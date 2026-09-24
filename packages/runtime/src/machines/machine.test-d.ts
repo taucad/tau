@@ -4,6 +4,7 @@ import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/sp
 import type { ConfigurationDefinition } from '#configuration/configuration.js';
 import { defineMachine, defineMachineQuery } from '#machines/machine.js';
 import type { MachineDiscoveryRuntime, MachineProviderDefinition, MachineTransportTrust } from '#machines/machine.js';
+import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
 
 type Binding = Readonly<{ logicalId: string }>;
 type Submission = Readonly<{ copies: number }>;
@@ -30,6 +31,7 @@ const definition = {
       technology: 'fff',
     },
   ],
+  manifest: machineManifestFixture,
   bindingConfiguration,
   submissionConfiguration,
   queries: {

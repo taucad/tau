@@ -10,6 +10,7 @@ import {
 } from '#plugins/plugin-runtime-definition.js';
 import { defineRuntime, resolveRuntimeDefinition } from '#worker/runtime-definition.js';
 import { defineConfiguration } from '#configuration/configuration.js';
+import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
 
 const defineUncheckedPlugin = definePlugin as unknown as (definition: unknown) => PluginFactory;
 const defineUncheckedRuntime = defineRuntime as unknown as (options: {
@@ -82,6 +83,7 @@ const testMachine = attachRuntimePluginFactoryOptions(
         vendor: 'test',
         technologies: ['additive.fff'],
         accepts: [],
+        manifest: machineManifestFixture,
         bindingConfiguration: jobRegistration.configuration,
         submissionConfiguration: jobRegistration.configuration,
         queries: {},

@@ -14,6 +14,7 @@ import type {
   MachineDirectoryFrame,
   MachineDirectorySnapshot,
 } from '#machines/machine-directory.js';
+import type { MachinePrintRequestClient } from '#machines/print-request.js';
 
 /** List the machine providers admitted by this host route. @public */
 export type MachineListProvidersInput = Readonly<{ signal?: AbortSignal }>;
@@ -35,7 +36,7 @@ export type MachineBeginBindingInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-/** Prepare and transfer one immutable machine artifact without starting a physical run. @public */
+/** Preflight one immutable machine artifact against the observed setup without transferring or starting anything. @public */
 export type MachinePreparePrintInput = Readonly<{
   machineId: string;
   artifact: MachineArtifactReference;
@@ -43,7 +44,7 @@ export type MachinePreparePrintInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-/** Durable preparation identity bound to one machine, artifact, setup and transferred remote object. @public */
+/** Durable preparation identity bound to one machine, artifact, setup and the remote object one upload will create. @public */
 export type MachinePreparedPrint = Readonly<{
   preparedId: string;
   preparedDigest: ContentDigest;
@@ -59,11 +60,22 @@ export type MachinePreparedPrint = Readonly<{
   expiresAt: string;
 }>;
 
-/** Start an exact prepared artifact with one caller-retained idempotency key. @public */
+/** Transfer an exact prepared artifact to the machine with one caller-retained idempotency key; never starts. @public */
+export type MachineUploadPrintInput = Readonly<{
+  machineId: string;
+  preparedId: string;
+  preparedDigest: ContentDigest;
+  operationId: string;
+  signal?: AbortSignal;
+}>;
+
+/** Start an exact prepared, transferred artifact with one caller-retained idempotency key. @public */
 export type MachineStartPrintInput = Readonly<{
   machineId: string;
   preparedId: string;
   preparedDigest: ContentDigest;
+  /** Evidence from the accepted upload receipt (`evidence.transferId`). */
+  transferId: string;
   expectedSetupDigest: ContentDigest;
   operationId: string;
   signal?: AbortSignal;
@@ -91,12 +103,26 @@ export type MachineCaptureStillClientInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-/** Terminal result returned after one physical command may have been sent. @public */
+/** Physical effects that address a run. @public */
+export type MachineRunOperationKind = 'cancel' | 'pause' | 'resume' | 'start' | 'urgent-stop';
+
+/** Every journaled physical effect kind. @public */
+export type MachineOperationKind = MachineRunOperationKind | 'upload';
+
+/** Terminal result returned after one physical effect may have been sent. @public */
 export type MachineOperationReceipt =
   | Readonly<{
       operationId: string;
       machineId: string;
-      kind: 'cancel' | 'pause' | 'resume' | 'start' | 'urgent-stop';
+      kind: 'upload';
+      status: 'accepted';
+      evidence: Readonly<{ transferId: string }>;
+      observedAt: string;
+    }>
+  | Readonly<{
+      operationId: string;
+      machineId: string;
+      kind: MachineRunOperationKind;
       status: 'accepted';
       providerRunId?: string;
       observedAt: string;
@@ -104,7 +130,7 @@ export type MachineOperationReceipt =
   | Readonly<{
       operationId: string;
       machineId: string;
-      kind: 'cancel' | 'pause' | 'resume' | 'start' | 'urgent-stop';
+      kind: MachineOperationKind;
       status: 'rejected';
       code: string;
       message: string;
@@ -113,7 +139,7 @@ export type MachineOperationReceipt =
   | Readonly<{
       operationId: string;
       machineId: string;
-      kind: 'cancel' | 'pause' | 'resume' | 'start' | 'urgent-stop';
+      kind: MachineOperationKind;
       status: 'unknown';
       reason: string;
       providerRunId?: string;
@@ -141,16 +167,18 @@ export type MachineGetInput = Readonly<{ machineId: string; signal?: AbortSignal
 export type MachineWatchInput = Readonly<{ cursor?: MachineDirectoryCursor; signal?: AbortSignal }>;
 
 /** Browser-safe machines facet shared by the workbench and agent tools. @public */
-export type MachineClient = Readonly<{
-  listProviders(input: MachineListProvidersInput): Promise<readonly MachineProvider[]>;
-  discover(input: MachineDiscoverInput): AsyncIterable<MachineDiscoveryFrame>;
-  beginBinding(input: MachineBeginBindingInput): Promise<MachineBindingOutcome>;
-  preparePrint(input: MachinePreparePrintInput): Promise<MachinePreparedPrint>;
-  startPrint(input: MachineStartPrintInput): Promise<MachineOperationReceipt>;
-  reconcileOperation(input: MachineReconcileOperationInput): Promise<MachineOperationSnapshot>;
-  controlRun(input: MachineControlRunInput): Promise<MachineOperationReceipt>;
-  captureStill(input: MachineCaptureStillClientInput): Promise<MachineStill>;
-  list(input: MachineListInput): Promise<MachineDirectorySnapshot>;
-  get(input: MachineGetInput): Promise<MachineDirectoryEntry>;
-  watch(input: MachineWatchInput): AsyncIterable<MachineDirectoryFrame>;
-}>;
+export type MachineClient = MachinePrintRequestClient &
+  Readonly<{
+    listProviders(input: MachineListProvidersInput): Promise<readonly MachineProvider[]>;
+    discover(input: MachineDiscoverInput): AsyncIterable<MachineDiscoveryFrame>;
+    beginBinding(input: MachineBeginBindingInput): Promise<MachineBindingOutcome>;
+    preparePrint(input: MachinePreparePrintInput): Promise<MachinePreparedPrint>;
+    uploadPrint(input: MachineUploadPrintInput): Promise<MachineOperationReceipt>;
+    startPrint(input: MachineStartPrintInput): Promise<MachineOperationReceipt>;
+    reconcileOperation(input: MachineReconcileOperationInput): Promise<MachineOperationSnapshot>;
+    controlRun(input: MachineControlRunInput): Promise<MachineOperationReceipt>;
+    captureStill(input: MachineCaptureStillClientInput): Promise<MachineStill>;
+    list(input: MachineListInput): Promise<MachineDirectorySnapshot>;
+    get(input: MachineGetInput): Promise<MachineDirectoryEntry>;
+    watch(input: MachineWatchInput): AsyncIterable<MachineDirectoryFrame>;
+  }>;

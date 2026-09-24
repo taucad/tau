@@ -40,6 +40,7 @@ const viteBarrelPath = resolve(here, '..', 'src', 'vite', 'index.ts');
  */
 const allowedMembers: ReadonlySet<string> = new Set([
   'machines',
+  'jobs',
   'lifecycleState',
   'renderStatus',
   'activeKernelId',

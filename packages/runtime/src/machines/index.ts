@@ -1,6 +1,8 @@
 export { defineMachine, defineMachineQuery, parseMachineProvider } from '#machines/machine.js';
 export { connectMachineChannel } from '#machines/machine-channel.js';
 export type { MachineChannelClient, MachineChannelEndpoint } from '#machines/machine-channel.js';
+export { machineManifestSchema, parseMachineManifest } from '#machines/machine-manifest.js';
+export type { MachineActionDescriptor, MachineManifest } from '#machines/machine-manifest.js';
 export type {
   MachineBeginBindingInput,
   MachineCaptureStillClientInput,
@@ -10,15 +12,30 @@ export type {
   MachineGetInput,
   MachineListInput,
   MachineListProvidersInput,
+  MachineOperationKind,
   MachineOperationReceipt,
   MachineOperationSnapshot,
   MachinePreparedPrint,
   MachinePreparePrintInput,
   MachineReconcileOperationInput,
+  MachineRunOperationKind,
   MachineStartPrintInput,
   MachineControlRunInput,
+  MachineUploadPrintInput,
   MachineWatchInput,
 } from '#machines/machine-client.js';
+export type {
+  MachineListPrintRequestsInput,
+  MachinePrintRequestClient,
+  MachineRequestPrintInput,
+  MachineResolvePrintRequestInput,
+  MachineWatchPrintRequestsInput,
+  MachineWithdrawPrintRequestInput,
+  PrintRequest,
+  PrintRequestState,
+  PrintRequestSummary,
+  PrintRequester,
+} from '#machines/print-request.js';
 export type {
   MachineDirectoryCursor,
   MachineDirectoryEntry,
@@ -71,6 +88,7 @@ export type {
   MachineQuantityDeclaration,
   MachinePreparationReceipt,
   MachineProviderPreparePrintInput,
+  MachineProviderUploadInput,
   MachineProviderDefinition,
   MachineProviderFactory,
   MachineQueryManifest,
@@ -85,5 +103,6 @@ export type {
   MachineSubmitInput,
   MachineToolCapability,
   MachineTemperatureSnapshot,
+  MachineTransferReceipt,
   MachineTransportTrust,
 } from '#machines/machine.js';

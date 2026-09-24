@@ -12,6 +12,8 @@ import type { MachinePreparedPrint } from '#machines/machine-client.js';
 import type { MachineDirectory, MachineDirectoryFrame, MachineDirectorySnapshot } from '#machines/machine-directory.js';
 import { defineMachine } from '#machines/machine.js';
 import type { MachineArtifactReference, MachineCandidate } from '#machines/machine.js';
+import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
+import type { PrintRequest } from '#machines/print-request.js';
 
 const configuration = defineConfiguration({
   id: 'fixture.configuration',
@@ -36,6 +38,7 @@ const provider = defineMachine({
       technology: 'additive.fff',
     },
   ],
+  manifest: machineManifestFixture,
   bindingConfiguration: configuration,
   submissionConfiguration: configuration,
   async *discover() {
@@ -83,6 +86,19 @@ const prepared: MachinePreparedPrint = {
   expiresAt: '2026-09-14T00:10:00Z',
 };
 
+const request: PrintRequest = {
+  requestId: 'request-1',
+  machineId: 'machine-1',
+  artifact,
+  configuration: {},
+  requestedBy: { kind: 'agent', id: 'agent-1', label: 'Tau agent' },
+  summary: { fileName: 'part.gcode.3mf' },
+  state: 'awaiting-approval',
+  createdAt: '2026-09-14T00:00:00Z',
+  updatedAt: '2026-09-14T00:00:00Z',
+  prepared,
+};
+
 const snapshot: MachineDirectorySnapshot = {
   cursor: {
     hostId: 'host',
@@ -100,7 +116,13 @@ const grants: readonly HostRouteGrant[] = [
   { route: 'machines', operation: 'machines.discover' },
   { route: 'machines', operation: 'machines.beginBinding' },
   { route: 'machines', operation: 'machines.preparePrint' },
+  { route: 'machines', operation: 'machines.uploadPrint' },
   { route: 'machines', operation: 'machines.startPrint' },
+  { route: 'machines', operation: 'machines.requestPrint' },
+  { route: 'machines', operation: 'machines.listPrintRequests' },
+  { route: 'machines', operation: 'machines.watchPrintRequests' },
+  { route: 'machines', operation: 'machines.resolvePrintRequest' },
+  { route: 'machines', operation: 'machines.withdrawPrintRequest' },
   { route: 'machines', operation: 'machines.reconcileOperation' },
   { route: 'machines', operation: 'machines.controlRun' },
   { route: 'machines', operation: 'machines.captureStill' },
@@ -139,8 +161,16 @@ const open = (
       status: 'bound',
       machineId: 'machine-1',
     })),
-    preparePrint: vi.fn<NonNullable<MachineChannelHostOperations['preparePrint']>>(async () => prepared),
-    startPrint: vi.fn<NonNullable<MachineChannelHostOperations['startPrint']>>(async (input) => ({
+    preparePrint: vi.fn<MachineChannelHostOperations['preparePrint']>(async () => prepared),
+    uploadPrint: vi.fn<MachineChannelHostOperations['uploadPrint']>(async (input) => ({
+      operationId: input.operationId,
+      machineId: input.machineId,
+      kind: 'upload',
+      status: 'accepted',
+      evidence: { transferId: 'transfer-1' },
+      observedAt: '2026-09-14T00:00:01Z',
+    })),
+    startPrint: vi.fn<MachineChannelHostOperations['startPrint']>(async (input) => ({
       operationId: input.operationId,
       machineId: input.machineId,
       kind: 'start',
@@ -148,7 +178,26 @@ const open = (
       providerRunId: 'run-1',
       observedAt: '2026-09-14T00:00:01Z',
     })),
-    reconcileOperation: vi.fn<NonNullable<MachineChannelHostOperations['reconcileOperation']>>(async (input) => ({
+    requestPrint: vi.fn<MachineChannelHostOperations['requestPrint']>(async (input) => ({
+      ...request,
+      requestId: input.requestId,
+      requestedBy: input.requestedBy,
+    })),
+    listPrintRequests: vi.fn<MachineChannelHostOperations['listPrintRequests']>(async () => [request]),
+    async *watchPrintRequests() {
+      yield request;
+    },
+    resolvePrintRequest: vi.fn<MachineChannelHostOperations['resolvePrintRequest']>(async (input) => ({
+      ...request,
+      state: input.decision === 'approve' ? 'started' : 'denied',
+      resolvedBy: input.resolvedBy,
+    })),
+    withdrawPrintRequest: vi.fn<MachineChannelHostOperations['withdrawPrintRequest']>(async (input) => ({
+      ...request,
+      state: 'withdrawn',
+      resolvedBy: input.resolvedBy,
+    })),
+    reconcileOperation: vi.fn<MachineChannelHostOperations['reconcileOperation']>(async (input) => ({
       operationId: input.operationId,
       machineId: input.machineId,
       kind: 'start',
@@ -156,14 +205,14 @@ const open = (
       status: 'accepted',
       updatedAt: '2026-09-14T00:00:01Z',
     })),
-    controlRun: vi.fn<NonNullable<MachineChannelHostOperations['controlRun']>>(async (input) => ({
+    controlRun: vi.fn<MachineChannelHostOperations['controlRun']>(async (input) => ({
       operationId: input.operationId,
       machineId: input.machineId,
       kind: input.command,
       status: 'accepted',
       observedAt: '2026-09-14T00:00:02Z',
     })),
-    captureStill: vi.fn<NonNullable<MachineChannelHostOperations['captureStill']>>(async () => ({
+    captureStill: vi.fn<MachineChannelHostOperations['captureStill']>(async () => ({
       bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
       mediaType: 'image/jpeg',
       capturedAt: '2026-09-14T00:00:02Z',
@@ -202,14 +251,49 @@ describe('machine channel', () => {
         fixture.client.preparePrint({ machineId: 'machine-1', artifact, configuration: {} }),
       ).resolves.toEqual(prepared);
       await expect(
+        fixture.client.uploadPrint({
+          machineId: 'machine-1',
+          preparedId: prepared.preparedId,
+          preparedDigest: prepared.preparedDigest,
+          operationId: 'upload-1',
+        }),
+      ).resolves.toEqual({
+        operationId: 'upload-1',
+        machineId: 'machine-1',
+        kind: 'upload',
+        status: 'accepted',
+        evidence: { transferId: 'transfer-1' },
+        observedAt: '2026-09-14T00:00:01Z',
+      });
+      await expect(
         fixture.client.startPrint({
           machineId: 'machine-1',
           preparedId: prepared.preparedId,
           preparedDigest: prepared.preparedDigest,
+          transferId: 'transfer-1',
           expectedSetupDigest: prepared.setupDigest,
           operationId: 'start-1',
         }),
       ).resolves.toMatchObject({ status: 'accepted', providerRunId: 'run-1' });
+      const requester = { kind: 'user', id: 'user', label: 'Operator' } as const;
+      await expect(
+        fixture.client.requestPrint({
+          requestId: 'request-2',
+          machineId: 'machine-1',
+          artifact,
+          configuration: {},
+          requestedBy: requester,
+        }),
+      ).resolves.toEqual({ ...request, requestId: 'request-2', requestedBy: requester });
+      await expect(fixture.client.listPrintRequests({})).resolves.toEqual([request]);
+      await expect(
+        fixture.client.resolvePrintRequest({ requestId: 'request-1', decision: 'deny', resolvedBy: requester }),
+      ).resolves.toEqual({ ...request, state: 'denied', resolvedBy: requester });
+      await expect(
+        fixture.client.withdrawPrintRequest({ requestId: 'request-1', resolvedBy: requester }),
+      ).resolves.toEqual({ ...request, state: 'withdrawn', resolvedBy: requester });
+      const watched = fixture.client.watchPrintRequests({ machineId: 'machine-1' });
+      await expect(watched[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: request });
       await expect(
         fixture.client.controlRun({
           machineId: 'machine-1',
@@ -240,7 +324,7 @@ describe('machine channel', () => {
     const discover = vi.fn(async function* () {
       yield { type: 'found', candidate } as const;
     });
-    const captureStill = vi.fn<NonNullable<MachineChannelHostOperations['captureStill']>>(async () => ({
+    const captureStill = vi.fn<MachineChannelHostOperations['captureStill']>(async () => ({
       bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
       mediaType: 'image/jpeg',
       capturedAt: '2026-09-14T00:00:02Z',

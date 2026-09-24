@@ -16,13 +16,14 @@ import type {
   HostAdmissionAuthority,
   HostSessionHandle,
 } from '#host/host-admission.js';
-import { exposeMachineChannel } from '#machines/machine-channel.js';
+import { exposeMachineChannel, parsePrintRequest } from '#machines/machine-channel.js';
 import type { MachineChannelEndpoint, MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type {
   MachineOperationReceipt,
   MachineOperationSnapshot,
   MachinePreparedPrint,
 } from '#machines/machine-client.js';
+import type { PrintRequest } from '#machines/print-request.js';
 import { createMachineDirectory, parseMachineDirectoryEvent } from '#machines/machine-directory.js';
 import type { MachineDirectory, MachineDirectoryEvent, MachineDirectoryEntry } from '#machines/machine-directory.js';
 import { parseMachineProvider } from '#machines/machine.js';
@@ -39,6 +40,7 @@ import type {
   MachineProvider,
   MachineSession,
   MachineSubmissionReceipt,
+  MachineTransferReceipt,
 } from '#machines/machine.js';
 import { createNodeMachineEventLog } from '#host/node-machine-event-log.js';
 import type { MachineEventLog } from '#host/node-machine-event-log.js';
@@ -145,7 +147,8 @@ const preparedEventSchema = z.strictObject({
   ),
   prepared: preparedPrintSchema,
 });
-const effectKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop']);
+const runEffectKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop']);
+const effectKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'upload', 'urgent-stop']);
 const effectIntentSchema = z.strictObject({
   type: z.literal('machine-effect-intent'),
   workspaceId: identity,
@@ -156,9 +159,15 @@ const effectIntentSchema = z.strictObject({
   inputDigest: digest,
   intent: z.discriminatedUnion('kind', [
     z.strictObject({
+      kind: z.literal('upload'),
+      preparedId: identity,
+      preparedDigest: digest,
+    }),
+    z.strictObject({
       kind: z.literal('start'),
       preparedId: identity,
       preparedDigest: digest,
+      transferId: identity,
       expectedSetupDigest: digest,
     }),
     z.strictObject({
@@ -173,11 +182,24 @@ const effectSendingSchema = z.strictObject({
   operationId: identity,
   observedAt: z.iso.datetime({ offset: true }),
 });
-const operationReceiptSchema = z.discriminatedUnion('status', [
+const receiptMessage = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine((value) => value.isWellFormed());
+const operationReceiptSchema = z.union([
   z.strictObject({
     operationId: identity,
     machineId: identity,
-    kind: effectKindSchema,
+    kind: z.literal('upload'),
+    status: z.literal('accepted'),
+    evidence: z.strictObject({ transferId: identity }),
+    observedAt: z.iso.datetime({ offset: true }),
+  }),
+  z.strictObject({
+    operationId: identity,
+    machineId: identity,
+    kind: runEffectKindSchema,
     status: z.literal('accepted'),
     providerRunId: identity.optional(),
     observedAt: z.iso.datetime({ offset: true }),
@@ -188,11 +210,7 @@ const operationReceiptSchema = z.discriminatedUnion('status', [
     kind: effectKindSchema,
     status: z.literal('rejected'),
     code: identity,
-    message: z
-      .string()
-      .min(1)
-      .max(1024)
-      .refine((value) => value.isWellFormed()),
+    message: receiptMessage,
     observedAt: z.iso.datetime({ offset: true }),
   }),
   z.strictObject({
@@ -205,6 +223,11 @@ const operationReceiptSchema = z.discriminatedUnion('status', [
     observedAt: z.iso.datetime({ offset: true }),
   }),
 ]);
+const printRequestEventSchema = z.strictObject({
+  type: z.literal('machine-print-request'),
+  workspaceId: identity,
+  request: z.unknown().transform((value) => parsePrintRequest(value)),
+});
 const effectResultSchema = z.strictObject({
   type: z.literal('machine-effect-result'),
   operationId: identity,
@@ -220,17 +243,33 @@ const providerReceiptSchema = z.discriminatedUnion('status', [
   z.strictObject({
     status: z.literal('rejected'),
     code: identity,
-    message: z
-      .string()
-      .min(1)
-      .max(1024)
-      .refine((value) => value.isWellFormed()),
+    message: receiptMessage,
     observedAt: z.iso.datetime({ offset: true }),
   }),
   z.strictObject({
     status: z.literal('unknown'),
     reason: identity,
     providerRunId: identity.optional(),
+    observedAt: z.iso.datetime({ offset: true }),
+  }),
+]);
+const transferReceiptSchema = z.discriminatedUnion('status', [
+  z.strictObject({
+    status: z.literal('transferred'),
+    transferId: identity,
+    digest,
+    length: z.number().int().positive(),
+    observedAt: z.iso.datetime({ offset: true }),
+  }),
+  z.strictObject({
+    status: z.literal('rejected'),
+    code: identity,
+    message: receiptMessage,
+    observedAt: z.iso.datetime({ offset: true }),
+  }),
+  z.strictObject({
+    status: z.literal('unknown'),
+    reason: identity,
     observedAt: z.iso.datetime({ offset: true }),
   }),
 ]);
@@ -281,21 +320,45 @@ const publicOperationReceipt = (
     operationId: string;
     machineId: string;
     kind: MachineOperationReceipt['kind'];
-    receipt: MachineSubmissionReceipt;
+    receipt: MachineSubmissionReceipt | MachineTransferReceipt;
   }>,
-): MachineOperationReceipt =>
-  operationReceiptSchema.parse({
-    operationId: input.operationId,
-    machineId: input.machineId,
-    kind: input.kind,
-    ...providerReceiptSchema.parse(input.receipt),
-  });
+): MachineOperationReceipt => {
+  const base = { operationId: input.operationId, machineId: input.machineId, kind: input.kind };
+  if (input.kind !== 'upload') {
+    return operationReceiptSchema.parse({ ...base, ...providerReceiptSchema.parse(input.receipt) });
+  }
+  const transfer = transferReceiptSchema.parse(input.receipt);
+  return operationReceiptSchema.parse(
+    transfer.status === 'transferred'
+      ? { ...base, status: 'accepted', evidence: { transferId: transfer.transferId }, observedAt: transfer.observedAt }
+      : { ...base, ...transfer },
+  );
+};
+const requestFailure = (error: unknown): NonNullable<PrintRequest['failure']> => {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (
+    cause !== null &&
+    typeof cause === 'object' &&
+    'code' in cause &&
+    typeof cause.code === 'string' &&
+    'message' in cause &&
+    typeof cause.message === 'string'
+  ) {
+    return { code: identity.parse(cause.code), message: receiptMessage.parse(cause.message) };
+  }
+  const message = error instanceof Error ? error.message : 'MACHINE_PREPARATION_FAILED';
+  return {
+    code: /^[A-Z][A-Z0-9_]{0,255}$/u.test(message) ? message : 'MACHINE_PREPARATION_FAILED',
+    message: receiptMessage.parse(message.slice(0, 1024) || 'MACHINE_PREPARATION_FAILED'),
+  };
+};
 type HostAuthorityIdentityEvent = Readonly<z.infer<typeof authorityIdentitySchema>>;
 type NodeMachineBindingEvent = Readonly<z.infer<typeof bindingEventSchema>>;
 type NodeMachinePreparedEvent = Readonly<z.infer<typeof preparedEventSchema>>;
 type NodeMachineEffectIntentEvent = Readonly<z.infer<typeof effectIntentSchema>>;
 type NodeMachineEffectSendingEvent = Readonly<z.infer<typeof effectSendingSchema>>;
 type NodeMachineEffectResultEvent = Readonly<z.infer<typeof effectResultSchema>>;
+type NodeMachinePrintRequestEvent = Readonly<z.infer<typeof printRequestEventSchema>>;
 type NodeMachineEffectEvent =
   | NodeMachineEffectIntentEvent
   | NodeMachineEffectSendingEvent
@@ -305,7 +368,9 @@ type HostAuthorityEvent =
   | MachineDirectoryEvent
   | NodeMachineBindingEvent
   | NodeMachinePreparedEvent
-  | NodeMachineEffectEvent;
+  | NodeMachineEffectEvent
+  | NodeMachinePrintRequestEvent;
+type OwnedPrintRequest = Readonly<{ workspaceId: string; request: PrintRequest }>;
 
 type NodeMachineEffectState = {
   intent: NodeMachineEffectIntentEvent;
@@ -460,6 +525,15 @@ const parseAuthorityEvent = (candidate: unknown): HostAuthorityEvent => {
   ) {
     return Object.freeze(effectResultSchema.parse(candidate));
   }
+  if (
+    candidate !== null &&
+    typeof candidate === 'object' &&
+    !Array.isArray(candidate) &&
+    'type' in candidate &&
+    candidate['type'] === 'machine-print-request'
+  ) {
+    return Object.freeze(printRequestEventSchema.parse(candidate));
+  }
   return parseMachineDirectoryEvent(candidate);
 };
 
@@ -511,11 +585,13 @@ const readAuthorityState = async (
     bindings: NodeMachineBindingEvent[];
     preparations: NodeMachinePreparedEvent[];
     effects: NodeMachineEffectEvent[];
+    requests: OwnedPrintRequest[];
   }>
 > => {
   const bindings = new Map<string, NodeMachineBindingEvent>();
   const preparations = new Map<string, NodeMachinePreparedEvent>();
   const effects: NodeMachineEffectEvent[] = [];
+  const requests = new Map<string, OwnedPrintRequest>();
   let cursor = 0;
   let endCursor: number | undefined;
   do {
@@ -538,6 +614,13 @@ const readAuthorityState = async (
           effects.push(record.event);
           break;
         }
+        case 'machine-print-request': {
+          requests.set(JSON.stringify([record.event.workspaceId, record.event.request.requestId]), {
+            workspaceId: record.event.workspaceId,
+            request: record.event.request,
+          });
+          break;
+        }
         default: {
           break;
         }
@@ -548,8 +631,21 @@ const readAuthorityState = async (
       throw new Error('NODE_MACHINE_HOST_JOURNAL_GAP');
     }
   } while (cursor < endCursor);
-  return Object.freeze({ bindings: [...bindings.values()], preparations: [...preparations.values()], effects });
+  return Object.freeze({
+    bindings: [...bindings.values()],
+    preparations: [...preparations.values()],
+    effects,
+    requests: [...requests.values()],
+  });
 };
+
+const terminalRequestStates: ReadonlySet<PrintRequest['state']> = new Set([
+  'denied',
+  'failed',
+  'rejected',
+  'started',
+  'withdrawn',
+]);
 
 const connectionContextSchema = z.strictObject({
   secretRef: identity,
@@ -629,12 +725,77 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   const committedBindings = new Map<string, NodeMachineBindingEvent>();
   const preparations = new Map<string, NodeMachinePreparedEvent>();
   const effects = new Map<string, NodeMachineEffectState>();
+  const requests = new Map<string, OwnedPrintRequest>();
   const stillCaptureTimes = new Map<string, number>();
   const effectQueue = new ResourceQueue();
   const connectedSessions = new Map<string, MachineSession>();
   let journal: MachineEventLog<HostAuthorityEvent> | undefined;
   let directory: MachineDirectory | undefined;
   const commits = new Topic<void>({ name: 'node-machine-authority-commits', onError });
+  const requestCommits = new Topic<OwnedPrintRequest>({ name: 'node-machine-print-requests', onError });
+  const now = (): string => input.runtime?.discovery.clock.now() ?? new Date().toISOString();
+  const requestKey = (workspaceId: string, requestId: string): string => JSON.stringify([workspaceId, requestId]);
+  const commitRequest = async (workspaceId: string, record: PrintRequest): Promise<PrintRequest> => {
+    if (!journal) {
+      throw new Error('NODE_MACHINE_HOST_CLOSED');
+    }
+    const event = Object.freeze(
+      printRequestEventSchema.parse({
+        type: 'machine-print-request',
+        workspaceId,
+        request: { ...record, updatedAt: now() },
+      }),
+    );
+    await journal.append(event);
+    const owned: OwnedPrintRequest = Object.freeze({ workspaceId, request: event.request });
+    requests.set(requestKey(workspaceId, event.request.requestId), owned);
+    requestCommits.emit(owned);
+    commits.emit();
+    return event.request;
+  };
+  /** Fold the durable effect ledger into one in-flight request; `undefined` means nothing settled yet. */
+  const advanceRequest = (record: PrintRequest): PrintRequest | undefined => {
+    const phase =
+      record.state === 'uploading' || (record.state === 'unknown' && record.transferId === undefined)
+        ? 'upload'
+        : record.state === 'starting' || record.state === 'unknown'
+          ? 'start'
+          : undefined;
+    if (!phase) {
+      return undefined;
+    }
+    const operationId = phase === 'upload' ? record.uploadOperationId : record.startOperationId;
+    const receipt = operationId === undefined ? undefined : effects.get(operationId)?.receipt;
+    if (!receipt || (record.state === 'unknown' && receipt.status === 'unknown')) {
+      return undefined;
+    }
+    if (receipt.status === 'rejected') {
+      return {
+        ...record,
+        state: phase === 'upload' ? 'failed' : 'rejected',
+        receipt,
+        failure: { code: receipt.code, message: receipt.message },
+      };
+    }
+    if (receipt.status === 'unknown') {
+      return { ...record, state: 'unknown', receipt };
+    }
+    return receipt.kind === 'upload'
+      ? { ...record, state: 'starting', transferId: receipt.evidence.transferId, receipt }
+      : { ...record, state: 'started', receipt };
+  };
+  const syncRequests = async (operationId: string): Promise<void> => {
+    for (const owned of requests.values()) {
+      if (owned.request.uploadOperationId !== operationId && owned.request.startOperationId !== operationId) {
+        continue;
+      }
+      const next = advanceRequest(owned.request);
+      if (next) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- request transitions journal in ledger order.
+        await commitRequest(owned.workspaceId, next);
+      }
+    }
+  };
   try {
     journal = await createNodeMachineEventLog({ authorityRoot: canonicalRoot, owner, parse: parseAuthorityEvent });
     await initializeAuthorityIdentity(journal, {
@@ -710,6 +871,26 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       state.status = 'unknown';
       state.updatedAt = receipt.observedAt;
       state.receipt = receipt;
+    }
+    for (const owned of recovered.requests) {
+      requests.set(requestKey(owned.workspaceId, owned.request.requestId), owned);
+    }
+    for (const owned of recovered.requests) {
+      if (terminalRequestStates.has(owned.request.state)) {
+        continue;
+      }
+      const next: PrintRequest | undefined =
+        owned.request.state === 'preparing'
+          ? {
+              ...owned.request,
+              state: 'failed',
+              failure: { code: 'HOST_RESTARTED', message: 'The host restarted before preparation completed.' },
+            }
+          : advanceRequest(owned.request);
+      if (next) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- recovered requests settle in journal order.
+        await commitRequest(owned.workspaceId, next);
+      }
     }
     directory = await createMachineDirectory({
       hostId,
@@ -820,6 +1001,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     state.updatedAt = receipt.observedAt;
     state.receipt = receipt;
     commits.emit();
+    await syncRequests(state.intent.operationId);
   };
   const executeEffect = async (
     effectInput: Readonly<{
@@ -831,7 +1013,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       physicalMachineId: string;
       intent: NodeMachineEffectIntentEvent['intent'];
       preflight(): Promise<void>;
-      send(): Promise<MachineSubmissionReceipt>;
+      send(): Promise<MachineSubmissionReceipt | MachineTransferReceipt>;
     }>,
   ): Promise<MachineOperationReceipt> => {
     const { runtime } = input;
@@ -976,7 +1158,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       },
       async beginBinding(operationInput) {
         if (!input.runtime) {
-          throw new Error('MACHINE_BINDING_UNAVAILABLE');
+          throw new Error('MACHINE_OPERATION_UNAVAILABLE');
         }
         const machineId = identity.parse(operationInput.name);
         const key = scopedKey(operationInput.admitted.workspaceId, operationInput.candidate.id);
@@ -1006,7 +1188,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       },
       async preparePrint(operationInput) {
         if (!input.runtime) {
-          throw new Error('MACHINE_PREPARATION_UNAVAILABLE');
+          throw new Error('MACHINE_OPERATION_UNAVAILABLE');
         }
         const machineId = identity.parse(operationInput.machineId);
         if (
@@ -1018,7 +1200,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         const machineKey = scopedKey(operationInput.admitted.workspaceId, machineId);
         const binding = committedBindings.get(machineKey);
         const session = connectedSessions.get(machineKey);
-        if (!binding || !session?.preparePrint) {
+        if (!binding || !session) {
           throw new Error('MACHINE_PREPARATION_UNAVAILABLE');
         }
         const directory = await ownedDirectory.snapshot({ workspaceId: operationInput.admitted.workspaceId });
@@ -1069,12 +1251,11 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         } catch {
           throw new Error('MACHINE_PREPARATION_FAILED');
         }
-        if (
-          receipt.status !== 'transferred' ||
-          receipt.digest !== operationInput.artifact.digest ||
-          receipt.length !== operationInput.artifact.length
-        ) {
-          throw new Error(receipt.status === 'rejected' ? 'MACHINE_PREPARATION_REJECTED' : 'MACHINE_TRANSFER_MISMATCH');
+        if (receipt.status === 'rejected') {
+          throw new Error('MACHINE_PREPARATION_REJECTED', { cause: receipt });
+        }
+        if (receipt.digest !== operationInput.artifact.digest || receipt.length !== operationInput.artifact.length) {
+          throw new Error('MACHINE_ARTIFACT_MISMATCH');
         }
         const preparedAt = input.runtime.discovery.clock.now();
         const providerData = cloneBoundedJson(receipt.providerData, {
@@ -1127,13 +1308,97 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         commits.emit();
         return prepared;
       },
-      async startPrint(operationInput) {
+      async uploadPrint(operationInput) {
         const { runtime } = input;
         if (!runtime) {
-          throw new Error('MACHINE_START_UNAVAILABLE');
+          throw new Error('MACHINE_OPERATION_UNAVAILABLE');
         }
         const machineId = identity.parse(operationInput.machineId);
         const operationId = identity.parse(operationInput.operationId);
+        return effectQueue.queueForMany(
+          [`effect:${operationId}`, `machine:${operationInput.admitted.workspaceId}:${machineId}`],
+          async () => {
+            operationInput.signal.throwIfAborted();
+            operationInput.admitted.assertCurrent();
+            const preparation = preparations.get(identity.parse(operationInput.preparedId));
+            if (
+              !preparation ||
+              preparation.workspaceId !== operationInput.admitted.workspaceId ||
+              preparation.prepared.machineId !== machineId ||
+              preparation.prepared.preparedDigest !== operationInput.preparedDigest
+            ) {
+              throw new Error('MACHINE_PREPARATION_MISMATCH');
+            }
+            const machineKey = scopedKey(operationInput.admitted.workspaceId, machineId);
+            const binding = committedBindings.get(machineKey);
+            if (!binding) {
+              throw new Error('MACHINE_OPERATION_UNAVAILABLE');
+            }
+            return executeEffect({
+              admitted: operationInput.admitted,
+              signal: operationInput.signal,
+              operationId,
+              machineId,
+              providerId: binding.providerId,
+              physicalMachineId: binding.physicalId,
+              intent: {
+                kind: 'upload',
+                preparedId: preparation.prepared.preparedId,
+                preparedDigest: preparation.prepared.preparedDigest,
+              },
+              async preflight() {
+                if (Date.parse(preparation.prepared.expiresAt) <= Date.parse(runtime.discovery.clock.now())) {
+                  throw new Error('MACHINE_PREPARATION_EXPIRED');
+                }
+                const directory = await ownedDirectory.snapshot({ workspaceId: operationInput.admitted.workspaceId });
+                const entry = directory.entries.find((candidate) => candidate.machineId === machineId);
+                if (entry?.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
+                  throw new Error('MACHINE_UPLOAD_STALE_MACHINE');
+                }
+                if (!connectedSessions.has(machineKey)) {
+                  throw new Error('MACHINE_OPERATION_UNAVAILABLE');
+                }
+              },
+              async send() {
+                const session = connectedSessions.get(machineKey);
+                if (!session) {
+                  throw new Error('MACHINE_OPERATION_UNAVAILABLE');
+                }
+                const transfer = await session.uploadPrint({
+                  operationId,
+                  expectedMachineId: binding.physicalId,
+                  artifact: preparation.prepared.artifact,
+                  remoteName: preparation.prepared.remoteName,
+                  providerData: preparation.providerData,
+                  configuration: preparation.configuration,
+                  signal: operationInput.signal,
+                });
+                if (
+                  transfer.status === 'transferred' &&
+                  (transfer.digest !== preparation.prepared.artifact.digest ||
+                    transfer.length !== preparation.prepared.artifact.length)
+                ) {
+                  return {
+                    status: 'rejected',
+                    code: 'TRANSFER_MISMATCH',
+                    message: 'The transferred object does not match the prepared artifact.',
+                    observedAt: transfer.observedAt,
+                  };
+                }
+                return transfer;
+              },
+            });
+          },
+        );
+      },
+      async startPrint(operationInput) {
+        const { runtime } = input;
+        if (!runtime) {
+          throw new Error('MACHINE_OPERATION_UNAVAILABLE');
+        }
+        const machineId = identity.parse(operationInput.machineId);
+        const operationId = identity.parse(operationInput.operationId);
+        const transferId = identity.parse(operationInput.transferId);
         return effectQueue.queueForMany(
           [`effect:${operationId}`, `machine:${operationInput.admitted.workspaceId}:${machineId}`],
           async () => {
@@ -1149,10 +1414,21 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
             ) {
               throw new Error('MACHINE_PREPARATION_MISMATCH');
             }
+            const transferred = [...effects.values()].some(
+              (state) =>
+                state.intent.intent.kind === 'upload' &&
+                state.intent.intent.preparedId === preparation.prepared.preparedId &&
+                state.receipt?.status === 'accepted' &&
+                state.receipt.kind === 'upload' &&
+                state.receipt.evidence.transferId === transferId,
+            );
+            if (!transferred) {
+              throw new Error('MACHINE_TRANSFER_MISMATCH');
+            }
             const machineKey = scopedKey(operationInput.admitted.workspaceId, machineId);
             const binding = committedBindings.get(machineKey);
             if (!binding) {
-              throw new Error('MACHINE_START_UNAVAILABLE');
+              throw new Error('MACHINE_OPERATION_UNAVAILABLE');
             }
             return executeEffect({
               admitted: operationInput.admitted,
@@ -1165,6 +1441,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
                 kind: 'start',
                 preparedId: preparation.prepared.preparedId,
                 preparedDigest: preparation.prepared.preparedDigest,
+                transferId,
                 expectedSetupDigest: operationInput.expectedSetupDigest,
               },
               async preflight() {
@@ -1198,6 +1475,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
                   expectedMachineId: binding.physicalId,
                   artifact: preparation.prepared.artifact,
                   remoteName: preparation.prepared.remoteName,
+                  transferId,
                   providerData: preparation.providerData,
                   configuration: preparation.configuration,
                   signal: operationInput.signal,
@@ -1209,7 +1487,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       },
       async controlRun(operationInput) {
         if (!input.runtime) {
-          throw new Error('MACHINE_CONTROL_UNAVAILABLE');
+          throw new Error('MACHINE_OPERATION_UNAVAILABLE');
         }
         const machineId = identity.parse(operationInput.machineId);
         const operationId = identity.parse(operationInput.operationId);
@@ -1267,7 +1545,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       async captureStill(operationInput) {
         const { runtime } = input;
         if (!runtime) {
-          throw new Error('MACHINE_STILL_UNAVAILABLE');
+          throw new Error('MACHINE_OPERATION_UNAVAILABLE');
         }
         const machineId = identity.parse(operationInput.machineId);
         const machineKey = scopedKey(operationInput.admitted.workspaceId, machineId);
@@ -1317,7 +1595,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       },
       async reconcileOperation(operationInput) {
         if (!input.runtime) {
-          throw new Error('MACHINE_RECONCILIATION_UNAVAILABLE');
+          throw new Error('MACHINE_OPERATION_UNAVAILABLE');
         }
         const machineId = identity.parse(operationInput.machineId);
         const operationId = identity.parse(operationInput.operationId);
@@ -1336,7 +1614,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
             return effectSnapshot(state);
           }
           const session = connectedSessions.get(scopedKey(operationInput.admitted.workspaceId, machineId));
-          if (!session?.reconcile) {
+          if (!session) {
             return effectSnapshot(state);
           }
           const command =
@@ -1369,7 +1647,232 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           return effectSnapshot(state);
         });
       },
+      async requestPrint(operationInput) {
+        if (!input.runtime) {
+          throw new Error('MACHINE_OPERATION_UNAVAILABLE');
+        }
+        const requestId = identity.parse(operationInput.requestId);
+        const machineId = identity.parse(operationInput.machineId);
+        const { workspaceId } = operationInput.admitted;
+        const key = requestKey(workspaceId, requestId);
+        return effectQueue.queueFor(`request:${key}`, async () => {
+          operationInput.signal.throwIfAborted();
+          operationInput.admitted.assertCurrent();
+          const configuration = cloneBoundedJson(operationInput.configuration, {
+            code: 'NODE_MACHINE_PREPARATION_CONFIGURATION',
+            maximumDepth: 20,
+            maximumNodes: 2048,
+            maximumCharacters: 65_536,
+          });
+          const existing = requests.get(key)?.request;
+          if (existing) {
+            if (
+              existing.machineId !== machineId ||
+              canonicalizeCacheValue({ value: existing.artifact }) !==
+                canonicalizeCacheValue({ value: operationInput.artifact }) ||
+              canonicalizeCacheValue({ value: existing.configuration }) !==
+                canonicalizeCacheValue({ value: configuration })
+            ) {
+              throw new Error('MACHINE_PRINT_REQUEST_ID_CONFLICT');
+            }
+            return existing;
+          }
+          const createdAt = now();
+          let record = await commitRequest(workspaceId, {
+            requestId,
+            machineId,
+            artifact: operationInput.artifact,
+            configuration,
+            requestedBy: operationInput.requestedBy,
+            summary: operationInput.summary ?? { fileName: operationInput.artifact.path.split('/').at(-1) ?? 'print' },
+            state: 'preparing',
+            createdAt,
+            updatedAt: createdAt,
+          });
+          try {
+            const prepared = await hostOperations.preparePrint({
+              admitted: operationInput.admitted,
+              signal: operationInput.signal,
+              machineId,
+              artifact: operationInput.artifact,
+              configuration,
+            });
+            record = await commitRequest(workspaceId, { ...record, state: 'awaiting-approval', prepared });
+          } catch (error) {
+            record = await commitRequest(workspaceId, { ...record, state: 'failed', failure: requestFailure(error) });
+          }
+          return record;
+        });
+      },
+      async listPrintRequests(operationInput) {
+        const machineId = operationInput.machineId === undefined ? undefined : identity.parse(operationInput.machineId);
+        return listRequests(operationInput.admitted.workspaceId, machineId);
+      },
+      async *watchPrintRequests(operationInput) {
+        const { signal } = operationInput;
+        const { workspaceId } = operationInput.admitted;
+        const machineId = operationInput.machineId === undefined ? undefined : identity.parse(operationInput.machineId);
+        // Ponytail: every frame is a whole record, so pending updates coalesce by request id and never need a cursor.
+        const pending = new Map<string, PrintRequest>();
+        let wake = Promise.withResolvers<void>();
+        const off = requestCommits.subscribe(
+          (owned) => {
+            if (
+              owned.workspaceId === workspaceId &&
+              (machineId === undefined || owned.request.machineId === machineId)
+            ) {
+              pending.set(owned.request.requestId, owned.request);
+              wake.resolve();
+            }
+          },
+          { signal },
+        );
+        const onAbort = (): void => {
+          wake.resolve();
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        try {
+          for (const request of listRequests(workspaceId, machineId)) {
+            signal.throwIfAborted();
+            yield pending.get(request.requestId) ?? request;
+          }
+          while (!signal.aborted) {
+            if (pending.size === 0) {
+              // oxlint-disable-next-line eslint/no-await-in-loop -- one wake per committed transition.
+              await wake.promise;
+              wake = Promise.withResolvers<void>();
+              continue;
+            }
+            const batch = [...pending.values()];
+            pending.clear();
+            for (const request of batch) {
+              signal.throwIfAborted();
+              yield request;
+            }
+          }
+        } finally {
+          off();
+          signal.removeEventListener('abort', onAbort);
+        }
+      },
+      async resolvePrintRequest(operationInput) {
+        if (!input.runtime) {
+          throw new Error('MACHINE_OPERATION_UNAVAILABLE');
+        }
+        const requestId = identity.parse(operationInput.requestId);
+        const { admitted } = operationInput;
+        const { workspaceId } = admitted;
+        const key = requestKey(workspaceId, requestId);
+        return effectQueue.queueFor(`request:${key}`, async () => {
+          operationInput.signal.throwIfAborted();
+          admitted.assertCurrent();
+          const record = requests.get(key)?.request;
+          if (!record) {
+            throw new Error('MACHINE_PRINT_REQUEST_UNKNOWN');
+          }
+          if (operationInput.decision === 'deny') {
+            if (record.state !== 'awaiting-approval') {
+              throw new Error('MACHINE_PRINT_REQUEST_NOT_AWAITING');
+            }
+            return commitRequest(workspaceId, { ...record, state: 'denied', resolvedBy: operationInput.resolvedBy });
+          }
+          let current = record;
+          if (current.state === 'awaiting-approval') {
+            current = await commitRequest(workspaceId, {
+              ...current,
+              state: 'approved',
+              resolvedBy: operationInput.resolvedBy,
+              uploadOperationId: identity.parse(operationInput.uploadOperationId ?? randomUUID()),
+              startOperationId: identity.parse(operationInput.startOperationId ?? randomUUID()),
+            });
+          } else if (current.state === 'approved' || current.state === 'uploading' || current.state === 'starting') {
+            if (
+              (operationInput.uploadOperationId !== undefined &&
+                operationInput.uploadOperationId !== current.uploadOperationId) ||
+              (operationInput.startOperationId !== undefined &&
+                operationInput.startOperationId !== current.startOperationId)
+            ) {
+              throw new Error('MACHINE_PRINT_REQUEST_ID_CONFLICT');
+            }
+          } else {
+            throw new Error('MACHINE_PRINT_REQUEST_NOT_AWAITING');
+          }
+          const { prepared, uploadOperationId, startOperationId } = current;
+          if (!prepared || uploadOperationId === undefined || startOperationId === undefined) {
+            throw new Error('NODE_MACHINE_PRINT_REQUEST_INVALID');
+          }
+          const latest = (): PrintRequest => requests.get(key)?.request ?? current;
+          try {
+            if (current.state === 'approved') {
+              current = await commitRequest(workspaceId, { ...current, state: 'uploading' });
+            }
+            if (current.state === 'uploading') {
+              // The approval is durable: the transfer answers to the host, not to the caller's wait.
+              await hostOperations.uploadPrint({
+                admitted,
+                signal: admitted.signal,
+                machineId: current.machineId,
+                preparedId: prepared.preparedId,
+                preparedDigest: prepared.preparedDigest,
+                operationId: uploadOperationId,
+              });
+              current = latest();
+            }
+            if (current.state === 'starting' && current.transferId !== undefined) {
+              await hostOperations.startPrint({
+                admitted,
+                signal: admitted.signal,
+                machineId: current.machineId,
+                preparedId: prepared.preparedId,
+                preparedDigest: prepared.preparedDigest,
+                transferId: current.transferId,
+                expectedSetupDigest: prepared.setupDigest,
+                operationId: startOperationId,
+              });
+              current = latest();
+            }
+          } catch (error) {
+            current = latest();
+            if (!terminalRequestStates.has(current.state)) {
+              current = await commitRequest(workspaceId, {
+                ...current,
+                state: 'failed',
+                failure: requestFailure(error),
+              });
+            }
+          }
+          return current;
+        });
+      },
+      async withdrawPrintRequest(operationInput) {
+        const requestId = identity.parse(operationInput.requestId);
+        const { workspaceId } = operationInput.admitted;
+        const key = requestKey(workspaceId, requestId);
+        return effectQueue.queueFor(`request:${key}`, async () => {
+          operationInput.signal.throwIfAborted();
+          operationInput.admitted.assertCurrent();
+          const record = requests.get(key)?.request;
+          if (!record) {
+            throw new Error('MACHINE_PRINT_REQUEST_UNKNOWN');
+          }
+          if (record.state !== 'awaiting-approval') {
+            throw new Error('MACHINE_PRINT_REQUEST_NOT_AWAITING');
+          }
+          return commitRequest(workspaceId, { ...record, state: 'withdrawn', resolvedBy: operationInput.resolvedBy });
+        });
+      },
     });
+  const listRequests = (workspaceId: string, machineId: string | undefined): readonly PrintRequest[] =>
+    [...requests.values()]
+      .filter(
+        (owned) =>
+          owned.workspaceId === workspaceId && (machineId === undefined || owned.request.machineId === machineId),
+      )
+      .map((owned) => owned.request)
+      .sort(
+        (left, right) => right.createdAt.localeCompare(left.createdAt) || right.requestId.localeCompare(left.requestId),
+      )
+      .slice(0, 1024);
   const channels = new Set<NodeMachineChannelHandle>();
   let closing: Promise<void> | undefined;
   let closed = false;
@@ -1524,6 +2027,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         async () => ownedJournal.close(),
         () => {
           commits.dispose();
+          requestCommits.dispose();
         },
         async () => owner.release(),
       ]);

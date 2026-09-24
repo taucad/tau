@@ -254,6 +254,31 @@ describe('slicerTranscoder', () => {
     });
   });
 
+  it('should slice a mesh wound inside out as its right-side-out twin', async () => {
+    const outward = await slice(await createGlb(cubeVertices(20), cubeTriangles));
+    // An OpenSCAD polyhedron with its faces listed the other way exports like this.
+    const inward = await slice(
+      await createGlb(
+        cubeVertices(20),
+        cubeTriangles.map(([a, b, c]) => [a, c, b] as const),
+      ),
+    );
+    if (!outward.success || !inward.success) {
+      expect.fail(JSON.stringify({ outward: outward.issues, inward: inward.issues }));
+    }
+    expect(readBambuContainer(inward.data[0]!.bytes).gcode).toEqual(readBambuContainer(outward.data[0]!.bytes).gcode);
+  });
+
+  it('should refuse a part with nothing to extrude on any layer', async () => {
+    // 0.2 mm thick: thinner than one 0.4 mm extrusion, so every layer drops it.
+    const fin = cubeVertices(20).map(([x, y, z]) => [x, y / 100, z] as const);
+    const result = await slice(await createGlb(fin, cubeTriangles));
+    expect(result).toEqual({ success: false, issues: [expect.objectContaining({ code: 'GEOMETRY_INVALID' })] });
+    if (!result.success) {
+      expect(result.issues[0]!.message).toContain('Nothing to print');
+    }
+  });
+
   it('should read a GLB written by glTF-Transform with node transforms into the same slice', async () => {
     const result = await slice(await createGlb(cubeVertices(20), cubeTriangles));
     if (!result.success) {

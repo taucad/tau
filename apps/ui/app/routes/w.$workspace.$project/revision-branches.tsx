@@ -18,10 +18,10 @@ import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisio
 /**
  * The one *New branch* control, wherever it is offered.
  *
- * It is shared rather than duplicated because it has two homes by design: the
- * Branches region (once a project has two lines) and the composer picker (which
- * exists at one, and is therefore the only way a fresh project ever gets a
- * second — R1).
+ * It is shared rather than duplicated because it has two homes in the Revisions
+ * pane: the Branches region (once a project has two lines) and, alone, the place
+ * that region would be at one line, which is the only way a fresh project ever
+ * gets a second (R1). The composer offers no branch control (C3).
  *
  * @param props - Whether a verb is in flight, and where the name goes.
  * @returns The toggle, and the form once it is open.
@@ -317,6 +317,10 @@ export type RevisionBranchesProps = {
   readonly chatNames: Readonly<Record<string, string>>;
   /** Durable chat placement by chat id. */
   readonly chatCheckoutIds: Readonly<Record<string, string | undefined>>;
+  /** The chat in focus, which *Use in this chat* places; absent when none is. */
+  readonly activeChatId?: string;
+  /** Put a chat's next turns on a branch's checkout — the only place a chat chooses its branch (C3). */
+  readonly onPlaceChat?: (chatId: string, checkoutId: string) => void;
   /** Graph-derived context by branch name. */
   readonly branchFacts: ReadonlyMap<
     string,
@@ -360,8 +364,8 @@ export type RevisionBranchesProps = {
  * Shown only when a second branch exists: a project with one line has nothing
  * to choose between, and the region would be a heading over a single row
  * saying what the region above it already says. *New branch* therefore lives
- * here *and* in the composer picker (`NewBranchForm`), which is the control a
- * project with one line still has — a region that appears at two branches can
+ * here *and* alone in the region's place (`NewBranchForm`), which is the control
+ * a project with one line still has — a region that appears at two branches can
  * never be where the second one is made (R1).
  *
  * Presentational on purpose: rows and verbs come from the projection and the
@@ -384,6 +388,8 @@ export function RevisionBranches({
   liveCheckoutId,
   chatNames,
   chatCheckoutIds,
+  activeChatId,
+  onPlaceChat,
   branchFacts,
   conflicts,
   isBusy,
@@ -419,6 +425,14 @@ export function RevisionBranches({
           const placedChats = Object.entries(chatCheckoutIds).filter(
             ([, checkoutId]) => checkoutId === branch.checkoutId,
           );
+          /* What *Use in this chat* would do, when it would change anything: an unplaced chat works in the live checkout. */
+          const placement =
+            activeChatId !== undefined &&
+            onPlaceChat !== undefined &&
+            branch.checkoutId !== undefined &&
+            (chatCheckoutIds[activeChatId] ?? liveCheckoutId) !== branch.checkoutId
+              ? { chatId: activeChatId, checkoutId: branch.checkoutId }
+              : undefined;
           return (
             <li
               key={branch.name}
@@ -531,6 +545,15 @@ export function RevisionBranches({
                       >
                         {`Rename ${branch.name}`}
                       </DropdownMenuItem>
+                      {placement === undefined ? null : (
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            onPlaceChat?.(placement.chatId, placement.checkoutId);
+                          }}
+                        >
+                          {`Use ${branch.name} in this chat`}
+                        </DropdownMenuItem>
+                      )}
                       {isCurrent ? null : (
                         <>
                           <DropdownMenuSeparator />

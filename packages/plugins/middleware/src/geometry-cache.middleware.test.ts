@@ -83,7 +83,12 @@ describe('geometryCache', () => {
       success: true,
       data: undefined,
       issues: [],
-      serializedNativeHandle: { kind: 'brep', id: 7 },
+      serializedNativeHandle: {
+        kind: 'brep',
+        id: 7,
+        material: undefined,
+        nested: { normalTexture: undefined, extras: null },
+      },
       [nativeBuildInputSymbol]: replayInput,
     };
     const handler = vi.fn(async () => result);
@@ -92,7 +97,11 @@ describe('geometryCache', () => {
     const cached = await middleware.wrapCreateGeometry!(createMockInput(), handler, runtime);
 
     expect(handler).toHaveBeenCalledOnce();
-    expect(cached).toMatchObject({ success: true, data: undefined, serializedNativeHandle: { id: 7 } });
+    expect(cached).toMatchObject({ success: true, serializedNativeHandle: { id: 7 } });
+    if (cached.success) {
+      expect(cached.data).toBeUndefined();
+      expect(cached.serializedNativeHandle).toEqual({ kind: 'brep', id: 7, nested: { extras: null } });
+    }
   });
 
   it.each([

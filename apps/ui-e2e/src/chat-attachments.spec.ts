@@ -9,6 +9,7 @@ import type { AnthropicRequest, FixtureFile, RecordFile, StoredFile } from '#sup
 import {
   chooseAttachment,
   composerSelector,
+  editComposerSelector,
   dismissCookies,
   dropAttachment,
   dropOverCapPdf,
@@ -261,7 +262,7 @@ test('sends from the chat directory, renders and downloads both attachments, and
   // An edit re-references the chat's attachments: a new request, no new bytes anywhere.
   const requestsBeforeEdit = requests.length;
   await target.click(selectors.getByRole('button', { name: new RegExp(sentText, 'u') }).first());
-  const editComposer = selectors.getByCss(`article ${composerSelector}`).first();
+  const editComposer = selectors.getByCss(editComposerSelector).first();
   await target.expectVisible(editComposer);
   // F5: the edit's rail finds the sent image in the chat directory, not the emptied draft stage.
   const editRailImage = selectors.getByCss('article').getByRole('button', { name: 'Open uploaded image 1' });

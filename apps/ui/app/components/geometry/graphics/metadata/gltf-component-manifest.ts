@@ -1,3 +1,4 @@
+import type { GLTF } from '@gltf-transform/core';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
 import type {
   GeometryComponentAppearance,
@@ -56,7 +57,7 @@ type GltfScene = {
 };
 
 /** The glTF JSON chunk, narrowed to what the manifest and the in-place update path read. @public */
-export type GltfJson = {
+export type GltfJson = Pick<GLTF.IGLTF, 'images' | 'textures' | 'samplers'> & {
   scene?: number;
   scenes?: GltfScene[];
   nodes?: GltfNode[];
@@ -71,8 +72,13 @@ type GltfMaterial = {
   name?: string;
   pbrMetallicRoughness?: {
     baseColorFactor?: number[];
+    metallicFactor?: number;
+    roughnessFactor?: number;
   };
+  extensions?: Record<string, JsonObject>;
 };
+
+type SurfaceMaterial = NonNullable<GeometryComponentAppearance['materials']>[number];
 
 type TopologyComponent = Partial<TauCadTopologyComponent> & { readonly kind?: GeometryComponentKind };
 
@@ -358,6 +364,89 @@ function getComponentAppearance(
   };
 }
 
+function readMaterialFactor(value: number | undefined): number | 'unavailable' | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return isFiniteNumber(value) && value >= 0 && value <= 1 ? value : 'unavailable';
+}
+
+function getSurfaceMaterial(json: GltfJson, materialIndex: number | undefined): SurfaceMaterial {
+  if (materialIndex === undefined) {
+    return {};
+  }
+  const material = json.materials?.[materialIndex];
+  if (!material) {
+    return { materialIndex, color: 'unavailable', metalness: 'unavailable', roughness: 'unavailable' };
+  }
+  const factors = material.pbrMetallicRoughness;
+  const baseColor = factors?.baseColorFactor;
+  const color =
+    baseColor === undefined
+      ? undefined
+      : baseColor.length === 4 && baseColor.every((value) => readMaterialFactor(value) !== 'unavailable')
+        ? baseColorFactorToCssColor(baseColor)
+        : 'unavailable';
+  return {
+    materialIndex,
+    ...(color === undefined ? {} : { color }),
+    ...(factors?.metallicFactor === undefined ? {} : { metalness: readMaterialFactor(factors.metallicFactor) }),
+    ...(factors?.roughnessFactor === undefined ? {} : { roughness: readMaterialFactor(factors.roughnessFactor) }),
+    ...(material.extensions?.['KHR_materials_unlit'] ? { isUnlit: true } : {}),
+  };
+}
+
+/** Attach immutable-source factors once, independently of legacy color swatches and live renderer overrides. */
+function attachComponentSurfaceMaterials(
+  json: GltfJson,
+  manifest: GeometryComponentManifest,
+): GeometryComponentManifest {
+  const materials = new Map<number | undefined, SurfaceMaterial>();
+  const resolved = new Map<string, Set<number | undefined>>();
+  const visiting = new Set<string>();
+  const visit = (id: string): Set<number | undefined> => {
+    const previous = resolved.get(id);
+    if (previous) {
+      return previous;
+    }
+    const indices = new Set<number | undefined>();
+    const node = manifest.nodesById[id];
+    if (!node || visiting.has(id)) {
+      return indices;
+    }
+    visiting.add(id);
+    for (const reference of node.primitiveRefs ?? []) {
+      const primitive = json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex];
+      if (primitive && [4, 5, 6].includes(primitive.mode ?? 4)) {
+        indices.add(primitive.material);
+      }
+    }
+    for (const childId of node.childIds) {
+      for (const index of visit(childId)) {
+        indices.add(index);
+      }
+    }
+    if (indices.size > 0) {
+      node.appearance = {
+        ...node.appearance,
+        materials: [...indices].map((index) => {
+          let material = materials.get(index);
+          if (!material) {
+            material = getSurfaceMaterial(json, index);
+            materials.set(index, material);
+          }
+          return material;
+        }),
+      };
+    }
+    visiting.delete(id);
+    resolved.set(id, indices);
+    return indices;
+  };
+  visit(manifest.rootId);
+  return manifest;
+}
+
 function toGeometryKind(value: unknown): GeometryComponentKind {
   const kind = typeof value === 'string' ? value : 'part';
   const known = new Set<GeometryComponentKind>([
@@ -583,7 +672,7 @@ export function buildGltfComponentManifest(
   const topologyComponents = readTopologyComponents(json, bin);
   const topologyManifest = createTopologyComponentManifest(json, topologyComponents, options);
   if (topologyManifest) {
-    return topologyManifest;
+    return attachComponentSurfaceMaterials(json, topologyManifest);
   }
 
   const topologyByNodeIndex = new Map<number, TopologyComponent>();
@@ -726,7 +815,7 @@ export function buildGltfComponentManifest(
   const rootCapabilities = createCapabilities(hasPreciseTopology);
   nodesById[rootId] = createRootNode(childIds, rootCapabilities);
 
-  return {
+  return attachComponentSurfaceMaterials(json, {
     schemaVersion: 1,
     sourceFile: options.sourceFile,
     geometryHash: options.geometryHash,
@@ -735,5 +824,5 @@ export function buildGltfComponentManifest(
     nodesById,
     capabilities: rootCapabilities,
     extensionUsed: json.extensions?.[tauCadTopologyExtension] ? tauCadTopologyExtension : undefined,
-  };
+  });
 }

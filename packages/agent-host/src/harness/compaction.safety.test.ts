@@ -494,6 +494,118 @@ describe('compaction safety regressions', () => {
     await session.close();
   });
 
+  /*
+   * The live provider-switch compaction row: the fixed overhead fills about half
+   * the window, so a read the model has already answered is larger than the
+   * message budget without being larger than a request. Its turn is ordinary
+   * history, so it is summarized away rather than cleared as oversized.
+   */
+  it('should summarize an oversized tool result the model already answered instead of clearing it', async () => {
+    const file = createMemoryEventLogFile();
+    await seedMessages(file, [
+      { id: 'ledger-user', role: 'user', content: 'Read ledger.ts and reply with its marker.' },
+      assistant('ledger-call', [
+        { type: 'toolCall', id: 'ledger-read', name: 'read_file', arguments: { targetFile: 'ledger.ts' } },
+      ]),
+      {
+        id: 'ledger-input',
+        role: 'tool-input',
+        toolCallId: 'ledger-read',
+        toolName: 'read_file',
+        content: { targetFile: 'ledger.ts' },
+      },
+      {
+        id: 'ledger-output',
+        role: 'tool-output',
+        toolCallId: 'ledger-read',
+        toolName: 'read_file',
+        content: `${'row\n'.repeat(Math.floor(contextWindow * 0.36))}export const marker = 'TAU-LEDGER';`,
+        isError: false,
+      },
+      assistant('ledger-answer', [{ type: 'text', text: 'TAU-LEDGER' }]),
+      { id: 'ack-user', role: 'user', content: 'Reply with ACKNOWLEDGED.' },
+      assistant('ack-answer', [{ type: 'text', text: 'ACKNOWLEDGED' }], Math.floor(contextWindow * 0.85)),
+    ]);
+    const summarize = vi.fn<CompactionSummarizer>(async () => 'The ledger marker is TAU-LEDGER.');
+    const compactions: CompactionOutcome[] = [];
+    const transport = new ScriptedTransport(() => [
+      { type: 'text-delta', text: 'READY' },
+      { type: 'completed', stopReason: 'stop' },
+    ]);
+    const session = await createSession({
+      file,
+      transport,
+      summarize,
+      onCompaction: (outcome) => compactions.push(outcome),
+    });
+    await session.prompt({ id: 'ready-user', role: 'user', content: 'Reply with READY.' });
+
+    const snapshot = await session.snapshot();
+    expect(snapshot.failure).toBeUndefined();
+    expect(compactions.map(({ tier, cleared, evicted }) => ({ tier, cleared, evicted }))).toEqual([
+      { tier: 'summarization', cleared: 0, evicted: 3 },
+    ]);
+    expect(JSON.stringify(summarize.mock.calls[0]?.[0].messages)).toContain('TAU-LEDGER');
+    expect(snapshot.messages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
+    expect(snapshot.messages[0]).toMatchObject({
+      content: [{ type: 'text', text: '<summary>\nThe ledger marker is TAU-LEDGER.\n</summary>' }],
+    });
+    expect(JSON.stringify(transport.requests[0]?.messages)).not.toContain('narrower request');
+    const log = await file.open();
+    const events = await log.read();
+    expect(events.some((event) => event.type === 'message.envelope-replaced')).toBe(false);
+    expect(events.find((event) => event.type === 'history.compacted')).toMatchObject({
+      evictedMessageIds: ['ledger-user', 'ledger-call', 'ledger-input', 'ledger-output'],
+    });
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    await log.close();
+    await session.close();
+  });
+
+  /* A switch from a larger-window model can leave an answered result no summarizer on this window can read. */
+  it('should clear an answered tool result that is larger than a whole request', async () => {
+    const file = createMemoryEventLogFile();
+    await seedMessages(file, [
+      { id: 'wide-user', role: 'user', content: 'Inspect the model.' },
+      assistant('wide-call', [{ type: 'toolCall', id: 'wide-inspect', name: 'inspect', arguments: {} }]),
+      { id: 'wide-input', role: 'tool-input', toolCallId: 'wide-inspect', toolName: 'inspect', content: {} },
+      {
+        id: 'wide-output',
+        role: 'tool-output',
+        toolCallId: 'wide-inspect',
+        toolName: 'inspect',
+        content: 'r'.repeat(Math.floor(contextWindow * 1.2 * 4)),
+        isError: false,
+      },
+      assistant('wide-answer', [{ type: 'text', text: 'Inspected.' }]),
+    ]);
+    const summarize = vi.fn<CompactionSummarizer>(async () => 'must not summarize an unreadable result');
+    const session = await createSession({
+      file,
+      transport: new ScriptedTransport(() => [
+        { type: 'text-delta', text: 'continued' },
+        { type: 'completed', stopReason: 'stop' },
+      ]),
+      summarize,
+    });
+    await session.prompt({ id: 'wide-next', role: 'user', content: 'continue' });
+
+    const snapshot = await session.snapshot();
+    expect(snapshot.failure).toBeUndefined();
+    expect(summarize).not.toHaveBeenCalled();
+    expect(snapshot.messages.find((message) => message.id === 'wide-output')).toMatchObject({
+      content: '[Tool result exceeded the context window and was cleared; re-run with a narrower request]',
+    });
+    await session.close();
+  });
+
   it('should evict and restore budget when fixed overhead exceeds the recent-token budget', async () => {
     const file = createMemoryEventLogFile();
     let compacted: CompactionOutcome | undefined;

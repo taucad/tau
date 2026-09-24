@@ -48,7 +48,7 @@ export const shaderSites = [
     modules: ['#components/geometry/graphics/three/materials/gltf-surface-depth-bias.ts'],
     authoring: ['on-before-compile', 'fixed-function'],
     backends: ['webgl', 'webgpu'],
-    risks: ['depth', 'clipping', 'upstream-drift'],
+    risks: ['camera', 'depth', 'clipping', 'upstream-drift'],
   },
   {
     id: 'fat-lines',
@@ -72,7 +72,7 @@ export const shaderSites = [
     modules: ['#components/geometry/graphics/three/post-processing-webgl.tsx'],
     authoring: ['glsl', 'render-pass'],
     backends: ['webgl'],
-    risks: ['camera', 'depth', 'lifecycle', 'hot-path'],
+    risks: ['camera', 'depth', 'lifecycle', 'hot-path', 'upstream-drift'],
   },
   {
     id: 'webgpu-post',
@@ -156,7 +156,7 @@ export const shaderEvidence = {
   'surface-depth-bias': evidence(
     'apps/ui/app/components/geometry/graphics/three/materials/gltf-surface-depth-bias.test.ts',
     'fails compilation when the expected log-depth chunk is absent or duplicated',
-    'apps/ui/app/components/geometry/graphics/three/materials/gltf-surface-depth-bias.test.ts::pushes opaque WebGL triangles locally in logarithmic depth',
+    'apps/ui/app/components/geometry/graphics/three/materials/gltf-surface-depth-bias.test.ts::also separates orthographic surfaces when the renderer writes fragment depth',
   ),
   'fat-lines': evidence(
     'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts',
@@ -168,14 +168,54 @@ export const shaderEvidence = {
     'starts exactly at source, ends at target',
     'apps/ui/app/components/geometry/splash/morphing-points-material.node.test.ts::matches stable stripped points node material snapshot',
   ),
-  'webgl-post': evidence(
-    'apps/ui/app/components/geometry/graphics/three/post-processing-webgl.test.tsx',
-    'restores the selected composer depth directly to canvas',
-  ),
-  'webgpu-post': evidence(
-    'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx',
-    'restores the selected scene-pass depth with one direct fullscreen draw',
-  ),
+  'webgl-post': {
+    ...evidence(
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgl.test.tsx',
+      'restores the selected composer depth directly to canvas',
+      'apps/ui/app/components/geometry/graphics/three/n8ao-pass.test.ts::should guard the dependency implementation whose owned wrappers it disposes',
+    ),
+    reference: [
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgl.test.tsx::restores the selected composer depth directly to canvas',
+      'apps/ui/app/components/geometry/graphics/three/n8ao-pass.test.ts::should pass the actual log-depth convention to the half-resolution shader',
+      'apps/ui/app/components/geometry/graphics/three/post-processing.test.tsx::should resolve viewport AO radius from the CSS diagonal independently of DPR above the physical minimum',
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgl.test.tsx::should compose display AO after tone mapping and bypass tone mapping for the raw AO diagnostic',
+      'apps/ui/app/components/geometry/graphics/three/n8ao-pass.test.ts::should copy AO color without rejecting pixels against a reused composer depth attachment',
+      'apps/ui/app/components/geometry/graphics/three/n8ao-pass.test.ts::should distinguish opacity-aware tone-map blending from the installed default that ignores opacity',
+    ],
+    lifecycle: [
+      'apps/ui/app/components/geometry/graphics/three/n8ao-pass.test.ts::should dispose all owned fullscreen materials and preserve borrowed depth',
+      'apps/ui/app/components/geometry/graphics/three/n8ao-pass.test.ts::should stop transparent scene replays when all visible parts become opaque',
+      'apps/ui/app/components/geometry/graphics/three/n8ao-pass.test.ts::should release half-resolution materials without disposing shared fullscreen geometry on a toggle',
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgl.test.tsx::updates AO diagnostics and tone mapping on the retained production composers',
+      'apps/ui/app/components/geometry/graphics/three/canvas-three-gl.test.ts::should restore both retained cameras to forward depth before a WebGL canvas starts',
+      'apps/ui/app/components/geometry/graphics/three/three-canvas-instance.test.tsx::should restore both retained camera depth conventions when AO is disabled',
+    ],
+    'structural-perf': [
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgl.test.tsx::bypasses AO execution while retaining the same tone-mapping composer',
+      'apps/ui/app/components/geometry/graphics/three/n8ao-pass.test.ts::should route the native AO copy without texture feedback when needsSwap=',
+      'apps/ui/app/components/geometry/graphics/three/n8ao-pass.test.ts::should restart native composer frames at the MSAA geometry target after an in-place post chain',
+    ],
+  },
+  'webgpu-post': {
+    ...evidence(
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx',
+      'restores the selected scene-pass depth with one direct fullscreen draw',
+    ),
+    reference: [
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::should tone-map once before display AO and encode the raw AO diagnostic without exposure',
+      'apps/ui/app/components/geometry/graphics/three/post-processing.test.tsx::should resolve viewport AO radius from the CSS diagonal independently of DPR above the physical minimum',
+    ],
+    lifecycle: [
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::disposes both endpoint resources once on unmount',
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::updates AO output and estimator uniforms without rebuilding the production graph',
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::restores MRT and target when synchronous scene prewarm throws',
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::keeps beauty ahead of AO dependencies and preserves its alpha in the AO visualization',
+      'apps/ui/app/components/geometry/graphics/three/canvas-three-gl.test.ts::should configure both native camera projections before the first WebGPU scene pass',
+    ],
+    'structural-perf': [
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::bypasses GTAO through a retained beauty-only graph sharing the same scene pass',
+    ],
+  },
   'model-emphasis-silhouette': evidence(
     'apps/ui/app/components/geometry/graphics/three/materials/model-emphasis-silhouette.test.ts',
     'draws the outline only where mask coverage changes',

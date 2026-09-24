@@ -1,4 +1,4 @@
-import type { Model, ModelModalities } from '#api/models/model.schema.js';
+import type { Model, ModelModalities, ModelReasoningSupport } from '#api/models/model.schema.js';
 import type { ProviderId } from '#api/providers/provider.schema.js';
 
 // 'ollama' is runtime-discovered and never part of the static cloud catalog.
@@ -8,6 +8,17 @@ const textOnlyModalities = { input: ['text'], output: ['text'] } satisfies Model
 const imageInputModalities = { input: ['text', 'image'], output: ['text'] } satisfies ModelModalities;
 /** Vision models on an Anthropic or OpenAI codec; providers rasterise PDF pages, so `pdf` never appears without `image`. */
 const pdfInputModalities = { input: ['text', 'image', 'pdf'], output: ['text'] } satisfies ModelModalities;
+
+/*
+ * User-selectable reasoning levels, per row (`support.reasoning`). A row
+ * declares levels only when its codec forwards an effort — Anthropic adaptive
+ * thinking, the Responses wire (OpenAI, xAI) and Vertex's thinking level; the
+ * OpenAI-compatible completions providers carry none, so they get no menu.
+ * `xhigh` is Anthropic Opus 4.7+ / Fable 5 and GPT-6 Astra only, and Vertex
+ * refuses anything past `high`.
+ */
+const lowToHighReasoning = { levels: ['low', 'medium', 'high'] } satisfies ModelReasoningSupport;
+const lowToExtraHighReasoning = { levels: ['low', 'medium', 'high', 'xhigh'] } satisfies ModelReasoningSupport;
 
 /** Catalog row; omit {@link ModelListEntry.enabled} or set `true` to expose via GET `/v1/models`. */
 export type ModelListEntry = Model & { readonly enabled?: boolean };
@@ -37,6 +48,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-fable-5-1',
       support: {
+        reasoning: lowToExtraHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -83,6 +95,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-fable-5',
       support: {
+        reasoning: lowToExtraHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -114,12 +127,58 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
+    'claude-opus-5.5': {
+      id: 'anthropic-claude-opus-5.5',
+      providerKind: 'tau-hosted',
+      name: 'Opus 5.5',
+      slug: 'claude-opus-5.5',
+      recommended: true,
+      description:
+        'Most capable Opus model for long-horizon agentic CAD design, complex multi-part assemblies, and multi-file work.',
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
+      model: 'claude-opus-5-5',
+      support: {
+        reasoning: lowToExtraHighReasoning,
+        toolChoice: false,
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'claude',
+        families: ['claude'],
+        contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
+        cost: {
+          inputTokens: 4,
+          outputTokens: 20,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 5,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+        max_tokens: 120_000,
+        thinking: {
+          type: 'adaptive',
+          display: 'summarized',
+        },
+        outputConfig: {
+          effort: 'high',
+        },
+      },
+    },
     'claude-opus-5': {
       id: 'anthropic-claude-opus-5',
       providerKind: 'tau-hosted',
       name: 'Opus 5',
       slug: 'claude-opus-5',
-      recommended: true,
+      recommended: false,
       description:
         'Strong Opus model for long-horizon agentic CAD design, complex multi-part assemblies, and multi-file work.',
       provider: {
@@ -128,6 +187,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-opus-5',
       support: {
+        reasoning: lowToExtraHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -173,6 +233,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-opus-4-8',
       support: {
+        reasoning: lowToExtraHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -217,6 +278,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-sonnet-5',
       support: {
+        reasoning: lowToHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -261,6 +323,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-sonnet-4-6',
       support: {
+        reasoning: lowToHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -350,6 +413,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6-astra',
       support: {
+        reasoning: lowToExtraHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -374,13 +438,93 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
+    'gpt-6-sol': {
+      enabled: true,
+      id: 'openai-gpt-6-sol',
+      providerKind: 'tau-hosted',
+      name: 'GPT-6 Sol',
+      slug: 'gpt-6-sol',
+      recommended: true,
+      description:
+        'Cost-efficient GPT-6 model for complex CAD design, strong at planning multi-part assemblies and verifying its own work.',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-6-sol',
+      support: {
+        reasoning: lowToHighReasoning,
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-6'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-04',
+        cost: {
+          inputTokens: 2,
+          outputTokens: 10,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 2.5,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 1,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
+    'gpt-6-luna': {
+      enabled: true,
+      id: 'openai-gpt-6-luna',
+      providerKind: 'tau-hosted',
+      name: 'GPT-6 Luna',
+      slug: 'gpt-6-luna',
+      recommended: true,
+      description: 'Fast, cost-efficient model for high-volume CAD iterations and small design changes.',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-6-luna',
+      support: {
+        reasoning: lowToHighReasoning,
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-6'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-04',
+        cost: {
+          inputTokens: 0.1,
+          outputTokens: 0.5,
+          cacheReadTokens: 0.01,
+          cacheWriteTokens: 0.125,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 1,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
+
     'gpt-5.6-sol': {
       enabled: true,
       id: 'openai-gpt-5.6-sol',
       providerKind: 'tau-hosted',
       name: 'GPT-5.6 Sol',
       slug: 'gpt-5.6-sol',
-      recommended: true,
+      recommended: false,
       description:
         "OpenAI's frontier model for complex CAD design, strong at planning multi-part assemblies and verifying its own work.",
       provider: {
@@ -389,6 +533,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-sol',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -420,7 +565,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       providerKind: 'tau-hosted',
       name: 'GPT-5.6 Terra',
       slug: 'gpt-5.6-terra',
-      recommended: true,
+      recommended: false,
       description: 'Strong balance of intelligence and cost for everyday CAD design, iteration, and multi-file edits.',
       provider: {
         id: 'openai',
@@ -428,6 +573,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-terra',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -452,13 +598,14 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
+
     'gpt-5.6-luna': {
       enabled: true,
       id: 'openai-gpt-5.6-luna',
       providerKind: 'tau-hosted',
       name: 'GPT-5.6 Luna',
       slug: 'gpt-5.6-luna',
-      recommended: true,
+      recommended: false,
       description: 'Fast, cost-efficient model for high-volume CAD iterations and small design changes.',
       provider: {
         id: 'openai',
@@ -466,6 +613,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-luna',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -505,6 +653,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.5',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -579,6 +728,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gemini-3.1-pro-preview-customtools',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: imageInputModalities,
       },
       details: {
@@ -614,6 +764,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gemini-3.8-flash',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: imageInputModalities,
       },
       details: {
@@ -632,7 +783,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         // Google's own default for this model; it rejects MINIMAL outright.
-        thinkingLevel: 'MEDIUM',
+        thinkingLevel: 'HIGH',
       },
     },
     'gemini-3.5-flash-lite': {
@@ -648,6 +799,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gemini-3.5-flash-lite',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: imageInputModalities,
       },
       details: {
@@ -665,7 +817,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        thinkingLevel: 'MEDIUM',
+        thinkingLevel: 'HIGH',
       },
     },
     'gemini-3.5-flash': {
@@ -682,6 +834,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gemini-3.5-flash',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: imageInputModalities,
       },
       details: {
@@ -699,7 +852,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        thinkingLevel: 'MEDIUM',
+        thinkingLevel: 'HIGH',
       },
     },
   },
@@ -970,7 +1123,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'medium',
+          effort: 'high',
         },
       },
     },
@@ -1005,7 +1158,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'medium',
+          effort: 'high',
         },
       },
     },
@@ -1040,20 +1193,62 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'medium',
+          effort: 'high',
         },
       },
     },
   },
 
   xai: {
+    'grok-4.7': {
+      enabled: true,
+      id: 'xai-grok-4.7',
+      providerKind: 'tau-hosted',
+      name: 'Grok 4.7',
+      slug: 'grok-4.7',
+      recommended: true,
+      description:
+        'Strong xAI model for long-horizon agentic CAD design, complex geometry reasoning, and polished visual work.',
+      provider: {
+        id: 'xai',
+        name: 'xAI',
+      },
+      model: 'grok-4.7',
+      support: {
+        reasoning: lowToHighReasoning,
+        tools: true,
+        toolChoice: false,
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'grok',
+        families: ['grok'],
+        contextWindow: 200_000,
+        maxTokens: 64_000,
+        knowledgeCutoff: '2026-05',
+        cost: {
+          inputTokens: 2,
+          outputTokens: 6,
+          cacheReadTokens: 0.5,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxOutputTokens: 64_000,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
     'grok-4.6': {
       enabled: true,
       id: 'xai-grok-4.6',
       providerKind: 'tau-hosted',
       name: 'Grok 4.6',
       slug: 'grok-4.6',
-      recommended: true,
+      recommended: false,
       description:
         'Strong xAI model for long-horizon agentic CAD design, complex geometry reasoning, and polished visual work.',
       provider: {
@@ -1062,6 +1257,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'grok-4.6',
       support: {
+        reasoning: lowToHighReasoning,
         tools: true,
         toolChoice: false,
         modalities: imageInputModalities,

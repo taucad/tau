@@ -115,8 +115,12 @@ describe('SectionContourFills placement (Architecture C)', () => {
 
   it('uses explicit render tiers and contour-specific materials for cap fills and outlines', () => {
     expect(viewportRenderTiers.sectionCapFill).toBeLessThan(viewportRenderTiers.sectionContourOutline);
+    // An emphasised cap outline draws above every ordinary edge, including unemphasised outlines.
+    expect(viewportRenderTiers.sectionContourOutline).toBeLessThan(viewportRenderTiers.modelEmphasisEdge);
     expect(sectionContourFillSource.includes('viewportRenderTiers.sectionCapFill')).toBe(true);
-    expect(sectionContourFillSource.includes('viewportRenderTiers.sectionContourOutline')).toBe(true);
+    // The outline's tier now follows its component's emphasis, so the material module owns it.
+    expect(sectionContourFillSource.includes('viewportRenderTiers.sectionContourOutline')).toBe(false);
+    expect(sectionContourFillSource.includes('resolveSectionContourOutlineEmphasis(')).toBe(true);
     expect(sectionContourFillSource.includes('createSectionContourOutlineMaterial')).toBe(true);
     expect(sectionContourFillSource.includes('setSectionContourOutlineMaterialColor')).toBe(true);
     expect(sectionContourFillSource.includes('createGltfFatLineMaterial({')).toBe(false);

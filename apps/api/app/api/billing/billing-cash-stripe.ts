@@ -59,6 +59,14 @@ export async function retrieveStripePaymentIntent(
   return stripe.paymentIntents.retrieve(paymentIntentId);
 }
 
+export async function retrieveStripeCustomer(
+  stripe: { readonly customers: Pick<Stripe['customers'], 'retrieve'> },
+  customerId: string,
+): Promise<Stripe.Customer | Stripe.DeletedCustomer> {
+  assertId(customerId, 'Customer');
+  return stripe.customers.retrieve(customerId);
+}
+
 export async function retrieveStripeCharge(
   stripe: { readonly charges: Pick<Stripe['charges'], 'retrieve'> },
   chargeId: string,

@@ -10,12 +10,29 @@ import {
 } from '#components/geometry/graphics/three/materials/striped-material-vertex-colored.js';
 import { createVertexColoredStripedMaterial } from '#components/geometry/graphics/three/materials/striped-material.js';
 import { getSectionCapDepthBias } from '#components/geometry/graphics/three/materials/section-cap-depth-state.js';
+import type { ShaderMaterial, WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
 import { serialiseStrippedTslGraph } from '#components/geometry/graphics/three/utils/tsl-node-graph-snapshot.js';
 
 const currentDirectory = fileURLToPath(new URL('.', import.meta.url));
 
 afterEach(() => {
   disposeVertexColoredSectionCapMaterialCache();
+});
+
+describe('section cap depth separation', () => {
+  it('separates the cap with the shared surface bias, not an offset the log-depth write discards', () => {
+    // The viewport writes `gl_FragDepth`, which discards the rasterizer's polygon offset. A cap
+    // separated only by `polygonOffset` ties its own outline, and the outline drops out in
+    // pieces — see `docs/research/viewer-emphasis-depth-and-coverage-blueprint.md` Finding 2.
+    const material = createVertexColoredSectionCapMaterial('webgl') as ShaderMaterial;
+    const shader = { fragmentShader: material.fragmentShader };
+    material.onBeforeCompile(shader as unknown as WebGLProgramParametersWithUniforms, {} as unknown as WebGLRenderer);
+
+    expect(shader.fragmentShader).toContain('tauSurfaceDepthSlope');
+    expect(shader.fragmentShader).toContain('gl_FragDepth + tauSurfaceDepthOffset');
+    // The same separation every other opaque surface carries, so outlines win by the same margin.
+    expect(material.polygonOffsetFactor).toBe(getSectionCapDepthBias('webgl').polygonOffsetFactor);
+  });
 });
 
 describe('createVertexColoredSectionCapMaterial', () => {

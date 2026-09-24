@@ -582,7 +582,7 @@ describe('billing Stripe transport', () => {
     ).resolves.toMatchObject({ complete: true, session: { id: 'cs_1' }, lines: [{ id: 'li_1' }] });
   });
 
-  it('verifies direct-account event scope, version, allowlist and raw digest', async () => {
+  it('verifies direct-account event scope, version and allowlist', async () => {
     const fixture = await createFixture({});
     const payloadText = JSON.stringify({
       id: 'evt_1',
@@ -630,5 +630,29 @@ describe('billing Stripe transport', () => {
         livemode: false,
       }),
     ).toThrow('scope mismatch');
+  });
+
+  it('digests a redelivered event identically whatever its pending_webhooks count, and changed content differently', async () => {
+    const fixture = await createFixture({});
+    const parse = (delivery: Record<string, unknown>) => {
+      const text = JSON.stringify({
+        id: 'evt_1',
+        object: 'event',
+        api_version: stripeApiVersion,
+        created: 1,
+        livemode: false,
+        type: 'payment_intent.succeeded',
+        data: { object: { id: 'pi_1', object: 'payment_intent' } },
+        ...delivery,
+      });
+      return parseVerifiedStripeEvent(fixture.stripe, {
+        rawBody: new TextEncoder().encode(text),
+        signature: fixture.stripe.webhooks.generateTestHeaderString({ payload: text, secret: 'whsec_fixture' }),
+        secret: 'whsec_fixture',
+        livemode: false,
+      }).payloadDigest;
+    };
+    expect(parse({ pending_webhooks: 1 })).toBe(parse({ pending_webhooks: 3 }));
+    expect(parse({ data: { object: { id: 'pi_1', object: 'payment_intent', amount: 1 } } })).not.toBe(parse({}));
   });
 });

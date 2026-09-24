@@ -3,7 +3,8 @@ import { ArrowUp, Square } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
+import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
+import { ariaKeyShortcuts, formatKeyCombination } from '#utils/keys.utils.js';
 import { Loader } from '#components/ui/loader.js';
 import { cn } from '@taucad/ui/utils/cn';
 
@@ -18,8 +19,8 @@ type ChatStreamingStopButtonProperties = {
 };
 
 /**
- * Circular stop control used while the assistant stream is active (textarea
- * shortcut affordance and pinned shortcut on the live user bubble).
+ * Circular stop control used while a turn runs (the composer's, and the one
+ * pinned to the live user bubble). Named, with its shortcut exposed (F1).
  */
 export const ChatStreamingStopButton = memo(function ({
   formattedCancelKeyCombination,
@@ -35,13 +36,15 @@ export const ChatStreamingStopButton = memo(function ({
           type='button'
           variant='ghost'
           size='icon'
+          aria-label='Stop'
+          aria-keyshortcuts={ariaKeyShortcuts(cancelChatStreamKeyCombination)}
           className={cn(chatComposerActionButtonClassName, isCompact ? 'size-6' : 'size-7')}
           onClick={(event) => {
             event.stopPropagation();
             onCancel();
           }}
         >
-          <Square className={cn('fill-background', isCompact ? 'size-3' : 'size-4')} />
+          <Square aria-hidden='true' className={cn('fill-background', isCompact ? 'size-3' : 'size-4')} />
         </Button>
       </TooltipTrigger>
       <TooltipContent className='flex items-center gap-2 align-baseline'>
@@ -54,8 +57,9 @@ export const ChatStreamingStopButton = memo(function ({
 type ChatTextareaSubmitButtonProperties = {
   readonly status: string;
   readonly isSubmitting: boolean;
-  readonly isDisabled: boolean;
-  /** The id of the text saying why Send is disabled, when there is one (S14). */
+  /** Why Send refuses right now, or `undefined` when it would send. */
+  readonly refusal: string | undefined;
+  /** The id of the text beside the attachments saying why Send refuses, when there is one (S14). */
   readonly describedBy?: string;
   readonly formattedCancelKeyCombination: string;
   readonly onSubmit: () => void;
@@ -63,13 +67,15 @@ type ChatTextareaSubmitButtonProperties = {
 };
 
 /**
- * Shared submit/cancel button component for the chat textarea.
- * Shows a stop button when streaming, otherwise shows a submit button.
+ * Send, or Stop while a turn runs.
+ *
+ * A refusing Send stays focusable (F14): it is `aria-disabled`, not
+ * `disabled`, so a keyboard reaches it and its tooltip says why.
  */
 export const ChatTextareaSubmitButton = memo(function ({
   status,
   isSubmitting,
-  isDisabled,
+  refusal,
   describedBy,
   formattedCancelKeyCombination,
   onSubmit,
@@ -85,19 +91,33 @@ export const ChatTextareaSubmitButton = memo(function ({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
+          type='button'
           variant='ghost'
           size='icon'
-          className={cn(chatComposerActionButtonClassName, 'size-7')}
-          disabled={isDisabled || isSubmitting}
+          aria-label='Send'
+          aria-keyshortcuts='Enter'
+          aria-disabled={refusal !== undefined}
+          className={cn(
+            chatComposerActionButtonClassName,
+            'size-7 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
+          )}
           // Only when set: an explicit `undefined` would replace the tooltip's own description.
           {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
-          onClick={onSubmit}
+          onClick={() => {
+            if (refusal === undefined) {
+              onSubmit();
+            }
+          }}
         >
-          {isSubmitting ? <Loader className='size-4' /> : <ArrowUp className='size-5' />}
+          {isSubmitting ? <Loader className='size-4' /> : <ArrowUp aria-hidden='true' className='size-5' />}
         </Button>
       </TooltipTrigger>
       <TooltipContent className='flex items-center gap-2 align-baseline'>
-        Send <KeyShortcut variant='tooltip'>{formatKeyCombination({ key: 'Enter' })}</KeyShortcut>
+        {refusal ?? (
+          <>
+            Send <KeyShortcut variant='tooltip'>{formatKeyCombination({ key: 'Enter' })}</KeyShortcut>
+          </>
+        )}
       </TooltipContent>
     </Tooltip>
   );

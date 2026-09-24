@@ -23,10 +23,10 @@ export function ChatLoginAffordance({ login }: { readonly login: AgentHostLogin 
   return (
     <section
       aria-label={`Sign in to ${name}`}
-      className='border-amber-500/40 bg-amber-500/10 mb-2 flex flex-col gap-2 rounded-md border p-3 text-sm'
+      className='mb-2 flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm'
     >
       <div className='flex min-w-0 items-center gap-2'>
-        <KeyRound className='text-amber-600 size-4 shrink-0' />
+        <KeyRound className='size-4 shrink-0 text-warning' />
         <p className='min-w-0 truncate font-medium'>{`${name} needs you to sign in`}</p>
       </div>
       {login.url === undefined ? undefined : (

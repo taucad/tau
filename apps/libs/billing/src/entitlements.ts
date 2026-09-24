@@ -41,7 +41,7 @@ export type Entitlements = {
    * always false (no-train guarantee).
    */
   readonly trainingConsent: boolean;
-  readonly currentPeriodEnd: Date | undefined;
+  /** The end of the last paid subscription period: the renewal date, or the access end once cancelled. */
   readonly paidThrough: Date | undefined;
   readonly graceEndsAt: Date | undefined;
   readonly cancelAtPeriodEnd: boolean;
@@ -109,7 +109,6 @@ export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
         tier,
         status: 'none',
         ...freeEntitlements,
-        currentPeriodEnd: undefined,
         paidThrough: undefined,
         graceEndsAt: undefined,
         cancelAtPeriodEnd: false,
@@ -122,7 +121,6 @@ export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
         tier,
         status: 'active',
         ...proEntitlements,
-        currentPeriodEnd: undefined,
         paidThrough: undefined,
         graceEndsAt: undefined,
         cancelAtPeriodEnd: false,
@@ -144,7 +142,6 @@ export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
         geospecConcurrentRuns: 4,
         canCreateGeoSpecEvidenceReports: true,
         geospecEvidenceRetentionDays: 365,
-        currentPeriodEnd: undefined,
         paidThrough: undefined,
         graceEndsAt: undefined,
         cancelAtPeriodEnd: false,

@@ -53,9 +53,11 @@ describe('SceneOverlay depth ownership', () => {
     const { OverlayDepthProvider, SceneOverlay, useOverlayDepthRestore } =
       await import('#components/geometry/graphics/three/scene-overlay.js');
     const order: string[] = [];
+    const targets: unknown[] = [];
     const Register = (): React.ReactNode => {
-      useOverlayDepthRestore(() => {
+      useOverlayDepthRestore((target) => {
         order.push('depth');
+        targets.push(target);
       });
       return null;
     };
@@ -70,6 +72,8 @@ describe('SceneOverlay depth ownership', () => {
     mocks.getFrame()?.({ gl: mocks.gl, scene: mocks.mainScene, camera: mocks.camera });
 
     expect(order).toEqual(['depth', 'overlay']);
+    // An overlay draws on the canvas, so it asks for the frame's depth there and nowhere else.
+    expect(targets).toEqual([undefined]);
     expect(mocks.renderScene).toHaveBeenCalledOnce();
     expect(mocks.renderScene.mock.calls[0]![0]).not.toBe(mocks.mainScene);
     expect(mocks.mainScene.traverse).not.toHaveBeenCalled();

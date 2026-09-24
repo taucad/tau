@@ -586,7 +586,7 @@ describe('tau tui', () => {
     await expect(finished).resolves.toBeUndefined();
   }, 120_000);
 
-  it('shows an interrupted ACP outcome as unknown on reattach without repeating the turn', async () => {
+  it('shows an interrupted ACP run as abandoned on reattach without repeating the turn', async () => {
     const chatId = 'chat-tui-acp-recovery';
     const directory = join(workspace, '.tau', 'chats', chatId);
     await mkdir(directory, { recursive: true });
@@ -623,7 +623,7 @@ describe('tau tui', () => {
     const errors = vi.spyOn(console, 'error');
     try {
       const { terminal, finished } = mount(chatId, { id: 'codex' });
-      await untilPainted(terminal, /EXTERNAL_AGENT_RECOVERY_UNKNOWN/u);
+      await untilPainted(terminal, /RUN_ABANDONED/u);
       await untilPainted(terminal, /run failed/u);
       const log = await chatLog(chatId);
       expect(log.match(/"role":"user"/gu)).toHaveLength(1);

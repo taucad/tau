@@ -113,7 +113,7 @@ describe('ManifoldWorker', () => {
       expect(schema).toMatchObject({
         type: 'object',
         properties: {
-          size: { type: 'integer', default: 20 },
+          size: { type: 'double', default: 20 },
           centered: { type: 'boolean', default: true },
         },
       });

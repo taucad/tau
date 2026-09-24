@@ -86,7 +86,12 @@ const config: KnipConfig = {
       ],
     },
     'apps/ui': {
-      entry: ['app/routes/**/*.tsx', 'app/types/**/*.d.ts', 'vite-environment.d.ts'],
+      entry: [
+        'app/routes/**/*.tsx',
+        'app/types/**/*.d.ts',
+        'vite-environment.d.ts',
+        'scripts/render-calibration/generate-physical.mts',
+      ],
       ignore: ['public/**'],
     },
     'apps/docs': {

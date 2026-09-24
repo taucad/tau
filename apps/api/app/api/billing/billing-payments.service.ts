@@ -1230,7 +1230,6 @@ export class BillingPaymentsService {
         .values({
           id: actionId,
           plan: 'pro',
-          referenceId: `financial:${actionId}`,
           accountId: owner.accountId,
           environment: this.config.environment,
           customerBindingId: binding.id,
@@ -4002,7 +4001,16 @@ export class BillingPaymentsService {
         .for('update');
       if (existing[0] !== undefined) return { binding, dispatch: false, leg: existing[0] };
       const legId = randomUUID();
-      const request = { metadata: { tau_account_id: owner.accountId, tau_customer_binding_id: binding.id } };
+      /* The environment stamp is what lets a test-mode cash scan tell another environment's
+       * customer from unexplained cash: test mode shares one Stripe account between local
+       * development, the acceptance suite and staging. */
+      const request = {
+        metadata: {
+          tau_account_id: owner.accountId,
+          tau_customer_binding_id: binding.id,
+          tau_environment: this.config.environment,
+        },
+      };
       const inserted = await tx
         .insert(billingProviderLeg)
         .values({

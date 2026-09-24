@@ -29,5 +29,13 @@
     "enabled": false,
     "budgetCreditAtoms": "0",
     "offer": null
+  },
+  "autoReload": {
+    "enabled": true,
+    "thresholdAtoms": "1000000",
+    "principalMinor": "2500",
+    "monthlyGrossCapMinor": "10000",
+    "minimumCadenceSeconds": 3600,
+    "terminalFailureLimit": 2
   }
 }

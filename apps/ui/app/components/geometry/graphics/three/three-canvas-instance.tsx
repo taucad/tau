@@ -45,6 +45,7 @@ export function ThreeCanvasInstance({
   upDirection = 'z',
   className,
   stageOptions,
+  postProcessingSettings,
   zoomSpeed = 2,
   gizmoContainer,
   ...canvasProperties
@@ -55,7 +56,10 @@ export function ThreeCanvasInstance({
   const [isContextLost, setIsContextLost] = useState(false);
   const cameraRig = useCameraRig();
 
-  const glProperty: CanvasProps['gl'] = useMemo(() => createTauR3fGlProp(graphicsBackend), [graphicsBackend]);
+  const glProperty: CanvasProps['gl'] = useMemo(
+    () => createTauR3fGlProp(graphicsBackend, [cameraRig.perspectiveCamera, cameraRig.orthographicCamera]),
+    [cameraRig, graphicsBackend],
+  );
 
   useLayoutEffect(() => {
     cameraRig.setClipPlanes(
@@ -77,7 +81,6 @@ export function ThreeCanvasInstance({
 
   const onCanvasCreated = useCallback((state: RootState): void => {
     const renderer = state.gl;
-    renderer.toneMappingExposure = 1;
 
     if ('isWebGPURenderer' in renderer && renderer.isWebGPURenderer) {
       const webGpuRenderer = renderer as unknown as InstanceType<typeof WebGPURenderer>;
@@ -128,7 +131,7 @@ export function ThreeCanvasInstance({
           {children}
         </Scene>
         <OverlayDepthProvider>
-          <PostProcessing />
+          <PostProcessing settings={postProcessingSettings} />
           {isTauDebugEnabled ? <WebGpuInspectorOverlay /> : null}
           <ModelEmphasisOverlay />
           <SceneOverlay overlayActive={enableAxes || enableGrid}>

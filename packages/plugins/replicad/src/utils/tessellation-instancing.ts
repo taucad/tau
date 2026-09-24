@@ -1,3 +1,4 @@
+import type { GlbMaterial } from '@taucad/geometry-core';
 import type { AnyShape } from 'replicad';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { SetRequired } from 'type-fest';
@@ -52,6 +53,7 @@ export type ReplicadTessellationInstance = {
   opacity?: number;
   metalness?: number;
   roughness?: number;
+  material?: GlbMaterial;
   locationMatrix: ReplicadShapeIdentityInfo['locationMatrix'];
   determinant: number;
   faceIds?: number[];
@@ -439,6 +441,22 @@ function transformNormals(values: number[], matrix: readonly number[]): number[]
   return transformTriplets(values, normals, transformVector);
 }
 
+function transformTangents(values: number[] | undefined, instance: ReplicadTessellationInstance): number[] | undefined {
+  if (!values) {
+    return undefined;
+  }
+  const matrix = instance.locationMatrix;
+  const linear = [matrix[0], matrix[1], matrix[2], matrix[4], matrix[5], matrix[6], matrix[8], matrix[9], matrix[10]];
+  const output: number[] = [];
+  for (let index = 0; index < values.length; index += 4) {
+    output.push(
+      ...transformVector(linear, [values[index]!, values[index + 1]!, values[index + 2]!]),
+      values[index + 3]! * Math.sign(instance.determinant),
+    );
+  }
+  return output;
+}
+
 function transformTriangles(triangles: number[], determinant: number): number[] {
   if (determinant >= 0) {
     return [...triangles];
@@ -504,7 +522,10 @@ export function transformReplicadGeometryInstance({
     opacity: instance.opacity,
     metalness: instance.metalness,
     roughness: instance.roughness,
+    material: instance.material,
     faces: {
+      texCoords: prototype.faces.texCoords,
+      tangents: transformTangents(prototype.faces.tangents, instance),
       vertices: transformTriplets(prototype.faces.vertices, instance.locationMatrix, transformPoint),
       normals: transformNormals(prototype.faces.normals, instance.locationMatrix),
       triangles: transformTriangles(prototype.faces.triangles, instance.determinant),

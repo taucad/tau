@@ -99,3 +99,20 @@ export function formatKeyCombination(combo: KeyCombination): string {
 
   return parts.join('');
 }
+
+/**
+ * Formats a key combination as an `aria-keyshortcuts` value (modifiers first,
+ * `+`-joined, the platform's modifier for `modKey`).
+ */
+export function ariaKeyShortcuts(combo: KeyCombination): string {
+  const isMac = detectedPlatform === 'mac';
+  return [
+    (combo.modKey ? !isMac : combo.ctrlKey) && 'Control',
+    combo.altKey && 'Alt',
+    combo.shiftKey && 'Shift',
+    (combo.modKey ? isMac : combo.metaKey) && 'Meta',
+    combo.key === ' ' ? 'Space' : combo.key,
+  ]
+    .filter(Boolean)
+    .join('+');
+}

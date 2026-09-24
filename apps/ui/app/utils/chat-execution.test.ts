@@ -32,6 +32,15 @@ describe('withTauExecutionModel', () => {
       model: 'b',
     });
   });
+
+  it('carries the chosen reasoning level across a model change, for the reader to clamp', () => {
+    // Fable at xhigh → Gemini reads as high, and back to Fable reads xhigh again.
+    expect(withTauExecutionModel({ kind: 'tau', model: 'fable', effort: 'xhigh' }, 'gemini')).toEqual({
+      kind: 'tau',
+      model: 'gemini',
+      effort: 'xhigh',
+    });
+  });
 });
 
 describe('withExecutionModel', () => {

@@ -143,6 +143,7 @@ const routes = [
     rates('10', '.25', '12.5', '50', '5m'),
   ),
   route('anthropic-claude-fable-5', 'Fable 5', 'anthropic', 1_000_000, 128_000, rates('10', '1', '12.5', '50', '5m')),
+  route('anthropic-claude-opus-5.5', 'Opus 5.5', 'anthropic', 1_000_000, 128_000, rates('4', '.2', '5', '20', '5m')),
   route('anthropic-claude-opus-5', 'Opus 5', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
   route('anthropic-claude-opus-4.8', 'Opus 4.8', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
   route('anthropic-claude-sonnet-5', 'Sonnet 5', 'anthropic', 1_000_000, 128_000, rates('2', '.2', '2.5', '10', '5m')),
@@ -162,6 +163,15 @@ const routes = [
     1_050_000,
     128_000,
     rates('20', '2', '25', '75', '30m'),
+  ),
+  route('openai-gpt-6-sol', 'GPT-6 Sol', 'openai-responses', 1_050_000, 128_000, rates('4', '.4', '5', '15', '30m')),
+  route(
+    'openai-gpt-6-luna',
+    'GPT-6 Luna',
+    'openai-responses',
+    1_050_000,
+    128_000,
+    rates('.2', '.02', '.25', '.75', '30m'),
   ),
   route(
     'openai-gpt-5.6-sol',
@@ -237,16 +247,20 @@ const routes = [
     combinedMaximum: 196_608n,
     outputParameter: 'max_tokens',
   }),
+  route('xai-grok-4.7', 'Grok 4.7', 'openai-responses', 500_000, 64_000, rates('4', '1', undefined, '12')),
   route('xai-grok-4.6', 'Grok 4.6', 'openai-responses', 500_000, 64_000, rates('4', '1', undefined, '12')),
 ] as const;
 
 const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly Rate[] }>([
   ['openai-gpt-6-astra', { minimum: 272_001n, baseRates: rates('10', '1', '12.5', '50', '30m') }],
+  ['openai-gpt-6-sol', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '10', '30m') }],
+  ['openai-gpt-6-luna', { minimum: 272_001n, baseRates: rates('.1', '.01', '.125', '.5', '30m') }],
   ['openai-gpt-5.6-sol', { minimum: 272_001n, baseRates: rates('4', '.4', '5', '20', '30m') }],
   ['openai-gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
   ['openai-gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
   ['openai-gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
   ['google-gemini-3.1-pro', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
+  ['xai-grok-4.7', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
   ['xai-grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
 ]);
 const jointInputProviders = new Set(['anthropic', 'openai', 'morph', 'xai']);

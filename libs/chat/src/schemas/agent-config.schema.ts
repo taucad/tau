@@ -2,6 +2,7 @@
 import z from 'zod';
 import { kernelProviders } from '@taucad/types/constants';
 import { chatModes } from '#constants/chat-mode.constants.js';
+import { reasoningLevels } from '#constants/model.constants.js';
 import { toolModes, toolNames } from '#constants/tool.constants.js';
 import { contextPayloadSchema } from '#schemas/context-payload.schema.js';
 import { snapshotSchema } from '#schemas/metadata.schema.js';
@@ -34,6 +35,13 @@ export const tauAgentExecutionSchema = z
     model: z.string().min(1),
     /** See {@link TauAgentHostId}; absent = this browser's own worker. */
     hostId: z.string().min(1).optional(),
+    /**
+     * The chat's chosen reasoning level. Absent means the model's catalog
+     * default. It survives a model change and is clamped to the model's
+     * offered levels where it is read, so a turn never admits one its
+     * provider refuses and a detour through a smaller model does not lose it.
+     */
+    effort: z.enum(reasoningLevels).optional(),
   })
   .strict()
   .meta({ id: 'TauAgentExecution' });

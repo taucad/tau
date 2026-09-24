@@ -79,9 +79,9 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await transaction`CREATE POLICY billing_runtime_subscription_extension ON public.subscription_extension FOR SELECT TO tau_billing_runtime USING (true)`;
     await transaction`GRANT SELECT, INSERT ON public.subscription TO tau_billing_runtime`;
     await transaction`GRANT SELECT ON public.subscription_extension TO tau_billing_runtime`;
-    await transaction`GRANT UPDATE (stripe_subscription_id, status, period_start, period_end, cancel_at_period_end,
-      cancel_at, canceled_at, ended_at, slot_state, paid_through, failed_renewal_invoice_id, dunning_started_at,
-      grace_ends_at, updated_at) ON public.subscription TO tau_billing_runtime`;
+    await transaction`GRANT UPDATE (stripe_subscription_id, status, cancel_at_period_end, canceled_at, ended_at,
+      slot_state, paid_through, failed_renewal_invoice_id, dunning_started_at, grace_ends_at, updated_at)
+      ON public.subscription TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (status, promo_atoms, plan_atoms, purchased_atoms, debt_atoms,
       promo_held_atoms, plan_held_atoms, purchased_held_atoms, pending_issuance_atoms, revision)
       ON billing.credit_account TO tau_billing_runtime`;
@@ -501,7 +501,7 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
             OR (OLD.projection_source_generation IS NOT NULL AND NEW.projection_source_generation < OLD.projection_source_generation)
           THEN RAISE EXCEPTION 'cash issuance/source generation cannot regress' USING ERRCODE = '23514'; END IF;
         WHEN 'subscription' THEN
-          mutable := ARRAY['stripe_subscription_id','status','period_start','period_end','cancel_at_period_end','cancel_at','canceled_at','ended_at','slot_state','paid_through','failed_renewal_invoice_id','dunning_started_at','grace_ends_at','updated_at'];
+          mutable := ARRAY['stripe_subscription_id','status','cancel_at_period_end','canceled_at','ended_at','slot_state','paid_through','failed_renewal_invoice_id','dunning_started_at','grace_ends_at','updated_at'];
           IF (OLD.stripe_subscription_id IS NOT NULL AND OLD.stripe_subscription_id IS DISTINCT FROM NEW.stripe_subscription_id)
             OR (OLD.paid_through IS NOT NULL AND (NEW.paid_through IS NULL OR NEW.paid_through < OLD.paid_through))
             OR (OLD.failed_renewal_invoice_id IS NOT NULL AND NEW.failed_renewal_invoice_id IS NOT NULL

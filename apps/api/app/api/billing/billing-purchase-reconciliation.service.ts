@@ -352,7 +352,6 @@ export class BillingPurchaseReconciliationService {
       .where(
         and(
           eq(subscription.environment, scan.environment),
-          isNotNull(subscription.accountId),
           isNotNull(subscription.stripeSubscriptionId),
           inArray(subscription.slotState, [...entitledSlotStates]),
           eq(billingStripeCustomer.stripeAccountId, scan.stripeAccountId),
@@ -364,7 +363,7 @@ export class BillingPurchaseReconciliationService {
     const rows = page.slice(0, maximum);
     for (const row of rows) {
       const { accountId, stripeSubscriptionId } = row.subscription;
-      if (accountId === null || stripeSubscriptionId === null) continue;
+      if (stripeSubscriptionId === null) continue;
       const source = await this.sourceStripe.subscriptions.retrieve(stripeSubscriptionId);
       const reasons = disagreeSubscription(scan, row.subscription, row.binding, source);
       const dedupeKey = `subscription:${row.subscription.id}`;
@@ -378,7 +377,7 @@ export class BillingPurchaseReconciliationService {
           sourceType: 'subscription',
           sourceId: row.subscription.id,
           currency: undefined,
-          firstEffectiveAt: row.subscription.periodStart ?? scan.windowStart,
+          firstEffectiveAt: scan.windowStart,
           evidence: {
             subscriptionId: row.subscription.id,
             stripeSubscriptionId,

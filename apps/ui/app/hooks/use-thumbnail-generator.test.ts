@@ -136,6 +136,7 @@ describe('useThumbnailGenerator', () => {
           projection: { kind: 'perspective', verticalFieldOfView: 45 },
         },
         quality: 0.9,
+        ao: {},
       },
     });
     const job = exportImage.mock.calls[0]![0];
@@ -233,7 +234,7 @@ describe('useThumbnailGenerator', () => {
     expect(event?.type).toBe('settled');
     if (event?.type === 'settled') {
       expect(event.hash).toBe(
-        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:768x576:m0.1:lw3:camera-bounds-v1:edges',
+        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:768x576:m0.1:lw3:camera-bounds-v1:edges:studio-v4',
       );
     }
   });

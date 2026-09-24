@@ -104,13 +104,12 @@ export class BillingService {
             orderBy: desc(subscription.paidThrough),
           });
     const now = Date.now();
-    const ownedRows = subscriptionRows.filter((row) => row.customerBindingId !== null && row.offerSnapshot !== null);
     const relevant =
-      ownedRows.find(
+      subscriptionRows.find(
         (row) =>
           (row.paidThrough !== null && now < row.paidThrough.getTime()) ||
           (row.failedRenewalInvoiceId !== null && row.graceEndsAt !== null && now < row.graceEndsAt.getTime()),
-      ) ?? ownedRows[0];
+      ) ?? subscriptionRows[0];
     const paid =
       relevant?.paidThrough !== null && relevant?.paidThrough !== undefined && now < relevant.paidThrough.getTime();
     const grace =
@@ -150,7 +149,6 @@ export class BillingService {
       trainingConsent: tier === 'free' ? (userRow?.allowsAiTraining ?? false) : false,
       hasPaymentMethod: defaultCard !== undefined,
       paymentMethod: defaultCard ? { brand: defaultCard.brand, last4: defaultCard.last4 } : undefined,
-      currentPeriodEnd: relevant?.periodEnd ?? undefined,
       paidThrough: relevant?.paidThrough ?? undefined,
       graceEndsAt: relevant?.graceEndsAt ?? undefined,
       cancelAtPeriodEnd: relevant?.cancelAtPeriodEnd ?? false,

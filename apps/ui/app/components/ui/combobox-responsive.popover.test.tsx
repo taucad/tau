@@ -54,4 +54,25 @@ describe('ComboBoxResponsive desktop popovers', () => {
     expect(screen.queryByRole('option', { name: 'Model option' })).not.toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Location option' })).toBeVisible();
   });
+
+  it('hands focus to onClose after Escape, not back to its trigger', async () => {
+    const user = userEvent.setup();
+
+    function Composer(): React.JSX.Element {
+      const editorReference = useRef<HTMLInputElement>(null);
+      return (
+        <>
+          <input ref={editorReference} aria-label='Composer' />
+          <Picker name='Location' onClose={() => editorReference.current?.focus()} />
+        </>
+      );
+    }
+
+    render(<Composer />);
+    await user.click(screen.getByRole('button', { name: 'Location' }));
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('option', { name: 'Location option' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Composer' })).toHaveFocus();
+  });
 });

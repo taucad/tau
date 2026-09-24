@@ -447,6 +447,13 @@ jobs:
       - name: Run deterministic file-edit qualification (edit bench)
         run: pnpm nx run-many -t test:models -- app/testing/edit-bench/edit-bench.test.ts
 
+      # Hermetic guards on the live provider harness, which the credentialed live
+      # suites cannot run here: a failing live row names the model's own answer,
+      # and a prompt a model refuses as a jailbreak never reaches a provider
+      # (docs/research/grok-4-7-live-suite-refusal-blueprint.md).
+      - name: Run the live-harness guards
+        run: pnpm nx run-many -t test:models -- app/testing/live/live-assertions.test.ts app/testing/live/live-gateway.harness.test.ts
+
       # Testing policy §13 for the durable migration the release command applies:
       # interrupted part-way it leaves the schema where it was, and a re-run is a
       # no-op. Lives under `app/testing/**`, so it runs through the same target as

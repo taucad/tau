@@ -1,6 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, it, expect, beforeAll } from 'vitest';
+import ts from 'typescript';
+import { buildReplicadModelTypes } from '#extract-replicad-api.js';
 
 /**
  * Tests for the replicad bundled type declarations.
@@ -120,4 +122,62 @@ describe('extract-replicad-types', () => {
   it('exports DrawingInterface', () => {
     expect(output).toContain('export declare interface DrawingInterface');
   });
+});
+
+describe('Replicad model authoring types', () => {
+  it('compiles the lampshade against the generated Monaco package and rejects invalid materials', () => {
+    const generated = buildReplicadModelTypes();
+    expect(generated).toEqual(
+      JSON.parse(readFileSync(new URL('generated/replicad/model.bundled.json', import.meta.url), 'utf8')),
+    );
+    const root = join(import.meta.dirname, '../../..');
+    const cache = join(root, 'node_modules/.cache/replicad-model-types');
+    mkdirSync(cache, { recursive: true });
+    const directory = mkdtempSync(join(cache, 'consumer-'));
+    try {
+      const bundle = generated['@taucad/replicad']!;
+      const packageRoot = join(directory, 'node_modules/@taucad/replicad');
+      for (const [name, content] of Object.entries({
+        ...bundle.files,
+        'index.d.ts': bundle.content,
+        'package.json': JSON.stringify(bundle.packageJson),
+      })) {
+        const path = join(packageRoot, name);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, content);
+      }
+      const entry = join(directory, 'main.ts');
+      const source = readFileSync(
+        join(root, 'libs/tau-examples/src/kernels/replicad/copper-lampshade/main.ts'),
+        'utf8',
+      );
+      writeFileSync(
+        entry,
+        source +
+          `
+// @ts-expect-error Material factors require numbers.
+const invalid: Material = { extensions: { KHR_materials_anisotropy: { anisotropyStrength: 'bad' } } };
+// @ts-expect-error glTF alpha modes are a closed vocabulary.
+const invalidAlpha: Material = { alphaMode: 'glass' };
+`,
+      );
+      const program = ts.createProgram([entry], {
+        noEmit: true,
+        strict: true,
+        target: ts.ScriptTarget.ESNext,
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        skipLibCheck: false,
+        types: [],
+      });
+      const diagnostics = ts
+        .getPreEmitDiagnostics(program)
+        .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
+      expect(diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))).toEqual(
+        [],
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
 });

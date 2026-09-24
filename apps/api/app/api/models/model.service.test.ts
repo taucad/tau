@@ -13,10 +13,13 @@ const maxEffectiveContextWindow = 200_000;
 const cappedModelIds = [
   'anthropic-claude-fable-5.1',
   'anthropic-claude-fable-5',
+  'anthropic-claude-opus-5.5',
   'anthropic-claude-opus-5',
   'anthropic-claude-opus-4.8',
   'anthropic-claude-sonnet-5',
   'openai-gpt-6-astra',
+  'openai-gpt-6-sol',
+  'openai-gpt-6-luna',
   'openai-gpt-5.6-sol',
   'openai-gpt-5.6-terra',
   'openai-gpt-5.6-luna',
@@ -32,6 +35,7 @@ const cappedModelIds = [
   'together-llama-4-maverick',
   'morph-qwen-3.5-397b',
   'morph-deepseek-v4-flash',
+  'xai-grok-4.7',
   'xai-grok-4.6',
   'moonshot-kimi-k3',
 ] as const;
@@ -40,12 +44,15 @@ const cappedModelIds = [
 const pdfInputModelIds = [
   'anthropic-claude-fable-5.1',
   'anthropic-claude-fable-5',
+  'anthropic-claude-opus-5.5',
   'anthropic-claude-opus-5',
   'anthropic-claude-opus-4.8',
   'anthropic-claude-sonnet-5',
   'anthropic-claude-sonnet-4.6',
   'anthropic-claude-haiku-4.5',
   'openai-gpt-6-astra',
+  'openai-gpt-6-sol',
+  'openai-gpt-6-luna',
   'openai-gpt-5.6-sol',
   'openai-gpt-5.6-terra',
   'openai-gpt-5.6-luna',
@@ -93,6 +100,60 @@ describe('modelList', () => {
       expect(model.support?.modalities?.input.length, model.id).toBeGreaterThan(0);
       expect(model.support?.modalities?.output.length, model.id).toBeGreaterThan(0);
     }
+  });
+
+  describe('reasoning levels', () => {
+    /** The effort a row sends by default, in the shared vocabulary, per the codec that forwards it. */
+    const forwardedDefault = (model: ReturnType<typeof getCloudCatalogEntries>[number]): string | undefined => {
+      const { configuration } = model;
+      switch (model.provider.id) {
+        case 'anthropic': {
+          return configuration.thinking?.type === 'adaptive' ? configuration.outputConfig?.effort : undefined;
+        }
+        case 'vertexai': {
+          return configuration.thinkingLevel?.toLowerCase();
+        }
+        case 'openai':
+        case 'xai': {
+          return configuration.reasoning?.effort;
+        }
+        default: {
+          // The completions codec forwards no effort for any other provider.
+          return undefined;
+        }
+      }
+    };
+
+    it('should offer levels on exactly the rows whose codec forwards an effort', () => {
+      for (const model of getCloudCatalogEntries()) {
+        expect(model.support?.reasoning !== undefined, model.id).toBe(forwardedDefault(model) !== undefined);
+      }
+    });
+
+    it('should include every row default in its own levels, sent at high', () => {
+      for (const model of getCloudCatalogEntries()) {
+        const levels: readonly string[] | undefined = model.support?.reasoning?.levels;
+        if (levels !== undefined) {
+          expect(levels, model.id).toContain(forwardedDefault(model));
+          expect(forwardedDefault(model), model.id).toBe('high');
+        }
+      }
+    });
+
+    it('should never offer Vertex a level past high, nor xhigh outside the models that accept it', () => {
+      const extraHigh = getCloudCatalogEntries()
+        .filter((model) => model.support?.reasoning?.levels.includes('xhigh'))
+        .map((model) => model.id);
+      expect(extraHigh).toEqual([
+        'anthropic-claude-fable-5.1',
+        'anthropic-claude-fable-5',
+        'anthropic-claude-opus-5.5',
+        'anthropic-claude-opus-5',
+        'anthropic-claude-opus-4.8',
+        'openai-gpt-6-astra',
+      ]);
+      expect(getCloudCatalogEntries().some((model) => model.support?.reasoning?.levels.includes('max'))).toBe(false);
+    });
   });
 
   it('declares PDF input on exactly the proven Anthropic and OpenAI codec models', () => {
@@ -149,14 +210,14 @@ describe('ModelService', () => {
     }
   });
 
-  it('recommends Opus 5 instead of Opus 4.8', async () => {
+  it('recommends Opus 5.5 instead of Opus 5', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
-    const opus5 = listedModels.find((model) => model.id === 'anthropic-claude-opus-5');
+    const opus5 = listedModels.find((model) => model.id === 'anthropic-claude-opus-5.5');
 
     expect(opus5).toMatchObject({
       recommended: true,
-      model: 'claude-opus-5',
+      model: 'claude-opus-5-5',
       provider: { id: 'anthropic', name: 'Anthropic' },
       support: {
         toolChoice: false,
@@ -166,8 +227,8 @@ describe('ModelService', () => {
         family: 'claude',
         contextWindow: maxEffectiveContextWindow,
         maxTokens: 128_000,
-        knowledgeCutoff: '2026-05',
-        cost: { inputTokens: 5, outputTokens: 25, cacheReadTokens: 0.5, cacheWriteTokens: 6.25 },
+        knowledgeCutoff: '2026-06',
+        cost: { inputTokens: 4, outputTokens: 20, cacheReadTokens: 0.2, cacheWriteTokens: 5 },
       },
       configuration: {
         streaming: true,
@@ -177,7 +238,7 @@ describe('ModelService', () => {
       },
     });
     expect(opus5?.configuration).toHaveProperty('max_tokens', 120_000);
-    expect(modelList.anthropic['claude-4.8-opus']?.recommended).toBe(false);
+    expect(modelList.anthropic['claude-opus-5']?.recommended).toBe(false);
   });
 
   it('recommends Fable 5.1 while retaining Fable 5', async () => {
@@ -255,14 +316,14 @@ describe('ModelService', () => {
     expect(modelSupportsInput(glm?.support, 'image')).toBe(false);
   });
 
-  it('lists Grok 4.6 as the recommended image-capable xAI model', async () => {
+  it('lists Grok 4.7 as the recommended image-capable xAI model', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
-    const grok = listedModels.find((model) => model.id === 'xai-grok-4.6');
+    const grok = listedModels.find((model) => model.id === 'xai-grok-4.7');
 
     expect(grok).toMatchObject({
       recommended: true,
-      model: 'grok-4.6',
+      model: 'grok-4.7',
       provider: { id: 'xai', name: 'xAI' },
       support: {
         tools: true,
@@ -273,7 +334,7 @@ describe('ModelService', () => {
         family: 'grok',
         contextWindow: maxEffectiveContextWindow,
         maxTokens: 64_000,
-        knowledgeCutoff: '2026-02',
+        knowledgeCutoff: '2026-05',
         cost: { inputTokens: 2, outputTokens: 6, cacheReadTokens: 0.5, cacheWriteTokens: 0 },
       },
       configuration: {
@@ -282,6 +343,7 @@ describe('ModelService', () => {
         reasoning: { effort: 'high', summary: 'auto' },
       },
     });
+    expect(modelList.xai['grok-4.6']?.recommended).toBe(false);
   });
 
   it('lists Together Kimi K3 while retaining Moonshot as a hidden fallback', async () => {

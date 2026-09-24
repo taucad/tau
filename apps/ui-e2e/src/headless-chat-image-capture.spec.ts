@@ -311,6 +311,10 @@ const openCommandPalette = async (query: string): Promise<void> => {
 const openScreenshotMenu = async (): Promise<void> => {
   const editor = selectors.getByCss('.tiptap[contenteditable="true"]');
   await target.expectVisible(editor);
+  /* A click waits for the editor to hold still: on a phone the chat sheet slides
+     in after a resize, and a caret measured mid-slide would anchor the menu off
+     screen. */
+  await target.click(editor);
   await target.fill(editor, '@');
   const category = selectors.getByText('Take Screenshot', { exact: true });
   await target.expectVisible(category);
@@ -574,8 +578,8 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
   await target.expectHidden(selectors.getByRole('menuitem', { name: 'Capture view to chat' }));
 
   await clearAttachments();
-  await target.click(selectors.getByRole('button', { name: 'Open chat options' }));
-  await target.click(selectors.getByText('Current view'));
+  await openScreenshotMenu();
+  await target.click(selectors.getByRole('button', { name: 'Current view' }));
   await waitForCaptureAttachments(1);
   const mobileChatCapture = await readCaptureEvidence(attachment(0));
   expectAnnotated(mobileChatCapture, 'image/webp', [mobileChatCapture.width, mobileChatCapture.height]);
@@ -583,8 +587,8 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
   await target.expectHidden(selectors.getByText('Current view'));
 
   await clearAttachments();
-  await target.click(selectors.getByRole('button', { name: 'Open chat options' }));
-  await target.click(selectors.getByText('Orthographic views x 6'));
+  await openScreenshotMenu();
+  await target.click(selectors.getByRole('button', { name: 'Orthographic views x 6' }));
   await waitForCaptureAttachments(6);
   const mobileViews: CaptureEvidence[] = [];
   for (let index = 0; index < 6; index++) {
@@ -783,8 +787,8 @@ test('SVG toolbar, desktop, and mobile actions use real resvg', async () => {
 
   await clearAttachments();
   await target.setViewport({ width: 390, height: 844 });
-  await target.click(selectors.getByRole('button', { name: 'Open chat options' }));
-  await target.click(selectors.getByText('Current view'));
+  await openScreenshotMenu();
+  await target.click(selectors.getByRole('button', { name: 'Current view' }));
   await waitForCaptureAttachments(1);
   expectAnnotated(await readCaptureEvidence(attachment(0)), 'image/png', [2400, 1350]);
 

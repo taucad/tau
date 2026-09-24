@@ -1,6 +1,7 @@
 import type { CanvasProps } from '@react-three/fiber';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
+import type { PostProcessingSettings } from '#components/geometry/graphics/three/post-processing-settings.js';
 
 export type SecondaryMouseButtonMode = 'camera-pan' | 'context-menu' | 'none';
 
@@ -20,6 +21,7 @@ export type ThreeViewerProperties = {
   readonly upDirection?: 'x' | 'y' | 'z';
   readonly className?: string;
   readonly stageOptions?: StageOptions;
+  readonly postProcessingSettings?: Partial<PostProcessingSettings>;
   readonly zoomSpeed?: number;
   readonly gizmoContainer?: HTMLElement | string;
 };

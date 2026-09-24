@@ -82,7 +82,7 @@ export function WorkspaceDirectoryPanel({
     ) : status === 'unsupported' ? (
       <AlertTriangle className='size-4 shrink-0 text-muted-foreground' />
     ) : (
-      <AlertTriangle className='text-amber-500 size-4 shrink-0' />
+      <AlertTriangle className='size-4 shrink-0 text-warning' />
     );
 
   if (variant === 'banner') {
@@ -92,7 +92,7 @@ export function WorkspaceDirectoryPanel({
         className={cn(
           'flex items-center justify-between gap-4 rounded-md border px-3 py-2 text-sm',
           status === 'permission' || status === 'disconnected' || status === 'missing'
-            ? 'border-amber-500/40 bg-amber-500/10'
+            ? 'border-warning/40 bg-warning/10'
             : 'border-border bg-muted/40',
         )}
       >

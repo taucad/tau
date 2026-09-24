@@ -1441,8 +1441,6 @@ describe('billing payments PostgreSQL foundation', () => {
     await database.insert(subscription).values({
       id: subscriptionId,
       plan: 'pro',
-      referenceId: `financial:${subscriptionId}`,
-      stripeCustomerId: evidence.customerId,
       stripeSubscriptionId: evidence.subscriptionId,
       accountId,
       environment: 'development',
@@ -1534,8 +1532,6 @@ describe('billing payments PostgreSQL foundation', () => {
     await database.insert(subscription).values({
       id: subscriptionId,
       plan: 'pro',
-      referenceId: `financial:${subscriptionId}`,
-      stripeCustomerId: remoteCustomerId,
       stripeSubscriptionId: remoteSubscriptionId,
       accountId,
       environment: 'development',

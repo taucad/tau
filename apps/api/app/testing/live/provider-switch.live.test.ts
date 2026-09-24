@@ -14,7 +14,6 @@ import type {
   HostToolResult,
   JsonValue,
   ProviderMessage,
-  ToolInputProviderMessage,
 } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
 import {
@@ -24,11 +23,20 @@ import {
   liveCadSystemPrompt,
   liveCompletionCeiling,
   liveCredentialName,
+  liveRepeats,
   liveSessionModel,
   runWithRateLimitRetry,
   startLiveGateway,
 } from '#testing/live/live-gateway.harness.js';
 import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
+import {
+  expectCompleted,
+  expectPairedToolMessages,
+  finalText,
+  refusal,
+  textOf,
+  toolCalls,
+} from '#testing/live/live-assertions.js';
 
 /**
  * Live provider-switch suite.
@@ -43,16 +51,16 @@ import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
  *
  * Assertions are on durable outcomes only: the run's lifecycle state, the
  * paired tool-call/tool-result rows of the session log, and whether the answer
- * carries the distinctive token a scripted tool result handed back. Nothing
+ * carries the distinctive marker a scripted tool result handed back. Nothing
  * here asserts a model's prose style.
  */
 
-/** Tokens no model can guess, so a turn-two answer proves turn-one context replayed. */
-const alphaToken = 'TAU-7Q4X-ALPHA';
-const betaToken = 'TAU-5M2J-BETA';
-const leftToken = 'TAU-3K8D-LEFT';
-const rightToken = 'TAU-9V6S-RIGHT';
-const ledgerToken = 'TAU-4P1Z-LEDGER';
+/** Markers no model can guess, so a turn-two answer proves turn-one context replayed. */
+const alphaMarker = 'TAU-7Q4X-ALPHA';
+const betaMarker = 'TAU-5M2J-BETA';
+const leftMarker = 'TAU-3K8D-LEFT';
+const rightMarker = 'TAU-9V6S-RIGHT';
+const ledgerMarker = 'TAU-4P1Z-LEDGER';
 
 /**
  * Bulk that pushes one tool result past a reduced context window.
@@ -69,11 +77,11 @@ const ledgerBody = Array.from(
 
 /** The scripted project the toolbelt reads; only the results are scripted, the tool listing is production. */
 const scriptedFiles: Readonly<Record<string, string>> = {
-  'alpha.ts': `export const token = '${alphaToken}';\n`,
-  'beta.ts': `export const token = '${betaToken}';\n`,
-  'left.ts': `export const token = '${leftToken}';\n`,
-  'right.ts': `export const token = '${rightToken}';\n`,
-  'ledger.ts': `${ledgerBody}\nexport const token = '${ledgerToken}';\n`,
+  'alpha.ts': `export const marker = '${alphaMarker}';\n`,
+  'beta.ts': `export const marker = '${betaMarker}';\n`,
+  'left.ts': `export const marker = '${leftMarker}';\n`,
+  'right.ts': `export const marker = '${rightMarker}';\n`,
+  'ledger.ts': `${ledgerBody}\nexport const marker = '${ledgerMarker}';\n`,
 };
 
 const isObject = (value: JsonValue): value is Readonly<Record<string, JsonValue>> =>
@@ -332,35 +340,6 @@ const orphanTrailingToolCall = async (
   };
 };
 
-/** @returns The provider's own refusal when there was one, so a failing row reports why. */
-const refusal = (snapshot: HostRunSnapshot): string => JSON.stringify(snapshot.failure ?? snapshot.messages.slice(-2));
-
-const expectCompleted = (snapshot: HostRunSnapshot): void => {
-  expect(snapshot.state, refusal(snapshot)).toBe('completed');
-};
-
-const textOf = (message: ProviderMessage): string =>
-  typeof message.content === 'string'
-    ? message.content
-    : Array.isArray(message.content)
-      ? message.content
-          .flatMap((block) =>
-            block !== null && typeof block === 'object' && !Array.isArray(block) && typeof block['text'] === 'string'
-              ? [block['text']]
-              : [],
-          )
-          .join('')
-      : '';
-
-/** @returns The final answer's text, which is where a consumed tool result has to show up. */
-const finalText = (snapshot: HostRunSnapshot): string => {
-  const assistant = snapshot.messages.findLast((message) => message.role === 'assistant');
-  if (!assistant) {
-    expect.fail(`the thread produced no assistant message: ${refusal(snapshot)}`);
-  }
-  return textOf(assistant);
-};
-
 /**
  * Provider-reported context tokens of the newest answer.
  *
@@ -381,33 +360,14 @@ const anchorTokens = (snapshot: HostRunSnapshot): number => {
   return usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 };
 
-const toolCalls = (messages: readonly ProviderMessage[], name?: string): readonly ToolInputProviderMessage[] =>
-  messages.filter(
-    (message): message is ToolInputProviderMessage =>
-      message.role === 'tool-input' && (name === undefined || message.toolName === name),
-  );
-
 /** @returns The rows the later leg added, so "B called a tool itself" cannot be satisfied by A's call. */
 const addedBy = (leg: HostRunSnapshot, previous: HostRunSnapshot): readonly ProviderMessage[] =>
   leg.messages.slice(previous.messages.length);
 
-/** Every tool call in this history was dispatched and answered; nothing was left open. */
-const expectPairedToolMessages = (snapshot: HostRunSnapshot): void => {
-  const answered = new Set(
-    snapshot.messages.flatMap((message) => (message.role === 'tool-output' ? [message.toolCallId] : [])),
-  );
-  expect(
-    toolCalls(snapshot.messages)
-      .map((call) => call.toolCallId)
-      .filter((id) => !answered.has(id)),
-  ).toEqual([]);
-  expect(toolCalls(snapshot.messages).length).toBeGreaterThan(0);
-};
-
 const readFileTurn = (file: string): string =>
-  `Call ${toolName.readFile} on ${file}, then reply with the exact token that file contains and nothing else.`;
+  `Call ${toolName.readFile} on ${file}, then reply with the exact marker that file exports and nothing else.`;
 
-const recallTurn = `Without calling any tool, reply with the exact token the earlier ${toolName.readFile} result contained, and nothing else.`;
+const recallTurn = `Without calling any tool, reply with the exact marker the earlier ${toolName.readFile} result contained, and nothing else.`;
 
 /** The ordered pairs a user can switch between, both directions each. */
 const switchPairs: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
@@ -417,10 +377,10 @@ const switchPairs: ReadonlyArray<{ readonly from: string; readonly to: string }>
   { from: 'anthropic-claude-haiku-4.5', to: 'openai-gpt-5.6-luna' },
   { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
   { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-haiku-4.5' },
-  { from: 'xai-grok-4.6', to: 'google-gemini-3.8-flash' },
-  { from: 'google-gemini-3.8-flash', to: 'xai-grok-4.6' },
-  { from: 'xai-grok-4.6', to: 'anthropic-claude-haiku-4.5' },
-  { from: 'anthropic-claude-haiku-4.5', to: 'xai-grok-4.6' },
+  { from: 'xai-grok-4.7', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'xai-grok-4.7' },
+  { from: 'xai-grok-4.7', to: 'anthropic-claude-haiku-4.5' },
+  { from: 'anthropic-claude-haiku-4.5', to: 'xai-grok-4.7' },
   { from: 'google-gemini-3.8-flash', to: 'google-gemini-3.1-pro' },
   { from: 'google-gemini-3.1-pro', to: 'google-gemini-3.8-flash' },
 ];
@@ -439,7 +399,7 @@ const slugFor = (from: string, to: string, row: string): string => `${from}-to-$
 
 /** The per-pair rows: turn two answers from turn one's tool result, then calls a tool itself, then resumes mid-loop. */
 const describePair = ({ from, to }: { readonly from: string; readonly to: string }): void => {
-  describe.skipIf(!bothAvailable(from, to))(switchTitle(from, to, 'pair'), () => {
+  describe.skipIf(!bothAvailable(from, to))(switchTitle(from, to, 'pair'), { repeats: liveRepeats }, () => {
     it("should answer on the new provider from the previous provider's tool result", async () => {
       const [first, second] = await liveSwitch(slugFor(from, to, 'recall'), async (thread) => {
         const legOne = await runLeg({ thread, modelId: from, index: 1, prompt: readFileTurn('alpha.ts') });
@@ -452,10 +412,10 @@ const describePair = ({ from, to }: { readonly from: string; readonly to: string
       expect(first, 'the first leg produced no snapshot').toBeDefined();
       expectCompleted(first!);
       expectPairedToolMessages(first!);
-      expect(finalText(first!)).toContain(alphaToken);
+      expect(finalText(first!)).toContain(alphaMarker);
       expect(second, `the switch never ran: ${refusal(first!)}`).toBeDefined();
       expectCompleted(second!);
-      expect(finalText(second!)).toContain(alphaToken);
+      expect(finalText(second!)).toContain(alphaMarker);
     });
 
     it('should call a tool on the new provider and use both results', async () => {
@@ -470,7 +430,7 @@ const describePair = ({ from, to }: { readonly from: string; readonly to: string
             thread,
             modelId: to,
             index: 2,
-            prompt: `Call ${toolName.readFile} on beta.ts. Then reply with two tokens separated by one space: first the token beta.ts contains, then the exact token the earlier ${toolName.readFile} result contained. Reply with nothing else.`,
+            prompt: `Call ${toolName.readFile} on beta.ts. Then reply with two markers separated by one space: first the marker beta.ts exports, then the exact marker the earlier ${toolName.readFile} result contained. Reply with nothing else.`,
           }),
         ];
       });
@@ -482,8 +442,8 @@ const describePair = ({ from, to }: { readonly from: string; readonly to: string
       expectPairedToolMessages(second!);
       const called = toolCalls(addedBy(second!, first!), toolName.readFile).map((call) => namedFile(call.content));
       expect(called, `${to} made no tool call of its own: ${refusal(second!)}`).toContain('beta.ts');
-      expect(finalText(second!)).toContain(betaToken);
-      expect(finalText(second!)).toContain(alphaToken);
+      expect(finalText(second!)).toContain(betaMarker);
+      expect(finalText(second!)).toContain(alphaMarker);
     });
 
     it('should resume on the new provider a run stopped after a tool result', async () => {
@@ -504,7 +464,7 @@ const describePair = ({ from, to }: { readonly from: string; readonly to: string
             thread,
             modelId: to,
             index: 2,
-            prompt: `Continue the interrupted work: reply with the exact token the earlier ${toolName.readFile} result contained, and nothing else.`,
+            prompt: `Continue the interrupted work: reply with the exact marker the earlier ${toolName.readFile} result contained, and nothing else.`,
           }),
         ];
       });
@@ -517,7 +477,7 @@ const describePair = ({ from, to }: { readonly from: string; readonly to: string
       ).toBeGreaterThan(0);
       expect(second, 'the switch never ran').toBeDefined();
       expectCompleted(second!);
-      expect(finalText(second!)).toContain(alphaToken);
+      expect(finalText(second!)).toContain(alphaMarker);
     });
   });
 };
@@ -540,7 +500,7 @@ const orphanRows: ReadonlyArray<{ readonly from: string; readonly to: string }> 
 ];
 
 for (const { from, to } of orphanRows) {
-  describe.skipIf(!bothAvailable(from, to))(switchTitle(from, to, 'orphaned call'), () => {
+  describe.skipIf(!bothAvailable(from, to))(switchTitle(from, to, 'orphaned call'), { repeats: liveRepeats }, () => {
     it('should accept a history whose last tool call never got a result', async () => {
       let orphan: { readonly dropped: number; readonly toolInputs: number } | undefined;
       const [first, second] = await liveSwitch(slugFor(from, to, 'orphan'), async (thread) => {
@@ -580,7 +540,7 @@ const compactionRows: ReadonlyArray<{ readonly from: string; readonly to: string
 ];
 
 for (const { from, to } of compactionRows) {
-  describe.skipIf(!bothAvailable(from, to))(switchTitle(from, to, 'compaction'), () => {
+  describe.skipIf(!bothAvailable(from, to))(switchTitle(from, to, 'compaction'), { repeats: liveRepeats }, () => {
     it('should answer on the new provider from knowledge that survived compaction', async () => {
       const compactions: CompactionOutcome[] = [];
       const legs = await liveSwitch(slugFor(from, to, 'compaction'), async (thread) => {
@@ -624,22 +584,20 @@ for (const { from, to } of compactionRows) {
             modelId: to,
             index: 4,
             prompt:
-              'Without calling any tool, reply with the exact token the file ledger.ts contained, and nothing else.',
+              'Without calling any tool, reply with the exact marker the file ledger.ts exported, and nothing else.',
           }),
         ];
       });
       const [first, , compacted, switched] = legs;
+      const performed = JSON.stringify(compactions.map(({ tier, cleared, evicted }) => ({ tier, cleared, evicted })));
 
       expect(first, 'the first leg produced no snapshot').toBeDefined();
       expectCompleted(first!);
       expect(compacted, `the compacting leg never ran: ${refusal(legs.at(-1)!)}`).toBeDefined();
-      expect(
-        compacted!.state,
-        `${refusal(compacted!)} after compactions ${JSON.stringify(compactions.map(({ tier, cleared, evicted }) => ({ tier, cleared, evicted })))}`,
-      ).toBe('completed');
+      expect(compacted!.state, `${refusal(compacted!)} after compactions ${performed}`).toBe('completed');
       expect(
         compacted!.messages.some((message) => message.role === 'user' && textOf(message).includes('<summary>')),
-        `the history was never compacted: ${String(compacted!.messages.length)} rows survived`,
+        `the history was never compacted: ${String(compacted!.messages.length)} rows survived after compactions ${performed}`,
       ).toBe(true);
       expect(
         compacted!.messages.some((message) => message.role === 'tool-output'),
@@ -647,7 +605,7 @@ for (const { from, to } of compactionRows) {
       ).toBe(false);
       expect(switched, 'the switch never ran').toBeDefined();
       expectCompleted(switched!);
-      expect(finalText(switched!)).toContain(ledgerToken);
+      expect(finalText(switched!)).toContain(ledgerMarker);
     });
   });
 }
@@ -659,14 +617,14 @@ const parallelRows: ReadonlyArray<{ readonly from: string; readonly to: string }
 ];
 
 for (const { from, to } of parallelRows) {
-  describe.skipIf(!bothAvailable(from, to))(switchTitle(from, to, 'parallel batch'), () => {
+  describe.skipIf(!bothAvailable(from, to))(switchTitle(from, to, 'parallel batch'), { repeats: liveRepeats }, () => {
     it('should replay a parallel tool batch on the new provider', async () => {
       const [first, second] = await liveSwitch(slugFor(from, to, 'parallel'), async (thread) => {
         const legOne = await runLeg({
           thread,
           modelId: from,
           index: 1,
-          prompt: `In one step, call ${toolName.readFile} twice at the same time — once on left.ts and once on right.ts — then reply with both exact tokens separated by a space and nothing else.`,
+          prompt: `In one step, call ${toolName.readFile} twice at the same time — once on left.ts and once on right.ts — then reply with both exact markers separated by a space and nothing else.`,
         });
         if (legOne.state !== 'completed') {
           return [legOne];
@@ -678,7 +636,7 @@ for (const { from, to } of parallelRows) {
             modelId: to,
             index: 2,
             prompt:
-              'Without calling any tool, reply with both exact tokens from the two files read earlier, separated by one space, and nothing else.',
+              'Without calling any tool, reply with both exact markers from the two files read earlier, separated by one space, and nothing else.',
           }),
         ];
       });
@@ -691,8 +649,8 @@ for (const { from, to } of parallelRows) {
       expect(read).toContain('right.ts');
       expect(second, 'the switch never ran').toBeDefined();
       expectCompleted(second!);
-      expect(finalText(second!)).toContain(leftToken);
-      expect(finalText(second!)).toContain(rightToken);
+      expect(finalText(second!)).toContain(leftMarker);
+      expect(finalText(second!)).toContain(rightMarker);
     });
   });
 }

@@ -690,16 +690,12 @@ describe('pi full-turn parity fixture', () => {
         (event) =>
           event.type === 'message.envelope-replaced' &&
           event.replacement.role === 'tool-output' &&
-          event.replacement.content ===
-            '[Tool result exceeded the context window and was cleared; re-run with a narrower request]',
+          event.replacement.content === '[Old tool result content cleared]',
       ),
     ).toHaveLength(2);
     expect(
       transport.requests[0]?.messages.some(
-        (message) =>
-          message.role === 'tool-output' &&
-          message.content ===
-            '[Tool result exceeded the context window and was cleared; re-run with a narrower request]',
+        (message) => message.role === 'tool-output' && message.content === '[Old tool result content cleared]',
       ),
     ).toBe(true);
     expect(events.filter((event) => event.type === 'run.lifecycle').map((event) => event.state)).toEqual([

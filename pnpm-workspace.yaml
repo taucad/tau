@@ -49,7 +49,6 @@ catalog:
   '@better-auth-ui/core': ^1.6.8
   '@better-auth-ui/react': ^1.6.8
   '@better-auth/api-key': ^1.6.19
-  '@better-auth/stripe': ^1.6.19
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.2
   '@fastify/cookie': ^11.0.2
   '@fastify/otel': ^0.17.1
@@ -382,9 +381,12 @@ patchedDependencies:
   vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch
   zod@4.4.3: patches/zod@4.4.3.patch
   '@agentclientprotocol/codex-acp@1.7.0': patches/@agentclientprotocol__codex-acp@1.7.0.patch
+  n8ao@1.10.2: patches/n8ao@1.10.2.patch
 overrides:
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
   '@types/express': 'catalog:'
+  nanoraster: https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2
+  nanoraster-darwin-arm64: https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2
   replicad: 'catalog:'
   replicad-opencascadejs: 'catalog:'
   vitest: 'catalog:'

@@ -18,6 +18,8 @@ import {
 import type {
   GeometryOutputTransformOptions,
   GlbInput,
+  GlbResources,
+  GlbMaterial,
   GlbNode,
   GlbPrimitive,
   TauCadTopologyComponent,
@@ -42,12 +44,13 @@ type ReplicadNodeBuildResult = {
   component: Omit<ReplicadTopologyComponent, 'nodeIndex'>;
 };
 
-type ReplicadGltfOptions = GeometryOutputTransformOptions & {
-  geometries: GeometryReplicad[];
-  format?: 'glb' | 'gltf';
-  includeTauTopology?: boolean;
-  logger?: RuntimeLogger;
-};
+type ReplicadGltfOptions = GeometryOutputTransformOptions &
+  GlbResources & {
+    geometries: GeometryReplicad[];
+    format?: 'glb' | 'gltf';
+    includeTauTopology?: boolean;
+    logger?: RuntimeLogger;
+  };
 
 type BuildNodeFromReplicadGeometryOptions = {
   geometry: GeometryReplicad;
@@ -95,6 +98,14 @@ function buildNodeFromReplicadGeometry({
   if (compactedFaces && compactedFaces.indices.length > 0) {
     const positions = transformVertexArray(faces.vertices, transformOptions);
     const normals = transformNormalArray(faces.normals, transformOptions);
+    const tangents = faces.tangents ? Float32Array.from(faces.tangents) : undefined;
+    if (tangents && transformOptions.coordinateSystem !== 'z-up') {
+      for (let index = 0; index < tangents.length; index += 4) {
+        const y = tangents[index + 1]!;
+        tangents[index + 1] = tangents[index + 2]!;
+        tangents[index + 2] = -y;
+      }
+    }
     const { indices } = compactedFaces;
 
     let baseColor: [number, number, number, number] = [
@@ -114,11 +125,32 @@ function buildNodeFromReplicadGeometry({
       }
     }
 
+    let material: GlbMaterial | undefined = geometry.material;
+    const volume = material?.extensions?.KHR_materials_volume;
+    if (material && volume && transformOptions.unit?.length === 'millimeter') {
+      material = {
+        ...material,
+        extensions: {
+          ...material.extensions,
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Standard glTF extension key.
+          KHR_materials_volume: {
+            ...volume,
+            ...(volume.thicknessFactor === undefined ? {} : { thicknessFactor: volume.thicknessFactor * 1000 }),
+            ...(volume.attenuationDistance === undefined
+              ? {}
+              : { attenuationDistance: volume.attenuationDistance * 1000 }),
+          },
+        },
+      };
+    }
+
     primitives.push({
       mode: Primitive.Mode['TRIANGLES']!,
       positions,
       normals,
       indices,
+      ...(faces.texCoords ? { texCoords: [new Float32Array(faces.texCoords)] } : {}),
+      ...(tangents ? { tangents } : {}),
       ...(includeTauTopology
         ? {
             extras: {
@@ -129,12 +161,16 @@ function buildNodeFromReplicadGeometry({
             },
           }
         : {}),
-      material: {
-        baseColorFactor: baseColor,
-        metallicFactor: geometry.metalness ?? cadMaterialDefaults.metalnessFactor,
-        roughnessFactor: geometry.roughness ?? cadMaterialDefaults.roughnessFactor,
+      material: material ?? {
         doubleSided: true,
-        alphaMode: baseColor[3] < 1 ? 'BLEND' : 'OPAQUE',
+        pbrMetallicRoughness: {
+          baseColorFactor: baseColor,
+          metallicFactor: geometry.metalness ?? cadMaterialDefaults.metalnessFactor,
+          ...((geometry.roughness ?? cadMaterialDefaults.roughnessFactor) === 1
+            ? {}
+            : { roughnessFactor: geometry.roughness ?? cadMaterialDefaults.roughnessFactor }),
+        },
+        ...(baseColor[3] < 1 ? { alphaMode: 'BLEND' } : {}),
       },
     });
   }
@@ -158,8 +194,11 @@ function buildNodeFromReplicadGeometry({
           }
         : {}),
       material: {
-        ...cadEdgeOverlayMaterialDefaults,
-        baseColorFactor: [...cadEdgeOverlayMaterialDefaults.baseColorFactor],
+        doubleSided: cadEdgeOverlayMaterialDefaults.doubleSided,
+        pbrMetallicRoughness: {
+          baseColorFactor: [...cadEdgeOverlayMaterialDefaults.baseColorFactor],
+          metallicFactor: cadEdgeOverlayMaterialDefaults.metallicFactor,
+        },
         extensions: {
           [KHRMaterialsUnlit.EXTENSION_NAME]: {},
         },
@@ -264,6 +303,9 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
   ];
   const input: GlbInput = {
     nodes,
+    images: options.images,
+    textures: options.textures,
+    samplers: options.samplers,
     ...(extensionsUsed.length > 0 ? { extensionsUsed } : {}),
     ...(topologyComponents.length > 0
       ? {

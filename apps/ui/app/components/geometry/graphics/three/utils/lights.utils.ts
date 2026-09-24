@@ -6,32 +6,52 @@
  */
 
 import * as THREE from 'three';
-import { calculateFovLightingCompensation } from '#components/geometry/graphics/three/utils/math.utils.js';
 
 /** Output buffer for camera world rotation — reused by every `applyLightingForCamera` call. */
 const scratchCameraWorldQuaternionForLighting = new THREE.Quaternion();
 
 // ── Lighting constants ─────────────────────────────────────────────────────
-/** Ambient fill -- provides base illumination floor so no surface is fully dark. */
-export const ambientBaseIntensity = 0.05;
+/** Low diffuse fill; metallic readability comes from the room environment. */
+export const ambientBaseIntensity = 0.1;
 
 /**
- * Camera-relative headlamp base intensity.
- *
- * Reduced from 0.5 since the camera-relative environment now provides
- * directional variation. The headlamp is retained primarily as part of
- * the FOV diffuse compensation system (its intensity is boosted at low FOV).
+ * Camera-relative diffuse key, calibrated with Neutral tone mapping at exposure 1.
  */
-export const headlampBaseIntensity = 0.8;
+export const headlampBaseIntensity = 1.5;
 
 /**
- * Scene-level environment intensity (base value) -- the primary illumination
- * source. This base value is scaled per-frame by the FOV compensation factor.
+ * Environment reflections supplement the directional key without washing out
+ * the surface gradient. Projection changes preserve the same light energy.
  */
-export const environmentBaseIntensity = 0.9;
+export const environmentBaseIntensity = 1;
+
+/** Explicit studio controls; material roughness and metalness remain authored properties. */
+export type StudioLightingSettings = {
+  environment: 'studio' | 'room' | 'white' | 'none';
+  ambientIntensity: number;
+  headlampIntensity: number;
+  environmentIntensity: number;
+  keyIntensity: number;
+  keySize: number;
+  fillIntensity: number;
+  /** Minimum linear radiance across the studio; added to every reflection card. */
+  backgroundIntensity: number;
+  exposure: number;
+};
+
+export const defaultStudioLighting: StudioLightingSettings = {
+  environment: 'room',
+  ambientIntensity: ambientBaseIntensity,
+  headlampIntensity: headlampBaseIntensity,
+  environmentIntensity: environmentBaseIntensity,
+  keyIntensity: 64,
+  keySize: 1.2,
+  fillIntensity: 1,
+  backgroundIntensity: 0,
+  exposure: 1,
+};
 
 // ── Dark-mode theme constants ──────────────────────────────────────────────
-// ~30% luminance reduction matches typical dark-mode surround adaptation.
 
 /** Overall intensity multiplier applied to all lights in dark mode. */
 export const darkModeIntensityScale = 1;
@@ -54,10 +74,10 @@ export type HeadlampConfig = {
 
 /** Default headlamp offset configuration matching the studio lighting rig. */
 export const defaultHeadlampConfig: HeadlampConfig = {
-  rightOffset: -0.1,
-  upOffset: 2.1,
-  targetRightSkew: 0.2,
-  targetUpSkew: 0.1,
+  rightOffset: 2,
+  upOffset: 2,
+  targetRightSkew: 0,
+  targetUpSkew: 0,
 };
 
 // ── Combined config for applyLightingForCamera ─────────────────────────────
@@ -69,7 +89,7 @@ export type LightingConfig = {
   ambientIntensity: number;
   environmentIntensity: number;
   headlampConfig: HeadlampConfig;
-  /** Theme-based overall intensity scale (1.0 for light, ~0.7 for dark). */
+  /** Theme-based overall intensity scale. */
   themeIntensityScale?: number;
   /** Theme-based ambient floor boost to prevent crushed shadows (1.0 for light, ~1.15 for dark). */
   themeAmbientBoost?: number;
@@ -78,91 +98,20 @@ export type LightingConfig = {
 // ── Pure functions ─────────────────────────────────────────────────────────
 
 /**
- * Angle (in radians) from either pole within which the yaw compensation
- * fades to zero. At the equator the blend is 1 (full compensation); inside
- * this cap the blend smoothsteps to 0 so the environment becomes world-
- * fixed and small camera perturbations don't swing the lighting wildly.
+ * Rotates the studio environment with the complete camera orientation.
+ * Three.js samples through the inverse of this rotation, keeping reflection
+ * directions fixed in view space through orbit, pole crossings and roll.
  *
- * 15° keeps standard top/bottom views stable while leaving the vast
- * majority of the viewing sphere (150° out of 180°) fully compensated.
- */
-export const poleFadeAngleDeg = 15;
-
-/** `sin²(poleFadeAngle)` — precomputed threshold for the smoothstep ramp. */
-const poleFadeThreshold = Math.sin((poleFadeAngleDeg * Math.PI) / 180) ** 2;
-
-/**
- * Computes the environment rotation Euler that cancels only the azimuthal
- * (yaw) component of the camera's world orientation around the up axis.
- *
- * By not compensating for polar (pitch) or roll changes, the Lightformers
- * remain stable during horizontal orbit but shift relative to the camera
- * when tilting up/down — producing natural lighting variation at different
- * viewing elevations instead of a uniformly locked rig.
- *
- * **Swing-twist decomposition** extracts yaw in quaternion space, avoiding
- * the gimbal-lock discontinuity of Euler decomposition that caused 180°
- * lighting hops at the equatorial plane.
- *
- * **Pole-proximity fade** attenuates the yaw compensation smoothly to zero
- * within {@link poleFadeAngleDeg}° of either pole (top/bottom view). Near
- * the poles azimuth is geometrically ill-defined and tiny camera movements
- * would otherwise cause wild lighting swings. The fade uses a smoothstep
- * over `sin²(polar_angle)` which is symmetric around both poles.
- *
- * Three.js internally negates all Euler components of `environmentRotation`
- * (WebGLMaterials.js "accommodate left-handed frame"), so the returned yaw
- * angle is provided with the sign that compensates for this negation.
- *
- * @param cameraWorldQuaternion - The camera's world quaternion.
- * @param upDirection - The configured up axis ('x', 'y', or 'z').
- * @returns An Euler suitable for assigning to `scene.environmentRotation`.
+ * @param cameraWorldQuaternion - Camera orientation in world space.
+ * @param upDirection - Scene up axis, used only to choose the Euler representation.
+ * @returns Environment orientation in world space.
  */
 export function computeEnvironmentRotation(
   cameraWorldQuaternion: THREE.Quaternion,
   upDirection: 'x' | 'y' | 'z',
 ): THREE.Euler {
   const order: THREE.EulerOrder = upDirection === 'y' ? 'YXZ' : upDirection === 'z' ? 'ZXY' : 'XZY';
-
-  // ── Swing-twist decomposition ───────────────────────────────────────────
-  // For quaternion Q = (x, y, z, w) the twist around the up axis keeps only
-  // the scalar (w) and the component aligned with the up axis. The yaw angle
-  // is 2·atan2(axisComponent, w).
-  const { x, y, z, w } = cameraWorldQuaternion;
-  const axisComponent = upDirection === 'z' ? z : upDirection === 'y' ? y : x;
-
-  const twistLengthSq = axisComponent * axisComponent + w * w;
-
-  // Hard safety net: both twist components ≈ 0 → azimuth truly undefined.
-  if (twistLengthSq < 1e-10) {
-    return new THREE.Euler(0, 0, 0, order);
-  }
-
-  const yaw = 2 * Math.atan2(axisComponent, w);
-
-  // ── Pole-proximity fade ─────────────────────────────────────────────────
-  // sin²(polar_angle) = 4 · twistLen² · swingLen². This equals 0 at both
-  // poles and 1 at the equator. We smoothstep from 0 → 1 over the
-  // [0, poleFadeThreshold] range so the yaw compensation fades out
-  // gracefully within ~15° of either pole.
-  const swingLengthSq = Math.max(0, 1 - twistLengthSq); // Clamp for float drift
-  const sinPolarSq = 4 * twistLengthSq * swingLengthSq;
-
-  const t = Math.min(1, sinPolarSq / poleFadeThreshold);
-  const blend = t * t * (3 - 2 * t); // Smoothstep
-
-  const effectiveYaw = yaw * blend;
-
-  if (upDirection === 'z') {
-    return new THREE.Euler(0, 0, effectiveYaw, order);
-  }
-
-  if (upDirection === 'y') {
-    return new THREE.Euler(0, effectiveYaw, 0, order);
-  }
-
-  // UpDirection === 'x'
-  return new THREE.Euler(effectiveYaw, 0, 0, order);
+  return new THREE.Euler().setFromQuaternion(cameraWorldQuaternion, order);
 }
 
 /**
@@ -170,8 +119,8 @@ export function computeEnvironmentRotation(
  * directional headlamp.
  *
  * The headlamp is offset in camera-up and camera-right directions so the
- * highlight remains biased toward screen upper-right. The target is placed
- * forward of the camera with slight lower-left skew.
+ * default light direction is normalize([1, 1, 1]) in view space, independent
+ * of camera distance, scene scale, orbit, and projection.
  *
  * @param root0 - The headlamp transform parameters
  * @param root0.cameraPosition - The camera's world position.
@@ -226,7 +175,7 @@ export type ApplyLightingOptions = {
   camera: THREE.Camera;
   /** Optional directional light to position as headlamp. */
   headlamp: THREE.DirectionalLight | undefined;
-  /** Optional ambient light whose intensity to compensate. */
+  /** Optional ambient fill. */
   ambient: THREE.AmbientLight | undefined;
   /** Lighting configuration with base intensities and offsets. */
   config: LightingConfig;
@@ -235,38 +184,27 @@ export type ApplyLightingOptions = {
 /**
  * Applies camera-relative lighting to a scene for the given camera.
  *
- * It performs:
- * 1. FOV-dependent intensity compensation
- * 2. Theme-based intensity scaling (dark mode dims all lights uniformly)
- * 3. Camera-locked environment rotation
- * 4. Headlamp positioning (if headlamp provided)
- * 5. Ambient intensity update (if ambient light provided)
+ * Keeps light directions fixed in view space and light energy independent of
+ * projection. Theme adaptation changes only the configured intensity factors.
  */
 export function applyLightingForCamera({ scene, camera, headlamp, ambient, config }: ApplyLightingOptions): void {
-  // FOV compensation
-  const currentFov = camera instanceof THREE.PerspectiveCamera ? camera.fov : 0;
-  const compensation = calculateFovLightingCompensation(currentFov);
-
-  // Theme scaling (applied after FOV compensation to preserve lighting ratios)
   const themeScale = config.themeIntensityScale ?? 1;
   const themeAmbientBoost = config.themeAmbientBoost ?? 1;
 
   // Environment intensity
-  scene.environmentIntensity = config.environmentIntensity * compensation.envFactor * themeScale;
+  scene.environmentIntensity = config.environmentIntensity * themeScale;
 
   // Camera-locked environment rotation
   camera.getWorldQuaternion(scratchCameraWorldQuaternionForLighting);
   const rotation = computeEnvironmentRotation(scratchCameraWorldQuaternionForLighting, config.upDirection);
   scene.environmentRotation.copy(rotation);
 
-  // Ambient intensity with FOV compensation + theme boost
   if (ambient) {
-    ambient.intensity = config.ambientIntensity * compensation.ambientFactor * themeScale * themeAmbientBoost;
+    ambient.intensity = config.ambientIntensity * themeScale * themeAmbientBoost;
   }
 
-  // Headlamp positioning with FOV compensation + theme scaling
   if (headlamp) {
-    headlamp.intensity = config.headlampIntensity * compensation.headlampFactor * themeScale;
+    headlamp.intensity = config.headlampIntensity * themeScale;
 
     const transform = computeHeadlampTransform({
       cameraPosition: camera.position,

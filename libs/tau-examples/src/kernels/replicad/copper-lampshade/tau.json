@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_86yHcpiI8LD1zAexvj46G",
+  "name": "Copper Lampshade",
+  "description": "A shelled BRep copper pendant with editable brushed-metal anisotropy, lacquer, porcelain, fabric sheen, refractive glass and emissive LED filaments. Uses standard glTF materials throughout.",
+  "tags": ["replicad", "parametric", "materials", "lighting"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

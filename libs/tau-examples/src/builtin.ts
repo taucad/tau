@@ -10,24 +10,25 @@ import thumbnail4 from './kernels/replicad/birdhouse/thumbnail.webp?url';
 import thumbnail5 from './kernels/replicad/bottle/thumbnail.webp?url';
 import thumbnail6 from './kernels/replicad/card-holder/thumbnail.webp?url';
 import thumbnail7 from './kernels/replicad/chair/thumbnail.webp?url';
-import thumbnail8 from './kernels/replicad/cycloidal-gear/thumbnail.webp?url';
-import thumbnail9 from './kernels/replicad/decorated-box/thumbnail.webp?url';
-import thumbnail10 from './kernels/replicad/drinking-glass/thumbnail.webp?url';
-import thumbnail11 from './kernels/replicad/gridfinity-box/thumbnail.webp?url';
-import thumbnail12 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
-import thumbnail13 from './kernels/replicad/hollow-box/thumbnail.webp?url';
-import thumbnail14 from './kernels/replicad/ibeam/thumbnail.webp?url';
-import thumbnail15 from './kernels/replicad/lego/thumbnail.webp?url';
-import thumbnail16 from './kernels/replicad/pot-plant/thumbnail.webp?url';
-import thumbnail17 from './kernels/replicad/simple-tray/thumbnail.webp?url';
-import thumbnail18 from './kernels/replicad/staircase/thumbnail.webp?url';
-import thumbnail19 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
-import thumbnail20 from './kernels/replicad/table/thumbnail.webp?url';
-import thumbnail21 from './kernels/replicad/tray/thumbnail.webp?url';
-import thumbnail22 from './kernels/replicad/vase/thumbnail.webp?url';
-import thumbnail23 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
-import thumbnail24 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
-import thumbnail25 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
+import thumbnail8 from './kernels/replicad/copper-lampshade/thumbnail.webp?url';
+import thumbnail9 from './kernels/replicad/cycloidal-gear/thumbnail.webp?url';
+import thumbnail10 from './kernels/replicad/decorated-box/thumbnail.webp?url';
+import thumbnail11 from './kernels/replicad/drinking-glass/thumbnail.webp?url';
+import thumbnail12 from './kernels/replicad/gridfinity-box/thumbnail.webp?url';
+import thumbnail13 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
+import thumbnail14 from './kernels/replicad/hollow-box/thumbnail.webp?url';
+import thumbnail15 from './kernels/replicad/ibeam/thumbnail.webp?url';
+import thumbnail16 from './kernels/replicad/lego/thumbnail.webp?url';
+import thumbnail17 from './kernels/replicad/pot-plant/thumbnail.webp?url';
+import thumbnail18 from './kernels/replicad/simple-tray/thumbnail.webp?url';
+import thumbnail19 from './kernels/replicad/staircase/thumbnail.webp?url';
+import thumbnail20 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
+import thumbnail21 from './kernels/replicad/table/thumbnail.webp?url';
+import thumbnail22 from './kernels/replicad/tray/thumbnail.webp?url';
+import thumbnail23 from './kernels/replicad/vase/thumbnail.webp?url';
+import thumbnail24 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
+import thumbnail25 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail26 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
 
 const textAssetLoaders = import.meta.glob<string>(
   [
@@ -47,6 +48,8 @@ const textAssetLoaders = import.meta.glob<string>(
     './kernels/replicad/card-holder/tau.json',
     './kernels/replicad/chair/main.ts',
     './kernels/replicad/chair/tau.json',
+    './kernels/replicad/copper-lampshade/main.ts',
+    './kernels/replicad/copper-lampshade/tau.json',
     './kernels/replicad/cycloidal-gear/main.ts',
     './kernels/replicad/cycloidal-gear/tau.json',
     './kernels/replicad/decorated-box/main.ts',
@@ -99,6 +102,7 @@ const binaryAssetLoaders = import.meta.glob<string>(
     './kernels/replicad/bottle/thumbnail.webp',
     './kernels/replicad/card-holder/thumbnail.webp',
     './kernels/replicad/chair/thumbnail.webp',
+    './kernels/replicad/copper-lampshade/thumbnail.webp',
     './kernels/replicad/cycloidal-gear/thumbnail.webp',
     './kernels/replicad/decorated-box/thumbnail.webp',
     './kernels/replicad/drinking-glass/thumbnail.webp',
@@ -323,6 +327,28 @@ export const builtinExamples = [
     ],
   },
   {
+    locator: 'replicad.copper-lampshade',
+    kernel: 'replicad',
+    manifest: {
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_86yHcpiI8LD1zAexvj46G',
+      name: 'Copper Lampshade',
+      description:
+        'A shelled BRep copper pendant with editable brushed-metal anisotropy, lacquer, porcelain, fabric sheen, refractive glass and emissive LED filaments. Uses standard glTF materials throughout.',
+      tags: ['replicad', 'parametric', 'materials', 'lighting'],
+      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
+    },
+    thumbnailUrl: thumbnail8,
+    assets: [
+      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/copper-lampshade/main.ts') },
+      { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/copper-lampshade/tau.json') },
+      {
+        path: 'thumbnail.webp',
+        load: loadBinaryAsset.bind(undefined, './kernels/replicad/copper-lampshade/thumbnail.webp'),
+      },
+    ],
+  },
+  {
     locator: 'replicad.cycloidal-gear',
     kernel: 'replicad',
     manifest: {
@@ -334,7 +360,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail8,
+    thumbnailUrl: thumbnail9,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/cycloidal-gear/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/cycloidal-gear/tau.json') },
@@ -356,7 +382,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail9,
+    thumbnailUrl: thumbnail10,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/decorated-box/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/decorated-box/tau.json') },
@@ -378,7 +404,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail10,
+    thumbnailUrl: thumbnail11,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/drinking-glass/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/drinking-glass/tau.json') },
@@ -400,7 +426,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail11,
+    thumbnailUrl: thumbnail12,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/gridfinity-box/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/gridfinity-box/tau.json') },
@@ -422,7 +448,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail12,
+    thumbnailUrl: thumbnail13,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/hex-screwdriver/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/hex-screwdriver/tau.json') },
@@ -444,7 +470,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail13,
+    thumbnailUrl: thumbnail14,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/hollow-box/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/hollow-box/tau.json') },
@@ -463,7 +489,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail14,
+    thumbnailUrl: thumbnail15,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/ibeam/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/ibeam/tau.json') },
@@ -482,7 +508,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail15,
+    thumbnailUrl: thumbnail16,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/lego/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/lego/tau.json') },
@@ -501,7 +527,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail16,
+    thumbnailUrl: thumbnail17,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/pot-plant/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/pot-plant/tau.json') },
@@ -520,7 +546,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail17,
+    thumbnailUrl: thumbnail18,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/simple-tray/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/simple-tray/tau.json') },
@@ -542,7 +568,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail18,
+    thumbnailUrl: thumbnail19,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/staircase/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/staircase/tau.json') },
@@ -561,7 +587,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail19,
+    thumbnailUrl: thumbnail20,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/t-slot-rail/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/t-slot-rail/tau.json') },
@@ -583,7 +609,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail20,
+    thumbnailUrl: thumbnail21,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/table/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/table/tau.json') },
@@ -602,7 +628,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail21,
+    thumbnailUrl: thumbnail22,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/tray/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/tray/tau.json') },
@@ -621,7 +647,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail22,
+    thumbnailUrl: thumbnail23,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/vase/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/vase/tau.json') },
@@ -640,7 +666,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail23,
+    thumbnailUrl: thumbnail24,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/wavy-vase/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/wavy-vase/tau.json') },
@@ -659,7 +685,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail24,
+    thumbnailUrl: thumbnail25,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/wedge-door-stopper/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/wedge-door-stopper/tau.json') },
@@ -681,7 +707,7 @@ export const builtinExamples = [
       tags: ['assembly', 'gears', 'parametric', 'replicad', 'manufacturing'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail25,
+    thumbnailUrl: thumbnail26,
     assets: [
       {
         path: 'MANUFACTURING.md',

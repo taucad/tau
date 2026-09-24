@@ -17,6 +17,7 @@ import {
   gltfEdgeHoverColor,
   gltfEdgeSelectedColor,
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
+import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 
 function makeScene(): { scene: Group; lines: LineSegments2[] } {
   const scene = new Group();
@@ -57,6 +58,24 @@ describe('setGltfFatLineEmphasis', () => {
     setGltfFatLineEmphasis(first, 'none');
     expect(first.material).toBe(base);
     expect(collectGltfFatLineMaterials(first)).toHaveLength(3);
+  });
+
+  it('draws an emphasised edge after every standard edge, whichever emphasis it wears', () => {
+    // Emphasis and base lines both sit at geometric depth with `LEQUAL`, so a coincident black
+    // edge on a neighbouring component wins whenever it happens to sort first — and the opaque
+    // sort is front-to-back by centroid, which flips as the camera moves. Ordering decides it.
+    const { lines } = makeScene();
+    const [first, second] = lines as [LineSegments2, LineSegments2];
+    expect(first.renderOrder).toBe(viewportRenderTiers.model);
+
+    for (const emphasis of ['hover', 'selected', 'focused'] as const) {
+      setGltfFatLineEmphasis(first, emphasis);
+      expect(first.renderOrder).toBe(viewportRenderTiers.modelEmphasisEdge);
+      expect(first.renderOrder).toBeGreaterThan(second.renderOrder);
+    }
+
+    setGltfFatLineEmphasis(first, 'none');
+    expect(first.renderOrder).toBe(viewportRenderTiers.model);
   });
 
   it('keeps theme colour on the base material and fans resolution out to the overlays', () => {

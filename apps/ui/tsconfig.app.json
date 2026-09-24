@@ -8,6 +8,7 @@
     "desktop/**/*.ts",
     "desktop/**/*.tsx",
     "server.ts",
+    "vite.calibration.config.ts",
     "react-router.config.ts",
     "vite-environment.d.ts",
     "types/**/*.d.ts",

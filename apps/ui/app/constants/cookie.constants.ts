@@ -38,6 +38,8 @@ export const cookieName = {
   chatWebSearch: 'chat-web-search',
   // The last selected model.
   chatModel: 'chat-model',
+  // The last chosen reasoning level, carried onto new chats.
+  chatEffort: 'chat-effort',
   // Per-user model availability overrides (sparse; values differ from model.recommended).
   chatModelOverrides: 'chat-model-overrides',
   // Whether to show the model cost in the chat-history.

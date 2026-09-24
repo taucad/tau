@@ -3,8 +3,9 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-09-10'
+updated: '2026-09-23'
 related:
+  - docs/research/onshape-viewer-lighting-profile.md
   - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
   - docs/research/project-card-thumbnail-preview-parity.md
   - docs/research/studio-environment-consolidation-blueprint.md
@@ -25,7 +26,7 @@ All conversion pipelines must produce GLTF materials with these canonical PBR va
 ```
 roughnessFactor:  0.35
 metallicFactor:   0.0
-baseColorFactor:  [0.8, 0.8, 0.8, 1]  (fallback when no source color)
+baseColorFactor:  [0.7, 0.7, 0.7, 1]  (fallback when no source color)
 doubleSided:      true
 ```
 
@@ -43,21 +44,23 @@ These values are defined in `libs/types/src/constants/material.constants.ts` as 
 
 Tau-generated auxiliary edge overlays use `cadEdgeOverlayMaterialDefaults`: linear `baseColorFactor: [0, 0, 0, 1]`, `metallicFactor: 0`, `roughnessFactor: 1`, `doubleSided: true`, `alphaMode: "OPAQUE"`, and explicit `KHR_materials_unlit`. Direct writers list the extension in `extensionsUsed` only when line primitives exist and do not add it to `extensionsRequired`.
 
+BRep comparisons must use native topological edges tessellated with their owning surfaces. Triangle-angle edge detection is a fallback for triangle-only inputs and is not evidence of BRep edge parity. Keep line geometry at its actual depth; separate coplanar opaque surfaces through the shared surface-depth owner for both orthographic and perspective cameras.
+
 Authored and imported line primitives preserve their source materials in artifacts and headless rendering. `nanoraster` uses a dedicated line pipeline that returns `baseColorFactor` directly and is therefore unlit by construction. The interactive viewport separately replaces loaded line materials with its existing theme-owned presentation material; that display behavior does not change artifact ownership.
 
 ## Material Policy
 
 - **Non-metallic default**: All CAD surfaces default to `metallicFactor: 0.0`. None of the source formats (STEP, Replicad, JSCAD, OpenRSCAD) carry per-part metal/non-metal metadata.
-- **Semi-glossy roughness**: `roughnessFactor: 0.35` produces a glossy CAD sheen with visible specular highlights under studio lighting, closely matching professional CAD viewers like Onshape.
+- **Semi-glossy roughness**: `roughnessFactor: 0.35` produces a glossy CAD sheen with visible specular highlights under studio lighting, while preserving the metallic-roughness model. Onshape's standard editor uses Blinn–Phong; a lighting fit does not make these BRDFs identical.
 - **Source materials preserved**: Source color overrides the default `baseColorFactor`; authored metallic and roughness values override their defaults when the kernel or imported format supplies them.
-- **Fallback material**: Meshes with no source color receive a unified neutral grey material (`[0.8, 0.8, 0.8, 1]`) across all pipelines rather than inheriting Three.js defaults.
+- **Fallback material**: Meshes with no source color receive a unified neutral grey material (`[0.7, 0.7, 0.7, 1]`) across all pipelines rather than inheriting Three.js defaults.
 - **Generated-edge provenance**: Apply `cadEdgeOverlayMaterialDefaults` only to auxiliary overlays Tau creates. Never use the convention to normalize or recolor arbitrary source `LINES`.
 
 ## Headless GLB Render Profile
 
 `nanoraster` is a deterministic factor-only glTF metallic-roughness renderer, not a general PBR reference viewer. `gltf-rs` owns GLB and glTF structural parsing and validation; Tau maps only the supported render semantics and rejects unsupported features before GPU setup.
 
-- Surface shading evaluates each primitive's `baseColorFactor`, `metallicFactor`, and `roughnessFactor` against fixed view-space studio lights and an analytic environment. Texture-backed material content is rejected rather than silently approximated.
+- Surface shading evaluates each primitive's `baseColorFactor`, `metallicFactor`, and `roughnessFactor` against the Tau image transcoder's default view-space directional rig and analytic studio environment. Callers may supply an explicit `lighting` override; texture-backed material content is rejected rather than silently approximated.
 - LINES use the dedicated unlit line pipeline and preserve their supplied `baseColorFactor`, whether authored or Tau-generated.
 - A glTF node's composed model transform applies equally to its surface and line primitives. Normals use the inverse-transpose transform for non-uniform scaling.
 - Repeated core node references share decoded and uploaded mesh buffers and issue one draw per node instance. Hardware draw batching and `EXT_mesh_gpu_instancing` are separate future optimizations/features.
@@ -67,9 +70,9 @@ The public GLB-to-image API therefore accepts standard packed, accessor-offset, 
 
 ## Tone Mapping Policy
 
-The renderer uses `ACESFilmicToneMapping` (React Three Fiber default) with `toneMappingExposure: 1.5` to offset ACES highlight compression while keeping mid-tones visible.
+Use `ACESFilmicToneMapping` with `toneMappingExposure: 0.5` for the interactive viewport. Keep the WebGL composer in `HalfFloatType` until the final tone-mapping pass. Apply the same ACES curve and exposure after WebGL N8AO compositing; enabling AO must not change the color of unoccluded surfaces. The current value is measured against the [Onshape planetary-gear reference](../research/onshape-viewer-lighting-profile.md), not a universal physical light calibration.
 
-**Rationale**: Environment maps contain HDR values exceeding 1.0. Without tone mapping, bright reflections clip to pure white, losing surface detail. ACES filmic provides good highlight rolloff while preserving natural colour appearance. The 1.5x exposure boost compensates for ACES's aggressive highlight compression, ensuring specular highlights remain visible.
+**Rationale**: The prior 1.0 direct-render exposure over-brightened the reference gray surface; applying the same output transform across direct and composited paths keeps the AO toggle from changing the base material color. ACES rolls off HDR highlights without clipping every bright reflection to white.
 
 **Decision gate for AgX**: If visual testing reveals unacceptable hue shifts under ACES (particularly in saturated reds/blues), switch to `THREE.AgXToneMapping` which preserves hues more accurately under bright lighting. Acceptance criteria:
 
@@ -79,16 +82,18 @@ The renderer uses `ACESFilmicToneMapping` (React Three Fiber default) with `tone
 
 ## Ambient Occlusion
 
-The renderer uses **N8AO** (from `@react-three/postprocessing`) for screen-space ambient occlusion, adding depth to crevices, part junctions, and concave areas.
+When post-processing is enabled, WebGL uses **N8AO** (from `n8ao`) and WebGPU uses **GTAO** for screen-space ambient occlusion, adding depth to crevices, part junctions, and concave areas. The default graphics setting currently leaves post-processing off; the user can enable it per viewer.
 
-**Configuration** (in `three-context.tsx`):
+**WebGL configuration** (in `post-processing-webgl.tsx`):
 
 ```
 screenSpaceRadius: true       -- AO radius in pixels, consistent at any zoom level
 aoRadius:          24          -- screen-space radius in pixels
 intensity:         1           -- pow(ao, intensity); 1 = natural, higher = darker AO
-distanceFalloff:   0.2         -- ratio of radius at which AO fades (for screen-space mode)
+distanceFalloff:   0.2         -- attenuation radius as a fraction of the screen-space AO radius
 ```
+
+A zero N8AO falloff suppresses occlusion samples; do not use it to disable attenuation. WebGPU GTAO uses a 24 px world-space-converted radius, half-resolution sampling, eight samples, and distance falloff 1. Both paths must preserve depth for overlays and section caps.
 
 **Rationale**: Professional CAD viewers (e.g. Onshape at 37.5% AO) use ambient occlusion to create depth perception. Without AO, the scene appears flat, especially from top-down and bottom-up views. N8AO was chosen because it:
 
@@ -109,14 +114,12 @@ The main CAD viewer uses an `<Environment>` component with `<Lightformer>` child
 
 - **Lightformers, not HDRI presets**: Full control over light panel placement, no CDN dependency, deterministic appearance across environments.
 - **Size-aware placement**: All Lightformer positions and scales are expressed as multiples of the scene's bounding sphere radius (`sceneRadius`). This ensures a 5mm watch gear and a 5-meter building frame both receive proportionally sized soft panels.
-- **No background**: The environment map is used for reflections only (`background` is not set). The app's CSS background shows through, consistent with standard CAD viewer behaviour.
+- **No background**: The environment map contributes PBR lighting and reflections (`background` is not set). The app's CSS background shows through, consistent with standard CAD viewer behaviour.
 - **Conditional on matcap**: When matcap is enabled, the environment is skipped entirely since `MeshMatcapMaterial` ignores environment maps. This avoids unnecessary GPU work.
-- **Camera-relative fill light**: A directional light (intensity `0.7`) follows the camera for consistent orbit illumination.
-- **Fixed directional key light**: A world-space directional light (intensity `3`) from above-front for angle-dependent specular highlights.
+- **Camera-relative rig**: Five asymmetric Lightformers provide key, left fill, top, ground, and back-fill panels; the complete camera quaternion rotates the environment through tilt, roll, and pole crossings, keeping the rig fixed in view space.
+- **Headlamp and ambient floor**: The default view-space directional key follows `normalize([1, 1, 1])` at intensity `1.5`, with ambient intensity `0.1` and environment intensity `1`. Keep all light energy independent of field of view and projection. The key reflection panel uses intensity `64`, position `[1, 1, 1] × sceneRadius`, and size `[1.2, 1.2] × sceneRadius`; the other four panels provide low-energy fill.
 - **Environment resolution**: `512px` for sharp, defined reflections on surfaces.
-- **Ambient light**: Moderate intensity (`0.35`) to provide base diffuse illumination, offset by AO in occluded areas.
-- **Post-load envMapIntensity**: After GLTF load, all `MeshStandardMaterial` instances receive `envMapIntensity = 2.5` (PBR path only) to amplify environment reflections.
-- **Post-load roughnessOverride**: After GLTF load, all `MeshStandardMaterial` instances receive `roughness = 0.28` for a semi-matte CAD appearance consistent with professional CAD viewers.
+- **Material ownership**: Preserve authored glTF roughness and metalness; do not add a post-load global material override merely to fit one reference part.
 
 ### Canonical Studio Environment
 
@@ -128,7 +131,7 @@ The interactive Three.js CAD viewer has one environment implementation: the Stud
 Source color (sRGB) --> GLTF baseColorFactor (linear via spec) --> Three.js linear shading --> Tone mapping --> sRGB output
 ```
 
-- GLTF spec requires `baseColorFactor` in linear space. The `@gltf-transform/core` API handles this correctly when values are provided in 0-1 range.
+- GLTF spec requires `baseColorFactor` in linear space. Convert source sRGB colors explicitly before storing linear factors; dividing an 8-bit sRGB channel by 255 does not linearize it, and `@gltf-transform/core` does not infer that conversion.
 - Three.js `GLTFLoader` creates `MeshStandardMaterial` with `colorSpace: SRGBColorSpace` on base color textures. For factor-only materials (no textures), the factor is treated as linear.
 - Tone mapping converts the linear HDR result to displayable sRGB range.
 
@@ -213,7 +216,7 @@ The `GltfMesh` component separates GLTF binary parsing (expensive) from material
 ### Post-Processing Performance
 
 - **No double MSAA**: The Canvas `gl` config omits `antialias: true` since `EffectComposer` handles antialiasing via its own `multisampling` FBO.
-- **N8AO halfRes**: The ambient occlusion pass runs at half resolution with depth-aware upsampling for ~2-4x speedup at minimal visual cost on smooth CAD surfaces.
+- **N8AO resolution**: The current WebGL pass uses the dependency's full-resolution default. Do not claim half-resolution savings without enabling and measuring that mode.
 
 ## Known Limitations
 

@@ -32,6 +32,7 @@ export type ExampleManifest = {
     | 'bundler-feature-matrix'
     | 'card-holder'
     | 'chair'
+    | 'copper-lampshade'
     | 'cycloidal-gear'
     | 'decorated-box'
     | 'drinking-glass'

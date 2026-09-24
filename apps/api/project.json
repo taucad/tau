@@ -170,6 +170,18 @@
         "cwd": "{projectRoot}"
       }
     },
+    "dev:cloud": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["billing-operations", "billing-recovery"],
+      "metadata": {
+        "description": "Start the API dev server with the two billing workers deployments run beside it. With TAU_CLOUD_ENABLED=true the webhook only records a Stripe event; billing-operations fulfils purchases, subscriptions and automatic reloads, and billing-recovery settles abandoned LLM operations. Without them a paid checkout stays Processing."
+      },
+      "options": {
+        "command": "vite",
+        "cwd": "{projectRoot}"
+      }
+    },
     "billing-recovery": {
       "executor": "nx:run-commands",
       "continuous": true,
@@ -187,7 +199,7 @@
       "continuous": true,
       "dependsOn": ["build:billing-command"],
       "options": {
-        "command": "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js billing-operations-worker --environment development --limit 100 --poll-milliseconds 60000",
+        "command": "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js billing-operations-worker --environment development --limit 100 --poll-milliseconds 5000",
         "cwd": "{workspaceRoot}",
         "env": {
           "OTEL_METRICS_PORT": "9466"

@@ -21,6 +21,10 @@ export const SubmitOnEnter = Extension.create<SubmitOnEnterOptions>({
     return {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Tiptap keyboard shortcut API key
       Enter: () => {
+        /* Q15: on a touch keyboard, return starts a new line and only Send sends. */
+        if (globalThis.matchMedia('(pointer: coarse)').matches) {
+          return false;
+        }
         this.options.onSubmit();
         return true;
       },

@@ -7,6 +7,7 @@ import {
   gatedCubeCylinderCutoutScript,
 } from '#support/agent-host-gateway-script.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
+import { placeChatOnNewBranch } from '#support/chat-branch.js';
 
 const prompt = 'Create a cube with a centered cylindrical cutout and verify it.';
 const composer = '[aria-label="Ask Tau to build anything..."]';
@@ -178,12 +179,10 @@ test('discards the isolated workspace when the production chat run is cancelled'
   const baselineGeoSpecCount = baselineGeoSpecState.count;
   /* Isolation is opt-in: non-branching is the default (A3) and writes straight
    * into the project folder, so only a chat on a branch of its own has an
-   * isolated tree to discard. Making that branch from the composer picker is
-   * what keeps this a test of cancellation rather than of the default path. */
-  await target.click(selectors.getByCss('[data-slot="chat-branch-picker"]'));
-  await target.click(selectors.getByText('New branch', { exact: true }));
-  await target.fill(selectors.getByLabelText('Name for the new branch'), 'isolated-run');
-  await target.click(selectors.getByRole('button', { name: 'Create' }));
+   * isolated tree to discard. Placing the chat on that branch from the
+   * Revisions pane is what keeps this a test of cancellation rather than of
+   * the default path. */
+  await placeChatOnNewBranch('isolated-run');
   await submitPrompt();
   await target.expectVisible(selectors.getByText('main.geospec.ts', { exact: true }).first(), 60_000);
   await target.click(stopButton());

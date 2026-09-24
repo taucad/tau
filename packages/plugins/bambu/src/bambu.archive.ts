@@ -17,6 +17,8 @@ export type BambuPreparedArtifact = Readonly<{
   length: number;
   parser: Readonly<{ id: 'tau.bambu.gcode-3mf'; version: '1' }>;
   memberMd5: string;
+  /** The inflated plate G-code, exactly as the printer runs it. */
+  plate: Uint8Array<ArrayBuffer>;
 }>;
 
 const fail = (code: string): never => {
@@ -127,11 +129,13 @@ export const prepareBambuArtifact = async (
   if (!Object.hasOwn(extracted, plateMember)) {
     return fail('BAMBU_ARCHIVE_PLATE_MISSING');
   }
+  const plate = extracted[plateMember]!;
   return Object.freeze({
     bytes,
     digest,
     length,
     parser,
-    memberMd5: createHash('md5').update(extracted[plateMember]!).digest('hex'),
+    memberMd5: createHash('md5').update(plate).digest('hex'),
+    plate,
   });
 };

@@ -13,6 +13,7 @@
  * one relay-acceptance predicate.
  */
 import type { ComputeStoreControl } from '@taucad/runtime/types';
+import type { MachineBindingOutcome } from '@taucad/runtime/machine';
 import { z } from 'zod';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host';
@@ -51,11 +52,31 @@ type DesktopShell = {
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
   };
+  readonly machines?: {
+    completeBinding(input: DesktopMachineBindingCompletion): Promise<unknown>;
+  };
   /** Ask main to broker a port for one concern; answered by a relayed message. */
   requestServicesPort(requestId: string, concern: string, context?: Readonly<Record<string, string>>): void;
 };
 
 export type DesktopQuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };
+
+/**
+ * The native half of one binding ceremony (D10): the secret and the address to
+ * pin trust from. Both are absent for the simulator.
+ * @public
+ */
+export type DesktopMachineBindingCompletion = {
+  readonly ceremonyId: string;
+  readonly address?: string;
+  readonly accessCode?: string;
+};
+
+/* Parsed, not trusted: main answers with whatever the utility said. */
+const bindingOutcomeSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('bound'), machineId: z.string().min(1).max(256) }),
+  z.object({ status: z.literal('operator-action-required'), ceremonyId: z.string().min(1).max(256) }),
+]);
 
 /** Keep the native app icon aligned with Tau's resolved local theme. */
 export const setDesktopAppIconTheme = (theme: 'light' | 'dark'): void => {
@@ -125,6 +146,25 @@ export type DesktopBridge = {
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     /** Release that hold and await launcher shutdown when it was the last one. */
     release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+  };
+  readonly machines: {
+    /**
+     * Ask main to broker a fresh `MessageChannelMain` to the node machine host
+     * in the services utility for `workspaceRoot`, and hand back this side.
+     *
+     * The far end is `NodeMachineHost.serve` over that port, so the page
+     * drives it with `connectMachineChannel` from `@taucad/runtime/machine` —
+     * the same wire the daemon serves over a WebSocket. Main refuses a root
+     * the user never granted.
+     */
+    connect(workspaceRoot: string): Promise<MessagePort>;
+    /**
+     * Complete a ceremony `beginBinding` answered with `operator-action-required`.
+     *
+     * The access code goes straight to the utility's protected store and is
+     * never kept in page state; the outcome is the host's own.
+     */
+    completeBinding(input: DesktopMachineBindingCompletion): Promise<MachineBindingOutcome>;
   };
   readonly compute: {
     inspect(projectRoot: string): ReturnType<ComputeStoreControl['inspect']>;
@@ -222,6 +262,15 @@ export const desktopBridge = (): DesktopBridge | undefined => {
         shell.agentHost.retain(workspaceRoot, projectId, attachmentId),
       release: async (workspaceRoot, projectId, attachmentId) =>
         shell.agentHost.release(workspaceRoot, projectId, attachmentId),
+    },
+    machines: {
+      connect: async (workspaceRoot: string) => connectServices('machines', { workspaceRoot }),
+      completeBinding: async (input) => {
+        if (!shell.machines) {
+          throw new Error('This desktop build has no machine binding ceremony.');
+        }
+        return bindingOutcomeSchema.parse(await shell.machines.completeBinding(input));
+      },
     },
     compute: shell.compute ?? {
       inspect: async () => {

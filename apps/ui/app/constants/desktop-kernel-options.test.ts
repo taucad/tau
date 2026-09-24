@@ -40,9 +40,32 @@ const installRuntimeBridge = (): void => {
   vi.stubGlobal('taucad', { requestRuntimePort, releaseRuntimeHost, relayTag });
 };
 
-const installDesktopBridge = (): void => {
+const requestServicesPort = vi.fn();
+
+/**
+ * The preload shell, optionally answering the services relay the way main does
+ * so the machines port is brokered; without `services` every services connect
+ * fails, which is the refusal the kernel preset must survive.
+ */
+const installDesktopBridge = (options: { services?: boolean } = {}): void => {
   vi.stubEnv('TAU_TARGET', 'desktop');
+  const relayTag = 'tau:services-port';
+  requestServicesPort.mockImplementation((requestId: string) => {
+    if (!options.services) {
+      throw new Error('services unavailable');
+    }
+    globalThis.window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { taucadRelay: relayTag, requestId },
+        origin: globalThis.location.origin,
+        source: globalThis.window,
+        ports: [new MessageChannel().port1],
+      }),
+    );
+  });
   vi.stubGlobal('tau', {
+    relayTag,
+    requestServicesPort,
     nodeFs: { homeRoot, connect: async () => new MessageChannel().port1 },
     dialog: { selectDirectory: async () => undefined },
   });
@@ -71,6 +94,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetModules();
   requestRuntimePort.mockReset();
+  requestServicesPort.mockReset();
 });
 
 describe('desktopKernelOptions', () => {
@@ -100,6 +124,34 @@ describe('desktopKernelOptions', () => {
       });
       expect(options.transport).toBeDefined();
       expect(options.config).toBeDefined();
+    },
+    moduleGraphTimeout,
+  );
+
+  it(
+    'should negotiate an available machines facet from the shell machines port, and none when the shell refuses',
+    async () => {
+      installDesktopBridge({ services: true });
+      installRuntimeBridge();
+      const { desktop, handleStore } = await loadModules();
+      await handleStore.setProjectFileSystemConfig({ projectId, backend: 'node', providerBasePath: 'widget' });
+      const fileSystem = {
+        get fileSystem(): never {
+          throw new Error('host-local runtime must not read the renderer filesystem');
+        },
+      };
+
+      const offered = (await desktop.desktopKernelOptions(projectId, undefined, 'off')())(fileSystem);
+
+      /* The port is brokered for this project's root before the kernel forks. */
+      expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'machines', {
+        workspaceRoot: `${homeRoot}/widget`,
+      });
+      expect(offered.transport.materialize().machines?.available).toBe(true);
+
+      installDesktopBridge({ services: false });
+      const refused = (await desktop.desktopKernelOptions(projectId, undefined, 'off')())(fileSystem);
+      expect(refused.transport.materialize().machines).toEqual({ available: false, reason: 'unsupported' });
     },
     moduleGraphTimeout,
   );

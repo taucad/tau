@@ -37,6 +37,9 @@ const installShellGlobal = (options: { foreign?: boolean } = {}) => {
   const selectDirectory = vi.fn(async () => '/Users/tester/Projects');
   const retainAgentHost = vi.fn(async () => undefined);
   const releaseAgentHost = vi.fn(async () => undefined);
+  const completeMachineBinding = vi.fn(
+    async (_input: unknown): Promise<unknown> => ({ status: 'bound', machineId: 'bambu:sim' }),
+  );
   const setAppIconTheme = vi.fn();
   let quitHandler: (() => void) | undefined;
   const onQuitAsk = vi.fn((handler: () => void) => {
@@ -53,6 +56,7 @@ const installShellGlobal = (options: { foreign?: boolean } = {}) => {
     relayTag,
     requestServicesPort,
     agentHost: { retain: retainAgentHost, release: releaseAgentHost },
+    machines: { completeBinding: completeMachineBinding },
     nodeFs: { homeRoot },
     appIcon: { setTheme: setAppIconTheme },
     quit: { isReady: isQuitReady, onAsk: onQuitAsk, reportQuiesced: vi.fn() },
@@ -63,6 +67,7 @@ const installShellGlobal = (options: { foreign?: boolean } = {}) => {
     requestServicesPort,
     retainAgentHost,
     releaseAgentHost,
+    completeMachineBinding,
     selectDirectory,
     setAppIconTheme,
     isQuitReady,
@@ -151,6 +156,33 @@ describe('desktopBridge', () => {
       projectId: 'proj_widget',
       computeMode: 'durable',
     });
+  });
+
+  it('should connect machines by naming the workspace root main must vouch for', async () => {
+    const { port, requestServicesPort } = installShellGlobal();
+    const { desktopBridge } = await loadBridge();
+
+    await expect(desktopBridge()?.machines.connect('/Users/tester/Projects/widget')).resolves.toBe(port);
+    expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'machines', {
+      workspaceRoot: '/Users/tester/Projects/widget',
+    });
+  });
+
+  it('should complete a binding through preload and accept only the host outcome shape', async () => {
+    const { completeMachineBinding } = installShellGlobal();
+    const { desktopBridge } = await loadBridge();
+
+    await expect(
+      desktopBridge()?.machines.completeBinding({ ceremonyId: 'ceremony-1', address: '10.0.0.5', accessCode: '1234' }),
+    ).resolves.toEqual({ status: 'bound', machineId: 'bambu:sim' });
+    expect(completeMachineBinding).toHaveBeenCalledExactlyOnceWith({
+      ceremonyId: 'ceremony-1',
+      address: '10.0.0.5',
+      accessCode: '1234',
+    });
+
+    completeMachineBinding.mockResolvedValueOnce({ status: 'bound' });
+    await expect(desktopBridge()?.machines.completeBinding({ ceremonyId: 'ceremony-2' })).rejects.toThrow();
   });
 
   it('forwards project-session retain and release to the preload surface', async () => {

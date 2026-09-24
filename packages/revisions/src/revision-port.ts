@@ -580,6 +580,14 @@ export type RevisionPortErrorCode =
   | 'REMOTE_NOT_ENTITLED'
   /** HTTP 404: the remote has no repository at this address for this account. */
   | 'REMOTE_NOT_FOUND'
+  /**
+   * HTTP 409 `GIT_PROXY_REDIRECTED_CREDENTIAL`: the repository moved (D11).
+   *
+   * The API's git proxy refuses to follow a redirect with a credential, so a
+   * renamed or transferred repository answers this until the person confirms
+   * the new address. Terminal: retrying the old address reproduces it.
+   */
+  | 'REMOTE_MOVED'
   /** HTTP 413 with no LFS file list; a batch refusal keeps raising `LfsQuotaError`. */
   | 'REMOTE_QUOTA_EXCEEDED'
   /**

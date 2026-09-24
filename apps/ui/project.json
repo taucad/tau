@@ -292,6 +292,10 @@
         "parallel": false
       }
     },
+    "render-calibration-lighting": {
+      "executor": "nx:run-commands",
+      "options": { "command": "node apps/ui/scripts/render-calibration/pack-lighting.mts" }
+    },
     "render-calibration-physical": {
       "executor": "nx:run-commands",
       "options": {

@@ -1,11 +1,245 @@
 /**
  * Bambu `.gcode.3mf` container reader and writer.
  *
- * Lane B implements `writeBambuContainer` and `readBambuContainer`; this file
- * exists so the `./container` subpath resolves for concurrent consumers.
+ * The container is an OPC package (a ZIP with `[Content_Types].xml` and
+ * relationships) whose printable payload is the plate G-code member. Member
+ * names follow the S-M4 census of real print-ready archives; every member's
+ * content is authored here. Output bytes are deterministic: fixed member
+ * order, fixed timestamps, no environment-dependent fields.
  *
  * @module
  */
 
-/** Members every print-ready Bambu container carries; names follow the S-M4 census. @public */
+import { strToU8, unzipSync, zipSync } from 'fflate';
+import type { Zippable } from 'fflate';
+
+import { md5Hex, sha256Hex } from '#hashes.js';
+
+/** The plate member every print-ready Bambu container carries. @public */
 export const bambuPlateMember = 'Metadata/plate_1.gcode';
+
+/** Media type of a print-ready Bambu container. @public */
+export const bambuContainerMediaType = 'application/vnd.bambulab.gcode-3mf';
+
+/** Member names written by {@link writeBambuContainer}, in archive order. @public */
+export const bambuContainerMembers = [
+  '[Content_Types].xml',
+  '_rels/.rels',
+  '3D/3dmodel.model',
+  bambuPlateMember,
+  'Metadata/plate_1.gcode.md5',
+  'Metadata/plate_1.json',
+  'Metadata/slice_info.config',
+  'Metadata/model_settings.config',
+] as const;
+
+const thumbnailMember = 'Metadata/plate_1.png';
+const maximumArchiveBytes = 256 * 1024 * 1024;
+const maximumEntries = 512;
+const maximumExpandedBytes = 512 * 1024 * 1024;
+const maximumPlateBytes = 128 * 1024 * 1024;
+// ZIP stores DOS local time; a fixed date keeps the archive byte-identical across runs and zones.
+const fixedTimestamp = new Date(2000, 0, 1, 0, 0, 0);
+
+/** Input to {@link writeBambuContainer}. @public */
+export type WriteBambuContainerInput = Readonly<{
+  /** Plate G-code text or bytes. */
+  gcode: Uint8Array<ArrayBuffer> | string;
+  /** Part name recorded in the 3MF model and the plate metadata. */
+  modelName: string;
+  /** Build plate identifier recorded in the plate metadata. */
+  plate?: string;
+  /** PNG bytes for the plate thumbnail. */
+  thumbnail?: Uint8Array<ArrayBuffer>;
+}>;
+
+/** What {@link readBambuContainer} recovered from a container. @public */
+export type BambuContainer = Readonly<{
+  /** The plate G-code bytes. */
+  gcode: Uint8Array<ArrayBuffer>;
+  /** Lowercase MD5 recorded beside the plate, when that member exists. */
+  recordedMd5: string | undefined;
+  /** Whether the recorded MD5 matches the plate bytes. */
+  md5Verified: boolean;
+  /** Every member with its inflated length and SHA-256 digest, in archive order. */
+  members: ReadonlyArray<Readonly<{ name: string; length: number; digest: `sha256:${string}` }>>;
+}>;
+
+const escapeXml = (value: string): string =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
+
+const xmlHeader = '<?xml version="1.0" encoding="UTF-8"?>\n';
+
+const contentTypes = (thumbnail: boolean): string =>
+  `${xmlHeader}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n` +
+  ' <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n' +
+  ' <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n' +
+  ' <Default Extension="gcode" ContentType="text/x.gcode"/>\n' +
+  (thumbnail ? ' <Default Extension="png" ContentType="image/png"/>\n' : '') +
+  '</Types>\n';
+
+const relationships = (thumbnail: boolean): string =>
+  `${xmlHeader}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n` +
+  ' <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n' +
+  (thumbnail
+    ? ` <Relationship Target="/${thumbnailMember}" Id="rel-2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail"/>\n`
+    : '') +
+  '</Relationships>\n';
+
+const model = (name: string): string =>
+  `${xmlHeader}<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n` +
+  ` <metadata name="Title">${name}</metadata>\n` +
+  ' <metadata name="Application">@taucad/slicer</metadata>\n' +
+  ' <resources/>\n' +
+  ' <build/>\n' +
+  '</model>\n';
+
+const sliceInfo = (name: string): string =>
+  `${xmlHeader}<config>\n` +
+  ' <plate>\n' +
+  '  <metadata key="index" value="1"/>\n' +
+  `  <object identify_id="1" name="${name}" skipped="false"/>\n` +
+  ' </plate>\n' +
+  '</config>\n';
+
+const modelSettings = (name: string): string =>
+  `${xmlHeader}<config>\n` +
+  ' <object id="1">\n' +
+  `  <metadata key="name" value="${name}"/>\n` +
+  ' </object>\n' +
+  ' <plate>\n' +
+  '  <metadata key="plater_id" value="1"/>\n' +
+  `  <metadata key="gcode_file" value="${bambuPlateMember}"/>\n` +
+  ' </plate>\n' +
+  '</config>\n';
+
+// Views from fflate may sit over any buffer kind; copying pins them to a plain ArrayBuffer.
+const copyBytes = (bytes: ArrayLike<number>): Uint8Array<ArrayBuffer> => Uint8Array.from(bytes);
+
+/**
+ * Write one print-ready Bambu container around plate G-code.
+ *
+ * @param input - Plate G-code, part name, plate identifier and optional thumbnail.
+ * @returns Deterministic container bytes.
+ * @public
+ * @example <caption>Wrap reference G-code for a Bambu upload</caption>
+ * ```typescript
+ * import { writeBambuContainer } from '@taucad/slicer/container';
+ *
+ * const bytes = writeBambuContainer({ gcode: 'G28\nG90\n', modelName: 'bracket', plate: 'textured-pei' });
+ * ```
+ */
+export const writeBambuContainer = (input: WriteBambuContainerInput): Uint8Array<ArrayBuffer> => {
+  const gcode = typeof input.gcode === 'string' ? copyBytes(strToU8(input.gcode)) : input.gcode;
+  if (gcode.byteLength === 0) {
+    throw new TypeError('SLICER_CONTAINER_PLATE_EMPTY');
+  }
+  const name = escapeXml(input.modelName);
+  const thumbnail = input.thumbnail !== undefined;
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu plate_1.json field names are fixed.
+  const plate = JSON.stringify({ version: 2, name: input.modelName, bed_type: input.plate ?? 'unspecified' });
+  const entries: Zippable = {
+    '[Content_Types].xml': strToU8(contentTypes(thumbnail)),
+    '_rels/.rels': strToU8(relationships(thumbnail)),
+    '3D/3dmodel.model': strToU8(model(name)),
+    [bambuPlateMember]: gcode,
+    'Metadata/plate_1.gcode.md5': strToU8(md5Hex(gcode)),
+    'Metadata/plate_1.json': strToU8(plate),
+    'Metadata/slice_info.config': strToU8(sliceInfo(name)),
+    'Metadata/model_settings.config': strToU8(modelSettings(name)),
+    ...(input.thumbnail === undefined ? {} : { [thumbnailMember]: [input.thumbnail, { level: 0 }] as const }),
+  };
+  return copyBytes(zipSync(entries, { level: 6, mtime: fixedTimestamp }));
+};
+
+const safeMemberName = (name: string): string => {
+  if (
+    name.length === 0 ||
+    name.length > 512 ||
+    !name.isWellFormed() ||
+    name.includes('\\') ||
+    name.startsWith('/') ||
+    name.endsWith('/') ||
+    name.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+  ) {
+    throw new TypeError('SLICER_CONTAINER_MEMBER_INVALID');
+  }
+  return name.normalize('NFC');
+};
+
+/**
+ * Read a bounded Bambu container: the plate G-code, its recorded MD5 and every member digest.
+ *
+ * Refuses archives over 256 MiB, more than 512 members, members that expand past
+ * 512 MiB in total, plates over 128 MiB, unsafe member names and archives
+ * without a plate.
+ *
+ * @param bytes - The archive to inspect.
+ * @returns The plate and member inventory.
+ * @throws TypeError - With a `SLICER_CONTAINER_*` code when the archive is refused.
+ * @public
+ * @example <caption>Recover the plate for the printer viewer</caption>
+ * ```typescript
+ * import { readBambuContainer } from '@taucad/slicer/container';
+ * import { parseGcode } from '@taucad/slicer/toolpath';
+ *
+ * const container = readBambuContainer(new Uint8Array(await new Response(new Blob([])).arrayBuffer()));
+ * const program = parseGcode(container.gcode);
+ * ```
+ */
+export const readBambuContainer = (bytes: Uint8Array<ArrayBuffer>): BambuContainer => {
+  if (bytes.byteLength === 0 || bytes.byteLength > maximumArchiveBytes) {
+    throw new TypeError('SLICER_CONTAINER_LIMIT');
+  }
+  const names: string[] = [];
+  let expanded = 0;
+  let extracted: ReturnType<typeof unzipSync>;
+  try {
+    extracted = unzipSync(bytes, {
+      filter(file) {
+        if (file.name.endsWith('/')) {
+          return false;
+        }
+        const name = safeMemberName(file.name);
+        expanded += file.originalSize;
+        if (
+          names.length >= maximumEntries ||
+          expanded > maximumExpandedBytes ||
+          names.some((existing) => existing.toLowerCase() === name.toLowerCase())
+        ) {
+          throw new TypeError('SLICER_CONTAINER_LIMIT');
+        }
+        if (name === bambuPlateMember && (file.originalSize === 0 || file.originalSize > maximumPlateBytes)) {
+          throw new TypeError('SLICER_CONTAINER_PLATE_INVALID');
+        }
+        names.push(name);
+        return true;
+      },
+    });
+  } catch (error) {
+    if (error instanceof TypeError && error.message.startsWith('SLICER_CONTAINER_')) {
+      throw error;
+    }
+    throw new TypeError('SLICER_CONTAINER_INVALID', { cause: error });
+  }
+  const plate = extracted[bambuPlateMember];
+  if (plate === undefined) {
+    throw new TypeError('SLICER_CONTAINER_PLATE_MISSING');
+  }
+  const recorded = extracted['Metadata/plate_1.gcode.md5'];
+  const recordedMd5 = recorded === undefined ? undefined : new TextDecoder().decode(recorded).trim().toLowerCase();
+  return {
+    gcode: copyBytes(plate),
+    recordedMd5,
+    md5Verified: recordedMd5 !== undefined && recordedMd5 === md5Hex(copyBytes(plate)),
+    members: names.map((name) => {
+      const member = extracted[name]!;
+      return { name, length: member.byteLength, digest: `sha256:${sha256Hex(copyBytes(member))}` };
+    }),
+  };
+};

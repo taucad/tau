@@ -89,7 +89,7 @@ const moduleOptions = async (input?: WasmInput): Promise<ModuleOptions | undefin
     return { wasmBinary: ordinaryBytes(resolved) };
   }
   if (resolved instanceof ArrayBuffer) {
-    return { wasmBinary: Uint8Array.from(new Uint8Array(resolved)) };
+    return { wasmBinary: new Uint8Array(resolved) };
   }
   if (resolved instanceof Response) {
     return { wasmBinary: new Uint8Array(await resolved.arrayBuffer()) };

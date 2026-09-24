@@ -4856,6 +4856,8 @@ MeshData report_triangle_soup(const TopoDS_Shape& shape) {
     }
     const gp_Trsf transform = location.Transformation();
     const bool mirrored = transform.VectorialPart().Determinant() < 0.0;
+    std::vector<std::optional<std::array<double, 3>>> placed_nodes(
+        static_cast<size_t>(mesh->NbNodes()) + 1);
     for (int triangle = 1; triangle <= mesh->NbTriangles(); ++triangle) {
       int nodes[3]{};
       mesh->Triangle(triangle).Get(nodes[0], nodes[1], nodes[2]);
@@ -4868,12 +4870,19 @@ MeshData report_triangle_soup(const TopoDS_Shape& shape) {
       }
       const uint32_t first = static_cast<uint32_t>(result.positions.size());
       for (int node : nodes) {
+        const size_t index = static_cast<size_t>(node);
+        if (index > 0 && index < placed_nodes.size() && placed_nodes[index]) {
+          result.positions.push_back(*placed_nodes[index]);
+          continue;
+        }
         const gp_Pnt placed = mesh->Node(node).Transformed(transform);
-        result.positions.push_back({
+        const std::array<double, 3> position{
             static_cast<double>(static_cast<float>(placed.X())),
             static_cast<double>(static_cast<float>(placed.Y())),
             static_cast<double>(static_cast<float>(placed.Z())),
-        });
+        };
+        if (index > 0 && index < placed_nodes.size()) placed_nodes[index] = position;
+        result.positions.push_back(position);
       }
       result.triangles.push_back({first, first + 1, first + 2});
     }

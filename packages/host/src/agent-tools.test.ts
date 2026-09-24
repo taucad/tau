@@ -388,19 +388,17 @@ describe('createHostToolRegistry', () => {
     expect(names).toContain('export_geometry');
   });
 
-  it('offers request_print only with a runtime, a history and a machine, and slices through its own export route', async () => {
+  it('offers request_print only with a runtime, a history and a machine, and slices at the requested quality through its own export route', async () => {
     const workspaceRoot = await makeWorkspace();
     const timestamp = '2026-09-24T00:00:00.000Z';
     /* Not a real container: the planner's summary is advisory and covered in its own tests. */
     const sliced = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
-    const runtimeClient = async () =>
-      fakeRuntime({
-        export: vi.fn<HostRuntimeClient['export']>(async () => ({
-          success: true,
-          data: [{ name: 'main.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf', bytes: sliced }],
-          issues: [],
-        })),
-      });
+    const slice = vi.fn<HostRuntimeClient['export']>(async () => ({
+      success: true,
+      data: [{ name: 'main.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf', bytes: sliced }],
+      issues: [],
+    }));
+    const runtimeClient = async () => fakeRuntime({ export: slice });
     const revisions: NonNullable<HostToolRegistryOptions['revisions']> = {
       log: async () => [],
       diff: async () => [],
@@ -486,10 +484,20 @@ describe('createHostToolRegistry', () => {
     const registry = createHostToolRegistry({ workspaceRoot, runtimeClient, revisions, machines });
     expect(registry.list().map((tool) => tool.name)).toContain('request_print');
 
-    const result = await invoke(registry, 'request_print', { targetFile: 'main.ts' });
+    const result = await invoke(registry, 'request_print', {
+      targetFile: 'main.ts',
+      preset: 'fine',
+      options: { walls: 3 },
+    });
     expect(result).toMatchObject({
       isError: false,
       content: { request: { requestId: 'call-1', machineId: 'machine-1', state: 'awaiting-approval' } },
+    });
+    /* The quality the agent asked for is what the slicer receives. */
+    expect(slice).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+      source: { path: 'main.ts' },
+      signal: expect.any(AbortSignal) as AbortSignal,
+      exportOptions: { walls: 3, preset: 'fine' },
     });
     const request = requestPrint.mock.calls[0]![0];
     expect(request.artifact).toMatchObject({
@@ -509,6 +517,15 @@ describe('createHostToolRegistry', () => {
     expect(request.summary).toEqual({ fileName: 'main.gcode.3mf' });
     /* The slice the machine host will read is the one the runtime produced, recorded in the project. */
     expect(new Uint8Array(await readFile(join(workspaceRoot, request.artifact.path)))).toEqual(sliced);
+
+    /* The same registry serves MCP: a slicer key the agent may not choose refuses before slicing. */
+    const refused = await invoke(registry, 'request_print', { targetFile: 'main.ts', options: { engine: 'service' } });
+    expect(refused).toMatchObject({
+      isError: true,
+      content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED', message: expect.stringContaining('"engine"') as string },
+    });
+    expect(slice).toHaveBeenCalledOnce();
+    expect(requestPrint).toHaveBeenCalledOnce();
   });
 
   it('offers both parameter tools only with a native parameter actor and preserves its outcome', async () => {

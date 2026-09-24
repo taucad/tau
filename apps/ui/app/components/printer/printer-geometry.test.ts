@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { parseGcode } from '@taucad/slicer/toolpath';
 import {
   derivePrinterGeometry,
+  framedPrintBox,
   framePrinterCamera,
+  partBounds,
   plateOffsetForHeight,
+  printerCameraFov,
   toolheadLiftForHeight,
 } from '#components/printer/printer-geometry.js';
+import type { PrinterBounds, PrinterCameraPose, PrinterGeometry } from '#components/printer/printer-geometry.js';
+import { fixtureProgram } from '#components/printer/testing/toolpath-fixture.js';
 import { resolvePrinterManifest, x1cReferenceGeometry } from '#components/printer/printer-manifest.fixture.js';
 import type { PrinterManifest } from '#components/printer/printer-manifest.fixture.js';
 
@@ -40,7 +46,8 @@ describe('derivePrinterGeometry', () => {
     expect(x1c.enclosure.center[0]).toBe(128);
     expect(x1c.enclosure.center[1]).toBe(128);
     expect(x1c.plate).toEqual({ center: [128, 128, -2], size: [256, 256, 4] });
-    expect(x1c.envelope).toEqual({ center: [128, 128, 128], size: [256, 256, 256] });
+    // The plate descends through the envelope, so it sits below the nozzle plane in world space.
+    expect(x1c.envelope).toEqual({ center: [128, 128, -128], size: [256, 256, 256] });
   });
 
   it('should keep the nozzle plane at z = 0 with headroom above and the base below', () => {
@@ -91,6 +98,7 @@ describe('derivePrinterGeometry', () => {
     expect(slinger.light).toBeUndefined();
     expect(slinger.panels.every(({ isDoor }) => !isDoor)).toBe(true);
     expect(slinger.toolhead.home).toEqual([1, 1, 1]);
+    expect(slinger.envelope.center[2]).toBe(125);
   });
 
   it('should give a delta three posts and no beam', () => {
@@ -100,17 +108,102 @@ describe('derivePrinterGeometry', () => {
     expect(geometry.gantry.rails.every((rail) => rail.size[2] > 250)).toBe(true);
   });
 
-  it('should frame the whole machine from the front right', () => {
-    const position = framePrinterCamera(x1c, 38);
-    expect(position[0]).toBeGreaterThan(x1c.camera.target[0]);
-    expect(position[1]).toBeLessThan(x1c.camera.target[1]);
-    expect(position[2]).toBeGreaterThan(x1c.camera.target[2]);
-    const distance = Math.hypot(...position.map((value, index) => value - x1c.camera.target[index]!));
-    expect(distance).toBeCloseTo((x1c.camera.radius / Math.sin((38 * Math.PI) / 360)) * 1.05, 6);
-  });
-
   it('should resolve the X1C reference until a manifest arrives', () => {
     expect(resolvePrinterManifest(undefined)).toBe(x1cReferenceGeometry);
     expect(resolvePrinterManifest(bedSlinger)).toBe(bedSlinger);
+  });
+});
+
+/** Where each corner of a box lands on screen for a pose, in normalised device coordinates. */
+const project = (pose: PrinterCameraPose, box: PrinterBounds, aspect: number): Array<readonly [number, number]> => {
+  const forward = pose.target.map((value, axis) => value - pose.position[axis]!);
+  const length = Math.hypot(...forward);
+  const [fx, fy, fz] = forward.map((value) => value / length) as [number, number, number];
+  const across = Math.hypot(fy, fx);
+  const right = [fy / across, -fx / across, 0];
+  const up = [right[1]! * fz, -right[0]! * fz, right[0]! * fy - right[1]! * fx];
+  const tanVertical = Math.tan((printerCameraFov * Math.PI) / 360);
+  const corners = [box.min[0], box.max[0]].flatMap((x) =>
+    [box.min[1], box.max[1]].flatMap((y) => [box.min[2], box.max[2]].map((z) => [x, y, z])),
+  );
+  return corners.map((corner) => {
+    const offset = corner.map((value, axis) => value - pose.position[axis]!);
+    const depth = offset[0]! * fx + offset[1]! * fy + offset[2]! * fz;
+    const x = offset[0]! * right[0]! + offset[1]! * right[1]!;
+    const y = offset[0]! * up[0]! + offset[1]! * up[1]! + offset[2]! * up[2]!;
+    return [x / (depth * tanVertical * aspect), y / (depth * tanVertical)] as const;
+  });
+};
+
+const isOutside = (geometry: PrinterGeometry, point: readonly number[]): boolean =>
+  point.some(
+    (value, axis) => Math.abs(value - geometry.enclosure.center[axis]!) > geometry.enclosure.size[axis]! / 2 + 19.999,
+  );
+
+describe('framing the print', () => {
+  const x1c = derivePrinterGeometry(x1cReferenceGeometry);
+  const part: PrinterBounds = { min: [108, 108, 0], max: [158, 158, 24] };
+
+  it('should widen the part halfway to the plate and span the finished plate to the chamber above the toolhead', () => {
+    const box = framedPrintBox(x1c, part);
+    expect(box.min[0]).toBeCloseTo(108 * 0.5, 6);
+    expect(box.max[0]).toBeCloseTo(158 + 98 * 0.5, 6);
+    expect(box.min[1]).toBeCloseTo(108 * 0.5, 6);
+    // X1C: the plate descends 24 mm below the nozzle plane; the carriage tops out 44 mm above it, plus 50 mm of chamber.
+    expect(box.min[2]).toBe(-28);
+    expect(box.max[2]).toBe(94);
+    const slinger = framedPrintBox(derivePrinterGeometry(bedSlinger), { min: [90, 90, 0], max: [130, 130, 30] });
+    expect([slinger.min[2], slinger.max[2]]).toEqual([-4, 124]);
+    // A toolpath that wanders off the plate never widens the framing past it.
+    const wide = framedPrintBox(x1c, { min: [-40, 0, 0], max: [300, 265, 10] });
+    expect([wide.min[0], wide.max[0], wide.max[1]]).toEqual([0, 256, 256]);
+  });
+
+  it('should keep the whole box in view from the front right at every pane shape, outside the enclosure', () => {
+    const box = framedPrintBox(x1c, part);
+    for (const aspect of [0.59, 0.8, 1, 1.78, 2.4]) {
+      const pose = framePrinterCamera(x1c, box, aspect);
+      expect(pose.position[0]).toBeGreaterThan(pose.target[0]);
+      expect(pose.position[1]).toBeLessThan(pose.target[1]);
+      expect(pose.position[2]).toBeGreaterThan(pose.target[2]);
+      expect(isOutside(x1c, pose.position)).toBe(true);
+      const corners = project(pose, box, aspect);
+      expect(Math.max(...corners.flat().map((value) => Math.abs(value)))).toBeLessThanOrEqual(0.88 + 1e-9);
+      // Centred across: the left and right extremes balance.
+      const across = corners.map(([x]) => x);
+      expect(Math.abs(Math.max(...across) + Math.min(...across))).toBeLessThan(0.1);
+    }
+  });
+
+  it('should fill a narrow pane edge to edge and step back rather than enter the enclosure', () => {
+    const box = framedPrintBox(x1c, part);
+    const narrow = project(framePrinterCamera(x1c, box, 0.59), box, 0.59);
+    expect(Math.max(...narrow.map(([x]) => Math.abs(x)))).toBeCloseTo(0.88, 6);
+    // A box this small in a wide pane would pull the eye inside the chamber; it stays outside and frames looser.
+    const tiny: PrinterBounds = { min: [126, 126, 0], max: [130, 130, 2] };
+    const pose = framePrinterCamera(x1c, tiny, 2.4);
+    expect(isOutside(x1c, pose.position)).toBe(true);
+    expect(
+      Math.max(
+        ...project(pose, tiny, 2.4)
+          .flat()
+          .map((value) => Math.abs(value)),
+      ),
+    ).toBeLessThan(0.88);
+  });
+});
+
+describe('partBounds', () => {
+  it('should measure walls and infill from the plate, leaving out the purge line, home moves and end lift', () => {
+    const program = fixtureProgram({ layers: 5, size: 30 });
+    // The whole toolpath runs from home through the front purge line to the 50 mm end lift.
+    expect(program.bounds).toEqual({ min: [0, 0, 0], max: [138, 138, 50] });
+    expect(partBounds(program)).toEqual({ min: [108, 108, 0], max: [138, 138, 1] });
+  });
+
+  it('should report no part when the G-code labels no walls, infill or support', () => {
+    const program = parseGcode('M104 S200\nG28\nG90\nM83\nG1 X10 Y10 Z0.2 F3000\nG1 X20 Y10 E1\n');
+    expect(program.segmentCount).toBe(2);
+    expect(partBounds(program)).toBeUndefined();
   });
 });

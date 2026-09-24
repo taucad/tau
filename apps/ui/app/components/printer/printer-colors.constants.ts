@@ -29,8 +29,9 @@ export const printerBody = {
   carriage: '#b3bcc6',
   nozzle: '#d9c27a',
   nozzleGlow: '#ff7a2a',
-  materialUnit: '#d8dde3',
-  spool: '#6f7a86',
+  /** The material unit sits at the top of the frame as context, so it stays close to the background. */
+  materialUnit: { light: '#d8dde3', dark: '#2c3238' },
+  spool: { light: '#b9c1ca', dark: '#3b424a' },
   chute: '#3f454d',
   lightOn: '#fff2c4',
   lightOff: '#4a4f57',
@@ -44,8 +45,11 @@ export const printerToolpath = {
   purge: '#e0a15a',
   travel: { light: '#c9ced6', dark: '#3a3f47' },
   unknown: '#b45fc9',
-  /** Layers below the active one drift toward this with depth. */
-  muted: { light: '#dfe3e8', dark: '#2a2f36' },
+  /**
+   * Layers below the active one drift toward this with depth. The plate is dark in both themes, so both
+   * drift toward shade: a light target washed the whole print out to pink on the light theme.
+   */
+  muted: { light: '#3b4048', dark: '#2a2f36' },
   /** The active layer and the fresh-filament trail brighten toward this. */
   highlight: '#ffffff',
 } as const;

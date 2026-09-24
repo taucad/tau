@@ -1,0 +1,35 @@
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+@@ -6227,15 +6227,6 @@
+       continue;
+     }
+-
++
+-    // Access representation items
+-    NCollection_Sequence<occ::handle<StepRepr_RepresentationItem>> aReprItems;
+-    collectRepresentationItems(Graph, aShapeRepr, aReprItems);
+-
+-    if (aReprItems.Length() == 0)
+-    {
+-      continue;
+-    }
+-
+     if (!myMap.IsBound(aRootShape))
+     {
+       continue;
+@@ -6245,6 +6236,15 @@
+     // Do not add subshapes to assembly,
+     // they will be processed with corresponding Shape_Product_Definition of necessary part.
+     if (ShapeTool->IsAssembly(aRootLab))
++    {
++      continue;
++    }
++
++    // Access representation items
++    NCollection_Sequence<occ::handle<StepRepr_RepresentationItem>> aReprItems;
++    collectRepresentationItems(Graph, aShapeRepr, aReprItems);
++
++    if (aReprItems.Length() == 0)
+     {
+       continue;
+     }

@@ -1,0 +1,34 @@
+--- a/src/ModelingAlgorithms/TKShHealing/ShapeFix/ShapeFix_IntersectionTool.cxx
++++ b/src/ModelingAlgorithms/TKShHealing/ShapeFix/ShapeFix_IntersectionTool.cxx
+@@ -1064,7 +1064,13 @@
+   bool isDone     = false;
+   for (int num1 = 1; num1 < sewd->NbEdges() && NbSplit < 30; num1++)
+   {
+-    // for each edge from first wire
++    // Keep the outer edge while the wire is unchanged. Each successful cut, split,
++    // replacement or removal increments one of these counters before the next pair.
++    TopoDS_Edge edge1          = sewd->Edge(num1);
++    int         seenSplit      = NbSplit;
++    int         seenCut        = NbCut;
++    int         seenReplaced   = nbReplaced;
++    int         seenRemoved    = NbRemoved;
+     for (int num2 = num1 + 2; num2 <= sewd->NbEdges() && NbSplit < 30; num2++)
+     {
+       // for each edge from second wire
+@@ -1072,7 +1078,15 @@
+       {
+         continue;
+       }
+-      TopoDS_Edge edge1 = sewd->Edge(num1);
++      if (seenSplit != NbSplit || seenCut != NbCut || seenReplaced != nbReplaced
++          || seenRemoved != NbRemoved)
++      {
++        edge1        = sewd->Edge(num1);
++        seenSplit    = NbSplit;
++        seenCut      = NbCut;
++        seenReplaced = nbReplaced;
++        seenRemoved  = NbRemoved;
++      }
+       TopoDS_Edge edge2 = sewd->Edge(num2);
+       if (edge1.IsSame(edge2))
+       {

@@ -11,19 +11,45 @@ import * as THREE from 'three';
 const scratchCameraWorldQuaternionForLighting = new THREE.Quaternion();
 
 // ── Lighting constants ─────────────────────────────────────────────────────
-/** Ambient fill -- provides base illumination floor so no surface is fully dark. */
-export const ambientBaseIntensity = 0.6;
+/** Low diffuse fill; metallic readability comes from the room environment. */
+export const ambientBaseIntensity = 0.1;
 
 /**
- * Camera-relative diffuse key, calibrated with ACES exposure 0.5.
+ * Camera-relative diffuse key, calibrated with Neutral tone mapping at exposure 1.
  */
-export const headlampBaseIntensity = 2.5;
+export const headlampBaseIntensity = 1.5;
 
 /**
  * Environment reflections supplement the directional key without washing out
  * the surface gradient. Projection changes preserve the same light energy.
  */
-export const environmentBaseIntensity = 0.09;
+export const environmentBaseIntensity = 1;
+
+/** Explicit studio controls; material roughness and metalness remain authored properties. */
+export type StudioLightingSettings = {
+  environment: 'studio' | 'room' | 'white' | 'none';
+  ambientIntensity: number;
+  headlampIntensity: number;
+  environmentIntensity: number;
+  keyIntensity: number;
+  keySize: number;
+  fillIntensity: number;
+  /** Minimum linear radiance across the studio; added to every reflection card. */
+  backgroundIntensity: number;
+  exposure: number;
+};
+
+export const defaultStudioLighting: StudioLightingSettings = {
+  environment: 'room',
+  ambientIntensity: ambientBaseIntensity,
+  headlampIntensity: headlampBaseIntensity,
+  environmentIntensity: environmentBaseIntensity,
+  keyIntensity: 64,
+  keySize: 1.2,
+  fillIntensity: 1,
+  backgroundIntensity: 0,
+  exposure: 1,
+};
 
 // ── Dark-mode theme constants ──────────────────────────────────────────────
 

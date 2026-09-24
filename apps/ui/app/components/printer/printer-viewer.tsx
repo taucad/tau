@@ -22,6 +22,7 @@ import type { PlaybackSpeed } from '#components/printer/printer-playback.js';
 import { loadPrinterProgram } from '#components/printer/printer-program.js';
 import { PrinterScene } from '#components/printer/printer-scene.js';
 import { usePrinterLive } from '#components/printer/use-printer-live.js';
+import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
 import type { FileViewerRenderRequest } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
 type PrinterViewerProps = Readonly<{
@@ -121,15 +122,26 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
   return renderPane({ body: <PrinterSimulation name={name} program={resource.program} /> });
 }
 
+/**
+ * The printer the scene draws: the followed machine's own manifest, or the X1C
+ * reference until one is bound and its providers load.
+ *
+ * @param live - The machine the viewer follows, when there is one.
+ * @returns The resolved manifest and the scene geometry derived from it.
+ */
+const usePrinterGeometry = (live: PrinterLiveState | undefined) => {
+  const manifest = resolvePrinterManifest(live?.manifest);
+  const geometry = useMemo(() => derivePrinterGeometry(manifest), [manifest]);
+  return { manifest, geometry };
+};
+
 function PrinterSimulation({ name, program }: Readonly<{ name: string; program: ToolpathProgram }>): React.JSX.Element {
   const isReducedMotion = useSyncExternalStore(subscribeMotion, getMotion, serverMotion);
   const { theme } = useTheme();
   const live = usePrinterLive();
   const hintId = useId();
   const [sceneError, setSceneError] = useState<string>();
-  // The directory carries no manifest yet; the seam resolves to the X1C reference.
-  const manifest = resolvePrinterManifest(undefined);
-  const geometry = useMemo(() => derivePrinterGeometry(manifest), [manifest]);
+  const { manifest, geometry } = usePrinterGeometry(live);
   // One cursor per loaded program; the parent remounts this tree when the file changes.
   const [store] = useState(() => createPlaybackStore(program, { isPlaying: !getMotion() }));
   const prefix = useMemo(() => createExtrusionPrefix(program), [program]);

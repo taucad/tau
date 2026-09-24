@@ -2,9 +2,9 @@
  * Reference machine facts for the printer simulation scene.
  *
  * The scene reads the geometry, chamber and material-system parts of a
- * `MachineManifest`. The Bambu provider will carry its own manifest; until the
- * machine directory hands one over, the X1C reference below stands in so the
- * viewer draws a real enclosure rather than a placeholder box.
+ * `MachineManifest`. The viewer draws the followed machine's provider manifest;
+ * before a machine is bound, or while its providers load, the X1C reference
+ * below stands in so the viewer draws a real enclosure rather than a placeholder box.
  *
  * @module
  */

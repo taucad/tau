@@ -483,7 +483,7 @@ describe('committed parameter edit', () => {
 
       const published = await client.export('glb');
       if (!published.success || !published.data[0]) {
-        throw new Error('Expected the repeated render to remain published');
+        throw new Error(`Expected the repeated render to remain published: ${JSON.stringify(published)}`);
       }
       const bounds = getBoundingBoxFromInspect(await getInspectReport(published.data[0].bytes));
       expect(bounds?.size[0]).toBeCloseTo(0.04);

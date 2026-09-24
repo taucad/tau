@@ -93,6 +93,7 @@ const qualificationOrder: readonly Qualification[] = ['qualified', 'designed', '
 const configurationUnits: Units = { length: { displaySymbol: 'mm' } };
 const transientEdit: ParameterEdit = { kind: 'transient' };
 const noValues: Record<string, unknown> = {};
+const noFields: readonly string[] = [];
 /** A read-only form keeps nothing: the host offers no update for a configuration it shows. */
 const keepDeclaredValues = (): void => undefined;
 
@@ -182,11 +183,9 @@ const withholdArrayGrowth = (node: unknown): void => {
   }
 };
 
-/** What a configuration form shows: the draft-07 schema the renderer reads, and every value it declares. */
-export type ConfigurationFieldsView = Readonly<{ schema: RJSFSchema; values: Record<string, unknown> }>;
-
+/** A form's view: the draft-07 schema the renderer reads and every value the declaration gives. */
 type ConfigurationView =
-  | (ConfigurationFieldsView & Readonly<{ status: 'ready'; manifest: ParameterManifest }>)
+  | Readonly<{ status: 'ready'; manifest: ParameterManifest; schema: RJSFSchema; values: Record<string, unknown> }>
   | Readonly<{ status: 'unavailable'; reason: string }>;
 
 /** Which provider configuration a form shows (`binding` or `submission`), and whether it only shows its values. */
@@ -348,8 +347,7 @@ function ActionRow({ action }: { readonly action: MachineActionDescriptor }): Re
  * the shown defaults.
  *
  * @param properties - The provider and configuration; for a flow that chooses values, the chosen
- * values, the change handler, and `present`, what the flow puts over the declaration (fields the
- * host fills itself, names, starting values).
+ * values, the change handler, and `omit`, the fields the flow fills itself and so does not offer.
  * @returns The fields, or why they cannot be shown.
  */
 export function ConfigurationFields({
@@ -358,20 +356,31 @@ export function ConfigurationFields({
   configuration,
   values = noValues,
   onChange,
-  present,
+  omit = noFields,
 }: {
   readonly providerId: string;
   readonly name: string;
   readonly configuration: ConfigurationManifestV1;
   readonly values?: Record<string, unknown>;
   readonly onChange?: (values: Record<string, unknown>) => void;
-  readonly present?: (view: ConfigurationFieldsView) => ConfigurationFieldsView;
+  readonly omit?: readonly string[];
 }): React.JSX.Element {
   const compiled = useConfigurationView({ providerId, name, configuration, isReadOnly: onChange === undefined });
-  const view = useMemo(
-    () => (compiled?.status === 'ready' && present !== undefined ? { ...compiled, ...present(compiled) } : compiled),
-    [compiled, present],
-  );
+  const view = useMemo(() => {
+    if (compiled?.status !== 'ready' || omit.length === 0) {
+      return compiled;
+    }
+    const { properties = {}, required = [] } = compiled.schema;
+    const offered = Object.entries(properties).filter(([key]) => !omit.includes(key));
+    return {
+      ...compiled,
+      schema: {
+        ...compiled.schema,
+        properties: Object.fromEntries(offered),
+        required: required.filter((key) => !omit.includes(key)),
+      },
+    };
+  }, [compiled, omit]);
   if (view === undefined) {
     return (
       <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>

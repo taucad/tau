@@ -422,8 +422,9 @@ export function RevisionBranches({
           const isCurrent = branch.name === currentBranch;
           const conflict = conflicts.find((entry) => entry.branch === branch.name);
           const fact = branchFacts.get(branch.name);
+          /* An unplaced chat has no checkout id; a remote-only branch has none either, and must not claim it. */
           const placedChats = Object.entries(chatCheckoutIds).filter(
-            ([, checkoutId]) => checkoutId === branch.checkoutId,
+            ([, checkoutId]) => checkoutId !== undefined && checkoutId === branch.checkoutId,
           );
           /* What *Use in this chat* would do, when it would change anything: an unplaced chat works in the live checkout. */
           const placement =

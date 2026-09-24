@@ -20,6 +20,7 @@ import { useProject } from '#hooks/use-project.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
+import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 import {
   getHostFinalizedTurns,
@@ -581,6 +582,28 @@ export const browserWorkspaceAuthorityTestApi = {
 };
 
 /** Places this project's browser turns on the worker's revision root. */
+/**
+ * The root's projection, waiting for its first one when none has arrived.
+ *
+ * The route opens the root only once its GitHub credential is minted (D36), so an
+ * attach composed at chat open can come before the checkout it must name.
+ *
+ * @param client - The project's revision client.
+ * @returns The projection.
+ */
+const firstStatus = async (client: RevisionClient): Promise<RevisionStatusProjection> =>
+  client.status() ??
+  new Promise((resolve) => {
+    // ponytail: never settles if the root closes first; the attach is dropped with its chat.
+    const stop = client.subscribe(() => {
+      const status = client.status();
+      if (status !== undefined) {
+        stop();
+        resolve(status);
+      }
+    });
+  });
+
 export function ChatWorkspaceAuthorityProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const { projectId } = useProject();
   const fileManager = useFileManager();
@@ -960,7 +983,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
        * resolves it — minus the `admitTurn` that would lease it. The root's own
        * checkout is the last resort: a chat with no turn yet has no checkout of
        * its own, and a project with no checkout at all has no log to attach to. */
-      const status = revisions?.status();
+      const status = revisions === undefined ? undefined : await firstStatus(revisions);
       const checkoutId = placed ?? state.conflicts.get(chatId)?.checkoutId ?? chat?.checkoutId ?? status?.checkoutId;
       if (checkoutId === undefined) {
         return undefined;

@@ -49,7 +49,11 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getHostFinalizedTurns: () => settlements,
   subscribeHostFinalizedTurns: () => () => undefined,
 }));
-const chats = [{ id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' }];
+const chats = [
+  { id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' },
+  /* Unplaced: it works in the live checkout. */
+  { id: 'chat-2', name: 'Sketch lid', checkoutId: undefined },
+];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
 const placeChat = vi.fn(async () => undefined);
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
@@ -750,6 +754,25 @@ describe('Revisions pane closeout', () => {
     renderPane();
 
     expect(await screen.findByText('Linked')).toBeInTheDocument();
+  });
+
+  it('places no chat on a remote-only branch, which has no checkout (D37)', async () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      checkoutId: 'live',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        { name: 'upstream-only', head: undefined, checkoutId: undefined, checkoutRoot: undefined, leaseChatIds: [] },
+      ],
+    };
+
+    renderPane();
+
+    const badge = await screen.findByText('Remote only');
+    const remote = badge.closest('li');
+    expect(remote).not.toBeNull();
+    expect(remote).not.toHaveTextContent('Sketch lid');
   });
 
   it('asks for no diff it does not render, including inside the closed Earlier fold (C52)', async () => {

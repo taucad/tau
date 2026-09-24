@@ -1,6 +1,11 @@
 import { AtSign, Eye, EyeOff, FileBox, Focus, EllipsisVertical, RotateCcw, Target } from 'lucide-react';
 import type { ActorRefFrom } from 'xstate';
-import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentReference } from '@taucad/types';
+import type {
+  GeometryComponentAppearance,
+  GeometryComponentManifest,
+  GeometryComponentNode,
+  GeometryComponentReference,
+} from '@taucad/types';
 import { geometryReferenceToToken, useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@taucad/ui/components/context-menu';
 import {
@@ -19,7 +24,7 @@ import {
   MenuSliderItem,
   preventMenuSliderEscapeDismissal,
 } from '#components/ui/menu-slider-item.js';
-import { menuItemVariants, menuSeparatorVariants } from '@taucad/ui/components/menu.variants';
+import { menuItemVariants, menuLabelVariants, menuSeparatorVariants } from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
@@ -147,13 +152,23 @@ export function ModelComponentActionContextContent({
 function ModelComponentDropdownItems(data: ModelComponentActionMenuData): React.JSX.Element {
   const descriptors = useModelComponentActionDescriptors(data);
 
-  return <>{descriptors.map((descriptor) => renderDropdownActionDescriptor(descriptor))}</>;
+  return (
+    <>
+      <ModelComponentMaterialSummary node={data.node} />
+      {descriptors.map((descriptor) => renderDropdownActionDescriptor(descriptor))}
+    </>
+  );
 }
 
 function ModelComponentContextMenuItems(data: ModelComponentActionMenuData): React.JSX.Element {
   const descriptors = useModelComponentActionDescriptors(data);
 
-  return <>{descriptors.map((descriptor) => renderContextActionDescriptor(descriptor))}</>;
+  return (
+    <>
+      <ModelComponentMaterialSummary node={data.node} />
+      {descriptors.map((descriptor) => renderContextActionDescriptor(descriptor))}
+    </>
+  );
 }
 
 export function ModelComponentViewerMenuItems({
@@ -162,7 +177,83 @@ export function ModelComponentViewerMenuItems({
 }: ModelComponentActionMenuData & { readonly onRequestClose: () => void }): React.JSX.Element {
   const descriptors = useModelComponentActionDescriptors(data);
 
-  return <>{descriptors.map((descriptor) => renderViewerActionDescriptor(descriptor, onRequestClose))}</>;
+  return (
+    <>
+      <ModelComponentMaterialSummary node={data.node} />
+      {descriptors.map((descriptor) => renderViewerActionDescriptor(descriptor, onRequestClose))}
+    </>
+  );
+}
+
+type SurfaceMaterials = NonNullable<GeometryComponentAppearance['materials']>;
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- This text reports the glTF format's material default; it is not a UI palette or style.
+const gltfDefaultBaseColorLabel = '#ffffff';
+
+function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'metalness' | 'roughness'): string {
+  const values = new Map<string, { explicit: number; defaulted: number }>();
+  for (const material of materials) {
+    const value = material[factor];
+    const isUnused = factor !== 'color' && material.isUnlit;
+    const label = isUnused
+      ? 'Not used (unlit)'
+      : value === 'unavailable'
+        ? 'Unavailable'
+        : String(value ?? (factor === 'color' ? gltfDefaultBaseColorLabel : 1));
+    const counts = values.get(label) ?? { explicit: 0, defaulted: 0 };
+    if (!isUnused && value === undefined) {
+      counts.defaulted++;
+    } else {
+      counts.explicit++;
+    }
+    values.set(label, counts);
+  }
+  const labels = [...values].map(([value, counts]) => {
+    if (counts.defaulted === 0) {
+      return value;
+    }
+    return `${value} (${counts.explicit > 0 ? 'includes glTF default' : 'glTF default'})`;
+  });
+  return labels.length === 1 ? labels[0]! : `Mixed: ${labels.join(', ')}`;
+}
+
+export function ModelComponentMaterialSummary({
+  node,
+}: {
+  readonly node: GeometryComponentNode;
+}): React.JSX.Element | undefined {
+  const materials = node.appearance?.materials;
+  if (!materials?.length) {
+    return undefined;
+  }
+
+  return (
+    <>
+      <div role='group' aria-label={`Material for ${node.name}`}>
+        <div className={menuLabelVariants()}>Material factors</div>
+        <dl className='space-y-1 px-3 pb-2 text-xs text-foreground'>
+          <div className='flex justify-between gap-4'>
+            <dt className='text-muted-foreground'>Base color</dt>
+            <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+              {formatMaterialValues(materials, 'color')}
+            </dd>
+          </div>
+          <div className='flex justify-between gap-4'>
+            <dt className='text-muted-foreground'>Metalness</dt>
+            <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+              {formatMaterialValues(materials, 'metalness')}
+            </dd>
+          </div>
+          <div className='flex justify-between gap-4'>
+            <dt className='text-muted-foreground'>Roughness</dt>
+            <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+              {formatMaterialValues(materials, 'roughness')}
+            </dd>
+          </div>
+        </dl>
+      </div>
+      <div role='separator' className={menuSeparatorVariants()} />
+    </>
+  );
 }
 
 function useModelComponentActionDescriptors(

@@ -15,7 +15,12 @@
       "inputs": [
         "{projectRoot}/src/extract-replicad-api.ts",
         "{workspaceRoot}/node_modules/replicad/dist/replicad.d.ts",
-        "sharedGlobals"
+        "sharedGlobals",
+        "{workspaceRoot}/packages/plugins/replicad/src/model.ts",
+        "{workspaceRoot}/packages/plugins/replicad/src/annotations/interface-declarations.ts",
+        "{workspaceRoot}/packages/core/geometry/src/utils/glb-material.ts",
+        "{workspaceRoot}/libs/types/src/types/json-value.types.ts",
+        "{workspaceRoot}/pnpm-lock.yaml"
       ],
       "outputs": ["{projectRoot}/src/generated/replicad"]
     },

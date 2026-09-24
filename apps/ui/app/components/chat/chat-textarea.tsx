@@ -4,8 +4,6 @@ import type { ActorRefFrom } from 'xstate';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
-import { ChatTextareaMobile } from '#components/chat/chat-textarea-mobile.js';
-import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
 import { ChatTextareaSkeleton } from '#components/chat/chat-textarea-skeleton.js';
 import { useProject } from '#hooks/use-project.js';
@@ -27,8 +25,8 @@ import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
 
 /**
- * Main chat textarea component that conditionally renders either the
- * desktop or mobile version based on the `useIsMobile()` hook.
+ * Main chat textarea: one composer on every device (C11) — a phone gets the
+ * same editor, menus, meter and bar, and its pickers open as drawers.
  *
  * All logic is shared via the `useChatTextareaLogic` hook.
  * Project context data (treeService, chats) is fetched here and passed
@@ -44,16 +42,12 @@ export const ChatTextarea = memo(function ({
   className,
   enableContextActions = true,
   enableKernelSelector = true,
-  creationLocationControls,
+  creationLocationControl,
   isSubmitDisabled = false,
   mode = 'main',
 }: ChatTextareaProperties): React.JSX.Element {
-  const isMobile = useIsMobile();
-
-  // Mutable ref populated by ChatTextareaDesktop (or, on mobile, by an effect
-  // below) so that drops anywhere on the outer container can route file/editor
-  // chips into the platform-appropriate sink (Tiptap node insert vs `@<path>`
-  // text append).
+  // Mutable refs populated by ChatTextareaDesktop so that drops anywhere on the
+  // outer container can route file/editor chips into Tiptap nodes.
   const addContextChipsRef = useRef<((paths: string[]) => void) | undefined>(undefined);
   const addContextReferencesRef = useRef<((references: ChatContextReference[]) => void) | undefined>(undefined);
   const { registerContextReferenceInserter } = useChatContextInsertion();
@@ -119,7 +113,6 @@ export const ChatTextarea = memo(function ({
   // Mutable ref populated by ChatTextareaDesktop so the imperative handle
   // can focus the Tiptap editor instead of the (non-existent) <textarea>
   const focusEditorRef = useRef<(() => void) | undefined>(undefined);
-  const closeOptionsRef = useRef<(() => void) | undefined>(undefined);
 
   useImperativeHandle(
     ref,
@@ -130,9 +123,6 @@ export const ChatTextarea = memo(function ({
         } else {
           logic.focusInput();
         }
-      },
-      closeOptions: () => {
-        closeOptionsRef.current?.();
       },
     }),
     [logic.focusInput],
@@ -201,23 +191,12 @@ export const ChatTextarea = memo(function ({
   const handleAddImageRef = useRef(logic.handleAddImage);
   const imageInputSupportedRef = useRef(logic.imageInputSupported);
   const rejectUnsupportedImageInputRef = useRef(logic.rejectUnsupportedImageInput);
-  const handleAddTextRef = useRef(logic.handleAddText);
-  const inputTextRefForChips = useRef(logic.inputText);
   useEffect(() => {
     projectContextRef.current = projectContext;
     handleAddImageRef.current = logic.handleAddImage;
     imageInputSupportedRef.current = logic.imageInputSupported;
     rejectUnsupportedImageInputRef.current = logic.rejectUnsupportedImageInput;
-    handleAddTextRef.current = logic.handleAddText;
-    inputTextRefForChips.current = logic.inputText;
-  }, [
-    logic.handleAddImage,
-    logic.handleAddText,
-    logic.imageInputSupported,
-    logic.inputText,
-    logic.rejectUnsupportedImageInput,
-    projectContext,
-  ]);
+  }, [logic.handleAddImage, logic.imageInputSupported, logic.rejectUnsupportedImageInput, projectContext]);
 
   /**
    * Resolve the per-view graphics actor whose pane currently shows `entryPath`.
@@ -330,103 +309,11 @@ export const ChatTextarea = memo(function ({
     [captureEntry],
   );
 
-  // Mobile drag-drop chip insertion: append `@<path>` segments and lean on the
-  // existing draft-text rehydration to render them as chips.
-  useEffect(() => {
-    if (!isMobile) {
-      return;
-    }
-    addContextChipsRef.current = (paths: string[]): void => {
-      if (paths.length === 0) {
-        return;
-      }
-      const segment = paths.map((path) => `@${path}`).join(' ');
-      const needsLeadingSpace = inputTextRefForChips.current.length > 0 && !inputTextRefForChips.current.endsWith(' ');
-      handleAddTextRef.current(`${needsLeadingSpace ? ' ' : ''}${segment} `);
-    };
-    addContextReferencesRef.current = (references: ChatContextReference[]): void => {
-      if (references.length === 0) {
-        return;
-      }
-      const segment = references
-        .map((reference) => reference.referenceToken ?? `@${reference.path ?? reference.label}`)
-        .join(' ');
-      const needsLeadingSpace = inputTextRefForChips.current.length > 0 && !inputTextRefForChips.current.endsWith(' ');
-      handleAddTextRef.current(`${needsLeadingSpace ? ' ' : ''}${segment} `);
-    };
-    return () => {
-      addContextChipsRef.current = undefined;
-      addContextReferencesRef.current = undefined;
-    };
-  }, [isMobile]);
-
   const skeleton = <ChatTextareaSkeleton className={className} />;
   /* A paused run is answered from the composer, not the transcript. Only the
    * main composer, and only under a real session: the new-project composer runs
    * on `ChatComposerProvider`, which has no chat to be paused. */
   const approvalBanner = mode === 'main' && projectContext && session ? <ChatApprovalBanner /> : undefined;
-
-  if (isMobile) {
-    return (
-      <ClientOnly fallback={skeleton}>
-        {approvalBanner}
-        <ChatTextareaMobile
-          className={className}
-          enableAutoFocus={enableAutoFocus}
-          enableContextActions={enableContextActions}
-          enableKernelSelector={enableKernelSelector}
-          creationLocationControl={creationLocationControls?.field}
-          isSubmitDisabled={logic.isSubmitDisabled}
-          // State
-          dragKind={logic.dragKind}
-          showContextMenu={logic.showContextMenu}
-          contextSearchQuery={logic.contextSearchQuery}
-          selectedMenuIndex={logic.selectedMenuIndex}
-          isSubmitting={logic.isSubmitting}
-          inputText={logic.inputText}
-          attachments={logic.attachments}
-          attachmentDirectory={logic.attachmentDirectory}
-          sendBlockReason={logic.sendBlockReason}
-          attachmentAccept={logic.attachmentAccept}
-          attachmentInputSupported={logic.attachmentInputSupported}
-          selectedToolChoice={logic.selectedToolChoice}
-          status={logic.status}
-          selectedModel={logic.selectedModel}
-          imageInputSupported={logic.imageInputSupported}
-          formattedCancelKeyCombination={logic.formattedCancelKeyCombination}
-          // Refs
-          textareaReference={logic.textareaReference}
-          fileInputReference={logic.fileInputReference}
-          containerReference={logic.containerReference}
-          closeOptionsRef={closeOptionsRef}
-          // Handlers
-          handleSubmit={logic.handleSubmit}
-          handleCancelClick={logic.handleCancelClick}
-          handleTextareaKeyDown={logic.handleTextareaKeyDown}
-          handleDragOver={logic.handleDragOver}
-          handleDragLeave={logic.handleDragLeave}
-          handleDrop={logic.handleDrop}
-          handlePaste={logic.handlePaste}
-          handleFileSelect={logic.handleFileSelect}
-          handleFileChange={logic.handleFileChange}
-          handleTextChange={logic.handleTextChange}
-          handleContextMenuSelect={logic.handleContextMenuSelect}
-          handleContextImageAdd={logic.handleContextImageAdd}
-          handleAddText={logic.handleAddText}
-          handleAddImage={logic.handleAddImage}
-          handleTextareaBlur={logic.handleTextareaBlur}
-          handlePointerDown={logic.handlePointerDown}
-          focusInput={logic.focusInput}
-          removeAttachment={logic.removeAttachment}
-          setShowContextMenu={logic.setShowContextMenu}
-          setAtSymbolPosition={logic.setAtSymbolPosition}
-          setContextSearchQuery={logic.setContextSearchQuery}
-          setSelectedMenuIndex={logic.setSelectedMenuIndex}
-          setDraftToolChoice={logic.setDraftToolChoice}
-        />
-      </ClientOnly>
-    );
-  }
 
   return (
     <ClientOnly fallback={skeleton}>
@@ -436,21 +323,20 @@ export const ChatTextarea = memo(function ({
         enableAutoFocus={enableAutoFocus}
         enableContextActions={enableContextActions}
         enableKernelSelector={enableKernelSelector}
-        creationLocationControl={creationLocationControls?.toolbar}
+        creationLocationControl={creationLocationControl}
         isSubmitDisabled={logic.isSubmitDisabled}
+        mode={mode}
         // State
         dragKind={logic.dragKind}
         isSubmitting={logic.isSubmitting}
+        isAttaching={logic.isAttaching}
         inputText={logic.inputText}
         attachments={logic.attachments}
         attachmentDirectory={logic.attachmentDirectory}
         sendBlockReason={logic.sendBlockReason}
         attachmentAccept={logic.attachmentAccept}
         attachmentInputSupported={logic.attachmentInputSupported}
-        selectedToolChoice={logic.selectedToolChoice}
         status={logic.status}
-        selectedModel={logic.selectedModel}
-        imageInputSupported={logic.imageInputSupported}
         formattedCancelKeyCombination={logic.formattedCancelKeyCombination}
         // Context data for Tiptap
         treeService={treeService}
@@ -479,7 +365,6 @@ export const ChatTextarea = memo(function ({
         onEscapePressed={onEscapePressed}
         handleTextareaBlur={logic.handleTextareaBlur}
         removeAttachment={logic.removeAttachment}
-        setDraftToolChoice={logic.setDraftToolChoice}
       />
     </ClientOnly>
   );

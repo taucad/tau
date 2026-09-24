@@ -107,25 +107,63 @@ export const connectPickedFolder = async (session: DesktopSession): Promise<void
 export const selectChatModel = async (page: Page, modelName: string): Promise<void> => {
   await parkPointer(page);
   await composerOf(page).click();
+  /* The shortcut opens the agent sheet; its model row drills into the list. */
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Slash' : 'Control+Slash');
-  /* A cloud-enabled build renders the credit estimate inside the option, so
-   * its accessible name is "Haiku 4.5 ≈ 30.84 credits": match the name as a
-   * whole leading word, not the exact string. */
+  await page.getByRole('button', { name: /^Model: .*\. Change$/u }).click();
+  /* From an external agent the list opens on that agent's tab. */
+  const tauTab = page.getByRole('tablist', { name: 'Agent' }).getByRole('tab', { name: /^Tau/u });
+  if (await tauTab.isVisible()) {
+    await tauTab.click();
+  }
+  /* The selected row carries its level after the name ("Haiku 4.5High"), so
+   * match the name as the option's leading text, not the exact string. */
   const escaped = modelName.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
   await page
-    .getByRole('option', { name: new RegExp(String.raw`^${escaped}(?:\s|$)`, 'u') })
+    .getByRole('option', { name: new RegExp(`^${escaped}`, 'u') })
     .first()
     .click();
+  await page.keyboard.press('Escape');
 };
 
-/** Select a model from the active external agent's own model namespace. */
-export const selectAgentModel = async (page: Page, modelName: string): Promise<void> => {
+/**
+ * Open the agent sheet's model list and read back the agents it offers.
+ *
+ * @param page - The desktop page.
+ * @returns Every agent tab's name, in order — e.g. `Codex` or `Claude Code, unavailable`.
+ */
+export const openAgentList = async (page: Page): Promise<readonly string[]> => {
   await parkPointer(page);
   await page
-    .getByRole('button', { name: /^Select model \(/u })
+    .getByRole('button', { name: /^Agent and model: /u })
     .first()
     .click();
-  await page.getByRole('option', { name: modelName, exact: true }).first().click();
+  await page.getByRole('button', { name: /^Model: .*\. Change$/u }).click();
+  const tabs = page.getByRole('tablist', { name: 'Agent' }).getByRole('tab');
+  await expectVisible(tabs.first());
+  return tabs.evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label') ?? ''));
+};
+
+/**
+ * Place the chat on one of an agent's models, from the agent sheet.
+ *
+ * @param page - The desktop page.
+ * @param agentName - The agent's tab name, e.g. `Codex`.
+ * @param modelName - The agent's own model name; absent takes the agent's first row.
+ * @returns The sheet's *Runs on* note for the placed agent, read before the sheet closes.
+ */
+export const selectAgent = async (page: Page, agentName: string, modelName?: string): Promise<string> => {
+  const tab = page.getByRole('tablist', { name: 'Agent' }).getByRole('tab', { name: new RegExp(`^${agentName}`, 'u') });
+  if (!(await tab.isVisible())) {
+    await openAgentList(page);
+  }
+  await tab.click();
+  const options = page.getByRole('option');
+  await (modelName === undefined ? options : options.filter({ hasText: modelName })).first().click();
+  const runsOn = page.locator('[data-slot="runs-on"]');
+  await expectVisible(runsOn);
+  const note = (await runsOn.textContent()) ?? '';
+  await page.keyboard.press('Escape');
+  return note;
 };
 
 /**
@@ -640,27 +678,4 @@ export const expectLauncher2Turn = async (logPath: string, projectRoot: string, 
   const eventsPath = join(projectRoot, '.tau/chats', chatId, 'events.jsonl');
   await expect.poll(() => existsSync(eventsPath), { timeout: 180_000 }).toBe(true);
   expect(readFileSync(eventsPath, 'utf8').trim().length).toBeGreaterThan(0);
-};
-
-/**
- * Open the chat's execution picker and read back the rows it offers.
- *
- * {@link selectChatModel} picks a Tau model row by name; this one exists for the
- * rows a *host* contributes — the external ACP agents, whose presence is the
- * assertion rather than a step on the way to one.
- *
- * @param page - The desktop page.
- * @returns Every option label the picker rendered, in order.
- */
-export const openExecutionPicker = async (page: Page): Promise<readonly string[]> => {
-  await parkPointer(page);
-  /* The agent picker has its own trigger beside the composer; `Meta+Slash`
-   * opens the *model* picker, which only exists for a Tau execution. */
-  await page
-    .getByRole('button', { name: /^Select agent: /u })
-    .first()
-    .click();
-  const options = page.getByRole('option');
-  await expectVisible(options.first());
-  return options.allTextContents();
 };

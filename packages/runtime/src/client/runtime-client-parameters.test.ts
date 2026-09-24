@@ -128,10 +128,9 @@ describe('RuntimeClient.resolveParameters', () => {
   it('resolves default and declared-only manifests without selecting a preview', async () => {
     const { client, resolveParameters } = await fixture();
 
-    await expect(client.resolveParameters({ source: { files: { 'main.ts': 'model' } } })).resolves.toMatchObject({
-      success: true,
-      data: { identity: { resolution: { mode: 'default' } } },
-    });
+    // The default mode is the absent mode, so its identity carries no `mode`.
+    const resolved = await client.resolveParameters({ source: { files: { 'main.ts': 'model' } } });
+    expect(resolved.success && resolved.data.identity.resolution).toEqual({});
     await expect(
       client.resolveParameters({
         source: { path: 'main.ts' },

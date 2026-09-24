@@ -309,7 +309,7 @@ describe('project creation locations', () => {
     expect(await readOpfsTree(fixture)).toEqual(beforeTree);
   });
 
-  test('mobile Location selection closes options, restores focus, and creates on disk', async ({ skip }) => {
+  test('mobile Location selection restores focus to the editor and creates on disk', async ({ skip }) => {
     skip(server.browser !== 'chromium', 'File System Access workflows run in Chromium.');
     const fixture = 'mobile-disk-workspace';
     await target.setViewport({ width: 390, height: 844 });
@@ -319,16 +319,14 @@ describe('project creation locations', () => {
     await selectReplicad();
     const editor = editorFor();
     await target.fill(editor, 'Create this from mobile options');
-    await target.click(selectors.getByRole('button', { name: 'Open chat options' }));
-    const chatOptions = selectors.getByRole('dialog', { name: 'Chat Options' });
-    await target.expectVisible(chatOptions);
+    // The phone composer is the same bar: the location control sits in it.
     await target.click(selectors.getByRole('button', { name: 'Create in Home' }));
     const locationDrawer = selectors.getByRole('dialog', { name: 'Select a project location' });
     await target.expectVisible(locationDrawer);
     await target.expectCount(locationDrawer.getByPlaceholder('Search locations...'), 0);
     await target.press(locationDrawer.getByRole('option', { name: 'Home in this browser' }), 'Escape');
     await target.expectCount(locationDrawer, 0);
-    await target.expectVisible(chatOptions);
+    await target.expectFocused(editor);
     expect(await target.textContent(editor)).toBe('Create this from mobile options');
 
     await target.click(selectors.getByRole('button', { name: 'Create in Home' }));
@@ -338,7 +336,6 @@ describe('project creation locations', () => {
         .getByRole('option', { name: `${workspace.name} on your disk` }),
     );
 
-    await target.expectCount(chatOptions, 0);
     await target.expectFocused(editor);
     expect(await target.textContent(editor)).toBe('Create this from mobile options');
     await target.press(editor, 'Enter');

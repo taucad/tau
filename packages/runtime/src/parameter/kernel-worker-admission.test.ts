@@ -38,7 +38,8 @@ const createWorker = (
   middlewareConfigs?: MockKernelWorkerOptions['middlewareConfigs'],
   onLog: OnWorkerLog = () => undefined,
 ) => {
-  const filesystem = Object.assign(createMockFileSystem(), {
+  // `readFile` and `readFiles` must agree, or every revalidation reads the closure as changed.
+  const filesystem = Object.assign(createMockFileSystem({ readFileResult: (path) => `source:${path}` }), {
     watch: vi.fn(() => vi.fn()),
   });
   filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
@@ -1097,7 +1098,7 @@ describe('parameter admission in the kernel worker', () => {
 
     expect(result).toMatchObject({
       success: false,
-      issues: [{ message: 'Parameters do not satisfy the admitted execution schema', code: 'RUNTIME' }],
+      issues: [{ message: 'INVALID_SCHEMA at /count', code: 'INVALID_SCHEMA' }],
     });
     expect(worker.createGeometryCalls).toBe(0);
   });

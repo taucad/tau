@@ -22,9 +22,9 @@ import {
   expectCount,
   expectSignedIn,
   expectVisible,
-  openExecutionPicker,
+  openAgentList,
   parkPointer,
-  selectAgentModel,
+  selectAgent,
   selectChatModel,
   selectKernel,
   sendPrompt,
@@ -129,16 +129,16 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
 
     await selectKernel(page, 'OpenSCAD');
     await connectPickedFolder(session);
-    /* 1. Both adapters main discovered are offered as rows on this computer.
-     * The renderer asks main for them over `externalAgentsChannel` (D17), so
-     * this is the renderer half of the one discovery main performed. */
-    const rows = await openExecutionPicker(page);
-    /* Lane 15's selector work replaced the "· This computer" suffix: a row is
-     * named for the adapter and described by where it runs (Q12.3). */
-    expect(rows.join('\n')).toMatch(/Codex\s*Runs with your local Codex login/u);
-    /* Claude Code is matched on the row's name alone: its note is a refusal
-     * when that login is absent, and this cell is about discovery. */
-    expect(rows.join('\n')).toMatch(/^Claude Code/mu);
+    /* 1. Both adapters main discovered are offered as agent tabs on this
+     * computer. The renderer asks main for them over `externalAgentsChannel`
+     * (D17), so this is the renderer half of the one discovery main performed. */
+    const rows = await openAgentList(page);
+    /* A tab is named for the adapter; where it runs is the sheet's *Runs on*
+     * note once it is chosen (Q12.3). */
+    expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
+    /* Claude Code is matched on the tab's name alone: an absent login marks
+     * it unavailable, and this cell is about discovery. */
+    expect(rows).toContainEqual(expect.stringMatching(/^Claude Code/u));
 
     /* 2. The services utility received the same answer. Written inside the
      * process that spawns the adapter, so the renderer cannot produce it. */
@@ -149,11 +149,7 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     /* 3. The first project turn is placed on the Codex row and answered by the
      * real adapter. Keeping this ACP-first makes the ACP contract independent
      * of a separate Tau-provider seed. */
-    await page
-      .getByRole('option', { name: /^Codex/u })
-      .first()
-      .click();
-    await selectAgentModel(page, 'GPT-5.6-Luna');
+    expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/Runs with your local Codex login/u);
     const gatewayCallsBefore = fixture.gatewayRequests.length;
     await submitPrompt(page, cadInspectionPrompt);
     await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
@@ -340,13 +336,9 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       if (nativeTurbojet) {
         await selectChatModel(page, 'GPT-5.6 Luna');
       } else {
-        const rows = await openExecutionPicker(page);
-        expect(rows.join('\n')).toMatch(/Codex\s*Runs with your local Codex login/u);
-        await page
-          .getByRole('option', { name: /^Codex/u })
-          .first()
-          .click();
-        await selectAgentModel(page, 'GPT-5.6-Luna');
+        const rows = await openAgentList(page);
+        expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
+        expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/Runs with your local Codex login/u);
       }
 
       const slug = await submitPrompt(page, externalPrompt);
@@ -520,13 +512,9 @@ test.skipIf(!codexAvailable)(
       /* Picked *before* the first submit: the home hero is session-backed, so the
        * choice lands in the Home composer record and the new project's chat row is
        * created carrying it. */
-      const rows = await openExecutionPicker(page);
-      expect(rows.join('\n')).toMatch(/Codex\s*Runs with your local Codex login/u);
-      await page
-        .getByRole('option', { name: /^Codex/u })
-        .first()
-        .click();
-      await selectAgentModel(page, 'GPT-5.6-Luna');
+      const rows = await openAgentList(page);
+      expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
+      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/Runs with your local Codex login/u);
 
       await submitPrompt(page, externalPrompt);
 
@@ -621,6 +609,27 @@ const branchRow = (page: Page, branchName: string): Locator =>
   branchesSection(page)
     .locator('li')
     .filter({ has: page.getByText(branchName, { exact: true }) });
+
+const openRevisionHistory = async (page: Page): Promise<void> => {
+  await parkPointer(page);
+  await page
+    .getByRole('button', { name: /Search/u })
+    .first()
+    .click();
+  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open revision history');
+  await page.getByText('Open revision history', { exact: true }).first().click();
+};
+
+/**
+ * Put the chat in focus on a branch's checkout, from that branch's row: the
+ * composer offers no branch (C3), so the Revisions pane is where a chat chooses.
+ */
+const useBranchInChat = async (page: Page, branchName: string): Promise<void> => {
+  await branchRow(page, branchName)
+    .getByRole('button', { name: `Actions for ${branchName}`, exact: true })
+    .click();
+  await page.getByRole('menuitem', { name: `Use ${branchName} in this chat`, exact: true }).click();
+};
 
 const expectCurrentBranch = async (page: Page, branchName: string): Promise<void> => {
   await expect
@@ -719,42 +728,20 @@ test.skipIf(!codexAvailable)(
       const candidateChatId = activeChatId(page);
       const candidateBranch = 'isolated-run';
 
-      /* The chat pane opens at its minimum width, and at that width the
-       * composer's right-hand action group ("Add context", attach, send) sits
-       * *over* the tail of its left group — the revision selector included, so
-       * the one control this cell has to click cannot be hit. Widening the pane
-       * is what an operator does about it, and it is the honest fix here; the
-       * overlap itself is reported as a finding rather than papered over with a
-       * synthetic event. */
-      /* Scoped to the project workspace's own Allotment: the app sidebar has a
-       * sash of its own, and it is the first one in the document. */
-      const sash = page.locator('[data-project-workspace] .sash-container > .sash').first();
-      const sashBounds = await sash.boundingBox();
-      expect(sashBounds, 'the chat pane offers no drag handle to widen it').not.toBeNull();
-      await page.mouse.move(sashBounds!.x + sashBounds!.width / 2, sashBounds!.y + sashBounds!.height / 2);
-      await page.mouse.down();
-      await page.mouse.move(sashBounds!.x + 360, sashBounds!.y + sashBounds!.height / 2, { steps: 12 });
-      await page.mouse.up();
-      await parkPointer(page);
-
-      /* The Codex row, then `New branch`: the revision control is offered by the
-       * placement's capability, so it is the same control a Tau turn picks. */
-      const rows = await openExecutionPicker(page);
-      /* The row is named for the adapter and described by where it runs. */
-      expect(rows.join('\n')).toMatch(/Codex\s*Runs with your local Codex login/u);
-      await page
-        .getByRole('option', { name: /^Codex/u })
-        .first()
-        .click();
-      await selectAgentModel(page, 'GPT-5.6-Luna');
-      await parkPointer(page);
-      /* The composer picker replaced the deleted revision-mode selector (W7): a
-         branch is made by name, and the chip then names it. */
-      await page.locator('[data-slot="chat-branch-picker"]').first().click();
-      await page.getByText('New branch', { exact: true }).first().click();
-      await page.getByLabel('Name for the new branch').fill('isolated-run');
-      await page.getByRole('button', { name: 'Create' }).first().click();
-      await expectVisible(page.locator('[aria-label="Work in isolated-run. Choose a branch."]'), 30_000);
+      /* The Codex tab, then the branch: placement is the Revisions pane's, so it
+       * is the same verb a Tau turn uses. */
+      const rows = await openAgentList(page);
+      expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
+      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/Runs with your local Codex login/u);
+      /* The composer offers no branch (C3): the Revisions pane makes it by name,
+         and its row places this chat there. The candidate revision's branch,
+         below, is what proves the placement held. */
+      await openRevisionHistory(page);
+      await page.getByRole('button', { name: 'New branch', exact: true }).first().click();
+      await page.getByLabel('Name for the new branch').fill(candidateBranch);
+      await page.getByRole('button', { name: 'Create branch', exact: true }).click();
+      await expectVisible(branchRow(page, candidateBranch), 60_000);
+      await useBranchInChat(page, candidateBranch);
 
       /* 4. The isolation claim, sampled rather than inferred. */
       const samples: Array<{ readonly live: string; readonly settled: boolean }> = [];
@@ -822,12 +809,7 @@ test.skipIf(!codexAvailable)(
 
       /* 5. The porcelain. */
       await parkPointer(page);
-      await page
-        .getByRole('button', { name: /Search/u })
-        .first()
-        .click();
-      await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open revision history');
-      await page.getByText('Open revision history', { exact: true }).first().click();
+      await openRevisionHistory(page);
       await expectVisible(branchesSection(page), 60_000);
       // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- `innerText` keeps the line breaks this evidence is read by.
       const listedText = await branchesSection(page).innerText();
@@ -886,10 +868,9 @@ test.skipIf(!codexAvailable)(
       await expectCount(branchRow(page, candidateBranch), 0, 60_000);
       await session.capture('rev-branches-after-discard');
 
-      // Discard does not silently transfer a chat's write authority to main.
-      await page.getByRole('button', { name: 'Branch unavailable. Choose a branch.' }).click();
-      await page.getByRole('option', { name: 'main', exact: true }).click();
-      await expectVisible(page.getByRole('button', { name: 'Work in main. Choose a branch.' }), 30_000);
+      /* Discard does not silently transfer a chat's write authority to main:
+       * main's row still offers to take the chat, and the person moves it. */
+      await useBranchInChat(page, 'main');
 
       /* Switch the same chat back to Tau after the ACP turn. The provider
        * fixture proves the next turn used Tau's gateway, while the durable
@@ -897,10 +878,13 @@ test.skipIf(!codexAvailable)(
       const completedBeforeNativeReturn = (candidateEvents.match(/"state":"completed"/gu) ?? []).length;
       const finalizedBeforeNativeReturn = finalizedRevisions(logOf(candidateChatId)).length;
       const gatewayCallsBeforeNativeReturn = fixture.gatewayRequests.length;
-      await openExecutionPicker(page);
-      await page.getByRole('option', { name: 'Select agent: Tau' }).click();
       await selectChatModel(page, gatewayFixtureModelName);
-      await expectVisible(page.getByRole('button', { name: 'Select agent: Tau' }), 30_000);
+      /* Tau's trigger names the model alone; an external agent's leads with the agent. */
+      await expectVisible(
+        page.getByRole('button', { name: `Agent and model: ${gatewayFixtureModelName}`, exact: false }),
+        30_000,
+      );
+      await expectCount(page.getByRole('button', { name: /^Agent and model: Codex/u }), 0);
       await sendPrompt(page, 'Continue this chat with Tau.');
       await expect
         .poll(() => (readLog(logOf(candidateChatId)).match(/"state":"completed"/gu) ?? []).length, {
@@ -989,13 +973,9 @@ test.skipIf(!codexAvailable)(
       const slug = await submitPrompt(page, seedPrompt);
       await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad', page });
 
-      const rows = await openExecutionPicker(page);
-      expect(rows.join('\n')).toMatch(/Codex/u);
-      await page
-        .getByRole('option', { name: /^Codex/u })
-        .first()
-        .click();
-      await selectAgentModel(page, 'GPT-5.6-Luna');
+      const rows = await openAgentList(page);
+      expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
+      await selectAgent(page, 'Codex', 'GPT-5.6-Luna');
 
       await page
         .locator('input[type="file"][accept*="application/pdf"]')

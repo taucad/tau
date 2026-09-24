@@ -1,5 +1,5 @@
-import { WebIO } from '@gltf-transform/core';
-import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import { Logger, WebIO } from '@gltf-transform/core';
+import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions';
 import { EXTManifold } from 'manifold-3d/manifold-gltf';
 
 type Vector = readonly [number, number, number];
@@ -61,7 +61,11 @@ export const readGltfSceneBounds = async ({
   targetWorld,
 }: Readonly<{ bytes: Uint8Array<ArrayBuffer>; targetWorld: TargetWorld }>): Promise<Bounds> => {
   const alignedBytes = bytes.byteOffset % 4 === 0 ? bytes : new Uint8Array(bytes);
-  const document = await new WebIO().registerExtensions([KHRMaterialsUnlit, EXTManifold]).readBinary(alignedBytes);
+  // Bounds depend on positions; unknown optional metadata does not affect the source GLB bytes.
+  const document = await new WebIO()
+    .registerExtensions([...KHRONOS_EXTENSIONS, EXTManifold])
+    .setLogger(new Logger(Logger.Verbosity.ERROR))
+    .readBinary(alignedBytes);
   const scene = document.getRoot().getDefaultScene() ?? document.getRoot().listScenes()[0];
   const bounds: MutableBounds = {
     min: [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],

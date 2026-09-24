@@ -62,11 +62,9 @@ const cubeGlb = (): Uint8Array<ArrayBuffer> => {
             normals: new Float32Array(normals),
             indices: new Uint32Array(indices),
             material: {
-              baseColorFactor: [0.8, 0.8, 0.8, 1],
-              metallicFactor: 0,
-              roughnessFactor: 1,
               doubleSided: false,
               alphaMode: 'OPAQUE',
+              pbrMetallicRoughness: { baseColorFactor: [0.8, 0.8, 0.8, 1], metallicFactor: 0, roughnessFactor: 1 },
             },
           },
         ],

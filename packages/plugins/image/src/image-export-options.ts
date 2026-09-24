@@ -1,6 +1,7 @@
 /** Strict per-target image transcoder export schemas. */
 
 import { z } from 'zod';
+import { quantity, quantityKinds } from '@taucad/runtime/transcoder';
 import type { FileExtension } from '@taucad/runtime/types';
 import {
   renderImageAnnotatedMinDimension,
@@ -56,6 +57,10 @@ const worldSchema = z
     }
   });
 
+// Output raster pixels: a dimensionless count Tau labels `px`.
+const pixels = () => quantity({ unit: '1', space: 'linear', symbol: 'px' });
+const ratio = () => quantity({ unit: '1', quantityKind: quantityKinds.dimensionlessRatio, space: 'linear' });
+
 const hexColor = z.string().regex(renderImageBackgroundPattern, 'Expected #RRGGBB or #RRGGBBAA');
 const finiteNumber = z.number();
 const positiveNumber = finiteNumber.positive();
@@ -86,14 +91,31 @@ const lightingSchema = z.union([
             .strict(),
         )
         .max(renderImageMaxLights),
-      ambient: finiteNumber.min(renderImageAmbientRange[0]).max(renderImageAmbientRange[1]).optional(),
+      ambient: ratio().min(renderImageAmbientRange[0]).max(renderImageAmbientRange[1]).optional(),
       environment: z.enum(['studio', 'none']).optional(),
       space: z.enum(['view', 'world']).optional(),
-      exposure: finiteNumber.min(renderImageExposureRange[0]).max(renderImageExposureRange[1]).optional(),
+      exposure: ratio().min(renderImageExposureRange[0]).max(renderImageExposureRange[1]).optional(),
     })
     .strict()
     .meta({ title: 'Directional lights' }),
 ]);
+const aoSchema = z
+  .object({
+    radiusPixels: pixels().min(1).max(128).optional(),
+    intensity: ratio().min(0).max(8).optional(),
+    distanceFalloff: ratio().min(0.01).max(1).optional(),
+  })
+  .strict();
+const defaultImageLighting = {
+  lights: [
+    { direction: [1, 1, 1], color: [2.5, 2.5, 2.5] },
+    { direction: [2.3, 0, 3], color: [1, 1, 1] },
+  ],
+  ambient: 0.13,
+  environment: 'studio',
+  space: 'view',
+  exposure: 0.5,
+} satisfies z.output<typeof lightingSchema>;
 const imageExportModeSchema = z.enum(['single', 'batch']);
 const imageLabelSchema = z
   .string()
@@ -102,11 +124,14 @@ const imageLabelSchema = z
   .refine((label) => label.trim().length > 0, 'Label must not contain only whitespace')
   .regex(renderImageLabelPattern, 'Label contains an unsupported character')
   .describe('Caller-authored view label rendered verbatim');
-const imageDimensionSchema = z.number().int().min(renderImageDimensionRange[0]).max(renderImageDimensionRange[1]);
-const imageQualitySchema = z.number().min(renderImageQualityRange[0]).max(renderImageQualityRange[1]);
-const imageZoomSchema = z.number().min(renderImageZoomRange[0]).max(renderImageZoomRange[1]);
-const imageVerticalFieldOfViewSchema = z
-  .number()
+const imageDimensionSchema = pixels().int().min(renderImageDimensionRange[0]).max(renderImageDimensionRange[1]);
+const imageQualitySchema = ratio().min(renderImageQualityRange[0]).max(renderImageQualityRange[1]);
+const imageZoomSchema = ratio().min(renderImageZoomRange[0]).max(renderImageZoomRange[1]);
+const imageVerticalFieldOfViewSchema = quantity({
+  unit: 'deg',
+  quantityKind: quantityKinds.planeAngle,
+  space: 'linear',
+})
   .min(renderImageVerticalFieldOfViewRange[0])
   .max(renderImageVerticalFieldOfViewRange[1]);
 const primitiveReferenceSchema = z
@@ -172,7 +197,7 @@ const fitCameraSchema = z
     framing: z.literal('fit'),
     direction: nonZeroCameraVectorSchema.default([0.6123724357, -0.6123724357, 0.5]),
     up: nonZeroCameraVectorSchema.default([0, 0, 1]),
-    margin: z.number().min(renderImageMarginRange[0]).max(renderImageMarginRange[1]).default(0.1),
+    margin: ratio().min(renderImageMarginRange[0]).max(renderImageMarginRange[1]).default(0.1),
     projection: z
       .discriminatedUnion('kind', [perspectiveFitProjectionSchema, orthographicFitProjectionSchema])
       .default({ kind: 'perspective', verticalFieldOfView: 45 }),
@@ -240,8 +265,7 @@ const baseImageShape = {
   world: worldSchema.default({ up: '+z', forward: '-y', unit: 'meter' }).describe('Caller world coordinates'),
   width: imageDimensionSchema.default(768).describe('Output width in pixels'),
   height: imageDimensionSchema.default(432).describe('Output height in pixels'),
-  lineWidth: z
-    .number()
+  lineWidth: pixels()
     .min(renderImageLineWidthRange[0])
     .max(renderImageLineWidthRange[1])
     .default(3)
@@ -255,7 +279,10 @@ const baseImageShape = {
     .boolean()
     .default(false)
     .describe('Include a physical scale bar at the fitted centre or fixed camera target plane'),
-  lighting: lightingSchema.optional().describe('Studio lighting or an explicit directional-light rig'),
+  lighting: lightingSchema
+    .default(defaultImageLighting)
+    .describe('Studio lighting or an explicit directional-light rig'),
+  ao: aoSchema.optional().describe('Screen-space ambient occlusion for opaque contact shadows'),
 } as const;
 
 const validateAnnotatedDimensions = (

@@ -38,6 +38,9 @@ export const gatewayModelErrorCodes = [
   'ORIGIN_NOT_ALLOWED',
   'PROVIDER_ACCOUNT_EXHAUSTED',
   'RATE_LIMITED',
+  /* The serialized request is past the gateway's byte bound; resending the same
+   * history is refused identically, so it reads as a chat-length state. */
+  'REQUEST_TOO_LARGE',
   'UNAUTHENTICATED',
   'INVALID_REQUEST',
   'PROVIDER_UNAVAILABLE',
@@ -231,6 +234,9 @@ const gatewayErrorCode = (value: unknown, status: number): GatewayModelErrorCode
   }
   if (status === 403) {
     return 'UNKNOWN_GATEWAY_ERROR';
+  }
+  if (status === 413) {
+    return 'REQUEST_TOO_LARGE';
   }
   if (status === 429) {
     return 'RATE_LIMITED';

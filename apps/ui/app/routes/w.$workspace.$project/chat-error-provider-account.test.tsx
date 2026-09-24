@@ -15,8 +15,8 @@ vi.mock('#hooks/use-chat.js', () => ({
 /* The composer's own picker reads the chat-scoped model catalogue; this suite
  * owns only the trigger the card hands it. */
 vi.mock('#components/chat/chat-model-selector.js', () => ({
-  ChatModelSelector: (props: { readonly enableShortcut?: boolean; readonly children: () => ReactNode }) => {
-    modelSelectorMock(props.enableShortcut);
+  ChatModelSelector: (props: { readonly children: () => ReactNode }) => {
+    modelSelectorMock();
     return <div>{props.children()}</div>;
   },
 }));
@@ -41,7 +41,7 @@ describe('ChatErrorProviderAccount (self-host)', () => {
     expect(notice).toHaveTextContent("This server's OpenAI key is out of credit");
     expect(notice).toHaveTextContent('Add credit on platform.openai.com');
     expect(actionLabels(notice)).toEqual(['Open OpenAI billing', 'Switch model', 'Try again']);
-    expect(modelSelectorMock).toHaveBeenCalledWith(false);
+    expect(modelSelectorMock).toHaveBeenCalled();
     expect(notice).not.toHaveClass('bg-destructive/10');
   });
 

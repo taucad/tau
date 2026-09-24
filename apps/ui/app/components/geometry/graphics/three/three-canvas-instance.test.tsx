@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { JSX } from 'react';
 import { useEffect } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { PerspectiveCamera } from 'three';
+import { OrthographicCamera, PerspectiveCamera, WebGLCoordinateSystem, WebGPUCoordinateSystem } from 'three';
 
 import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-canvas-instance.js';
 import {
@@ -19,9 +19,16 @@ let fireLatestWebGlContextLost: (() => void) | undefined;
 let latestCanvasEventSource: ReactThreeFiber.CanvasProps['eventSource'] | undefined;
 let latestCanvasEventPrefix: ReactThreeFiber.CanvasProps['eventPrefix'] | undefined;
 let latestCanvasCamera: ReactThreeFiber.CanvasProps['camera'] | undefined;
+let latestCanvasGl: ReactThreeFiber.CanvasProps['gl'] | undefined;
+let exposureAfterCreated: number | undefined;
 const rigCamera = new PerspectiveCamera();
+const orthographicCamera = new OrthographicCamera();
 const setClipPlanes = vi.fn();
-const cameraRig = { activeCamera: rigCamera, setClipPlanes };
+const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera, setClipPlanes };
+
+vi.mock('#components/geometry/graphics/three/renderer.js', () => ({
+  createRenderer: async () => ({ coordinateSystem: WebGLCoordinateSystem }),
+}));
 
 vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => cameraRig,
@@ -33,13 +40,22 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
   type StubCanvasProps = {
     readonly children?: React.ReactNode;
     readonly camera?: ReactThreeFiber.CanvasProps['camera'];
+    readonly gl?: ReactThreeFiber.CanvasProps['gl'];
     readonly eventPrefix?: ReactThreeFiber.CanvasProps['eventPrefix'];
     readonly eventSource?: ReactThreeFiber.CanvasProps['eventSource'];
     readonly onCreated?: (state: { gl: Record<string, unknown> }) => void;
   };
 
-  function StubCanvas({ camera, children, eventPrefix, eventSource, onCreated }: StubCanvasProps): JSX.Element {
+  function StubCanvas({
+    camera,
+    children,
+    eventPrefix,
+    eventSource,
+    gl: glFactory,
+    onCreated,
+  }: StubCanvasProps): JSX.Element {
     latestCanvasCamera = camera;
+    latestCanvasGl = glFactory;
     latestCanvasEventPrefix = eventPrefix;
     latestCanvasEventSource = eventSource;
 
@@ -57,12 +73,13 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
       };
 
       const gl = {
-        toneMappingExposure: 1,
+        toneMappingExposure: 0.37,
         domElement,
       };
 
       const microtaskHandle = (): void => {
         onCreated?.({ gl });
+        exposureAfterCreated = gl.toneMappingExposure;
         fireLatestWebGlContextLost = (): void => {
           for (const listener of webglListeners) {
             listener({ preventDefault: vi.fn() } as unknown as Event);
@@ -136,6 +153,8 @@ describe('ThreeCanvasInstance', () => {
     latestCanvasEventPrefix = undefined;
     latestCanvasEventSource = undefined;
     latestCanvasCamera = undefined;
+    latestCanvasGl = undefined;
+    exposureAfterCreated = undefined;
     setClipPlanes.mockClear();
   });
 
@@ -160,6 +179,13 @@ describe('ThreeCanvasInstance', () => {
       expect(screen.getByText('Graphics context lost')).toBeInTheDocument();
     });
     expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it('preserves the lighting owner exposure when the canvas finishes mounting', async () => {
+    render(<KeyedThreeCanvas canvasKey='exposure' />);
+    await waitFor(() => {
+      expect(exposureAfterCreated).toBe(0.37);
+    });
   });
 
   it('ignores queued context-loss when the keyed instance already unmounted (stale teardown)', async () => {
@@ -249,6 +275,33 @@ describe('ThreeCanvasInstance', () => {
     });
 
     expect(latestCanvasCamera).toBe(rigCamera);
+  });
+
+  it('should restore both retained camera depth conventions when AO is disabled', async () => {
+    for (const camera of [rigCamera, orthographicCamera]) {
+      Object.assign(camera, { coordinateSystem: WebGPUCoordinateSystem, _reversedDepth: true });
+      camera.updateProjectionMatrix();
+    }
+    await act(async () => {
+      render(
+        <ThreeCanvasInstance
+          graphicsBackend='webgl'
+          postProcessingSettings={{ aoEnabled: false }}
+          onRetry={() => undefined}
+        >
+          {null}
+        </ThreeCanvasInstance>,
+      );
+    });
+    if (typeof latestCanvasGl !== 'function') {
+      throw new TypeError('Expected the R3F renderer factory.');
+    }
+    await latestCanvasGl({ canvas: document.createElement('canvas') });
+
+    for (const camera of [rigCamera, orthographicCamera]) {
+      expect(camera.coordinateSystem).toBe(WebGLCoordinateSystem);
+      expect(camera.reversedDepth).toBe(false);
+    }
   });
 
   it('installs and clears grid presentation clipping during the canvas layout lifecycle', () => {

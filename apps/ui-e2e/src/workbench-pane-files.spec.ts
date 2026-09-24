@@ -229,20 +229,19 @@ test('should share modern command search chrome across command, model, kernel, a
 
   await target.setViewport({ width: 390, height: 844 });
   const chatToggle = selectors.getByRole('button', { name: 'Toggle Chat lane' });
-  if (!(await target.isVisible(selectors.getByRole('button', { name: 'Open chat options' })))) {
+  const agentTrigger = selectors.getByRole('button', { name: /^Agent and model: /u });
+  if (!(await target.isVisible(agentTrigger))) {
     await target.click(chatToggle);
   }
-  await target.click(selectors.getByRole('button', { name: 'Open chat options' }));
-  const chatOptions = selectors.getByRole('dialog', { name: 'Chat Options' });
-  await target.expectVisible(chatOptions);
-
-  await target.click(chatOptions.getByText('AI model for responses', { exact: true }));
+  // The phone composer is the same bar: its agent sheet opens as a drawer.
+  await target.click(agentTrigger);
+  await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
   const mobileModelFilter = selectors.getByPlaceholder('Search models...');
   await expectModernCommandInput(mobileModelFilter);
   await target.press(mobileModelFilter, 'Escape');
-  await target.expectVisible(chatOptions);
+  await target.expectCount(mobileModelFilter, 0);
 
-  await target.click(chatOptions.getByText('CAD kernel for code execution', { exact: true }));
+  await target.click(selectors.getByRole('button', { name: /^Select kernel/u }));
   const mobileKernelFilter = selectors.getByPlaceholder('Search kernels...');
   await expectModernCommandInput(mobileKernelFilter);
   await target.emulateColorScheme('dark');

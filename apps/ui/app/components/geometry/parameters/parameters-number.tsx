@@ -336,7 +336,7 @@ export function ParametersNumber({
       value={draftValue}
       formattedValue={formattedValue}
       editingValue={draftText || undefined}
-      unit={binding.representation === 'safe-integer' ? binding.nativeUnit : fieldProjection.adornment}
+      unit={fieldProjection.adornment}
       isApproximation={isApproximation}
       diagnostic={
         fieldProjection.diagnostic?.message ??

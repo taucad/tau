@@ -12,7 +12,7 @@ import {
 } from '#components/ui/floating-panel.js';
 import { Button } from '@taucad/ui/components/button';
 import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
-import { RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
+import { NewBranchForm, RevisionBranches } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
 import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
@@ -26,7 +26,10 @@ import {
 } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
+import { useLocation } from 'react-router';
 import { useChats } from '#hooks/use-chats.js';
+import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
+import { projectChatIdFromSearch } from '#utils/project-url.utils.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
@@ -394,6 +397,9 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const { signIn } = useAuthLinks();
   const chatNames = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.name])), [chats]);
   const chatCheckoutIds = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.checkoutId])), [chats]);
+  /* The chat the route has in focus: *Use in this chat* places it (C3). */
+  const activeChatId = projectChatIdFromSearch(useLocation().search);
+  const authority = useOptionalChatWorkspaceAuthority();
   const branches = status?.branches ?? [];
   const isSyncOpen = status !== undefined && (status.remote.kind !== 'none' || isConnectOpen);
   const conflicts = status?.conflicts ?? [];
@@ -498,6 +504,14 @@ export function RevisionsPanelBody(): React.JSX.Element {
             liveCheckoutId={status?.checkoutId}
             chatNames={chatNames}
             chatCheckoutIds={chatCheckoutIds}
+            {...(activeChatId === undefined ? {} : { activeChatId })}
+            {...(authority === undefined
+              ? {}
+              : {
+                  onPlaceChat: (chatId: string, checkoutId: string) => {
+                    void authority.placeChat(chatId, checkoutId);
+                  },
+                })}
             branchFacts={branchFacts}
             /* A verb waiting on a person is still in flight: re-enabling the
                rows while its question is open invites a second verb on top of
@@ -521,7 +535,17 @@ export function RevisionsPanelBody(): React.JSX.Element {
             onResolveInEditor={commands.resolveFileInEditor}
             conflictTexts={conflictTexts}
           />
-        ) : null}
+        ) : (
+          /* The region's own control, offered alone: this is where a
+             one-line project makes its second branch (R1, C3). */
+          <NewBranchForm
+            isBusy={(status?.branchVerb.busy ?? false) || (status?.branchVerb.asking ?? false)}
+            onCreate={(name) => {
+              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- the toast channel owns this refusal; only the loose rejection is ours
+              void commands.createBranch(name).catch(() => undefined);
+            }}
+          />
+        )}
 
         {/* ponytail: no `min-h-0` here. The column above owns `overflow-y-auto`;
             `min-h-0` let this section shrink below its own `<ol>`, which then

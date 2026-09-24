@@ -1,9 +1,35 @@
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { useLayoutEffect } from 'react';
+import type { RenderFrame } from '@taucad/spatial';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Texture } from 'three';
+import { mock } from 'vitest-mock-extended';
+import { createRoot, events as createPointerEvents, extend } from '@react-three/fiber';
+import type * as Fiber from '@react-three/fiber';
+import {
+  BoxGeometry,
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  MeshPhysicalMaterial,
+  Plane,
+  PerspectiveCamera,
+  Raycaster,
+  Texture,
+  Vector3,
+  WebGLRenderer,
+} from 'three';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
+import * as inPlaceGeometry from '#components/geometry/graphics/three/utils/in-place-geometry-update.js';
+import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import { setModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
+import {
+  applyModelMaterialAppearance,
+  captureModelMaterialAppearance,
+} from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 
 type RendererMock = {
   compileAsync?: ReturnType<typeof vi.fn>;
@@ -41,6 +67,7 @@ const mocks = vi.hoisted(() => {
       }),
     },
     gl,
+    rootScene: { name: 'viewport-lighting-scene' },
     frameCallback: undefined as (() => void) | undefined,
     invalidate: vi.fn(),
     modelUnit: {
@@ -54,15 +81,17 @@ const mocks = vi.hoisted(() => {
     },
     renderFrame: {
       anchorFrameId: 'tau:root',
-      originMeters: [0, 0, 0],
+      originMeters: [0, 0, 0] as [number, number, number],
       metersPerRenderUnit: 1,
     },
     sectionView: { enableMesh: false, isActive: false, plane: undefined },
+    raycastClipState: undefined as RaycastClipState | undefined,
     sceneBounds,
   };
 });
 
-vi.mock('@react-three/fiber', () => ({
+vi.mock('@react-three/fiber', async (importOriginal) => ({
+  ...(await importOriginal<typeof Fiber>()),
   useFrame: (callback: () => void) => {
     mocks.frameCallback = callback;
   },
@@ -70,6 +99,7 @@ vi.mock('@react-three/fiber', () => ({
     camera: mocks.camera,
     controls: undefined,
     gl: mocks.gl,
+    scene: mocks.rootScene,
     invalidate: mocks.invalidate,
     size: { height: 768, width: 1024 },
   }),
@@ -90,6 +120,11 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useGraphics: () => mocks.graphicsActor,
   useGraphicsSelector: () => false,
   useRenderFrame: () => mocks.renderFrame,
+  useRenderFrameRetarget: (handler: (frame: RenderFrame) => void) => {
+    useLayoutEffect(() => {
+      handler(mocks.renderFrame);
+    }, [handler, mocks.renderFrame]);
+  },
   useModelInteractionRef: () => mocks.graphicsActor,
   useModelInteractionSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: {} }),
@@ -101,7 +136,7 @@ vi.mock('#machines/model-interaction.machine.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/use-section-view.js', () => ({
-  createSectionViewRaycastClipState: () => undefined,
+  createSectionViewRaycastClipState: () => mocks.raycastClipState,
   useSectionView: () => mocks.sectionView,
 }));
 
@@ -161,7 +196,7 @@ describe('GltfMesh camera lifecycle', () => {
     mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: undefined };
     mocks.renderFrame = {
       anchorFrameId: 'tau:root',
-      originMeters: [0, 0, 0],
+      originMeters: [0, 0, 0] as [number, number, number],
       metersPerRenderUnit: 1,
     };
     delete mocks.gl.compileAsync;
@@ -173,13 +208,14 @@ describe('GltfMesh camera lifecycle', () => {
       isActive: false,
       plane: undefined,
     };
+    mocks.raycastClipState = undefined;
   });
 
   it('warms the parsed model for both persistent endpoint cameras exactly once', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
     parseAsync.mockResolvedValue(createGltf());
-    const compileAsync = vi.fn(async (_scene: unknown, _camera: unknown) => undefined);
+    const compileAsync = vi.fn(async (_scene: unknown, _camera: unknown, _targetScene?: unknown) => undefined);
     mocks.gl.compileAsync = compileAsync;
     mocks.gl.coordinateSystem = 2001;
     const gltfFile = new Uint8Array([1, 2, 3]);
@@ -192,6 +228,7 @@ describe('GltfMesh camera lifecycle', () => {
       mocks.cameraRig.perspectiveCamera,
       mocks.cameraRig.orthographicCamera,
     ]);
+    expect(compileAsync.mock.calls.map((call) => call[2])).toEqual([mocks.rootScene, mocks.rootScene]);
     expect(mocks.cameraRig.perspectiveCamera.coordinateSystem).toBe(2001);
     expect(mocks.cameraRig.orthographicCamera.coordinateSystem).toBe(2001);
 
@@ -453,6 +490,255 @@ describe('GltfMesh camera lifecycle', () => {
 
     view.unmount();
     expect(geometryDispose).toHaveBeenCalledTimes(1);
+    expect(materialDispose).toHaveBeenCalledTimes(1);
+    expect(textureDispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps glass attenuation invariant across render scales without mutating authored materials', async () => {
+    const gltf = createGltf();
+    const authored = new MeshPhysicalMaterial({ transmission: 1, thickness: 0.0008, attenuationDistance: 0.02 });
+    const mesh = new Mesh(new BoxGeometry(), authored);
+    gltf.scene.add(mesh);
+    const parse = vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    const bytes = new Uint8Array([1]);
+    mocks.renderFrame = { ...mocks.renderFrame, metersPerRenderUnit: 0.001 };
+    const view = render(<GltfMesh gltfFile={bytes} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(mesh.material.attenuationDistance).toBe(20);
+    });
+    expect(mesh.material.thickness).toBe(0.0008);
+    expect(authored.attenuationDistance).toBe(0.02);
+    const { material } = mesh;
+    for (const metersPerRenderUnit of [1, 1e-6, 1000, 0.001]) {
+      mocks.renderFrame = { ...mocks.renderFrame, metersPerRenderUnit };
+      view.rerender(<GltfMesh gltfFile={bytes} enableMatcap={false} />);
+      expect(mesh.material).toBe(material);
+      expect(mesh.material.attenuationDistance * metersPerRenderUnit).toBeCloseTo(0.02, 12);
+      expect(mesh.material.thickness).toBe(0.0008);
+    }
+    expect(parse).toHaveBeenCalledTimes(1);
+  });
+
+  it('should isolate initially shared PBR materials for component dimming and dispose their owned resources once', async () => {
+    const gltf = createGltf();
+    const geometry = new BoxGeometry();
+    const texture = new Texture();
+    const material = new MeshStandardMaterial({
+      color: 0x28_5e_88,
+      metalness: 0.65,
+      roughness: 0.32,
+      map: texture,
+    });
+    const first = new Mesh(geometry, material);
+    const second = new Mesh(geometry, material);
+    gltf.scene.add(first, second);
+    const originalDispose = vi.spyOn(material, 'dispose');
+    const textureDispose = vi.spyOn(texture, 'dispose');
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    const view = render(<GltfMesh gltfFile={new Uint8Array([1])} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(view.container.querySelector('primitive')).not.toBeNull();
+    });
+
+    expect(first.material === second.material).toBe(false);
+    const firstDispose = vi.spyOn(first.material, 'dispose');
+    const secondDispose = vi.spyOn(second.material, 'dispose');
+    applyModelMaterialAppearance(first.material, captureModelMaterialAppearance(first.material), 0.25);
+    expect(first.material.opacity).toBe(0.25);
+    expect(second.material.opacity).toBe(1);
+    expect(material.opacity).toBe(1);
+    for (const surface of [first, second]) {
+      expect(surface.material.color.getHex()).toBe(0x28_5e_88);
+      expect(surface.material.metalness).toBe(0.65);
+      expect(surface.material.roughness).toBe(0.32);
+      expect(surface.material.map).toBe(texture);
+    }
+
+    view.unmount();
+    expect(firstDispose).toHaveBeenCalledTimes(1);
+    expect(secondDispose).toHaveBeenCalledTimes(1);
+    expect(originalDispose).toHaveBeenCalledTimes(1);
+    expect(textureDispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('should dispatch nearest visible model hits without stock child triangle raycasts', async () => {
+    const gltf = createGltf();
+    const near = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
+    const far = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
+    near.position.z = -2;
+    far.position.z = -4;
+    gltf.scene.add(near, far);
+    const originalRaycast = gltf.scene.raycast;
+    const nearRaycast = vi.spyOn(near, 'raycast');
+    const farRaycast = vi.spyOn(far, 'raycast');
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    const bytes = new Uint8Array([1]);
+    const view = render(<GltfMesh gltfFile={bytes} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(view.container.querySelector('primitive')).not.toBeNull();
+    });
+    for (const mesh of [near, far]) {
+      setModelComponentOwner(mesh, { unitId: 'unit:test', componentId: 'root' });
+    }
+    gltf.scene.updateMatrixWorld(true);
+    const raycaster = new Raycaster(new Vector3(), new Vector3(0, 0, -1));
+    const hits = raycaster.intersectObject(gltf.scene, true);
+    expect(hits.length).toBe(1);
+    expect(hits[0]?.object).toBe(near);
+    expect(nearRaycast).not.toHaveBeenCalled();
+    expect(farRaycast).not.toHaveBeenCalled();
+
+    raycaster.ray.origin.x = 10;
+    expect(raycaster.intersectObject(gltf.scene, true)).toEqual([]);
+    raycaster.ray.origin.x = 0;
+    mocks.raycastClipState = { enabled: true, planes: [new Plane(new Vector3(0, 0, -1), -3)] };
+    mocks.sectionView = { ...mocks.sectionView, isActive: true };
+    view.rerender(<GltfMesh gltfFile={bytes} enableMatcap={false} />);
+    expect(raycaster.intersectObject(gltf.scene, true).map((hit) => hit.object)).toEqual([far]);
+    expect(nearRaycast).not.toHaveBeenCalled();
+    expect(farRaycast).not.toHaveBeenCalled();
+
+    view.unmount();
+    expect(gltf.scene.raycast).toBe(originalRaycast);
+  });
+
+  it('should reuse the authoritative R3F hit for hover, selection and the secondary-pointer menu', async () => {
+    const gltf = createGltf();
+    const near = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
+    const far = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
+    near.position.z = -2;
+    far.position.z = -4;
+    gltf.scene.add(near, far);
+    const originalRaycast = gltf.scene.raycast;
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    const raycast = vi.spyOn(bvhRaycast, 'raycastFirstVisibleMeshHit');
+    const secondaryPointer = vi.fn();
+    const canvas = document.createElement('canvas');
+    const renderer = Object.create(WebGLRenderer.prototype) as WebGLRenderer;
+    Object.defineProperties(renderer, {
+      dispose: { value: vi.fn() },
+      domElement: { value: canvas },
+      render: { value: vi.fn() },
+      setPixelRatio: { value: vi.fn() },
+      setSize: { value: vi.fn() },
+      outputColorSpace: { value: '', writable: true },
+      toneMapping: { value: 0, writable: true },
+      toneMappingExposure: { value: 1, writable: true },
+    });
+    extend({ Group });
+    const root = createRoot(canvas);
+    const camera = new PerspectiveCamera(60, 1, 0.1, 100);
+    const bytes = new Uint8Array([1]);
+    const element = (
+      <GltfMesh gltfFile={bytes} enableMatcap={false} onModelComponentSecondaryPointerCandidate={secondaryPointer} />
+    );
+    try {
+      await act(async () => {
+        await root.configure({
+          camera,
+          events: createPointerEvents,
+          frameloop: 'never',
+          gl: renderer,
+          size: { width: 800, height: 800, top: 0, left: 0 },
+        });
+      });
+      const store = root.render(element);
+      await waitFor(() => {
+        expect(gltf.scene.raycast).not.toBe(originalRaycast);
+      });
+      setModelComponentOwner(near, { unitId: 'unit:test', componentId: 'near' });
+      setModelComponentOwner(far, { unitId: 'unit:test', componentId: 'far' });
+      store.getState().scene.updateMatrixWorld(true);
+      const nearCenter = near.getWorldPosition(new Vector3());
+      const farCenter = far.getWorldPosition(new Vector3());
+      const direction = farCenter.clone().sub(nearCenter).normalize();
+      camera.position.copy(nearCenter).addScaledVector(direction, -5);
+      camera.lookAt(farCenter);
+      camera.updateMatrixWorld(true);
+      const pointer = mock<PointerEvent>({ offsetX: 400, offsetY: 400, pointerId: 1, button: 0, target: canvas });
+      const secondaryPointerEvent = mock<PointerEvent>({
+        offsetX: 400,
+        offsetY: 400,
+        pointerId: 1,
+        button: 2,
+        target: canvas,
+      });
+      const { handlers } = store.getState().events;
+
+      raycast.mockClear();
+      await act(async () => handlers?.onPointerMove(pointer));
+      expect(mocks.graphicsActor.send).toHaveBeenCalledWith({
+        type: 'setHoveredModelComponent',
+        unitId: 'unit:test',
+        componentId: 'near',
+        source: 'viewer',
+      });
+      expect(raycast).toHaveBeenCalledTimes(1);
+
+      await act(async () => handlers?.onPointerDown(pointer));
+      raycast.mockClear();
+      await act(async () => handlers?.onClick(pointer));
+      expect(mocks.graphicsActor.send).toHaveBeenCalledWith({
+        type: 'toggleModelComponentSelection',
+        unitId: 'unit:test',
+        componentId: 'near',
+        source: 'viewer',
+      });
+      expect(raycast).toHaveBeenCalledTimes(1);
+
+      near.layers.set(1);
+      raycast.mockClear();
+      await act(async () => handlers?.onPointerDown(secondaryPointerEvent));
+      expect(secondaryPointer).toHaveBeenLastCalledWith({ unitId: 'unit:test', componentId: 'far' });
+      expect(raycast).toHaveBeenCalledTimes(1);
+
+      near.layers.set(0);
+      mocks.raycastClipState = {
+        enabled: true,
+        planes: [
+          new Plane().setFromNormalAndCoplanarPoint(direction, nearCenter.clone().add(farCenter).multiplyScalar(0.5)),
+        ],
+      };
+      mocks.sectionView = { ...mocks.sectionView, isActive: true };
+      await act(async () => {
+        root.render(
+          <GltfMesh
+            gltfFile={bytes}
+            enableMatcap={false}
+            onModelComponentSecondaryPointerCandidate={secondaryPointer}
+          />,
+        );
+      });
+      raycast.mockClear();
+      await act(async () => handlers?.onPointerDown(secondaryPointerEvent));
+      expect(secondaryPointer).toHaveBeenLastCalledWith({ unitId: 'unit:test', componentId: 'far' });
+      expect(raycast).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
+  it('should dispose parsed material snapshots if presentation preparation fails after cloning', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const gltf = createGltf();
+    const texture = new Texture();
+    const material = new MeshStandardMaterial({ map: texture });
+    gltf.scene.add(new Mesh(new BoxGeometry(), material));
+    const materialDispose = vi.spyOn(material, 'dispose');
+    const textureDispose = vi.spyOn(texture, 'dispose');
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    vi.spyOn(inPlaceGeometry, 'captureInPlaceGeometryTargets').mockImplementation(() => {
+      throw new Error('presentation preparation failed');
+    });
+    render(<GltfMesh gltfFile={new Uint8Array([1])} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(mocks.graphicsActor.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'gltfPresentationFailed' }),
+      );
+    });
+
     expect(materialDispose).toHaveBeenCalledTimes(1);
     expect(textureDispose).toHaveBeenCalledTimes(1);
   });

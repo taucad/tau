@@ -242,6 +242,11 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => `mode: ${input.mode}`,
     output: (output) => `Captured ${output.images.length} image(s)`,
   },
+  [toolName.updateTodos]: {
+    input: (input) => (input.items ?? []).map((item) => `- [${item?.status ?? '?'}] ${item?.title ?? ''}`).join('\n'),
+    output: (output) =>
+      `${output.path}: ${String(output.counts.done)} done, ${String(output.counts.in_progress)} in progress, ${String(output.counts.pending)} pending`,
+  },
   [toolName.revisions]: {
     input: (input) => `action: ${input.action}`,
     /* The `where` line first, because it is the answer every action carries. */

@@ -1,28 +1,116 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { JsonValue } from '@taucad/agent-host';
-import type { MachineClient } from '@taucad/runtime/machine';
+import type { HostToolInvocation, InterruptResolution, JsonValue } from '@taucad/agent-host';
+import type {
+  MachineArtifactReference,
+  MachineClient,
+  MachineDirectoryEntry,
+  PrintRequest,
+} from '@taucad/runtime/machine';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
+import { createMachineToolRegistry } from '#registry/machine-tool-registry.js';
+import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
 
 const timestamp = '2026-09-14T00:00:00.000Z';
+// SAFETY: a well-formed sha256 literal for the branded digest a fixture reference carries.
+const sha = (fill: string): MachineArtifactReference['digest'] =>
+  `sha256:${fill.repeat(64)}` as MachineArtifactReference['digest'];
+
+/** Every machine tool, in listing order; `request_print` needs a planner. */
 const machineToolNames = [
   'discover_machines',
   'begin_machine_binding',
   'list_machines',
   'get_machine',
+  'request_print',
+  'get_print_request',
+  'list_print_requests',
+  'cancel_print',
   'prepare_machine_print',
-  'start_machine_print',
+  'upload_machine_print',
   'reconcile_machine_operation',
   'control_machine_run',
   'capture_machine_still',
 ] as const;
 
-const clientFixture = () => {
-  const startPrint = vi.fn<MachineClient['startPrint']>(async (input) => ({
+const entry = (machineId: string, name: string): MachineDirectoryEntry =>
+  ({
+    machineId,
+    providerId: 'bambu',
+    descriptor: { id: `physical-${machineId}`, name, model: 'X1C' },
+    snapshot: {
+      connection: 'connected',
+      readiness: 'idle',
+      observedAt: timestamp,
+      setup: { bedType: 'textured-pei', materials: [{ slot: 0, state: 'loaded', materialId: 'petg' }] },
+    },
+    freshness: 'current',
+  }) as unknown as MachineDirectoryEntry;
+
+const artifactFixture: MachineArtifactReference = {
+  revision: {
+    authorityId: 'authority-1',
+    workspaceId: 'workspace-1',
+    revisionId: 'revision-1' as MachineArtifactReference['revision']['revisionId'],
+    treeDigest: sha('c'),
+  },
+  path: '.tau/artifacts/call-1__main.ts-gcode.3mf/pyramid.gcode.3mf',
+  digest: sha('d'),
+  length: 4096,
+  mediaType: 'application/vnd.bambulab.gcode-3mf',
+  contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+  selectedMember: 'Metadata/plate_1.gcode',
+};
+
+const clientFixture = (input: { readonly entries?: readonly MachineDirectoryEntry[] } = {}) => {
+  const entries = input.entries ?? [entry('machine-1', 'Workshop X1C')];
+  const requests = new Map<string, PrintRequest>();
+  const startPrint = vi.fn<MachineClient['startPrint']>(async () => {
+    throw new Error('startPrint must never be reached from a tool');
+  });
+  const uploadPrint = vi.fn<MachineClient['uploadPrint']>(async () => {
+    throw new Error('uploadPrint must never be reached before approval');
+  });
+  const requestPrint = vi.fn<MachineClient['requestPrint']>(async (request) => {
+    const existing = requests.get(request.requestId);
+    if (existing) {
+      return existing;
+    }
+    const created: PrintRequest = {
+      requestId: request.requestId,
+      machineId: request.machineId,
+      artifact: request.artifact,
+      configuration: request.configuration,
+      requestedBy: request.requestedBy,
+      summary: request.summary ?? { fileName: 'unnamed' },
+      state: 'awaiting-approval',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    requests.set(created.requestId, created);
+    return created;
+  });
+  const resolvePrintRequest = vi.fn<MachineClient['resolvePrintRequest']>(async (input) => {
+    const current = requests.get(input.requestId)!;
+    const next: PrintRequest = {
+      ...current,
+      state: input.decision === 'approve' ? 'approved' : 'denied',
+      resolvedBy: input.resolvedBy,
+    };
+    requests.set(next.requestId, next);
+    return next;
+  });
+  const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>(async (input) => {
+    const current = requests.get(input.requestId)!;
+    const next: PrintRequest = { ...current, state: 'withdrawn', resolvedBy: input.resolvedBy };
+    requests.set(next.requestId, next);
+    return next;
+  });
+  const controlRun = vi.fn<MachineClient['controlRun']>(async (input) => ({
     operationId: input.operationId,
     machineId: input.machineId,
-    kind: 'start',
+    kind: input.command,
     status: 'accepted',
-    providerRunId: 'provider-run-1',
+    providerRunId: input.expectedProviderRunId,
     observedAt: timestamp,
   }));
   const captureStill = vi.fn<MachineClient['captureStill']>(async () => ({
@@ -50,13 +138,12 @@ const clientFixture = () => {
     preparePrint: async () => {
       throw new Error('not used');
     },
+    uploadPrint,
     startPrint,
     reconcileOperation: async () => {
       throw new Error('not used');
     },
-    controlRun: async () => {
-      throw new Error('not used');
-    },
+    controlRun,
     captureStill,
     list: async () => ({
       cursor: {
@@ -67,7 +154,7 @@ const clientFixture = () => {
         position: 1,
         revision: 1,
       },
-      entries: [],
+      entries,
     }),
     get: async () => {
       throw new Error('not used');
@@ -75,29 +162,59 @@ const clientFixture = () => {
     async *watch() {
       yield* [];
     },
+    requestPrint,
+    listPrintRequests: async ({ machineId }) =>
+      [...requests.values()].filter((request) => machineId === undefined || request.machineId === machineId),
+    async *watchPrintRequests() {
+      yield* [];
+    },
+    resolvePrintRequest,
+    withdrawPrintRequest,
   };
-  return { captureStill, client, startPrint };
+  return {
+    client,
+    requests,
+    captureStill,
+    controlRun,
+    requestPrint,
+    resolvePrintRequest,
+    startPrint,
+    uploadPrint,
+    withdrawPrintRequest,
+  };
 };
 
-const registry = (machines: Parameters<typeof createChatToolRegistry>[0]['machines']) =>
-  createChatToolRegistry({
-    fileSystemFor: () => {
-      throw new Error('not used');
-    },
-    machines,
-    testingEnabled: false,
+const planPrint = vi.fn<MachinePrintPlanner>(async () => ({
+  artifact: artifactFixture,
+  configuration: { expectedBedType: 'textured-pei' },
+  summary: { layers: 125, estimatedDuration: 3900, filamentLength: 2100 },
+}));
+
+const run = async (
+  client: MachineClient,
+  call: { readonly toolName: string; readonly input: JsonValue; readonly approve?: HostToolInvocation['approve'] },
+) =>
+  createMachineToolRegistry(client, { planPrint }).invoke({
+    toolCallId: 'call-1',
+    signal: new AbortController().signal,
+    ...call,
   });
 
-const invoke = async (client: MachineClient, toolName: string, input: JsonValue) =>
-  registry({ available: true, ...client }).invoke({
-    toolCallId: 'call-1',
-    toolName,
-    input,
-    signal: new AbortController().signal,
-  });
+const invoke = async (client: MachineClient, toolName: string, input: JsonValue) => run(client, { toolName, input });
+
+const approveWith = (outcome: InterruptResolution['outcome']) =>
+  vi.fn<NonNullable<HostToolInvocation['approve']>>(async () => ({ interruptId: 'interrupt-1', outcome }));
 
 describe('machine tool registry', () => {
   it('registers explicit tools only for the negotiated and granted facet', () => {
+    const registry = (machines: Parameters<typeof createChatToolRegistry>[0]['machines']) =>
+      createChatToolRegistry({
+        fileSystemFor: () => {
+          throw new Error('not used');
+        },
+        machines,
+        testingEnabled: false,
+      });
     for (const reason of ['unsupported', 'not-granted'] as const) {
       const names = registry({ available: false, reason })
         .list()
@@ -107,14 +224,31 @@ describe('machine tool registry', () => {
     const definitions = registry({ available: true, ...clientFixture().client })
       .list()
       .filter(({ name }) => machineToolNames.includes(name as (typeof machineToolNames)[number]));
-    expect(definitions.map(({ name }) => name)).toEqual(machineToolNames);
+    /* Through the chat registry no planner is wired yet, so `request_print` is
+     * withheld rather than offered-and-failing; nothing offers a bare start. */
+    expect(definitions.map(({ name }) => name)).toEqual(machineToolNames.filter((name) => name !== 'request_print'));
+    expect(definitions.map(({ name }) => name)).not.toContain('start_machine_print');
     expect(JSON.stringify(definitions.map(({ inputSchema }) => inputSchema))).not.toMatch(
       /access.?code|certificate.?decision|host.?path|mqtt/iu,
     );
   });
 
-  it('collects bounded discovery and returns the exact physical-operation receipt', async () => {
-    const { captureStill, client, startPrint } = clientFixture();
+  it('offers request_print only with a planner and keeps every description short', () => {
+    const { client } = clientFixture();
+    const withPlanner = createMachineToolRegistry(client, { planPrint }).list();
+    expect(withPlanner.map(({ name }) => name)).toEqual(machineToolNames);
+    expect(
+      createMachineToolRegistry(client)
+        .list()
+        .map(({ name }) => name),
+    ).not.toContain('request_print');
+    for (const definition of withPlanner) {
+      expect(definition.description.split(/\s+/u).length).toBeLessThan(150);
+    }
+  });
+
+  it('collects bounded discovery and captures a still without touching run state', async () => {
+    const { captureStill, client } = clientFixture();
     await expect(
       invoke(client, 'discover_machines', {
         providerId: 'bambu',
@@ -124,26 +258,6 @@ describe('machine tool registry', () => {
       isError: false,
       content: { events: [{ type: 'found', candidate: { claimedIdentity: { model: 'X1C' } } }] },
     });
-
-    const result = await invoke(client, 'start_machine_print', {
-      machineId: 'machine-1',
-      preparedId: 'prepared-1',
-      preparedDigest: `sha256:${'a'.repeat(64)}`,
-      expectedSetupDigest: `sha256:${'b'.repeat(64)}`,
-      operationId: 'operation-1',
-    });
-    expect(result).toMatchObject({
-      isError: false,
-      content: {
-        operationId: 'operation-1',
-        machineId: 'machine-1',
-        kind: 'start',
-        status: 'accepted',
-        providerRunId: 'provider-run-1',
-      },
-    });
-    expect(startPrint).toHaveBeenCalledWith(expect.objectContaining({ operationId: 'operation-1' }));
-
     await expect(invoke(client, 'capture_machine_still', { machineId: 'machine-1' })).resolves.toMatchObject({
       isError: false,
       content: {
@@ -157,17 +271,245 @@ describe('machine tool registry', () => {
     expect(captureStill).toHaveBeenCalledWith(expect.objectContaining({ machineId: 'machine-1' }));
   });
 
+  describe('request_print', () => {
+    it('opens one request, pauses on the approval, and resolves it when the person accepts', async () => {
+      const fixture = clientFixture();
+      const approve = approveWith('approved');
+      planPrint.mockClear();
+
+      const result = await run(fixture.client, {
+        toolName: 'request_print',
+        input: { targetFile: 'main.ts', preset: 'fine' },
+        approve,
+      });
+
+      expect(planPrint).toHaveBeenCalledTimes(1);
+      expect(planPrint.mock.calls[0]![0]).toMatchObject({
+        toolCallId: 'call-1',
+        targetFile: 'main.ts',
+        preset: 'fine',
+        machine: { machineId: 'machine-1' },
+        cursor: { authorityId: 'authority-1', workspaceId: 'workspace-1' },
+      });
+      expect(fixture.requestPrint).toHaveBeenCalledTimes(1);
+      expect(fixture.requestPrint.mock.calls[0]![0]).toMatchObject({
+        requestId: 'call-1',
+        machineId: 'machine-1',
+        artifact: artifactFixture,
+        configuration: { expectedBedType: 'textured-pei' },
+        requestedBy: { kind: 'agent', id: 'tau' },
+        summary: { fileName: 'pyramid.gcode.3mf', layers: 125, estimatedDuration: 3900, filamentLength: 2100 },
+      });
+      expect(approve).toHaveBeenCalledTimes(1);
+      expect(approve).toHaveBeenCalledWith({
+        prompt: 'Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min.',
+        payload: {
+          kind: 'print-request',
+          requestId: 'call-1',
+          machineId: 'machine-1',
+          fileName: 'pyramid.gcode.3mf',
+          artifactDigest: artifactFixture.digest,
+        },
+      });
+      expect(fixture.resolvePrintRequest).toHaveBeenCalledTimes(1);
+      expect(fixture.resolvePrintRequest.mock.calls[0]![0]).toMatchObject({
+        requestId: 'call-1',
+        decision: 'approve',
+        resolvedBy: { kind: 'user' },
+      });
+      expect(fixture.withdrawPrintRequest).not.toHaveBeenCalled();
+      expect(fixture.startPrint).not.toHaveBeenCalled();
+      expect(fixture.uploadPrint).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        isError: false,
+        content: { approval: 'approved', request: { requestId: 'call-1', state: 'approved' } },
+      });
+    });
+
+    it.each(['denied', 'cancelled'] as const)('withdraws the request when the answer is %s', async (outcome) => {
+      const fixture = clientFixture();
+      const result = await run(fixture.client, {
+        toolName: 'request_print',
+        input: { targetFile: 'main.ts' },
+        approve: approveWith(outcome),
+      });
+      expect(fixture.resolvePrintRequest).not.toHaveBeenCalled();
+      expect(fixture.withdrawPrintRequest).toHaveBeenCalledTimes(1);
+      expect(fixture.withdrawPrintRequest.mock.calls[0]![0]).toMatchObject({
+        requestId: 'call-1',
+        resolvedBy: { kind: 'user', label: 'Declined in chat' },
+      });
+      expect(fixture.startPrint).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        isError: false,
+        content: { approval: outcome, request: { state: 'withdrawn' } },
+      });
+    });
+
+    it('returns the request awaiting approval with a next step under a host without interrupts', async () => {
+      const fixture = clientFixture();
+      const result = await invoke(fixture.client, 'request_print', { targetFile: 'main.ts' });
+      expect(fixture.requestPrint.mock.calls[0]![0]).toMatchObject({
+        requestedBy: { kind: 'agent', id: 'external-agent' },
+      });
+      expect(fixture.resolvePrintRequest).not.toHaveBeenCalled();
+      expect(fixture.withdrawPrintRequest).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        isError: false,
+        content: {
+          request: { requestId: 'call-1', state: 'awaiting-approval' },
+          nextStep:
+            "Waiting for a person to accept print request call-1 in Tau's Print pane; accepting uploads the file and starts the print. Do not retry; call get_print_request to observe it.",
+        },
+      });
+      expect(result.content).not.toHaveProperty('approval');
+    });
+
+    it('names the bound machines when the choice is missing, ambiguous or unknown', async () => {
+      const none = clientFixture({ entries: [] });
+      await expect(invoke(none.client, 'request_print', { targetFile: 'main.ts' })).resolves.toMatchObject({
+        isError: true,
+        content: {
+          errorCode: 'MACHINE_TOOL_ERROR',
+          message: 'No machine is bound to this workspace; the person binds one in the Print pane.',
+        },
+      });
+      const two = clientFixture({ entries: [entry('machine-1', 'Workshop X1C'), entry('machine-2', 'Bench X1C')] });
+      await expect(invoke(two.client, 'request_print', { targetFile: 'main.ts' })).resolves.toMatchObject({
+        isError: true,
+        content: {
+          message:
+            'Several machines are bound; pass machineId. Bound machines: machine-1 (Workshop X1C), machine-2 (Bench X1C).',
+        },
+      });
+      await expect(
+        invoke(two.client, 'request_print', { targetFile: 'main.ts', machineId: 'machine-9' }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: {
+          message: 'No machine machine-9 is bound. Bound machines: machine-1 (Workshop X1C), machine-2 (Bench X1C).',
+        },
+      });
+      expect(none.requestPrint).not.toHaveBeenCalled();
+      expect(two.requestPrint).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('cancel_print', () => {
+    it('cancels the exact observed provider run of a started request', async () => {
+      const fixture = clientFixture();
+      fixture.requests.set('request-started', {
+        requestId: 'request-started',
+        machineId: 'machine-1',
+        artifact: artifactFixture,
+        configuration: {},
+        requestedBy: { kind: 'user', id: 'user-1', label: 'Ada' },
+        summary: { fileName: 'pyramid.gcode.3mf' },
+        state: 'started',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        receipt: {
+          operationId: 'start-1',
+          machineId: 'machine-1',
+          kind: 'start',
+          status: 'accepted',
+          providerRunId: 'provider-run-7',
+          observedAt: timestamp,
+        },
+      });
+      const result = await invoke(fixture.client, 'cancel_print', { requestId: 'request-started' });
+      expect(fixture.controlRun).toHaveBeenCalledTimes(1);
+      expect(fixture.controlRun.mock.calls[0]![0]).toMatchObject({
+        machineId: 'machine-1',
+        operationId: 'call-1:cancel',
+        command: 'cancel',
+        expectedProviderRunId: 'provider-run-7',
+      });
+      expect(fixture.withdrawPrintRequest).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        isError: false,
+        content: {
+          request: { requestId: 'request-started' },
+          receipt: { status: 'accepted', providerRunId: 'provider-run-7' },
+        },
+      });
+    });
+
+    it('withdraws a request that has not started and leaves a settled one alone', async () => {
+      const fixture = clientFixture();
+      await invoke(fixture.client, 'request_print', { targetFile: 'main.ts' });
+      await expect(invoke(fixture.client, 'cancel_print', { requestId: 'call-1' })).resolves.toMatchObject({
+        isError: false,
+        content: { request: { requestId: 'call-1', state: 'withdrawn' } },
+      });
+      expect(fixture.withdrawPrintRequest).toHaveBeenCalledTimes(1);
+      await expect(invoke(fixture.client, 'cancel_print', { requestId: 'call-1' })).resolves.toMatchObject({
+        isError: false,
+        content: { request: { state: 'withdrawn' } },
+      });
+      expect(fixture.withdrawPrintRequest).toHaveBeenCalledTimes(1);
+      expect(fixture.controlRun).not.toHaveBeenCalled();
+    });
+
+    it('controls a run directly by machine and expected provider run id', async () => {
+      const fixture = clientFixture();
+      await expect(
+        invoke(fixture.client, 'cancel_print', { machineId: 'machine-1', expectedProviderRunId: 'provider-run-3' }),
+      ).resolves.toMatchObject({ isError: false, content: { status: 'accepted', providerRunId: 'provider-run-3' } });
+      expect(fixture.controlRun.mock.calls[0]![0]).toMatchObject({
+        operationId: 'call-1:cancel',
+        expectedProviderRunId: 'provider-run-3',
+      });
+    });
+  });
+
+  it('reads and lists print requests', async () => {
+    const fixture = clientFixture();
+    await invoke(fixture.client, 'request_print', { targetFile: 'main.ts' });
+    await expect(invoke(fixture.client, 'get_print_request', { requestId: 'call-1' })).resolves.toMatchObject({
+      isError: false,
+      content: { request: { requestId: 'call-1', state: 'awaiting-approval' } },
+    });
+    await expect(invoke(fixture.client, 'get_print_request', { requestId: 'missing' })).resolves.toMatchObject({
+      isError: true,
+      content: { errorCode: 'MACHINE_TOOL_ERROR', message: 'No print request missing.' },
+    });
+    await expect(invoke(fixture.client, 'list_print_requests', { machineId: 'machine-1' })).resolves.toMatchObject({
+      isError: false,
+      content: { total: 1, requests: [{ requestId: 'call-1' }] },
+    });
+    await expect(invoke(fixture.client, 'list_print_requests', { machineId: 'machine-2' })).resolves.toMatchObject({
+      isError: false,
+      content: { total: 0, requests: [] },
+    });
+  });
+
   it('refuses invalid physical inputs before calling the client', async () => {
-    const { client, startPrint } = clientFixture();
+    const fixture = clientFixture();
     await expect(
-      invoke(client, 'start_machine_print', {
+      invoke(fixture.client, 'upload_machine_print', {
         machineId: 'machine-1',
         preparedId: 'prepared-1',
         preparedDigest: 'not-a-digest',
-        expectedSetupDigest: `sha256:${'b'.repeat(64)}`,
         operationId: 'operation-1',
       }),
     ).resolves.toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
-    expect(startPrint).not.toHaveBeenCalled();
+    const halfAddressed = await invoke(fixture.client, 'cancel_print', { machineId: 'machine-1' });
+    expect(halfAddressed).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+    expect(JSON.stringify(halfAddressed.content)).toContain(
+      'Give requestId alone, or machineId together with expectedProviderRunId.',
+    );
+    await expect(invoke(fixture.client, 'request_print', { targetFile: '' })).resolves.toMatchObject({
+      isError: true,
+      content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' },
+    });
+    await expect(invoke(fixture.client, 'start_machine_print', { machineId: 'machine-1' })).resolves.toMatchObject({
+      isError: true,
+      content: { errorCode: 'TOOL_NOT_FOUND' },
+    });
+    expect(fixture.uploadPrint).not.toHaveBeenCalled();
+    expect(fixture.controlRun).not.toHaveBeenCalled();
+    expect(fixture.requestPrint).not.toHaveBeenCalled();
+    expect(fixture.startPrint).not.toHaveBeenCalled();
   });
 });

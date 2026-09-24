@@ -22,7 +22,9 @@ import { toPiToolContent } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
+import type { MachineClient, MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
 import type { HashedGeometryResult } from '@taucad/runtime/types';
+import { sha256Bytes } from '@taucad/utils/hash';
 import { createActor, fromPromise } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 
@@ -30,7 +32,7 @@ import * as agentToolsRegistry from '@taucad/agent-tools/registry';
 import type { SystemSkillBundle } from '@taucad/agent-tools/registry';
 
 import { createHostToolRegistry } from '#agent-tools.js';
-import type { HostExportFile, HostRuntimeClient } from '#agent-tools.js';
+import type { HostExportFile, HostRuntimeClient, HostToolRegistryOptions } from '#agent-tools.js';
 
 const roots: string[] = [];
 
@@ -384,6 +386,129 @@ describe('createHostToolRegistry', () => {
     expect(names).toContain('get_kernel_result');
     expect(names).toContain('screenshot');
     expect(names).toContain('export_geometry');
+  });
+
+  it('offers request_print only with a runtime, a history and a machine, and slices through its own export route', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const timestamp = '2026-09-24T00:00:00.000Z';
+    /* Not a real container: the planner's summary is advisory and covered in its own tests. */
+    const sliced = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+    const runtimeClient = async () =>
+      fakeRuntime({
+        export: vi.fn<HostRuntimeClient['export']>(async () => ({
+          success: true,
+          data: [{ name: 'main.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf', bytes: sliced }],
+          issues: [],
+        })),
+      });
+    const revisions: NonNullable<HostToolRegistryOptions['revisions']> = {
+      log: async () => [],
+      diff: async () => [],
+      describe: async () => ({
+        branch: 'main',
+        revisionNumber: 3,
+        revisionId: 'revision-3',
+        branches: [{ name: 'main', revisionNumber: 3, revisionId: 'revision-3' }],
+        line: 'main · Rev 3',
+      }),
+    };
+    const entry = {
+      machineId: 'machine-1',
+      providerId: 'bambu',
+      descriptor: {
+        id: 'physical-1',
+        name: 'Workshop X1C',
+        model: 'X1C',
+        accepts: [
+          {
+            contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+            mediaType: 'application/vnd.bambulab.gcode-3mf',
+            requiredMembers: ['Metadata/plate_1.gcode'],
+            payloadSelection: 'plate',
+            technology: 'additive.fff',
+          },
+        ],
+      },
+      snapshot: {
+        connection: 'connected',
+        readiness: 'idle',
+        observedAt: timestamp,
+        setup: { bedType: 'textured-pei', materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
+      },
+      freshness: 'current',
+    } as unknown as MachineDirectoryEntry;
+    const provider = {
+      id: 'bambu',
+      name: 'Bambu Lab',
+      manifest: {
+        toolhead: {
+          filamentDiameter: { value: 1.75, unit: 'mm' },
+          nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],
+        },
+        bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+      },
+    } as unknown as MachineProvider;
+    const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
+      requestId: input.requestId,
+      machineId: input.machineId,
+      artifact: input.artifact,
+      configuration: input.configuration,
+      requestedBy: input.requestedBy,
+      summary: input.summary ?? { fileName: 'main.gcode.3mf' },
+      state: 'awaiting-approval',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }));
+    const machines = {
+      available: true,
+      list: async () => ({
+        cursor: {
+          hostId: 'host-1',
+          authorityId: 'authority-1',
+          workspaceId: 'workspace-1',
+          generation: 'generation-1',
+          position: 1,
+          revision: 1,
+        },
+        entries: [entry],
+      }),
+      listProviders: async () => [provider],
+      requestPrint,
+    } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
+
+    const names = (options: Partial<HostToolRegistryOptions>) =>
+      createHostToolRegistry({ workspaceRoot, ...options })
+        .list()
+        .map((tool) => tool.name);
+    expect(names({ runtimeClient, revisions })).not.toContain('request_print');
+    expect(names({ runtimeClient, machines })).not.toContain('request_print');
+    expect(names({ revisions, machines })).not.toContain('request_print');
+    const registry = createHostToolRegistry({ workspaceRoot, runtimeClient, revisions, machines });
+    expect(registry.list().map((tool) => tool.name)).toContain('request_print');
+
+    const result = await invoke(registry, 'request_print', { targetFile: 'main.ts' });
+    expect(result).toMatchObject({
+      isError: false,
+      content: { request: { requestId: 'call-1', machineId: 'machine-1', state: 'awaiting-approval' } },
+    });
+    const request = requestPrint.mock.calls[0]![0];
+    expect(request.artifact).toMatchObject({
+      revision: { authorityId: 'authority-1', workspaceId: 'workspace-1', revisionId: 'revision-3' },
+      path: '.tau/artifacts/call-1__main.ts-gcode.3mf/main.gcode.3mf',
+      digest: `sha256:${await sha256Bytes(sliced)}`,
+      length: sliced.byteLength,
+      mediaType: 'application/vnd.bambulab.gcode-3mf',
+      selectedMember: 'Metadata/plate_1.gcode',
+    });
+    expect(request.configuration).toMatchObject({
+      expectedModel: 'X1C',
+      expectedBedType: 'textured-pei',
+      expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
+      amsMapping: [0],
+    });
+    expect(request.summary).toEqual({ fileName: 'main.gcode.3mf' });
+    /* The slice the machine host will read is the one the runtime produced, recorded in the project. */
+    expect(new Uint8Array(await readFile(join(workspaceRoot, request.artifact.path)))).toEqual(sliced);
   });
 
   it('offers both parameter tools only with a native parameter actor and preserves its outcome', async () => {

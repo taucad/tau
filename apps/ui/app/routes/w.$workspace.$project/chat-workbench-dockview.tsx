@@ -76,7 +76,7 @@ import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
 import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
-import { MachinesPanelBody } from '#routes/w.$workspace.$project/chat-machines.js';
+import { PrintPanelBody } from '#routes/w.$workspace.$project/chat-print.js';
 import { ConverterPanelBody } from '#routes/w.$workspace.$project/chat-converter.js';
 import { DetailsPanelBody } from '#routes/w.$workspace.$project/chat-details.js';
 import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel.js';
@@ -268,8 +268,8 @@ function JobsWorkbenchPanel(): React.JSX.Element {
   return <JobsPanelBody />;
 }
 
-function MachinesWorkbenchPanel(): React.JSX.Element {
-  return <MachinesPanelBody />;
+function PrintWorkbenchPanel(): React.JSX.Element {
+  return <PrintPanelBody />;
 }
 
 function ExportWorkbenchPanel(): React.JSX.Element {
@@ -328,6 +328,12 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
         shortcut: projectWorkspaceKeyCombinations.model,
         panel: { id: 'workbench:model', component: 'model', title: 'Model' },
       },
+      {
+        id: 'print',
+        label: 'Print',
+        icon: Printer,
+        panel: { id: 'workbench:print', component: 'print', title: 'Print' },
+      },
     ],
   },
   {
@@ -351,12 +357,6 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
         label: 'Jobs',
         icon: BriefcaseBusiness,
         panel: { id: 'workbench:jobs', component: 'jobs', title: 'Jobs' },
-      },
-      {
-        id: 'machines',
-        label: 'Machines',
-        icon: Printer,
-        panel: { id: 'workbench:machines', component: 'machines', title: 'Machines' },
       },
     ],
   },
@@ -732,7 +732,9 @@ const components = {
   revisions: RevisionsWorkbenchPanel,
   agents: AgentsWorkbenchPanel,
   jobs: JobsWorkbenchPanel,
-  machines: MachinesWorkbenchPanel,
+  print: PrintWorkbenchPanel,
+  // Layouts persisted before the Print pane still name the retired Machines component.
+  machines: PrintWorkbenchPanel,
   export: ExportWorkbenchPanel,
   share: ShareWorkbenchPanel,
   details: DetailsWorkbenchPanel,
@@ -746,7 +748,7 @@ export const workbenchPanels = {
   revisions: getWorkbenchSurface('revisions').panel!,
   agents: getWorkbenchSurface('agents').panel!,
   jobs: getWorkbenchSurface('jobs').panel!,
-  machines: getWorkbenchSurface('machines').panel!,
+  print: getWorkbenchSurface('print').panel!,
   export: getWorkbenchSurface('export').panel!,
   share: getWorkbenchSurface('share').panel!,
   details: getWorkbenchSurface('details').panel!,
@@ -768,6 +770,7 @@ export const WorkbenchDockviewTab = withTabContextMenu(WorkbenchTabContextMenu, 
 const tabComponents = { editor: WorkbenchDockviewTab };
 
 const legacyWorkbenchFilesPanelId = 'workbench:files';
+const legacyWorkbenchMachinesPanelId = 'workbench:machines';
 
 export function openWorkbenchUtility(
   api: DockviewApi,
@@ -821,6 +824,14 @@ export function restoreWorkbenchLayout({
     const legacyFilesPanel = api.panels.find((panel) => panel.id === legacyWorkbenchFilesPanelId);
     if (legacyFilesPanel) {
       api.removePanel(legacyFilesPanel);
+    }
+    const legacyMachinesPanel = api.panels.find((panel) => panel.id === legacyWorkbenchMachinesPanelId);
+    if (legacyMachinesPanel) {
+      api.addPanel({
+        ...workbenchPanels.print,
+        position: { direction: 'within', referenceGroup: legacyMachinesPanel.group },
+      });
+      api.removePanel(legacyMachinesPanel);
     }
     if (!isTauDebugEnabled) {
       for (const panelId of [workbenchPanels.kernel.id, workbenchPanels.console.id]) {

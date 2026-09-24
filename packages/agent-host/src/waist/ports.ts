@@ -225,7 +225,32 @@ export type HostToolInvocation = {
    * adapter, which is served at the workspace root.
    */
   readonly runId?: string | undefined;
+  /**
+   * Pause the run on a durable approval and await the person's decision.
+   *
+   * Optional, unlike the rest of the invocation: one registry serves runs under
+   * hosts that have no interrupt port — an API-coordinated run, an MCP call from
+   * an external adapter — and a tool that needs consent under such a host hands
+   * its record back `awaiting-approval` for the person to answer in Tau's own
+   * surface, rather than failing or, worse, proceeding.
+   */
+  readonly approve?: HostToolApproval | undefined;
 };
+
+/**
+ * One durable approval a tool asks of the person before an effect it must not
+ * take alone — a physical print, a paid job.
+ *
+ * The whole resolution, not just its outcome: a request that offered options is
+ * answered by one of them, and re-deriving the choice from `approved` would
+ * substitute the host's guess for the human's decision.
+ *
+ * @public
+ */
+export type HostToolApproval = (request: {
+  readonly prompt: string;
+  readonly payload?: JsonValue | undefined;
+}) => Promise<InterruptResolution>;
 
 /** Normalized result of one tool dispatch. @public */
 export type HostToolResult = {

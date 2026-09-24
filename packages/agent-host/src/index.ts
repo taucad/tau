@@ -125,6 +125,7 @@ export type {
   HostRun,
   HostRunFailure,
   HostRunSnapshot,
+  HostToolApproval,
   HostToolDefinition,
   HostToolInvocation,
   HostToolResult,

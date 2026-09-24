@@ -584,8 +584,14 @@ function ConnectedPrintPanel({
               onReconciled={recordReconciled}
             />
             <PrepareSection entry={selected} provider={provider} manifest={manifest} prepare={prepare} />
-            <MonitorSection client={client} entry={selected} manifest={manifest} />
-            <ControlsSection client={client} entry={selected} manifest={manifest} onReceipt={recordReceipt} />
+            <MonitorSection client={client} entry={selected} manifest={manifest} requests={requests} />
+            <ControlsSection
+              client={client}
+              entry={selected}
+              manifest={manifest}
+              requests={requests}
+              onReceipt={recordReceipt}
+            />
             <ActivitySection requests={requests} ledger={ledger} entry={selected} />
             <InspectSection entry={selected} provider={provider} manifest={manifest} />
           </div>

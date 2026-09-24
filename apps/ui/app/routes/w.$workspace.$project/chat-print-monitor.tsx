@@ -29,6 +29,7 @@ import {
   materialSlotLabel,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
+import { startedRunIdOf } from '#hooks/use-machines-print-requests.js';
 
 /**
  * Whether one observation group is older than the budget its manifest declares.
@@ -207,11 +208,27 @@ function StillCapture({
   );
 }
 
+/**
+ * The active run's file as the person approved it, else as the printer names it.
+ *
+ * @param entry - The observed machine.
+ * @param requests - Its print requests.
+ * @returns The file name, or `undefined` without a run.
+ */
+const runFileName = (entry: MachineDirectoryEntry, requests: readonly PrintRequest[]): string | undefined => {
+  const { activeRunId, run } = entry.snapshot;
+  const started =
+    activeRunId === undefined ? undefined : requests.find((request) => startedRunIdOf(request) === activeRunId);
+  return started?.summary.fileName ?? run?.file ?? run?.name;
+};
+
 function RunGroup({
   entry,
+  fileName,
   isStale,
 }: {
   readonly entry: MachineDirectoryEntry;
+  readonly fileName: string | undefined;
   readonly isStale: boolean;
 }): React.JSX.Element {
   const { run } = entry.snapshot;
@@ -235,7 +252,7 @@ function RunGroup({
             />
           )}
           <dl className='flex flex-col gap-0.5'>
-            {(run.file ?? run.name) === undefined ? null : <PrintRow label='File'>{run.file ?? run.name}</PrintRow>}
+            {fileName === undefined ? null : <PrintRow label='File'>{fileName}</PrintRow>}
             {run.stage === undefined ? null : <PrintRow label='Stage'>{run.stage}</PrintRow>}
             {speed === '' ? null : <PrintRow label='Speed'>{speed}</PrintRow>}
           </dl>
@@ -382,10 +399,12 @@ export function MonitorSection({
   client,
   entry,
   manifest,
+  requests,
 }: {
   readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
+  readonly requests: readonly PrintRequest[];
 }): React.JSX.Element {
   const now = useNow();
   const { alerts } = entry.snapshot;
@@ -399,7 +418,7 @@ export function MonitorSection({
           <span className='font-mono'>{alerts.map(({ code }) => code).join(', ')}</span>
         </PrintNotice>
       ) : null}
-      <RunGroup entry={entry} isStale={stale('run')} />
+      <RunGroup entry={entry} fileName={runFileName(entry, requests)} isStale={stale('run')} />
       <TemperatureGroup entry={entry} manifest={manifest} isStale={stale('thermal')} />
       <EnvironmentGroup
         entry={entry}
@@ -475,11 +494,13 @@ export function ControlsSection({
   client,
   entry,
   manifest,
+  requests,
   onReceipt,
 }: {
   readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
+  readonly requests: readonly PrintRequest[];
   readonly onReceipt: (receipt: MachineOperationReceipt) => void;
 }): React.JSX.Element {
   const [isBusy, setIsBusy] = useState(false);
@@ -488,6 +509,7 @@ export function ControlsSection({
   const commands = availableRunCommands(entry);
   const isCurrent = entry.freshness === 'current' && entry.snapshot.connection === 'connected';
   const otherActions = (manifest?.actions ?? []).filter((action) => !implementedActions.has(action.id));
+  const fileName = runFileName(entry, requests);
 
   const issue = async (command: MachineControlRunInput['command']): Promise<void> => {
     const expectedProviderRunId = entry.snapshot.activeRunId;
@@ -556,7 +578,7 @@ export function ControlsSection({
         >
           <p>
             {commandVerb[confirming]} {entry.descriptor.name}
-            ’s current run{entry.snapshot.run?.file ? ` (${entry.snapshot.run.file})` : ''}?
+            ’s current run{fileName === undefined ? '' : ` (${fileName})`}?
             {confirming === 'urgent-stop'
               ? ' This is a priority stop of the current run, not a certified emergency stop.'
               : ''}
@@ -662,7 +684,7 @@ export const startedRunLabel = (
   ledger: readonly LedgerEntry[],
 ): string => {
   const { receipt } = request;
-  const runId = receipt !== undefined && 'providerRunId' in receipt ? receipt.providerRunId : undefined;
+  const runId = startedRunIdOf(request);
   // Only a current observation of this machine made after the start can say the run moved on.
   if (
     entry?.machineId !== request.machineId ||

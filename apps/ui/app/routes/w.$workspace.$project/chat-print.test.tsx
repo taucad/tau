@@ -685,6 +685,41 @@ describe('Print pane monitor and controls', () => {
     expect(within(item).queryByText('Started')).not.toBeInTheDocument();
   });
 
+  it("names the run by the file the person approved, not the printer's upload name", async () => {
+    const started = agentRequest({
+      state: 'started',
+      receipt: {
+        operationId: 'operation-start-1',
+        machineId: 'machine-1',
+        kind: 'start',
+        status: 'accepted',
+        providerRunId: 'provider-run-1',
+        observedAt: timestamp,
+      },
+    });
+    const uploaded = printing();
+    const fixture = createFixture({
+      entries: [
+        {
+          ...uploaded,
+          snapshot: { ...uploaded.snapshot, run: { ...uploaded.snapshot.run!, file: 'tau-3f2a9c.gcode.3mf' } },
+        },
+      ],
+      requests: [started],
+    });
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Printing' });
+
+    await waitFor(() => {
+      expect(screen.getByText('File').nextElementSibling).toHaveTextContent('pyramid.gcode.3mf');
+    });
+    await user.click(screen.getByRole('button', { name: 'Urgent stop' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Confirm urgent stop' });
+    expect(dialog).toHaveTextContent('current run (pyramid.gcode.3mf)?');
+    expect(dialog).not.toHaveTextContent('tau-3f2a9c');
+  });
+
   it('holds an accepted start while a run is in progress and disables every physical action while stale', async () => {
     const fixture = createFixture({ requests: [agentRequest()] });
     const user = userEvent.setup();

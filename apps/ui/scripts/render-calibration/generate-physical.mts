@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Export BRep copper, metal and glass fixtures through Tau's runtime into the comparison catalog.
+ * Export BRep copper and physical-material fixtures through Tau's runtime into the comparison catalog.
  * Usage: node --import tsx apps/ui/scripts/render-calibration/generate-physical.mts
  * Inputs: the checked-in Replicad example. No environment variables are required.
  * Outputs: out/render-calibration/fixtures/*.glb and catalog entries.
@@ -29,7 +29,7 @@ const main = async (): Promise<void> => {
   );
   const variants = [
     { id: 'copper-lampshade', label: 'Copper lampshade · standard physical materials', source },
-    ...(['metal', 'glass'] as const).map((kind) => ({
+    ...(['metal', 'glass', 'layers'] as const).map((kind) => ({
       id: `physical-${kind}`,
       label: `Physical ${kind} · roughness and layer matrix`,
       source: `import { makeSphere, makeBox } from 'replicad';
@@ -47,7 +47,15 @@ export default function main(): Model {
         pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: roughness[column] },
         extensions: { KHR_materials_transmission: { transmissionFactor: 1 }, KHR_materials_ior: { ior: row === 0 ? 1 : 1.5 }, KHR_materials_volume: { thicknessFactor: row === 0 ? 0 : 0.025, attenuationDistance: 0.04, attenuationColor: row === 2 ? [0.2, 0.8, 0.4] : [1, 1, 1] } },
       };
-      parts.push({ name: 'Sphere ' + row + ':' + column, shape: makeSphere(14).translate([column * 38 - 57, 0, row * 38]), material: '${kind}' === 'metal' ? metal : glass });
+      const layers: Material = {
+        pbrMetallicRoughness: { baseColorFactor: row === 0 ? [0.18, 0.18, 0.18, 1] : row === 1 ? [0.13, 0.25, 0.45, 1] : [0.28, 0.32, 0.38, 1], metallicFactor: row === 2 ? 1 : 0, roughnessFactor: roughness[column] },
+        extensions: row === 0
+          ? { KHR_materials_specular: { specularFactor: 0.9, specularColorFactor: [1, 0.35, 0.12] } }
+          : row === 1
+            ? { KHR_materials_sheen: { sheenColorFactor: [0.9, 0.2, 0.1], sheenRoughnessFactor: roughness[column] } }
+            : { KHR_materials_iridescence: { iridescenceFactor: 1, iridescenceIor: 1.3, iridescenceThicknessMinimum: 400, iridescenceThicknessMaximum: 400 } },
+      };
+      parts.push({ name: 'Sphere ' + row + ':' + column, shape: makeSphere(14).translate([column * 38 - 57, 0, row * 38]), material: '${kind}' === 'metal' ? metal : '${kind}' === 'glass' ? glass : layers });
     }
   }
   if ('${kind}' === 'glass') {

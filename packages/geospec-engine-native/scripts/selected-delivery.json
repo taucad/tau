@@ -39,6 +39,7 @@
       "emscripten/em++": "498eba9b6aacffca1c358ba340fc7b37015d7867cb211c7f2d45784ee9310f03",
       "emscripten/emar": "18c8397cf60835533e0db88d1172e04fa0b753dea68e978149d923a9e6378af3",
       "bin/clang": "b23bc0247566b4543ce6131d1cec32ea9cdeecdd7444f69de39d8debe9e4c642",
+      "bin/wasm-ld": "78d7562994e04a4fc9da1c3a65349c45a55513d79a083f00c03fa1605434edff",
       "bin/wasm-opt": "32e91be8e904c587d0066b60f314293fc717d14a6f3fd56fbae0e1fe1e040484"
     }
   },
@@ -75,13 +76,17 @@
     "-DUSE_RAPIDJSON=ON",
     "-DUSE_FREETYPE=ON",
     "-DUSE_TBB=OFF",
-    "-DCMAKE_C_FLAGS=-O2 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS -DHAVE_RAPIDJSON",
-    "-DCMAKE_CXX_FLAGS=-O2 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS -DHAVE_RAPIDJSON -frtti -fexceptions -DOCJS_EXCEPTIONS_ENABLED=1"
+    "-DCMAKE_C_FLAGS=-O2 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS -DHAVE_RAPIDJSON -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm",
+    "-DCMAKE_CXX_FLAGS=-O2 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS -DHAVE_RAPIDJSON -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm"
   ],
   "wasmSimd": {
     "rustFlags": ["-C", "target-feature=+simd128"],
     "cxxFlag": "-msimd128",
     "linkFlag": "-msimd128"
+  },
+  "wasmEh": {
+    "compileFlags": ["-fwasm-exceptions", "-sWASM_LEGACY_EXCEPTIONS=1", "-sSUPPORT_LONGJMP=wasm"],
+    "linkFlags": ["-fwasm-exceptions", "-sWASM_LEGACY_EXCEPTIONS=1", "-sSUPPORT_LONGJMP=wasm"]
   },
   "linkOptimization": "O3",
   "diskGiB": {

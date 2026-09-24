@@ -466,9 +466,20 @@ class PreparationContractTest(unittest.TestCase):
         command = self.contract()['command']
         self.assertIn('-DUSE_TBB=OFF', command)
         for flag in ['-DCMAKE_C_FLAGS=', '-DCMAKE_CXX_FLAGS=']:
-            self.assertTrue(any(option.startswith(flag) and '-msimd128' in option for option in command))
+            self.assertTrue(any(option.startswith(flag) and all(selected in option for selected in
+                                ['-msimd128', *self.recipe['wasmEh']['compileFlags']]) for option in command))
         self.assertEqual(prepare.MIXED_PREFIX, 'occt-mixed-simd128')
         self.assertEqual(self.verify(), self.receipt)
+
+    def test_should_reject_js_eh_or_longjmp_in_native_eh_prefix(self):
+        original = list(self.recipe['mixedOcctOptions'])
+        for incompatible in ['-fexceptions', '-sDISABLE_EXCEPTION_CATCHING=0',
+                             '-sSUPPORT_LONGJMP=emscripten']:
+            with self.subTest(incompatible=incompatible):
+                self.recipe['mixedOcctOptions'] = [*original[:-1], original[-1] + ' ' + incompatible]
+                with self.assertRaisesRegex(ValueError, 'cannot mix with JavaScript EH or longjmp'):
+                    self.contract()
+        self.recipe['mixedOcctOptions'] = original
 
     def test_should_refuse_changed_selected_source_archives(self):
         selections = [self.recipe['occt'], *self.recipe['headers'].values()]
@@ -558,6 +569,7 @@ class PreparationContractTest(unittest.TestCase):
         self.assertEqual(manifest['recipeSha256'], prepare.digest(self.recipe_path))
         self.assertEqual(manifest['prefixProducerRecipe'], str(self.original_recipe))
         self.assertEqual(manifest['wasmSimd'], self.recipe['wasmSimd'])
+        self.assertEqual(manifest['wasmEh'], self.recipe['wasmEh'])
         self.assertEqual(manifest['cache'], str(self.cache / 'mixed-build-simd128'))
         self.assertEqual(manifest['occtPrefix'], str(self.prefix / 'install'))
         inputs = {row['path']: row['sha256'] for row in manifest['inputs']}

@@ -34,7 +34,7 @@ import zlib
 
 PACKAGE = Path(__file__).resolve().parents[1]
 ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_DELIVERY_CACHE = ROOT / 'node_modules/.cache/geospec-engine-native/delivery'
+DEFAULT_DELIVERY_CACHE = ROOT / 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh'
 DEFAULT_OCCT_PREFIX = ROOT / 'node_modules/.cache/geospec-engine-native/occt/install'
 TARGET = 'aarch64-apple-darwin'
 RUST_TOOLCHAIN = '1.88'
@@ -688,6 +688,9 @@ def mixed_environment(closure):
     require(simd is None or simd == {'rustFlags': ['-C', 'target-feature=+simd128'],
                                     'cxxFlag': '-msimd128', 'linkFlag': '-msimd128'},
             'Unsupported mixed SIMD selection')
+    eh_flags = ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm']
+    require(closure.get('wasmEh') == {'compileFlags': eh_flags, 'linkFlags': eh_flags},
+            'Unsupported mixed native WASM EH selection')
     return {
         **closure['environment'], 'RUSTC': closure['rustc'],
         'GEOSPEC_OCCT_PREFIX': closure['occtPrefix'], 'CARGO_INCREMENTAL': '0',
@@ -695,8 +698,7 @@ def mixed_environment(closure):
         'CXX_wasm32_unknown_emscripten': closure['emxx'],
         'AR_wasm32_unknown_emscripten': closure['emar'],
         'CXXFLAGS_wasm32_unknown_emscripten':
-            (simd['cxxFlag'] + ' ' if simd else '') +
-            '-fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten',
+            ' '.join([*([simd['cxxFlag']] if simd else []), '-frtti', *eh_flags]),
         **({'CARGO_ENCODED_RUSTFLAGS': '\x1f'.join(simd['rustFlags']),
             'GEOSPEC_WASM_SIMD_PROFILE': 'simd128-v1'} if simd else {}),
     }
@@ -753,6 +755,10 @@ def select_mixed_build():
         expected = mixed_environment(closure)
         require(closure['wasmSimd'] == selected['wasmSimd'] == receipt.get('wasmSimd'),
                 'Mixed SIMD recipe/receipt differ')
+        require(closure['wasmEh'] == selected['wasmEh'] == receipt.get('wasmEh'),
+                'Mixed native WASM EH recipe/receipt differ')
+        require(all(flag in commands[3]['args'] for flag in closure['wasmEh']['linkFlags']),
+                'Mixed link command omitted native WASM EH')
         require(receipt.get('buildEnvironment') == {
             key: expected[key] for key in ['CARGO_ENCODED_RUSTFLAGS',
                                            'CXXFLAGS_wasm32_unknown_emscripten',

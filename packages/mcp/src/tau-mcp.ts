@@ -4,7 +4,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import { exportGeometryInputSchema, exportGeometryOutputSchema } from '@taucad/chat/schemas/tools/export-geometry';
@@ -68,6 +69,38 @@ export type TauMcpRpcCall = Readonly<{
   args: Readonly<Record<string, unknown>>;
 }>;
 
+/**
+ * One validated call to a host tool registered beside the CAD four.
+ *
+ * Host tools have no canonical chat RPC; the host resolves them by tool name
+ * in its own registry (the print request tools, blueprint D5).
+ *
+ * @public
+ */
+export type TauMcpToolCall = Readonly<{
+  toolName: string;
+  args: Readonly<Record<string, unknown>>;
+}>;
+
+/** Any call the MCP adapter makes into the host. @public */
+export type TauMcpHostCall = TauMcpRpcCall | TauMcpToolCall;
+
+/**
+ * One host tool exposed over MCP beside the CAD four.
+ *
+ * The input schema is the JSON Schema the host registry already publishes to
+ * models; it is converted for the SDK, which validates arguments before the
+ * host sees them and serializes the same schema back to `tools/list`.
+ *
+ * @public
+ */
+export type TauMcpHostTool = Readonly<{
+  name: string;
+  description: string;
+  inputSchema: Readonly<Record<string, unknown>>;
+  annotations?: ToolAnnotations | undefined;
+}>;
+
 /** A successful canonical RPC result. @public */
 export type TauMcpRpcSuccess = Readonly<{ success: true } & Record<string, unknown>>;
 
@@ -83,9 +116,17 @@ export type TauMcpRpcFailure = Readonly<{
 
 /** Transport-neutral port implemented by browser-backed and headless Tau authorities. @public */
 export type TauMcpDispatch = (
-  call: TauMcpRpcCall,
+  call: TauMcpHostCall,
   options: TauMcpDispatchOptions,
 ) => Promise<TauMcpRpcSuccess | TauMcpRpcFailure>;
+
+/** Options shared by every server constructor in this package. @public */
+export type TauMcpServerOptions = Readonly<{
+  /** Canonical RPC dispatch function for one authorized run. */
+  dispatch: TauMcpDispatch;
+  /** Host tools registered beside the CAD four, dispatched by name. */
+  hostTools?: readonly TauMcpHostTool[] | undefined;
+}>;
 
 /** Options for one stateless Streamable HTTP MCP request. @public */
 export type TauMcpHttpRequestOptions = Readonly<{
@@ -238,6 +279,8 @@ export const createTauMcpAdapter = (options: { dispatch: TauMcpDispatch }): TauM
   },
 });
 
+const hostToolArgumentsSchema = z.record(z.string(), z.unknown());
+
 const readOnlyAnnotations = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -260,8 +303,8 @@ const artifactWriteAnnotations = {
  * @returns Nothing.
  * @public
  */
-export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauMcpDispatch }): void => {
-  const adapter = createTauMcpAdapter(options);
+export const registerTauMcpTools = (server: McpServer, options: TauMcpServerOptions): void => {
+  const adapter = createTauMcpAdapter({ dispatch: options.dispatch });
 
   server.registerTool(
     toolName.getKernelResult,
@@ -307,6 +350,25 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
         signal: extra.signal,
       }),
   );
+  for (const tool of options.hostTools ?? []) {
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: z.fromJSONSchema(tool.inputSchema),
+        ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
+      },
+      async (args, extra) => {
+        extra.signal.throwIfAborted();
+        const result = await options.dispatch(
+          /* The SDK validated `args` against the tool's own schema; this only recovers the object type (CL11). */
+          { toolName: tool.name, args: hostToolArgumentsSchema.parse(args) },
+          { toolCallId: randomUUID(), signal: extra.signal },
+        );
+        return result.success === true ? rpcSuccess(withoutSuccess(result)) : rpcFailure(result);
+      },
+    );
+  }
 };
 
 /**
@@ -320,7 +382,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
  * @returns A tool-only MCP server that has not yet been connected to a transport.
  * @public
  */
-export const createTauMcpServer = (options: { readonly dispatch: TauMcpDispatch }): McpServer => {
+export const createTauMcpServer = (options: TauMcpServerOptions): McpServer => {
   const server = new McpServer({ name: '@taucad/mcp', version: '0.0.1' }, { instructions: tauMcpInstructions });
   registerTauMcpTools(server, options);
   return server;
@@ -334,10 +396,13 @@ export const createTauMcpServer = (options: { readonly dispatch: TauMcpDispatch 
  * request. Every request must present the same server-verified authority key;
  * a session id alone never grants access.
  *
+ * @param handlerOptions - Host tools every session of this handler exposes beside the CAD four.
  * @returns A stateful HTTP handler and its process-lifetime cleanup function.
  * @public
  */
-export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
+export const createTauMcpHttpHandler = (
+  handlerOptions: Readonly<{ hostTools?: readonly TauMcpHostTool[] | undefined }> = {},
+): TauMcpHttpHandler => {
   type Session = {
     readonly server: McpServer;
     readonly transport: StreamableHTTPServerTransport;
@@ -386,6 +451,7 @@ export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
       },
     });
     const server = createTauMcpServer({
+      hostTools: handlerOptions.hostTools,
       dispatch: async (call, dispatchOptions) => {
         const dispatch = requestDispatch.getStore();
         if (!dispatch) {

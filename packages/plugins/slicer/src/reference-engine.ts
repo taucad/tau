@@ -176,10 +176,21 @@ export const sliceReference = async (input: ReferenceSliceInput): Promise<Refere
   const filamentArea = Math.PI * (options.filamentDiameter / 2) ** 2;
   const density = options.infillPercent / 100;
 
-  const meshGl = new module.Mesh({ numProp: 3, vertProperties: input.mesh.positions, triVerts: input.mesh.indices });
+  const ofMesh = (triVerts: Uint32Array): Manifold =>
+    module.Manifold.ofMesh(new module.Mesh({ numProp: 3, vertProperties: input.mesh.positions, triVerts }));
   let manifold: Manifold;
   try {
-    manifold = module.Manifold.ofMesh(meshGl);
+    manifold = ofMesh(input.mesh.indices);
+    // A closed mesh wound inside out (an OpenSCAD polyhedron with its faces listed the other way)
+    // is a valid manifold with negative volume, and every slice of it is empty: turn it right side out.
+    if (manifold.status() === 'NoError' && manifold.volume() < 0) {
+      manifold.delete();
+      const flipped = Uint32Array.from(input.mesh.indices);
+      for (let index = 0; index < flipped.length; index += 3) {
+        [flipped[index + 1], flipped[index + 2]] = [flipped[index + 2]!, flipped[index + 1]!];
+      }
+      manifold = ofMesh(flipped);
+    }
   } catch (error) {
     throw new ReferenceEngineError('GEOMETRY_INVALID', 'The mesh is not a closed, consistently oriented manifold.', {
       cause: error,
@@ -371,6 +382,12 @@ export const sliceReference = async (input: ReferenceSliceInput): Promise<Refere
       if (extruded) {
         extrudedLayerCount += 1;
       }
+    }
+    if (extrudedLayerCount === 0) {
+      throw new ReferenceEngineError(
+        'GEOMETRY_INVALID',
+        `Nothing to print: no layer of the part has anything to extrude. Features thinner than the ${formatNumber(width, 2)} mm extrusion are dropped.`,
+      );
     }
 
     lines.push(';END');

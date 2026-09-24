@@ -25,6 +25,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import {
+  awaitGithubGistConnection,
   connectGithubGist,
   getGithubGistConnectionStatus,
   parseGithubGistAuthorizationReturn,
@@ -368,15 +369,26 @@ function PortableShareBody({
   const [password, setPassword] = useState('');
   const [includePassword, setIncludePassword] = useState(true);
   const [publicGist, setPublicGist] = useState(false);
+  /* D16c: desktop runs the Gist grant in the system browser and waits here for it. */
+  const [browserConsent, setBrowserConsent] = useState<'waiting' | 'cancelled' | 'timed-out'>();
   const operationRef = useRef<AbortController | undefined>(undefined);
+  const consentRef = useRef<AbortController | undefined>(undefined);
+  const primaryRef = useRef<HTMLButtonElement>(null);
   const { ticked: copied, trigger: triggerCopiedTick } = useTickAnimation();
 
   useEffect(() => {
     onBusyChange(busy);
   }, [busy, onBusyChange]);
+  /* The Cancel that was clicked unmounts; focus returns to the button that started the grant. */
+  useEffect(() => {
+    if (browserConsent === 'cancelled') {
+      primaryRef.current?.focus();
+    }
+  }, [browserConsent]);
   useEffect(() => {
     return () => {
       operationRef.current?.abort();
+      consentRef.current?.abort();
     };
   }, []);
   useEffect(() => {
@@ -464,15 +476,39 @@ function PortableShareBody({
   const connect = async (): Promise<void> => {
     setBusy(true);
     setError(undefined);
+    setBrowserConsent(undefined);
     try {
-      await connectGithubGist({
+      const handoff = await connectGithubGist({
         returnUrl: globalThis.location.href,
         surface: 'editor',
       });
+      if (handoff === 'redirect') {
+        return;
+      }
+      const consent = new AbortController();
+      consentRef.current = consent;
+      setBrowserConsent('waiting');
+      const connected = await awaitGithubGistConnection(consent.signal);
+      if (consent.signal.aborted) {
+        return;
+      }
+      consentRef.current = undefined;
+      setBrowserConsent(connected ? undefined : 'timed-out');
+      if (connected) {
+        setGithubStatus('connected');
+      }
+      setBusy(false);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'GitHub authorization failed.');
       setBusy(false);
     }
+  };
+
+  const cancelBrowserConsent = (): void => {
+    consentRef.current?.abort();
+    consentRef.current = undefined;
+    setBrowserConsent('cancelled');
+    setBusy(false);
   };
 
   const isDirect = method === 'direct';
@@ -583,7 +619,19 @@ function PortableShareBody({
               : 'GitHub authorization could not be completed. Try again.'}
         </div>
       ) : null}
-      {!isDirect && githubStatus && githubStatus !== 'connected' ? (
+      {!isDirect && browserConsent ? (
+        <div
+          role='status'
+          className='rounded-md border border-purple/30 bg-purple/10 px-3 py-2 text-sm text-purple dark:text-purple/80'
+        >
+          {browserConsent === 'waiting'
+            ? 'Finish in your browser. Tau continues here once GitHub grants Gist access.'
+            : browserConsent === 'cancelled'
+              ? 'Stopped waiting for your browser. Gist access was not changed here.'
+              : 'Gist access did not arrive within 10 minutes. Try again.'}
+        </div>
+      ) : null}
+      {!isDirect && githubStatus && githubStatus !== 'connected' && browserConsent !== 'waiting' ? (
         <div className='rounded-md border border-purple/30 bg-purple/10 px-3 py-2 text-sm text-purple dark:text-purple/80'>
           {githubStatus === 'signed-out'
             ? 'Sign in to Tau before connecting GitHub.'
@@ -604,12 +652,18 @@ function PortableShareBody({
       ) : null}
       {shareUrl ? <Input aria-label='Share link' readOnly value={shareUrl} /> : null}
       <div className='flex flex-wrap justify-end gap-2'>
+        {browserConsent === 'waiting' ? (
+          <Button type='button' variant='ghost' onClick={cancelBrowserConsent}>
+            Cancel
+          </Button>
+        ) : null}
         {!isDirect && githubStatus === 'signed-out' ? (
           <Button asChild>
             <NavLink to={signIn}>Sign in</NavLink>
           </Button>
         ) : (
           <Button
+            ref={primaryRef}
             type='button'
             disabled={busy || !passwordValid || (!isDirect && githubStatus === undefined)}
             onClick={() => {

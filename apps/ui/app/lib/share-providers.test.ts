@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-/* `linkSocial` is typed by its one argument so the scope assertions below read
- * the call's own shape rather than `any` — the *order* of the two consents is
- * what those rows are for (charter W12). */
 type LinkSocialInput = Readonly<{ scopes: readonly string[]; disableRedirect?: boolean }>;
 
 const authClient = vi.hoisted(() => ({
@@ -22,10 +19,8 @@ vi.mock('@taucad/share/artifact-worker', () => ({
 }));
 
 const {
-  authorizeGithubRemote,
+  awaitGithubGistConnection,
   connectGithubGist,
-  githubRemoteAuthorization,
-  githubRemoteScope,
   createGithubGistAuthorizationReturnUrl,
   getGithubGistConnectionStatus,
   githubShareCredentialBroker,
@@ -99,6 +94,20 @@ describe('GitHub share credential broker', () => {
     expect(authClient.getAccessToken).not.toHaveBeenCalled();
   });
 
+  it('should refuse repository scopes, which only the GitHub App connection grants', async () => {
+    for (const scope of ['public_repo', 'repo', 'delete_repo']) {
+      // oxlint-disable-next-line no-await-in-loop -- each refusal is asserted in turn.
+      await expect(
+        githubShareCredentialBroker.getAccessToken({
+          connectionId: 'github',
+          audience: 'https://api.github.com',
+          scopes: [scope],
+        }),
+      ).rejects.toThrow('The requested GitHub authority is not allowed.');
+    }
+    expect(authClient.getAccessToken).not.toHaveBeenCalled();
+  });
+
   it('requires the actual gist scope on a linked GitHub account', async () => {
     await expect(getGithubGistConnectionStatus()).resolves.toBe('connected');
     authClient.listAccounts.mockResolvedValueOnce({
@@ -115,10 +124,12 @@ describe('GitHub share credential broker', () => {
   it('lets Better Auth own the incremental GitHub scope redirect without forwarding fragments', async () => {
     authClient.linkSocial.mockResolvedValueOnce({ data: {}, error: null });
 
-    await connectGithubGist({
-      returnUrl: 'https://tau.new/w/home/demo?chat=chat_1#password=secret',
-      surface: 'editor',
-    });
+    await expect(
+      connectGithubGist({
+        returnUrl: 'https://tau.new/w/home/demo?chat=chat_1#password=secret',
+        surface: 'editor',
+      }),
+    ).resolves.toBe('redirect');
 
     expect(authClient.linkSocial).toHaveBeenCalledWith({
       provider: 'github',
@@ -149,142 +160,82 @@ describe('GitHub share credential broker', () => {
   });
 });
 
-/*
- * Connecting a project to a GitHub repository (charter W12, S34).
- *
- * The rule the charter states is an *order*, not a set: `public_repo` when
- * Connect is pressed, and `repo` only once the person has said the repository
- * is private. Asking for `repo` up front would be a pre-emptive grant of read
- * and write over every private repository the person has.
- */
-describe('GitHub remote authority', () => {
-  const consentWindow = (): Window => ({ closed: false, close: vi.fn(), location: { href: '' } }) as unknown as Window;
-
+/* D16c: on desktop the OAuth `state` cookie and the GitHub callback would live
+ * in two different browsers, so the grant runs on the web page instead. */
+describe('desktop GitHub Gist consent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authClient.listAccounts.mockResolvedValue({
-      data: [{ providerId: 'github', accountId: 'account_1', scopes: ['read:user'] }],
-      error: null,
-    });
-    authClient.linkSocial.mockResolvedValue({ data: { url: 'https://github.com/login/oauth/authorize' }, error: null });
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    globalThis.window.ENV = {
+      ...originalClientEnvironment,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+      TAU_FRONTEND_URL: 'https://tau.new/',
+    };
   });
 
-  it('names the one scope each visibility needs', () => {
-    expect(githubRemoteScope('public')).toBe('public_repo');
-    expect(githubRemoteScope('private')).toBe('repo');
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    globalThis.window.ENV = originalClientEnvironment;
   });
 
-  it('asks for public_repo first and repo only after the private choice', async () => {
-    const consent = consentWindow();
-    /* Each poll answers with the scope just granted, so the consent window is
-     * the only thing being scripted here — the order is what is under test. */
-    authClient.listAccounts
-      .mockResolvedValueOnce({ data: [{ providerId: 'github', accountId: 'a', scopes: ['read:user'] }], error: null })
-      .mockResolvedValueOnce({ data: [{ providerId: 'github', accountId: 'a', scopes: ['public_repo'] }], error: null })
-      .mockResolvedValueOnce({ data: [{ providerId: 'github', accountId: 'a', scopes: ['public_repo'] }], error: null })
-      .mockResolvedValue({
-        data: [{ providerId: 'github', accountId: 'a', scopes: ['public_repo', 'repo'] }],
-        error: null,
-      });
+  it('should open the web consent page in the system browser and never link from the renderer', async () => {
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
 
-    await authorizeGithubRemote({ visibility: 'private', consent });
-
-    expect(authClient.linkSocial.mock.calls.map(([call]) => call.scopes)).toStrictEqual([['public_repo'], ['repo']]);
-    expect(authClient.linkSocial.mock.calls.every(([call]) => call.disableRedirect === true)).toBe(true);
-  });
-
-  it('asks for nothing more than public_repo for a public repository', async () => {
-    const consent = consentWindow();
-    authClient.listAccounts
-      .mockResolvedValueOnce({ data: [{ providerId: 'github', accountId: 'a', scopes: ['read:user'] }], error: null })
-      .mockResolvedValue({ data: [{ providerId: 'github', accountId: 'a', scopes: ['public_repo'] }], error: null });
-
-    await authorizeGithubRemote({ visibility: 'public', consent });
-
-    expect(authClient.linkSocial.mock.calls.map(([call]) => call.scopes)).toStrictEqual([['public_repo']]);
-  });
-
-  it('asks for nothing at all when the session already carries the scope', async () => {
-    authClient.listAccounts.mockResolvedValue({
-      data: [{ providerId: 'github', accountId: 'a', scopes: ['public_repo'] }],
-      error: null,
-    });
-
-    await authorizeGithubRemote({ visibility: 'public', consent: consentWindow() });
-
-    expect(authClient.linkSocial).not.toHaveBeenCalled();
-  });
-
-  it('asks again on a reconnect, because a rotated secret leaves the scope and loses the token', async () => {
-    authClient.listAccounts.mockResolvedValue({
-      data: [{ providerId: 'github', accountId: 'a', scopes: ['public_repo'] }],
-      error: null,
-    });
-
-    await authorizeGithubRemote({ visibility: 'public', consent: consentWindow(), reconnect: true });
-
-    expect(authClient.linkSocial.mock.calls.map(([call]) => call.scopes)).toStrictEqual([['public_repo']]);
-  });
-
-  /*
-   * Review R4: a project connected to a *private* repository must get `repo`
-   * back. Nothing records which project was private — the row survives a reload
-   * — so the account's own widest scope is what the reconnect re-grants.
-   */
-  it('re-grants `repo` on a reconnect for an account that records it, never a silent downgrade', async () => {
-    authClient.listAccounts.mockResolvedValue({
-      data: [{ providerId: 'github', accountId: 'a', scopes: ['public_repo', 'repo'] }],
-      error: null,
-    });
-
-    await authorizeGithubRemote({ visibility: 'public', consent: consentWindow(), reconnect: true });
-
-    expect(authClient.linkSocial.mock.calls.map(([call]) => call.scopes)).toStrictEqual([['repo']]);
-  });
-
-  it('closes the consent window even when nothing had to be asked for', async () => {
-    const consent = { closed: false, close: vi.fn(), location: { href: '' } } as unknown as Window;
-    authClient.listAccounts.mockResolvedValue({
-      data: [{ providerId: 'github', accountId: 'a', scopes: ['public_repo'] }],
-      error: null,
-    });
-
-    await authorizeGithubRemote({ visibility: 'public', consent });
-
-    expect(authClient.linkSocial).not.toHaveBeenCalled();
-    // An `about:blank` pop-up left open is the user-visible defect (review R5).
-    expect(consent.close).toHaveBeenCalled();
-  });
-
-  it('says the permission was not granted when the window is closed without it', async () => {
-    const consent = { closed: true, close: vi.fn(), location: { href: '' } } as unknown as Window;
-
-    await expect(authorizeGithubRemote({ visibility: 'public', consent })).rejects.toThrow(
-      'GitHub permission was not granted.',
+    await expect(connectGithubGist({ returnUrl: 'app://tau/w/home/demo', surface: 'editor' })).resolves.toBe(
+      'system-browser',
     );
+
+    expect(open).toHaveBeenCalledExactlyOnceWith(
+      'https://tau.new/connect/github-gist',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    expect(authClient.linkSocial).not.toHaveBeenCalled();
   });
 
-  it('mints the remote credential as a header value, through the broker’s allow-set', async () => {
+  it('should poll every two seconds until the account carries the gist scope', async () => {
+    vi.useFakeTimers();
+    authClient.listAccounts
+      .mockResolvedValueOnce({ data: [{ providerId: 'github', accountId: 'a', scopes: ['read:user'] }], error: null })
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ data: [{ providerId: 'github', accountId: 'a', scopes: ['gist'] }], error: null });
+
+    const connected = awaitGithubGistConnection(new AbortController().signal);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(authClient.listAccounts).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(4001);
+
+    await expect(connected).resolves.toBe(true);
+    expect(authClient.listAccounts).toHaveBeenCalledTimes(3);
+  });
+
+  it('should give up after ten minutes without the gist scope', async () => {
+    vi.useFakeTimers();
     authClient.listAccounts.mockResolvedValue({
-      data: [{ providerId: 'github', accountId: 'account_1', scopes: ['public_repo'] }],
-      error: null,
-    });
-    authClient.getAccessToken.mockResolvedValue({
-      data: { accessToken: 'gho_remote', scopes: ['public_repo'] },
+      data: [{ providerId: 'github', accountId: 'a', scopes: ['read:user'] }],
       error: null,
     });
 
-    await expect(githubRemoteAuthorization('public')).resolves.toBe('Bearer gho_remote');
+    const connected = awaitGithubGistConnection(new AbortController().signal);
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+
+    await expect(connected).resolves.toBe(false);
+    expect(authClient.listAccounts).toHaveBeenCalledTimes(300);
   });
 
-  it('refuses an authority that is not on the allow-set', async () => {
-    await expect(
-      githubShareCredentialBroker.getAccessToken({
-        connectionId: 'github',
-        audience: 'https://api.github.com',
-        scopes: ['delete_repo'],
-      }),
-    ).rejects.toThrow('The requested GitHub authority is not allowed.');
+  it('should stop polling once the wait is cancelled', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+
+    const connected = awaitGithubGistConnection(controller.signal);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(2000);
+
+    await expect(connected).resolves.toBe(false);
+    expect(authClient.listAccounts).not.toHaveBeenCalled();
   });
 });
 

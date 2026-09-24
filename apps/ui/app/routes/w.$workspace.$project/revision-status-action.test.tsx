@@ -88,6 +88,19 @@ describe('selectRevisionFacts', () => {
     ...revisionStatusHarness.status.sync,
     ...over,
   });
+  const remoteOf = (over: Partial<RevisionStatusProjection['remote']>): RevisionStatusProjection['remote'] => ({
+    ...revisionStatusHarness.status.remote,
+    phase: 'connected',
+    ...over,
+  });
+  const tauRemote = remoteOf({ kind: 'tau', url: 'https://api.test/v1/git/p.git' });
+  const githubRemote = remoteOf({
+    kind: 'git',
+    url: 'https://github.com/o/r.git',
+    provider: 'github',
+    repositoryId: '99',
+  });
+  const gitRemote = remoteOf({ kind: 'git', url: 'https://gitlab.example.com/o/r.git' });
   const conflict: RevisionStatusProjection['conflicts'][number] = {
     revisionId: 'rev-13',
     branch: 'main',
@@ -145,12 +158,44 @@ describe('selectRevisionFacts', () => {
       'Needs your decision · both sides changed main',
     ],
     [
-      'backup asks for sign-in',
-      status({ sync: sync({ state: 'failed', reason: 'unauthorized' }) }),
+      'Tau Cloud asking for sign-in',
+      status({ remote: tauRemote, sync: sync({ state: 'failed', reason: 'unauthorized' }) }),
       onMain,
       CloudAlert,
       'attention',
       'Not backed up · Sign in',
+    ],
+    [
+      'GitHub refusing its credential (R-U4)',
+      status({ remote: githubRemote, sync: sync({ state: 'failed', reason: 'unauthorized' }) }),
+      onMain,
+      CloudAlert,
+      'attention',
+      'Not backed up · Reconnect GitHub',
+    ],
+    [
+      'another Git host refusing its credential (R-U4)',
+      status({ remote: gitRemote, sync: sync({ state: 'failed', reason: 'unauthorized' }) }),
+      onMain,
+      CloudAlert,
+      'attention',
+      'Not backed up · Remote refused access',
+    ],
+    [
+      'a Git remote refusing large files (R-U4)',
+      status({ remote: gitRemote, sync: sync({ state: 'failed', reason: 'largeFiles' }) }),
+      onMain,
+      CloudAlert,
+      'attention',
+      'Not backed up · Files too large for this remote',
+    ],
+    [
+      'a moved GitHub repository (D11)',
+      status({ remote: githubRemote, sync: sync({ state: 'failed', reason: 'moved' }) }),
+      onMain,
+      CloudAlert,
+      'attention',
+      'Not backed up · Repository moved',
     ],
     [
       'backup refused',

@@ -1,12 +1,34 @@
 /* oxlint-disable react/set-state-in-effect -- these effects synchronize paged GitHub catalog state. */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, GitBranch, Lock, RefreshCw } from 'lucide-react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ChevronDown, EllipsisVertical, GitBranch, Lock, RefreshCw } from 'lucide-react';
 import { useSession } from '@better-auth-ui/react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
 import { Button } from '@taucad/ui/components/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
+import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { githubConnections } from '#lib/github-connections.js';
+import {
+  GithubRequestError,
+  githubConnections,
+  githubErrorMessage,
+  githubSetupReturn,
+} from '#lib/github-connections.js';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import type {
@@ -32,6 +54,27 @@ type GithubRepositoryPickerProps = Readonly<{
   returnTo?: string;
 }>;
 
+/**
+ * Whether this deployment has the GitHub App connection set up (D8), from
+ * `GET /v1/github/configuration`. `undefined` while unknown or signed out.
+ *
+ * @returns `false` only when the API answered `GITHUB_CONNECTION_UNAVAILABLE`.
+ */
+export const useGithubConnectionAvailable = (): boolean | undefined => {
+  const { data: session } = useSession(authClient);
+  const { data, error } = useQuery({
+    queryKey: ['github', 'configuration'],
+    enabled: session !== null && session !== undefined,
+    retry: false,
+    staleTime: 5 * 60_000,
+    queryFn: async () => githubConnections.configuration(),
+  });
+  if (error instanceof GithubRequestError && error.code === 'GITHUB_CONNECTION_UNAVAILABLE') {
+    return false;
+  }
+  return data === undefined ? undefined : true;
+};
+
 const byAccount = (left: GithubInstallation, right: GithubInstallation): number => {
   const leftOrganization = left.owner.type.toLowerCase() === 'organization';
   const rightOrganization = right.owner.type.toLowerCase() === 'organization';
@@ -44,6 +87,9 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
   returnTo = '/import',
 }: GithubRepositoryPickerProps): React.JSX.Element {
   const { data: session, isPending: sessionPending } = useSession(authClient);
+  const { canConnectGitHub, isResolved: planResolved, requestUpgrade } = useCommercialFeatures();
+  const connectionAvailable = useGithubConnectionAvailable();
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [connections, setConnections] = useState<readonly GithubConnection[]>([]);
   const [connectionId, setConnectionId] = useState('');
   const [installations, setInstallations] = useState<readonly GithubInstallation[]>([]);
@@ -78,14 +124,14 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
       setConnections(found);
       setConnectionId((current) => (found.some((item) => item.id === current) ? current : (found[0]?.id ?? '')));
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'GitHub connections could not be loaded.');
+      setError(githubErrorMessage(error));
     } finally {
       setBusy(false);
     }
   }, []);
 
   useEffect(() => {
-    if (sessionPending || session === null || session === undefined) {
+    if (sessionPending || session === null || session === undefined || !canConnectGitHub) {
       return;
     }
     // async-iife: bootstrap -- the component cleanup aborts any desktop OAuth poll.
@@ -93,7 +139,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     return () => {
       oauthAbort.current?.abort();
     };
-  }, [loadConnections, session, sessionPending]);
+  }, [canConnectGitHub, loadConnections, session, sessionPending]);
 
   useEffect(() => {
     if (connectionId === '') {
@@ -135,7 +181,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         setBusy(false);
       } catch (error) {
         if (active) {
-          setError(error instanceof Error ? error.message : 'GitHub installations could not be loaded.');
+          setError(githubErrorMessage(error));
           setBusy(false);
         }
       }
@@ -176,7 +222,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         setBusy(false);
       } catch (error) {
         if (active) {
-          setError(error instanceof Error ? error.message : 'Repositories could not be loaded.');
+          setError(githubErrorMessage(error));
           setBusy(false);
         }
       }
@@ -199,10 +245,23 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     const loadBranches = async (): Promise<void> => {
       try {
         const result = await githubConnections.branches(connectionId, repository.id);
+        let found: readonly GithubBranch[] =
+          result.branches.length === 0 ? [{ name: repository.defaultBranch }] : result.branches;
+        /* D14: pages are alphabetical, so the default branch may lie beyond the first one. */
+        if (!found.some((item) => item.name === repository.defaultBranch)) {
+          const resolved = await githubConnections
+            .branch(connectionId, repository.id, repository.defaultBranch)
+            .catch((error: unknown) => {
+              if (error instanceof GithubRequestError && error.status === 404) {
+                return undefined;
+              }
+              throw error;
+            });
+          found = resolved === undefined ? found : [resolved, ...found];
+        }
         if (!active) {
           return;
         }
-        const found = result.branches.length === 0 ? [{ name: repository.defaultBranch }] : result.branches;
         setBranches(found);
         setBranchPage(1);
         setBranchHasMore(result.branches.length === 100);
@@ -214,7 +273,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         setBusy(false);
       } catch (error) {
         if (active) {
-          setError(error instanceof Error ? error.message : 'Branches could not be loaded.');
+          setError(githubErrorMessage(error));
           setBusy(false);
         }
       }
@@ -229,40 +288,45 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
   const connect = useCallback(async (): Promise<void> => {
     setBusy(true);
     setError(undefined);
+    const abort = new AbortController();
     try {
       const started = await githubConnections.start(returnTo, isDesktopTarget ? 'desktop-poll' : 'browser');
       oauthAttempt.current = started.attemptId;
       globalThis.location.assign(started.authorizationUrl);
-      if (isDesktopTarget) {
-        const abort = new AbortController();
-        oauthAbort.current?.abort();
-        oauthAbort.current = abort;
-        setOauthPending(true);
-        const expiresAt = Date.now() + 10 * 60_000;
-        while (!abort.signal.aborted && Date.now() < expiresAt) {
-          try {
-            // oxlint-disable-next-line no-await-in-loop -- completion appears only after the external-browser callback.
-            await githubConnections.complete(started.attemptId);
-            // oxlint-disable-next-line no-await-in-loop -- completion refresh belongs to the successful poll iteration.
-            await loadConnections();
-            return;
-          } catch {
-            // The pending result does not exist until GitHub returns; retry within the attempt TTL.
-          }
-          // oxlint-disable-next-line no-await-in-loop -- bounded OAuth completion polling.
-          await new Promise<void>((resolve) => {
-            globalThis.setTimeout(resolve, 1500);
-          });
-        }
-        if (!abort.signal.aborted) {
-          throw new Error('The GitHub connection attempt expired. Try again.');
-        }
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (!isDesktopTarget) {
         return;
       }
-      setError(error instanceof Error ? error.message : 'GitHub authorization could not be started.');
+      oauthAbort.current?.abort();
+      oauthAbort.current = abort;
+      setOauthPending(true);
+      const expiresAt = Date.now() + 10 * 60_000;
+      while (!abort.signal.aborted && Date.now() < expiresAt) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- completion appears only after the external-browser callback.
+          await githubConnections.complete(started.attemptId);
+          // oxlint-disable-next-line no-await-in-loop -- completion refresh belongs to the successful poll iteration.
+          await loadConnections();
+          return;
+        } catch (error) {
+          /* D7: only "not back from GitHub yet" is worth another poll; a denied or failed callback ends it. */
+          if (!(error instanceof GithubRequestError && error.code === 'GITHUB_COMPLETION_PENDING')) {
+            throw error;
+          }
+        }
+        // oxlint-disable-next-line no-await-in-loop -- bounded OAuth completion polling.
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(resolve, 1500);
+        });
+      }
+      if (!abort.signal.aborted) {
+        setError(githubErrorMessage({ code: 'GITHUB_COMPLETION_EXPIRED' }));
+        setBusy(false);
+      }
+    } catch (error) {
+      if (abort.signal.aborted) {
+        return;
+      }
+      setError(githubErrorMessage(error));
       setBusy(false);
     } finally {
       oauthAttempt.current = undefined;
@@ -284,7 +348,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
       try {
         await githubConnections.cancel(attemptId);
       } catch (error) {
-        setError(error instanceof Error ? error.message : 'The GitHub connection attempt could not be cancelled.');
+        setError(githubErrorMessage(error));
       }
     }
   }, []);
@@ -297,17 +361,38 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
 
   const configure = useCallback(async (): Promise<void> => {
     setBusy(true);
+    setError(undefined);
     try {
       const configuration = await githubConnections.configuration();
+      if (!isDesktopTarget) {
+        /* D16d: GitHub returns to the App's Setup URL (/github/complete) with no Tau state. */
+        githubSetupReturn.remember(returnTo);
+      }
       globalThis.location.assign(configuration.installUrl);
       if (isDesktopTarget) {
         setBusy(false);
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'GitHub access could not be configured.');
+      setError(githubErrorMessage(error));
       setBusy(false);
     }
-  }, []);
+  }, [returnTo]);
+
+  const disconnect = useCallback(async (): Promise<void> => {
+    if (connection === undefined) {
+      return;
+    }
+    setDisconnectOpen(false);
+    setBusy(true);
+    setError(undefined);
+    try {
+      await githubConnections.remove(connection.id);
+      await refreshCatalog();
+    } catch (error) {
+      setError(githubErrorMessage(error));
+      setBusy(false);
+    }
+  }, [connection, refreshCatalog]);
 
   const loadMoreRepositories = useCallback(async (): Promise<void> => {
     if (connectionId === '' || installation === undefined || !repositoryHasMore) {
@@ -336,7 +421,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
       if (generation !== catalogGeneration.current) {
         return;
       }
-      setError(error instanceof Error ? error.message : 'More repositories could not be loaded.');
+      setError(githubErrorMessage(error));
     } finally {
       if (generation === catalogGeneration.current) {
         setBusy(false);
@@ -366,7 +451,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
       if (generation !== catalogGeneration.current) {
         return;
       }
-      setError(error instanceof Error ? error.message : 'More branches could not be loaded.');
+      setError(githubErrorMessage(error));
     } finally {
       if (generation === catalogGeneration.current) {
         setBusy(false);
@@ -380,11 +465,18 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     }
     setBusy(true);
     setError(undefined);
+    let tree: { readonly files: readonly GithubTreeFile[]; readonly manifestBase64?: string | undefined };
     try {
-      const tree =
+      tree =
         branch.head === undefined
-          ? { files: [] as readonly GithubTreeFile[], manifestBase64: undefined }
+          ? { files: [] }
           : await githubConnections.tree(connection.id, repository.id, branch.head);
+    } catch (error) {
+      setError(githubErrorMessage(error));
+      setBusy(false);
+      return;
+    }
+    try {
       const manifest =
         tree.manifestBase64 === undefined
           ? undefined
@@ -433,6 +525,36 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     );
   }
 
+  if (!planResolved) {
+    return <p role='status'>Checking your plan…</p>;
+  }
+
+  if (!canConnectGitHub) {
+    return (
+      <div className='flex flex-col gap-3'>
+        <p className='text-sm text-muted-foreground'>
+          Linking a GitHub repository with its history and sync is available on Pro.
+        </p>
+        <Button variant='outline' size='sm' className='self-start' onClick={requestUpgrade}>
+          <CommercialUpgradeLabel />
+        </Button>
+      </div>
+    );
+  }
+
+  if (connectionAvailable === false) {
+    return (
+      <div className='flex flex-col gap-3'>
+        <p className='text-sm text-muted-foreground'>
+          GitHub connection isn’t set up on this deployment, so private and writable repositories can’t be linked here.
+        </p>
+        <Button disabled className='self-start'>
+          <SvgIcon id='github' aria-hidden className='size-4' /> Connect GitHub
+        </Button>
+      </div>
+    );
+  }
+
   if (!busy && connections.length === 0) {
     return (
       <div className='flex flex-col gap-3'>
@@ -453,17 +575,64 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
 
   return (
     <div className='flex flex-col gap-3' aria-busy={busy}>
-      <Picker
-        label='GitHub account'
-        items={connectionGroups}
-        value={connection}
-        getValue={(item) => item.id}
-        render={(item) => item.login}
-        onSelect={(value) => {
-          catalogGeneration.current += 1;
-          setConnectionId(value);
-        }}
-      />
+      <div className='flex items-end gap-2'>
+        <div className='min-w-0 flex-1'>
+          <Picker
+            label='GitHub account'
+            items={connectionGroups}
+            value={connection}
+            getValue={(item) => item.id}
+            render={(item) => item.login}
+            onSelect={(value) => {
+              catalogGeneration.current += 1;
+              setConnectionId(value);
+            }}
+          />
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              ref={connectTrigger}
+              variant='outline'
+              size='icon'
+              aria-label='GitHub account options'
+              disabled={busy}
+            >
+              <EllipsisVertical aria-hidden className='size-4' />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align='end'>
+            <DropdownMenuItem onSelect={connect}>Add account</DropdownMenuItem>
+            <DropdownMenuItem onSelect={configure}>Configure GitHub access</DropdownMenuItem>
+            <DropdownMenuItem
+              variant='destructive'
+              disabled={connection === undefined}
+              onSelect={() => {
+                setDisconnectOpen(true);
+              }}
+            >
+              Disconnect {connection?.login ?? 'account'}…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <AlertDialog open={disconnectOpen} onOpenChange={setDisconnectOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect {connection?.login} from Tau?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tau removes this account and asks GitHub to revoke its access. Projects linked through it stop syncing
+              until you connect GitHub again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button variant='destructive' onClick={disconnect}>
+              Disconnect
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {connection !== undefined && installations.length === 0 && !busy ? (
         <div className='rounded-md border p-3 text-sm'>
           <p>No personal or organization installation is available for this account.</p>
@@ -478,7 +647,9 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         value={installation}
         getValue={(item) => String(item.id)}
         render={(item) => item.owner.login}
-        disabled={(item) => item.suspended}
+        disabledReason={(item) =>
+          item.suspended ? 'Suspended on GitHub. An owner must unsuspend the Tau app for this account.' : undefined
+        }
         onSelect={(value) => {
           catalogGeneration.current += 1;
           setInstallationId(value);
@@ -493,7 +664,9 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         render={(item) =>
           `${item.fullName}${item.visibility === 'public' ? '' : ` · ${item.visibility === 'private' ? 'Private' : 'Internal'}`}${item.archived ? ' · Archived' : ''}${item.disabled ? ' · Disabled' : ''}`
         }
-        disabled={(item) => item.access === 'unknown'}
+        disabledReason={(item) =>
+          item.access === 'unknown' ? "Your GitHub account can't read this repository." : undefined
+        }
         isLoadingMore={busy}
         emptyListMessage={repositoryHasMore ? 'Searching remaining repositories…' : 'No repository found'}
         onLoadMore={repositoryHasMore ? loadMoreRepositories : undefined}
@@ -531,17 +704,11 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         <Button variant='outline' disabled={busy} onClick={refreshCatalog}>
           <RefreshCw aria-hidden className='size-4' /> Refresh
         </Button>
-        <Button ref={connectTrigger} variant='ghost' disabled={busy} onClick={connect}>
-          Add account
-        </Button>
         {oauthPending ? (
           <Button variant='ghost' onClick={cancelOauth}>
             Cancel connection
           </Button>
         ) : undefined}
-        <Button variant='ghost' disabled={busy} onClick={configure}>
-          Configure GitHub access
-        </Button>
       </div>
     </div>
   );
@@ -554,7 +721,7 @@ function Picker<Item>({
   getValue,
   getKeywords,
   render,
-  disabled,
+  disabledReason,
   onSelect,
   onLoadMore,
   isLoadingMore,
@@ -566,22 +733,37 @@ function Picker<Item>({
   getValue: (item: Item) => string;
   getKeywords?: (item: Item) => readonly string[];
   render: (item: Item) => string;
-  disabled?: (item: Item) => boolean;
+  /** Why an item can't be chosen; shown beside it (D17). */
+  disabledReason?: (item: Item) => string | undefined;
   onSelect: (value: string) => void;
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
   emptyListMessage?: string;
 }>): React.JSX.Element {
+  const labelId = useId();
+  const triggerId = useId();
   return (
     <div className='flex flex-col gap-1.5'>
-      <span className='text-sm font-medium'>{label}</span>
+      <span id={labelId} className='text-sm font-medium'>
+        {label}
+      </span>
       <ComboBoxResponsive
         groupedItems={items}
         value={value}
         getValue={getValue}
         getKeywords={getKeywords}
-        renderLabel={(item) => <span className='truncate'>{render(item)}</span>}
-        isDisabled={disabled}
+        renderLabel={(item) => {
+          const reason = disabledReason?.(item);
+          return reason === undefined ? (
+            <span className='truncate'>{render(item)}</span>
+          ) : (
+            <span className='flex min-w-0 flex-col'>
+              <span className='truncate'>{render(item)}</span>
+              <span className='text-xs text-muted-foreground'>{reason}</span>
+            </span>
+          );
+        }}
+        isDisabled={disabledReason === undefined ? undefined : (item) => disabledReason(item) !== undefined}
         title={`Select ${label}`}
         description={`Choose ${label.toLowerCase()}`}
         placeholder={`Select ${label.toLowerCase()}…`}
@@ -594,6 +776,8 @@ function Picker<Item>({
         onSelect={onSelect}
       >
         <Button
+          id={triggerId}
+          aria-labelledby={`${labelId} ${triggerId}`}
           variant='outline'
           className='w-full justify-between'
           disabled={items.every((group) => group.items.length === 0)}

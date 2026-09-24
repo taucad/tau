@@ -44,8 +44,8 @@ import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
-import { githubConnections } from '#lib/github-connections.js';
-import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { GithubRequestError, githubConnections, githubErrorMessage } from '#lib/github-connections.js';
+import { githubNoreplyAuthor, githubProjectBinding } from '#lib/github-project-binding.js';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
@@ -485,6 +485,216 @@ const remoteOrigin = (url: string | undefined): string | undefined => {
   }
 };
 
+/** Re-mint a GitHub credential this long before it expires (D2). */
+const githubRenewWindowMilliseconds = 5 * 60_000;
+/**
+ * The next attempt when a re-mint could not move the deadline.
+ *
+ * The API hands back the stored token until its last minute, so a re-mint
+ * inside the window can return the same one; and a failed renewal leaves the
+ * held token working until it expires. Either way: ask again in a minute.
+ */
+const githubRenewRetryMilliseconds = 60_000;
+/** `setTimeout` fires at once past this, which would turn a far deadline into a loop. */
+const longestTimerMilliseconds = 2_147_483_647;
+
+/**
+ * How long until this project's GitHub credential is re-minted (D2).
+ *
+ * @param expiresAt - The credential's expiry, as the API reported it.
+ * @param now - The current time, in epoch milliseconds.
+ * @returns Milliseconds to wait before minting again.
+ * @internal
+ */
+export const githubCredentialRenewDelay = (expiresAt: string, now: number): number => {
+  const remaining = Date.parse(expiresAt) - now;
+  return Number.isFinite(remaining) && remaining > githubRenewWindowMilliseconds
+    ? Math.min(remaining - githubRenewWindowMilliseconds, longestTimerMilliseconds)
+    : githubRenewRetryMilliseconds;
+};
+
+/**
+ * One project's pending re-mint; `epoch` retires every mint already in flight.
+ * `withdrawn` is set while the root holds an `unavailable` frame from a failed
+ * mint, so the retry that succeeds also has the refused remote try again.
+ */
+type GithubCredentialLease = {
+  timer: ReturnType<typeof setTimeout> | undefined;
+  epoch: number;
+  withdrawn: boolean;
+};
+const githubCredentialLeases = new Map<string, GithubCredentialLease>();
+
+const githubCredentialLease = (projectId: string): GithubCredentialLease => {
+  const held = githubCredentialLeases.get(projectId);
+  if (held !== undefined) {
+    return held;
+  }
+  const lease: GithubCredentialLease = { timer: undefined, epoch: 0, withdrawn: false };
+  githubCredentialLeases.set(projectId, lease);
+  return lease;
+};
+
+/**
+ * Stop re-minting this project's GitHub credential, and drop any mint in flight.
+ *
+ * @param projectId - The project whose remote changed or closed.
+ */
+const stopGithubCredential = (projectId: string): void => {
+  const lease = githubCredentialLeases.get(projectId);
+  if (lease === undefined) {
+    return;
+  }
+  globalThis.clearTimeout(lease.timer);
+  lease.timer = undefined;
+  lease.epoch += 1;
+  lease.withdrawn = false;
+};
+
+/**
+ * The frame that tells a revision root why this GitHub repository has no credential.
+ *
+ * @param repositoryUrl - The bound repository.
+ * @param reason - The sentence the Sync region shows.
+ * @returns The `unavailable` frame.
+ */
+const githubUnavailableFrame = (repositoryUrl: string, reason: string): GitRemoteCredential => ({
+  apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
+  origin: 'https://github.com',
+  repositoryUrl,
+  unavailable: reason,
+});
+
+/**
+ * The frame that withdraws this project's credential (review R-U2).
+ *
+ * While the project is bound to a GitHub repository it is `unavailable` for
+ * that repository rather than a bare frame: a bare frame clears the held
+ * credential, and the desktop host then reaches the repository with the
+ * person's own Git credential helper, which a GitHub-bound project never uses.
+ *
+ * @param projectId - The project.
+ * @param reason - Why there is no credential.
+ * @returns The frame to send.
+ */
+const withdrawnGithubCredential = (projectId: string, reason: string): GitRemoteCredential => {
+  const binding = githubProjectBinding.get(projectId);
+  return binding === undefined
+    ? { apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL') }
+    : githubUnavailableFrame(binding.repositoryUrl, reason);
+};
+
+/**
+ * Whether a failed mint may succeed when asked again (reviews R-U3, R-U5).
+ *
+ * A rate limit, a server error and an unreachable network pass; every other
+ * refusal (the grant disconnected or revoked, a stale generation) needs the
+ * person, so asking every minute would only repeat it.
+ *
+ * @param error - What the mint threw.
+ * @returns Whether to retry.
+ */
+const isTransientGithubFailure = (error: unknown): boolean =>
+  error instanceof GithubRequestError ? error.status === 429 || error.status >= 500 : error instanceof TypeError;
+
+/**
+ * Have a remote refused while there was no credential try the fresh one.
+ *
+ * @param client - The project's revision client.
+ */
+const resumeGithubRemote = (client: RevisionClient): void => {
+  const status = client.status();
+  if (status?.remote.phase === 'reconnectRequired') {
+    client.send({ command: 'authorizeRemote' });
+  } else if (status?.sync.state === 'failed' && status.sync.reason === 'unauthorized') {
+    client.send({ command: 'syncNow' });
+  }
+};
+
+/**
+ * Mint this project's GitHub credential and hand it to its revision root (D2).
+ *
+ * Reads the binding when it runs rather than when it was scheduled: a project
+ * that has connected another repository since must never be sent the last
+ * one's frame (review R1).
+ *
+ * @param client - The project's revision client.
+ * @param projectId - The project.
+ * @param onFailure - `unavailable` tells the root why there is no credential,
+ *   for an open or a recovery with nothing usable held; `retry` keeps the held
+ *   credential, which still works until it expires. Either way a transient
+ *   failure is asked again shortly, and a terminal one is sent as `unavailable`.
+ * @returns Whether a fresh credential was sent.
+ */
+const mintGithubCredential = async (
+  client: RevisionClient,
+  projectId: string,
+  onFailure: 'unavailable' | 'retry',
+): Promise<boolean> => {
+  const binding = githubProjectBinding.get(projectId);
+  if (binding === undefined) {
+    return false;
+  }
+  const lease = githubCredentialLease(projectId);
+  const { epoch } = lease;
+  const current = (): boolean =>
+    lease.epoch === epoch && githubProjectBinding.get(projectId)?.repositoryUrl === binding.repositoryUrl;
+  try {
+    const token = await githubConnections.token(binding.connectionId);
+    if (!current()) {
+      return false;
+    }
+    if (token.generation < binding.generation) {
+      throw Object.assign(new Error('The GitHub connection is stale.'), { code: 'GITHUB_RECONNECT_REQUIRED' });
+    }
+    client.remoteCredential({
+      apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
+      origin: 'https://github.com',
+      repositoryUrl: binding.repositoryUrl,
+      authorization: `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`,
+      expiresAt: token.expiresAt,
+    });
+    lease.withdrawn = false;
+    scheduleGithubCredential(client, projectId, githubCredentialRenewDelay(token.expiresAt, Date.now()));
+    return true;
+  } catch (error) {
+    if (!current()) {
+      return false;
+    }
+    const transient = isTransientGithubFailure(error);
+    if (onFailure === 'unavailable' || !transient) {
+      client.remoteCredential(githubUnavailableFrame(binding.repositoryUrl, githubErrorMessage(error)));
+      lease.withdrawn = true;
+    }
+    if (transient) {
+      scheduleGithubCredential(client, projectId, githubRenewRetryMilliseconds);
+    }
+    return false;
+  }
+};
+
+/**
+ * Re-mint this project's GitHub credential after `renewDelay` (D2).
+ *
+ * @param client - The project's revision client.
+ * @param projectId - The project.
+ * @param renewDelay - Milliseconds to wait.
+ */
+function scheduleGithubCredential(client: RevisionClient, projectId: string, renewDelay: number): void {
+  const lease = githubCredentialLease(projectId);
+  globalThis.clearTimeout(lease.timer);
+  lease.timer = globalThis.setTimeout(() => {
+    lease.timer = undefined;
+    const { withdrawn } = lease;
+    // async-iife: bootstrap -- a renewal reports through the frame it sends, or retries.
+    void (async (): Promise<void> => {
+      if ((await mintGithubCredential(client, projectId, 'retry')) && withdrawn) {
+        resumeGithubRemote(client);
+      }
+    })();
+  }, renewDelay);
+}
+
 /**
  * Open (or reuse) this project's connection to the worker revision root.
  *
@@ -771,8 +981,16 @@ export const peekRevisionClient = (projectId: string): RevisionClient | undefine
 
 /** Test-only access to the module's client table; not exported from a barrel. @internal */
 export const revisionClientTestApi = {
+  /** Serve `client` for `projectId` on `worker`, as `getRevisionClient` would have opened it. */
+  adopt: (projectId: string, worker: Worker, client: RevisionClient): void => {
+    clients.set(projectId, { client, worker });
+  },
   reset: (): void => {
     clients.clear();
+    for (const projectId of githubCredentialLeases.keys()) {
+      stopGithubCredential(projectId);
+    }
+    githubCredentialLeases.clear();
   },
 };
 
@@ -888,51 +1106,69 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
     if (client === undefined) {
       return;
     }
-    const binding = githubProjectBinding.get(projectId);
     const credentialAbort = new AbortController();
-    const provisionCredential = async (): Promise<void> => {
-      if (binding === undefined || sessionUser === undefined) {
-        client.remoteCredential({
-          apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
-        });
-      } else {
-        try {
-          const token = await githubConnections.token(binding.connectionId);
-          if (credentialAbort.signal.aborted) {
-            return;
-          }
-          if (token.generation < binding.generation) {
-            throw new Error('The GitHub connection is stale. Reconnect it.');
-          }
-          client.remoteCredential({
-            apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
-            origin: 'https://github.com',
-            repositoryUrl: binding.repositoryUrl,
-            authorization: `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`,
-          });
-        } catch (error) {
-          if (credentialAbort.signal.aborted) {
-            return;
-          }
-          client.remoteCredential({
-            apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
-            origin: 'https://github.com',
-            repositoryUrl: binding.repositoryUrl,
-            unavailable: error instanceof Error ? error.message : 'The GitHub connection needs to be renewed.',
-          });
+    /*
+     * One automatic re-mint per refusal (D2): a GitHub remote the provider
+     * answered 401 for re-mints, re-sends its frame and retries exactly once.
+     * The latch opens again only once the project is backed up, so a revoked
+     * grant still settles in *Reconnect GitHub* instead of looping. Closed
+     * until the open's own mint has answered: that mint is the first attempt.
+     */
+    let recovered = true;
+    const recover = (): void => {
+      const status = client.status();
+      if (status === undefined) {
+        return;
+      }
+      if (status.sync.state === 'backedUp') {
+        recovered = false;
+        return;
+      }
+      const refused =
+        status.remote.kind === 'git' &&
+        (status.remote.phase === 'reconnectRequired' ||
+          (status.sync.state === 'failed' && status.sync.reason === 'unauthorized'));
+      if (
+        !refused ||
+        recovered ||
+        sessionUser === undefined ||
+        githubProjectBinding.get(projectId)?.repositoryUrl !== status.remote.url
+      ) {
+        return;
+      }
+      recovered = true;
+      const retry = status.remote.phase === 'reconnectRequired' ? 'authorizeRemote' : 'syncNow';
+      // async-iife: bootstrap -- the retry settles on the projection this listener reads.
+      void (async (): Promise<void> => {
+        if ((await mintGithubCredential(client, projectId, 'unavailable')) && !credentialAbort.signal.aborted) {
+          client.send({ command: retry });
         }
-      }
-      if (!credentialAbort.signal.aborted) {
-        client.open();
-      }
+      })();
     };
-    // async-iife: bootstrap -- project cleanup fences the session-scoped credential request.
-    void provisionCredential();
+    const unsubscribe = client.subscribe(recover);
+    // async-iife: bootstrap -- project cleanup retires the session-scoped credential request.
+    void (async (): Promise<void> => {
+      const bound = sessionUser !== undefined && githubProjectBinding.get(projectId) !== undefined;
+      const minted = bound && (await mintGithubCredential(client, projectId, 'unavailable'));
+      if (credentialAbort.signal.aborted) {
+        return;
+      }
+      if (!bound) {
+        client.remoteCredential(withdrawnGithubCredential(projectId, 'Sign in to Tau to sync with GitHub.'));
+      }
+      recovered = !minted;
+      client.open();
+      /* The worker's opening fetch starts when the port connects, before this mint
+       * lands, and GitHub refuses it for want of a credential (D36). */
+      if (minted) {
+        resumeGithubRemote(client);
+      }
+    })();
     return () => {
       credentialAbort.abort();
-      client.remoteCredential({
-        apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
-      });
+      unsubscribe();
+      stopGithubCredential(projectId);
+      client.remoteCredential(withdrawnGithubCredential(projectId, 'Open this project in Tau to sync with GitHub.'));
       client.close();
     };
   }, [client, projectId, sessionUser]);
@@ -940,15 +1176,21 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
     if (client === undefined) {
       return;
     }
-    client.send({
-      command: 'setActor',
-      actor: revisionUserActor({
-        workspace: workspace ?? '',
-        user: sessionUser,
-        anonymous,
-      }),
-    });
-  }, [client, workspace, sessionUser, anonymous]);
+    const send = (): void => {
+      client.send({
+        command: 'setActor',
+        actor: revisionUserActor({
+          workspace: workspace ?? '',
+          user: sessionUser,
+          anonymous,
+          commitIdentity: githubProjectBinding.get(projectId)?.author,
+        }),
+      });
+    };
+    send();
+    /* Linking or unlinking GitHub changes who the next revision is authored as (D33). */
+    return githubProjectBinding.subscribe(send);
+  }, [client, projectId, workspace, sessionUser, anonymous]);
   return client;
 };
 
@@ -1029,6 +1271,8 @@ export type RevisionCommands = Readonly<{
       repositoryId?: string;
       connectionId?: string;
       generation?: number;
+      /** When `authorization` expires; the page re-mints before then (D2). */
+      expiresAt?: string;
       fetchOnly?: boolean;
     }>,
   ) => Promise<void>;
@@ -1125,6 +1369,7 @@ export const useRevisionCommands = (): RevisionCommands => {
           repositoryId?: string;
           connectionId?: string;
           generation?: number;
+          expiresAt?: string;
           fetchOnly?: boolean;
         }>,
       ) => {
@@ -1139,34 +1384,55 @@ export const useRevisionCommands = (): RevisionCommands => {
          * mint one says so, and the row asks for *Reconnect* rather than
          * reporting a failed push (charter W12). */
         const origin = kind === 'git' ? remoteOrigin(resolved) : undefined;
+        const github = origin !== undefined && resolved !== undefined && isGithubRemoteUrl(resolved);
         const minted =
-          origin !== undefined && resolved !== undefined && isGithubRemoteUrl(resolved)
-            ? options?.authorization === undefined
-              ? {
-                  unavailable: 'Select this repository from a connected GitHub account.',
-                }
-              : {
-                  authorization: options.authorization,
-                  repositoryUrl: resolved,
-                }
+          github && options?.authorization !== undefined
+            ? {
+                authorization: options.authorization,
+                repositoryUrl: resolved,
+                ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
+              }
             : {};
+        /* Ruling G2 (D6): a github.com address with no App credential is an
+         * anonymous read, the Advanced form's own promise. It is linked
+         * read-only, because a push without the App credential is refused. */
+        const fetchOnly = options?.fetchOnly === true || (github && options?.authorization === undefined);
+        /* The last remote's renewals stop here: they would re-send its frame. */
+        stopGithubCredential(projectId);
         /* One frame on *every* connect, including *No remote* and Tau Cloud: the
          * frame is how a credential minted for the last remote stops being
-         * offered to the next one (review R1). A non-GitHub host gets an origin
-         * and no credential, which is an anonymous read. */
+         * offered to the next one (review R1). A host with no credential gets an
+         * origin alone, which is an anonymous read. */
         client?.remoteCredential({
           apiBaseUrl,
           ...(origin === undefined ? {} : { origin }),
           ...minted,
         });
-        client?.send({
-          command: 'connectRemote',
-          kind,
-          ...(resolved === undefined ? {} : { url: resolved }),
-          ...(options?.provider === undefined ? {} : { provider: options.provider }),
-          ...(options?.repositoryId === undefined ? {} : { repositoryId: options.repositoryId }),
-          ...(options?.fetchOnly === true ? { fetchOnly: true } : {}),
-        });
+        /* D3: the remote already recorded, picked again, is a re-grant rather
+         * than a new connection. The fresh frame is sent; `remote.machine`
+         * re-validates from `reconnectRequired`, and a refused sync retries. */
+        const recorded = client?.status()?.remote;
+        const regranted =
+          kind === 'git' &&
+          recorded?.kind === 'git' &&
+          recorded.url === resolved &&
+          recorded.provider === options?.provider &&
+          recorded.repositoryId === options?.repositoryId &&
+          /* Changed access is not a re-grant: the link must be re-sent with it (review R-U6). */
+          recorded.fetchOnly === fetchOnly &&
+          (recorded.phase === 'reconnectRequired' || recorded.phase === 'connected');
+        if (regranted) {
+          client?.send({ command: recorded.phase === 'reconnectRequired' ? 'authorizeRemote' : 'syncNow' });
+        } else {
+          client?.send({
+            command: 'connectRemote',
+            kind,
+            ...(resolved === undefined ? {} : { url: resolved }),
+            ...(options?.provider === undefined ? {} : { provider: options.provider }),
+            ...(options?.repositoryId === undefined ? {} : { repositoryId: options.repositoryId }),
+            ...(fetchOnly ? { fetchOnly: true } : {}),
+          });
+        }
         if (
           options?.provider === 'github' &&
           resolved !== undefined &&
@@ -1176,12 +1442,21 @@ export const useRevisionCommands = (): RevisionCommands => {
         ) {
           const repositoryId = Number(options.repositoryId);
           if (Number.isSafeInteger(repositoryId) && repositoryId > 0) {
+            const { connectionId } = options;
+            const connections = await githubConnections.list();
+            const connection = connections.find((candidate) => candidate.id === connectionId);
             githubProjectBinding.set(projectId, {
-              connectionId: options.connectionId,
+              connectionId,
               repositoryId,
               repositoryUrl: resolved,
               generation: options.generation,
+              ...(connection === undefined
+                ? {}
+                : { author: githubNoreplyAuthor(connection.subject, connection.login) }),
             });
+            if (client !== undefined && options.expiresAt !== undefined) {
+              scheduleGithubCredential(client, projectId, githubCredentialRenewDelay(options.expiresAt, Date.now()));
+            }
           }
         } else {
           githubProjectBinding.remove(projectId);
@@ -1189,6 +1464,7 @@ export const useRevisionCommands = (): RevisionCommands => {
       },
       disconnectRemote: () => {
         /* The credential goes with the remote it was minted for (review R1). */
+        stopGithubCredential(projectId);
         client?.remoteCredential({
           apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
         });

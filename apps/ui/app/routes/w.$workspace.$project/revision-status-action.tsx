@@ -14,7 +14,7 @@ import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-stat
 import { useChats } from '#hooks/use-chats.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { syncCopy } from '#routes/w.$workspace.$project/revision-sync-region.js';
+import { isGithubRemote, syncCopy } from '#routes/w.$workspace.$project/revision-sync-region.js';
 
 /** What the trigger draws for one state: one glyph in one tone, the mark it stands for, and the sentence. */
 export type RevisionFacts = Readonly<{
@@ -48,10 +48,40 @@ const failedBackupReasons: ReadonlySet<string> = new Set(['rejected', 'forbidden
 
 const revisionName = (n: number | undefined): string | undefined => (n === undefined ? undefined : `Rev ${String(n)}`);
 
-const backupAsks: Partial<Record<string, string>> = {
-  unauthorized: 'Sign in',
-  quota: 'Over your plan',
-  notEntitled: 'Backup is a Pro feature',
+/**
+ * What a failed backup asks the person for (R-U4).
+ *
+ * A refused credential is keyed on whose it was, as the Sync row's action is
+ * (D18): only Tau Cloud is reached with this device's own session, so only it
+ * asks to *Sign in*.
+ *
+ * @param status - The revision status projection.
+ * @returns The ask, or `undefined` when the backup needs nothing from the person.
+ */
+const backupAsk = ({ sync, remote }: RevisionStatusProjection): string | undefined => {
+  if (sync.state !== 'failed') {
+    return undefined;
+  }
+  switch (sync.reason) {
+    case 'unauthorized': {
+      return remote.kind === 'tau' ? 'Sign in' : isGithubRemote(remote) ? 'Reconnect GitHub' : 'Remote refused access';
+    }
+    case 'quota': {
+      return 'Over your plan';
+    }
+    case 'notEntitled': {
+      return 'Backup is a Pro feature';
+    }
+    case 'largeFiles': {
+      return 'Files too large for this remote';
+    }
+    case 'moved': {
+      return 'Repository moved';
+    }
+    default: {
+      return undefined;
+    }
+  }
 };
 
 /** Failed, then needs you: the two tiers that interrupt. */
@@ -73,7 +103,7 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
       sentence: branch === undefined ? 'Needs your decision' : `Needs your decision · both sides changed ${branch}`,
     };
   }
-  const ask = sync.state === 'failed' ? backupAsks[sync.reason ?? 'unknown'] : undefined;
+  const ask = backupAsk(status);
   return ask === undefined
     ? undefined
     : { icon: CloudAlert, tone: 'text-warning', mark: 'attention', sentence: `Not backed up · ${ask}` };

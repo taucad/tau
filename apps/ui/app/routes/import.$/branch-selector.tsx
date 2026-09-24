@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 import { GitBranch, ChevronDown } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
@@ -11,6 +11,8 @@ type Branch = {
 };
 
 type BranchSelectorProperties = {
+  /** The visible label's id; the trigger is named by it and its own value (D17). */
+  readonly labelId?: string;
   readonly branches: Branch[];
   readonly selectedBranch: string;
   readonly isDisabled?: boolean;
@@ -33,7 +35,8 @@ function isDefaultBranch(name: string): boolean {
 }
 
 export function BranchSelector(properties: BranchSelectorProperties): React.JSX.Element {
-  const { branches, selectedBranch, isDisabled, isLoadingMore, onSelect, onLoadMore } = properties;
+  const { labelId, branches, selectedBranch, isDisabled, isLoadingMore, onSelect, onLoadMore } = properties;
+  const triggerId = useId();
 
   // Group branches: Default first, then by last commit time
   const groupedBranches = useMemo((): BranchGroup[] => {
@@ -82,7 +85,13 @@ export function BranchSelector(properties: BranchSelectorProperties): React.JSX.
       onSelect={onSelect}
       onLoadMore={onLoadMore}
     >
-      <Button variant='outline' className='w-full justify-between' disabled={isDisabled}>
+      <Button
+        id={triggerId}
+        aria-labelledby={labelId === undefined ? undefined : `${labelId} ${triggerId}`}
+        variant='outline'
+        className='w-full justify-between'
+        disabled={isDisabled}
+      >
         <div className='flex items-center gap-2'>
           <GitBranch className='size-4' />
           <span>{selectedBranch || 'Select branch...'}</span>

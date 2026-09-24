@@ -10,6 +10,8 @@ import {
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { ENV } from '#environment.config.js';
 import { githubConnections } from '#lib/github-connections.js';
+import { githubNoreplyAuthor } from '#lib/github-project-binding.js';
+import { getRevisionSessionUser } from '#lib/revision-actor.js';
 
 export type LinkedGithubImport = Readonly<{
   files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
@@ -61,6 +63,8 @@ export async function prepareLinkedGithubImport({
       `${unsupportedLargeBlob.path} is a large ordinary Git blob. Track it with Git LFS before importing.`,
     );
   }
+  const author = githubNoreplyAuthor(selection.connection.subject, selection.connection.login);
+  const actorId = getRevisionSessionUser()?.id ?? `github:${String(selection.connection.subject)}`;
   const credential = await githubConnections.token(selection.connection.id);
   const remoteAuthorization = `Basic ${globalThis.btoa(`x-access-token:${credential.accessToken}`)}`;
   const provider = await createMemoryProvider();
@@ -102,32 +106,23 @@ export async function prepareLinkedGithubImport({
       ? {}
       : { sourceRef: `refs/heads/${selection.branch.name}`, sourceHead: revisionId(selection.branch.head) }),
     targetBranch,
-    author: {
-      name: selection.connection.login,
-      email: `${String(selection.connection.subject)}+${selection.connection.login}@users.noreply.github.com`,
-    },
+    author,
     maximumFiles: 100_000,
     maximumBytes: maximumMaterializedBytes,
-    ...(setupFiles.length === 0
-      ? {}
-      : {
-          setup: {
-            files: setupFiles,
-            provenance: {
-              source: 'import',
-              actorId: `github:${String(selection.connection.subject)}`,
-              actor: {
-                kind: 'user',
-                id: `github:${String(selection.connection.subject)}`,
-                name: selection.connection.login,
-                email: `${String(selection.connection.subject)}+${selection.connection.login}@users.noreply.github.com`,
-              },
-              trigger: 'save',
-              createdAt: Date.now(),
-            },
-            summary: { generated: 'Set up this repository as a Tau project' },
-          },
-        }),
+    /* Always offered: bootstrap also folds in the generated Git config and records
+     * a setup revision only when the tree actually changes (D34). */
+    setup: {
+      files: setupFiles,
+      provenance: {
+        source: 'import',
+        /* The Tau person who linked it, so History reads it as theirs (D33). */
+        actorId,
+        actor: { kind: 'user', id: actorId, ...author },
+        trigger: 'save',
+        createdAt: Date.now(),
+      },
+      summary: { generated: 'Set up this repository as a Tau project' },
+    },
     ...(signal === undefined ? {} : { signal }),
   });
   const files: LinkedGithubImport['files'] = await readFiles(provider);

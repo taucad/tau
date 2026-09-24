@@ -22,7 +22,6 @@ export function RevisionActorIdentity(): ReactNode {
   const user = session?.user;
   const id = user?.id;
   const name = user?.name;
-  const email = user?.email;
 
   useEffect(() => {
     setRevisionSessionUser(
@@ -31,10 +30,9 @@ export function RevisionActorIdentity(): ReactNode {
         : {
             id,
             ...(name === undefined || name === '' ? {} : { name }),
-            ...(email === undefined || email === '' ? {} : { email }),
           },
     );
-  }, [id, name, email]);
+  }, [id, name]);
 
   return null;
 }

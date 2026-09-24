@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getGitHubClient } from '#lib/github-api.js';
+import { GitHubTreeTruncatedError, getGitHubClient } from '#lib/github-api.js';
 
 const originalClientEnvironment = globalThis.window.ENV;
 
@@ -137,6 +137,21 @@ describe('GitHubApiClient', () => {
       });
 
       await expect(client.listBranches({ owner: 'o', repo: 'r' })).rejects.toThrow('Branches list unavailable');
+    });
+  });
+
+  describe('listFiles', () => {
+    it('should explain a truncated tree to the person importing, without developer advice', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        Response.json({ sha: 'a'.repeat(40), truncated: true, tree: [{ path: 'main.scad', type: 'blob', size: 1 }] }),
+      );
+
+      const error: unknown = await client.listFiles('o', 'r', 'main').catch((error: unknown) => error);
+
+      expect(error).toBeInstanceOf(GitHubTreeTruncatedError);
+      expect((error as Error).message).toBe(
+        'This repository has too many files for GitHub to list, so Tau cannot preview its files.',
+      );
     });
   });
 });

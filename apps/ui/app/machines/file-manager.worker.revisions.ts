@@ -119,7 +119,7 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'confirmBranch' }>
   | Readonly<{ command: 'cancelBranch' }>
   /*
-   * The Sync region's four verbs (S26, S34).
+   * The Sync region's verbs (S26, S34).
    *
    * Named `…Remote` rather than the machine's own `authorized`/`cancel`: this
    * is one flat namespace per project and `cancel` already belongs to restore.
@@ -136,6 +136,9 @@ export type WorkerRevisionCommand =
     }>
   | Readonly<{ command: 'disconnectRemote' }>
   | Readonly<{ command: 'cancelRemote' }>
+  /* The page re-minted the credential a `reconnectRequired` remote was refused
+     with and sent its frame first; `remote.machine` re-validates (D3). */
+  | Readonly<{ command: 'authorizeRemote' }>
   | Readonly<{ command: 'syncNow' }>
   | Readonly<{ command: 'recordsChanged' }>
   /*
@@ -995,6 +998,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         case 'cancelRemote': {
           actor.send({ type: 'remote', event: { type: 'cancel' } });
+          return;
+        }
+        case 'authorizeRemote': {
+          actor.send({ type: 'remote', event: { type: 'authorized' } });
           return;
         }
         case 'syncNow': {

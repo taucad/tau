@@ -17,7 +17,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
+import type { HostToolDefinition, HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
 
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
@@ -139,7 +139,17 @@ describe('createHostMcpEndpoint capability', () => {
     const claims = mcp.verify(capability.token);
     expect(claims).toMatchObject({ v: 1, runId: 'run-1', chatId: 'chat-1' });
     expect(claims.sessionKey).toMatch(/^[\w-]+$/u);
-    expect(claims.allowedTools).toEqual(['get_kernel_result', 'test_model', 'screenshot', 'export_geometry']);
+    expect(claims.allowedTools).toEqual([
+      'get_kernel_result',
+      'test_model',
+      'screenshot',
+      'export_geometry',
+      'request_print',
+      'get_print_request',
+      'list_print_requests',
+      'cancel_print',
+    ]);
+    expect(claims.allowedTools).not.toContain('start_machine_print');
 
     const [prefix, encoded, signature] = capability.token.split('.');
     const forgedClaims = Buffer.from(JSON.stringify({ ...claims, runId: 'run-2' }), 'utf8').toString('base64url');
@@ -323,6 +333,74 @@ describe('the mounted /mcp route', () => {
     expect(idle.isError).toBe(true);
     expect(JSON.stringify(idle)).toContain('MCP_RUN_INACTIVE');
     expect(invocations).toHaveLength(1);
+  }, 30_000);
+
+  it('offers request_print beside the CAD four and dispatches it into the registry by name', async () => {
+    const printTools: readonly HostToolDefinition[] = [
+      {
+        name: 'request_print',
+        description: 'Ask to print one CAD source file on a bound machine.',
+        inputSchema: {
+          type: 'object',
+          properties: { targetFile: { type: 'string' }, machineId: { type: 'string' } },
+          required: ['targetFile'],
+          additionalProperties: false,
+        },
+      },
+      /* A registry tool outside the grant is never registered over MCP. */
+      { name: 'list_machines', description: 'List machines.', inputSchema: { type: 'object', properties: {} } },
+    ];
+    const printRegistry: ToolRegistry = {
+      list: () => printTools,
+      invoke: async (invocation) => {
+        invocations.push(invocation);
+        return {
+          content: {
+            request: { requestId: invocation.toolCallId, machineId: 'machine-1', state: 'awaiting-approval' },
+            nextStep: "Waiting for a person to accept the request in Tau's Print pane.",
+          },
+          isError: false,
+        };
+      },
+    };
+    endpoint = createHostMcpEndpoint({ secret, registry: printRegistry });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot: '/tmp/tau-mcp-test', mcp: endpoint });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'run-1', chatId: 'chat-1' });
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'run-1',
+      chatId: 'chat-1',
+      signal: new AbortController().signal,
+    });
+    const client = await connectMcpOverFetch({
+      url: new URL('mcp', server.url()).href,
+      headers: { authorization: `Bearer ${capability.token}` },
+    });
+
+    const requested = await client.callTool('request_print', { targetFile: 'main.ts' });
+
+    expect(requested.isError).not.toBe(true);
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0]).toMatchObject({
+      toolName: 'request_print',
+      runId: 'run-1',
+      input: { targetFile: 'main.ts' },
+    });
+    /* The registry's content comes back verbatim as structured content, keyed
+     * by the call id `@taucad/mcp` minted for this one request. */
+    expect(requested.structuredContent).toEqual({
+      request: { requestId: invocations[0]?.toolCallId, machineId: 'machine-1', state: 'awaiting-approval' },
+      nextStep: "Waiting for a person to accept the request in Tau's Print pane.",
+    });
+    /* An MCP caller has no interrupt port: the registry sees no `approve` and
+     * hands the request back awaiting approval instead of pausing anything. */
+    expect(invocations[0]?.approve).toBeUndefined();
+
+    const unlisted = await client.callTool('list_machines', {});
+    expect(unlisted.isError).toBe(true);
+    expect(invocations).toHaveLength(1);
+    await release();
   }, 30_000);
 
   it('captures the active run for each call made through one long-lived MCP session', async () => {

@@ -33,6 +33,7 @@ import { toRpcError } from '@taucad/chat/rpc';
 import type { RpcGeoSpecClient, RpcSkillResolver } from '@taucad/chat/rpc';
 import {
   createChatToolRegistry,
+  createMachinePrintPlanner,
   createProviderRpcFileSystem,
   createSkillBundleOverlay,
   createSkillBundleRegistry,
@@ -51,6 +52,8 @@ import { assertRootedPath } from '@taucad/utils/path';
  * as an external import. */
 import type { ExportFile, RuntimeFileSystemBase, SourceRevision } from '@taucad/runtime/types';
 import type { RuntimeClient } from '@taucad/runtime/client';
+import type { MachineClient } from '@taucad/runtime/machine';
+import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
@@ -265,6 +268,15 @@ export type HostToolRegistryOptions = {
    * client here follows.
    */
   readonly revisions?: ProjectRevisions['history'] | undefined;
+  /**
+   * The machines facet this host serves its machine tools over, once the
+   * composition has negotiated and granted it — the daemon under
+   * `tau serve --machines`, the desktop services utility. Omit it and no
+   * machine tool is offered rather than offered-and-failing (the same rule
+   * every other client here follows); a facet that is present but not
+   * `available` offers none either.
+   */
+  readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
 };
 
 /**
@@ -441,16 +453,49 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     };
 
-    return createChatToolRegistry({
+    /**
+     * `request_print` needs every leg of the print path — a runtime to slice
+     * with, a revision to qualify the artifact by and a machine to ask — so it
+     * is offered only when all three are here, like every other tool.
+     */
+    const { revisions, machines } = options;
+    const printing =
+      runtimeClient !== undefined && revisions !== undefined && machines?.available
+        ? { revisions, machines }
+        : undefined;
+    const registry: ToolRegistry = createChatToolRegistry({
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(parameters === undefined ? {} : { parameters }),
       ...(geospec === undefined ? {} : { geospec }),
-      ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
+      ...(revisions === undefined ? {} : { revisions }),
+      ...(machines === undefined ? {} : { machines }),
+      ...(printing === undefined
+        ? {}
+        : {
+            planPrint: createMachinePrintPlanner({
+              ...printing,
+              /* The registry's own route, so the slice is recorded exactly as an export is. */
+              exportGeometry: async (input) =>
+                registry.invoke({
+                  toolCallId: input.toolCallId,
+                  toolName: 'export_geometry',
+                  input: { targetFile: input.targetFile, format: input.format },
+                  signal: input.signal,
+                }),
+              readArtifact: async ({ path, signal }) => {
+                signal.throwIfAborted();
+                const bytes = await recordView.readFile(assertRootedPath(path));
+                signal.throwIfAborted();
+                return bytes;
+              },
+            }),
+          }),
       skillResolver,
       testingEnabled: geospec !== undefined,
     });
+    return registry;
   };
 
   /**

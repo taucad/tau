@@ -39,6 +39,31 @@ describe('handleExportGeometry', () => {
     expect(graphics.exportGeometry).toHaveBeenCalledWith({ targetFile: 'src/pen.ts', format: 'stl' }, undefined);
   });
 
+  it('should forward host export options to graphics.exportGeometry as given', async () => {
+    const graphics = mock<RpcGraphicsClient>();
+    graphics.exportGeometry.mockResolvedValue({
+      success: true,
+      files: [{ name: 'model.gcode.3mf', bytes: new Uint8Array([7]), mimeType: 'application/vnd.bambulab.gcode-3mf' }],
+    });
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.writeBinaryFile.mockResolvedValue(undefined);
+
+    await handleExportGeometry(
+      {
+        toolCallId: 'tc-1',
+        targetFile: 'src/pen.ts',
+        format: 'gcode.3mf',
+        exportOptions: { preset: 'fine', walls: 3 },
+      },
+      { graphics, fileSystem },
+    );
+
+    expect(graphics.exportGeometry).toHaveBeenCalledWith(
+      { targetFile: 'src/pen.ts', format: 'gcode.3mf', exportOptions: { preset: 'fine', walls: 3 } },
+      undefined,
+    );
+  });
+
   it('should embed slug(targetFile) and format in artifactPath', async () => {
     const graphics = mock<RpcGraphicsClient>();
     graphics.exportGeometry.mockResolvedValue({

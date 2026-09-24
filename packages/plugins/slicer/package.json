@@ -25,7 +25,10 @@
   "keywords": [
     "cad",
     "plugin",
-    "slicer"
+    "slicer",
+    "gcode",
+    "3mf",
+    "bambu"
   ],
   "author": "Richard Fontein",
   "license": "Apache-2.0",
@@ -34,6 +37,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./toolpath": "./src/toolpath.ts",
+    "./container": "./src/container.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -44,6 +49,16 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
+      "./toolpath": {
+        "types": "./dist/toolpath.d.mts",
+        "import": "./dist/toolpath.mjs",
+        "default": "./dist/toolpath.mjs"
+      },
+      "./container": {
+        "types": "./dist/container.d.mts",
+        "import": "./dist/container.mjs",
+        "default": "./dist/container.mjs"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -53,12 +68,25 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
-    "@taucad/runtime": "^0.1.0-beta.0"
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@taucad/runtime": "workspace:*"
+    "@taucad/runtime": "workspace:*",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@taucad/units": "workspace:*",
+    "fflate": "catalog:",
+    "manifold-3d": "catalog:"
+  },
+  "tau": {
+    "skills": null,
+    "reason": "Transcoder; its options are already tool schemas"
   }
 }

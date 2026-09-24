@@ -6,22 +6,26 @@
 [![license](https://img.shields.io/npm/l/@taucad/slicer)](./LICENSE)
 [![provenance](https://img.shields.io/badge/provenance-npm-blue)](https://docs.npmjs.com/generating-provenance-statements)
 
-FFF slicing to Bambu gcode.3mf with a reference engine and a tau-slicer-service client
+FFF slicing to Bambu `gcode.3mf` with a reference engine and a tau-slicer-service client, plus the
+G-code toolpath parser and container reader the printer viewer builds on.
 
 ## Why @taucad/slicer?
 
-- **One call composes it** — `slicer()` registers this package's capabilities with `defineRuntime`.
-- **Role factories** — `slicerTranscoder()` support direct authoring, isolated tests, and whole-role ordering outside plugin expansion.
-- **No module-scope work** — backends load in `initialize()` and stay in capability context, one payload per worker.
+- **One call composes it** — `slicer()` registers the `glb → gcode.3mf` transcoder with `defineRuntime`.
+- **Two engines, one edge** — the built-in reference engine slices on `manifold-3d` with no network; the
+  `service` engine hands the same mesh to a `tau-slicer-service/1` endpoint and verifies the returned bytes.
+- **Round trip in the box** — `@taucad/slicer/container` reads the archive the transcoder wrote and
+  `@taucad/slicer/toolpath` turns its plate into a timed, struct-of-arrays program.
+- **No module-scope work** — the WebAssembly kernel loads on the first slice inside the capability.
 
 ## Install
 
 ```bash
-npm i @taucad/slicer @taucad/runtime
+npm i @taucad/slicer @taucad/runtime zod
 ```
 
-`@taucad/runtime` is a required peer — one install must hold one runtime. A capability with an options
-schema adds `zod` as a second required peer.
+`@taucad/runtime` and `zod` are required peers — one install must hold one runtime, and the edge's
+options schema is a Zod schema.
 
 ## Quick start
 
@@ -33,24 +37,64 @@ const runtime = defineRuntime({ plugins: [slicer()] });
 ```
 
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
-[`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.
+[`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle. A transcode
+from `glb` to `gcode.3mf` returns one `model.gcode.3mf` file whose media type is
+`application/vnd.bambulab.gcode-3mf`.
+
+```typescript
+import { readBambuContainer } from '@taucad/slicer/container';
+import { parseGcode } from '@taucad/slicer/toolpath';
+
+const { gcode, md5Verified } = readBambuContainer(bytes);
+const program = parseGcode(gcode);
+console.log(program.layerTable.length, program.duration, md5Verified);
+```
 
 ## API
 
-| Export             | Kind               | Use                                                                           |
-| ------------------ | ------------------ | ----------------------------------------------------------------------------- |
-| `slicer`           | toolkit factory    | package-named authoring factory; presets select capabilities                  |
-| `plugin`           | toolkit factory    | the same factory under its mechanical name, for loaders that read a fixed key |
-| `slicerTranscoder` | transcoder factory | direct `transcoders` composition, with options                                |
+| Export                                    | Subpath                    | Use                                                                                  |
+| ----------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------ |
+| `slicer`, `plugin`                        | `@taucad/slicer`           | toolkit factory; the `default` preset selects the transcoder                         |
+| `slicerTranscoder`                        | `@taucad/slicer`           | direct `transcoders` composition, with options                                       |
+| `slicerOptionsSchema`, `slicerPresets`    | `@taucad/slicer`           | the edge's Zod options schema and the `fast`/`standard`/`fine` layer-height presets  |
+| `resolveSlicerOptions`                    | `@taucad/slicer`           | apply the preset and defaults the transcoder applies, for previews                   |
+| `parseGcode`, `segmentAtTime`             | `@taucad/slicer/toolpath`  | timed struct-of-arrays program from linear FFF G-code; binary search by program time |
+| `toolpathSegmentKinds`, `ToolpathProgram` | `@taucad/slicer/toolpath`  | the kind palette and the program shape every consumer reads                          |
+| `ToolpathParseError`                      | `@taucad/slicer/toolpath`  | typed refusal with a `TOOLPATH_*` code and the offending record                      |
+| `writeBambuContainer`                     | `@taucad/slicer/container` | wrap plate G-code in a print-ready `gcode.3mf` archive                               |
+| `readBambuContainer`                      | `@taucad/slicer/container` | bounded reader returning the plate, its recorded MD5 and every member digest         |
 
-One preset, `default`, selecting `transcoders.default`.
+### Options
+
+| Option              | Default     | Notes                                                                 |
+| ------------------- | ----------- | --------------------------------------------------------------------- |
+| `engine`            | `reference` | `service` requires `service.url` and `service.token`                  |
+| `preset`            | `standard`  | `fast` 0.28 mm, `standard` 0.2 mm, `fine` 0.12 mm; `layerHeight` wins |
+| `walls`             | `2`         | 1–16 perimeters                                                       |
+| `infillPercent`     | `15`        | 0–100; `infillPattern` selects `grid` or `lines`                      |
+| `supports`          | `false`     | the reference engine refuses `true` with a content issue              |
+| `nozzleTemperature` | `220` °C    | 150–320; `bedTemperature` 0–120, default 55                           |
+| `printSpeed`        | `100` mm/s  | `travelSpeed` default 250 mm/s                                        |
+| `machineProfile`    | `bambu-x1c` | `plate` default `textured-pei`; `bedSize` default 256 × 256 mm        |
+
+The reference engine is deterministic: the same GLB and options always produce byte-identical archives.
+It writes its own X1C start and end sequences and annotates layers with `;LAYER_CHANGE`, `;Z:` and
+`;TYPE:` so the toolpath parser recovers them. Parts must fit the bed and stand 256 mm or lower.
+
+### Toolpath parser
+
+`parseGcode` accepts the closed linear subset (`G0`–`G4`, `G17`, `G21`, `G28`, `G29`, `G90`–`G92`,
+`M82`–`M84`, `M104`/`M109`, `M140`/`M190`, `M141`/`M191`, `M106`/`M107`, `M201`–`M205`, `M220`,
+`M221`, `M73`, `T<n>`), linearises arcs, keeps Bambu vendor records as `vendor` events and counts
+everything else as `unknown`. Sources over 64 MiB or 1,100,000 records are refused, as is extruder
+motion before any nozzle temperature was commanded.
 
 ## Environment
 
-| Host           | Supported | Notes                            |
-| -------------- | --------- | -------------------------------- |
-| Browser worker | Yes       | no Node built-ins in the payload |
-| Node.js        | Yes       | `>=24`                           |
+| Host           | Supported | Notes                                                            |
+| -------------- | --------- | ---------------------------------------------------------------- |
+| Browser worker | Yes       | `manifold-3d` WebAssembly resolves through `import.meta.resolve` |
+| Node.js        | Yes       | `>=24`                                                           |
 
 ## Versioning and stability
 

@@ -1,7 +1,12 @@
 [
   {
-    "name": "measure before release — placeholder budget",
+    "name": "total (ESM JS) — measured 13.24 kB brotli on 2026-09-24",
     "path": "dist/**/*.mjs",
-    "limit": "100 kB"
+    "limit": "16 kB"
+  },
+  {
+    "name": "@taucad/slicer/toolpath — measured 3.76 kB brotli on 2026-09-24",
+    "path": "dist/toolpath.mjs",
+    "limit": "6 kB"
   }
 ]

@@ -198,7 +198,7 @@ const main = async (): Promise<void> => {
       },
       timings: { opaque: opaque.timings, mask: masked.timings, totalWallMilliseconds: totalDuration },
       limitation:
-        'Pixel and timing diagnostics; no parity or human preference claim. Orthographic shading currently depends on camera distance.',
+        'Pixel and timing diagnostics; backend lighting, tone mapping and AO differ from the WebGL editing profile.',
     };
     // oxlint-disable-next-line eslint/no-await-in-loop -- Persist each completed fixture before starting the next native render.
     await Promise.all([

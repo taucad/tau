@@ -105,6 +105,11 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.webBrowser,
       toolName.revisions,
       toolName.updateTodos,
+      toolName.getMachine,
+      toolName.requestPrint,
+      toolName.getPrintRequest,
+      toolName.listPrintRequests,
+      toolName.cancelPrint,
     ]);
   });
 
@@ -184,6 +189,16 @@ describe('provider-facing tool schema compatibility', () => {
     });
 
     expect(failures).toEqual([]);
+  });
+
+  it('should offer request_print its slicer options as a plain described object slot', () => {
+    const schema = providerSchemaFor(toolName.requestPrint);
+
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['machineId', 'options', 'preset', 'targetFile']);
+    expect(schema.required).toEqual(['targetFile']);
+    expect(schema.properties?.['options']).toEqual({
+      description: 'Slicer options: a JSON object mapping option names to JSON values.',
+    });
   });
 
   it('should keep screenshot and use_skill provider inputs pruned to implemented fields', () => {

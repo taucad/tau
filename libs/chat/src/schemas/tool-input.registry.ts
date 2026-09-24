@@ -19,6 +19,18 @@ import { testModelInputSchema, testModelOutputSchema } from '#schemas/tools/test
 import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
 import { updateTodosInputSchema, updateTodosOutputSchema } from '#schemas/tools/update-todos.tool.schema.js';
 import {
+  cancelPrintInputSchema,
+  cancelPrintOutputSchema,
+  getMachineInputSchema,
+  getMachineOutputSchema,
+  getPrintRequestInputSchema,
+  getPrintRequestOutputSchema,
+  listPrintRequestsInputSchema,
+  listPrintRequestsOutputSchema,
+  requestPrintInputSchema,
+  requestPrintOutputSchema,
+} from '#schemas/tools/print.tool.schema.js';
+import {
   applyParameterOperationInputSchema,
   applyParameterOperationOutputSchema,
   getParametersInputSchema,
@@ -120,6 +132,26 @@ export const uiMessageTools = {
   [toolName.updateTodos]: {
     inputSchema: updateTodosInputSchema,
     outputSchema: updateTodosOutputSchema,
+  },
+  [toolName.getMachine]: {
+    inputSchema: getMachineInputSchema,
+    outputSchema: getMachineOutputSchema,
+  },
+  [toolName.requestPrint]: {
+    inputSchema: requestPrintInputSchema,
+    outputSchema: requestPrintOutputSchema,
+  },
+  [toolName.getPrintRequest]: {
+    inputSchema: getPrintRequestInputSchema,
+    outputSchema: getPrintRequestOutputSchema,
+  },
+  [toolName.listPrintRequests]: {
+    inputSchema: listPrintRequestsInputSchema,
+    outputSchema: listPrintRequestsOutputSchema,
+  },
+  [toolName.cancelPrint]: {
+    inputSchema: cancelPrintInputSchema,
+    outputSchema: cancelPrintOutputSchema,
   },
 } as const;
 

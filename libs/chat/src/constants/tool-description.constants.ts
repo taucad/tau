@@ -141,6 +141,15 @@ For searching file contents, use \`grep\`.`,
 Send the whole list every time: an item you leave out is removed. Keep one item \`in_progress\` at a time and mark items \`done\` as they finish. Titles are short and outcome-shaped ("Slice the pyramid"), not step narration.
 
 Returns the written path (\`.tau/chats/<chatId>/todo.yaml\`) and a count per status.`,
+  [toolName.getMachine]:
+    'Read one bound machine: its readiness, loaded setup and printable envelope. Omit machineId when exactly one machine is bound; otherwise the error names every bound machine.',
+  [toolName.requestPrint]:
+    "The only way to print. Slices one CAD source file to a .gcode.3mf recorded in the project and opens a print request on a bound machine; nothing is uploaded or started until a person accepts it, and accepting starts the print. Under a Tau-hosted turn this waits for their answer; elsewhere it returns the request awaiting-approval for them to accept in the Print pane. Never retry a pending request or work around it with other machine tools; a denial or withdrawal is the person's decision. Before requesting, run test_model and check the part fits the printable envelope get_machine reports. Omit machineId when exactly one machine is bound.",
+  [toolName.getPrintRequest]:
+    'Read one print request by its exact request ID: state, summary, receipts and any failure.',
+  [toolName.listPrintRequests]: 'List print requests, newest first, optionally for one machine.',
+  [toolName.cancelPrint]:
+    'Stop a print. Withdraws a request that has not started, or cancels the exact observed provider run of a started one, which stops the printer. Give requestId alone, or machineId with expectedProviderRunId.',
   [toolName.revisions]: `Read this project's saved revisions. Read-only.
 
 Actions:

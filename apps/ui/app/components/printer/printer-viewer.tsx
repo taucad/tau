@@ -6,6 +6,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { useTheme } from '#hooks/use-theme.js';
+import { digestBytes } from '#utils/crypto.utils.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { printerAccent } from '#components/printer/printer-colors.constants.js';
 import type { PrinterFileKind } from '#components/printer/printer-file.js';
@@ -36,7 +37,7 @@ type PrinterViewerProps = Readonly<{
 
 type ProgramResource =
   | Readonly<{ kind: 'loading' }>
-  | Readonly<{ kind: 'ready'; program: ToolpathProgram }>
+  | Readonly<{ kind: 'ready'; program: ToolpathProgram; digest: string | undefined }>
   | Readonly<{ kind: 'error'; message: string }>;
 
 const motionQuery = '(prefers-reduced-motion: reduce)';
@@ -77,9 +78,13 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
     let active = true;
     const load = async (): Promise<void> => {
       try {
-        const program = loadPrinterProgram(await readAll(), kind);
+        const bytes = await readAll();
+        const program = loadPrinterProgram(bytes, kind);
+        // The print request ledger names artifacts by digest; Live mode follows a run only from its own bytes.
+        // WebCrypto needs a secure context: without one (a LAN address over http) Live mode stays off.
+        const digest = await digestBytes(bytes).catch(() => undefined);
         if (active) {
-          setResource({ kind: 'ready', program });
+          setResource({ kind: 'ready', program, digest });
         }
       } catch (error) {
         if (active) {
@@ -133,7 +138,9 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
         <Focus />
       </PaneButton>
     ),
-    body: <PrinterSimulation name={name} program={resource.program} frameRequest={frameRequest} />,
+    body: (
+      <PrinterSimulation name={name} program={resource.program} digest={resource.digest} frameRequest={frameRequest} />
+    ),
   });
 }
 
@@ -153,11 +160,17 @@ const usePrinterGeometry = (live: PrinterLiveState | undefined) => {
 function PrinterSimulation({
   name,
   program,
+  digest,
   frameRequest,
-}: Readonly<{ name: string; program: ToolpathProgram; frameRequest: number }>): React.JSX.Element {
+}: Readonly<{
+  name: string;
+  program: ToolpathProgram;
+  digest: string | undefined;
+  frameRequest: number;
+}>): React.JSX.Element {
   const isReducedMotion = useSyncExternalStore(subscribeMotion, getMotion, serverMotion);
   const { theme } = useTheme();
-  const live = usePrinterLive();
+  const live = usePrinterLive(digest);
   const hintId = useId();
   const [sceneError, setSceneError] = useState<string>();
   const { manifest, geometry } = usePrinterGeometry(live);
@@ -166,7 +179,7 @@ function PrinterSimulation({
   const prefix = useMemo(() => createExtrusionPrefix(program), [program]);
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const position = live?.position;
-  const isLiveAvailable = live?.isActive === true;
+  const isLiveAvailable = live?.printsThisFile === true;
 
   useEffect(() => {
     if (snapshot.isLive && position) {
@@ -296,7 +309,7 @@ function PrinterSimulation({
             <dd>
               {formatFilament(filamentUsed)} / {formatFilament(program.filamentLength)}
             </dd>
-            {live?.isActive ? (
+            {isLiveAvailable ? (
               <>
                 <dt className='text-muted-foreground'>Machine</dt>
                 <dd>
@@ -400,7 +413,11 @@ function PrinterSimulation({
           />
           <Radio aria-hidden className='size-3.5' />
           Live
-          {isLiveAvailable ? null : <span className='text-muted-foreground'>· No active run to follow</span>}
+          {isLiveAvailable ? null : (
+            <span className='text-muted-foreground'>
+              · {live?.isActive ? 'The printer is running another file' : 'No active run to follow'}
+            </span>
+          )}
         </label>
         <Button type='button' size='sm' variant='ghost' disabled={snapshot.isLive} onClick={store.reset}>
           <RotateCcw aria-hidden />

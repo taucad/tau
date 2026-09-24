@@ -53,9 +53,11 @@ const loadedSpoolColor = '#E0523C';
 
 /** A bound machine with a red spool loaded and nothing printing: the scene takes the spool's colour. */
 const idleLive: PrinterLiveState = {
+  machineId: 'machine-1',
   machineName: 'Workshop X1C',
   runState: 'idle',
   isActive: false,
+  printsThisFile: false,
   position: {},
   chamberLight: 'on',
   nozzleTarget: undefined,
@@ -68,6 +70,7 @@ const printingLive: PrinterLiveState = {
   ...idleLive,
   runState: 'printing',
   isActive: true,
+  printsThisFile: true,
   position: { currentLayer: 70, totalLayers: 120, progress: 58 },
   nozzleTarget: 250,
   bedTarget: 65,

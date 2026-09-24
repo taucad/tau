@@ -4,7 +4,9 @@
  * Reads the negotiated machines facet the way the Print pane does (main
  * geometry unit → kernel client → `machines`), follows the directory, and
  * reduces it to the one entry the scene follows: an active run when there is
- * one, otherwise the first connected machine for its light and filament.
+ * one, otherwise the first connected machine for its light and filament. Live
+ * mode follows the run only from the file it prints, which the print request
+ * ledger names by digest.
  *
  * @module
  */
@@ -17,18 +19,23 @@ import type {
   MachineDirectoryFrame,
   MachineDirectorySnapshot,
   MachineManifest,
+  PrintRequest,
 } from '@taucad/runtime/machine';
 import { convert } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
+import { startedRunIdOf, useMachinesPrintRequests } from '#hooks/use-machines-print-requests.js';
 import { useProject } from '#hooks/use-project.js';
 import type { LiveRunPosition } from '#components/printer/printer-playback.js';
 
 /** What the viewer follows on a machine. */
 export type PrinterLiveState = Readonly<{
+  machineId: string;
   machineName: string;
   runState: NonNullable<MachineDirectoryEntry['snapshot']['run']>['state'] | undefined;
-  /** A run is printing or paused, so Live mode can follow it. */
+  /** A run is printing or paused. */
   isActive: boolean;
+  /** The active run prints the viewer's file, byte for byte, so Live mode can follow it. */
+  printsThisFile: boolean;
   position: LiveRunPosition;
   chamberLight: 'on' | 'off' | 'unknown';
   /** Degrees Celsius. */
@@ -59,11 +66,13 @@ const isFollowable = (entry: MachineDirectoryEntry): boolean =>
  *
  * @param entries - The machine directory, when it has loaded.
  * @param manifests - Provider manifests by provider id, when they have loaded.
+ * @param file - The viewer's file digest and the followed machine's print requests, once both are known.
  * @returns The followed machine's live facts, or `undefined` when none is followable.
  */
 export const selectPrinterLive = (
   entries: readonly MachineDirectoryEntry[] | undefined,
   manifests?: ReadonlyMap<string, MachineManifest>,
+  file?: Readonly<{ digest: string; requests: readonly PrintRequest[] }>,
 ): PrinterLiveState | undefined => {
   const candidates = entries?.filter((entry) => isFollowable(entry)) ?? [];
   const entry =
@@ -71,11 +80,21 @@ export const selectPrinterLive = (
   if (!entry) {
     return undefined;
   }
-  const { run, temperatures, lights, setup } = entry.snapshot;
+  const { run, temperatures, lights, setup, activeRunId } = entry.snapshot;
+  const isActive = activeRunStates.has(run?.state ?? '');
+  // The request whose start receipt names the active run says which bytes it prints.
+  const printsThisFile =
+    isActive && activeRunId !== undefined && file !== undefined
+      ? file.requests.some(
+          (request) => request.artifact.digest === file.digest && startedRunIdOf(request) === activeRunId,
+        )
+      : false;
   return {
+    machineId: entry.machineId,
     machineName: entry.descriptor.name,
     runState: run?.state,
-    isActive: activeRunStates.has(run?.state ?? ''),
+    isActive,
+    printsThisFile,
     position: { currentLayer: run?.currentLayer, totalLayers: run?.totalLayers, progress: run?.progress },
     chamberLight: lights?.chamber ?? 'unknown',
     nozzleTarget: celsius(temperatures?.nozzleTarget),
@@ -185,13 +204,23 @@ export const useProviderManifests = (
   return state !== undefined && state.client === client ? state.manifests : undefined;
 };
 
-/** The machine the printer viewer follows, or `undefined` outside a project or without machines. */
-export const usePrinterLive = (): PrinterLiveState | undefined => {
+/**
+ * The machine the printer viewer follows, or `undefined` outside a project or without machines.
+ *
+ * @param digest - The `sha256:` digest of the file the viewer shows, once it is read.
+ * @returns The followed machine's live facts.
+ */
+export const usePrinterLive = (digest: string | undefined): PrinterLiveState | undefined => {
   const project = useProject({ enableNoContext: true });
   const unit = project?.geometryUnits.get(project.mainEntryPath);
   const machines = useSelector(unit, (state) => state?.context.kernelClient?.machines);
   const client = machines?.available ? machines : undefined;
   const entries = useMachineDirectoryEntries(client);
   const manifests = useProviderManifests(client);
-  return useMemo(() => selectPrinterLive(entries, manifests), [entries, manifests]);
+  const followed = useMemo(() => selectPrinterLive(entries, manifests), [entries, manifests]);
+  const { requests } = useMachinesPrintRequests(client, followed?.isActive ? followed.machineId : undefined);
+  return useMemo(
+    () => (digest === undefined ? followed : selectPrinterLive(entries, manifests, { digest, requests })),
+    [digest, entries, followed, manifests, requests],
+  );
 };

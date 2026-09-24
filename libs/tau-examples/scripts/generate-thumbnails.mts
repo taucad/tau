@@ -8,6 +8,7 @@
  *   pnpm exec tsx libs/tau-examples/scripts/generate-thumbnails.mts --only=replicad/logo,replicad/tau-wordmark
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +51,7 @@ const thumbnailMargin = 0.1;
 const supportedKernels: ReadonlySet<string> = exampleKernelIds;
 const engineIdForFixtureFamily = (kernel: string): string => (kernel === 'openscad' ? 'openrscad' : kernel);
 
-const generateAssetMap = (thumbnails: readonly RenderedThumbnail[]): string => {
+const generateAssetMap = (entries: readonly ManifestEntry[]): string => {
   const lines = [
     '/* oxlint-disable prettier/prettier, eslint/no-restricted-imports -- Auto-generated Vite asset imports. */',
     '/* eslint-disable @typescript-eslint/naming-convention -- Generated keys are fixture paths. */',
@@ -58,8 +59,7 @@ const generateAssetMap = (thumbnails: readonly RenderedThumbnail[]): string => {
     '// Run `pnpm nx generate-thumbnails tau-examples` to regenerate.',
     '',
   ];
-  for (const [index, thumbnail] of thumbnails.entries()) {
-    const { kernel, name } = thumbnail.entry;
+  for (const [index, { kernel, name }] of entries.entries()) {
     lines.push(`import thumbnail${index} from './kernels/${kernel}/${name}/thumbnail.webp?url';`);
   }
   lines.push(
@@ -67,8 +67,8 @@ const generateAssetMap = (thumbnails: readonly RenderedThumbnail[]): string => {
     '/** Static thumbnail URLs keyed by `<kernel>/<example>`. @public */',
     'export const thumbnailAssets = {',
   );
-  for (const [index, thumbnail] of thumbnails.entries()) {
-    lines.push(`  '${thumbnail.entry.kernel}/${thumbnail.entry.name}': thumbnail${index},`);
+  for (const [index, { kernel, name }] of entries.entries()) {
+    lines.push(`  '${kernel}/${name}': thumbnail${index},`);
   }
   lines.push(
     '} as const;',
@@ -165,13 +165,31 @@ if (missing.length > 0) {
 const skipped = entries.filter(
   (entry) => entry.mainFile === undefined || !supportedKernels.has(engineIdForFixtureFamily(entry.kernel)),
 );
-for (const entry of skipped) {
+const isolated = process.argv.includes('--isolated');
+for (const entry of isolated ? [] : skipped) {
   const reason = entry.mainFile ? `kernel ${entry.kernel} is not composed` : 'no supported main entrypoint';
   console.log(`Skipping ${entry.kernel}/${entry.name}: ${reason}`);
 }
+if (!isolated) {
+  for (const entry of renderable) {
+    // Native kernel allocations can outlive client.terminate(); reclaim them between examples.
+    const key = `${entry.kernel}/${entry.name}`;
+    const child = spawnSync(
+      process.execPath,
+      ['--import', 'tsx', fileURLToPath(import.meta.url), '--isolated', `--only=${key}`, ...(check ? ['--check'] : [])],
+      { cwd: rootDirectory, stdio: 'inherit' },
+    );
+    if (child.error) {
+      throw child.error;
+    }
+    if (child.status !== 0) {
+      throw new Error(`Thumbnail generation failed for ${key}: ${child.signal ?? child.status}`);
+    }
+  }
+}
 
 const thumbnails: RenderedThumbnail[] = [];
-for (const entry of renderable) {
+for (const entry of isolated ? renderable : []) {
   // One fresh client (and kernel WASM instance) per fixture: OCCT's shell/offset
   // results depend on accumulated heap state, so a shared instance makes a
   // fixture's bytes depend on the 47 fixtures rendered before it. A clean
@@ -221,6 +239,7 @@ for (const entry of renderable) {
           projection: { kind: 'perspective', verticalFieldOfView: 45 },
         },
         quality: 0.9,
+        ao: {},
       },
     });
     if (!result.success) {
@@ -246,7 +265,7 @@ for (const entry of renderable) {
   }
 }
 
-const assetMap = only.size === 0 ? generateAssetMap(thumbnails) : undefined;
+const assetMap = only.size === 0 ? generateAssetMap(allRenderable) : undefined;
 if (check) {
   const drift: string[] = [];
   for (const thumbnail of thumbnails) {
@@ -266,7 +285,7 @@ if (check) {
   if (drift.length > 0) {
     throw new Error(`Generated thumbnail drift:\n${drift.map((item) => `- ${item}`).join('\n')}`);
   }
-  console.log(`Verified ${thumbnails.length} thumbnails`);
+  console.log(`Verified ${renderable.length} thumbnails`);
 } else {
   for (const thumbnail of thumbnails) {
     writeFileSync(thumbnail.path, thumbnail.bytes);
@@ -274,5 +293,5 @@ if (check) {
   if (assetMap !== undefined) {
     writeFileSync(assetMapPath, assetMap);
   }
-  console.log(`Generated ${thumbnails.length} thumbnails${assetMap ? ' and thumbnail.assets.ts' : ''}`);
+  console.log(`Generated ${renderable.length} thumbnails${assetMap ? ' and thumbnail.assets.ts' : ''}`);
 }

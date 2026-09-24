@@ -12,6 +12,7 @@ import type {
   BufferGeometry,
   Mesh,
   Scene,
+  MeshPhysicalMaterial,
 } from 'three';
 import { Vector2, Box3, Vector3, WebGLCoordinateSystem, WebGPUCoordinateSystem } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -63,7 +64,15 @@ import {
   getModelComponentIdInHierarchy,
   setModelComponentOwner,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
-import { useCameraRig, useGraphics, useGraphicsSelector, useModelInteractionSelector } from '#hooks/use-graphics.js';
+import {
+  useCameraRig,
+  useGraphics,
+  useGraphicsSelector,
+  useModelInteractionSelector,
+  useRenderFrame,
+  useRenderFrameRetarget,
+} from '#hooks/use-graphics.js';
+import type { RenderFrame } from '@taucad/spatial';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
@@ -1061,6 +1070,7 @@ export function GltfMesh({
   const graphicsBackendThree = useThreeGraphicsBackend();
   const sectionView = useSectionView();
   const cameraRig = useCameraRig();
+  const renderFrame = useRenderFrame();
   const assetMatrix = useMemo(() => createCanonicalGltfToTauMatrix(), []);
   const [presentation, setPresentation] = useState<PreparedGltfPresentation | undefined>();
   const committedPresentationRef = useRef<PreparedGltfPresentation | undefined>(undefined);
@@ -1657,6 +1667,33 @@ export function GltfMesh({
     [topologyScheduler],
   );
 
+  // Thickness is object-space and Three scales its transmission ray with modelMatrix.
+  // Absorption distance is world-space: convert only that value to this viewport's
+  // render units, from immutable loader materials on every atomic frame retarget.
+  const retargetMaterialDistances = useCallback(
+    (nextFrame: RenderFrame): void => {
+      if (!presentation) {
+        return;
+      }
+      presentation.scene.traverse((object) => {
+        const original = presentation.originalMaterials.get(object.id);
+        if (!original) {
+          return;
+        }
+        const originals = getMaterials(original);
+        for (const [index, material] of getObjectMaterials(object).entries()) {
+          const source = originals[index];
+          if (source && 'attenuationDistance' in source && 'attenuationDistance' in material) {
+            (material as MeshPhysicalMaterial).attenuationDistance =
+              (source as MeshPhysicalMaterial).attenuationDistance / nextFrame.metersPerRenderUnit;
+          }
+        }
+      });
+    },
+    [presentation],
+  );
+  useRenderFrameRetarget(retargetMaterialDistances);
+
   // Material-mode changes mutate only the committed bundle and never reparse the GLB.
   useEffect(() => {
     if (!presentation) {
@@ -1671,11 +1708,20 @@ export function GltfMesh({
     } else {
       restoreOriginalMaterials(presentation.scene, presentation.originalMaterials);
     }
+    retargetMaterialDistances(renderFrame);
     applyGltfSurfaceDepthBiasToScene(presentation.scene, graphicsBackendThree);
     seedSceneMaterialAppearances(presentation.scene);
     materialSignaturesRef.current.set(presentation, materialSignature);
     invalidate();
-  }, [enableMatcap, graphicsBackendThree, invalidate, matcapTint, presentation]);
+  }, [
+    enableMatcap,
+    graphicsBackendThree,
+    invalidate,
+    matcapTint,
+    presentation,
+    renderFrame,
+    retargetMaterialDistances,
+  ]);
 
   // Toggle visibility when enableSurfaces or enableLines change
   useEffect(() => {

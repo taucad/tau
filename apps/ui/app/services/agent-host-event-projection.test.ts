@@ -14,6 +14,7 @@ import {
   projectAgentHostUserTurn,
   projectTurnFinalized,
   latestAcpSessionData,
+  parseAgentHostApproval,
   projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
@@ -680,6 +681,29 @@ describe('projectAgentHostEvent', () => {
       },
       { type: 'tool-approval-request', approvalId: 'approval-1', toolCallId: 'approval-1' },
     ]);
+  });
+
+  it('carries the ledger correlation a print request attaches, and nothing else from its context', () => {
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'approval-print',
+      phase: 'requested',
+      reason: 'Print pyramid.gcode.3mf on Simulated X1C',
+      payload: {
+        kind: 'approval',
+        prompt: 'Print pyramid.gcode.3mf on Simulated X1C',
+        context: { requestId: 'req-7f3a', machineId: 'bambu-simulator', fileName: 'pyramid.gcode.3mf', extra: 1 },
+      },
+    });
+    expect(part).toMatchObject({
+      type: 'tool-input-available',
+      input: {
+        interruptId: 'approval-print',
+        context: { requestId: 'req-7f3a', machineId: 'bambu-simulator', fileName: 'pyramid.gcode.3mf' },
+      },
+    });
+    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context?.requestId).toBe('req-7f3a');
   });
 
   it('projects a login an external agent is waiting on as facts, not a decision', () => {

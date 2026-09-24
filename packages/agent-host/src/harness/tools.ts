@@ -6,7 +6,7 @@ import type {
 } from '@earendil-works/pi-agent-core';
 import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
-import type { HostToolInvocation, HostToolResult, ToolRegistry } from '#waist/ports.js';
+import type { HostToolApproval, HostToolInvocation, HostToolResult, ToolRegistry } from '#waist/ports.js';
 import type { JsonValue } from '#log/event-types.js';
 
 const bracketArrayAlias = /^(files|include|exclude)\[(0|[1-9][0-9]*)\]$/u;
@@ -232,6 +232,8 @@ type CreateAgentToolsOptions = {
   readonly substitute?: ToolResultSubstituter | undefined;
   /** The run every dispatch from these tools belongs to (V19). */
   readonly runId: string;
+  /** The run's durable approval, when its host has one; forwarded on every invocation. */
+  readonly approve?: HostToolApproval | undefined;
 };
 
 /** Wrap the waist tool registry as pi `AgentTool`s, including T4 result substitution. @public */
@@ -250,6 +252,7 @@ export const createAgentTools = (options: CreateAgentToolsOptions): HostAgentToo
         input: input as JsonValue,
         signal: signal ?? new AbortController().signal,
         runId: options.runId,
+        ...(options.approve === undefined ? {} : { approve: options.approve }),
         ...(onUpdate === undefined
           ? {}
           : {

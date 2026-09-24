@@ -112,7 +112,12 @@ export type RevisionClient = Readonly<{
    * new branch has to refuse the turn rather than silently run it elsewhere.
    */
   createBranch: (name: string, from?: string) => Promise<BranchCreated>;
-  /** Connect, or do nothing when the connection is already open. */
+  /**
+   * Connect, or do nothing when the connection is already open.
+   *
+   * Frames sent before this wait for it: connecting starts the root, and its
+   * first fetch must see the credential the route mints before opening (D36).
+   */
   open: () => void;
   /**
    * Give the root back.
@@ -729,6 +734,11 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
   let nextRequestId = 0;
   let connectionGeneration = 0;
   let channel: MessageChannel | undefined;
+  /* Frames posted before the route opens this client (D36). Connecting starts the
+   * root and its opening fetch, so the connection waits for `open`, which the
+   * lifecycle calls once the GitHub credential is minted and queued first. */
+  let admitted = false;
+  const queued: WorkerRevisionRequest[] = [];
   const receive = (generation: number, { data }: MessageEvent<WorkerRevisionResponse>): void => {
     if (generation !== connectionGeneration) {
       return;
@@ -795,6 +805,10 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     return opened.port2;
   };
   const post = (request: WorkerRevisionRequest): void => {
+    if (!admitted) {
+      queued.push(request);
+      return;
+    }
     open().postMessage(request);
   };
   /**
@@ -902,10 +916,17 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       return created;
     },
     open: () => {
-      open();
+      admitted = true;
+      const port = open();
+      for (const request of queued.splice(0)) {
+        port.postMessage(request);
+      }
     },
     close: () => {
+      admitted = false;
+      queued.length = 0;
       if (channel === undefined) {
+        cancelPendingRequests();
         return;
       }
       const closing = channel;
@@ -1158,11 +1179,6 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
       }
       recovered = !minted;
       client.open();
-      /* The worker's opening fetch starts when the port connects, before this mint
-       * lands, and GitHub refuses it for want of a credential (D36). */
-      if (minted) {
-        resumeGithubRemote(client);
-      }
     })();
     return () => {
       credentialAbort.abort();

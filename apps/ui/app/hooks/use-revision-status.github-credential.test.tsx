@@ -385,27 +385,6 @@ describe('opening a GitHub-bound project', () => {
 });
 
 describe('recovery from a refused GitHub credential (D2)', () => {
-  it('should re-validate a remote the opening fetch refused before the first mint landed (D36)', async () => {
-    let answer: (token: Token) => void = () => undefined;
-    githubToken.mockImplementationOnce(
-      async () =>
-        new Promise<Token>((resolve) => {
-          answer = resolve;
-        }),
-    );
-    const scripted = mountBound();
-    /* The worker fetched as the port connected, with no credential yet held. */
-    scripted.show({ ...githubRemote, phase: 'reconnectRequired', error: 'The remote rejected the saved credentials.' });
-    expect(scripted.sent()).not.toContainEqual({ command: 'authorizeRemote' });
-
-    answer({ accessToken: 'first', expiresAt: expiringIn(eightHours), generation: 3 });
-
-    await vi.waitFor(() => {
-      expect(scripted.sent()).toContainEqual({ command: 'authorizeRemote' });
-    });
-    expect(githubToken).toHaveBeenCalledOnce();
-  });
-
   it('should re-mint once and re-validate a remote that needs reconnecting', async () => {
     githubToken.mockResolvedValue({ accessToken: 'fresh', expiresAt: expiringIn(eightHours), generation: 3 });
     const scripted = mountBound();

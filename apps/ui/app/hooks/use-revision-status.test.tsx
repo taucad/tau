@@ -476,6 +476,26 @@ describe('the page client of the worker revision root', () => {
     client.close();
   });
 
+  it('should hold every frame until the route opens, so the credential precedes the first fetch (D36)', () => {
+    const { worker, ports, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    revisionClient.send({ command: 'setDeviceId', deviceId: 'device-1' });
+    revisionClient.remoteCredential({ apiBaseUrl: 'http://api.test', origin: 'https://github.com' });
+
+    /* Connecting starts the root and its opening fetch. */
+    expect(ports).toHaveLength(0);
+
+    revisionClient.open();
+
+    expect(ports).toHaveLength(1);
+    expect(messages).toMatchObject([
+      { command: 'remoteCredential' },
+      { command: 'setDeviceId', deviceId: 'device-1' },
+      { command: 'remoteCredential', origin: 'https://github.com' },
+    ]);
+    revisionClient.close();
+  });
+
   it('should replay a completed chat projection to a later route subscriber', () => {
     const { worker, ports } = controlledWorker();
     const revisionClient = getRevisionClient({ projectId, worker });

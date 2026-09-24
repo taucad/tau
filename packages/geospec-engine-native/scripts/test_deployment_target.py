@@ -48,6 +48,7 @@ class DeploymentTargetTest(unittest.TestCase):
             'rustPrefix': '/recorded/rust', 'sdkPrefix': '/recorded/sdk',
             'sourceRoot': str(materials.ROOT), 'preparationCache': '/recorded/prep',
             'environment': {'HOME': '/recorded/home', 'EM_CONFIG': '/recorded/config'},
+            'wasmEh': prepare.RECIPE['wasmEh'],
             'tools': tools,
             **{name: f'/recorded/tools/{name}' for name in ['rustc', 'cargo', 'emcc', 'emxx', 'emar']},
         }
@@ -467,9 +468,16 @@ class PreparationContractTest(unittest.TestCase):
         self.assertIn('-DUSE_TBB=OFF', command)
         for flag in ['-DCMAKE_C_FLAGS=', '-DCMAKE_CXX_FLAGS=']:
             self.assertTrue(any(option.startswith(flag) and all(selected in option for selected in
-                                ['-msimd128', *self.recipe['wasmEh']['compileFlags']]) for option in command))
+                                ['-msimd128', *self.recipe['wasmEh']['compileFlags'],
+                                 '-UOCC_CONVERT_SIGNALS']) for option in command))
         self.assertEqual(prepare.MIXED_PREFIX, 'occt-mixed-simd128')
         self.assertEqual(self.verify(), self.receipt)
+
+    def test_should_reject_mixed_signal_conversion_with_wasm_longjmp(self):
+        self.recipe['mixedOcctOptions'] = [option.replace(' -UOCC_CONVERT_SIGNALS', '')
+                                           for option in self.recipe['mixedOcctOptions']]
+        with self.assertRaisesRegex(ValueError, 'no POSIX signal conversion'):
+            self.contract()
 
     def test_should_reject_js_eh_or_longjmp_in_native_eh_prefix(self):
         original = list(self.recipe['mixedOcctOptions'])

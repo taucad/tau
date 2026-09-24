@@ -377,10 +377,10 @@ def prefix_contract(kind, paths, env, context, producing_builder=None):
         require(RECIPE['wasmEh'] == {'compileFlags': eh, 'linkFlags': eh},
                 'Unsupported native WASM EH recipe')
         require(all(any(option.startswith(flag) and all(selected in option.split('=', 1)[1].split()
-                                                      for selected in ['-msimd128', *eh])
+                                                      for selected in ['-msimd128', *eh, '-UOCC_CONVERT_SIGNALS'])
                         for option in RECIPE['mixedOcctOptions'])
                     for flag in ('-DCMAKE_C_FLAGS=', '-DCMAKE_CXX_FLAGS=')),
-                'OCCT C and C++ must compile with fixed SIMD and native WASM EH')
+                'OCCT C and C++ must compile with fixed SIMD, native WASM EH and no POSIX signal conversion')
         require(not any(incompatible in option.split('=', 1)[1].split()
                         for option in RECIPE['mixedOcctOptions'] if option.startswith('-DCMAKE_C')
                         for incompatible in ('-fexceptions', '-sDISABLE_EXCEPTION_CATCHING=0',

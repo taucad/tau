@@ -128,6 +128,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const runtimeLeases = new Map<string, ReturnType<ServicesBrokerOptions['connectRuntime']>>();
   const runtimeLeaseClosures = new Map<string, Promise<void>>();
   const projectAttachments = new Map<string, Set<string>>();
+  /* Monotone per root for the broker's life, never deleted on release (L6 N3):
+   * a release that outlived its deadline may still be closing in the utility,
+   * and a restarted count would hand the next adoption that release's number,
+   * letting the stale release delete the new session's launcher. */
   const attachmentGenerations = new Map<string, number>();
   const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
   /* Roots with a release in flight, by how many. `releaseAgentHost` awaits the
@@ -449,7 +453,6 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       const spawned = utility;
       if (spawned === undefined) {
         projectAttachments.delete(root);
-        attachmentGenerations.delete(root);
         runtimeContexts.delete(root);
         projectIds.delete(root);
         return;
@@ -487,7 +490,6 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
          * would strand the launcher that re-adoption is already using. */
         if (attachmentGenerations.get(root) === generation) {
           projectAttachments.delete(root);
-          attachmentGenerations.delete(root);
           runtimeContexts.delete(root);
           projectIds.delete(root);
         }

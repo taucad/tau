@@ -106,9 +106,10 @@ const savedBudgetMilliseconds = 100;
 /**
  * B1's fixture (D11): 1 000 source files and one 5 MiB export, warm save.
  * Loaded baseline: `revision-latency-b1.json` `warmDuration` from coordinator
- * run 2026-09-25-execution (to fill). The 100-file reading above is superseded.
+ * run 2026-09-25-execution r11 (70.5 ms, 1-minute load under 15, incremental
+ * capture on). The 100-file reading above is superseded.
  */
-const savedLoadedBaselineMilliseconds = Number.NaN;
+const savedLoadedBaselineMilliseconds = 70.5;
 const savedFixtureQuery = '?files=1000&binaryMib=5';
 
 /** B4's stated budget (rule 20). */

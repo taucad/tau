@@ -27,10 +27,12 @@ const githubToken = vi.hoisted(() =>
 );
 
 const githubRepository = vi.hoisted(() => vi.fn());
+/* No connected account unless a test lists one. */
+const githubList = vi.hoisted(() => vi.fn(async (): Promise<ReadonlyArray<{ id: string }>> => []));
 
 vi.mock('#lib/github-connections.js', async (importOriginal) => ({
   ...(await importOriginal<typeof GithubConnectionsModule>()),
-  githubConnections: { token: githubToken, repository: githubRepository },
+  githubConnections: { token: githubToken, repository: githubRepository, list: githubList },
 }));
 /* eslint-disable @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({
@@ -40,23 +42,32 @@ vi.mock('#environment.config.js', () => ({
 const githubAvailable = vi.hoisted(() => vi.fn<() => boolean | undefined>(() => true));
 vi.mock('#components/github/github-repository-picker.js', () => ({
   useGithubConnectionAvailable: githubAvailable,
-  GithubRepositoryPicker: ({ onSelect }: { onSelect: (selection: unknown) => void }) => (
-    <button
-      type='button'
-      onClick={() => {
-        onSelect({
-          connection: { id: '00000000-0000-4000-8000-000000000001' },
-          repository: {
-            id: 99,
-            fullName: 'o/r',
-            cloneUrl: 'https://github.com/o/r.git',
-            access: 'write',
-          },
-        });
-      }}
-    >
-      Pick GitHub repository
-    </button>
+  GithubRepositoryPicker: ({
+    onSelect,
+    shouldConnect,
+  }: {
+    onSelect: (selection: unknown) => void;
+    shouldConnect?: boolean;
+  }) => (
+    <>
+      <button
+        type='button'
+        onClick={() => {
+          onSelect({
+            connection: { id: '00000000-0000-4000-8000-000000000001' },
+            repository: {
+              id: 99,
+              fullName: 'o/r',
+              cloneUrl: 'https://github.com/o/r.git',
+              access: 'write',
+            },
+          });
+        }}
+      >
+        Pick GitHub repository
+      </button>
+      {shouldConnect === true ? <p>GitHub connect started</p> : null}
+    </>
   ),
 }));
 
@@ -524,6 +535,70 @@ describe('RevisionSyncRegion', () => {
         expect.objectContaining({ provider: 'github', repositoryId: '99' }),
       );
     });
+  });
+
+  /*
+   * D48: *Reconnect GitHub* only opened the picker, so with the picker already
+   * open — where a disconnect leaves it — the click did nothing.
+   */
+  it('reconnects in one click through an account that still reaches the repository (D48)', async () => {
+    const user = userEvent.setup();
+    githubList.mockResolvedValueOnce([{ id: '00000000-0000-4000-8000-000000000001' }]);
+    githubRepository.mockResolvedValueOnce({
+      id: 99,
+      fullName: 'o/r',
+      cloneUrl: 'https://github.com/o/r.git',
+      access: 'write',
+    });
+    const region = renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'reconnectRequired',
+        url: 'https://github.com/o/r.git',
+        provider: 'github',
+        repositoryId: '99',
+        error: 'The remote rejected the saved credentials.',
+      }),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Reconnect GitHub' }));
+
+    await waitFor(() => {
+      expect(region.connect).toHaveBeenCalledWith(
+        'git',
+        'https://github.com/o/r.git',
+        expect.objectContaining({ provider: 'github', repositoryId: '99' }),
+      );
+    });
+    expect(githubRepository).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001', 99);
+  });
+
+  it('starts GitHub connect from Reconnect GitHub when no account reaches the repository, picker open or not (D48)', async () => {
+    const user = userEvent.setup();
+    const region = renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/r.git',
+        provider: 'github',
+        repositoryId: '99',
+      }),
+      syncFacet({
+        state: 'failed',
+        pendingCount: 1,
+        error: 'The remote rejected the saved credentials.',
+        reason: 'unauthorized',
+      }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    expect(screen.queryByText('GitHub connect started')).not.toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole('status', { name: 'Backup status' })).getByRole('button', { name: 'Reconnect GitHub' }),
+    );
+
+    expect(await screen.findByText('GitHub connect started')).toBeInTheDocument();
+    expect(region.connect).not.toHaveBeenCalled();
   });
 
   /* R-U6: the same repository with changed access is re-sent, not skipped as "the same remote". */

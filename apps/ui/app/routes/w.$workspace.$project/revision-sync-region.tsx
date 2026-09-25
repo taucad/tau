@@ -487,6 +487,11 @@ export function RevisionSyncRegion({
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [pendingConnection, setPendingConnection] = useState<PendingConnection>();
   const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
+  const [reconnecting, setReconnecting] = useState(false);
+  const [shouldConnect, setShouldConnect] = useState(false);
+  const handleConnectRequest = (): void => {
+    setShouldConnect(false);
+  };
   const syncState = syncCopy(sync);
   const failureAction = syncFailureAction(sync.reason, remote);
   /*
@@ -521,9 +526,9 @@ export function RevisionSyncRegion({
           <Button
             size='xs'
             variant='outline'
+            disabled={reconnecting}
             onClick={() => {
-              setChoice('git');
-              setChangingBackup(true);
+              void reconnectGithub();
             }}
           >
             Reconnect GitHub
@@ -642,6 +647,35 @@ export function RevisionSyncRegion({
       return;
     }
     await commitConnection(pending);
+  };
+
+  /*
+   * D48: *Reconnect GitHub* reconnects. Opening the picker was all it did, so
+   * with the picker already open — where a disconnect leaves it — the click
+   * changed nothing. An account that still reaches this repository re-mints
+   * for it (the D3 route, no picking); with none, GitHub's own consent starts,
+   * and it returns here with the account listed.
+   */
+  const reconnectGithub = async (): Promise<void> => {
+    setChoice('git');
+    setChangingBackup(true);
+    setReconnecting(true);
+    try {
+      const repositoryId = Number(remote.repositoryId);
+      const connections = Number.isSafeInteger(repositoryId) ? await githubConnections.list().catch(() => []) : [];
+      for (const connection of connections) {
+        // oxlint-disable-next-line no-await-in-loop -- the first account that reaches the repository is the reconnect.
+        const repository = await githubConnections.repository(connection.id, repositoryId).catch(() => undefined);
+        if (repository !== undefined) {
+          // oxlint-disable-next-line no-await-in-loop -- this is the reconnect; the loop ends here.
+          await requestConnection({ kind: 'github', connectionId: connection.id, repository });
+          return;
+        }
+      }
+      setShouldConnect(true);
+    } finally {
+      setReconnecting(false);
+    }
   };
 
   const selectRemote = (value: string): void => {
@@ -793,6 +827,8 @@ export function RevisionSyncRegion({
           <GithubRepositoryPicker
             actionLabel='Connect repository'
             returnTo={globalThis.location.pathname}
+            shouldConnect={shouldConnect}
+            onConnectRequestHandled={handleConnectRequest}
             onSelect={async (selection) =>
               requestConnection({
                 kind: 'github',
@@ -997,9 +1033,9 @@ export function RevisionSyncRegion({
             <Button
               size='sm'
               className='self-start'
+              disabled={reconnecting}
               onClick={() => {
-                setChoice('git');
-                setChangingBackup(true);
+                void reconnectGithub();
               }}
             >
               Reconnect GitHub

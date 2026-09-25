@@ -34,9 +34,15 @@ vi.mock('#components/code/code-editor.client.js', () => ({
   CodeEditor: ({ value }: { readonly value?: string }) => <pre data-testid='conflict-buffer'>{value}</pre>,
 }));
 vi.mock('#components/code/diff-viewer.js', () => ({
-  DiffViewer: ({ originalContent, modifiedContent }: { originalContent: string; modifiedContent: string }) => (
-    <pre data-testid='conflict-diff'>{`${originalContent}|${modifiedContent}`}</pre>
-  ),
+  DiffViewer: ({
+    originalContent,
+    modifiedContent,
+    language,
+  }: {
+    originalContent: string;
+    modifiedContent: string;
+    language?: string;
+  }) => <pre data-testid='conflict-diff' data-language={language}>{`${originalContent}|${modifiedContent}`}</pre>,
 }));
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
@@ -374,6 +380,7 @@ describe('Revisions pane', () => {
     /* A27/D19's third *Compare* surface, on the conflict row (review R9). */
     await user.click(screen.getByRole('button', { name: 'Compare src/bracket.ts' }));
     expect(screen.getByTestId('conflict-diff').textContent).toBe('thick = 4\n|thick = 6\n');
+    expect(screen.getByTestId('conflict-diff')).toHaveAttribute('data-language', 'typescript');
   });
 
   /*

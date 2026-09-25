@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, afterEach, beforeAll, beforeEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { DiffViewer, getDiffLineCount, getFirstChangedLine } from '#components/code/diff-viewer.js';
 import { getHighlighter } from '#lib/shiki.lib.js';
 import { supportedHighlightLanguages } from '#lib/code-language-resolution.js';
@@ -98,6 +98,50 @@ describe('DiffViewer', () => {
       },
       { timeout: 15_000 },
     );
+  });
+
+  /* The rule is asserted where it is declared, because jsdom has no layout. In
+   * plaintext Shiki renders a blank line as a `.line` holding one empty span, so
+   * a rule on `.line:empty` alone would leave it 0 px tall. */
+  it('should keep a blank line one line tall', async () => {
+    const { container } = render(<DiffViewer originalContent='' modifiedContent={'a\n\nb'} language='plaintext' />);
+    await waitFor(() => {
+      expectDiffViewerShikiReady(container);
+    });
+
+    const blankLine = await waitFor(
+      () => {
+        const line = [...container.querySelectorAll('.line.diff.add')].find((element) => element.textContent === '');
+        expect(line).toBeInstanceOf(HTMLElement);
+        return line;
+      },
+      { timeout: 15_000 },
+    );
+
+    expect(blankLine?.closest('pre')?.parentElement).toHaveClass('[&_.line]:min-h-[1.6em]');
+  });
+
+  it('should label hidden lines at the 12 px minimum text size', async () => {
+    const originalContent = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8'].join('\n');
+    const modifiedContent = ['l1', 'X', 'l3', 'l4', 'l5', 'l6', 'l7', 'Y'].join('\n');
+
+    render(<DiffViewer originalContent={originalContent} modifiedContent={modifiedContent} language='typescript' />);
+
+    const label = await screen.findByText('3 hidden lines', undefined, { timeout: 15_000 });
+    expect(label.parentElement).toHaveClass('text-xs');
+  });
+
+  it('should render every line before the highlighter loads, so an opening disclosure measures its full height', () => {
+    const { container } = render(
+      <DiffViewer originalContent={'alpha\nbeta'} modifiedContent={'alpha\ngamma'} language='typescript' />,
+    );
+
+    expect((container.firstElementChild as HTMLElement).dataset['shikiState']).toBe('loading');
+    expect([...container.querySelectorAll('.line')].map((line) => [line.textContent, line.className])).toEqual([
+      ['alpha', 'line'],
+      ['beta', 'line diff remove'],
+      ['gamma', 'line diff add'],
+    ]);
   });
 
   it('emits no diff add/remove classes when the two files are identical', async () => {

@@ -451,8 +451,14 @@ const owedPushes = (context: SyncMachineContext): readonly SyncQueueEntry[] =>
  */
 const narrowedOffer = (context: SyncMachineContext): readonly string[] | undefined => {
   const owed = owedPushes(context);
+  /* A revision minted since the branch was last acknowledged is owed too. A
+   * refused chat ref narrowed every later push to itself, so while it kept
+   * being refused, `main` was never offered again. */
+  const historyOwed =
+    context.localHead !== undefined && context.localHead !== context.leases[historyRefOf(context.branch)];
   return owed.length > 0 &&
     context.failure !== 'none' &&
+    !historyOwed &&
     owed.every((entry) => entry.ref !== historyRefOf(context.branch))
     ? owed.map((entry) => entry.ref)
     : undefined;

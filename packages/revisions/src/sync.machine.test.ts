@@ -1334,7 +1334,7 @@ describe('syncMachine', () => {
 
     harness.clock.advance(5000);
     await settleWhenRunning(harness.effects, 'fetch', {
-      output: { leases: {}, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+      output: { leases: { [mainRef]: 'r1' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
     });
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
@@ -1350,6 +1350,33 @@ describe('syncMachine', () => {
     });
     expect(harness.actor.getSnapshot().context.pending.map((entry) => entry.ref)).toEqual([chatRef]);
     expect(selectSyncFacet(harness.actor.getSnapshot()).pendingCount).toBe(1);
+
+    harness.stop();
+  });
+
+  it('offers the branch again when a revision is minted while a refused chat ref is retried', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'r1' },
+        { name: chatRef, status: 'rejected', head: undefined, reason: 'does not fast-forward' },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    /* The chat is still refused, but `r2` has never been offered: the push
+     * must carry both sets, not only the chat ref it is retrying. */
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r2' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('push').at(-1)).not.toHaveProperty('refs');
 
     harness.stop();
   });

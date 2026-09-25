@@ -69,6 +69,8 @@ export type SlicedArtifact = Readonly<{
   mimeType: string;
   /** The slicer options this artifact was produced from; a different key means the slice is stale. */
   optionsKey: string;
+  /** The rendered geometry it was sliced from, compared by identity: a new render makes the slice stale. */
+  geometry: unknown;
   summary: SliceSummary;
   fit: BuildVolumeFit | undefined;
 }>;
@@ -233,6 +235,8 @@ export type PrintPrepare = Readonly<{
   effectiveSubmission: Record<string, unknown>;
   slice: SlicedArtifact | undefined;
   isSliceStale: boolean;
+  /** Why the slice no longer matches the model or its options, in the person's words. */
+  staleReason: string | undefined;
   isSlicing: boolean;
   sliceError: string | undefined;
   sliceNow: () => Promise<void>;
@@ -282,7 +286,8 @@ export const usePrintPrepare = ({
   const kernelClient = useSelector(actor, (state) => state?.context.kernelClient);
   const activeKernelId = useSelector(actor, (state) => state?.context.activeKernelId);
   const capabilities = useSelector(actor, (state) => state?.context.capabilities);
-  const hasGeometry = useSelector(actor, (state) => state?.context.geometry !== undefined);
+  const geometry: unknown = useSelector(actor, (state) => state?.context.geometry);
+  const hasGeometry = geometry !== undefined;
 
   const route = useMemo(
     () =>
@@ -306,7 +311,9 @@ export const usePrintPrepare = ({
   const [submission, setSubmission] = useState<Record<string, unknown>>({});
   const [slice, setSlice] = useState<SlicedArtifact>();
   const [isSlicing, setIsSlicing] = useState(false);
-  const [sliceError, setSliceError] = useState<string>();
+  /* Kept with the geometry it described, so a new render retires it (a failure on an empty model must not outlive it). */
+  const [failedSlice, setFailedSlice] = useState<Readonly<{ message: string; geometry: unknown }>>();
+  const sliceError = failedSlice?.geometry === geometry ? failedSlice.message : undefined;
   const [isSending, setIsSending] = useState(false);
   const [isConfirmingSend, setIsConfirmingSend] = useState(false);
   const [sendError, setSendError] = useState<string>();
@@ -347,14 +354,29 @@ export const usePrintPrepare = ({
     [machineOptions, route],
   );
   const optionsKey = JSON.stringify({ ...machineOptions, ...options });
-  const isSliceStale = slice !== undefined && slice.optionsKey !== optionsKey;
+  const changed = ((): 'model' | 'options' | undefined => {
+    if (slice === undefined) {
+      return undefined;
+    }
+    if (slice.geometry !== geometry) {
+      return 'model';
+    }
+    return slice.optionsKey === optionsKey ? undefined : 'options';
+  })();
+  const isSliceStale = changed !== undefined;
+  const staleReason =
+    changed === 'model'
+      ? 'The model changed since this slice. Slice again to send the current model.'
+      : changed === 'options'
+        ? 'Options changed since this slice. Slice again to send the current settings.'
+        : undefined;
 
   const sliceNow = useCallback(async (): Promise<void> => {
     if (!kernelClient || !route) {
       return;
     }
     setIsSlicing(true);
-    setSliceError(undefined);
+    setFailedSlice(undefined);
     try {
       const result = await exportWithRuntimeValidatedInput(kernelClient, route, {
         exportOptions: { ...machineOptions, ...options },
@@ -378,16 +400,17 @@ export const usePrintPrepare = ({
         digest,
         length: file.bytes.byteLength,
         mimeType: file.mimeType,
+        geometry,
         optionsKey,
         summary,
         fit: manifest ? fitsBuildVolume(summary.bounds, manifest.geometry.buildVolume) : undefined,
       });
     } catch (error) {
-      setSliceError(error instanceof Error ? error.message : String(error));
+      setFailedSlice({ message: error instanceof Error ? error.message : String(error), geometry });
     } finally {
       setIsSlicing(false);
     }
-  }, [entryPath, fileManager, kernelClient, machineOptions, manifest, options, optionsKey, route]);
+  }, [entryPath, fileManager, geometry, kernelClient, machineOptions, manifest, options, optionsKey, route]);
 
   const openPreview = useCallback((): void => {
     if (slice) {
@@ -402,8 +425,8 @@ export const usePrintPrepare = ({
     if (!slice) {
       return 'Slice the model first.';
     }
-    if (isSliceStale) {
-      return 'The options changed since this slice. Slice again before sending.';
+    if (changed !== undefined) {
+      return `The ${changed} changed since this slice. Slice again before sending.`;
     }
     if (slice.fit && !slice.fit.fits) {
       return `The toolpath does not fit the plate: ${slice.fit.reason}.`;
@@ -506,6 +529,7 @@ export const usePrintPrepare = ({
     setSubmission,
     effectiveSubmission,
     slice,
+    staleReason,
     isSliceStale,
     isSlicing,
     sliceError,
@@ -626,7 +650,7 @@ function SliceResult({
 }): React.JSX.Element | undefined {
   const {
     slice,
-    isSliceStale,
+    staleReason,
     openPreview,
     confirmSend,
     cancelSend,
@@ -676,11 +700,11 @@ function SliceResult({
       ) : (
         <PrintNotice tone='warning'>The toolpath does not fit the plate: {fit.reason}.</PrintNotice>
       )}
-      {isSliceStale ? (
+      {staleReason === undefined ? null : (
         <PrintNotice tone='neutral' role='status'>
-          Options changed since this slice. Slice again to send the current settings.
+          {staleReason}
         </PrintNotice>
-      ) : null}
+      )}
       {isConfirmingSend ? (
         <StartConfirmationCard
           digest={slice.digest}

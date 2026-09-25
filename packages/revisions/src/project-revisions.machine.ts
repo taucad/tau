@@ -217,6 +217,8 @@ export type ProjectRevisionsMachineEvent =
     }>
   /** That file could not be opened for resolution, and why (C44). */
   | Readonly<{ type: 'conflictMaterializationFailed'; revisionId: string; path: string; reason: string }>
+  /** A step of one resolution failed, and why (D56). */
+  | Readonly<{ type: 'resolutionFailed'; revisionId: string; reason: string }>
   | Readonly<{
       type: 'turnRequested';
       revisionId: string;
@@ -314,6 +316,8 @@ export type ProjectRevisionsMachineEmitted =
     }>
   /** That file could not be opened for resolution, and why (C44). */
   | Readonly<{ type: 'conflictMaterializationFailed'; revisionId: string; path: string; reason: string }>
+  /** A step of one resolution failed, and why (D56). */
+  | Readonly<{ type: 'resolutionFailed'; revisionId: string; reason: string }>
   | Readonly<{
       type: 'turnRequested';
       revisionId: string;
@@ -1127,6 +1131,11 @@ const projectRevisionsMachineDefinition = setup({
         /* And so does its refusal: a surface that asked for a file learns that
          * nothing is coming from a fact, not from a timeout (C44). */
         conflictMaterializationFailed: ({ event }, enq) => {
+          enq.emit(event);
+          return {};
+        },
+        /* D56: the only way a failed *Merge into* reaches a person. */
+        resolutionFailed: ({ event }, enq) => {
           enq.emit(event);
           return {};
         },

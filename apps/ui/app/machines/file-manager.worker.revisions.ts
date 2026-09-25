@@ -310,7 +310,7 @@ export type RevisionToast =
    */
   | Readonly<{
       type: 'error';
-      subject: 'restore' | 'branch' | 'save';
+      subject: 'restore' | 'branch' | 'save' | 'resolution';
       /* Which branch verb refused, so a caller correlating one *New branch*
        * does not take another verb's refusal for its own (finding 1). */
       operation?: BranchOperation;
@@ -752,6 +752,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       path: failed.path,
       reason: failed.reason,
     });
+  });
+  /* D56: a resolution child is spawned per conflict, so its failure crosses
+   * the root the way the facts above do. */
+  actor.on('resolutionFailed', (failed) => {
+    toasts.emit({ type: 'error', subject: 'resolution', message: failed.reason });
   });
   actor.on('turnRequested', (requested) => {
     toasts.emit({

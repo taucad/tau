@@ -310,7 +310,7 @@ describe('resolutionMachine', () => {
   });
 
   it('returns to the rows when the resolving revision cannot be minted', async () => {
-    const { actor, promises, emitted } = await loaded();
+    const { actor, promises, emitted, parent } = await loaded();
 
     for (const path of ['enclosure.ts', 'params/wall.json']) {
       actor.send({ type: 'keepTheirs', path });
@@ -331,6 +331,13 @@ describe('resolutionMachine', () => {
     expect(emitted.find((event) => event.type === 'toast.error')).toEqual({
       type: 'toast.error',
       message: 'that branch moved while the merge was running',
+    });
+    /* D56: and the parent hears it too, because a host holds only the root and
+       never saw this child's own toast. */
+    expect(parent.events.find((event) => event.type === 'resolutionFailed')).toEqual({
+      type: 'resolutionFailed',
+      revisionId: 'rev-conflict',
+      reason: 'that branch moved while the merge was running',
     });
 
     actor.stop();

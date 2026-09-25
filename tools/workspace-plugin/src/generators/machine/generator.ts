@@ -216,6 +216,11 @@ const updateManifest = (target: MachineTarget): PackageManifest | undefined => {
     return undefined;
   }
 
+  const devDependencies = {
+    ...target.manifest.devDependencies,
+    '@taucad/xstate-testing': target.manifest.devDependencies?.['@taucad/xstate-testing'] ?? 'workspace:*',
+  };
+
   if (!target.publishable) {
     return {
       ...target.manifest,
@@ -223,6 +228,7 @@ const updateManifest = (target: MachineTarget): PackageManifest | undefined => {
         ...target.manifest.dependencies,
         xstate: target.manifest.dependencies?.['xstate'] ?? 'catalog:',
       },
+      devDependencies,
     };
   }
 
@@ -250,7 +256,7 @@ const updateManifest = (target: MachineTarget): PackageManifest | undefined => {
       xstate: target.manifest.peerDependencies?.['xstate'] ?? '^6.0.0-alpha.59',
     },
     devDependencies: {
-      ...target.manifest.devDependencies,
+      ...devDependencies,
       xstate: target.manifest.devDependencies?.['xstate'] ?? 'catalog:',
     },
   };

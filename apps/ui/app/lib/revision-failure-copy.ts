@@ -15,10 +15,22 @@
  */
 
 /**
- * The three verbs whose refusals reach the tree's one error channel, and the
- * turn, which announces its own (`turn.failed`).
+ * The three verbs whose refusals reach the tree's one error channel, the turn,
+ * which announces its own (`turn.failed`), the backup, whose terminal refusal
+ * the Sync line says, and removing a version name, which the Hosted Remote's
+ * audited verb answers (D24).
  */
-export type RevisionFailureSubject = 'restore' | 'branch' | 'save' | 'turn';
+export type RevisionFailureSubject = 'restore' | 'branch' | 'save' | 'turn' | 'backup' | 'removeName';
+
+/** What Tau Cloud's own budgets answer (D22, I11): one sentence each, each saying when to try again. */
+const hostedRemoteCopy: ReadonlyArray<readonly [string, string]> = [
+  ['GIT_RATE_LIMITED', 'Tau Cloud is getting too many requests for this project. Wait a minute, then try again.'],
+  ['GIT_LEASE_OWNER_BUSY', 'Tau Cloud is still busy with this account’s other projects. Try again in a moment.'],
+  [
+    'GIT_HYDRATE_BUDGET_EXHAUSTED',
+    'This account has reached today’s limit for opening projects on Tau Cloud. Try again tomorrow.',
+  ],
+];
 
 /** Whatever the engine itself could not do, said the same way for every verb. */
 const engineCopy: ReadonlyArray<readonly [string, string]> = [
@@ -35,12 +47,41 @@ const engineCopy: ReadonlyArray<readonly [string, string]> = [
  * module owns every word of a failure rather than two (A18, I12).
  */
 export const revisionFailureCopy: Readonly<
-  Record<RevisionFailureSubject, Readonly<{ title: string; fallback: string; codes: ReadonlyMap<string, string> }>>
+  Record<
+    RevisionFailureSubject,
+    Readonly<{
+      title: string;
+      fallback: string;
+      codes: ReadonlyMap<string, string>;
+      /** A title for a code whose outcome is not the subject's failure, e.g. files that are back but unrecorded. */
+      titles?: ReadonlyMap<string, string>;
+    }>
+  >
 > = {
   restore: {
     title: 'Restore failed',
     fallback: 'Tau could not restore that revision. Reload the page and try again.',
-    codes: new Map([...engineCopy, ['UNKNOWN_REVISION', 'That revision is not in this project any more.']]),
+    codes: new Map([
+      ...engineCopy,
+      /* A1: a turn holds the files, so the restore wrote nothing — Switch's words. */
+      ['LEASE_UNAVAILABLE', 'An agent is working in this project’s files.'],
+      /* One of the restore's two revisions lost its race with another writer (A7). */
+      ['CAS_LOST', 'Something else changed this project first. Try again.'],
+      /* A3: the files moved between the revision before the restore and its write. */
+      ['CHECKOUT_CONFLICT', 'These files changed while the restore was being prepared. Try again.'],
+      ['UNKNOWN_REVISION', 'That revision is not in this project any more.'],
+      /* W0 N1: the files are the target's, but the restore's own revision lost its race; a retry would find nothing to save. */
+      [
+        'RESTORE_UNRECORDED',
+        'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own revision. Your files are kept.',
+      ],
+      /* W0 M1: Undo pressed after the selection left the line the restore was made on. */
+      ['UNDO_UNAVAILABLE', 'That restore was made on another branch. Open it there to undo it.'],
+    ]),
+    titles: new Map([
+      ['RESTORE_UNRECORDED', 'Files restored'],
+      ['UNDO_UNAVAILABLE', 'Nothing to undo here'],
+    ]),
   },
   branch: {
     title: 'That branch change did not go through',
@@ -66,7 +107,30 @@ export const revisionFailureCopy: Readonly<
     fallback: 'Tau could not record this change. Reload the page and try again.',
     codes: new Map([
       ...engineCopy,
+      /* D3: another writer moved the line first; the files stay as they are, unsaved. */
+      ['CAS_LOST', 'Something else changed this project first. Your changes are still here; save again.'],
       ['UNKNOWN_REVISION', 'The revision this change builds on is not in this project any more.'],
+    ]),
+  },
+  backup: {
+    title: 'Not backed up',
+    fallback: 'Tau could not back this project up. It will try again.',
+    codes: new Map([
+      ...hostedRemoteCopy,
+      /* Terminal (W2a): no retry and no verb clears it; only a repair of the cloud copy does. */
+      [
+        'REMOTE_DAMAGED',
+        'Tau has to repair this project’s copy on Tau Cloud before it can back it up again. Nothing on this device is lost.',
+      ],
+    ]),
+  },
+  removeName: {
+    title: 'That name was not removed',
+    fallback: 'Tau Cloud could not remove that name. Try again.',
+    codes: new Map([
+      ...hostedRemoteCopy,
+      ['GIT_REF_REMOVAL_OWNER_ONLY', 'Only the project’s owner can remove a version name.'],
+      ['GIT_REF_NOT_REMOVABLE', 'Only a version name can be removed.'],
     ]),
   },
   turn: {
@@ -105,7 +169,7 @@ export const describeRevisionFailure = (
   const copy = revisionFailureCopy[subject];
   const description = (code === undefined ? undefined : copy.codes.get(code)) ?? copy.fallback;
   return {
-    title: copy.title,
+    title: (code === undefined ? undefined : copy.titles?.get(code)) ?? copy.title,
     description:
       branch === undefined || code !== 'CHECKOUT_CONFLICT'
         ? description

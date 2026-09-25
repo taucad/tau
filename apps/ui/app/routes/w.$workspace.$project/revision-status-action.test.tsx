@@ -12,15 +12,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History, Rewind } from 'lucide-react';
+import { CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History } from 'lucide-react';
 import type { RevisionRow, RevisionStatusProjection } from '@taucad/revisions';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import {
-  RevisionStatusAction,
-  revisionAccessibleName,
-  selectRevisionFacts,
-} from '#routes/w.$workspace.$project/revision-status-action.js';
-import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-status-action.js';
+import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
+import { revisionAccessibleName, selectRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 let focusedChatId: string | undefined = 'chat-1';
@@ -69,7 +66,7 @@ const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Elem
   </QueryClientProvider>
 );
 
-const onMain: RevisionWhere = { branch: 'main', head: 12, latest: undefined, isDirty: false };
+const onMain: RevisionWhere = { branch: 'main', head: 12, isDirty: false };
 
 beforeEach(() => {
   revisionStatusHarness.reset();
@@ -121,14 +118,6 @@ describe('selectRevisionFacts', () => {
       'none',
       'Not saved yet',
     ],
-    [
-      'showing an older revision',
-      status(),
-      { ...onMain, head: 3, latest: 12 },
-      Rewind,
-      'none',
-      'Viewing Rev 3 · main is at Rev 12',
-    ],
     ['saving', status({ minting: true }), { ...onMain, isDirty: true }, CircleDashed, 'running', 'Saving…'],
     [
       'restoring',
@@ -154,7 +143,7 @@ describe('selectRevisionFacts', () => {
       onMain,
       GitMerge,
       'attention',
-      'Needs your decision · both sides changed main',
+      'Needs your decision on main',
     ],
     [
       'Tau Cloud asking for sign-in',
@@ -234,12 +223,6 @@ describe('revisionAccessibleName', () => {
     );
   });
 
-  it('names the revision you are on while it is not the latest', () => {
-    expect(revisionAccessibleName({ ...onMain, head: 3, latest: 12 }, 'Viewing Rev 3 · main is at Rev 12')).toBe(
-      'Open Revisions. You are on Rev 3 of main. Viewing Rev 3, main is at Rev 12.',
-    );
-  });
-
   it('says Setting up before there is a branch, without doubling an ellipsis', () => {
     expect(revisionAccessibleName({ ...onMain, branch: undefined, head: undefined }, 'Setting up history')).toBe(
       'Open Revisions. Setting up. Setting up history.',
@@ -261,17 +244,34 @@ describe('RevisionStatusAction', () => {
     expect(trigger).toHaveTextContent(/^main$/u);
   });
 
-  it('labels the revision instead of the branch while an older one is showing', async () => {
+  /*
+   * RA2: a restore is a revision on the line (D1), so after restoring Rev 3 of
+   * a twelve-revision `main` the header names the line — never *Rev 3*, never
+   * *Viewing* — and the new head is `Rev 13` in the accessible name and card.
+   */
+  it('reads main with the History glyph after a restore, and names the restore row Rev N+1 (RA2)', async () => {
+    const user = userEvent.setup();
     revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-13', revisionNumber: 13, summary: 'Restore', source: 'restore', restoredFrom: 'rev-3' }),
       row({ revisionId: 'rev-12', revisionNumber: 12 }),
       row({ revisionId: 'rev-3', revisionNumber: 3 }),
     ];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-13' };
 
     render(<RevisionStatusAction />, { wrapper });
 
-    const trigger = await screen.findByRole('button', { name: /^Open Revisions\. You are on Rev 3 of main\./u });
-    expect(trigger).toHaveTextContent(/^Rev 3$/u);
+    const trigger = await screen.findByRole('button', {
+      name: 'Open Revisions. You are on main, Rev 13. Saved on this device.',
+    });
+    expect(trigger).toHaveTextContent(/^main$/u);
+    expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-history');
+    expect(trigger).not.toHaveTextContent(/Viewing|Rev 3/u);
+
+    await user.tab();
+    await screen.findByRole('list', { name: 'Recent revisions' });
+    const card = document.querySelector('[data-slot="revision-card"]');
+    expect(card?.firstElementChild).toHaveTextContent(/^main\s*Rev 13$/u);
+    expect(card).toHaveTextContent('Restored Rev 3');
   });
 
   it('opens Revisions when it is clicked', async () => {
@@ -331,14 +331,59 @@ describe('RevisionStatusAction', () => {
     expect(screen.queryByText('Follow chat')).not.toBeInTheDocument();
   });
 
-  it('says where you are even before the first revision, rather than vanishing (review R10)', () => {
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: undefined };
+  /* R10, M2 (I6): before the projection names the line, History is loading — never empty, never `main`. */
+  it('says History is loading while the line is unknown, rather than vanishing or saying nothing was saved', () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
 
     render(<RevisionStatusAction />, { wrapper });
 
-    expect(screen.getByRole('button', { name: 'Open Revisions. Setting up. Nothing saved yet.' })).toHaveTextContent(
-      'Setting up',
-    );
+    const trigger = screen.getByRole('button', { name: 'Open Revisions. Setting up. Loading history…' });
+    expect(trigger).toHaveTextContent('Setting up');
+    expect(trigger).not.toHaveTextContent(/main|Nothing saved/u);
+  });
+
+  it('says the conflicted line in its name, and draws the amber GitMerge (HQ1, HQ2)', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-12', revisionNumber: 12 })];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-12',
+      attention: 1,
+      conflicts: [
+        {
+          revisionId: 'rev-c',
+          branch: 'bracket-fillet',
+          labels: { ours: 'main', theirs: 'bracket-fillet' },
+          paths: [],
+          busy: false,
+          ready: false,
+        },
+      ],
+    };
+
+    render(<RevisionStatusAction />, { wrapper });
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Open Revisions. You are on main, Rev 12. Needs your decision on main.',
+    });
+    expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-git-merge', 'text-warning');
+  });
+
+  it('says a removed collaborator’s state calmly, never as a failure (HQ3)', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-12', revisionNumber: 12 })];
+    revisionStatusHarness.role = 'revoked';
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-12',
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+      sync: { ...revisionStatusHarness.status.sync, state: 'failed', reason: 'forbidden' },
+    };
+
+    render(<RevisionStatusAction />, { wrapper });
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Open Revisions. You are on main, Rev 12. Saved, Access removed.',
+    });
+    expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-history');
   });
 
   it('renders nothing before the project root has answered at all', () => {

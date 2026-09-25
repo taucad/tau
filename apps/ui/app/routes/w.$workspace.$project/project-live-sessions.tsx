@@ -183,7 +183,7 @@ function ProjectSessionBinding({
       /* R11: the branch the checkout is on gives `revision.line` its producer,
        * so the `⎇ <branch>` chip has data instead of a permanent `onMain`. */
       pendingCount: sync.pendingCount,
-      ...(status.branch === undefined ? {} : { branch: status.branch }),
+      ...(status.line.kind === 'unknown' ? {} : { branch: status.line.name }),
     });
   }, [session, status]);
 

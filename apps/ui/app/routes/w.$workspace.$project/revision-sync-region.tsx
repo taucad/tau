@@ -1,14 +1,36 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { AlertTriangle, Cloud, CloudOff, GitBranch } from 'lucide-react';
+import {
+  CircleAlert,
+  Cloud,
+  CloudAlert,
+  CloudOff,
+  EllipsisVertical,
+  ExternalLink,
+  GitBranch,
+  RefreshCw,
+  RotateCw,
+  Unplug,
+  WifiOff,
+} from 'lucide-react';
 import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
+import { Collapsible, CollapsibleContent } from '@taucad/ui/components/collapsible';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSwitchItem,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
-import { gitRemoteUrlProblem, isGithubRemoteUrl } from '@taucad/revisions';
+import { gitRemoteUrlProblem } from '@taucad/revisions';
 import type { RemoteFacet, SyncFacet, SyncFailureReason } from '@taucad/revisions';
 /* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
    and a second copy of the union here would be exactly the dual vocabulary the
@@ -23,6 +45,15 @@ import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
 import { Switch } from '@taucad/ui/components/switch';
 import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-collaborators.js';
+import { ActionButton, DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { RevisionRegion } from '#components/revisions/revision-region.js';
+import { timelineRow } from '#components/revisions/revision-timeline.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import {
+  accessRemovedSentence,
+  backupCopy,
+  isGithubRemote,
+} from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
@@ -97,62 +128,14 @@ export type RevisionSyncRegionProps = {
    * moved GitHub repository, whose binding it keys (D11).
    */
   readonly projectId?: string;
+  /**
+   * The projection has named the line (HQ7). Until it has, Change backup and
+   * Disconnect wait: a verb offered over a checkout nobody has located yet could
+   * only fail after the gesture.
+   */
+  readonly isLineKnown?: boolean;
   readonly className?: string;
 };
-
-/**
- * The Sync row's own sentence (S26).
- *
- * Four states and a count, because "how much of my work is not on the server"
- * is the only question this row answers. `Checking…` is the open pull's first
- * window; after it the row says what this device actually knows rather than
- * holding a spinner over a pull that is still running.
- *
- * @param sync - The settled sync facet.
- * @returns What the row reads, or `undefined` when there is nothing to say.
- */
-export const syncCopy = (sync: SyncFacet): string | undefined => {
-  switch (sync.state) {
-    case 'noRemote': {
-      return undefined;
-    }
-    case 'checking': {
-      return 'Checking…';
-    }
-    case 'backedUp': {
-      return 'Backed up';
-    }
-    case 'pending': {
-      return sync.pendingCount > 0
-        ? `Backing up… ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`
-        : 'Backing up…';
-    }
-    case 'conflicted': {
-      return 'Needs resolution';
-    }
-    default: {
-      /* `queued` and `failed` read the same to a person: their work is not on
-       * the server. What differs is whether this device will retry by itself,
-       * which the offline line below says. */
-      return sync.pendingCount > 0
-        ? `Not backed up · ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`
-        : 'Not backed up';
-    }
-  }
-};
-
-/**
- * Whether a credential refusal on this remote is GitHub's to fix (D18).
- *
- * A repository picked from a connected account, or a github.com address typed
- * into the Advanced form: both are fixed by connecting GitHub. Any other host
- * is not, and must not be offered GitHub or Tau copy.
- *
- * @param remote - The connection.
- * @returns Whether *Reconnect GitHub* is the answer.
- */
-export const isGithubRemote = (remote: RemoteFacet): boolean =>
-  remote.provider === 'github' || (remote.kind === 'git' && remote.url !== undefined && isGithubRemoteUrl(remote.url));
 
 /**
  * What the *reconnect* row says, keyed on whose credential was refused (D18).
@@ -467,6 +450,7 @@ export function RevisionSyncRegion({
   signInHref,
   role,
   projectId,
+  isLineKnown = true,
   className,
 }: RevisionSyncRegionProps): React.JSX.Element {
   const busy = remote.phase === 'connecting' || remote.phase === 'disconnecting';
@@ -491,8 +475,17 @@ export function RevisionSyncRegion({
   const handleConnectRequest = (): void => {
     setShouldConnect(false);
   };
-  const syncState = syncCopy(sync);
+  const syncState = backupCopy(sync, role);
   const failureAction = syncFailureAction(sync.reason, remote);
+  /* W2a: a damaged cloud copy is terminal; the client has nothing to offer but the truth (I12). */
+  const failureSentence =
+    sync.reason === 'damaged' ? describeRevisionFailure('backup', 'REMOTE_DAMAGED').description : sync.error;
+  const settingsRef = useRef<HTMLButtonElement>(null);
+  const opensDisconnect = useRef(false);
+  /* A fetch-only link can still be changed for a writable one; a view-only or removed collaborator cannot. */
+  const canManage = role !== 'read' && role !== 'revoked' && isLineKnown;
+  /* Sync now while something waits to go, and never beside a failure's own verb (A1 item 6). */
+  const canSyncNow = !readOnly && role !== 'revoked' && (sync.state === 'pending' || sync.state === 'queued');
   /*
    * One renderer for rule 19's action, because there are now two surfaces that
    * must offer exactly one: the Sync row's refused push, and a refused connect.
@@ -522,31 +515,21 @@ export function RevisionSyncRegion({
       case 'moved':
       case 'reconnectGithub': {
         return (
-          <Button
-            size='xs'
-            variant='outline'
+          <ActionButton
+            verb='Reconnect GitHub'
+            icon={GitBranch}
             disabled={reconnecting}
             onClick={() => {
               void reconnectGithub();
             }}
-          >
-            Reconnect GitHub
-          </Button>
+          />
         );
       }
       case 'syncNow': {
-        return (
-          <Button size='xs' variant='outline' onClick={onSync}>
-            Sync now
-          </Button>
-        );
+        return <ActionButton verb='Sync now' icon={RefreshCw} onClick={onSync} />;
       }
       case 'retry': {
-        return (
-          <Button size='xs' variant='outline' onClick={onRetry}>
-            Retry
-          </Button>
-        );
+        return <ActionButton verb='Retry' icon={RotateCw} onClick={onRetry} />;
       }
       default: {
         return undefined;
@@ -697,50 +680,223 @@ export function RevisionSyncRegion({
     await requestConnection({ kind: 'tau' });
   };
 
-  return (
-    <section aria-labelledby='revision-sync-heading' className={cn('flex flex-col gap-3', className)}>
-      <h3 id='revision-sync-heading' className='text-xs font-medium text-muted-foreground'>
-        Sync
-      </h3>
+  const showMeter = remote.storage !== undefined && (percentage >= 75 || remote.overQuota.length > 0);
+  /* WifiOff leads while offline; removed access is calm; red only for a damaged copy (A1 item 12). */
+  const GlyphIcon =
+    role === 'revoked'
+      ? CloudOff
+      : sync.online
+        ? sync.reason === 'damaged'
+          ? CircleAlert
+          : sync.state === 'failed' || sync.state === 'queued'
+            ? CloudAlert
+            : remote.kind === 'tau'
+              ? Cloud
+              : GitBranch
+        : WifiOff;
+  const glyphTone =
+    GlyphIcon === CircleAlert
+      ? 'text-destructive'
+      : GlyphIcon === CloudAlert
+        ? 'text-warning'
+        : 'text-muted-foreground';
+  const glyph = <GlyphIcon aria-hidden className={cn('size-4 shrink-0', glyphTone)} />;
+  const includes = [
+    'Files',
+    'history',
+    ...(remote.kind === 'tau' && syncChats ? ['chats'] : []),
+    ...(remote.kind === 'tau' && syncLargeExports ? ['exports'] : []),
+  ];
+  const facts: ReadonlyArray<readonly [string, ReactNode]> = [
+    [
+      'Backup',
+      remote.kind === 'tau' ? 'Tau Cloud' : remote.provider === 'github' ? 'GitHub repository' : 'Git repository',
+    ],
+    ...(remote.kind === 'git' && remote.url !== undefined
+      ? ([
+          [
+            'Address',
+            <code key='address' className='font-mono break-all'>
+              {remote.url}
+            </code>,
+          ],
+        ] as const)
+      : []),
+    [
+      'Access',
+      role === 'revoked'
+        ? 'Removed'
+        : role === 'read'
+          ? 'View only'
+          : remote.fetchOnly
+            ? 'Read-only link · Tau will not push'
+            : 'Read and write',
+    ],
+    ['Includes', `${includes.slice(0, -1).join(', ')} and ${includes.at(-1) ?? ''}`],
+  ];
+  /*
+    Whether this project is backed up, and how much is not (S26, S41, AC21).
 
-      {remote.phase === 'connected' && !changingBackup ? (
-        <div className='flex flex-wrap items-center gap-2 rounded-md border bg-card p-2'>
-          {remote.kind === 'tau' ? (
-            <Cloud aria-hidden className='size-4 text-muted-foreground' />
-          ) : (
-            <GitBranch aria-hidden className='size-4 text-muted-foreground' />
-          )}
-          <span className='min-w-0 flex-1 text-sm'>{connectedLabel}</span>
-          {readOnly ? <span className='text-xs text-muted-foreground'>Read only</span> : null}
-          {remote.kind === 'tau' ? (
-            <span className='flex items-center gap-2'>
-              <Switch aria-label='Sync chats' checked={syncChats} onCheckedChange={onSyncChatsChange} />
-              <span className='text-xs'>Sync chats</span>
-              {/* EQ7/D16: the project's own `syncLargeExports`, on the row that
-                  already owns the other per-project transfer choice. Only the
-                  import route wrote it before, so a connected project could
-                  never turn it on (C14). */}
-              <Switch aria-label='Sync exports' checked={syncLargeExports} onCheckedChange={onSyncLargeExportsChange} />
-              <span className='text-xs'>Sync exports</span>
+    A `status` live region, because it changes on its own. The reason and exactly
+    one action for its class follow it (N3, C4): the sentence is the server's,
+    the action is chosen from `sync.reason`, which is a contract.
+  */
+  const hasFigure = remote.storage !== undefined && !showMeter;
+  const showsAccess = readOnly && role !== 'revoked' && remote.kind !== 'none';
+  const statusBlock =
+    syncState === undefined && !hasFigure && !showsAccess ? undefined : (
+      <div role='status' aria-label='Backup status' className='flex min-w-0 flex-auto flex-col gap-1 text-xs'>
+        <span className='flex min-w-0 flex-wrap items-center gap-x-3 tabular-nums'>
+          {syncState === undefined ? undefined : <span>{syncState}</span>}
+          {sync.online ? undefined : <span className='text-muted-foreground'>Offline</span>}
+          {/* A push this viewer cannot make is said on the line, not discovered after a gesture (F1). */}
+          {showsAccess ? (
+            <span className='text-muted-foreground'>
+              {remote.fetchOnly ? 'Read-only link · Tau will not push' : 'View only'}
             </span>
-          ) : null}
-          {readOnly ? null : (
-            <Button variant='outline' size='sm' onClick={onSync}>
-              Sync now
-            </Button>
+          ) : undefined}
+          {remote.storage === undefined || !hasFigure ? undefined : (
+            <span className='text-muted-foreground'>
+              {formatBytes(remote.storage.used)} of {formatBytes(remote.storage.quota)}
+            </span>
           )}
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={() => {
-              setPendingConnection(undefined);
-              setChoice(remote.kind);
-              setChangingBackup(true);
+        </span>
+        {role === 'revoked' ? (
+          <span className='text-muted-foreground'>{accessRemovedSentence}</span>
+        ) : failureSentence === undefined ? undefined : failureAction === 'moved' ? (
+          <MovedRepository
+            projectId={projectId}
+            sentence={failureSentence}
+            fallback={renderFailureAction(failureAction)}
+            onUpdate={(connectionId, repository) => {
+              void commitConnection({ kind: 'github', connectionId, repository });
             }}
-          >
-            Change backup
+          />
+        ) : (
+          <span className='flex flex-wrap items-center gap-2'>
+            <span className='min-w-0 flex-auto'>{failureSentence}</span>
+            {renderFailureAction(failureAction)}
+          </span>
+        )}
+      </div>
+    );
+  const hasSettings = remote.provider === 'github' || canManage;
+  /* Round 18: the meter shows once storage is worth watching, and then its caption carries the figure. */
+
+  return (
+    <RevisionRegion
+      id='revision-sync-heading'
+      title='Sync'
+      className={className}
+      action={
+        canSyncNow ? (
+          <Button size='xs' variant='ghost' className='gap-1 text-muted-foreground' onClick={onSync}>
+            <RefreshCw aria-hidden className='size-3' />
+            Sync now
           </Button>
-        </div>
+        ) : null
+      }
+      bodyClassName='flex flex-col gap-3 p-1.5'
+    >
+      {remote.phase === 'connected' && !changingBackup ? (
+        /* Laid out as a History row (round 8): the glyph in the markers'
+           column, the remote in the titles' column; the backup line ends in
+           More and Details as one pair (round 19). */
+        <Collapsible className='flex flex-col'>
+          <div className={timelineRow}>
+            <span className='mt-1.5 flex justify-center'>{glyph}</span>
+            <div className='flex min-w-0 flex-col py-1 pr-0.5 pl-1'>
+              <span className='min-w-0 text-sm font-medium break-words'>{connectedLabel}</span>
+              <div data-slot='sync-status-line' className='flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1'>
+                {statusBlock}
+                <div data-slot='actions-end' className='ml-auto flex shrink-0 items-center gap-2'>
+                  {hasSettings ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button ref={settingsRef} size='icon-xs' variant='outline' aria-label='Backup settings'>
+                          <EllipsisVertical aria-hidden />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align='end'
+                        onCloseAutoFocus={(event) => {
+                          if (!opensDisconnect.current) {
+                            return;
+                          }
+                          opensDisconnect.current = false;
+                          event.preventDefault();
+                          setConfirmingDisconnect(true);
+                        }}
+                      >
+                        <DropdownMenuLabel>{connectedLabel}</DropdownMenuLabel>
+                        {remote.provider === 'github' && remote.url !== undefined ? (
+                          <DropdownMenuItem asChild>
+                            <a href={remote.url.replace(/\.git$/u, '')} target='_blank' rel='noreferrer'>
+                              <ExternalLink aria-hidden />
+                              Open on GitHub
+                            </a>
+                          </DropdownMenuItem>
+                        ) : null}
+                        {remote.kind === 'tau' && canManage ? (
+                          <>
+                            {/* EQ7/D16: the project's own transfer choices, beside each other. */}
+                            <DropdownMenuSwitchItem isChecked={syncChats} onIsCheckedChange={onSyncChatsChange}>
+                              Sync chats
+                            </DropdownMenuSwitchItem>
+                            <DropdownMenuSwitchItem
+                              isChecked={syncLargeExports}
+                              onIsCheckedChange={onSyncLargeExportsChange}
+                            >
+                              Sync exports
+                            </DropdownMenuSwitchItem>
+                          </>
+                        ) : null}
+                        {canManage ? (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                setPendingConnection(undefined);
+                                setChoice(remote.kind);
+                                setChangingBackup(true);
+                              }}
+                            >
+                              <Cloud aria-hidden />
+                              Change backup…
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant='destructive'
+                              onSelect={() => {
+                                opensDisconnect.current = true;
+                              }}
+                            >
+                              <Unplug aria-hidden />
+                              {`Disconnect ${connectedLabel}…`}
+                            </DropdownMenuItem>
+                          </>
+                        ) : null}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
+                  <DetailsToggle />
+                </div>
+              </div>
+            </div>
+          </div>
+          <CollapsibleContent className={disclosureMotion}>
+            <dl
+              aria-label={`Details for ${connectedLabel}`}
+              className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 pt-0.5 pr-2 pb-1 pl-8 text-xs'
+            >
+              {facts.map(([term, value]) => (
+                <div key={term} className='contents'>
+                  <dt className='text-muted-foreground'>{term}</dt>
+                  <dd className='min-w-0'>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </CollapsibleContent>
+        </Collapsible>
       ) : (
         <RadioGroup
           aria-label='Where this project syncs'
@@ -883,105 +1039,38 @@ export function RevisionSyncRegion({
         </div>
       ) : undefined}
 
-      {/*
-        Whether this project is backed up, and how much is not (S26, S41, AC21).
-
-        A `status` live region rather than prose, because it changes on its own:
-        a person who has just closed a tab and reopened it wants to be told, not
-        to go looking. `Not backed up` is never silent and never a spinner — the
-        count is the whole of what they can act on.
-      */}
-      {syncState === undefined ? undefined : (
-        <div role='status' aria-label='Backup status' className='flex flex-col gap-1.5 text-sm'>
-          <span className='flex items-center gap-2'>
-            {sync.state === 'conflicted' || sync.state === 'failed' || sync.state === 'queued' ? (
-              <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-            ) : (
-              <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
-            )}
-            <span className='tabular-nums'>{syncState}</span>
-            {sync.online ? undefined : <span className='text-xs text-muted-foreground'>Offline</span>}
-          </span>
-          {/*
-            The reason, and exactly one action for its class (N3, C4).
-
-            `sync.error` is the server's own sentence; the *action* is chosen
-            from `sync.reason`, which is a contract. A count is not a reason,
-            and a reason with no verb is not an answer.
-          */}
-          {sync.error === undefined ? undefined : failureAction === 'moved' ? (
-            <MovedRepository
-              projectId={projectId}
-              sentence={sync.error}
-              fallback={renderFailureAction(failureAction)}
-              onUpdate={(connectionId, repository) => {
-                void commitConnection({ kind: 'github', connectionId, repository });
-              }}
-            />
-          ) : (
-            <span className='flex flex-wrap items-center gap-2 text-xs'>
-              <span className='min-w-0 flex-1'>{sync.error}</span>
-              {renderFailureAction(failureAction)}
-            </span>
-          )}
-        </div>
-      )}
-
-      {remote.phase === 'connected' && !changingBackup && remote.url !== undefined && remote.kind === 'git' ? (
-        <div className='flex flex-wrap items-center justify-between gap-2'>
-          <details className='min-w-0 flex-1'>
-            <summary className='text-xs text-muted-foreground'>Connection details</summary>
-            {remote.provider === 'github' ? (
-              <span className='block text-xs font-medium'>GitHub repository</span>
-            ) : undefined}
-            <span className='block truncate font-mono text-xs text-muted-foreground'>{remote.url}</span>
-            {remote.fetchOnly ? (
-              <span className='block text-xs text-muted-foreground'>Read-only link · Tau will not push</span>
-            ) : undefined}
-          </details>
-          {confirmingDisconnect ? undefined : (
-            <span className='flex shrink-0 items-center gap-1'>
-              {remote.provider === 'github' ? (
-                <Button asChild variant='ghost' size='sm'>
-                  <a href={remote.url.replace(/\.git$/u, '')} target='_blank' rel='noreferrer'>
-                    Open GitHub
-                  </a>
-                </Button>
-              ) : undefined}
-            </span>
-          )}
-        </div>
-      ) : undefined}
+      {remote.phase === 'connected' && !changingBackup ? undefined : statusBlock}
 
       {confirmingDisconnect && remote.phase === 'connected' ? (
         <div className='flex flex-col gap-2'>
           <p className='text-sm'>{`Disconnect ${connectedLabel}? Every revision stays on this device.`}</p>
+          {/* A confirmation reads as the naming form: the dismissal first, then the verb with its glyph (round 16). */}
           <div className='flex flex-wrap items-center gap-2'>
             <Button
-              size='sm'
+              size='xs'
+              variant='outline'
+              onClick={() => {
+                setConfirmingDisconnect(false);
+                setChoice(undefined);
+                setChangingBackup(false);
+                settingsRef.current?.focus();
+              }}
+            >
+              Keep it
+            </Button>
+            <ActionButton
+              verb={`Disconnect ${connectedLabel}`}
+              icon={Unplug}
               variant='destructive'
-              /* The button the click came from unmounts, so focus would fall to
-               * `<body>` without this (review R15). */
+              /* The control the request came from unmounts or sits in a closed
+               * menu, so focus would fall to `<body>` without this (review R15). */
               autoFocus
               onClick={() => {
                 setConfirmingDisconnect(false);
                 setChoice('none');
                 onDisconnect();
               }}
-            >
-              {`Disconnect ${connectedLabel}`}
-            </Button>
-            <Button
-              size='sm'
-              variant='ghost'
-              onClick={() => {
-                setConfirmingDisconnect(false);
-                setChoice(undefined);
-                setChangingBackup(false);
-              }}
-            >
-              Keep it
-            </Button>
+            />
           </div>
         </div>
       ) : undefined}
@@ -1025,7 +1114,7 @@ export function RevisionSyncRegion({
             aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote credentials'}
             className='flex items-center gap-2 text-sm'
           >
-            <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
+            <CloudAlert aria-hidden className='size-4 shrink-0 text-warning' />
             <span>{reconnectCopy(remote)}</span>
           </p>
           {isGithubRemote(remote) ? (
@@ -1058,7 +1147,7 @@ export function RevisionSyncRegion({
 
       {connectionError === undefined ? undefined : (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
-          <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
           <span className='min-w-0 flex-1'>{connectionError}</span>
           <Button
             size='xs'
@@ -1073,7 +1162,7 @@ export function RevisionSyncRegion({
         </div>
       )}
 
-      {remote.storage === undefined ? undefined : (
+      {remote.storage === undefined || !showMeter ? undefined : (
         <div className='flex flex-col gap-1.5'>
           <p className='text-sm tabular-nums'>
             {formatBytes(remote.storage.used)} of {formatBytes(remote.storage.quota)}
@@ -1094,7 +1183,7 @@ export function RevisionSyncRegion({
       {remote.overQuota.length > 0 ? (
         <div className='flex flex-col gap-1.5'>
           <p className='flex items-center gap-2 text-sm'>
-            <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
+            <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
             <span>These files are over your plan and were not backed up:</span>
           </p>
           <ul className='flex flex-col gap-1'>
@@ -1117,7 +1206,7 @@ export function RevisionSyncRegion({
       */}
       {remote.phase === 'failed' && remote.error !== undefined ? (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
-          <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
           <span className='min-w-0 flex-1'>{remote.error}</span>
           {renderFailureAction(syncFailureAction(remote.reason, remote) ?? 'retry', () => {
             setChangingBackup(true);
@@ -1126,19 +1215,10 @@ export function RevisionSyncRegion({
       ) : undefined}
 
       {/*
-        Access this account no longer has (N1).
-
-        A settled listing that does not name the project is an owner's revoke
-        arriving at a tab that never closed. The row says so in one sentence and
-        `readOnly` has already taken *Sync now* away — a push would be refused,
-        and a button that fails after the gesture is worse than no button.
+        Access this account no longer has (N1, HQ3): the backup line says
+        *Access removed* and the owner-directed sentence, calmly, because nothing
+        on this device was lost and only the owner can change it.
       */}
-      {role === 'revoked' && remote.kind === 'tau' ? (
-        <p className='flex items-center gap-2 text-sm'>
-          <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-          <span>You no longer have access to this project&apos;s cloud copy.</span>
-        </p>
-      ) : undefined}
 
       {/*
         Who else may work on this project (D27, charter W5).
@@ -1151,6 +1231,6 @@ export function RevisionSyncRegion({
       {role === 'owner' && projectId !== undefined && remote.kind === 'tau' && remote.phase === 'connected' ? (
         <RevisionCollaborators projectId={projectId} />
       ) : undefined}
-    </section>
+    </RevisionRegion>
   );
 }

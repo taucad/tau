@@ -14,6 +14,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
+import { revisionId } from '@taucad/revisions/algorithms';
+import { admissionMilliseconds } from '@taucad/revisions/revision-effects';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
@@ -26,7 +28,10 @@ import type {
 type Harness = {
   readonly service: WorkspaceFileService;
   readonly registry: ReturnType<typeof createWorkerRevisionRegistry>;
+  /** A content change under the project's live route. */
   readonly announce: (projectId: string, paths: readonly string[]) => void;
+  /** A content change under any checkout route, live or linked. */
+  readonly announceAt: (root: string, paths: readonly string[]) => void;
   readonly open: (projectId: string) => Promise<Client>;
   readonly root: (projectId: string) => Promise<WorkerProjectRevisions>;
   readonly dispose: () => void;
@@ -87,9 +92,9 @@ const harness = (projectIds: readonly string[]): Harness => {
         checkouts: checkoutRoutes(projectId),
       }),
     filesystem: (root) => service.createRootedFileSystem(root),
-    observe: (projectId, onChanged) => {
-      observers.set(projectId, onChanged);
-      return () => observers.delete(projectId);
+    observe: (root, onChanged) => {
+      observers.set(root, onChanged);
+      return () => observers.delete(root);
     },
     authorityEpoch: 'epoch-w3d',
   });
@@ -103,7 +108,8 @@ const harness = (projectIds: readonly string[]): Harness => {
       }
       return open;
     },
-    announce: (projectId, paths) => observers.get(projectId)?.(paths),
+    announce: (projectId, paths) => observers.get(`/projects/${projectId}`)?.(paths),
+    announceAt: (root, paths) => observers.get(root)?.(paths),
     open: async (projectId) => {
       const channel = new MessageChannel();
       registry.connect(channel.port1, projectId);
@@ -150,6 +156,28 @@ const harness = (projectIds: readonly string[]): Harness => {
   };
   live.push(entry);
   return entry;
+};
+
+/** Make a branch through the port and wait for the checkout the registry made for it. */
+const branchOff = async (
+  client: Client,
+  root: WorkerProjectRevisions,
+  name: string,
+): Promise<Readonly<{ checkoutId: string; checkoutRoot: string }>> => {
+  client.send({ command: 'createBranch', name, id: 900 });
+  for (
+    let attempt = 0;
+    attempt < 40 && !client.frames.some((frame) => 'id' in frame && frame.id === 900);
+    attempt += 1
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+    await client.settle();
+  }
+  const row = root.status().branches.find((branch) => branch.name === name);
+  if (row?.checkoutId === undefined || row.checkoutRoot === undefined) {
+    throw new Error(`${name} has no checkout`);
+  }
+  return { checkoutId: row.checkoutId, checkoutRoot: row.checkoutRoot };
 };
 
 describe('the file-manager worker revision root (north star S48 jsdom 1–4)', () => {
@@ -467,7 +495,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(root.status()).toMatchObject({
       checkoutId: 'live',
       headRevisionId: 'rev-daemon',
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
     });
   });
 
@@ -488,15 +516,117 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(head).toBeDefined();
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
 
-    /* A restore to that head with a dirty tree needs a person: the machine asks
-     * and waits, and `confirm` is what applies it (PC9 — W7 renders the ask). */
+    /* A restore to that head from a dirty tree mints the unsaved work first,
+     * then the restore, both on `main` (D1): nothing is discarded, nothing
+     * detaches, and the dirty bytes are one row back. */
     await project.writeFile('main.scad', 'cube(30);');
+    const root = await fixture.root('alpha');
+    const before = await root.log();
     alpha.send({ command: 'restore', revisionId: head! });
-    await settle(20);
-    alpha.send({ command: 'confirm' });
-    await settle(30);
+    /* Two cuts and a plan through a real store: the default 1 s bound flaked under load. */
+    await vi.waitFor(
+      async () => {
+        const rows = await root.log();
+        expect(rows).toHaveLength(before.length + 2);
+      },
+      { timeout: 10_000 },
+    );
 
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
+    const after = await root.log();
+    expect(after).toHaveLength(before.length + 2);
+    expect(after[0]?.summary).toMatch(/^Restored Rev \d+$/u);
+    expect(after[1]?.summary).toBe('Saved changes (restore)');
+    expect(after.slice(0, 2).map((row) => row.trigger)).toEqual(['restore', 'restore']);
+    expect(after[0]?.source).toBe('restore');
+    expect(after[1]?.source).toBe('user');
+    await settle(10);
+    expect(root.status()).toMatchObject({
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: after[0]?.revisionId,
+    });
+  });
+
+  /*
+   * D3: a save that loses its compare-and-swap is answered at once and out loud.
+   *
+   * Another writer moved `main` under this checkout. The cut's candidate loses
+   * the race; the answer used to reach nothing above the package, so the page
+   * waited out the whole bound and said nothing — and the next save rewound
+   * the line. Now the request settles on the loss and the toast says so.
+   */
+  it('should answer a save that lost its compare-and-swap at once, with a toast (D3)', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const answered = async (id: number): Promise<WorkerRevisionResponse | undefined> => {
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+        await settle(4);
+        const answer = alpha.frames.find(
+          (frame) => (frame.type === 'result' || frame.type === 'error') && frame.id === id,
+        );
+        if (answer !== undefined) {
+          return answer;
+        }
+      }
+      return undefined;
+    };
+    alpha.send({ command: 'saveRevision', id: 1, trigger: 'save' });
+    await answered(1);
+    await project.writeFile('main.scad', 'cube(20);');
+    fixture.announce('alpha', ['main.scad']);
+    alpha.send({ command: 'saveRevision', id: 2, trigger: 'save' });
+    await answered(2);
+    const root = await fixture.root('alpha');
+    const [second, first] = await root.log();
+    expect(first).toBeDefined();
+
+    /* Another writer on the same store moves the line. */
+    const other = createIsomorphicGitRevisionPort({
+      filesystem: fixture.service.createRootedFileSystem('/projects/alpha'),
+    });
+    await other.updateRef({
+      name: 'main',
+      expectedHead: revisionId(second!.revisionId),
+      head: revisionId(first!.revisionId),
+    });
+    await project.writeFile('main.scad', 'cube(30);');
+    fixture.announce('alpha', ['main.scad']);
+    alpha.send({ command: 'saveRevision', id: 3, trigger: 'save' });
+
+    expect(await answered(3)).toEqual({ type: 'result', id: 3, result: { kind: 'saved' } });
+    expect(alpha.frames).toContainEqual({
+      type: 'toast',
+      toast: {
+        type: 'error',
+        subject: 'save',
+        message: 'Something else changed this project first. Try again.',
+        code: 'CAS_LOST',
+      },
+    });
+
+    /* N6: a cut nobody asked for heals itself in the next idle window, so its loss is quiet. */
+    await settle(10);
+    const [head] = await root.log();
+    /* Moved again, to a revision this checkout does not believe is the head. */
+    const elsewhere = head!.revisionId === first!.revisionId ? second! : first!;
+    await other.updateRef({
+      name: 'main',
+      expectedHead: revisionId(head!.revisionId),
+      head: revisionId(elsewhere.revisionId),
+    });
+    await project.writeFile('main.scad', 'cube(40);');
+    fixture.announce('alpha', ['main.scad']);
+    const toastsBefore = alpha.frames.filter((frame) => frame.type === 'toast').length;
+    alpha.send({ command: 'saveRevision', id: 4, trigger: 'hidden' });
+
+    expect(await answered(4)).toMatchObject({ id: 4 });
+    /* The hidden cut lost its race rather than minting, and nothing was said. */
+    const [latest] = await root.log();
+    expect(latest?.revisionId).toBe(elsewhere.revisionId);
+    expect(alpha.frames.filter((frame) => frame.type === 'toast')).toHaveLength(toastsBefore);
   });
 
   /* W7: S38's second half — the comparison whose right-hand side is the working
@@ -621,6 +751,55 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(generation()).toBe(before + 2);
   });
 
+  it('should raise a change against the checkout whose route it landed under (L2-F4)', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const liveId = root.status().checkoutId!;
+    const linked = await branchOff(alpha, root, 'side');
+    const generation = (checkoutId: string): number => root.inspect().writeGenerations[checkoutId] ?? 0;
+    const liveBefore = generation(liveId);
+    const linkedBefore = generation(linked.checkoutId);
+
+    fixture.announceAt(linked.checkoutRoot, ['main.scad']);
+    await settle();
+    fixture.announce('alpha', ['main.scad']);
+    await settle();
+
+    expect(generation(linked.checkoutId)).toBe(linkedBefore + 1);
+    expect(generation(liveId)).toBe(liveBefore + 1);
+  });
+
+  it('should record a dirty linked checkout when the page closes, not only the one it shows (close ruling)', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const linked = await branchOff(alpha, root, 'side');
+    const before = await root.log({ branch: 'side' });
+    const linkedFiles = fixture.service.createRootedFileSystem(linked.checkoutRoot);
+    await linkedFiles.writeFile('main.scad', 'cube(30);');
+    fixture.announceAt(linked.checkoutRoot, ['main.scad']);
+    await settle();
+
+    alpha.send({ command: 'saveRevision', id: 78, trigger: 'close' });
+    for (
+      let attempt = 0;
+      attempt < 60 && !alpha.frames.some((frame) => 'id' in frame && frame.id === 78);
+      attempt += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await settle(4);
+    }
+
+    const after = await root.log({ branch: 'side' });
+    expect(after).toHaveLength(before.length + 1);
+    expect(after[0]).toMatchObject({ trigger: 'close' });
+  });
+
   it('should hold a completion that lands while its turn is still being placed (W3c 7.2)', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
@@ -645,7 +824,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
    * T4-02: the admission wait is bounded, the root's queue was not.
    *
    * An edit behind a running turn queues on the turn id that turn holds (V8).
-   * When the caller's 30 s wait expired it refused only its own promise, so the
+   * When the caller's wait expired it refused only its own promise, so the
    * entry stayed in the root and was raised the moment the running turn
    * retired: a turn spawned, took the checkout's lease, and nothing was left to
    * send it `turnCompleted`. The checkout then read as held for the rest of the
@@ -666,7 +845,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
        * recording, and gives up waiting before it retires. */
       alpha.send({ command: 'admitTurn', id: 77, turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
       await settle(8);
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(admissionMilliseconds);
       await settle(8);
       expect(alpha.frames.find((frame) => frame.type === 'error' && frame.id === 77)).toBeDefined();
 

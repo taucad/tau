@@ -18,6 +18,7 @@
 import { Topic } from '@taucad/events';
 import {
   admissionMilliseconds,
+  awaitCheckoutCuts,
   awaitSyncSettled,
   createProjectRevisionsActor,
   describeTurnRelease,
@@ -31,8 +32,10 @@ import {
   versionedChangePaths as classifiedChangePaths,
 } from '@taucad/revisions/revision-projection';
 import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
+import { isAmbientCut } from '@taucad/revisions/checkout-machine';
 import type {
   BranchOperation,
+  CheckoutRecord,
   GitRemoteCredential,
   IsomorphicGitCheckoutOptions,
   KeepalivePushOutcome,
@@ -76,6 +79,9 @@ import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 export const versionedChangePaths = (event: ChangeEvent, projectRoot: string): readonly string[] =>
   classifiedChangePaths(event, projectRoot, tauPathPolicy);
 
+/** The sentence a lost compare-and-swap reads as, in the log (the page's words come from its code). */
+const casLostMessage = 'Something else changed this project first. Try again.';
+
 /**
  * A command the page sends to one project's revision root.
  *
@@ -90,7 +96,7 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'turnCompleted'; turnId: string }>
   | Readonly<{ command: 'turnAbandoned'; turnId: string }>
   | Readonly<{ command: 'restore'; revisionId: string }>
-  | Readonly<{ command: 'returnToLatest' }>
+  /** *Undo restore*: restore the first parent of `revisionId`, or of the last restore (D2). */
   | Readonly<{ command: 'undo' }>
   | Readonly<{ command: 'confirm' }>
   | Readonly<{ command: 'cancel' }>
@@ -262,7 +268,8 @@ export type RevisionFileComparison = Readonly<{ original: string; modified: stri
  * @public
  */
 export type RevisionToast =
-  | Readonly<{ type: 'restored'; revisionNumber: number; unrecoverable: readonly string[] }>
+  /** `revisionNumber` is `undefined` for a target that is not on the line (D5, A9). */
+  | Readonly<{ type: 'restored'; revisionNumber: number | undefined }>
   | Readonly<{ type: 'nothingToSave' }>
   | Readonly<{
       type: 'branch';
@@ -308,6 +315,12 @@ export type RevisionToast =
    * W18 DEF-7). A cut a *turn* asked for is not on this channel: its chat
    * already says so, through the admission it refuses.
    */
+  /**
+   * A remote or resolution child's own sentence (L2-F8): *Connected*, a
+   * refused connection, a merge that could not be finished. The machines
+   * already phrase these for a person, so the page shows `message` as it is.
+   */
+  | Readonly<{ type: 'notice'; subject: 'remote' | 'resolution'; tone: 'info' | 'error'; message: string }>
   | Readonly<{
       type: 'error';
       subject: 'restore' | 'branch' | 'save';
@@ -458,6 +471,14 @@ export type WorkerProjectRevisionsOptions = Readonly<{
   recordHistoryPush?: <Result>(run: () => Promise<Result>) => Promise<Result>;
   /** One rooted provider per checkout route; `checkout.root` is that route. */
   filesystem: (root: string) => RootedFileSystem | Promise<RootedFileSystem>;
+  /**
+   * Observe the versioned content changes under one checkout route.
+   *
+   * Called once per checkout the registry reports, live and linked, and the
+   * returned stop is called when that checkout goes (L2-F4). Absent, only
+   * `changed` feeds the tree.
+   */
+  observe?: (root: string, onChanged: (paths: readonly string[]) => void) => () => void;
   authorityEpoch: string;
   clock?: () => number;
   /**
@@ -679,6 +700,57 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   actor.on('turnRefused', (event) => {
     refuseAdmission(event.runId, event.reason, event.code);
   });
+  const changed = (checkoutId: string, paths: readonly string[]): void => {
+    /* One increment per content-change event, whatever its path count: the
+     * checkout takes `Math.max` of it across a mint, so a counter that
+     * repeated would hide a write that landed during one (F9, F4). */
+    const generation = (generations.get(checkoutId) ?? 0) + 1;
+    generations.set(checkoutId, generation);
+    actor.send({ type: 'changed', checkoutId, paths, generation });
+  };
+  /*
+   * L2-F4: one observation per checkout, each raising against its own id.
+   *
+   * A write under a linked checkout's route used to be credited to whichever
+   * checkout the workbench showed, and one under the live route while the
+   * workbench showed a linked checkout was credited to that one. Reconciled
+   * from the registry on every snapshot, so a checkout made or removed later
+   * is observed or let go with it.
+   */
+  const observations = new Map<string, () => void>();
+  const observeCheckouts = (checkouts: readonly CheckoutRecord[]): void => {
+    const { observe } = options;
+    if (observe === undefined) {
+      return;
+    }
+    const known = new Set(checkouts.map((checkout) => checkout.id));
+    for (const [id, stop] of observations) {
+      if (!known.has(id)) {
+        stop();
+        observations.delete(id);
+      }
+    }
+    for (const checkout of checkouts) {
+      if (!observations.has(checkout.id)) {
+        observations.set(
+          checkout.id,
+          observe(checkout.root, (paths) => {
+            changed(checkout.id, paths);
+          }),
+        );
+      }
+    }
+  };
+  const observing = actor.subscribe((snapshot) => {
+    observeCheckouts(snapshot.context.checkouts);
+  });
+  const stopObserving = (): void => {
+    observing.unsubscribe();
+    for (const stop of observations.values()) {
+      stop();
+    }
+    observations.clear();
+  };
   actor.start();
   published = selectRevisionStatus(actor.getSnapshot());
   /* After `start`, because the invoked children exist only once the root runs.
@@ -686,10 +758,15 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * them, so they cross the port rather than being re-derived on the page. */
   const restoreChild = actor.getSnapshot().children.restore;
   restoreChild?.on('toast.restored', (toast) => {
-    toasts.emit({ type: 'restored', revisionNumber: toast.revisionNumber, unrecoverable: toast.unrecoverable });
+    toasts.emit({ type: 'restored', revisionNumber: toast.revisionNumber });
   });
   restoreChild?.on('toast.error', (toast) => {
-    toasts.emit({ type: 'error', subject: 'restore', message: toast.message });
+    toasts.emit({
+      type: 'error',
+      subject: 'restore',
+      message: toast.message,
+      ...(toast.code === undefined ? {} : { code: toast.code }),
+    });
   });
   /* The branch verbs settle out of sight of the region that started them — a
    * *Discard* the registry refused has no row left to say so on (A25's "no
@@ -708,10 +785,24 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * for the ambient ones nobody is watching a spinner for.
    */
   actor.on('cutFailed', (failure) => {
-    if (failure.turnId !== undefined) {
+    if (!isAmbientCut(failure)) {
       return;
     }
     toasts.emit({ type: 'error', subject: 'save', message: failure.reason });
+  });
+  /*
+   * D3: a lost CAS on a save a person asked for is an answer they see, not a count.
+   *
+   * Only `save`: an operation's own cut is answered by the child that asked,
+   * and an `idle`, `hidden` or `close` cut nobody pressed anything for heals
+   * itself — the checkout re-reads, rests dirty, and the next window records
+   * the same bytes (I5, N6) — so saying so would be noise under two clients.
+   */
+  actor.on('casLost', (lost) => {
+    if (lost.turnId !== undefined || lost.trigger !== 'save') {
+      return;
+    }
+    toasts.emit({ type: 'error', subject: 'save', message: casLostMessage, code: 'CAS_LOST' });
   });
   actor.on('nothingToSave', (event) => {
     if (event.trigger === 'save') {
@@ -720,6 +811,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
   actor.on('switchRefused', (refusal) => {
     toasts.emit({ type: 'refused', branch: refusal.branch, reason: refusal.reason });
+  });
+  actor.on('childToast', ({ type: _type, ...toast }) => {
+    toasts.emit({ ...toast, type: 'notice' });
   });
   /* A conflicted merge is the one outcome that looks like nothing happening:
    * the branch merged into is byte-identical afterwards, on purpose (A22). */
@@ -783,17 +877,17 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
 
   /**
-   * Cut the live checkout and wait for the tree's own answer (C16).
+   * Cut the selected checkout for an explicit *Save* and wait for the tree's own answer (C16).
    *
-   * One implementation for the close path and for an explicit save: the three
-   * settled outcomes are the machine's own emissions — minted, refused by the
-   * I5 gate, or failed — and the deadline is the same `syncQuiesceMilliseconds`
-   * everything else on the close path is bounded by.
+   * The four settled outcomes are the machine's own emissions — minted,
+   * refused by the I5 gate, failed, or lost to another writer's
+   * compare-and-swap (D3). `hidden` and `close` record every checkout instead,
+   * through `awaitCheckoutCuts`.
    *
-   * @param trigger - What asked for the cut (S30).
    * @returns When the cut has settled.
    */
-  const awaitCut = async (trigger: 'save' | 'hidden' | 'close'): Promise<void> => {
+  const awaitSave = async (): Promise<void> => {
+    const trigger = 'save';
     const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
     if (checkoutId === undefined) {
       throw new Error('The project checkout was not ready before close.');
@@ -805,6 +899,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       actor.on('revisionMinted', (event) => {
         if (matches(event)) {
           cut.resolve();
+        }
+      }),
+      /* Terminal: the checkout re-reads and rests dirty, so nothing else will
+       * answer this request (D3). The toast above already said so. */
+      actor.on('casLost', (event) => {
+        if (matches(event)) {
+          cut.reject(new Error(casLostMessage));
         }
       }),
       actor.on('nothingToSave', (event) => {
@@ -908,10 +1009,16 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
 
   const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<void> => {
     try {
-      await awaitCut(trigger);
+      /* `hidden` is the browser's close preparation (rule 9), so it records
+       * what a close would: every checkout, live and linked (the close ruling). */
+      await (trigger === 'save' ? awaitSave() : awaitCheckoutCuts(actor, trigger));
+    } catch {
+      /* Reported already; whatever did not record is still on disk for the next cut. */
+    }
+    try {
       await awaitSyncSettled(actor);
     } catch {
-      /* Reported already; the queue carries whatever did not reach the remote. */
+      /* The queue carries whatever did not reach the remote (D28). */
     }
   };
 
@@ -1108,8 +1215,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           actor.send({ type: command.command, turnId: command.turnId });
           return;
         }
-        case 'returnToLatest':
-        case 'undo':
+        case 'undo': {
+          actor.getSnapshot().children.restore?.send({ type: 'undo' });
+          break;
+        }
         case 'confirm':
         case 'cancel': {
           actor.getSnapshot().children.restore?.send({ type: command.command });
@@ -1165,14 +1274,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
       }
     },
-    changed: (checkoutId, paths) => {
-      /* One increment per content-change event, whatever its path count: the
-       * checkout takes `Math.max` of it across a mint, so a counter that
-       * repeated would hide a write that landed during one (F9, F4). */
-      const generation = (generations.get(checkoutId) ?? 0) + 1;
-      generations.set(checkoutId, generation);
-      actor.send({ type: 'changed', checkoutId, paths, generation });
-    },
+    changed,
     tag: async (input) =>
       options.port.tag({
         name: input.name,
@@ -1255,14 +1357,26 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
        * is pushed, or recorded as unsent" true; after the bound the durable
        * queue is the guarantee and the next open retries it (D28).
        */
-      await awaitCut('close');
+      /* Every checkout no turn holds, live and linked (the close ruling, D6).
+       * A refused cut still lets the scheduler push what the others minted,
+       * and then keeps the tree: the next close re-attempts the cut. */
+      let refused: Error | undefined;
+      try {
+        await awaitCheckoutCuts(actor, 'close');
+      } catch (error) {
+        refused = error instanceof Error ? error : new Error(String(error));
+      }
       await awaitSyncSettled(actor);
+      if (refused !== undefined) {
+        throw refused;
+      }
       /* The fourth way a turn ends without its lease, in the same frame and
        * with the same code as the other three — a client cannot act on a
        * refusal it has to tell apart by its wording (a2 review R2). */
       for (const runId of admissions.keys()) {
         refuseAdmission(runId, 'it stopped before the turn was placed.');
       }
+      stopObserving();
       listeners.dispose();
       events.dispose();
       toasts.dispose();
@@ -1387,12 +1501,13 @@ export type WorkerRevisionRegistryOptions = Readonly<{
   /** One rooted provider per checkout route. */
   filesystem: (root: string) => RootedFileSystem | Promise<RootedFileSystem>;
   /**
-   * Observe this project's versioned content changes.
+   * Observe the versioned content changes under one checkout route.
    *
-   * The worker holds the change bus; the registry only coalesces what it is
-   * handed into one `changed` per event (F9 — debounce is the machine's, W6).
+   * The worker holds the change bus; each project's tree observes one route per
+   * checkout, live and linked, and raises one `changed` per event against that
+   * checkout (F9 — debounce is the machine's, W6; L2-F4).
    */
-  observe: (projectId: string, onChanged: (paths: readonly string[]) => void) => () => void;
+  observe: (root: string, onChanged: (paths: readonly string[]) => void) => () => void;
   /**
    * The identity of the session that owns this project's revisions (W19).
    *
@@ -1429,7 +1544,6 @@ type ProjectEntry = {
   /** Record the API origin alone, which Publish carries and a credential also names. */
   readonly setApiBaseUrl: (apiBaseUrl: string) => void;
   readonly revisions: Promise<WorkerProjectRevisions>;
-  readonly stopObserving: () => void;
   readonly unsubscribe: () => void;
 };
 
@@ -1526,6 +1640,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         projectId,
         port: await options.createPort(projectId, () => credential),
         filesystem: options.filesystem,
+        observe: options.observe,
         authorityEpoch:
           typeof options.authorityEpoch === 'string' ? options.authorityEpoch : options.authorityEpoch(projectId),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
@@ -1545,7 +1660,6 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
               },
             }),
       }))();
-    let stopObserving = (): void => undefined;
     let unsubscribe = (): void => undefined;
     // async-iife: bootstrap -- the root is served through `revisions`; this only
     // attaches the two streams once it exists.
@@ -1572,12 +1686,6 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           stop();
         }
       };
-      stopObserving = options.observe(projectId, (paths) => {
-        const { checkoutId } = tree.status();
-        if (checkoutId !== undefined) {
-          tree.changed(checkoutId, paths);
-        }
-      });
     })();
     const entry: ProjectEntry = {
       ports,
@@ -1589,9 +1697,6 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         apiBaseUrl = url;
       },
       revisions,
-      stopObserving: () => {
-        stopObserving();
-      },
       unsubscribe: () => {
         unsubscribe();
       },
@@ -1606,9 +1711,9 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       return;
     }
     const tree = await entry.revisions;
+    /* A refused close keeps the entry and its live tree for the next close. */
     await tree.release();
     projects.delete(projectId);
-    entry.stopObserving();
     entry.unsubscribe();
     options.released?.(projectId);
   };

@@ -14,9 +14,9 @@
  * record in the chat's own durable log. One schema, two transports.
  */
 
-import { useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
+import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
@@ -46,6 +46,11 @@ export type RevisionCard = {
   readonly tags?: readonly string[];
   readonly trigger: RevisionRow['trigger'];
   /**
+   * The revision a restore brought back (D1): present only on the row a restore
+   * minted, which is how History names a *Restored* row (A9).
+   */
+  readonly restoredFrom?: string;
+  /**
    * Paths the settling host attested, for a card whose revision is not in this
    * page's graph. Otherwise the diff is asked of the graph on demand.
    */
@@ -60,11 +65,10 @@ export type RevisionsView = {
   readonly byTurnId: ReadonlyMap<string, RevisionCard>;
   /** The revision the selected checkout reflects — the one that reads "Current". */
   readonly headRevisionId: string | undefined;
-  readonly branch: string | undefined;
+  /** The line the checkout is on; `unknown` until the projection arrives (D3). */
+  readonly line: RevisionLine;
   /** The checkout has been written to since its head (A19). */
   readonly isDirty: boolean;
-  /** The checkout sits behind the newest revision on its branch. */
-  readonly canReturnToLatest: boolean;
   readonly isLoading: boolean;
   readonly branchFacts?: ReadonlyMap<
     string,
@@ -74,16 +78,23 @@ export type RevisionsView = {
 
 const emptyRows: readonly RevisionRow[] = Object.freeze([]);
 
+const unknownLine: RevisionLine = { kind: 'unknown' };
+
 const emptyView: RevisionsView = {
   revisions: [],
   byTurnId: new Map(),
   headRevisionId: undefined,
-  branch: undefined,
+  line: unknownLine,
   isDirty: false,
-  canReturnToLatest: false,
   isLoading: false,
   branchFacts: new Map(),
 };
+
+/* An unknown line is a history still on its way, never an empty one (I6, D3). */
+const loadingView: RevisionsView = { ...emptyView, isLoading: true };
+
+/** One branch's log, and the head it was read at. */
+type HeadLog = Readonly<{ head: string | undefined; rows: readonly RevisionRow[] }>;
 
 /**
  * The title a person reads, never the generator's own string (C37).
@@ -121,15 +132,20 @@ const titleOf = (row: RevisionRow): string => {
  * @param session - The signed-in person, as the hook subscribed to them.
  * @returns The attribution line.
  */
-const actorOf = (row: RevisionRow, session: RevisionSessionUser | undefined): string => {
+export const actorOf = (
+  row: Readonly<{ actor: string; source: string }>,
+  session: RevisionSessionUser | undefined,
+): string => {
+  /* The actor id of an agent turn is a model id: a person reads who did it, not which model. */
   if (row.source === 'agent') {
-    return row.actor;
+    return 'Tau agent';
   }
   if (row.actor.startsWith('anon:')) {
     return `Anonymous · ${row.actor.slice('anon:'.length)}`;
   }
+  /* HQ4: your own revisions say You; everyone else's say who they are. */
   if (session !== undefined && session.id === row.actor) {
-    return session.name ?? 'You';
+    return 'You';
   }
   return row.actor === '' ? 'Unknown' : 'Another account';
 };
@@ -144,6 +160,7 @@ const cardOf = (row: RevisionRow, session: RevisionSessionUser | undefined): Rev
   conflicted: row.conflicted,
   tags: row.tags,
   trigger: row.trigger,
+  ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
 });
 
 /**
@@ -221,7 +238,10 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
  *
  * The log is re-read whenever the projection's head moves, which is what a
  * settled turn, a save, a restore and a switch all do — so no surface has to be
- * told that the graph changed.
+ * told that the graph changed. The query is keyed by the branch alone and
+ * remembers the head it was read at (D3): a head that moves re-reads it with the
+ * rows still on screen, and no head — earlier or later — is ever answered from a
+ * log read at another.
  *
  * @returns The view every revision surface reads.
  * @public
@@ -230,7 +250,9 @@ export function useRevisions(): RevisionsView {
   const { projectId } = useProject();
   const client = useRevisionClient();
   const status = useRevisionStatus();
-  const branch = status?.branch;
+  const line = status?.line ?? unknownLine;
+  /* The only kind with a history to read: `unborn` has no revision yet. */
+  const branch = line.kind === 'branch' ? line.name : undefined;
   const headRevisionId = status?.headRevisionId;
   /* Subscribed, not read once: a sign-in mid-session relabels every card. */
   const session = useRevisionSessionUser();
@@ -246,14 +268,28 @@ export function useRevisions(): RevisionsView {
     [branch, finalized],
   );
 
-  const { data: rows, isPending } = useQuery({
-    queryKey: ['revision-log', projectId, branch ?? '', headRevisionId ?? ''],
+  const {
+    data: log,
+    isPending,
+    refetch,
+  } = useQuery({
+    queryKey: ['revision-log', projectId, branch ?? ''],
     enabled: client !== undefined && branch !== undefined,
-    queryFn: async () => client?.log(branch === undefined ? {} : { branch }) ?? [],
-    /* The graph is append-only and the key carries the head, so a cached answer
-     * for a head that has not moved is exact rather than merely fresh. */
+    queryFn: async (): Promise<HeadLog> => ({
+      head: headRevisionId,
+      rows: (await client?.log(branch === undefined ? {} : { branch })) ?? [],
+    }),
+    /* Exact for the head it was read at; the effect below re-reads it for any other. */
     staleTime: Number.POSITIVE_INFINITY,
   });
+  const readAt = log?.head;
+  useEffect(() => {
+    if (readAt !== headRevisionId && log !== undefined) {
+      /* Every mounted reader sees the same move; `cancelRefetch: false` makes them one read. */
+      void refetch({ cancelRefetch: false });
+    }
+  }, [headRevisionId, log, readAt, refetch]);
+  const rows = log?.rows;
   /*
    * `combine` is not an optimisation here, it is the difference between this
    * hook having a memo and not (B9, C51).
@@ -293,7 +329,13 @@ export function useRevisions(): RevisionsView {
 
   return useMemo(() => {
     if (client === undefined || branch === undefined) {
-      return emptyView;
+      /* I6/D3: until the projection names the line, or while the line's worker
+       * has not connected, History is loading. Only an `unborn` line is a
+       * history with nothing in it yet. */
+      if (line.kind === 'unknown') {
+        return line === unknownLine ? loadingView : { ...loadingView, line };
+      }
+      return { ...emptyView, line, isLoading: line.kind === 'branch' };
     }
     const revisions = (rows ?? []).map((row) => cardOf(row, session));
     const byTurnId = new Map<string, RevisionCard>();
@@ -327,17 +369,27 @@ export function useRevisions(): RevisionsView {
       revisions,
       byTurnId,
       headRevisionId,
-      branch,
+      line,
       isDirty: status?.dirty ?? false,
-      canReturnToLatest:
-        headRevisionId !== undefined && revisions.length > 0 && revisions[0]?.revisionId !== headRevisionId,
       isLoading:
         isPending ||
         settledBranchRows.isPending ||
         branchRows.pending.some((pending, index) => status?.branches[index]?.head !== undefined && pending),
       branchFacts,
     };
-  }, [branch, branchRows, client, finalized, headRevisionId, isPending, rows, session, settledBranchRows, status]);
+  }, [
+    branch,
+    branchRows,
+    client,
+    finalized,
+    headRevisionId,
+    isPending,
+    line,
+    rows,
+    session,
+    settledBranchRows,
+    status,
+  ]);
 }
 
 /**

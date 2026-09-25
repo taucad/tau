@@ -6,7 +6,7 @@ import { ChatEditorLayout } from '#routes/w.$workspace.$project/chat-editor-layo
 import { ChatDetails } from '#routes/w.$workspace.$project/chat-details.js';
 import { ChatConverter } from '#routes/w.$workspace.$project/chat-converter.js';
 import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
-import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
+import { ChatRevisions } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatInterfaceNav } from '#routes/w.$workspace.$project/chat-interface-nav.js';
@@ -113,7 +113,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                 <ProjectShareWorkbenchPanel />
               </TabsContent>
               <TabsContent enableAnimation={false} value='revisions' className='flex h-full flex-col'>
-                <RevisionsPanelBody />
+                {/* The pane's own title and Close, as every other panel here (L3-F15). */}
+                <ChatRevisions />
               </TabsContent>
             </Tabs>
           </DrawerContent>

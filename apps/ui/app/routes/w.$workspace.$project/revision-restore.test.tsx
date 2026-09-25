@@ -21,7 +21,10 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
   return harness.revisionStatusMock();
 });
-vi.mock('#components/ui/sonner.js', () => ({ toast: { success: toastSuccess, error: toastError, info: toastInfo } }));
+const toastWarning = vi.hoisted(() => vi.fn<(title: string, options?: { description?: string }) => void>());
+vi.mock('#components/ui/sonner.js', () => ({
+  toast: { success: toastSuccess, error: toastError, info: toastInfo, warning: toastWarning },
+}));
 const capture = vi.hoisted(() => vi.fn<(event: string, payload?: Record<string, unknown>) => void>());
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
 
@@ -36,6 +39,8 @@ beforeEach(() => {
   revisionStatusHarness.reset();
   toastSuccess.mockReset();
   toastError.mockReset();
+  toastInfo.mockReset();
+  toastWarning.mockReset();
   capture.mockReset();
 });
 
@@ -45,7 +50,9 @@ describe('RevisionRestore', () => {
 
     render(<RevisionRestore />);
 
-    expect(screen.getByText(/This deletes 2 files created since\./)).toBeInTheDocument();
+    expect(screen.getByText(/2 files added since will be removed\./)).toBeInTheDocument();
+    /* D1: the dialog says the restore is a new revision, so History loses nothing. */
+    expect(screen.getByText(/as a new revision, so nothing in History is lost\./)).toBeInTheDocument();
   });
 
   it('asks about unsaved editor changes without inventing a deletion', () => {
@@ -53,8 +60,9 @@ describe('RevisionRestore', () => {
 
     render(<RevisionRestore />);
 
-    expect(screen.getByText(/Unsaved editor changes will be overwritten\./)).toBeInTheDocument();
-    expect(screen.queryByText(/This deletes/)).not.toBeInTheDocument();
+    /* D1: dirty work is minted before the restore touches it, so nothing is overwritten. */
+    expect(screen.getByText(/Your unsaved edits are saved first\./)).toBeInTheDocument();
+    expect(screen.queryByText(/will be removed/)).not.toBeInTheDocument();
   });
 
   it('never asks about a restore the plan found safe, even while it applies', () => {
@@ -70,7 +78,9 @@ describe('RevisionRestore', () => {
     plan({ asking: true, removedPathCount: 1 });
 
     render(<RevisionRestore />);
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    /* The verb keeps its object through the confirmation (DESIGN: controls name their effect). */
+    expect(screen.getByText('Restore Rev 3?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Rev 3' }));
     expect(revisionStatusHarness.commands.confirm).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -105,16 +115,73 @@ describe('RevisionRestore', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
   });
 
-  it('reports the restore the worker attested, with its unrecoverable files', () => {
+  it('reports the restore the worker attested, with Undo', () => {
     render(<RevisionRestore />);
 
     for (const listener of revisionStatusHarness.toasts) {
-      listener({ type: 'restored', revisionNumber: 3, unrecoverable: ['old.scad'] });
+      listener({ type: 'restored', revisionNumber: 3 });
     }
 
     const [title, options] = toastSuccess.mock.calls[0] ?? [];
-    expect(title).toBe('Restored to Revision 3');
-    expect(options?.description).toContain('1 file could not be recovered');
+    expect(title).toBe('Restored Rev 3');
+    expect(options).toMatchObject({ action: { label: 'Undo restore' } });
+  });
+
+  /* HQ1, HQ2: a merge that collided says the one conflict sentence, naming the line the decision lands on. */
+  it('announces a conflicted merge as a decision on the line merged into', () => {
+    render(<RevisionRestore />);
+
+    for (const listener of revisionStatusHarness.toasts) {
+      listener({ type: 'mergeConflicted', branch: 'fillet', into: 'main', paths: ['main.scad'] });
+    }
+
+    expect(toastWarning.mock.calls[0]?.[0]).toBe('Needs your decision on main');
+  });
+
+  /* W2b: a remote or resolution child's notice is already a person's sentence; it is never a restore. */
+  it('shows a child notice in its own tone, never as a restore', () => {
+    render(<RevisionRestore />);
+
+    for (const listener of revisionStatusHarness.toasts) {
+      listener({ type: 'notice', subject: 'remote', tone: 'info', message: 'Backed up to Tau Cloud.' });
+      listener({ type: 'notice', subject: 'resolution', tone: 'error', message: 'That file could not be opened.' });
+    }
+
+    expect(toastInfo).toHaveBeenCalledWith('Backed up to Tau Cloud.');
+    expect(toastError).toHaveBeenCalledWith('That file could not be opened.');
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  /* W0 N1, M1: files that are back, and an undo that belongs to another line, lost nothing. */
+  it('says a restore that is not in History kept the files, with no Try again', () => {
+    render(<RevisionRestore />);
+
+    for (const listener of revisionStatusHarness.toasts) {
+      listener({ type: 'error', subject: 'restore', message: 'cut lost its CAS', code: 'RESTORE_UNRECORDED' });
+      listener({ type: 'error', subject: 'restore', message: 'selection moved', code: 'UNDO_UNAVAILABLE' });
+    }
+
+    expect(toastWarning.mock.calls[0]).toEqual([
+      'Files restored',
+      {
+        description:
+          'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own revision. Your files are kept.',
+      },
+    ]);
+    expect(toastWarning.mock.calls[1]?.[1]).toEqual({
+      description: 'That restore was made on another branch. Open it there to undo it.',
+    });
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('names a restore of a revision off the line without inventing its number (A9)', () => {
+    render(<RevisionRestore />);
+
+    for (const listener of revisionStatusHarness.toasts) {
+      listener({ type: 'restored', revisionNumber: undefined });
+    }
+
+    expect(toastSuccess.mock.calls[0]?.[0]).toBe('Restored an earlier revision');
   });
 
   /* The refusal crosses the boundary as a code; the page owns the words (P4).

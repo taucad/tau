@@ -124,9 +124,9 @@ describe('buildAgentProjection', () => {
       model: { name: 'Claude Sonnet', provider: 'Anthropic' },
       workspace: 'tau',
       /* No chat has a branch of its own — turns attach to the chat's checkout
-       * and never create one (A29, S11) — so a row with no branched turn reads
-       * the default. */
-      branch: 'main',
+       * and never create one (A29, S11) — and a row with no landed turn names
+       * no line rather than guessing `main` (I6). */
+      branch: undefined,
       unread: false,
     });
   });

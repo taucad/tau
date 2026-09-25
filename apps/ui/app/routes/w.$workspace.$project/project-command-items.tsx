@@ -10,7 +10,7 @@ import {
   History,
   ImageDown,
   Info,
-  RotateCcw,
+  RefreshCw,
   Save,
   Share2,
   SlidersHorizontal,
@@ -27,11 +27,9 @@ import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
-import { useRevisions } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
-import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -66,10 +64,6 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   );
   const fileCount = fileTree.size;
 
-  // Chat-restore time-travel (R13) — keyboard-first discovery of the pane + redo.
-  const { returnToLatest } = useRestoreToPoint();
-  const { canReturnToLatest } = useRevisions();
-
   /* The Sync region is the surface; the palette is the keyboard path to it
    * (DESIGN: a feature that only exists behind a pointer gesture is
    * unfinished). Where Tau Cloud is comes from `useRevisionCommands`, the one
@@ -83,6 +77,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   const { syncNow } = useRevisionCommands();
   const saveRevision = useSaveRevisionRequest();
   const isRemoteConnected = revisionStatus?.remote.kind !== undefined && revisionStatus.remote.kind !== 'none';
+  /* HQ7: backup verbs wait until the projection has located the line; before it, they could only fail. */
+  const isLineKnown = revisionStatus !== undefined && revisionStatus.line.kind !== 'unknown';
   const handleOpenSync = useCallback(() => {
     openPanel('revisions');
   }, [openPanel]);
@@ -195,9 +191,10 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
             {
               id: 'change-backup',
               label: 'Change backup',
-              group: 'Sync',
+              group: 'Revisions',
               icon: <Cloud />,
               action: handleOpenSync,
+              visible: isLineKnown,
             },
             /* R29 names two verbs, not one wearing the other's id: *Change* and
                *Disconnect* are different intents and both open the pane, which
@@ -205,16 +202,17 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
             {
               id: 'disconnect-remote',
               label: 'Disconnect backup',
-              group: 'Sync',
+              group: 'Revisions',
               icon: <CloudOff />,
               action: handleOpenSync,
+              visible: isLineKnown,
             },
           ]
         : [
             {
               id: 'connect-tau-cloud',
               label: 'Connect Tau Cloud',
-              group: 'Sync',
+              group: 'Revisions',
               icon: <Cloud />,
               action: handleOpenSync,
             },
@@ -222,8 +220,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       {
         id: 'sync-now',
         label: 'Sync now',
-        group: 'Sync',
-        icon: <Cloud />,
+        group: 'Revisions',
+        icon: <RefreshCw />,
         action: syncNow,
         visible: isRemoteConnected,
         disabled: revisionStatus?.remote.phase !== 'connected' || syncReadOnly,
@@ -310,14 +308,6 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         },
       },
       {
-        id: 'restore-latest-revision',
-        label: 'Restore to latest revision',
-        group: 'Revisions',
-        icon: <RotateCcw />,
-        action: returnToLatest,
-        disabled: !canReturnToLatest,
-      },
-      {
         id: 'export',
         label: 'Export',
         group: 'Export',
@@ -371,6 +361,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       handleDownloadZip,
       fileCount,
       isRemoteConnected,
+      isLineKnown,
       handleOpenSync,
       syncReadOnly,
       revisionStatus?.remote.phase,

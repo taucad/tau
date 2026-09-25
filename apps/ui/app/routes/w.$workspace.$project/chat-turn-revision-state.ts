@@ -177,7 +177,8 @@ export const turnRevisionLabel = (state: TurnRevisionState, fileCount: number): 
       return 'Revision not saved';
     }
     case 'conflicted': {
-      return 'Changes need review';
+      /* HQ1: a decision waiting on the person is said one way everywhere. */
+      return 'Needs your decision';
     }
     case 'unconfirmed': {
       return 'Save not confirmed';
@@ -211,7 +212,7 @@ export const turnRevisionDetail = (state: TurnRevisionState): string => {
       return 'Nothing was saved for this request.';
     }
     case 'conflicted': {
-      return 'Two versions changed the same files. Review them in Revisions.';
+      return 'Two versions changed the same files. Choose one in Revisions.';
     }
     default: {
       return '';

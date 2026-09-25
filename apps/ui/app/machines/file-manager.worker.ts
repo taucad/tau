@@ -388,9 +388,9 @@ const revisionRegistry = createWorkerRevisionRegistry({
     pushRecorders.delete(projectId);
   },
   filesystem: (root) => fileService.createRootedFileSystem(root),
-  observe: (projectId, onChanged) =>
+  observe: (root, onChanged) =>
     eventBus.subscribe((event) => {
-      const paths = versionedChangePaths(event, `/projects/${projectId}`);
+      const paths = versionedChangePaths(event, root);
       if (paths.length > 0) {
         onChanged(paths);
       }

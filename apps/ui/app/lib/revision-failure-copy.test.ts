@@ -98,3 +98,45 @@ describe('describeRevisionFailure', () => {
     expect(describeRevisionFailure('branch', 'SOMETHING_NEW').description).toBe(revisionFailureCopy.branch.fallback);
   });
 });
+
+describe('a restore or save the line refused (D1, D3)', () => {
+  it.each([
+    ['restore', 'LEASE_UNAVAILABLE', 'An agent is working in this project’s files.'],
+    ['restore', 'CAS_LOST', 'Something else changed this project first. Try again.'],
+    ['restore', 'CHECKOUT_CONFLICT', 'These files changed while the restore was being prepared. Try again.'],
+    [
+      'restore',
+      'RESTORE_UNRECORDED',
+      'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own revision. Your files are kept.',
+    ],
+    ['restore', 'UNDO_UNAVAILABLE', 'That restore was made on another branch. Open it there to undo it.'],
+    ['save', 'CAS_LOST', 'Something else changed this project first. Your changes are still here; save again.'],
+  ] as const)('phrases a %s refused with %s', (subject, code, description) => {
+    expect(describeRevisionFailure(subject, code).description).toBe(description);
+  });
+});
+
+/* I12: each new refusal class has one sentence a person can act on, and never the server's code. */
+describe('a restore whose files are back but not recorded (W0 N1, M1)', () => {
+  it('titles it by what happened, and offers no Try again', () => {
+    const copy = describeRevisionFailure('restore', 'RESTORE_UNRECORDED');
+    expect(copy.title).toBe('Files restored');
+    expect(copy.description).not.toMatch(/try again/iu);
+    expect(describeRevisionFailure('restore', 'UNDO_UNAVAILABLE').title).toBe('Nothing to undo here');
+  });
+});
+
+describe('what the Hosted Remote answers (W2a, W9)', () => {
+  it.each([
+    ['backup', 'REMOTE_DAMAGED', /has to repair this project’s copy on Tau Cloud.*Nothing on this device is lost/u],
+    ['removeName', 'GIT_RATE_LIMITED', /Wait a minute, then try again/u],
+    ['removeName', 'GIT_LEASE_OWNER_BUSY', /Try again in a moment/u],
+    ['removeName', 'GIT_HYDRATE_BUDGET_EXHAUSTED', /Try again tomorrow/u],
+    ['backup', 'GIT_RATE_LIMITED', /Wait a minute, then try again/u],
+    ['removeName', 'GIT_REF_REMOVAL_OWNER_ONLY', /Only the project’s owner/u],
+  ] as const)('phrases %s refused with %s', (subject, code, sentence) => {
+    const { description } = describeRevisionFailure(subject, code);
+    expect(description).toMatch(sentence);
+    expect(description).not.toContain(code);
+  });
+});

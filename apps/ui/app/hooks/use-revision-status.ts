@@ -37,7 +37,12 @@ import type {
 import { isGithubRemoteUrl, tauRemoteUrl } from '@taucad/revisions';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
 import { useParams } from 'react-router';
-import { revisionUserActor, useAnonymousRevisions, useRevisionSessionUser } from '#lib/revision-actor.js';
+import {
+  revisionUserActor,
+  useAnonymousRevisions,
+  useRevisionSalt,
+  useRevisionSessionUser,
+} from '#lib/revision-actor.js';
 import { deviceId } from '#lib/device-id.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
@@ -1110,6 +1115,10 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
    * identity.
    */
   const anonymous = useAnonymousRevisions(workspace ?? '');
+  /* EQ10 (a): the pseudonym derives from the account's salt for this
+   * workspace, served by the API and never written to the tree; fetched on
+   * sign-in whatever the preference, so it is ready before anonymity is. */
+  const salt = useRevisionSalt({ workspace: workspace ?? '', userId: sessionUser?.id });
   /*
    * Which device this document is (W13, W17).
    *
@@ -1199,6 +1208,7 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
           workspace: workspace ?? '',
           user: sessionUser,
           anonymous,
+          salt,
           commitIdentity: githubProjectBinding.get(projectId)?.author,
         }),
       });
@@ -1206,7 +1216,7 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
     send();
     /* Linking or unlinking GitHub changes who the next revision is authored as (D33). */
     return githubProjectBinding.subscribe(send);
-  }, [client, projectId, workspace, sessionUser, anonymous]);
+  }, [client, projectId, workspace, sessionUser, anonymous, salt]);
   return client;
 };
 
@@ -1238,7 +1248,6 @@ export const useRevisionStatus = (): RevisionStatusProjection | undefined =>
 /** The verbs the page sends to its revision root. @public */
 export type RevisionCommands = Readonly<{
   restore: (revisionId: string) => void;
-  returnToLatest: () => void;
   undo: () => void;
   confirm: () => void;
   cancel: () => void;
@@ -1339,7 +1348,6 @@ export const useRevisionCommands = (): RevisionCommands => {
   return useMemo(
     () => ({
       restore: (revisionId: string) => client?.send({ command: 'restore', revisionId }),
-      returnToLatest: () => client?.send({ command: 'returnToLatest' }),
       undo: () => client?.send({ command: 'undo' }),
       confirm: () => client?.send({ command: 'confirm' }),
       cancel: () => client?.send({ command: 'cancel' }),

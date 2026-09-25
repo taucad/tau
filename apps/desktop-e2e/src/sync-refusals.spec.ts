@@ -4,6 +4,7 @@ import process from 'node:process';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
+import { openBackupChooser } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { launchBrowserClient } from '#support/two-client/browser-client.js';
 import type { BrowserClient } from '#support/two-client/browser-client.js';
@@ -108,8 +109,7 @@ const openSync = async (client: BrowserClient): Promise<void> => {
     .getByRole('button', { name: /^Open Revisions\./u })
     .first()
     .click({ timeout: 120_000 });
-  await page.getByRole('button', { name: 'Connect Tau Cloud', exact: true }).first().click({ timeout: 120_000 });
-  await page.getByRole('region', { name: 'Sync' }).first().waitFor({ state: 'visible', timeout: 60_000 });
+  await openBackupChooser(page);
 };
 
 const backupStatus = (client: BrowserClient) => client.page.getByRole('status', { name: 'Backup status' }).first();
@@ -245,6 +245,21 @@ describe('a Pro owner whose pushes are refused', () => {
         message: 'Storage quota reached: 11 of 10 bytes used (W8 413).',
       },
       action: /Upgrade/u,
+    },
+    /* Audit §7.2 item 4: both classes were proven in units and on the server
+     * (`git.http.integration.test.ts`, `fault-injection.spec.ts`) and never
+     * rendered. A 422 is the remote refusing the refs, not the device, so its
+     * verb is *Sync now*; a 503 is the retryable busy class, so it is *Retry*
+     * (`remotes.ts` classification, `revision-sync-region.tsx` actions). */
+    {
+      name: '422',
+      refusal: { status: 422, message: 'The pushed refs failed the remote connectivity check (W3 422).' },
+      action: /^Sync now$/u,
+    },
+    {
+      name: '503',
+      refusal: { status: 503, message: 'Tau Cloud storage is busy right now (W3 503).' },
+      action: /^Retry$/u,
     },
   ];
 

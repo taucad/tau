@@ -17,6 +17,7 @@ import {
   startGatewayFixture,
 } from '#support/gateway-fixture.js';
 import { expectCount, expectVisible, selectChatModel, sendPrompt, stopButtonOf } from '#support/scenario.js';
+import { historyRows, openBackupChooser, restoreFromHistory } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   browserFileDigest,
@@ -208,15 +209,10 @@ const openRevisionsPane = async (client: PageClient): Promise<void> => {
 const openSyncRegion = async (client: PageClient): Promise<void> => {
   const { page } = client;
   await openRevisionsPane(client);
-  /* D26/A29: the region replaces this button once a remote exists, so a
-   * re-open finds the region directly. The offer reads *Connect Tau Cloud*
-   * (`chat-revisions.tsx`); matching its old *Back up to Tau Cloud* wording
-   * silently skipped the click and every remote-less case timed out. */
-  const connect = page.getByRole('button', { name: 'Connect Tau Cloud', exact: true }).first();
-  if (await connect.isVisible()) {
-    await connect.click();
-  }
-  await page.getByRole('region', { name: 'Sync' }).first().waitFor({ state: 'visible', timeout: 60_000 });
+  /* D26/A29: the region replaces the strip's *Back up* once a remote exists, so
+   * a re-open finds the region directly. A project with no revision yet saves
+   * its first one, because nothing offers a backup before it (S1). */
+  await openBackupChooser(page);
 };
 
 /**
@@ -294,9 +290,15 @@ const uploadFileInBrowser = async (
     .waitFor({ timeout: 60_000 });
 };
 
-/** How many rows the Revisions pane's `History` list carries right now. */
-const revisionRowCount = async (client: BrowserClient): Promise<number> =>
-  client.page.getByRole('list', { name: 'Revision history' }).first().getByRole('listitem').count();
+/** How many revision rows the Revisions pane's `History` list carries right now. */
+const revisionRowCount = async (client: BrowserClient): Promise<number> => historyRows(client.page).count();
+
+/**
+ * The header chip once the checkout is modified: `… Modified since Rev N.` It
+ * is always mounted, so it observes an edit whichever pane is in front.
+ */
+const modifiedChip = (page: Page): Locator =>
+  page.getByRole('button', { name: /^Open Revisions\..* Modified since Rev \d+\.$/u });
 
 /** What the Sync region says right now. */
 const syncRegionText = async (client: PageClient): Promise<string> =>
@@ -405,7 +407,34 @@ const gitOutput = async (repository: string, args: readonly string[]): Promise<s
 const gitHead = async (repository: string): Promise<string | undefined> =>
   gitOutput(repository, ['rev-parse', 'refs/heads/main']);
 
-const tauRepository = (projectId: string): string => join(tauGitRoot, `${projectId}.git`);
+/**
+ * A local mirror of the Tau Hosted Remote's repository for `projectId`.
+ *
+ * The server keeps repositories in object storage (git storage substrate D1),
+ * so the suite reads them the way any client would: a forced mirror fetch over
+ * smart HTTP refreshes every advertised ref (heads, tags, `refs/tau/chats/*`)
+ * and prunes deleted ones before each read. A failed fetch (the repository does
+ * not exist yet) removes the mirror, so reads resolve `undefined` rather than
+ * stale refs.
+ */
+const tauRepository = async (projectId: string): Promise<string> => {
+  const mirror = join(tauGitRoot, `${projectId}.git`);
+  if (!existsSync(mirror)) {
+    await mkdir(mirror, { recursive: true });
+    const initialized = await runGit(['init', '--quiet', '--bare'], mirror);
+    expect(initialized.code, initialized.stderr).toBe(0);
+  }
+  const authorization = `http.extraHeader=Authorization: ${basicAuthorization(bearer)}`;
+  const remoteUrl = `${desktopE2EApiUrl}/v1/git/${projectId}.git`;
+  const fetched = await runGit(
+    ['-c', authorization, 'fetch', '--quiet', '--force', '--prune', '--no-tags', remoteUrl, '+refs/*:refs/*'],
+    mirror,
+  );
+  if (fetched.code !== 0) {
+    await rm(mirror, { recursive: true, force: true });
+  }
+  return mirror;
+};
 
 /** The revision id in the last durable host-attested turn settlement. */
 const finalizedTurnRevision = async (logPath: string): Promise<string | undefined> => {
@@ -488,7 +517,11 @@ const openTauCloudProject = async (
       timeout: 60_000,
     })
     .toBeGreaterThan(0);
-  await title.locator('../..').getByRole('button', { name: 'Open' }).click();
+  await region
+    .getByRole('listitem')
+    .filter({ has: page.getByText(name, { exact: true }) })
+    .getByRole('button', { name: 'Open' })
+    .click();
   await expect
     .poll(async () => page.url(), {
       message: `${continuationOwner} ${direction}: destination must open the Tau Cloud project`,
@@ -514,14 +547,15 @@ const assertCurrentRevision = async (
     })
     .toBe(expectedHead);
   await openRevisionsPane(client);
-  const current = client.page
-    .getByRole('list', { name: 'Revision history' })
-    .first()
-    .getByRole('listitem')
-    .filter({ hasText: 'Current' })
-    .first();
+  /* The current row opens in place and lists the files its revision changed. */
+  const current = historyRows(client.page).filter({ hasText: 'Current' }).first();
+  await current.waitFor({ state: 'visible', timeout: 120_000 });
+  if ((await current.getAttribute('aria-expanded')) !== 'true') {
+    await current.click();
+  }
+  const changedFiles = client.page.getByRole('list', { name: 'Changed files' }).first();
   await expect
-    .poll(async () => current.getByText('main.scad', { exact: true }).count(), {
+    .poll(async () => changedFiles.getByText('main.scad', { exact: true }).count(), {
       message: `${continuationOwner} ${direction}: destination current revision changed paths must contain main.scad`,
       timeout: 120_000,
     })
@@ -704,15 +738,28 @@ describe('a project on the browser client', () => {
     await registerProjectOnRemote(accountOwner, projectId, 'W18 Two Client');
     await openSyncRegion(client);
     await chooseTauCloud(client);
-    /* The connected row (`revision-sync-region.tsx`) names the remote and
-     * offers *Change backup*, which no other phase renders; it no longer prints
-     * the URL or a bare *Disconnect*. */
+    /* The connected row (`revision-sync-region.tsx`) names the remote, and its
+     * *Backup settings* menu offers *Change backup…*, which no other phase
+     * renders; it prints neither the URL nor a bare *Disconnect*. */
+    const settings = client.page
+      .getByRole('region', { name: 'Sync' })
+      .first()
+      .getByRole('button', { name: 'Backup settings', exact: true });
     await expect
-      .poll(async () => syncRegionText(client), {
-        message: 'W11b (DEF-8): the connected Tau Cloud remote must reach the Sync region',
-        timeout: 120_000,
-      })
-      .toMatch(/Tau Cloud[\s\S]*Change backup/u);
+      .poll(
+        async () => {
+          const text = await syncRegionText(client);
+          return text.includes('Tau Cloud') && (await settings.isVisible());
+        },
+        {
+          message: 'W11b (DEF-8): the connected Tau Cloud remote must reach the Sync region',
+          timeout: 120_000,
+        },
+      )
+      .toBe(true);
+    await settings.click();
+    await client.page.getByRole('menuitem', { name: 'Change backup…', exact: true }).waitFor({ state: 'visible' });
+    await client.page.keyboard.press('Escape');
   }, 900_000);
 
   /** P53's connected-session scheduler is observable now that W19-b fixed DEF-8. */
@@ -838,11 +885,11 @@ describe('a project on the browser client', () => {
       'V13/V14: the browser STEP revision has no head.',
     );
     await expect
-      .poll(async () => gitHead(tauRepository(lfsProjectId)), { timeout: 180_000 })
+      .poll(async () => gitHead(await tauRepository(lfsProjectId)), { timeout: 180_000 })
       .toBe(browserHeadAfterStep);
-    expect(await gitOutput(tauRepository(lfsProjectId), ['show', `${browserHeadAfterStep}:roundtrip.step`])).toContain(
-      `oid sha256:${browserDigest}`,
-    );
+    expect(
+      await gitOutput(await tauRepository(lfsProjectId), ['show', `${browserHeadAfterStep}:roundtrip.step`]),
+    ).toContain(`oid sha256:${browserDigest}`);
 
     /* The named version is authored through the product, then read from each
      * destination's own revision store — not inferred from the remote tag or
@@ -851,13 +898,13 @@ describe('a project on the browser client', () => {
     await source.page.getByRole('combobox', { name: /Version name/iu }).fill('v1');
     await source.page.getByRole('button', { name: /Publish and copy link/iu }).click();
     await expect
-      .poll(async () => gitOutput(tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1^{}']), {
+      .poll(async () => gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1^{}']), {
         message: 'V15: the browser named version must reach Tau Cloud',
         timeout: 180_000,
       })
       .toBe(browserHeadAfterStep);
     const publishedTagOid = required(
-      await gitOutput(tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1']),
+      await gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1']),
       'V10/V15: Tau Cloud has no unpeeled named-version ref.',
     );
     expect(publishedTagOid, 'V10/V15: the unpeeled named-version ref must be a concrete SHA-1 OID').toMatch(
@@ -920,9 +967,7 @@ describe('a project on the browser client', () => {
     desktopStep.set(new TextEncoder().encode('ISO-10303-21;\n/* desktop */\n'), 0);
     const desktopDigest = createHash('sha256').update(desktopStep).digest('hex');
     await writeFile(join(destinationRoot, 'roundtrip.step'), desktopStep);
-    await expect
-      .poll(async () => destination.page.getByText('Modified', { exact: true }).count(), { timeout: 60_000 })
-      .toBeGreaterThan(0);
+    await expect.poll(async () => modifiedChip(destination.page).count(), { timeout: 60_000 }).toBeGreaterThan(0);
     await destination.page.bringToFront();
     await destination.page.keyboard.press(`${modifier}+KeyS`);
     await expect
@@ -936,11 +981,11 @@ describe('a project on the browser client', () => {
       'V13/V14: the desktop STEP revision has no head.',
     );
     await expect
-      .poll(async () => gitHead(tauRepository(lfsProjectId)), { timeout: 180_000 })
+      .poll(async () => gitHead(await tauRepository(lfsProjectId)), { timeout: 180_000 })
       .toBe(desktopHeadAfterStep);
-    expect(await gitOutput(tauRepository(lfsProjectId), ['show', `${desktopHeadAfterStep}:roundtrip.step`])).toContain(
-      `oid sha256:${desktopDigest}`,
-    );
+    expect(
+      await gitOutput(await tauRepository(lfsProjectId), ['show', `${desktopHeadAfterStep}:roundtrip.step`]),
+    ).toContain(`oid sha256:${desktopDigest}`);
     await source.page.reload({ waitUntil: 'domcontentloaded' });
     await expect
       .poll(async () => browserHead(source, sourceSlug), {
@@ -962,9 +1007,7 @@ describe('a project on the browser client', () => {
     await mkdir(join(destinationRoot, 'exports'), { recursive: true });
     await writeFile(localExportPath, localExport);
     await writeFile(join(destinationRoot, 'main.scad'), 'cube([38, 38, 38]); // repeated LFS push\n', 'utf8');
-    await expect
-      .poll(async () => destination.page.getByText('Modified', { exact: true }).count(), { timeout: 60_000 })
-      .toBeGreaterThan(0);
+    await expect.poll(async () => modifiedChip(destination.page).count(), { timeout: 60_000 }).toBeGreaterThan(0);
     await destination.page.bringToFront();
     await destination.page.keyboard.press(`${modifier}+KeyS`);
     await expect.poll(async () => desktopHead(destinationRoot), { timeout: 120_000 }).not.toBe(desktopHeadAfterStep);
@@ -972,52 +1015,55 @@ describe('a project on the browser client', () => {
       await desktopHead(destinationRoot),
       'V13/V14: the repeated desktop push has no head.',
     );
-    await expect.poll(async () => gitHead(tauRepository(lfsProjectId)), { timeout: 180_000 }).toBe(repeatedHead);
+    await expect.poll(async () => gitHead(await tauRepository(lfsProjectId)), { timeout: 180_000 }).toBe(repeatedHead);
     expect(await projectLfsBytes(lfsProjectId), 'V13: an existing LFS object must not be uploaded twice').toBe(
       2 * fiveMiB,
     );
     const persistedExport = await readFile(localExportPath);
     expect(persistedExport.byteLength, 'AC16: the full 50 MiB export must remain on desktop').toBe(fiftyMiB);
     expect(createHash('sha256').update(persistedExport).digest('hex')).toBe(localExportDigest);
-    const remoteExport = await runGit(['show', `${repeatedHead}:exports/local.step`], tauRepository(lfsProjectId));
+    const remoteExport = await runGit(
+      ['show', `${repeatedHead}:exports/local.step`],
+      await tauRepository(lfsProjectId),
+    );
     expect(remoteExport.code, 'V8/V13/AC16: the 50 MiB exports/** file must not enter the remote revision').not.toBe(0);
   }, 900_000);
 
   /**
-   * AC17's divergent case and *Keep mine*, owner W10 (the surface) with W13
-   * (`sync/<remote>/<branch>`).
+   * Diverge `main` from a stock-git peer, then resolve the conflict in the
+   * browser by keeping one side, and prove the resolution reached Tau Cloud.
    *
-   * W10-a2 landed the surface this drives: `revision-branches.tsx` renders a
-   * `Files to resolve in <branch>` list with a `Keep mine in <path>` button per
-   * file, and finishing the resolution is a separate verb. Reaching it needs
-   * two devices to record divergent revisions on one branch and both to push.
-   * W19-b fixed the browser write and smart-HTTP prerequisites. */
-  it('should resolve a divergent branch with Keep mine', async () => {
-    const client = required(browser, 'The browser client did not launch.');
-    const accountOwner = required(owner, 'The account was not seeded.');
-    await client.page.goto(projectUrl, { waitUntil: 'domcontentloaded' });
-    await registerProjectOnRemote(accountOwner, projectId, 'W18 Two Client');
-    await openSyncRegion(client);
-    await chooseTauCloud(client);
-    await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
-    const previousRemoteHead = await gitHead(tauRepository(projectId));
+   * AC17's divergent case, owner W10 (the surface) with W13
+   * (`sync/<remote>/<branch>`). `revision-branches.tsx` renders a
+   * `Files to resolve in <branch>` list with a *Keep <side> in <path>* button
+   * per side and file, and finishing the resolution is a separate verb.
+   * Reaching it needs two devices to record divergent revisions on one branch
+   * and both to push. W19-b fixed the browser write and smart-HTTP
+   * prerequisites. *Keep theirs* is the same row with the other side (audit
+   * §7.2 item 5).
+   */
+  const divergeAndResolve = async (client: BrowserClient, keep: 'mine' | 'theirs', tag: string): Promise<void> => {
+    const previousRemoteHead = await gitHead(await tauRepository(projectId));
     const peer = await scratch('conflict-peer');
     const authorization = `http.extraHeader=Authorization: ${basicAuthorization(bearer)}`;
     const remoteUrl = `${desktopE2EApiUrl}/v1/git/${projectId}.git`;
     const cloned = await runGit(['-c', authorization, 'clone', '--quiet', remoteUrl, '.'], peer);
     expect(cloned.code, cloned.stderr).toBe(0);
-    const configuredName = await runGit(['config', 'user.name', 'W18 peer'], peer);
+    const configuredName = await runGit(['config', 'user.name', `${tag} peer`], peer);
     expect(configuredName.code, configuredName.stderr).toBe(0);
     const configuredEmail = await runGit(['config', 'user.email', 'w18-peer@tau.invalid'], peer);
     expect(configuredEmail.code, configuredEmail.stderr).toBe(0);
-    await writeFile(join(peer, 'main.scad'), 'cube([31, 31, 31]); // W18 peer\n', 'utf8');
+    const peerVersion = `cube([31, 31, 31]); // ${tag} peer\n`;
+    await writeFile(join(peer, 'main.scad'), peerVersion, 'utf8');
     const staged = await runGit(['add', 'main.scad'], peer);
     expect(staged.code, staged.stderr).toBe(0);
-    const committed = await runGit(['commit', '--quiet', '-m', 'W18 peer divergence'], peer);
+    const committed = await runGit(['commit', '--quiet', '-m', `${tag} peer divergence`], peer);
     expect(committed.code, committed.stderr).toBe(0);
     const pushed = await runGit(['-c', authorization, 'push', '--quiet', 'origin', 'HEAD:refs/heads/main'], peer);
     expect(pushed.code, pushed.stderr).toBe(0);
-    await expect.poll(async () => gitHead(tauRepository(projectId)), { timeout: 120_000 }).not.toBe(previousRemoteHead);
+    await expect
+      .poll(async () => gitHead(await tauRepository(projectId)), { timeout: 120_000 })
+      .not.toBe(previousRemoteHead);
 
     await client.page.keyboard.press('Control+KeyF');
     await client.page
@@ -1025,7 +1071,7 @@ describe('a project on the browser client', () => {
       .first()
       .click({ timeout: 120_000 });
     await focusBrowserEditor(client);
-    const browserVersion = 'cube([32, 32, 32]); // W18 browser\n';
+    const browserVersion = `cube([32, 32, 32]); // ${tag} browser\n`;
     await client.page.keyboard.press(`${modifier}+KeyA`);
     await client.page.keyboard.insertText(browserVersion);
     await expect
@@ -1038,7 +1084,7 @@ describe('a project on the browser client', () => {
         message: 'W10/W13: the conflict must replace the pre-conflict Backed up state',
         timeout: 120_000,
       })
-      .toMatch(/Needs resolution/u);
+      .toMatch(/Needs your decision/u);
     expect(
       await readBrowserFile(client, slug, ['.git', 'refs', 'heads', 'sync', 'tau', 'main']),
       'W13: the conflict must remain reachable from sync/tau/main',
@@ -1055,8 +1101,9 @@ describe('a project on the browser client', () => {
       })
       .toBeGreaterThan(0);
     await client.page
-      /* `revision-branches.tsx` labels each side by its branch: *Keep main in <path>*. */
-      .getByRole('button', { name: /^Keep main in / })
+      /* `revision-branches.tsx` labels each side by its name: *Keep main in <path>*
+       * is this device's side; the other button in the pair is the remote's. */
+      .getByRole('button', { name: keep === 'mine' ? /^Keep main in / : /^Keep (?!main in ).+ in main\.scad$/u })
       .first()
       .click();
     const finishResolution = client.page.getByRole('button', { name: /^Merge into / }).first();
@@ -1065,18 +1112,39 @@ describe('a project on the browser client', () => {
     await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
     const resolvedHead = required(
       await browserHead(client, slug),
-      'W10/W13: Keep mine completed without a resolved local HEAD.',
+      `W10/W13: Keep ${keep} completed without a resolved local HEAD.`,
     );
     await expect
-      .poll(async () => gitHead(tauRepository(projectId)), {
+      .poll(async () => gitHead(await tauRepository(projectId)), {
         message: 'W10/W13: the bare remote HEAD must equal the resolved browser HEAD',
         timeout: 120_000,
       })
       .toBe(resolvedHead);
-    expect(await readBrowserFile(client, slug, ['main.scad'])).toBe(browserVersion);
-    const remoteFile = await runGit(['show', `${resolvedHead}:main.scad`], tauRepository(projectId));
+    const kept = keep === 'mine' ? browserVersion : peerVersion;
+    expect(await readBrowserFile(client, slug, ['main.scad'])).toBe(kept);
+    const remoteFile = await runGit(['show', `${resolvedHead}:main.scad`], await tauRepository(projectId));
     expect(remoteFile.code, remoteFile.stderr).toBe(0);
-    expect(remoteFile.stdout).toBe(browserVersion);
+    expect(remoteFile.stdout).toBe(kept);
+  };
+
+  it('should resolve a divergent branch with Keep mine', async () => {
+    const client = required(browser, 'The browser client did not launch.');
+    const accountOwner = required(owner, 'The account was not seeded.');
+    await client.page.goto(projectUrl, { waitUntil: 'domcontentloaded' });
+    await registerProjectOnRemote(accountOwner, projectId, 'W18 Two Client');
+    await openSyncRegion(client);
+    await chooseTauCloud(client);
+    await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
+    await divergeAndResolve(client, 'mine', 'W18');
+  }, 900_000);
+
+  it('should resolve a divergent branch with Keep theirs', async () => {
+    const client = required(browser, 'The browser client did not launch.');
+    /* The project Keep mine connected and resolved: already backed up. */
+    await client.page.goto(projectUrl, { waitUntil: 'domcontentloaded' });
+    await openSyncRegion(client);
+    await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
+    await divergeAndResolve(client, 'theirs', 'W3');
   }, 900_000);
 
   /* W18 defect DEF-2, landed by W18-b.
@@ -1106,6 +1174,69 @@ describe('a project on the browser client', () => {
     await expect.poll(async () => client.page.url(), { timeout: 120_000 }).toMatch(/\/w\//u);
   }, 900_000);
 
+  /* Audit §7.1 T10 (W3; revisions charter D1): a restore is a revision like any
+   * other, so it reaches Tau Cloud as a fast-forward and the second device, on
+   * its next open, lands on it and names it. Red on the detaching restore:
+   * nothing is minted, so nothing is pushed and Tau Cloud's head never moves. */
+  it('should carry a restore on the browser to the desktop by fast-forward', async () => {
+    const client = required(browser, 'The browser client did not launch.');
+    const second = required(desktop, 'The desktop client did not launch.');
+    await client.page.goto(projectUrl, { waitUntil: 'domcontentloaded' });
+    await openSyncRegion(client);
+    await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
+    const before = required(await browserHead(client, slug), 'T10: the browser has no head before the restore.');
+    await expect.poll(async () => gitHead(await tauRepository(projectId)), { timeout: 180_000 }).toBe(before);
+
+    /* The newest revision History offers to restore: the newest row that is not Current.
+     * The row opens, its *Restore Rev N* restores it, and a restore that removes
+     * files or saves edits asks first (`restore.machine`'s `isRisky`). */
+    const restoredNumber = await restoreFromHistory(
+      client.page,
+      historyRows(client.page).filter({ hasNotText: 'Current' }).first(),
+      (n) =>
+        historyRows(client.page)
+          .filter({ hasText: 'Current' })
+          .filter({ hasText: `Restored Rev ${n}` }),
+    );
+
+    await expect
+      .poll(async () => browserHead(client, slug), {
+        message: 'T10 (D1): the restore must mint a revision on main',
+        timeout: 120_000,
+      })
+      .not.toBe(before);
+    const restoredHead = required(await browserHead(client, slug), 'T10: the restore left no head on main.');
+    await expect
+      .poll(async () => gitHead(await tauRepository(projectId)), {
+        message: 'T10: the restore revision must reach Tau Cloud',
+        timeout: 180_000,
+      })
+      .toBe(restoredHead);
+    const remote = await tauRepository(projectId);
+    expect(await gitOutput(remote, ['rev-parse', `${restoredHead}^`]), 'T10: a fast-forward of the old head').toBe(
+      before,
+    );
+    expect(await gitOutput(remote, ['show', '-s', '--format=%B', restoredHead])).toContain('Tau-Trigger: restore');
+
+    /* The desktop holds this project from the row above; reopening it runs the
+     * open pull, which fast-forwards it to the restore revision. */
+    await second.page.reload({ waitUntil: 'domcontentloaded' });
+    await openRevisionsPane(second);
+    await expect
+      .poll(
+        async () =>
+          second.page
+            .getByRole('list', { name: 'Revision history' })
+            .first()
+            .getByRole('listitem')
+            .filter({ hasText: 'Current' })
+            .filter({ hasText: `Restored Rev ${restoredNumber}` })
+            .count(),
+        { message: 'T10: the second device must land on the restore revision and name it', timeout: 180_000 },
+      )
+      .toBeGreaterThan(0);
+  }, 900_000);
+
   it('should merge and render ordered replies from two divergent device logs', async () => {
     const accountOwner = required(owner, 'The account was not seeded.');
     const source = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
@@ -1133,7 +1264,7 @@ describe('a project on the browser client', () => {
       const chatRef = `refs/tau/chats/${chatId}`;
       await expect.poll(async () => source.page.getByText(setupPrompt, { exact: true }).count()).toBeGreaterThan(0);
       await expect
-        .poll(async () => gitOutput(tauRepository(chatProjectId), ['rev-parse', chatRef]), {
+        .poll(async () => gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]), {
           message: 'V15: the common chat base must reach Tau Cloud before the second device opens it',
           timeout: 180_000,
         })
@@ -1189,7 +1320,7 @@ describe('a project on the browser client', () => {
       );
 
       await expect
-        .poll(async () => gitOutput(tauRepository(chatProjectId), ['rev-parse', chatRef]), {
+        .poll(async () => gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]), {
           message: 'V14/V15: native desktop must publish its divergent segment while browser Git is held',
           timeout: 180_000,
         })
@@ -1198,7 +1329,7 @@ describe('a project on the browser client', () => {
       await expect
         .poll(
           async () => {
-            const head = await gitOutput(tauRepository(chatProjectId), ['rev-parse', chatRef]);
+            const head = await gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]);
             return head !== undefined && head !== sourceChatHead && head !== destinationChatHead ? head : undefined;
           },
           {
@@ -1208,7 +1339,7 @@ describe('a project on the browser client', () => {
         )
         .toBeDefined();
       const mergedChatHead = required(
-        await gitOutput(tauRepository(chatProjectId), ['rev-parse', chatRef]),
+        await gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]),
         'V15: the merged remote chat ref is absent.',
       );
       expect(
@@ -1416,14 +1547,13 @@ describe('close and continue', () => {
       await sendPrompt(source.page, 'Build the browser continuation source.');
       const chatId = activeChatId(source.page);
       const sourceChat = await terminalChatIdentity(source.page, chatId, direction);
-      const remote = tauRepository(projectId);
       await expect
-        .poll(async () => gitOutput(remote, ['show', '-s', '--format=%B', 'refs/heads/main']), {
+        .poll(async () => gitOutput(await tauRepository(projectId), ['show', '-s', '--format=%B', 'refs/heads/main']), {
           message: `${continuationOwner} ${direction}: terminal chat must settle its turn revision before the last edit`,
           timeout: 180_000,
         })
         .toContain('Tau-Trigger: turn');
-      const beforeClose = await gitHead(remote);
+      const beforeClose = await gitHead(await tauRepository(projectId));
       if (beforeClose === undefined) {
         throw new Error(`${continuationOwner} ${direction}: settled turn revisionId is absent`);
       }
@@ -1450,17 +1580,23 @@ describe('close and continue', () => {
         row: direction,
       });
       await expect
-        .poll(async () => gitHead(remote), {
+        .poll(async () => gitHead(await tauRepository(projectId)), {
           message: `${continuationOwner} ${direction}: close revision must reach Tau Cloud`,
           timeout: 180_000,
         })
         .toBe(closeRevisionId);
       expect(
-        await gitOutput(remote, ['show', '-s', '--format=%B', closeRevisionId]),
+        await gitOutput(await tauRepository(projectId), ['show', '-s', '--format=%B', closeRevisionId]),
         `${continuationOwner} ${direction}: source revision must be the close event prepared while hidden`,
       ).toContain('Tau-Trigger: close');
       expect(
-        await gitOutput(remote, ['diff-tree', '--no-commit-id', '--name-only', '-r', closeRevisionId]),
+        await gitOutput(await tauRepository(projectId), [
+          'diff-tree',
+          '--no-commit-id',
+          '--name-only',
+          '-r',
+          closeRevisionId,
+        ]),
         `${continuationOwner} ${direction}: source close revision changed paths must contain main.scad`,
       ).toContain('main.scad');
 
@@ -1565,7 +1701,7 @@ describe('close and continue', () => {
       const editedAt = Date.now();
       await writeFile(join(sourceRoot, 'main.scad'), marker, 'utf8');
       await expect
-        .poll(async () => source.page.getByText('Modified', { exact: true }).count(), {
+        .poll(async () => modifiedChip(source.page).count(), {
           message: `${continuationOwner} ${direction}: the source must observe its last edit before app.quit()`,
           timeout: 1000,
         })
@@ -1598,7 +1734,7 @@ describe('close and continue', () => {
         `${continuationOwner} ${direction}: source close revision changed paths must contain main.scad`,
       ).toContain('main.scad');
       await expect
-        .poll(async () => gitHead(tauRepository(projectId)), {
+        .poll(async () => gitHead(await tauRepository(projectId)), {
           message: `${continuationOwner} ${direction}: close revision must reach Tau Cloud before quit completes`,
           timeout: 180_000,
         })
@@ -1693,7 +1829,7 @@ describe('close and continue', () => {
       `${continuationOwner} offline: source head is absent before close`,
     );
     await expect
-      .poll(async () => gitHead(tauRepository(offlineProjectId)), {
+      .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
         message: `${continuationOwner} offline: Tau Cloud must acknowledge the baseline before the outage`,
         timeout: 180_000,
       })
@@ -1745,7 +1881,7 @@ describe('close and continue', () => {
       })
       .toMatch(/Backed up/u);
     await expect
-      .poll(async () => gitHead(tauRepository(offlineProjectId)), {
+      .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
         message: `${continuationOwner} offline: Tau Cloud destination head must equal the queued close revisionId`,
         timeout: 180_000,
       })
@@ -1882,9 +2018,6 @@ describe('a git remote', () => {
   );
 });
 
-/** Kept for the git-remote cases that push with a Tau credential. */
-void basicAuthorization;
-
 /**
  * W15: attachments across two devices (blueprint §Sync, D26, W12).
  *
@@ -1931,21 +2064,23 @@ describe('chat attachments across two clients', () => {
       await sendPrompt(source.page, firstPrompt);
       const chatId = activeChatId(source.page);
       const chatRef = `refs/tau/chats/${chatId}`;
-      const repository = tauRepository(projectId);
       await expect
-        .poll(async () => gitOutput(repository, ['rev-parse', chatRef]), {
+        .poll(async () => gitOutput(await tauRepository(projectId), ['rev-parse', chatRef]), {
           message: 'the chat ref carrying the attachments must reach Tau Cloud',
           timeout: 180_000,
         })
         .toBeDefined();
-      const firstHead = required(await gitOutput(repository, ['rev-parse', chatRef]), 'The chat ref is absent.');
+      const firstHead = required(
+        await gitOutput(await tauRepository(projectId), ['rev-parse', chatRef]),
+        'The chat ref is absent.',
+      );
 
       /* One object per attachment, at its content-addressed name and its exact
        * size: an LFS pointer would be 127 bytes and the wrong name (D26). */
       await expect
         .poll(
           async () => {
-            const listing = await gitOutput(repository, ['ls-tree', '-r', '-l', chatRef]);
+            const listing = await gitOutput(await tauRepository(projectId), ['ls-tree', '-r', '-l', chatRef]);
             return (listing ?? '')
               .split('\n')
               .map((row) => row.trim().split(/\s+/u))
@@ -1994,12 +2129,16 @@ describe('chat attachments across two clients', () => {
       await selectChatModel(destination.page, gatewayFixtureModelName);
       await sendPrompt(destination.page, secondPrompt);
       await expect
-        .poll(async () => gitOutput(repository, ['rev-parse', chatRef]), {
+        .poll(async () => gitOutput(await tauRepository(projectId), ['rev-parse', chatRef]), {
           message: 'the second turn must publish a new chat head',
           timeout: 180_000,
         })
         .not.toBe(firstHead);
-      const added = await gitOutput(repository, ['rev-list', '--objects', `${firstHead}..${chatRef}`]);
+      const added = await gitOutput(await tauRepository(projectId), [
+        'rev-list',
+        '--objects',
+        `${firstHead}..${chatRef}`,
+      ]);
       expect(
         (added ?? '').split('\n').filter((row) => row.includes('attachments/')),
         'the second turn transferred attachment bytes again',

@@ -786,6 +786,16 @@ export const connectBambuMachine = async (
             runtime,
             signal: prepareInput.signal,
           });
+          // Real printers run only Bambu Studio output (blueprint P3); the simulator accepts any producer.
+          if (artifact.producer?.name !== 'Bambu Studio') {
+            return {
+              status: 'rejected',
+              code: 'ARTIFACT_UNQUALIFIED',
+              message:
+                'This file was not sliced by Bambu Studio. Slice it with Bambu Studio in Tau (desktop app with Bambu Studio installed), then send it again.',
+              observedAt: runtime.clock.now(),
+            };
+          }
           return {
             status: 'ready',
             remoteName: bambuRemoteName(prepareInput.operationId),

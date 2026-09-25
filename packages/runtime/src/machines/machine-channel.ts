@@ -271,6 +271,7 @@ const requestSummarySchema = z.strictObject({
   layers: z.number().int().nonnegative().optional(),
   estimatedDuration: z.number().nonnegative().optional(),
   filamentLength: z.number().nonnegative().optional(),
+  producer: z.strictObject({ name: identitySchema, version: identitySchema.optional() }).optional(),
 });
 const printRequestSchema = z.strictObject({
   requestId: identitySchema,

@@ -63,6 +63,7 @@ const material = z.strictObject({
   slot: count.max(127),
   state: z.enum(['empty', 'loaded', 'unknown']),
   materialId: identity.optional(),
+  profileId: identity.optional(),
   brand: identity.optional(),
   color: z
     .string()

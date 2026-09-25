@@ -41,6 +41,7 @@ export type BambuStatus = Readonly<{
       slot: number;
       state: 'empty' | 'loaded' | 'unknown';
       materialId?: string;
+      profileId?: string;
       brand?: string;
       color?: string;
       remainingPercent?: number;
@@ -408,6 +409,7 @@ export const parseBambuStatusPayload = (bytes: Uint8Array<ArrayBuffer>): BambuSt
     }
     const candidate = row as Readonly<Record<string, unknown>>;
     const materialId = boundedString(candidate['tray_type'], 128) ?? boundedString(candidate['material_id'], 128);
+    const profileId = boundedString(candidate['tray_info_idx'], 128);
     const brand = boundedString(candidate['tray_sub_brands'], 128);
     const color = materialColor(candidate['tray_color']);
     const remainingPercent = finite({
@@ -420,6 +422,7 @@ export const parseBambuStatusPayload = (bytes: Uint8Array<ArrayBuffer>): BambuSt
       slot,
       state,
       ...(materialId ? { materialId } : {}),
+      ...(profileId ? { profileId } : {}),
       ...(brand ? { brand } : {}),
       ...(color ? { color } : {}),
       ...(remainingPercent === undefined ? {} : { remainingPercent }),

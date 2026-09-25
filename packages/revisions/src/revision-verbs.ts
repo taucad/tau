@@ -66,6 +66,12 @@ export type RevisionRow = Readonly<{
    * this, never the trigger, is what names a *Restored* row (A9).
    */
   restoredFrom?: string;
+  /**
+   * The revision this one follows: its first parent, by id, or `undefined` for
+   * a branch's first revision. A merge's second parent is the side it brought
+   * in, which History already lists without a number.
+   */
+  parent?: string;
 }>;
 
 /** Where the reader is, and what else this project holds. @public */
@@ -155,6 +161,7 @@ const rowOf = (
     tags,
     trigger: entry.provenance.trigger,
     ...(entry.provenance.restoredFrom === undefined ? {} : { restoredFrom: entry.provenance.restoredFrom }),
+    ...(entry.parents[0] === undefined ? {} : { parent: entry.parents[0] }),
   });
 
 /**

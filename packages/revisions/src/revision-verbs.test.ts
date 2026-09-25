@@ -123,6 +123,21 @@ describe('revision verbs', () => {
     ]);
   });
 
+  /* W1 Details: a row names the revision it follows, its first parent, and the first revision none. */
+  it("carries each revision's first parent onto its row", async () => {
+    const port = await openPort();
+    await port.setHead('main');
+    const first = await record(port, { parents: [], content: 'one', actorId: 'ada', summary: 'First' });
+    const second = await record(port, { parents: [first], content: 'two', actorId: 'ada', summary: 'Second' });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: second });
+
+    const rows = await readRevisionLog(port);
+    expect(rows.map((row) => [row.revisionNumber, row.parent])).toStrictEqual([
+      [2, first],
+      [1, undefined],
+    ]);
+  });
+
   it('gives a merged-in revision no number of its own on this branch', async () => {
     const port = await openPort();
     await port.setHead('main');

@@ -76,6 +76,7 @@ import { createQuickLookController, removeStaleQuickLookSessions } from '#main/q
 import type { QuickLookController } from '#main/quick-look.js';
 import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
 import { createOpenFileQueue } from '#main/open-files.js';
+import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import {
   appIconThemeChannel,
   agentHostSessionChannels,
@@ -86,6 +87,7 @@ import {
   desktopNativeKernelIds,
   computeControlChannels,
   servicesPortRelayTag,
+  slicersChannels,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import { openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
@@ -710,6 +712,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
   };
 
   ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
+  /* Blueprint D12: the Print pane's Bambu Studio presets and settings. The
+   * service parses every input; this guard keeps other senders out. */
+  const bambuStudio = createBambuStudioService({ env: environment });
+  for (const [channel, call] of [
+    [slicersChannels.bambuStudio.status, bambuStudio.status],
+    [slicersChannels.bambuStudio.catalog, bambuStudio.catalog],
+    [slicersChannels.bambuStudio.resolveSelection, bambuStudio.resolveSelection],
+    [slicersChannels.bambuStudio.settings, bambuStudio.settings],
+  ] as const) {
+    ipcMain.handle(channel, async (event, input: unknown) => {
+      if (!trusted(event.senderFrame)) {
+        throw new Error('Desktop shell refused Bambu Studio request.');
+      }
+      return call(input);
+    });
+  }
   ipcMain.handle('tau:auth:sign-in', async (event) => {
     if (trusted(event.senderFrame)) {
       await auth.signIn();

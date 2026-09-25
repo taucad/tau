@@ -32,6 +32,7 @@ import {
   computeControlChannels,
   readBootstrap,
   servicesPortRelayTag,
+  slicersChannels,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import { openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
@@ -98,6 +99,18 @@ contextBridge.exposeInMainWorld('tau', {
      * relay above carries the non-secret half of the same ceremony. */
     completeBinding: async (input: { ceremonyId: string; address?: string; accessCode?: string }): Promise<unknown> =>
       ipcRenderer.invoke(machinesChannels.completeBinding, input),
+  },
+  slicers: {
+    /* Read-only presets and settings (D12); refusals arrive as `{ ok: false, error }`. */
+    bambuStudio: {
+      status: async (): Promise<unknown> => ipcRenderer.invoke(slicersChannels.bambuStudio.status),
+      catalog: async (filter?: unknown): Promise<unknown> =>
+        ipcRenderer.invoke(slicersChannels.bambuStudio.catalog, filter),
+      resolveSelection: async (input: unknown): Promise<unknown> =>
+        ipcRenderer.invoke(slicersChannels.bambuStudio.resolveSelection, input),
+      settings: async (input: unknown): Promise<unknown> =>
+        ipcRenderer.invoke(slicersChannels.bambuStudio.settings, input),
+    },
   },
   nodeFs: { homeRoot: bootstrap.homeRoot },
   runtimeKernelIds: bootstrap.runtimeKernelIds,

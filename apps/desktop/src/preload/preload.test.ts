@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { quitChannels } from '#shared/desktop-bootstrap.js';
+import { ipcRenderer } from 'electron';
+import { quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
 
 const state = vi.hoisted(() => ({
   exposed: new Map<string, unknown>(),
@@ -74,5 +75,32 @@ describe('desktop preload quit bridge', () => {
     quitApi().onAsk(handler);
 
     expect(handler).toHaveBeenCalledOnce();
+  });
+});
+
+describe('desktop preload Bambu Studio bridge', () => {
+  type BambuStudioApi = Readonly<
+    Record<'status' | 'catalog' | 'resolveSelection' | 'settings', (input?: unknown) => Promise<unknown>>
+  >;
+
+  const bambuStudio = (): BambuStudioApi =>
+    (state.exposed.get('tau') as { readonly slicers: { readonly bambuStudio: BambuStudioApi } }).slicers.bambuStudio;
+
+  it('should send each Bambu Studio call on its own channel with the renderer input', async () => {
+    vi.mocked(ipcRenderer.invoke).mockClear();
+    vi.mocked(ipcRenderer.invoke).mockResolvedValue({ ok: true, value: 'answer' });
+    const hints = { model: 'X1C', materials: [] };
+
+    await expect(bambuStudio().resolveSelection({ hints })).resolves.toEqual({ ok: true, value: 'answer' });
+    await bambuStudio().status();
+    await bambuStudio().catalog({ model: 'X1C' });
+    await bambuStudio().settings({ printer: 'p', process: 'q', filaments: [] });
+
+    expect(vi.mocked(ipcRenderer.invoke).mock.calls).toEqual([
+      [slicersChannels.bambuStudio.resolveSelection, { hints }],
+      [slicersChannels.bambuStudio.status],
+      [slicersChannels.bambuStudio.catalog, { model: 'X1C' }],
+      [slicersChannels.bambuStudio.settings, { printer: 'p', process: 'q', filaments: [] }],
+    ]);
   });
 });

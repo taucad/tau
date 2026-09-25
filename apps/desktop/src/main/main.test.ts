@@ -6,7 +6,12 @@ import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { computeControlChannels, quitChannels, servicesPortRelayTag } from '#shared/desktop-bootstrap.js';
+import {
+  computeControlChannels,
+  quitChannels,
+  servicesPortRelayTag,
+  slicersChannels,
+} from '#shared/desktop-bootstrap.js';
 
 const originalTitle = process.title;
 const originalUncaught = new Set(process.listeners('uncaughtException'));
@@ -47,6 +52,7 @@ const state = vi.hoisted(() => ({
   autoQuiesce: true,
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
+  bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
 }));
 
@@ -243,6 +249,14 @@ vi.mock('#main/utility-environment.js', () => ({
 vi.mock('#main/quick-look.js', () => ({
   createQuickLookController: vi.fn(() => ({ dispose: vi.fn() })),
   removeStaleQuickLookSessions: vi.fn(),
+}));
+vi.mock('#main/bambu-studio-service.js', () => ({
+  createBambuStudioService: vi.fn(() => ({
+    status: state.bambuStudioStatus,
+    catalog: vi.fn(),
+    resolveSelection: vi.fn(),
+    settings: vi.fn(),
+  })),
 }));
 vi.mock('#main/open-files.js', () => ({
   createOpenFileQueue: vi.fn(() => ({
@@ -657,6 +671,35 @@ describe('desktop main deep links', () => {
         });
       });
       expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main Bambu Studio channels', () => {
+  const bootMilliseconds = 30_000;
+
+  it(
+    'should answer Bambu Studio calls only for the trusted renderer',
+    async () => {
+      vi.stubGlobal('tauCloudBuildEnabled', false);
+      state.userData = await mkdtemp(join(tmpdir(), 'tau-main-bambu-'));
+      await import('#main/main.js');
+      await vi.waitFor(() => {
+        expect(state.handlers.has(slicersChannels.bambuStudio.status)).toBe(true);
+      });
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      const status = state.handlers.get(slicersChannels.bambuStudio.status)!;
+
+      await expect(status({ senderFrame: {} })).resolves.toEqual({ available: false, reason: 'not installed' });
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      await expect(status({ senderFrame: { url: 'https://evil.example/' } })).rejects.toThrow(
+        'Desktop shell refused Bambu Studio request.',
+      );
+      expect(state.bambuStudioStatus).toHaveBeenCalledOnce();
+      for (const channel of Object.values(slicersChannels.bambuStudio)) {
+        expect(state.handlers.has(channel)).toBe(true);
+      }
     },
     bootMilliseconds,
   );

@@ -483,14 +483,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       return undefined;
     }
     const stored: unknown = JSON.parse(await filesystem.readFile(path, 'utf8'));
-    const record = stored as Readonly<{ id: string; branch: string; baseRevisionId: string }>;
+    const record = stored as Readonly<{ id: string; branch: string }>;
     return Object.freeze({
       id: record.id,
       projectId: checkouts.projectId,
       root: `/checkouts/${record.id}`,
       kind: 'linked',
       branch: record.branch,
-      baseRevisionId: revisionId(record.baseRevisionId),
+      /* The branch's head, read now — as a native worktree's `HEAD` follows
+       * its branch. A base kept from `addCheckout` went stale the moment a
+       * merge moved the branch, and hid the conflict it moved it onto (S7). */
+      baseRevisionId: await port.readRef(record.branch),
     });
   };
 
@@ -1573,7 +1576,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       await Promise.all(tree.entries().map(async (entry) => provider.writeFile(entry.path, entry.content)));
       await filesystem.writeFile(
         `${checkoutsDirectory}/${id}.json`,
-        `${JSON.stringify({ version: 1, id, branch: input.branch, baseRevisionId: base })}\n`,
+        `${JSON.stringify({ version: 1, id, branch: input.branch })}\n`,
       );
       return Object.freeze({
         id,

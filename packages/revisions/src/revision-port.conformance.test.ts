@@ -778,6 +778,21 @@ const conformance = (adapter: Adapter): void => {
       await expect(port.addCheckout!({ branch })).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
     }, 180_000);
 
+    it("reports a linked checkout's head as its branch's head after the branch moves (S7)", async () => {
+      /* A merge that does not settle moves the source branch onto a conflicted
+       * revision while its linked checkout stays put. The registry reads the
+       * head from here, so a checkout that kept the base it was added at hid
+       * the conflict: no *Needs resolution*, on the browser leg only (W2d F1). */
+      const branch = 'checkout/moving';
+      await port.updateRef({ name: branch, expectedHead: undefined, head: base });
+      const added = await port.addCheckout!({ branch });
+      await port.updateRef({ name: branch, expectedHead: base, head: child });
+
+      const listed = await port.listCheckouts!();
+      expect(listed.find((checkout) => checkout.id === added.id)?.baseRevisionId).toBe(child);
+      await port.removeCheckout!(added.id);
+    }, 180_000);
+
     it('removes a linked checkout and refuses to remove the live one', async () => {
       const branch = 'checkout/removable';
       await port.updateRef({ name: branch, expectedHead: undefined, head: base });

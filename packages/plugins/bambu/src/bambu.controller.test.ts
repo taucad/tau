@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 
-import type { MachineArtifactReference, MachineConnectionRuntime, MachineNetworkStream } from '@taucad/runtime/machine';
+import type {
+  MachineArtifactReference,
+  MachineConnectionRuntime,
+  MachineDatagramListenInput,
+  MachineNetworkStream,
+} from '@taucad/runtime/machine';
 import { zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -447,6 +452,22 @@ describe('Bambu read-only controller', () => {
       },
     ]);
     expect(listenDatagrams).not.toHaveBeenCalled();
+  });
+
+  it('should listen on UDP 2021 for two advertisement periods so a pass cannot fall between them', async () => {
+    const listenDatagrams = vi.fn(async function* () {
+      yield* [];
+    });
+    for await (const _event of discoverBambuMachines(
+      { configuration: { logicalId: 'discovery' }, signal: new AbortController().signal },
+      { clock: { now: () => '2026-09-14T00:00:00.000Z' }, listenDatagrams },
+    )) {
+      // A silent LAN yields nothing.
+    }
+    /* The X1C advertises about every 5.05 s (5.0–5.1 s measured); a 5 s pass missed it. */
+    const [listen] = listenDatagrams.mock.calls[0] as unknown as [MachineDatagramListenInput];
+    expect(listen.port).toBe(2021);
+    expect(listen.durationMs).toBeGreaterThan(2 * 5100);
   });
 
   it('should redact host failures and require pinned MQTT trust', async () => {

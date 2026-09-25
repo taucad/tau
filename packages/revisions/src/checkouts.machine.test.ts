@@ -1,12 +1,18 @@
 import { createActor } from 'xstate';
+import type { AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#checkouts.machine.js';
 import { checkoutsMachine, selectLeaseSet } from '#checkouts.machine.js';
+import type { CheckoutsMachineEvent } from '#checkouts.machine.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { CheckoutRecord } from '#revision-port.js';
-import { createFakeParent, createFakePromiseActors, recordEmitted } from '#test/fake-actors.js';
-import type { FakePromiseActors } from '#test/fake-actors.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFakeParent, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
+import type { FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
  * Path table — `checkouts.machine` (catalogue: 14).
@@ -39,6 +45,36 @@ import type { FakePromiseActors } from '#test/fake-actors.js';
  * --  a removable record offers removal; `open` rehydrates from records again;
  *     start and stop, serializable snapshot, one exported machine value
  */
+
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 (or the W0 item named on the row) answers each one or
+ * moves it to an exported `checkoutsIgnoredEvents` (D13, MC-R17), and deletes
+ * the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  checkouts: [
+    // W0.8: `turnConflicted` leaves the lease held; no state takes it.
+    ['*', 'turnConflicted'],
+    // W5: L7 F3 — an operation or `open` outside the state that serves it is dropped unanswered.
+    ['idle', 'addCheckout'],
+    ['idle', 'removeCheckout'],
+    ['recovering', 'open'],
+    ['recovering', 'addCheckout'],
+    ['recovering', 'removeCheckout'],
+    ['loading', 'open'],
+    ['loading', 'addCheckout'],
+    ['loading', 'removeCheckout'],
+    ['failed', 'addCheckout'],
+    ['failed', 'removeCheckout'],
+    ['ready.adding', 'addCheckout'],
+    ['ready.adding', 'removeCheckout'],
+    ['ready.removing', 'addCheckout'],
+    ['ready.removing', 'removeCheckout'],
+    ['ready.retiring', 'addCheckout'],
+    ['ready.retiring', 'removeCheckout'],
+  ],
+};
 
 /** Let every queued microtask and the actor's promise handlers run. */
 const flush = async (): Promise<void> => {
@@ -74,6 +110,7 @@ const linked: CheckoutRecord = {
 };
 
 const start = (): Harness => {
+  const guard = guardActors({ ignore: knownDefects });
   const promises = createFakePromiseActors();
   const parent = createFakeParent();
   const actor = createActor(
@@ -86,7 +123,7 @@ const start = (): Harness => {
         retireLease: promises.actor('retireLease'),
       },
     }),
-    { input: { projectId: 'project-1', parentRef: parent.ref } },
+    { input: { projectId: 'project-1', parentRef: parent.ref }, clock: new StepClock(), inspect: guard.inspect },
   );
   const emitted = recordEmitted(actor);
   actor.start();
@@ -605,5 +642,61 @@ describe('checkoutsMachine', () => {
       typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([checkoutsMachine]);
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const invokeId = (path: string): string =>
+      checkoutsMachine.getStateNodeById(`checkouts.${path}`).invoke[0]?.id ?? '';
+    const sweepInvoke = invokeId('recovering');
+    const listInvoke = invokeId('loading');
+    const addInvoke = invokeId('ready.adding');
+    const removeInvoke = invokeId('ready.removing');
+    const retireInvoke = invokeId('ready.retiring');
+    const settlement = {
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      checkoutId: 'checkout-b',
+      runId: 'run-7',
+      revisionId: 'rev-2',
+      trigger: 'turn',
+      branch: 'agent/b',
+      runIds: ['run-7'],
+    } as const;
+    const publicEvents: readonly CheckoutsMachineEvent[] = [
+      { type: 'open' },
+      { type: 'addCheckout', branch: 'agent/c', from: 'rev-1' },
+      { type: 'removeCheckout', id: 'checkout-live' },
+      { type: 'leaseStale', runId: 'run-7' },
+      { type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' },
+      { type: 'turnFinalized', ...settlement },
+      { type: 'turnReleased', turnId: 'turn-1', checkoutId: 'checkout-b', runId: 'run-7' },
+    ];
+    const options = {
+      input: { projectId: 'project-1', parentRef: undefined },
+      events: [
+        ...publicEvents,
+        /* W0.8: the turn sends `turnConflicted`, which the registry's event union does not name yet. */
+        { type: 'turnConflicted', ...settlement },
+        /* Effect outcomes reach the states behind each invoke; they are not public. */
+        { type: `xstate.done.actor.${sweepInvoke}`, output: { retiredRunIds: [] } },
+        { type: `xstate.error.actor.${sweepInvoke}`, error: new Error('no runs directory') },
+        { type: `xstate.done.actor.${listInvoke}`, output: { checkouts: [live, linked] } },
+        { type: `xstate.error.actor.${listInvoke}`, error: new Error('registry unreadable') },
+        {
+          type: `xstate.done.actor.${addInvoke}`,
+          output: { checkout: { ...linked, id: 'checkout-c', branch: 'agent/c' } },
+        },
+        { type: `xstate.error.actor.${addInvoke}`, error: new Error('cannot nest a worktree') },
+        { type: `xstate.done.actor.${removeInvoke}`, output: undefined },
+        { type: `xstate.error.actor.${removeInvoke}`, error: new Error('directory busy') },
+        { type: `xstate.done.actor.${retireInvoke}`, output: undefined },
+        { type: `xstate.error.actor.${retireInvoke}`, error: new Error('lease file gone') },
+      ],
+      limit: 20_000,
+      serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+    };
+
+    expect(unansweredEvents(checkoutsMachine, { ...options, ignore: knownDefects['checkouts'] })).toEqual([]);
+    expect(unreachedStates(checkoutsMachine, options)).toEqual([]);
   });
 });

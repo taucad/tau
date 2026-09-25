@@ -1,19 +1,22 @@
 import { createActor } from 'xstate';
 import { getSimplePaths } from 'xstate/graph';
-import type { AnyEventObject } from 'xstate';
+import type { AnyEventObject, AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#checkout.machine.js';
 import { checkoutMachine, checkoutQueuedCutLimit } from '#checkout.machine.js';
-import type { CheckoutFenceActorInput } from '#checkout.machine.js';
+import type { CheckoutFenceActorInput, CheckoutMachineEvent } from '#checkout.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import {
   createFakeCallbackActors,
   createFakeParent,
   createFakePromiseActors,
-  createManualClock,
   recordEmitted,
-} from '#test/fake-actors.js';
-import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+} from '@taucad/xstate-testing/fakes';
+import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
  * Path table — `checkout.machine` (catalogue: 24).
@@ -52,6 +55,32 @@ import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/f
  * --  `getSimplePaths` generates no state value the table above leaves unexercised
  */
 
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 (or the W0 item named on the row) answers each one or
+ * moves it to an exported `checkoutIgnoredEvents` (D13, MC-R17), and deletes
+ * the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  checkout: [
+    // W5: totality — a fence answer outside `minting.acquiring`, the only state that waits for one.
+    ['clean', 'fenceGranted'],
+    ['clean', 'fenceRefused'],
+    ['dirty.quiet', 'fenceGranted'],
+    ['dirty.quiet', 'fenceRefused'],
+    ['minting.cutting', 'fenceGranted'],
+    ['minting.cutting', 'fenceRefused'],
+    ['minting.writing', 'fenceGranted'],
+    ['minting.writing', 'fenceRefused'],
+    ['minting.publishing', 'fenceGranted'],
+    ['minting.publishing', 'fenceRefused'],
+    ['rereading', 'fenceGranted'],
+    ['rereading', 'fenceRefused'],
+    ['failed', 'fenceGranted'],
+    ['failed', 'fenceRefused'],
+  ],
+};
+
 const headTreeId = 'tree-head';
 const nextTreeId = 'tree-next';
 
@@ -61,14 +90,15 @@ type Harness = Readonly<{
   callbacks: FakeCallbackActors;
   parent: ReturnType<typeof createFakeParent>;
   emitted: ReturnType<typeof recordEmitted>;
-  clock: ManualClock;
+  clock: StepClock;
 }>;
 
 const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWindow?: number }>): Harness => {
+  const guard = guardActors({ ignore: knownDefects });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const parent = createFakeParent();
-  const clock = createManualClock();
+  const clock = new StepClock();
   const actor = createActor(
     checkoutMachine.provide({
       actors: {
@@ -81,6 +111,7 @@ const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWi
     }),
     {
       clock,
+      inspect: guard.inspect,
       input: {
         checkoutId: 'checkout-1',
         branch: options?.branch ?? 'main',
@@ -662,5 +693,47 @@ describe('checkoutMachine', () => {
 
     expect(paths.length).toBeGreaterThan(0);
     expect([...generated].filter((value) => !exercised.has(value))).toEqual([]);
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const invokeId = (path: string): string => checkoutMachine.getStateNodeById(`checkout.${path}`).invoke[0]?.id ?? '';
+    const cutInvoke = invokeId('minting.cutting');
+    const writeInvoke = invokeId('minting.writing');
+    const casInvoke = invokeId('minting.publishing');
+    const readHeadInvoke = invokeId('rereading');
+    const publicEvents: readonly CheckoutMachineEvent[] = [
+      { type: 'changed', paths: ['a.ts'], generation: 1 },
+      { type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] },
+      { type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' },
+      { type: 'fenceGranted' },
+      { type: 'fenceRefused', reason: 'held elsewhere' },
+    ];
+    const options = {
+      input: {
+        checkoutId: 'checkout-1',
+        branch: 'main',
+        headRevisionId: 'rev-1',
+        headTreeId,
+        parentRef: undefined,
+      },
+      /* Effect outcomes reach the states behind each invoke; they are not public. */
+      events: [
+        ...publicEvents,
+        { type: `xstate.done.actor.${cutInvoke}`, output: { treeId: nextTreeId, cutId: 'cut-1' } },
+        { type: `xstate.error.actor.${cutInvoke}`, error: new Error('quota') },
+        { type: `xstate.done.actor.${writeInvoke}`, output: { revisionId: 'rev-2' } },
+        { type: `xstate.error.actor.${writeInvoke}`, error: new Error('the store is out of space') },
+        { type: `xstate.done.actor.${casInvoke}`, output: { status: 'updated', head: 'rev-2' } },
+        { type: `xstate.done.actor.${casInvoke}`, output: { status: 'conflicted', head: 'rev-9' } },
+        { type: `xstate.error.actor.${casInvoke}`, error: new Error('ref locked') },
+        { type: `xstate.done.actor.${readHeadInvoke}`, output: { revisionId: 'rev-9', treeId: 'tree-9' } },
+        { type: `xstate.error.actor.${readHeadInvoke}`, error: new Error('ESTALE') },
+      ],
+      limit: 20_000,
+      serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+    };
+
+    expect(unansweredEvents(checkoutMachine, { ...options, ignore: knownDefects['checkout'] })).toEqual([]);
+    expect(unreachedStates(checkoutMachine, options)).toEqual([]);
   });
 });

@@ -147,6 +147,7 @@
   },
   "devDependencies": {
     "@taucad/utils": "workspace:*",
+    "@taucad/xstate-testing": "workspace:*",
     "xstate": "catalog:"
   },
   "peerDependenciesMeta": {

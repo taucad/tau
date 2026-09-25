@@ -58,6 +58,7 @@ import {
 import { revisionId } from '@taucad/revisions/algorithms';
 import type { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
 import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
+import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 
@@ -459,7 +460,10 @@ export type WorkerProjectRevisionsOptions = Readonly<{
   /** One rooted provider per checkout route; `checkout.root` is that route. */
   filesystem: (root: string) => RootedFileSystem | Promise<RootedFileSystem>;
   authorityEpoch: string;
-  clock?: () => number;
+  /** Timers and time for this project's revision tree (MC-R4); tests pass a `StepClock`. */
+  clock?: ActorOptions<AnyActorLogic>['clock'];
+  /** The tree's inspector; development passes the console inspector, tests the harness. */
+  inspect?: ActorOptions<AnyActorLogic>['inspect'];
   /**
    * Which API origin this document is signed in to, read per use.
    *
@@ -520,6 +524,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     projectId,
     authorityEpoch: options.authorityEpoch,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     actorId: projectId,
     deviceId: () => device,
     ...(options.recordHistoryPush === undefined ? {} : { recordHistoryPush: options.recordHistoryPush }),
@@ -1409,7 +1414,10 @@ export type WorkerRevisionRegistryOptions = Readonly<{
    * project, one store. The page reads the projection from the host side.
    */
   hostServesRevisions?: (projectId: string) => boolean;
-  clock?: () => number;
+  /** Timers and time for every revision tree this worker opens (MC-R4). */
+  clock?: ActorOptions<AnyActorLogic>['clock'];
+  /** The trees' inspector; development passes the console inspector, tests the harness. */
+  inspect?: ActorOptions<AnyActorLogic>['inspect'];
 }>;
 
 /** The worker's revision roots, one per opened project. @public */
@@ -1529,6 +1537,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         authorityEpoch:
           typeof options.authorityEpoch === 'string' ? options.authorityEpoch : options.authorityEpoch(projectId),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
+        ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
         /* The same fact the credential frame carries, read per use: a page that
          * signs in after the project opened publishes without reopening it. */
         apiBaseUrl: () => apiBaseUrl ?? credential?.apiBaseUrl,

@@ -1,14 +1,25 @@
 import type { Scheduler } from 'fast-check';
 import { flush, StepClock } from '@taucad/xstate-testing/clock';
 
+/**
+ * An environment fault the simulator schedules as a step against one process.
+ *
+ * @public
+ */
 export type SeamFault = 'portClose' | 'processDeath' | 'duplicate' | 'reconnect' | 'freeze' | 'thaw';
 
-/** Numbers are 32-bit integers (FM-R8). */
+/**
+ * Numbers are 32-bit integers (FM-R8).
+ *
+ * @public
+ */
 export type TraceValue = string | boolean | number;
 
 /**
  * A trace line's body, as a scenario's `describe` returns it. `kind` is the spec action; a machine
  * step's is its microstep's `meta.tla` (W2 MC-R27).
+ *
+ * @public
  */
 export type TraceEntry = {
   /** Further fields: commandId, status, effect, cursor, generation, … */
@@ -25,9 +36,16 @@ export type TraceEntry = {
 /**
  * Trace format v1: one flat NDJSON object per spec action, so TLA+ reads `Trace[l].kind` directly.
  * `t` is the release counter: lines are written at release points, so their order is causal.
+ *
+ * @public
  */
 export type TraceLine = TraceEntry & { readonly t: number };
 
+/**
+ * One released task: its release counter, the process it ran on, and what it was.
+ *
+ * @public
+ */
 export type SimulatorStep = {
   readonly t: number;
   readonly actor: string;
@@ -38,6 +56,8 @@ export type SimulatorStep = {
 /**
  * A simulated `@taucad/rpc` port end: structurally a `Port<T>`, so code that takes one runs over it.
  * Deliveries are scheduled tasks; `onClose` fires on a `portClose` fault.
+ *
+ * @public
  */
 export type SimulatedPort<T> = {
   postMessage: (data: T) => void;
@@ -46,12 +66,32 @@ export type SimulatedPort<T> = {
   close: () => void;
 };
 
+/**
+ * A simulated process: its own clock, advanced only by the simulator.
+ *
+ * @public
+ */
 export type SimulatedProcess = { readonly clock: StepClock };
 
+/**
+ * What the simulator calls on a process's `processDeath` and `reconnect` faults.
+ *
+ * @public
+ */
 export type ProcessHooks = { readonly stop: () => void; readonly reconnect?: () => void };
 
+/**
+ * How a run ended; any outcome other than `done` fails the scenario.
+ *
+ * @public
+ */
 export type RunOutcome = 'done' | 'no-progress' | 'step-cap';
 
+/**
+ * The simulator a scenario builds its processes, ports and faults on.
+ *
+ * @public
+ */
 export type SeamSimulator = {
   readonly process: (id: string, hooks: ProcessHooks) => SimulatedProcess;
   readonly port: <T>(from: string, to: string) => readonly [SimulatedPort<T>, SimulatedPort<T>];
@@ -97,6 +137,8 @@ const removable = <T>(set: Set<T>, item: T): (() => void) => {
  * and faults, every delivery, timer and fault a task on fast-check's seeded `scheduler`, which picks
  * the order, shrinks a failure and replays it (`fc.schedulerFor`). After each released task the
  * simulator flushes and appends the lines `describe` builds for that step.
+ *
+ * @public
  */
 export const createSeamSimulator = (
   scheduler: Scheduler,

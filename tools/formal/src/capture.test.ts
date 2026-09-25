@@ -34,7 +34,26 @@ describe('captureChatLogs', () => {
 
     expect(copied).toEqual(['chat-a', 'chat-b']);
     expect(destination).toBe(path.join(root, 'out/test-results/chat-logs/desktop-e2e/chat.spec.ts'));
-    expect(readFileSync(path.join(destination, 'chat-b.jsonl'), 'utf8')).toBe('{"b":null}\n');
+    expect(readFileSync(path.join(destination, 'chat-b.0.jsonl'), 'utf8')).toBe('{"b":null}\n');
+  });
+
+  it('should keep both logs when two tests of one spec reuse a chat id', async () => {
+    const root = temporaryRoot();
+    const destination = path.join(root, 'out');
+    writeLog(path.join(root, 'first/.tau/chats/chat-1/events.jsonl'), '{"first":1}\n');
+    writeLog(path.join(root, 'second/.tau/chats/chat-1/events.jsonl'), '{"second":1}\n');
+
+    await Promise.all([
+      captureChatLogs(path.join(root, 'first'), destination),
+      captureChatLogs(path.join(root, 'second'), destination),
+    ]);
+    await writeChatLogs(destination, [{ chatId: 'chat-1', text: '{"third":1}\n' }]);
+
+    expect(
+      ['chat-1.0.jsonl', 'chat-1.1.jsonl', 'chat-1.2.jsonl']
+        .map((file) => readFileSync(path.join(destination, file), 'utf8'))
+        .sort(),
+    ).toEqual(['{"first":1}\n', '{"second":1}\n', '{"third":1}\n']);
   });
 
   it('should write logs read through a page', async () => {
@@ -42,6 +61,6 @@ describe('captureChatLogs', () => {
 
     await writeChatLogs(destination, [{ chatId: 'chat-z', text: '{"z":1}\n' }]);
 
-    expect(readFileSync(path.join(destination, 'chat-z.jsonl'), 'utf8')).toBe('{"z":1}\n');
+    expect(readFileSync(path.join(destination, 'chat-z.0.jsonl'), 'utf8')).toBe('{"z":1}\n');
   });
 });

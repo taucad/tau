@@ -6,6 +6,8 @@ import { canonicalJson } from '#graph.js';
 /**
  * Drives one live actor from spec actions (forward replay, S6 bridge b). The adapter supplies the
  * determinism replay needs (L1 F19): W2's fakes and `StepClock`, stable ids, pinned versions.
+ *
+ * @public
  */
 export type ConformanceAdapter<H> = {
   /** A fresh live actor over fakes. */
@@ -19,6 +21,11 @@ export type ConformanceAdapter<H> = {
   readonly stop?: (harness: H) => void;
 };
 
+/**
+ * The first field where the implementation left the spec on a replayed behaviour.
+ *
+ * @public
+ */
 export type Divergence = {
   readonly behaviour: number;
   readonly step: number;
@@ -31,7 +38,11 @@ export type Divergence = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
-/** The first field (one level into records) where the implementation's view differs from the spec state. */
+/**
+ * The first field (one level into records) where the implementation's view differs from the spec state.
+ *
+ * @public
+ */
 export const firstDifference = (
   spec: SpecView,
   actual: SpecView,
@@ -57,6 +68,8 @@ export const firstDifference = (
 /**
  * Replays spec behaviours on live actors and returns each behaviour's first divergence.
  * Each behaviour's first state is its `Init`; every later state names the action that produced it.
+ *
+ * @public
  */
 export const replaySuite = async <H>(
   behaviours: ReadonlyArray<readonly SpecView[]>,
@@ -95,7 +108,11 @@ export const replaySuite = async <H>(
   return divergences;
 };
 
-/** One recorded delivery (W2's `recordTransitions` record, of which replay needs these fields). */
+/**
+ * One recorded delivery (W2's `recordTransitions` record, of which replay needs these fields).
+ *
+ * @public
+ */
 export type TransitionRecord = {
   readonly event: AnyEventObject;
   readonly value: unknown;
@@ -106,6 +123,8 @@ export type TransitionRecord = {
  * Replay equality (D3, W2 MC-R6): fold the live actor's recorded events through pure `transition`
  * from `initialTransition` and compare state value and context after every step. A difference means
  * a transition read something outside its snapshot and event.
+ *
+ * @public
  */
 export const replayEquality = (
   machine: AnyStateMachine,

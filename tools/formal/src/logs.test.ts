@@ -81,7 +81,22 @@ describe('validateCapturedLogs', () => {
     });
   });
 
-  it('should pass and write empty verdicts when nothing was captured', async () => {
+  it('should fail under CI when the suites captured no log', async () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable
+    const context = { ...temporaryContext(), env: { CI: 'true' } };
+    const lines: string[] = [];
+
+    const code = await validateCapturedLogs(context, {
+      project: 'desktop-e2e',
+      validate: async () => ({ outcome: 'pass', seconds: 0 }),
+      log: (line) => lines.push(line),
+    });
+
+    expect(code).toBe(1);
+    expect(lines.join('\n')).toContain('captured no chat log');
+  });
+
+  it('should pass locally with empty verdicts when nothing was captured', async () => {
     const context = temporaryContext();
 
     const code = await validateCapturedLogs(context, {

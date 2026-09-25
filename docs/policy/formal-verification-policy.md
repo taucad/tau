@@ -44,6 +44,8 @@ Specs live in the owner project's `specs/` directory. Modules that `EXTENDS` or 
 
 Specs are excluded from the `production` input, so a spec edit never rebuilds a dependant.
 
+**Why**: A model next to the code it constrains changes in the same review, and one layout lets the runner find every configuration without a registry of paths.
+
 ### 3. Hand-Written Specs
 
 Write specs from rulings and invariants. Extraction from a machine config is for bootstrap or migration evidence only.
@@ -63,6 +65,8 @@ Every configuration, Apalache command and log case has an entry in `expected.jso
 A changed verdict fails the run until `expected.json` changes in the same change. A configuration file with no entry fails too.
 
 A violating configuration holds exactly one expected-violated property, because TLC stops at the first violation and leaves the rest unchecked. A passing configuration may hold many.
+
+**Why**: A counterexample nobody recorded is either forgotten or silently fixed; a recorded verdict turns both into a failing run that names the change.
 
 CORRECT:
 
@@ -95,6 +99,8 @@ Liveness configurations use no `SYMMETRY`, and fairness applies only to actions 
 
 Run models only through `formal` Nx targets or `node tools/formal/src/cli.ts`. The runner gives each JVM a 1 GB heap, two workers and a watchdog (300 s in the pull-request tier, 900 s nightly), runs at most two JVMs at once, refuses to start below 3 GiB free disk, puts `-metadir` under `node_modules/.cache/formal/tlc/`, and passes `-noGenerateSpecTE`. Verdicts come from TLC's text, never from its exit code alone; unreadable output is an error, never a pass.
 
+**Why**: An unbounded TLC run filled the disk in spike S1, and `-cleanup` deletes the whole `./states` directory, other models' runs included.
+
 CORRECT:
 
 ```bash
@@ -117,7 +123,9 @@ java -cp tla2tools.jar tlc2.TLC -cleanup AttachGeneration.tla   # -cleanup delet
 
 ### 7. Generated Files Are Committed and Checked
 
-Suites, graphs, drift manifests, goldens and generated Lean are committed, canonically sorted and at most 1 MB each. The tier that can regenerate a file fails when the committed copy is stale. Regenerate with `formal update`.
+Suites, graphs, drift manifests, goldens and generated Lean are committed, canonically sorted and at most 1 MB each. The tier that can regenerate a file fails when the committed copy is stale; JSON is compared by value, because the commit hook reformats it. Regenerate with `formal update`.
+
+**Why**: A reviewer sees a behaviour change as a diff to a committed file, and a stale file fails in the tier that can regenerate it rather than in the tier that reads it.
 
 ### 8. Trace and Log Fields Are TLC-Readable
 
@@ -129,21 +137,31 @@ Fields a spec reads are strings, booleans or 32-bit integers. Validation reads a
 
 Lean files import `Init` and `Std` only: no Mathlib, Lake, `sorry` or `native_decide`. Axioms stay within `propext`, `Quot.sound` and `Classical.choice`. A counterexample is a `decide` theorem.
 
+**Why**: A proof that depends on Mathlib, Lake or `native_decide` either cannot build in CI's pinned core or trusts the compiler instead of the kernel.
+
 ### 10. Differential Tests Compare With Goldens
 
 TypeScript is compared with committed Lean goldens in the Node tier; the Lean tier regenerates them. A known mismatch is `it.fails` naming its defect. Nightly seeds are fresh and printed for replay. Every mutant in `mutants.json` must be caught, and a mutant whose `find` no longer matches fails as stale.
+
+**Why**: Goldens make the model the oracle for the TypeScript on every pull request, without Lean installed; mutants prove the comparison can fail.
 
 ### 11. Pinned Tools, Visible Skips
 
 Every tool is pinned by URL and sha256 in `tools/formal/toolchain.lock`, and `formal setup` refuses other bytes. Tools live under `node_modules/.cache/formal/`, never in `pnpm install`. An absent tool prints `SKIPPED <target>: …; run pnpm nx run formal:setup` and exits 0 locally and 1 when `CI` is set.
 
+**Why**: The rolling TLC release tag has already served different bytes under the same URL; a pinned hash makes that a setup failure instead of a changed verdict, and a skip that exits 0 in CI would be a gate that checked nothing.
+
 ### 12. The Drift Gate Forces a Spec Touch
 
 A spec tied to a machine, a seam or a code path has `<Module>/drift.json`: the machine alphabet, each machine's `version`, table and source hashes, each transition's `meta.tla`, and the spec hashes. The owner's Node-tier test fails when the manifest is stale or when a transition names an action the spec does not define. `formal update` refuses to rewrite a manifest whose alphabet, tables, sources or actions moved while no spec file did, or whose alphabet moved while no machine's `version` did.
 
+**Why**: A machine whose alphabet changes without its spec changing is the drift the models exist to stop; a stale manifest is the cheapest place to catch it.
+
 ### 13. Outputs Stay Out of the Root
 
 Scratch and toolchains go under `node_modules/.cache/formal/`, reports under `out/reports/formal/<projectRoot>/`, captured logs under `out/test-results/chat-logs/<project>/` and simulator traces under `out/test-results/seam-traces/<project>/`.
+
+**Why**: Anything written at the workspace root fails `validate-workspace-root`, and `out/` and `node_modules/.cache/` are already ignored by Git.
 
 ## Anti-Patterns
 

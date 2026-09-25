@@ -1384,7 +1384,10 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
       : [
           {
             name: checkout.branch,
-            head: checkout.headRevisionId,
+            /* The live child's head first, as `headRevisionId` reads it: the
+               registry record lags a save, and the row then counted the
+               branch behind itself (D47). */
+            head: context.checkoutStatus[checkout.id]?.headRevisionId ?? checkout.headRevisionId,
             checkoutId: checkout.id,
             checkoutRoot: checkout.root,
             /* The registry's own record, not the root's routing memory: a chip

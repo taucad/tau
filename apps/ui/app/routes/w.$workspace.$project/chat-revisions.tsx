@@ -80,6 +80,7 @@ import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-s
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 /**
  * The Revisions pane (S26, A18, A29), as a mobile `FloatingPanel` around the
@@ -316,6 +317,8 @@ function OrientationStrip({
             <dd>
               {where.branch === undefined ? '—' : `${where.branch} → ${revisionName(tip ?? revisions[0]?.n) ?? '—'}`}
             </dd>
+            <dt className='text-muted-foreground'>This device</dt>
+            <dd>{isDesktopTarget() ? 'Workbench (desktop app)' : 'Workbench (browser)'}</dd>
           </dl>
         </CollapsibleContent>
       </Collapsible>

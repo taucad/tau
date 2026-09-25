@@ -208,6 +208,64 @@ describe('RevisionRow', () => {
     expect(details).toHaveTextContent('Agent turn');
   });
 
+  /* W1 Details: the revision a row follows, and a first revision that follows none. */
+  it('names the parent it follows in Details, and says a first revision has none', async () => {
+    const user = userEvent.setup();
+    renderRow({ revision: card({ parent: 'rev-1' }) });
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Parent\s*rev-1/u);
+  });
+
+  it('says a branch’s first revision follows none', async () => {
+    const user = userEvent.setup();
+    renderRow({ revision: card({ revisionId: 'rev-1', n: 1 }) });
+    await openRow(user, 'Rev 1 · Thicker base');
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(document.querySelector('dl[aria-label="Details for Rev 1"]')).toHaveTextContent(
+      /Parent\s*None \(first revision\)/u,
+    );
+  });
+
+  /* Canvas round 4b: the whole revision against the current files, from the row's More. */
+  it('compares the whole revision with the current files from More, and returns to its own changes', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
+    revisionStatusHarness.comparison = { original: 'cube(1);', modified: 'cube(5);' };
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
+
+    const since = await screen.findByRole('list', { name: 'Changed since Rev 2' });
+    expect(revisionStatusHarness.diffRequests).toContain('rev-2..rev-5');
+    await user.click(within(since).getByRole('button', { name: 'Compare bracket.scad with the current file' }));
+    expect(await screen.findByTestId('diff')).toHaveTextContent('cube(1);|cube(5);');
+
+    await user.click(screen.getByRole('button', { name: 'Stop comparing' }));
+    expect(screen.getByRole('list', { name: 'Changed files' })).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Changed since Rev 2' })).not.toBeInTheDocument();
+  });
+
+  it('says so when nothing changed since the revision', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
+    renderRow();
+    await openRow(user);
+    revisionStatusHarness.diff = [];
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
+    expect(await screen.findByRole('note')).toHaveTextContent('No changes since Rev 2.');
+  });
+
+  it('offers no Compare with current on the revision you are on, which already compares with your edits', async () => {
+    const user = userEvent.setup();
+    renderRow({ isCurrent: true, isDirty: true });
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    expect(screen.queryByRole('menuitem', { name: 'Compare with current' })).not.toBeInTheDocument();
+  });
+
   it('gives every target at least 24 × 24 CSS px', async () => {
     const user = userEvent.setup();
     renderRow({ revision: card({ tags: ['v1'] }) });

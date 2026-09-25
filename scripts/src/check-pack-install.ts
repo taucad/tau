@@ -109,10 +109,15 @@ const run = (command: string, arguments_: string[], cwd: string): string => {
 const exportTarget = (entry: ExportEntry): string | undefined =>
   typeof entry === 'string' ? entry : (entry.import ?? entry.default);
 
-/** Every subpath a consumer can `import()`, as bare specifiers. Type-only entries have no runtime target. */
+/**
+ * Every subpath a consumer can `import()`, as bare specifiers. Type-only entries have no runtime target;
+ * asset targets (CSS, WASM) are covered by {@link requiredArtifactPaths} instead.
+ */
 export const importableSpecifiers = (manifest: Manifest): string[] =>
   Object.entries(manifest.exports ?? {})
-    .filter(([key, entry]) => key !== './package.json' && !key.includes('*') && exportTarget(entry) !== undefined)
+    .filter(
+      ([key, entry]) => key !== './package.json' && !key.includes('*') && /\.[cm]?js$/u.test(exportTarget(entry) ?? ''),
+    )
     .map(([key]) => (key === '.' ? manifest.name : `${manifest.name}${key.slice(1)}`));
 
 /** Every file an installed tree must contain: `files` entries plus every export condition target. */
@@ -172,10 +177,13 @@ export const assetUrlSpecifiers = (source: string): string[] =>
     return specifier === undefined || /^[a-z][\d+.a-z-]*:/u.test(specifier) ? [] : [specifier];
   });
 
-/** Exported package assets reached through Node's standard package resolver. */
+/** Exported package assets reached through Node's standard package resolver; interpolated specifiers are dynamic. */
 export const packageAssetUrlSpecifiers = (source: string): string[] =>
   [...source.matchAll(/new URL\(\s*import\.meta\.resolve\(\s*(["'`])(?<specifier>[^"'`]+)\1\s*\)\s*\)/gu)].flatMap(
-    (match) => (match.groups?.['specifier'] === undefined ? [] : [match.groups['specifier']]),
+    (match) => {
+      const specifier = match.groups?.['specifier'];
+      return specifier === undefined || specifier.includes('${') ? [] : [specifier];
+    },
   );
 
 /** Every asset an installed package's modules reach for must exist inside that package. */
@@ -219,7 +227,15 @@ const assertAssetUrlsResolve = (installedRoot: string, name: string): number => 
  * (`$strip`/`$strict` brands), so a second copy breaks both — this is the
  * independent witness for the `tau-peer-dependency-shape` gate, read from a real
  * npm install rather than from the manifests.
+ *
+ * A dependent listed in `isolatedZodDependents` keeps its own nested copy: no Tau
+ * schema crosses into it, so that copy cannot fork identity.
  */
+const isolatedZodDependents: Record<string, string> = {
+  '@anthropic-ai/sandbox-runtime':
+    'zod ^3 validates its own CLI/config input only; @taucad/native-process-core passes it no schemas.',
+};
+
 const assertSingleZodInstance = (appRoot: string): void => {
   type Node = {
     readonly path?: string;
@@ -240,7 +256,9 @@ const assertSingleZodInstance = (appRoot: string): void => {
       if (name === 'zod' && child.path !== undefined) {
         installs.add(child.path);
       }
-      walk(child);
+      if (!(name in isolatedZodDependents)) {
+        walk(child);
+      }
     }
   };
   walk(JSON.parse(listing.stdout || '{}') as Node);

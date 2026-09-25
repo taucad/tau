@@ -263,7 +263,8 @@ describe('assetUrlSpecifiers', () => {
       packageAssetUrlSpecifiers(
         `const single = new URL(import.meta.resolve('replicad-opencascadejs/wasm'));
          const multi = new URL(import.meta.resolve("replicad-opencascadejs/multi/wasm")).href;
-         const dynamic = new URL(import.meta.resolve(specifier));`,
+         const dynamic = new URL(import.meta.resolve(specifier));
+         const template = new URL(import.meta.resolve(\`\${owner}/package.json\`));`,
       ),
     ).toStrictEqual(['replicad-opencascadejs/wasm', 'replicad-opencascadejs/multi/wasm']);
   });

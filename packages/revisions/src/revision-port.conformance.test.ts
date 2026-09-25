@@ -1341,6 +1341,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       it('pushes each ref on its own result, and a refused record ref does not stop main', async () => {
         await harness.writeRawRef('refs/tau/chats/refused', head);
         await harness.writeRawRef('refs/tau/chats/kept', head);
+        const before = fixture.trail().length;
 
         const result = await port.push({
           remote: 'tau',
@@ -1358,6 +1359,14 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
           ['refs/tags/v1', 'updated'],
           ['refs/heads/main', 'updated'],
         ]);
+        /* One receive-pack for all four (EQ8): the per-ref report is the
+         * server's `report-status`, not one request per ref. */
+        expect(
+          fixture
+            .trail()
+            .slice(before)
+            .filter((entry) => entry.endsWith('/git-receive-pack')),
+        ).toHaveLength(1);
         // The server is the witness, not the client's own bookkeeping.
         expect(await fixture.git(['rev-parse', 'refs/heads/main'])).toBe(head);
         expect(await fixture.git(['rev-parse', 'refs/tau/chats/kept'])).toBe(head);
@@ -1425,6 +1434,104 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
 
         expect(held.refs[0]?.status).toBe('updated');
         expect(await fixture.git(['rev-parse', 'refs/heads/main'])).toBe(moved);
+      }, 180_000);
+
+      /* E4 (D10, EQ8): git's floor is one advertisement and one `receive-pack`
+       * per push, whatever the ref count — every extra request is a whole
+       * lease hydrate on the Tau API. Counted off the server's own trail. */
+      it('makes one advertisement and one receive-pack for a three-ref push', async () => {
+        const names = ['refs/heads/w13-a', 'refs/heads/w13-b', 'refs/tau/chats/w13'] as const;
+        const advance = async (parent: RevisionId | undefined, body: string): Promise<RevisionId> => {
+          const receipt = await port.writeRevision({
+            parents: parent === undefined ? [] : [parent],
+            tree: tree({ 'w13.txt': body }),
+            provenance: provenance('user'),
+            summary: summary(body),
+          });
+          const next = revisionId(receipt.commitId);
+          for (const name of names) {
+            // eslint-disable-next-line no-await-in-loop -- three refs, one write each.
+            await harness.writeRawRef(name, next);
+          }
+          return next;
+        };
+        const pushCounted = async (): Promise<{ statuses: string[]; infoRefs: number; receivePacks: number }> => {
+          const before = fixture.trail().length;
+          const pushed = await port.push({ remote: 'tau', refs: names.map((name) => ({ name })) });
+          const trail = fixture.trail().slice(before);
+          return {
+            statuses: pushed.refs.map((entry) => entry.status),
+            infoRefs: trail.filter((entry) => entry === `GET ${new URL(fixture.url).pathname}/info/refs`).length,
+            receivePacks: trail.filter((entry) => entry.endsWith('/git-receive-pack')).length,
+          };
+        };
+
+        const first = await advance(undefined, 'one\n');
+        expect(await pushCounted()).toStrictEqual({
+          statuses: ['updated', 'updated', 'updated'],
+          infoRefs: 1,
+          receivePacks: 1,
+        });
+
+        const second = await advance(first, 'two\n');
+        expect(await pushCounted()).toStrictEqual({
+          statuses: ['updated', 'updated', 'updated'],
+          infoRefs: 1,
+          receivePacks: 1,
+        });
+        for (const name of names) {
+          // eslint-disable-next-line no-await-in-loop -- the server is the witness, one ref at a time.
+          expect(await fixture.git(['rev-parse', name])).toBe(second);
+        }
+
+        expect(await pushCounted()).toStrictEqual({
+          statuses: ['upToDate', 'upToDate', 'upToDate'],
+          infoRefs: 1,
+          receivePacks: 0,
+        });
+      }, 180_000);
+
+      /* One request carries the whole set, so `atomic` means what it means on
+       * the disk leg: one stale lease refuses every ref, and a rewind without a
+       * lease is refused per ref, before anything is sent. */
+      it('refuses an atomic set whole on one stale lease, and a rewind without a lease', async () => {
+        const mint = async (parents: RevisionId[], body: string): Promise<RevisionId> => {
+          const receipt = await port.writeRevision({
+            parents,
+            tree: tree({ 'atomic.txt': body }),
+            provenance: provenance('user'),
+            summary: summary(body),
+          });
+          return revisionId(receipt.commitId);
+        };
+        const x = 'refs/heads/w13-x';
+        const y = 'refs/heads/w13-y';
+        const base = await mint([], 'base\n');
+        await harness.writeRawRef(x, base);
+        await harness.writeRawRef(y, base);
+        await port.push({ remote: 'tau', refs: [{ name: x }, { name: y }] });
+
+        const next = await mint([base], 'next\n');
+        await harness.writeRawRef(x, next);
+        await harness.writeRawRef(y, next);
+        const atomic = await port.push({
+          remote: 'tau',
+          atomic: true,
+          refs: [
+            { name: x, expected: base },
+            { name: y, expected: next },
+          ],
+        });
+
+        expect(atomic.refs.map((entry) => entry.status)).toStrictEqual(['rejected', 'rejected']);
+        expect(await fixture.git(['rev-parse', x])).toBe(base);
+
+        await harness.writeRawRef(x, await mint([], 'unrelated\n'));
+        const rewind = await port.push({ remote: 'tau', refs: [{ name: x }] });
+
+        expect(rewind.refs[0]?.status).toBe('rejected');
+        expect(rewind.refs[0]?.reason).toContain('non-fast-forward');
+        expect(await fixture.git(['rev-parse', x])).toBe(base);
       }, 180_000);
     });
   }

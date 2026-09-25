@@ -81,6 +81,8 @@ export type CommitLeaseArguments = {
   lease: RepositoryLease;
   /** The authenticated pusher, from the session and never from the request (NI16). */
   committedBy: string;
+  /** The cloud host the pusher's request came through (D21, EQ11); absent for the account's own push. */
+  viaDevice?: string;
   /** Live packs tolerated before this committer compacts. */
   packBound?: number;
   /** Per-repository ceiling on non-LFS bytes (D20). */
@@ -278,7 +280,12 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
 
   const next = succeedManifest(
     lease.manifest,
-    { refs: references, packs: [...retainedLive, ...uploaded], committedBy: args.committedBy },
+    {
+      refs: references,
+      packs: [...retainedLive, ...uploaded],
+      committedBy: args.committedBy,
+      ...(args.viaDevice === undefined ? {} : { viaDevice: args.viaDevice }),
+    },
     at,
   );
   await writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next });

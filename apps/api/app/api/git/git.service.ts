@@ -99,11 +99,19 @@ export type GitAccess = {
   /** What the authenticated caller may do with this project. */
   readonly role: ProjectRole;
   /**
-   * Who is asking: the authenticated user, or a named system caller such as a
+   * Who is asking: the authenticated user, a cloud host (`device:<id>`, never
+   * its owner's id — RV-W10 F1), or a named system caller such as a
    * publication viewer's repair. Keys the hydrate budgets, so an owner's own
    * reads are never spent by anybody else (D22).
    */
   readonly callerId: string;
+  /**
+   * The cloud host this request came through (D21), as the git transport
+   * resolved it; absent for the account's own request. Recorded as the push's
+   * `viaDevice` (EQ11), and it holds the caller at `write` whatever the
+   * owner's own role is (I10).
+   */
+  readonly viaDevice?: string;
   /** Bytes this project may still add before the plan allowance is spent. */
   readonly remainingBytes: number;
   /** The owner's complete plan allowance, used by serialized write admission. */
@@ -332,19 +340,28 @@ export class GitRepositoryService implements OnModuleDestroy {
     projectId: string;
     userId: string;
     mode: 'read' | 'write' | 'finalize';
+    /** The cloud host the owner's request came through (D21), when it did. */
+    viaDevice?: string | undefined;
   }): Promise<GitAccess> {
     const access = await this.projectAccess.authorize(
       args.projectId,
       args.userId,
       args.mode === 'read' ? 'read' : 'write',
     );
+    const caller =
+      args.viaDevice === undefined
+        ? { role: access.role, callerId: args.userId }
+        : ({
+            role: 'write',
+            callerId: `device:${args.viaDevice}`,
+            viaDevice: args.viaDevice,
+          } satisfies Pick<GitAccess, 'role' | 'callerId' | 'viaDevice'>);
 
     if (args.mode === 'read') {
       return {
         projectId: args.projectId,
         ownerId: access.ownerId,
-        role: access.role,
-        callerId: args.userId,
+        ...caller,
         /* A read spends nothing and is offered nothing: every caller that reads
            these two is a write caller (`git.controller.ts`, `git-lfs.service.ts`). */
         remainingBytes: 0,
@@ -375,8 +392,7 @@ export class GitRepositoryService implements OnModuleDestroy {
     return {
       projectId: args.projectId,
       ownerId: access.ownerId,
-      role: access.role,
-      callerId: args.userId,
+      ...caller,
       remainingBytes,
       storageLimitBytes: limit,
     };
@@ -724,6 +740,7 @@ export class GitRepositoryService implements OnModuleDestroy {
         store: this.store,
         lease,
         committedBy: args.committedBy,
+        ...(args.access.viaDevice === undefined ? {} : { viaDevice: args.access.viaDevice }),
         byteCeiling: this.repositoryByteCeiling,
         ...(this.faults === undefined ? {} : { faults: this.faults }),
       });
@@ -1012,7 +1029,7 @@ export class GitRepositoryService implements OnModuleDestroy {
    * @throws HttpException `429` when a daily hydrate budget is spent.
    * @throws ServiceUnavailableException When another lease would not fit, or the owner already holds its share.
    */
-  private async admitLease(access: Pick<GitAccess, 'ownerId' | 'callerId'>): Promise<() => void> {
+  private async admitLease(access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>): Promise<() => void> {
     const { ownerId } = access;
     await this.sweepAbandonedLeases();
     await mkdir(this.#leaseParent, { recursive: true });
@@ -1069,17 +1086,23 @@ export class GitRepositoryService implements OnModuleDestroy {
    * third parties together cannot turn the owner's repositories into unbounded
    * egress, and exhausting it never touches the owner's own bucket.
    *
+   * A cloud host is the owner's device (EQ5) but not the owner's bucket
+   * (RV-W10 F1): it has its own `caller:device:<id>` bucket and stays out of
+   * the aggregate, so a looping host can spend neither the owner's own reads
+   * nor the collaborators' allowance.
+   *
    * @param access - Whose repository, and who is asking.
    * @throws HttpException `429` with `retryAfterSeconds` when a bucket is spent.
    */
-  private async spendHydrate(access: Pick<GitAccess, 'ownerId' | 'callerId'>): Promise<void> {
+  private async spendHydrate(access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>): Promise<void> {
     const own = access.callerId === access.ownerId;
+    const shared = !own && access.viaDevice === undefined;
     const buckets = [
       {
         key: `git:hydrate:${access.ownerId}:${own ? 'owner' : `caller:${access.callerId}`}`,
         limit: hydratesPerCallerPerDay,
       },
-      ...(own ? [] : [{ key: `git:hydrate:${access.ownerId}:others`, limit: hydratesFromOthersPerOwnerPerDay }]),
+      ...(shared ? [{ key: `git:hydrate:${access.ownerId}:others`, limit: hydratesFromOthersPerOwnerPerDay }] : []),
     ];
     for (const bucket of buckets) {
       // oxlint-disable-next-line no-await-in-loop -- the aggregate is spent only once the caller's own bucket admitted the read

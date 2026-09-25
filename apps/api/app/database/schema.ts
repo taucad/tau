@@ -1741,9 +1741,18 @@ export const hostDevice = pgTable(
      * also stops a container and which project a run directory row belongs to.
      */
     cloudProjectId: text('cloud_project_id'),
+    /**
+     * The cloud host's repository-scoped push credential (D21, I10), hashed;
+     * null on a paired laptop. A second secret beside `credential_hash`
+     * because that one also opens the model gateway, jobs and the control
+     * socket: this one opens `cloud_project_id`'s git routes and nothing else,
+     * and dies with `revoked_at`. Only `git-transport.ts` reads it.
+     */
+    gitCredentialHash: text('git_credential_hash'),
   },
   (table) => [
     uniqueIndex('agent_device_credential_hash_idx').on(table.credentialHash),
+    uniqueIndex('agent_device_git_credential_hash_idx').on(table.gitCredentialHash),
     index('agent_device_owner_idx').on(table.ownerId, desc(table.createdAt)),
     /* Partial: a revoked cloud host stays as history and must not block the
      * next provisioning of the same project. */

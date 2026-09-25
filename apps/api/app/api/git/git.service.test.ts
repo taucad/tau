@@ -654,6 +654,56 @@ describe('GitRepositoryService security floor (W9)', () => {
     await expect(service.advertiseRefs(access, 'git-upload-pack')).resolves.toBeDefined();
   }, 60_000);
 
+  /* RV-W10 F1: a cloud host acts for its owner but reads on its own bucket,
+     outside the owner's and outside the aggregate, so a host looping on one
+     project can deny neither the owner's sync nor a collaborator's. */
+  it('should give a cloud host its own hydrate bucket, so a host at its budget leaves the owner unaffected', async () => {
+    const counters = new Map<string, number>();
+    const limiter = new PublicationRateLimiterService({
+      client: {
+        // oxlint-disable-next-line max-params -- `eval(script, numberOfKeys, key, expiry, count)` is Redis's own signature
+        eval: async (_script: string, _keys: number, key: string, _expiry: string, count: string): Promise<number> => {
+          const next = (counters.get(key) ?? 0) + Number(count);
+          counters.set(key, next);
+          return next;
+        },
+      },
+    } as unknown as RedisService);
+    const day = Math.floor(Date.now() / 86_400_000);
+    const service = createService(store, caughtUp(), { rateLimiter: limiter });
+    const host = await service.authorize({ projectId, userId: ownerId, mode: 'read', viaDevice: 'agent_cloud' });
+
+    await expect(service.advertiseRefs(host, 'git-upload-pack')).resolves.toBeDefined();
+    expect(host.callerId).toBe('device:agent_cloud');
+    expect([...counters.keys()]).toEqual([`git:hydrate:${ownerId}:caller:device:agent_cloud:w86400:${String(day)}`]);
+
+    counters.set(`git:hydrate:${ownerId}:caller:device:agent_cloud:w86400:${String(day)}`, hydratesPerCallerPerDay);
+    await expect(service.advertiseRefs(host, 'git-upload-pack')).rejects.toMatchObject({
+      status: 429,
+      response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' },
+    });
+    await expect(service.advertiseRefs(access, 'git-upload-pack')).resolves.toBeDefined();
+  }, 60_000);
+
+  /* RV-W10 F2: `write` in every mode, so the owner-only removal verb refuses a
+     host even if the transport's allowlist ever admitted the route. */
+  it('should hold a cloud host at write in every mode, and refuse it the removal verb', async () => {
+    const service = createService(store, caughtUp());
+    vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({ storageBytes: 0, lfsBytes: 0 });
+
+    const accesses = await Promise.all(
+      (['read', 'write', 'finalize'] as const).map(async (mode) =>
+        service.authorize({ projectId, userId: ownerId, mode, viaDevice: 'agent_cloud' }),
+      ),
+    );
+
+    expect(accesses.map((granted) => granted.role)).toEqual(['write', 'write', 'write']);
+    await expect(
+      service.removeRef({ access: accesses[2]!, ref: 'refs/tags/v2', committedBy: ownerId }),
+    ).rejects.toMatchObject({ response: { code: 'GIT_REF_REMOVAL_OWNER_ONLY' } });
+    expect(await manifestReferences()).toHaveProperty(['refs/tags/v2']);
+  });
+
   it('answers 429 with the wait when a hydrate budget is spent, before hydrating', async () => {
     let hydrated = false;
     const watched: RepositoryStore = {
@@ -1056,4 +1106,57 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('derived_generation is 
     expect(afterStale?.derivedGeneration, 'a slower deriver rewound the marker').toBe(2);
     expect(Number(afterStale?.storageBytes), 'a slower deriver rewound the byte accounting').toBe(generationTwoBytes);
   }, 120_000);
+});
+
+/*
+ * W10 (D21, EQ11): a cloud host acts for its owner, and the server's own
+ * record says so — the push log names the device the push came through, and
+ * the host is held at `write` whatever the owner's role is (I10).
+ */
+describe('GitRepositoryService cloud host attribution (W10)', () => {
+  it('should hold a host at write and record its device on the push it commits, and none on the owner own', async () => {
+    const store = memoryStore();
+    const locator = repositoryLocator({ ownerId, projectId });
+    const service = createService(
+      store,
+      databaseStub({ generation: 0, derivedGeneration: 0, storageBytes: 0 }, { failTransaction: false }),
+    );
+    const client = scratch('host-client');
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'W10');
+    git(client, 'config', 'user.email', 'w10@tau.test');
+    const pushOnce = async (file: string, viaDevice?: string): Promise<void> => {
+      writeFileSync(path.join(client, file), `${file}\n`);
+      git(client, 'add', '.');
+      git(client, 'commit', '--quiet', '-m', file);
+      const lease = await hydrateLease({ store, locator, parentDirectory: scratch('host-lease') });
+      try {
+        execFileSync('git', ['push', '--quiet', lease.directory, 'main'], {
+          cwd: client,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: gitEnvironment,
+        });
+        const result = await commitLease({
+          store,
+          lease,
+          committedBy: ownerId,
+          ...(viaDevice === undefined ? {} : { viaDevice }),
+        });
+        expect(result.committed).toBe(true);
+      } finally {
+        await lease.dispose();
+      }
+    };
+
+    const hosted = await service.authorize({ projectId, userId: ownerId, mode: 'read', viaDevice: 'agent_cloud' });
+    await pushOnce('agent-turn.scad', hosted.viaDevice);
+    await pushOnce('owner-edit.scad');
+
+    expect(hosted).toMatchObject({ ownerId, role: 'write', viaDevice: 'agent_cloud' });
+    const read = await store.readManifest(locator);
+    const [hostPush, ownerPush] = read === undefined ? [] : decodeManifest(read.manifest).pushes;
+    expect(hostPush).toMatchObject({ committedBy: ownerId, viaDevice: 'agent_cloud' });
+    expect(ownerPush).toMatchObject({ committedBy: ownerId });
+    expect(ownerPush).not.toHaveProperty('viaDevice');
+  }, 60_000);
 });

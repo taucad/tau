@@ -64,14 +64,14 @@ globalThis.addEventListener('message', async () => {
     seedHandle.flush();
     seedHandle.close();
 
-    const log = await createOpfsEventLog({ fileHandle });
+    const log = await createOpfsEventLog({ fileHandle, access: 'write' });
     const healedEvents = await log.read();
     const healedCount = healedEvents.length;
     const firstAppend = await log.append(event(1));
     const duplicateAppend = await log.append(event(1));
     await log.close();
 
-    const reopened = await createOpfsEventLog({ fileHandle });
+    const reopened = await createOpfsEventLog({ fileHandle, access: 'write' });
     const persistedEvents = await reopened.read();
     const persistedCount = persistedEvents.length;
     await reopened.close();
@@ -108,7 +108,7 @@ globalThis.addEventListener('message', async () => {
     const failingFile = {
       createSyncAccessHandle: async () => failingHandle,
     } as unknown as FileSystemFileHandle;
-    const failureAtomicLog = await createOpfsEventLog({ fileHandle: failingFile });
+    const failureAtomicLog = await createOpfsEventLog({ fileHandle: failingFile, access: 'write' });
     let partialWriteRejected = false;
     try {
       await failureAtomicLog.append(event(0));
@@ -144,7 +144,7 @@ globalThis.addEventListener('message', async () => {
       seedRecovery.write(recoverySeed, { at: 0 });
       seedRecovery.flush();
       seedRecovery.close();
-      const durableRecoveryLog = await createOpfsEventLog({ fileHandle: recoveryFile });
+      const durableRecoveryLog = await createOpfsEventLog({ fileHandle: recoveryFile, access: 'write' });
       const session = await createAgentSession({
         chatId: 'browser-recovery-chat',
         runId: 'browser-recovery-run',

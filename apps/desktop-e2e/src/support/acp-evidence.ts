@@ -1,3 +1,5 @@
+import { emptyChatLedger, foldChatLedger } from '@taucad/agent-host';
+
 /** A reduced desktop-log message with its original run identity. */
 export type DurableMessage = {
   readonly id: string;
@@ -72,15 +74,15 @@ export const toolResult = (
   return result.content;
 };
 
-/** Resolve the terminal run instead of accidentally accepting an older successful result. */
+/** Resolve the terminal run instead of accidentally accepting an older successful result: the chat ledger's current run. */
 export const latestCompletedRun = (events: string): string => {
   const rows = events
     .split('\n')
     .filter((line) => line.trim() !== '')
-    .map((line) => JSON.parse(line) as { type: string; state?: string; runId: string });
-  const run = rows.findLast((row) => row.type === 'run.lifecycle');
-  if (run?.state !== 'completed') {
+    .map((line): unknown => JSON.parse(line));
+  const { currentRunId, runs } = foldChatLedger(emptyChatLedger, rows);
+  if (currentRunId === undefined || runs[currentRunId]?.lifecycle !== 'completed') {
     throw new Error('The latest desktop run has not completed successfully.');
   }
-  return run.runId;
+  return currentRunId;
 };

@@ -166,7 +166,16 @@ export function createChatFileStore(
        * between two terms that start at the same instant; this host's own
        * device id is W13's to mint and the reader never needs it. */
       .map(([name, text]) => ({ deviceId: name, bytes: encoder.encode(text) }));
-    return segments.length === 0 ? [] : deriveChatTranscript(mergeLogSegments(segments));
+    return segments.length === 0
+      ? []
+      : deriveChatTranscript(
+          mergeLogSegments(segments, {
+            // Two devices wrote different rows under one key: the term's own device wins, and the loss is reported.
+            onConflict: (conflict) => {
+              console.warn('[chatFileStorage] conflicting copies of one chat-log row', chatId, conflict);
+            },
+          }),
+        );
   };
 
   /**

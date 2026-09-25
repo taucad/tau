@@ -155,13 +155,33 @@ export const providerMessageSchema = z.discriminatedUnion('role', [
     metadata: metadataSchema.optional(),
   }),
 ]);
-const eventBase = {
-  version: z.literal(1),
+const position = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const counter = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const envelopeFields = {
   leaderEpoch: nonEmptyString,
-  sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  sequence: position,
   recordedAt: nonEmptyString,
   runId: nonEmptyString,
+  epoch: counter.optional(),
+  commandId: nonEmptyString.optional(),
+  attempt: counter.optional(),
 };
+const eventBase = { version: z.literal(1), ...envelopeFields };
+/*
+ * What every row must carry to be kept at all (CL-R1): a row with this envelope and anything else is opaque; a line
+ * without it is quarantined. `version` is any integer, so a newer schema version is carried, not refused (D16).
+ */
+const rowEnvelopeSchema = z.looseObject({
+  ...envelopeFields,
+  version: z.number().int().positive(),
+  type: nonEmptyString,
+});
+const turnPlacementSchema = z.looseObject({
+  checkoutId: nonEmptyString,
+  branch: nonEmptyString.optional(),
+  baseRevisionId: nonEmptyString.optional(),
+  mode: z.enum(['direct', 'candidate']),
+});
 const systemPromptBlockSchema = z.strictObject({
   type: z.literal('text'),
   text: z.string(),
@@ -303,6 +323,7 @@ const knownLogEventSchema = z.union([
     ...eventBase,
     type: z.literal('run.lifecycle'),
     state: z.enum(['admitted', 'running', 'paused', 'completed', 'failed', 'cancelled']),
+    placement: turnPlacementSchema.optional(),
     storageDurability: z.enum(storageDurabilityClasses).optional(),
     detail: runFailureDetailSchema.optional(),
   }),
@@ -319,6 +340,20 @@ const knownLogEventSchema = z.union([
     attemptId: opaqueInvocationId,
     operationId: opaqueInvocationId,
     status: z.enum(['pending', 'terminal', 'unavailable']),
+  }),
+  z.looseObject({
+    ...eventBase,
+    type: z.literal('model.invocation-settled'),
+    attemptId: opaqueInvocationId,
+    outcome: z.enum(['settled', 'released', 'absorbed']),
+    operationId: opaqueInvocationId,
+    chargedCreditAtoms: z.string().regex(/^\d+$/u),
+  }),
+  z.looseObject({
+    ...eventBase,
+    type: z.literal('model.invocation-settled'),
+    attemptId: opaqueInvocationId,
+    outcome: z.literal('voided'),
   }),
   z.looseObject({
     ...eventBase,
@@ -357,6 +392,47 @@ export const agentLogEventSchema = z.union([
       }),
     })
     .transform((record) => record as AgentLogEvent),
+]);
+
+/**
+ * How a reader keeps one line (CL-R1). `known`: it parses under this build's schema and is folded. `opaque`: a valid
+ * envelope with an unknown type, a version above 1, or a known type with an unknown enum value or nested field; it is
+ * preserved, cursored and returned by reads, but never folded or executed. `quarantined`: no valid envelope; the
+ * line is skipped, reported and excluded from the cursor.
+ *
+ * @internal
+ */
+export type ClassifiedRow =
+  | { readonly class: 'known'; readonly event: AgentLogEvent }
+  | { readonly class: 'opaque'; readonly event: AgentLogEvent }
+  | { readonly class: 'quarantined' };
+
+/**
+ * Class one row as a tolerant reader keeps it (D16: read tolerantly, execute strictly).
+ *
+ * @internal
+ * @param value - One row as read, from a file or a wire batch.
+ * @returns The row's class, with the row itself unless it is quarantined.
+ */
+export const classifyLogRow = (value: unknown): ClassifiedRow => {
+  if (!rowEnvelopeSchema.safeParse(value).success) {
+    return { class: 'quarantined' };
+  }
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- an opaque row is carried, not modelled (see agentLogEventSchema).
+  const carried = value as AgentLogEvent;
+  const known = knownLogEventSchema.safeParse(value);
+  return known.success ? { class: 'known', event: known.data as AgentLogEvent } : { class: 'opaque', event: carried };
+};
+
+/** Rows whose loss leaves the provider history wrong; an opaque one breaks the chat's history (CL-R2). @internal */
+export const historyRowTypes: ReadonlySet<string> = new Set([
+  'message.appended',
+  'message.envelope-replaced',
+  'history.compacted',
+  'history.rewound',
+  'snapshot-context.refreshed',
+  'safeguard.recorded',
+  'turn.history-projection-committed',
 ]);
 
 /** Validate one untrusted durable or broadcast event envelope. @public */

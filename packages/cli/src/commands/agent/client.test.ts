@@ -7,11 +7,11 @@
  * leading glyph — so `NO_COLOR` and a piped stdout lose no meaning at all.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import type { AgentLogEvent } from '@taucad/agent-host';
+import type { AgentChannelClient, AgentLogEvent } from '@taucad/agent-host';
 
-import { eventLine } from '#commands/agent/client.js';
+import { eventLine, replayChat } from '#commands/agent/client.js';
 
 const base = {
   version: 1,
@@ -102,5 +102,43 @@ describe('eventLine', () => {
     } as AgentLogEvent);
 
     expect(line).toBe('7\tmessage.envelope-replaced\tassistant Filleted the top edge. [codex gpt-5.3-codex]');
+  });
+});
+
+// CL-S8 (W3 CL-R13): a version-1 daemon clamps a cursor past the log's end instead of refusing it. The CLI's tail
+// compares the page's cursor with the one it asked for and reports the clamp instead of rewinding silently.
+describe('replayChat', () => {
+  const row = (sequence: number, state: 'admitted' | 'running' | 'completed'): AgentLogEvent => ({
+    ...base,
+    sequence,
+    type: 'run.lifecycle',
+    state,
+  });
+  const clientOf = (pages: ReadonlyArray<Record<string, unknown>>): AgentChannelClient => {
+    let page = 0;
+    return {
+      execute: vi.fn(async () => ({ type: 'tail', batch: pages[page++] })),
+    } as unknown as AgentChannelClient;
+  };
+
+  it('should report a read the daemon answered from a clamped cursor', async () => {
+    const client = clientOf([
+      { cursor: 0, nextCursor: 2, endCursor: 4, events: [row(0, 'admitted'), row(1, 'running')] },
+      { cursor: 1, nextCursor: 1, endCursor: 1, events: [] },
+    ]);
+
+    await expect(
+      replayChat({ client, chatId: 'chat-1', from: 0, follow: false, onEvent: async () => undefined }),
+    ).rejects.toMatchObject({ code: 'LOG_READ_CLAMPED' });
+  });
+
+  it('should answer the current run state from the chat ledger', async () => {
+    const client = clientOf([
+      { cursor: 0, nextCursor: 3, endCursor: 3, events: [row(0, 'admitted'), row(1, 'running'), row(2, 'completed')] },
+    ]);
+
+    await expect(
+      replayChat({ client, chatId: 'chat-1', from: 0, follow: false, onEvent: async () => undefined }),
+    ).resolves.toMatchObject({ cursor: 3, state: 'completed' });
   });
 });

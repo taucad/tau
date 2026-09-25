@@ -1,0 +1,56 @@
+{
+  "domain": {
+    "state": ["unadmitted", "open", "ended", "settled-open", "settled", "reopenable"],
+    "op": ["admitted", "running", "paused", "completed", "failed", "cancelled"]
+  },
+  "table": {
+    "unadmitted": {
+      "admitted": "ok",
+      "running": "NO_RUN_ADMITTED",
+      "paused": "NO_RUN_ADMITTED",
+      "completed": "NO_RUN_ADMITTED",
+      "failed": "NO_RUN_ADMITTED",
+      "cancelled": "NO_RUN_ADMITTED"
+    },
+    "open": {
+      "admitted": "RUN_ID_TAKEN",
+      "running": "ok",
+      "paused": "ok",
+      "completed": "ok",
+      "failed": "ok",
+      "cancelled": "ok"
+    },
+    "ended": {
+      "admitted": "RUN_ID_TAKEN",
+      "running": "ok",
+      "paused": "ok",
+      "completed": "ok",
+      "failed": "ok",
+      "cancelled": "ok"
+    },
+    "settled-open": {
+      "admitted": "RUN_ID_TAKEN",
+      "running": "ok",
+      "paused": "ok",
+      "completed": "ok",
+      "failed": "ok",
+      "cancelled": "ok"
+    },
+    "settled": {
+      "admitted": "RUN_ID_TAKEN",
+      "running": "RUN_ID_TAKEN",
+      "paused": "RUN_ID_TAKEN",
+      "completed": "RUN_ID_TAKEN",
+      "failed": "RUN_ID_TAKEN",
+      "cancelled": "RUN_ID_TAKEN"
+    },
+    "reopenable": {
+      "admitted": "RUN_ID_TAKEN",
+      "running": "ok",
+      "paused": "RUN_ID_TAKEN",
+      "completed": "RUN_ID_TAKEN",
+      "failed": "RUN_ID_TAKEN",
+      "cancelled": "RUN_ID_TAKEN"
+    }
+  }
+}

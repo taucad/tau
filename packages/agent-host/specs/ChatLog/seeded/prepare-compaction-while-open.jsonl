@@ -1,0 +1,6 @@
+{"version":1,"leaderEpoch":"epoch-a","sequence":0,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"admitted","attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":1,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"running","attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":2,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"model.invocation-prepared","attemptId":"r1:1:1","purpose":"generation","modelId":"m"}
+{"version":1,"leaderEpoch":"epoch-a","sequence":3,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"model.invocation-prepared","attemptId":"r1:1:2","purpose":"compaction","modelId":"m"}
+{"version":1,"leaderEpoch":"epoch-a","sequence":4,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"history.compacted","evictedMessageIds":["m0"],"summary":{"id":"s1","role":"user","content":"summary"}}
+{"version":1,"leaderEpoch":"epoch-a","sequence":5,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"model.invocation-prepared","attemptId":"r1:1:3","purpose":"generation","modelId":"m"}

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Outcome } from '#expected.js';
 import { describeOutcome } from '#expected.js';
@@ -10,7 +10,21 @@ import { cacheDirectory, locateTools, missingTools } from '#toolchain.js';
 /** Validates one sanitized log; the default runs `ChatLog.tla` through TLC. */
 export type LogValidator = (sanitized: string) => Promise<{ readonly outcome: Outcome; readonly seconds: number }>;
 
-export type LogVerdict = { readonly accepted: boolean; readonly verdict: string; readonly seconds: number };
+export type LogVerdict = {
+  readonly accepted: boolean;
+  readonly verdict: string;
+  /** Set when the log is rejected only by listed known-defect rules: it passes, and names them. */
+  readonly knownDefect?: string;
+  readonly seconds: number;
+};
+
+/** A rule a captured log may break until the named work package lands (FM-R3 lifecycle, as for configs). */
+export type KnownLogDefect = {
+  readonly rule: string;
+  readonly kind: 'defect';
+  readonly fixedBy: string;
+  readonly ref?: string;
+};
 
 export type LogsOptions = {
   /** The Nx project whose captured logs are validated, e.g. `ui-e2e`. */
@@ -27,6 +41,31 @@ export const verdictsFile = (context: FormalContext, project: string): string =>
   path.join(context.root, 'out/reports/formal/logs', project, 'verdicts.json');
 
 const chatLogSpecs = (context: FormalContext): string => path.join(context.root, 'packages/agent-host/specs');
+
+/** Per project, the rules a captured log may break today, each a known defect a named work package fixes. */
+export const knownLogDefectsFile = (context: FormalContext): string =>
+  path.join(chatLogSpecs(context), 'known-log-defects.json');
+
+const knownLogDefects = (context: FormalContext, project: string): readonly KnownLogDefect[] => {
+  const file = knownLogDefectsFile(context);
+  if (!existsSync(file)) {
+    return [];
+  }
+  const registry = JSON.parse(readFileSync(file, 'utf8')) as Readonly<Record<string, readonly KnownLogDefect[]>>;
+  return registry[project] ?? [];
+};
+
+/** The listed defects a rejection is made of, or `undefined` when any of its rules is not listed. */
+const knownDefectsOf = (
+  outcome: Outcome,
+  defects: readonly KnownLogDefect[],
+): readonly KnownLogDefect[] | undefined => {
+  if (typeof outcome === 'string' || !('rejected' in outcome) || outcome.rejected.rules.length === 0) {
+    return undefined;
+  }
+  const matched = outcome.rejected.rules.map((rule) => defects.find((defect) => defect.rule === rule));
+  return matched.every((defect) => defect !== undefined) ? matched : undefined;
+};
 
 const tlcValidator =
   (context: FormalContext, tools: Required<Pick<LocatedTools, 'java' | 'tlc'>>): LogValidator =>
@@ -79,6 +118,8 @@ export const validateCapturedLogs = async (context: FormalContext, options: Logs
     return 1;
   }
   const verdicts: Record<string, LogVerdict> = {};
+  const defects = knownLogDefects(context, options.project);
+  const occurred = new Set<string>();
   await Promise.all(
     files.map(async (file) => {
       const sanitized = path.join(cacheDirectory(context), 'captured', options.project, file);
@@ -86,12 +127,21 @@ export const validateCapturedLogs = async (context: FormalContext, options: Logs
       const { outcome, seconds } = validate
         ? await validate(sanitized)
         : { outcome: { error: 'no validator' }, seconds: 0 };
+      const known = knownDefectsOf(outcome, defects);
+      for (const defect of known ?? []) {
+        occurred.add(defect.rule);
+      }
+      const knownDefect = known?.map((defect) => `${defect.rule} (fixed by ${defect.fixedBy})`).join(', ');
       verdicts[file] = {
-        accepted: outcome === 'pass',
+        accepted: outcome === 'pass' || known !== undefined,
         verdict: describeOutcome(outcome),
+        ...(knownDefect === undefined ? {} : { knownDefect }),
         seconds: Math.round(seconds * 100) / 100,
       };
-      log(`${outcome === 'pass' ? 'ok  ' : 'FAIL'} ${options.project}/${file}: ${describeOutcome(outcome)}`);
+      const mark = outcome === 'pass' ? 'ok  ' : known === undefined ? 'FAIL' : 'ok  ';
+      log(
+        `${mark} ${options.project}/${file}: ${describeOutcome(outcome)}${knownDefect ? `; known defect ${knownDefect}` : ''}`,
+      );
     }),
   );
   const output = verdictsFile(context, options.project);
@@ -99,8 +149,16 @@ export const validateCapturedLogs = async (context: FormalContext, options: Logs
   const sorted = Object.fromEntries(Object.entries(verdicts).sort(([left], [right]) => left.localeCompare(right)));
   writeFileSync(output, `${JSON.stringify(sorted, undefined, 2)}\n`);
   const rejected = Object.values(verdicts).filter((verdict) => !verdict.accepted).length;
+  const knownCount = Object.values(verdicts).filter((verdict) => verdict.knownDefect !== undefined).length;
+  // A listed defect no captured log shows any more is fixed or unexercised: its entry must flip, as a config's would.
+  const vanished = files.length === 0 ? [] : defects.filter((defect) => !occurred.has(defect.rule));
+  for (const defect of vanished) {
+    log(
+      `FAIL ${options.project}:formal:logs: the known defect ${defect.rule} no longer occurs (${defect.fixedBy} landed?); flip its entry in ${path.relative(context.root, knownLogDefectsFile(context))}`,
+    );
+  }
   log(
-    `${options.project}:formal:logs: ${files.length} logs, ${rejected} rejected; ${path.relative(context.root, output)}`,
+    `${options.project}:formal:logs: ${files.length} logs, ${rejected} rejected, ${knownCount} known defect${knownCount === 1 ? '' : 's'}; ${path.relative(context.root, output)}`,
   );
-  return rejected === 0 ? 0 : 1;
+  return rejected === 0 && vanished.length === 0 ? 0 : 1;
 };

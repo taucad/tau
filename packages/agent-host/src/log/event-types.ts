@@ -166,13 +166,29 @@ export const modelProviderKinds = [
 /** Catalog provider identity used to select an honest provider wire. @public */
 export type ModelProviderKind = (typeof modelProviderKinds)[number];
 
+/** A row's identity: its term and its position in the term. @public */
+export type RowKey = Readonly<{ leaderEpoch: string; sequence: number }>;
+
 /** Fields shared by every version-one event-log record. @public */
 export type LogEventBase = {
   readonly version: 1;
+  /** The term's identity; with `sequence`, the row's key. */
   readonly leaderEpoch: string;
   readonly sequence: number;
   readonly recordedAt: string;
   readonly runId: string;
+  /**
+   * The term's integer epoch: above every epoch in the log on the term's first (claiming) append, and repeated by the
+   * term's later rows (D5). Absent on legacy rows, which count as epoch 0.
+   */
+  readonly epoch?: number | undefined;
+  /** The command that wrote the row; the ledger's applied set is folded from it (D15). */
+  readonly commandId?: string | undefined;
+  /**
+   * The run attempt a lifecycle or settlement row belongs to, from 1. A legacy row without one (or with 0) takes the
+   * attempt its position implies.
+   */
+  readonly attempt?: number | undefined;
 };
 
 /** Appends one stable-id message to provider history. @public */
@@ -373,10 +389,25 @@ export type RunFailureDetail = {
   readonly details?: Record<string, unknown> | undefined;
 };
 
+/**
+ * Where a run's turn is placed: the placement of record, carried by attempt 1's `running` row (D9). The turn-settlement
+ * work package owns its meaning; the log only carries it.
+ *
+ * @public
+ */
+export type TurnPlacement = {
+  readonly checkoutId: string;
+  readonly branch?: string | undefined;
+  readonly baseRevisionId?: string | undefined;
+  readonly mode: 'direct' | 'candidate';
+};
+
 /** Records a run lifecycle transition. @public */
 export type RunLifecycleEvent = LogEventBase & {
   readonly type: 'run.lifecycle';
   readonly state: RunLifecycleState;
+  /** Attempt 1's `running` row only: the placement of record. A placement on any other row is ignored. */
+  readonly placement?: TurnPlacement | undefined;
   readonly storageDurability?: StorageDurabilityClass | undefined;
   readonly detail?: RunFailureDetail | undefined;
   /**
@@ -406,6 +437,26 @@ export type ModelInvocationBoundEvent = LogEventBase & {
   readonly operationId: string;
   readonly status: 'pending' | 'terminal' | 'unavailable';
 };
+
+/**
+ * The gateway's answer for one prepared model invocation (W11, D19), recorded by the host.
+ *
+ * Readers ship before any writer emits it (D16, CL-S12). A voided key was never admitted, so that branch carries no
+ * operation and no charge. `chargedCreditAtoms` is a decimal string of credit atoms, `'0'` unless settled.
+ *
+ * @public
+ */
+export type ModelInvocationSettledEvent = LogEventBase & {
+  readonly type: 'model.invocation-settled';
+  readonly attemptId: string;
+} & (
+    | {
+        readonly outcome: 'settled' | 'released' | 'absorbed';
+        readonly operationId: string;
+        readonly chargedCreditAtoms: string;
+      }
+    | { readonly outcome: 'voided' }
+  );
 
 /** Commits the exact retained history prefix and the next user message at turn start. @public */
 export type TurnContextSnapshot = {
@@ -443,4 +494,5 @@ export type AgentLogEvent =
   | RunLifecycleEvent
   | ModelInvocationPreparedEvent
   | ModelInvocationBoundEvent
+  | ModelInvocationSettledEvent
   | TurnHistoryProjectionCommittedEvent;

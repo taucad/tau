@@ -136,7 +136,7 @@ describe('live gateway provider streaming', () => {
         model,
         modelTransport: transport,
         toolRegistry,
-        eventLog: await createNodeEventLog({ filePath }),
+        eventLog: await createNodeEventLog({ filePath, access: 'write' }),
         onLiveEvent: (event) => {
           live.push(event);
         },
@@ -204,7 +204,7 @@ describe('live gateway provider streaming', () => {
         model,
         modelTransport: transport,
         toolRegistry,
-        eventLog: await createNodeEventLog({ filePath }),
+        eventLog: await createNodeEventLog({ filePath, access: 'write' }),
       });
       try {
         await second.prompt({

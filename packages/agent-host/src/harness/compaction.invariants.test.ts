@@ -30,23 +30,26 @@ const createInvariantLogFile = (): {
           const event = parseLogEvent(candidate);
           const transition = reducer.prepare(event);
           if (transition.duplicate) {
-            return { appended: false };
+            return { appended: false, endCursor: events.length };
           }
           transition.commit();
           events.push(event);
-          return { appended: true };
+          return { appended: true, endCursor: events.length };
         },
         read: async () => [...events],
         readBatch: async ({ cursor, limit }) => {
-          const boundedCursor = Math.min(cursor, events.length);
-          const batch = events.slice(boundedCursor, boundedCursor + limit);
+          const batch = events.slice(cursor, cursor + limit);
           return {
-            cursor: boundedCursor,
-            nextCursor: boundedCursor + batch.length,
+            status: 'batch',
+            cursor,
+            nextCursor: cursor + batch.length,
             endCursor: events.length,
             events: batch,
           };
         },
+        messages: async () => reducer.messages(),
+        historyIntact: async () => reducer.historyIntact(),
+        anomalies: async () => [],
         close: async () => undefined,
       };
     },

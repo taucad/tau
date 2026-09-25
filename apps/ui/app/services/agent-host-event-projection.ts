@@ -1032,6 +1032,7 @@ export const projectAgentHostEvent = (
     case 'safeguard.recorded':
     case 'model.invocation-prepared':
     case 'model.invocation-bound':
+    case 'model.invocation-settled':
     case 'turn.finalized':
     case 'turn.conflicted':
     case 'turn.failed':

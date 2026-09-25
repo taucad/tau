@@ -26,8 +26,8 @@ import { basename, dirname, join, sep } from 'node:path';
 import { z } from 'zod';
 import { chatRecordSchema } from '@taucad/chat';
 
-import { jsonValueSchema } from '@taucad/agent-host';
-import type { AgentChannelRevisionEvent, JsonValue } from '@taucad/agent-host';
+import { emptyChatLedger, foldChatLedger, jsonValueSchema, unsettledAttempts } from '@taucad/agent-host';
+import type { AgentChannelRevisionEvent, ChatLedger, JsonValue } from '@taucad/agent-host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId } from '@taucad/revisions/algorithms';
@@ -1604,10 +1604,33 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       appendToChatLog = async (chatId, event) => launcher.append(chatId, event);
       const watching = new AbortController();
       let watchFailure: unknown;
+      /* One chat ledger per chat, over the rows this stream delivers (W3 CL-S8): a row delivered twice folds once. */
+      const ledgers = new Map<string, ChatLedger>();
       const watch = (async (): Promise<void> => {
         try {
-          for await (const { event } of launcher.events(watching.signal)) {
-            if (event.type !== 'run.lifecycle' || !terminalStates.has(event.state)) {
+          for await (const { chatId, event } of launcher.events(watching.signal)) {
+            const before = ledgers.get(chatId) ?? emptyChatLedger;
+            const ledger = foldChatLedger(before, [event]);
+            const current = ledger.currentRunId === undefined ? undefined : ledger.runs[ledger.currentRunId];
+            // A chat whose run ended and settled is done with its ledger; a late redelivery finds no turn to settle.
+            const done =
+              current?.lifecycle !== undefined &&
+              terminalStates.has(current.lifecycle) &&
+              unsettledAttempts(ledger).length === 0;
+            if (done) {
+              ledgers.delete(chatId);
+            } else {
+              ledgers.set(chatId, ledger);
+            }
+            const lifecycle = ledger.runs[event.runId]?.lifecycle;
+            // The run's attempt just ended with no settlement row: the turn is the machine's to settle (D10).
+            if (
+              ledger === before ||
+              event.type !== 'run.lifecycle' ||
+              lifecycle === undefined ||
+              !terminalStates.has(lifecycle) ||
+              !unsettledAttempts(ledger).some((attempt) => attempt.runId === event.runId)
+            ) {
               continue;
             }
             const turnId = turns.get(event.runId);

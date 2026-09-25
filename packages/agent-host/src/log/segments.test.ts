@@ -105,4 +105,68 @@ describe('mergeLogSegments', () => {
     ]);
     expect(ids(mergeLogSegments([torn, whole]))).toEqual(['epoch-a-0', 'epoch-b-0']);
   });
+  // CL-A10, T7, I6 (S5 D5): the merge depends only on the set of rows.
+  it('should merge identically under segment order and duplication', () => {
+    const a = [
+      record({ leaderEpoch: 'epoch-a', sequence: 0, recordedAt: '2026-09-13T06:00:10.000Z', text: 'a0' }),
+      record({ leaderEpoch: 'epoch-c', sequence: 0, recordedAt: '2026-09-13T06:00:05.000Z', text: 'c0' }),
+    ];
+    const b = [record({ leaderEpoch: 'epoch-b', sequence: 0, recordedAt: '2026-09-13T06:00:07.000Z', text: 'b0' })];
+    // Device b's copy of a's first term, with an earlier clock: the term's start is its earliest copy.
+    const copied = [
+      ...b,
+      record({ leaderEpoch: 'epoch-a', sequence: 0, recordedAt: '2026-09-13T06:00:06.000Z', text: 'a0' }),
+    ];
+    const segments = [segment('device-a', a), segment('device-b', copied)];
+    const merged = ids(mergeLogSegments(segments));
+    const orders = [
+      [segments[1]!, segments[0]!],
+      [segments[0]!, segments[1]!, segments[0]!],
+      [segments[1]!, segments[1]!, segments[0]!],
+      [segment('device-b', b), segments[0]!, segments[1]!],
+    ];
+
+    for (const order of orders) {
+      expect(ids(mergeLogSegments(order))).toEqual(merged);
+    }
+    expect(merged).toHaveLength(3);
+  });
+
+  it('should report a conflicting copy of one key', () => {
+    const conflicts: unknown[] = [];
+    const own = record({ leaderEpoch: 'epoch-a', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'a0' });
+    const other = record({ leaderEpoch: 'epoch-a', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'zz' });
+
+    const merged = mergeLogSegments([segment('device-b', [other]), segment('device-a', [own])], {
+      onConflict: (conflict) => conflicts.push(conflict),
+    });
+
+    // The term's device is the smallest device id holding it; its copy is kept.
+    expect(merged).toEqual([own]);
+    expect(conflicts).toEqual([
+      { key: { leaderEpoch: 'epoch-a', sequence: 0 }, keptDeviceId: 'device-a', droppedDeviceId: 'device-b' },
+    ]);
+  });
+
+  // When the term's device holds no copy of a key, equal copies from two devices tie; the device id breaks it.
+  it('should report the same kept device under any segment order', () => {
+    const at = (sequence: number, text: string) =>
+      record({ leaderEpoch: 'epoch-a', sequence, recordedAt: '2026-09-13T06:00:00.000Z', text });
+    const segments = [
+      segment('device-a', [at(0, 'a0')]),
+      segment('device-c', [at(1, 'x')]),
+      segment('device-b', [at(1, 'x')]),
+      segment('device-d', [at(1, 'y')]),
+    ];
+    const reports = (ordered: typeof segments) => {
+      const conflicts: unknown[] = [];
+      mergeLogSegments(ordered, { onConflict: (conflict) => conflicts.push(conflict) });
+      return conflicts;
+    };
+
+    expect(reports(segments)).toEqual([
+      { key: { leaderEpoch: 'epoch-a', sequence: 1 }, keptDeviceId: 'device-b', droppedDeviceId: 'device-d' },
+    ]);
+    expect(reports(segments.toReversed())).toEqual(reports(segments));
+  });
 });

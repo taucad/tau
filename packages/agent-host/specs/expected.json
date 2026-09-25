@@ -44,8 +44,8 @@
       "expect": {
         "violated": "EventuallyConverged"
       },
-      "kind": "defect",
-      "ref": "EQ3; S5 D5: views never converge under today's merge",
+      "kind": "witness",
+      "ref": "EQ3; S5 D5: views never converge under today's merge; MergeFixed = FALSE is the knob for today's merge, and W3's TypeScript merge (mergeLogSegments, CL-R14) implements FixedView",
       "fixedBy": "W3"
     },
     "CrossDevice.today-OwnFileOrder.cfg": {
@@ -53,8 +53,8 @@
       "expect": {
         "violated": "OwnFileOrder"
       },
-      "kind": "defect",
-      "ref": "EQ3; S5 D5 (Lean T7): a device's own terms reorder after a clock step",
+      "kind": "witness",
+      "ref": "EQ3; S5 D5 (Lean T7): a device's own terms reorder after a clock step; MergeFixed = FALSE is the knob for today's merge, and W3's TypeScript merge (mergeLogSegments, CL-R14) implements FixedView",
       "fixedBy": "W3"
     },
     "CrossDevice.today-ViewsConverge.cfg": {
@@ -62,9 +62,50 @@
       "expect": {
         "violated": "ViewsConverge"
       },
-      "kind": "defect",
-      "ref": "EQ3; S5 D5 at protocol level: a segment read twice undoes holdFileOrder",
+      "kind": "witness",
+      "ref": "EQ3; S5 D5 at protocol level: a segment read twice undoes holdFileOrder; MergeFixed = FALSE is the knob for today's merge, and W3's TypeScript merge (mergeLogSegments, CL-R14) implements FixedView",
       "fixedBy": "W3"
+    },
+    "LogLeadership.fence-handle-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W3 CL-S13: EveryCommandAnswered under the OPFS handle, S4 target constants"
+    },
+    "LogLeadership.fence-handle.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W3 CL-S13: OPFS exclusive sync handle, S4 target constants"
+    },
+    "LogLeadership.fence-lazy-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W3 CL-S13: EveryCommandAnswered under the lazy fence, S4 target constants"
+    },
+    "LogLeadership.fence-lazy-nocas-OneWriterPerEpoch.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OneWriterPerEpoch"
+      },
+      "kind": "witness",
+      "ref": "W3 CL-S13: the lazy claim without the conditional append; two writers mint one epoch (2 sends)"
+    },
+    "LogLeadership.fence-lazy-refines.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W3 CL-S13, FM-Q12: the lazy fence refines LogFence (FenceRefined) and LogFence!IndInv holds in every reachable state; W6 reviews"
+    },
+    "LogLeadership.fence-lazy.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W3 CL-S13: lazy claim with a conditional append (CL-R11), S4 target constants"
+    },
+    "LogLeadership.fence-mint-EpochsMonotone.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EpochsMonotone"
+      },
+      "kind": "witness",
+      "ref": "W3 CL-S13: an eager claim row without the conditional append; a stale claim appends a lower epoch (2 sends)"
     },
     "LogLeadership.steal-first-append-AtMostOnceEffect.cfg": {
       "tier": "pr",
@@ -489,6 +530,31 @@
         "--length=1",
         "MC_TurnSettlement.tla"
       ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "W3 CL-S13, FM-Q12: LogFence IndInv holds initially",
+      "args": ["check", "--cinit=ConstInit", "--init=Init", "--inv=IndInv", "--length=0", "MC_LogFence.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "W3 CL-S13, FM-Q12: LogFence IndInv is inductive (three writers, logs of up to six rows, unbounded epochs and view lengths)",
+      "args": ["check", "--cinit=ConstInit", "--init=IndInit", "--inv=IndInv", "--length=1", "MC_LogFence.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "W3 CL-S13, FM-Q12: IndInv implies EpochsMonotone and OneWriterPerEpoch (I1, I2)",
+      "args": ["check", "--cinit=ConstInit", "--init=IndInit", "--inv=Safety", "--length=0", "MC_LogFence.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "W3 CL-S13: without the conditional append IndInv is not inductive (a stale writer appends a lower epoch)",
+      "args": ["check", "--cinit=ConstInitNoCheck", "--init=IndInit", "--inv=IndInv", "--length=1", "MC_LogFence.tla"]
     }
   ],
   "logs": {
@@ -594,7 +660,7 @@
           }
         },
         "kind": "witness",
-        "ref": "SettledOnce: one seeded log per rule (FM-A6)"
+        "ref": "SettledOnce: one seeded log per rule (FM-A6); a legacy settlement without attempt belongs to the current attempt"
       },
       "ChatLog/seeded/row-without-run.jsonl": {
         "tier": "pr",
@@ -606,6 +672,131 @@
         },
         "kind": "witness",
         "ref": "RowsNeedRun: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/legal-attempts.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "W3 CL-S9: integer epochs, a voided invocation, a resumable failure reopened as attempt 2, a resolved interrupt continuing a paused attempt, a compaction closed by history.compacted, shown replies"
+      },
+      "ChatLog/seeded/opaque-rows.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "W3 CL-S9 OpaqueSkipped (CL-R1): a version-2 admitted row, an unknown type and an unknown lifecycle state are consumed without effect"
+      },
+      "ChatLog/seeded/epochs-decrease.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 3,
+            "rules": ["EpochsIncrease"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 EpochsIncrease (CL-R5, CL-R11): a new term claims epoch 1 after epoch 2"
+      },
+      "ChatLog/seeded/reopen-not-resumable.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": ["ReopenOnlyByRunning"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 ReopenOnlyByRunning (CL-R9, run-lifecycle.legality.json): a settled attempt that failed with a code outside the resume class is not reopenable"
+      },
+      "ChatLog/seeded/reopen-while-another-runs.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 7,
+            "rules": ["OneRunAtATime"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 OneRunAtATime widened (RV1-F4): r1 reopens attempt 2 while r2 is admitted and running"
+      },
+      "ChatLog/seeded/settled-twice-attempt.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 8,
+            "rules": ["SettledOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 SettledOnce per (runId, attempt): attempt 2 settles after attempt 1, then attempt 1 settles again"
+      },
+      "ChatLog/seeded/invocation-settled-orphan.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 2,
+            "rules": ["InvocationSettledOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 InvocationSettledOnce (W11, CL-R17): a settled row with no prepared row"
+      },
+      "ChatLog/seeded/invocation-settled-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["InvocationSettledOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 InvocationSettledOnce (W11, CL-R17): a second settled row for one attempt id"
+      },
+      "ChatLog/seeded/command-opens-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["CommandOpensOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 CommandOpensOnce (FM-Q11, CL-Q14 draft set): one command id admits two runs (W9 double send)"
+      },
+      "ChatLog/seeded/prepare-after-released.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "W3 CL-S9 PrepareOnlyWhenResolved (RV1-F3): an overflow re-prepare after a zero-charge released settled row"
+      },
+      "ChatLog/seeded/prepare-while-unresolved.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["PrepareOnlyWhenResolved"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 PrepareOnlyWhenResolved (RV1-F3): an overflow re-prepare while the run's invocation is unresolved"
+      },
+      "ChatLog/seeded/prepare-new-attempt-while-chat-unresolved.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 8,
+            "rules": ["PrepareOnlyWhenResolved"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 PrepareOnlyWhenResolved (RV1-F3, GI-R10): r2's first generation while r1's invocation is unresolved"
+      },
+      "ChatLog/seeded/prepare-compaction-while-open.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 6,
+            "rules": ["PrepareOnlyWhenResolved"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3 CL-S9 PrepareOnlyWhenResolved (gateCode, EQ1, RV1-F3): the compaction prepare is exempt and history.compacted closes it, but the generation it interrupted is still unresolved, so the next generation prepare is refused"
       }
     }
   }

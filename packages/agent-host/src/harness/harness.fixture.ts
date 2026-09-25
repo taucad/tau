@@ -1,6 +1,8 @@
 import type { Model } from '@earendil-works/pi-ai';
 import { createEventLogAppender } from '#log/event-log-appender.js';
-import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
+import { withLength } from '#log/event-log-storage.fixture.js';
+import type { BareEventLogStorage } from '#log/event-log-storage.fixture.js';
+import type { EventLogAppender } from '#log/event-log-appender.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 /** Deterministic pi model descriptor used by harness unit fixtures. @public */
@@ -20,7 +22,7 @@ export const stubModel: Model<'openai-responses'> = {
 /** In-memory W1 appender used by deterministic harness parity fixtures. */
 export const createMemoryEventLog = async (initial: readonly AgentLogEvent[] = []): Promise<EventLogAppender> => {
   let bytes = new Uint8Array(new ArrayBuffer(0));
-  const storage: EventLogStorage = {
+  const storage: BareEventLogStorage = {
     read: async () => bytes,
     append: async (next) => {
       const combined = new Uint8Array(bytes.byteLength + next.byteLength);
@@ -33,7 +35,7 @@ export const createMemoryEventLog = async (initial: readonly AgentLogEvent[] = [
     },
     close: async () => undefined,
   };
-  const log = await createEventLogAppender(storage);
+  const log = await createEventLogAppender(withLength(storage));
   for (const event of initial) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- Initial log records must be appended in cursor order.
     await log.append(event);
@@ -57,6 +59,8 @@ export const createMemoryEventLogFile = (): { open(): Promise<EventLogAppender> 
         truncate: async (size) => {
           bytes = bytes.slice(0, size);
         },
+        size: async () => bytes.byteLength,
+        exclusive: async (section) => section(),
         close: async () => undefined,
       }),
   };

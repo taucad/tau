@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { AgentLogEvent } from '@taucad/agent-host';
-import { replayedStartOutcome } from '@taucad/agent-host';
+import { emptyChatLedger, foldChatLedger, replayedStartOutcome } from '@taucad/agent-host';
 
 /** One scripted durable record, with the log's own base fields left to {@link scriptedLog}. */
 type ScriptedRow = AgentLogEvent extends infer Event
@@ -56,13 +56,14 @@ describe('replayedStartOutcome', () => {
       settlementOnly('run-2', 'turn-2'),
     ]);
 
-    expect(replayedStartOutcome({ events, runId: 'run-2' })).toBe('admit');
+    expect(replayedStartOutcome(foldChatLedger(emptyChatLedger, events), 'run-2')).toBe('admit');
   });
 
-  it('should admit a run admitted without its turn ever being committed', () => {
+  // L2a D6: a dead leader's admission with no committed turn is the run owner's to recover; the worker admits it.
+  it('should answer recover for a run admitted without its turn ever being committed', () => {
     const events = scriptedLog([{ type: 'run.lifecycle', runId: 'run-1', state: 'admitted' }]);
 
-    expect(replayedStartOutcome({ events, runId: 'run-1' })).toBe('admit');
+    expect(replayedStartOutcome(foldChatLedger(emptyChatLedger, events), 'run-1')).toBe('recover');
   });
 
   it('should resume a run whose committed turn has not ended', () => {
@@ -72,7 +73,7 @@ describe('replayedStartOutcome', () => {
       { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
     ]);
 
-    expect(replayedStartOutcome({ events, runId: 'run-1' })).toBe('resume');
+    expect(replayedStartOutcome(foldChatLedger(emptyChatLedger, events), 'run-1')).toBe('resume');
   });
 
   it('should answer a committed run that already ended as settled', () => {
@@ -82,10 +83,10 @@ describe('replayedStartOutcome', () => {
       { type: 'run.lifecycle', runId: 'run-1', state: 'completed' },
     ]);
 
-    expect(replayedStartOutcome({ events, runId: 'run-1' })).toBe('settled');
+    expect(replayedStartOutcome(foldChatLedger(emptyChatLedger, events), 'run-1')).toBe('settled');
   });
 
   it('should admit a command against an empty log', () => {
-    expect(replayedStartOutcome({ events: [], runId: 'run-1' })).toBe('admit');
+    expect(replayedStartOutcome(foldChatLedger(emptyChatLedger, []), 'run-1')).toBe('admit');
   });
 });

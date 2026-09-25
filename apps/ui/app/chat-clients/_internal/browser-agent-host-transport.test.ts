@@ -2903,6 +2903,50 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  // CL-S6 (W3 CL-R13): a version-1 host clamps a cursor past its end instead of refusing it. The reader detects the
+  // clamp through the ledger's read fold and refolds from the start, rather than ending the replay on a short log.
+  it('should refold from the start when a read comes back clamped', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-daemon-reattach-clamped';
+    const events = hexagonalNutFourRunEvents();
+    const streamingRunId = [...new Set(events.map((event) => event.runId))].at(-1)!;
+    const batchFrom = (cursor: number) => ({
+      cursor,
+      nextCursor: Math.min(cursor + agentHostTailBatchLimit, events.length),
+      endCursor: events.length,
+      events: events.slice(cursor, cursor + agentHostTailBatchLimit),
+      snapshot: snapshot(chatId, streamingRunId),
+    });
+    let clamped = false;
+    const tail = vi.fn(async (input: { readonly cursor: number }) => {
+      if (!clamped && input.cursor > 0) {
+        clamped = true;
+        return { cursor: 10, nextCursor: 10, endCursor: 10, events: [] };
+      }
+      return batchFrom(input.cursor);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A daemon-placed turn reads its workspace from the daemon.');
+      },
+      createClient: async () => clientFor(chatId, streamingRunId, { attach: vi.fn(async () => batchFrom(0)), tail }),
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+    const chat = new Chat<MyUIMessage>({ id: chatId, transport, messages: [] });
+    const unregisterReset = applyRunResets(chat, chatId);
+
+    await chat.resumeStream();
+
+    expect(tail.mock.calls.slice(0, 2).map(([input]) => input.cursor)).toEqual([agentHostTailBatchLimit, 0]);
+    expect(assistantTexts(chat.messages)).toEqual(durableTexts(events));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('clamped'), chatId);
+    warn.mockRestore();
+    unregisterReset();
+    unregister();
+  });
+
   it('rebuilds every run in the log on reattach, not only the one it streams', async () => {
     /*
      * The same chat four turns later. The first fix rebuilt only the run the

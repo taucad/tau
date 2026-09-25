@@ -49,7 +49,7 @@ globalThis.addEventListener('message', async () => {
       model: { id: 'scripted-g2-model', contextWindow: 200_000 },
       modelTransport: new ScriptedParityModelTransport(scriptedParityResponses.slice(0, 2)),
       toolRegistry: readTool,
-      openEventLog: async () => createOpfsEventLog({ fileHandle }),
+      openEventLog: async () => createOpfsEventLog({ fileHandle, access: 'write' }),
       interruptPort: {
         pause: async (request) => ({ interruptId: request.interruptId, outcome: 'approved' }),
         pending: async () => [],
@@ -67,7 +67,7 @@ globalThis.addEventListener('message', async () => {
     });
     await host.close();
 
-    const reopened = await createOpfsEventLog({ fileHandle });
+    const reopened = await createOpfsEventLog({ fileHandle, access: 'write' });
     const events = await reopened.read();
     await reopened.close();
     const file = await fileHandle.getFile();

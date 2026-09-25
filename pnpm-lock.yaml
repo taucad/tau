@@ -1554,7 +1554,7 @@ importers:
         version: link:libs/chat
       '@taucad/filesystem':
         specifier: workspace:*
-        version: link:libs/filesystem
+        version: link:packages/filesystem
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:packages/core/geometry
@@ -1839,7 +1839,7 @@ importers:
         version: link:../../libs/events
       '@taucad/filesystem':
         specifier: workspace:*
-        version: link:../../libs/filesystem
+        version: link:../../packages/filesystem
       '@taucad/jobs':
         specifier: workspace:*
         version: link:../../packages/jobs
@@ -1933,7 +1933,7 @@ importers:
         version: link:../../packages/plugins/esbuild
       '@taucad/filesystem':
         specifier: workspace:*
-        version: link:../../libs/filesystem
+        version: link:../../packages/filesystem
       '@taucad/geospec-engine':
         specifier: workspace:*
         version: link:../../packages/geospec-engine
@@ -2188,7 +2188,7 @@ importers:
         version: link:../../../libs/events
       '@taucad/filesystem':
         specifier: workspace:*
-        version: link:../../../libs/filesystem
+        version: link:../../../packages/filesystem
       '@taucad/memory':
         specifier: workspace:*
         version: link:../../../libs/memory
@@ -2425,7 +2425,7 @@ importers:
         version: link:../../packages/plugins/esbuild
       '@taucad/filesystem':
         specifier: workspace:*
-        version: link:../../libs/filesystem
+        version: link:../../packages/filesystem
       '@taucad/fs-bridge':
         specifier: workspace:*
         version: link:../../libs/fs-bridge
@@ -2548,7 +2548,7 @@ importers:
         version: link:../../libs/events
       '@taucad/filesystem':
         specifier: workspace:*
-        version: link:../../libs/filesystem
+        version: link:../../packages/filesystem
       '@taucad/fs-bridge':
         specifier: workspace:*
         version: link:../../libs/fs-bridge
@@ -2936,7 +2936,7 @@ importers:
         version: link:../chat
       '@taucad/filesystem':
         specifier: workspace:*
-        version: link:../filesystem
+        version: link:../../packages/filesystem
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../packages/parameters
@@ -2993,39 +2993,11 @@ importers:
 
   libs/events: {}
 
-  libs/filesystem:
-    dependencies:
-      '@taucad/events':
-        specifier: workspace:*
-        version: link:../events
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../memory
-      '@taucad/types':
-        specifier: workspace:*
-        version: link:../types
-      '@taucad/utils':
-        specifier: workspace:*
-        version: link:../utils
-      jszip:
-        specifier: ^3.10.1
-        version: 3.10.1
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    devDependencies:
-      fast-check:
-        specifier: 'catalog:'
-        version: 4.10.1
-      vitest:
-        specifier: 4.1.11
-        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
-
   libs/fs-bridge:
     dependencies:
       '@taucad/filesystem':
         specifier: workspace:*
-        version: link:../filesystem
+        version: link:../../packages/filesystem
       '@taucad/rpc':
         specifier: workspace:*
         version: link:../rpc
@@ -3187,9 +3159,9 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 0.84.4
         version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.21.3)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/rpc':
-        specifier: workspace:*
-        version: link:../../libs/rpc
+      '@msgpack/msgpack':
+        specifier: 'catalog:'
+        version: 3.1.3
       uint8array-extras:
         specifier: 'catalog:'
         version: 1.5.0
@@ -3197,6 +3169,12 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
+      '@taucad/nx':
+        specifier: workspace:*
+        version: link:../../tools/nx
+      '@taucad/rpc':
+        specifier: workspace:*
+        version: link:../../libs/rpc
       '@vitest/browser-playwright':
         specifier: 'catalog:'
         version: 4.1.11(playwright@1.62.1)(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))(vitest@4.1.11)
@@ -3384,6 +3362,43 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
+  packages/filesystem:
+    dependencies:
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
+      nanoid:
+        specifier: 'catalog:'
+        version: 5.1.14
+      type-fest:
+        specifier: 'catalog:'
+        version: 4.41.0
+    devDependencies:
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../libs/events
+      '@taucad/memory':
+        specifier: workspace:*
+        version: link:../../libs/memory
+      '@taucad/nx':
+        specifier: workspace:*
+        version: link:../../tools/nx
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
+      fast-check:
+        specifier: 'catalog:'
+        version: 4.10.1
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.3.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
   packages/geospec:
     dependencies:
       '@taucad/esbuild':
@@ -3478,6 +3493,9 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../agent-host
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../filesystem
       '@taucad/jobs':
         specifier: workspace:*
         version: link:../jobs
@@ -3503,9 +3521,6 @@ importers:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
-      '@taucad/filesystem':
-        specifier: workspace:*
-        version: link:../../libs/filesystem
       '@taucad/geospec-engine':
         specifier: workspace:*
         version: link:../geospec-engine
@@ -4194,7 +4209,7 @@ importers:
     dependencies:
       '@taucad/filesystem':
         specifier: workspace:*
-        version: link:../../libs/filesystem
+        version: link:../filesystem
       buffer:
         specifier: 'catalog:'
         version: 6.0.3
@@ -4229,6 +4244,9 @@ importers:
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../core/cache
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../filesystem
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../parameters
@@ -4269,9 +4287,6 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../../libs/events
-      '@taucad/filesystem':
-        specifier: workspace:*
-        version: link:../../libs/filesystem
       '@taucad/fs-bridge':
         specifier: workspace:*
         version: link:../../libs/fs-bridge
@@ -4326,9 +4341,6 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../parameters
-      '@taucad/utils':
-        specifier: workspace:*
-        version: link:../../libs/utils
       deepmerge:
         specifier: 'catalog:'
         version: 4.3.1
@@ -4532,6 +4544,9 @@ importers:
       '@nx/devkit':
         specifier: 'catalog:'
         version: 22.7.1(nx@22.7.1(@swc-node/register@1.11.1(@swc/core@1.15.8(@swc/helpers@0.5.23))(@swc/types@0.1.28)(typescript@5.9.3))(@swc/core@1.15.8(@swc/helpers@0.5.23)))
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
 
   tools/workspace-plugin: {}
 

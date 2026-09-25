@@ -277,6 +277,7 @@
     "@msgpack/msgpack": "catalog:",
     "@standard-schema/spec": "catalog:",
     "@taucad/cache-core": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/units": "workspace:*",
@@ -308,7 +309,6 @@
   },
   "devDependencies": {
     "@taucad/events": "workspace:*",
-    "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/json-schema": "workspace:*",
     "@taucad/memory": "workspace:*",

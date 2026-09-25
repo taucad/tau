@@ -66,6 +66,7 @@
     "@agentclientprotocol/sdk": "catalog:",
     "@hatchet-dev/typescript-sdk": "catalog:",
     "@taucad/agent-host": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
     "@taucad/jobs": "workspace:*",
     "@taucad/jobs-hatchet": "workspace:*",
     "@taucad/jobs-solvers": "workspace:*",
@@ -92,7 +93,6 @@
   "devDependencies": {
     "@taucad/agent-tools": "workspace:*",
     "@taucad/chat": "workspace:*",
-    "@taucad/filesystem": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",

@@ -98,7 +98,7 @@ describe('candidate checkouts and the project tree (north star W0 pin 4)', () =>
      * revision would capture is the user's own file and the two generated git
      * control files the registry deliberately versions — git needs `.gitignore`
      * and `.gitattributes` in the tree, so they take the authored default
-     * (`libs/filesystem/src/path-registry.ts` `pathRegistry`) — nothing else. A
+     * (`packages/filesystem/src/path-registry.ts` `pathRegistry`) — nothing else. A
      * checkout materialized here would be versioned too (no row covers it any
      * more), and the next revision would swallow another turn's whole tree. */
     expect(files.filter((path) => classify(path).versioned).toSorted()).toEqual([

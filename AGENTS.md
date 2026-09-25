@@ -46,9 +46,9 @@ Tau is an AI-native CAD platform in an Nx/pnpm monorepo. Project configuration a
 - [apps/libs](apps/libs): Private application capabilities, including billing hooks, fs-client, converter and LSP
 - [packages/runtime](packages/runtime): Multi-kernel runtime, clients, transports, artifacts and plugin contracts
 - [packages/plugins](packages/plugins): Standalone kernel/bundler/middleware/transcoder toolkits; available toolkits differ from product-selected kernels
-- [packages](packages): Public host/jobs/GeoSpec/React/CLI/Three.js APIs
+- [packages](packages): Public host/jobs/filesystem/GeoSpec/React/CLI/Three.js APIs
 - [packages/ui](packages/ui): Published design system and `styles/tokens.css`, governed by DESIGN
-- [libs](libs): Shared filesystem/events/RPC authority, contracts, memory, telemetry, types and tooling
+- [libs](libs): Shared events/RPC authority, contracts, memory, telemetry, types and tooling
 - [tools](tools), [scripts](scripts), [.github](.github), [infra](infra): Generators/build tooling, maintenance/validation, CI/release and infrastructure
 
 Nothing under `packages/**` or `libs/**` depends on `apps/libs/**`. Query project configuration for names, exports and targets.

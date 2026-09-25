@@ -1,6 +1,6 @@
 # Filesystem
 
-`libs/filesystem` owns virtual paths, mount routing, provider composition, rooted views, mutations, and watch semantics. `apps/libs/fs-client` owns UI file-manager facades. Follow `docs/policy/filesystem-policy.md`, `docs/policy/filesystem-authority-policy.md`, and `docs/policy/event-fanout-policy.md`.
+`packages/filesystem` owns virtual paths, mount routing, provider composition, rooted views, mutations, and watch semantics. `apps/libs/fs-client` owns UI file-manager facades. Follow `docs/policy/filesystem-policy.md`, `docs/policy/filesystem-authority-policy.md`, and `docs/policy/event-fanout-policy.md`.
 
 ## Owners
 

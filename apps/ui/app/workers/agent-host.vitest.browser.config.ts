@@ -60,7 +60,8 @@ export default defineConfig({
     // Vite 8's fs check must admit the monorepo root (worker + package imports).
     fs: { allow: [fileURLToPath(new URL('../../../..', import.meta.url))] },
   },
-  optimizeDeps: { include: ['@taucad/gltf > draco3dgltf'] },
+  /* `isomorphic-git` and its `buffer`: RM-A22's worker; found late, they reload the run mid-test. */
+  optimizeDeps: { include: ['@taucad/gltf > draco3dgltf', 'buffer', 'isomorphic-git'] },
   test: {
     include: [
       'app/workers/agent-host.browser.test.ts',
@@ -70,6 +71,7 @@ export default defineConfig({
       'app/workers/skill-resources.browser.test.ts',
       'app/machines/file-manager.browser.test.ts',
       'app/machines/web-locks.browser.test.ts',
+      'app/machines/revisions-opfs.browser.test.ts',
       'app/components/geometry/loader/metal-morph-spinner.browser.test.tsx',
     ],
     fileParallelism: false,

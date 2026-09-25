@@ -377,7 +377,8 @@ for (const row of ports) {
        * text rather than matched against a value the test would have to mint. */
       expect(leaseRecord).toMatch(/"authorityEpoch":\s*"[^"]+"/u);
       expect(leaseRecord).toMatch(/"startedAt":\s*\d+/u);
-      await expect(held.leaseIds()).resolves.toEqual([]);
+      /* RM-R10: the lease retires after the settlement is announced, on its acknowledgement. */
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
 
       /* The turn's write is in the live tree, and the revision is a record of
        * it: one revision on `main`, parented on the base the turn descended
@@ -551,7 +552,8 @@ for (const row of ports) {
       expect(firstSettlement.checkoutId).toBe('live');
       expect(secondSettlement.checkoutId).toBe('live');
       await expect(held.refs()).resolves.toEqual(['main']);
-      await expect(held.leaseIds()).resolves.toEqual([]);
+      /* RM-R10: the lease retires after the settlement is announced, on its acknowledgement. */
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
 
       /* AC9's other half: the settlement names every lease on the checkout, and
        * the revision itself still carries the run that minted it — the case
@@ -629,7 +631,8 @@ for (const row of ports) {
       });
       expect(held.events.filter((event) => event.type === 'turn.finalized')).toHaveLength(0);
       expect(held.checkouts.size).toBe(0);
-      await expect(held.leaseIds()).resolves.toEqual([]);
+      /* RM-R10: the lease retires after the settlement is announced, on its acknowledgement. */
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
     }, 30_000);
 
     it('does not retire a live lease when a second host opens the same project', async () => {

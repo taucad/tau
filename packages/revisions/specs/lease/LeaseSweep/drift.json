@@ -1,0 +1,11 @@
+{
+  "alphabet": [],
+  "sources": {
+    "revision-effects.ts#prepare.staleRunIds": "743b0615cacbb42e5db321dc7686be38dcef0e8c6e17c30928d4c27d311b75ec",
+    "revision-effects.ts#sweepLeases": "e1841e0c7b4a6a8e79705cdd5108d09a33d04b48e8b3ca09d515a8dd2a6cdc9d"
+  },
+  "specs": {
+    "LeaseSweep.tla": "26436c557723ecad24774391577fa4379cfdba700c578bbbe51c5bcc420159cf"
+  },
+  "tables": {}
+}

@@ -56,6 +56,7 @@ import {
   registerProjectOverHttp,
   tauRemoteUrl,
 } from '@taucad/revisions';
+import { selectBranchNeedsConfirmation } from '@taucad/revisions/branch-machine';
 import type { branchMachine } from '@taucad/revisions/branch-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
@@ -73,6 +74,7 @@ import type {
   RevisionRow,
   RevisionStatusProjection,
   RevisionTag,
+  TurnAttemptKey,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
 import type {
@@ -653,8 +655,8 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       }),
     );
   };
-  /** Each admitted run's turn id, so a terminal marker can name the turn. */
-  const turns = new Map<string, string>();
+  /** Each admitted run's attempt key, so a terminal marker can name the attempt (D14). */
+  const turns = new Map<string, TurnAttemptKey>();
   /** Monotonic per checkout, one increment per content-change event (A38, F9). */
   const generations = new Map<string, number>();
   const applyingPaths = new Map<string, number>();
@@ -901,7 +903,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     });
   });
   actor.on('cutFailed', (failure) => {
-    if (failure.turnId === undefined) {
+    if (failure.turn === undefined) {
       emitChannel({
         kind: 'toast',
         value: revisionJson({
@@ -964,7 +966,10 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   }): Promise<void> => {
     const pending = Promise.withResolvers<void>();
     admissions.set(input.runId, pending);
-    turns.set(input.runId, input.turnId);
+    /* Today's commands name no attempt, so every admission is attempt 0 and
+     * `legacy`: the root acknowledges it itself until W8's port does (RM-S9). */
+    const key: TurnAttemptKey = { chatId: input.chatId, turnId: input.turnId, runId: input.runId, attempt: 0 };
+    turns.set(input.runId, key);
     const bound = setTimeout(() => {
       if (!admissions.has(input.runId)) {
         return;
@@ -980,7 +985,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
        * save on it records nothing. A lease has no heartbeat by policy (§8),
        * so this host giving up is the only liveness signal it has.
        */
-      actor.send({ type: 'turnAbandoned', turnId: input.turnId, runId: input.runId });
+      actor.send({ type: 'turnAbandoned', key });
       /*
        * And the run id becomes admittable again, as it does on every other way
        * an admission ends (`turnReleased`, a failed `execute`).
@@ -997,9 +1002,8 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * it and replays it, so there is nothing here to compensate for (A38). */
     actor.send({
       type: 'admitTurn',
-      turnId: input.turnId,
-      chatId: input.chatId,
-      runId: input.runId,
+      key,
+      legacy: true,
       ...(input.checkoutId === undefined ? {} : { checkoutId: input.checkoutId }),
     });
     /* The placement is awaited, not assumed: the agent's session and Tau's own
@@ -1127,38 +1131,38 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * host to open the project.
      */
     const checkoutId = await waitForLiveCheckout();
-    const { checkouts, turnRefs } = actor.getSnapshot().context;
+    const { turnRefs } = actor.getSnapshot().context;
     if (checkoutId === undefined) {
       throw new Error('The project checkout was not ready before the close deadline.');
     }
     /*
-     * A turn holding this checkout is already recording these bytes.
+     * A turn of this root holding this checkout is already recording these bytes.
      *
-     * The lease is the shared fact, so this holds for a *second* window over the
-     * same project as much as for this one's own turns: minting here would pass
-     * the I5 gate first and leave the turn's own settlement with an unchanged
-     * tree — the turn's revision, recorded under `close` and credited to nobody.
-     * A process that dies before the turn settles loses nothing either: the next
-     * host to open the project mints from the same bytes.
+     * Another holder's lease is not skipped here: the registry's list lags a
+     * retirement, so a refused turn's record would skip the close silently. The
+     * cut reads the records itself instead, and a live lease answers
+     * `nothingToSave{heldBy}` (RM-R16); a process that dies before that turn
+     * settles loses nothing, since the next host mints from the same bytes.
      */
-    const live = checkouts.find((checkout) => checkout.id === checkoutId);
-    if (Object.keys(turnRefs).length > 0 || (live?.leaseRunIds.length ?? 0) > 0) {
+    if (Object.keys(turnRefs).length > 0) {
       return;
     }
     const settledCut = Promise.withResolvers<void>();
+    /* The answer names the request, so another tab's close or an idle mint never settles this one (RM-R1). */
+    const requestId = `close:${randomUUID()}`;
     const subscriptions = [
       actor.on('revisionMinted', (event) => {
-        if (event.checkoutId === checkoutId && event.trigger === 'close') {
+        if (event.requestId === requestId) {
           settledCut.resolve();
         }
       }),
       actor.on('nothingToSave', (event) => {
-        if (event.checkoutId === checkoutId && event.trigger === 'close') {
+        if (event.requestId === requestId) {
           settledCut.resolve();
         }
       }),
       actor.on('cutFailed', (event) => {
-        if (event.checkoutId === checkoutId && event.trigger === 'close') {
+        if (event.requestId === requestId) {
           settledCut.reject(new Error(event.reason));
         }
       }),
@@ -1167,7 +1171,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       settledCut.reject(new Error('The close revision was not recorded before the deadline.'));
     }, closeFlushMilliseconds).unref();
     try {
-      actor.send({ type: 'cut', trigger: 'close', checkoutId, leaseIds: [] });
+      actor.send({ type: 'cut', requestId, trigger: 'close', checkoutId, leaseIds: [] });
       await settledCut.promise;
     } finally {
       clearTimeout(bound);
@@ -1230,6 +1234,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     }
     return value;
   };
+  /* A verb names its request (RM-R1): the page's own id when it sent one, else one minted here. */
+  const requestIdOf = (request: Record<string, JsonValue>): string =>
+    optionalText(request, 'requestId') ?? randomUUID();
   /**
    * What one `remoteCredential` frame makes this host hold (D4, D16b).
    *
@@ -1364,7 +1371,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         actor.getSnapshot().children.restore?.send({ type: request.command });
         break;
       case 'switch':
-        actor.send({ type: 'switch', branch: text('branch') });
+        actor.send({ type: 'switch', requestId: requestIdOf(request), branch: text('branch') });
         break;
       case 'followChat':
         actor.send({ type: 'followChat', chatId: text('chatId') });
@@ -1377,6 +1384,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           type: 'branch',
           event: {
             type: 'create',
+            requestId: requestIdOf(request),
             name: text('name'),
             ...(optionalText(request, 'from') ? { from: optionalText(request, 'from') } : {}),
           },
@@ -1387,6 +1395,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           type: 'branch',
           event: {
             type: 'discard',
+            requestId: requestIdOf(request),
             branch: text('branch'),
             ...(optionalText(request, 'checkoutId') ? { checkoutId: optionalText(request, 'checkoutId') } : {}),
           },
@@ -1395,13 +1404,13 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'mergeBranch':
         actor.send({
           type: 'branch',
-          event: { type: 'merge', branch: text('branch') },
+          event: { type: 'merge', requestId: requestIdOf(request), branch: text('branch') },
         });
         break;
       case 'renameBranch':
         actor.send({
           type: 'branch',
-          event: { type: 'rename', branch: text('branch'), name: text('name') },
+          event: { type: 'rename', requestId: requestIdOf(request), branch: text('branch'), name: text('name') },
         });
         break;
       case 'confirmBranch':
@@ -1449,6 +1458,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           type: 'publish',
           event: {
             type: 'publish',
+            requestId: requestIdOf(request),
             ...(optionalText(request, 'tag') ? { tag: optionalText(request, 'tag') } : {}),
           },
         });
@@ -1522,6 +1532,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           const trigger = request['trigger'];
           actor.send({
             type: 'cut',
+            requestId: requestIdOf(request),
             trigger: trigger === 'hidden' || trigger === 'close' ? trigger : 'save',
             checkoutId,
             leaseIds: [],
@@ -1610,14 +1621,14 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             if (event.type !== 'run.lifecycle' || !terminalStates.has(event.state)) {
               continue;
             }
-            const turnId = turns.get(event.runId);
-            if (turnId === undefined) {
+            const key = turns.get(event.runId);
+            if (key === undefined) {
               continue;
             }
             /* Sent straight through: `turn.machine` buffers a completion that
              * arrives while it is still `preparing` and replays it on
              * `leased.held`, so the host holds nothing (W6). */
-            actor.send({ type: 'turnCompleted', turnId });
+            actor.send({ type: 'turnCompleted', key });
           }
         } catch (error) {
           /* A durable subscription can *error* — the launcher's fan-out drops
@@ -1667,12 +1678,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
              * the turn never reached the tool loop and wrote nothing. The turn
              * actor retires its lease and drops out; a refused admission must
              * not hold one for the life of the host. */
-            const turnId = turns.get(command.runId);
-            if (turnId !== undefined) {
-              /* Named by run as well as by turn: an edit reuses the message id
-               * the previous run leased, so the verb must not end whichever run
-               * holds that turn id now. */
-              actor.send({ type: 'turnAbandoned', turnId, runId: command.runId });
+            const key = turns.get(command.runId);
+            if (key !== undefined) {
+              /* Named by attempt: an edit reuses the message id the previous
+               * run leased, so the verb must not end whichever run holds that
+               * turn id now (D14). */
+              actor.send({ type: 'turnAbandoned', key });
               turns.delete(command.runId);
             }
             options.checkouts?.delete(command.runId);
@@ -1974,28 +1985,36 @@ export const openProjectRevisions = (
      * host re-implementing a machine (I20); now it only reports what the machine
      * settled on (W7 review R3).
      */
+    /* Every answer names this request, so another verb's toast never settles this one (RM-R1). */
+    const requestId = randomUUID();
     const outcome = await answered<RevisionSwitchOutcome>(
       (resolve) => {
         const refused = actor.on('switchRefused', (event) => {
-          resolve(Object.freeze({ status: 'refused', branch, reason: event.reason }));
+          if (event.requestId === requestId) {
+            resolve(Object.freeze({ status: 'refused', branch, reason: event.reason }));
+          }
         });
         /* A re-root is finished the moment it is resolved: the branch already
          * has a place of its own and no tree is rewritten. */
         const rerooted = actor.on('switchResolved', (event) => {
-          if (event.mode === 'reroot') {
+          if (event.requestId === requestId && event.mode === 'reroot') {
             resolve(Object.freeze({ status: 'switched', branch, line: branch }));
           }
         });
-        const settled = child.on('toast.branch', () => {
-          resolve(Object.freeze({ status: 'switched', branch, line: branch }));
+        const settled = child.on('toast.branch', (event) => {
+          if (event.requestId === requestId) {
+            resolve(Object.freeze({ status: 'switched', branch, line: branch }));
+          }
         });
         const failed = child.on('toast.error', (event) => {
-          resolve(Object.freeze({ status: 'refused', branch, reason: event.message }));
+          if (event.requestId === requestId) {
+            resolve(Object.freeze({ status: 'refused', branch, reason: event.message }));
+          }
         });
         /* The machine parks in `confirming` when its own check says a person is
          * needed; an unconfirmed switch cancels rather than waiting. */
         const watching = child.subscribe((snapshot: SnapshotFrom<typeof branchMachine>) => {
-          if (!snapshot.matches('confirming')) {
+          if (!selectBranchNeedsConfirmation(snapshot) || snapshot.context.requestId !== requestId) {
             return;
           }
           if (verb.confirm === true) {
@@ -2013,7 +2032,7 @@ export const openProjectRevisions = (
             }),
           );
         });
-        actor.send({ type: 'switch', branch });
+        actor.send({ type: 'switch', requestId, branch });
         return () => {
           refused.unsubscribe();
           rerooted.unsubscribe();
@@ -2065,17 +2084,20 @@ export const openProjectRevisions = (
         reason: 'This project has no checkout registry running.',
       });
     }
+    const requestId = randomUUID();
     return answered<RevisionDiscardOutcome>(
       (resolve) => {
         const failed = actor.on('checkoutFailed', (event) => {
-          resolve(Object.freeze({ status: 'refused', branch, reason: event.reason }));
+          if (event.requestId === requestId) {
+            resolve(Object.freeze({ status: 'refused', branch, reason: event.reason }));
+          }
         });
         const watching = actor.subscribe((snapshot) => {
           if (!snapshot.context.checkouts.some((checkout) => checkout.id === record.id)) {
             resolve(Object.freeze({ status: 'discarded', branch }));
           }
         });
-        checkouts.send({ type: 'removeCheckout', id: record.id });
+        checkouts.send({ type: 'removeCheckout', requestId, id: record.id });
         return () => {
           failed.unsubscribe();
           watching.unsubscribe();
@@ -2104,9 +2126,13 @@ export const openProjectRevisions = (
         reason: 'This project has no publish verbs running.',
       });
     }
+    const requestId = randomUUID();
     return answered<RevisionPublishOutcome>(
       (resolve) => {
         const published = child.on('published', (event) => {
+          if (event.requestId !== requestId) {
+            return;
+          }
           resolve(
             Object.freeze({
               status: 'published',
@@ -2117,11 +2143,13 @@ export const openProjectRevisions = (
           );
         });
         const failed = child.on('toast.error', (event) => {
-          resolve(Object.freeze({ status: 'refused', reason: event.message }));
+          if (event.requestId === requestId) {
+            resolve(Object.freeze({ status: 'refused', reason: event.message }));
+          }
         });
         actor.send({
           type: 'publish',
-          event: { type: 'publish', tag: draft.tag },
+          event: { type: 'publish', requestId, tag: draft.tag },
         });
         actor.send({ type: 'publish', event: { type: 'confirm', draft } });
         return () => {

@@ -59,6 +59,8 @@ export const revisionFailureCopy: Readonly<
        * to be reported as a name collision, which is not what happened. */
       ['CHECKOUT_UNKNOWN', 'This project has nothing open to branch from yet. Wait a moment and try again.'],
       ['UNKNOWN_REVISION', 'The revision this branch would start from is not in this project any more.'],
+      /* Another branch change is running or waiting for an answer (RM-R11). */
+      ['REVISIONS_BUSY', 'Another branch change is still in progress. Wait for it to finish, then try again.'],
     ]),
   },
   save: {
@@ -76,9 +78,9 @@ export const revisionFailureCopy: Readonly<
       ...engineCopy,
       /* Another document of this project is mid-change on the same files. */
       ['LEASE_UNAVAILABLE', 'Another window has this project open. Wait for it to finish, then try again.'],
-      ['BASE_CUT_TIMED_OUT', 'Tau took too long to save this project’s earlier edits. Try sending that again.'],
+      /* The earlier edits on the checkout could not be recorded before the turn began (RM-S14). */
+      ['BASE_CUT_FAILED', 'Tau could not save this project’s earlier edits first. Try sending that again.'],
       ['CAS_LOST', 'Something else changed this project at the same time. Try sending that again.'],
-      ['CUT_TIMED_OUT', 'Tau took too long to record that change. Try sending it again.'],
       /* No files to run in: the worker client refuses one placement this way
        * and the page's authority the other, from this one row. */
       ['PLACEMENT_UNROOTED', 'This chat’s files could not be found.'],

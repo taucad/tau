@@ -33,9 +33,10 @@ describe('createLfsClient batch validation', () => {
     const oid = 'a'.repeat(64);
     const missing: RevisionHttpClient = { request: async () => response('{"objects":[]}') };
     await expect(
-      createLfsClient({ url: 'https://github.com/a/b.git', http: missing }).upload(
-        new Map([[oid, encoder.encode('x')]]),
-      ),
+      createLfsClient({ url: 'https://github.com/a/b.git', http: missing }).upload({
+        pointers: [{ oid, size: 1 }],
+        read: async () => encoder.encode('x'),
+      }),
     ).rejects.toThrow(/omitted large object/u);
 
     const entry = { oid, size: 1 };
@@ -43,9 +44,10 @@ describe('createLfsClient batch validation', () => {
       request: async () => response(JSON.stringify({ objects: [entry, entry] })),
     };
     await expect(
-      createLfsClient({ url: 'https://github.com/a/b.git', http: duplicate }).upload(
-        new Map([[oid, encoder.encode('x')]]),
-      ),
+      createLfsClient({ url: 'https://github.com/a/b.git', http: duplicate }).upload({
+        pointers: [{ oid, size: 1 }],
+        read: async () => encoder.encode('x'),
+      }),
     ).rejects.toThrow(/invalid LFS batch entry/u);
   });
 
@@ -73,9 +75,10 @@ describe('createLfsClient batch validation', () => {
       request: async () => ({ ...response(answer), statusCode, statusMessage: 'Refused' }),
     });
     const upload = async (http: RevisionHttpClient): Promise<readonly string[]> =>
-      createLfsClient({ url: 'https://github.com/a/b.git', http, remote: 'origin' }).upload(
-        new Map([['c'.repeat(64), encoder.encode('x')]]),
-      );
+      createLfsClient({ url: 'https://github.com/a/b.git', http, remote: 'origin' }).upload({
+        pointers: [{ oid: 'c'.repeat(64), size: 1 }],
+        read: async () => encoder.encode('x'),
+      });
 
     const moved = 'The repository moved; confirm its new location before sending the credential there';
     await expect(

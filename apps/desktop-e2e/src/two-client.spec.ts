@@ -1872,7 +1872,9 @@ describe('a git remote', () => {
       const proxied = await fetch(`${desktopE2EApiUrl}/v1/git/proxy?url=${encodeURIComponent(target.toString())}`, {
         headers: {
           authorization: `Bearer ${bearer}`,
-          'x-tau-proxy-authorization': `Bearer ${token}`,
+          /* The product's shape (`github-linked-import.ts`): GitHub's git
+           * endpoint refuses `Bearer` for an OAuth or App user token. */
+          'x-tau-proxy-authorization': `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
         },
       });
       expect(proxied.status).toBe(200);

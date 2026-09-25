@@ -420,6 +420,16 @@ for (const row of ports) {
         projectId: 'project-1',
         line: { kind: 'branch', name: 'main' },
       });
+      /* One revision by id, and how far two heads have gone apart: History's
+       * pinned rows and the Branches region, without reading a whole log. */
+      const head = String(settlement.revisionId);
+      const one = await held.revisions.channel.request({ command: 'log', from: head, limit: 1 });
+      const record = await held.port.readRevision(revisionId(head));
+      expect(one.result).toEqual([expect.objectContaining({ revisionId: head, treeId: record?.treeId })]);
+      const parent = String(record?.parents[0]);
+      await expect(
+        held.revisions.channel.request({ command: 'divergence', head, base: parent }),
+      ).resolves.toMatchObject({ result: { ahead: 1, behind: 0 } });
       await expect(held.revisions.channel.request({ command: 'open' })).resolves.toMatchObject({
         status: { projectId: 'project-1' },
       });
@@ -1600,10 +1610,11 @@ describe('a branch refusal over the host channel', () => {
     })();
     try {
       await revisions.channel.request({ command: 'open' });
-      /* A project with nothing recorded has nothing to branch from, which is
-         the cheapest refusal this tree mints — any refused verb proves the
-         relay, and this one needs no turn to have run. */
-      await revisions.channel.request({ command: 'createBranch', name: 'isolated-run' });
+      /* A branch the live checkout already holds is refused however soon the
+         registry answers — any refused verb proves the relay, and this one
+         needs no turn to have run. (A project with nothing recorded was
+         refused only while its registry was still opening.) */
+      await revisions.channel.request({ command: 'createBranch', name: 'main' });
 
       await expect
         .poll(
@@ -1616,11 +1627,45 @@ describe('a branch refusal over the host channel', () => {
             type: 'error',
             subject: 'branch',
             operation: 'create',
-            branch: 'isolated-run',
+            branch: 'main',
             code: expect.any(String) as unknown as string,
             message: expect.any(String) as unknown as string,
           },
         });
+    } finally {
+      abort.abort();
+      await reading.catch(() => undefined);
+      await revisions.release();
+    }
+  }, 30_000);
+
+  /* Asked the moment the project opens, before its registry has loaded: the
+     registry dropped the verb, and the pane waited out the 30 s bound (W4 a3b). */
+  it('answers a branch from an unknown base asked for as the project opens', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-branch-early-'));
+    roots.push(workspaceRoot);
+    const revisions = createProjectRevisions({
+      workspaceRoot,
+      projectId: 'project-1',
+      port: createIsomorphicGitRevisionPort({
+        filesystem: new NodeFsProvider(workspaceRoot),
+        checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+      }),
+    });
+    const abort = new AbortController();
+    const frames: Array<Readonly<{ kind: string; value: unknown }>> = [];
+    const reading = (async (): Promise<void> => {
+      for await (const frame of revisions.channel.events(abort.signal)) {
+        frames.push(frame);
+      }
+    })();
+    try {
+      await revisions.channel.request({ command: 'open' });
+      await revisions.channel.request({ command: 'createBranch', name: 'feature', from: 'no-such-revision' });
+
+      await expect
+        .poll(() => frames.find((frame) => frame.kind === 'toast'), { timeout: 5000 })
+        .toMatchObject({ kind: 'toast', value: { type: 'error', branch: 'feature', code: 'UNKNOWN_REVISION' } });
     } finally {
       abort.abort();
       await reading.catch(() => undefined);

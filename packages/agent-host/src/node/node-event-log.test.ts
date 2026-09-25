@@ -147,8 +147,45 @@ describe('Node event log', () => {
       await rm(`${filePath}.lock`, { force: true });
     }
   });
-  // Without a kernel lock (Windows, Electron off Darwin, a Darwin worker thread) the pid marker is the only fence, so
-  // two takers of one stale marker are told apart after a settle window: only the inode the path still names holds.
+  /*
+   * Two takers can both unlink one stale marker, and a writer that holds a kernel lock can still race one that does not
+   * (a main-thread writer and a Darwin worker, or an older build), so every takeover is told apart after a settle
+   * window: only the inode the path still names holds.
+   */
+  const takeOverAgainstStraggler = async (create: typeof createNodeEventLog): Promise<void> => {
+    const filePath = await temporaryLogPath();
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(`${filePath}.lock`, '2147483646\n');
+    const outcome = (async () => {
+      try {
+        const log = await create({ filePath, access: 'write' });
+        await log.close();
+        return 'opened';
+      } catch (error) {
+        return error;
+      }
+    })();
+    const takenOver = async (): Promise<boolean> => {
+      try {
+        const contents = await readFile(`${filePath}.lock`, 'utf8');
+        return contents.startsWith(`${process.pid}\n`);
+      } catch {
+        return false;
+      }
+    };
+    // Polls until the taker has written its marker, inside its settle window.
+    // oxlint-disable-next-line no-await-in-loop -- one probe at a time.
+    while (!(await takenOver())) {
+      // oxlint-disable-next-line no-await-in-loop -- one probe at a time.
+      await sleep(5);
+    }
+    await rm(`${filePath}.lock`, { force: true });
+    await writeFile(`${filePath}.lock`, '424242\n');
+
+    await expect(outcome).resolves.toMatchObject({ code: 'WRITER_LOCKED' });
+    expect(await readFile(`${filePath}.lock`, 'utf8')).toBe('424242\n');
+  };
+
   it('should refuse a takeover whose marker a straggler replaced when no kernel lock is held', async () => {
     vi.resetModules();
     vi.doMock('@taucad/filesystem/backend/node', async (original) => {
@@ -162,41 +199,15 @@ describe('Node event log', () => {
     });
     try {
       const { createNodeEventLog: createUnlocked } = await import('#node.js');
-      const filePath = await temporaryLogPath();
-      await mkdir(dirname(filePath), { recursive: true });
-      await writeFile(`${filePath}.lock`, '2147483646\n');
-      const outcome = (async () => {
-        try {
-          const log = await createUnlocked({ filePath, access: 'write' });
-          await log.close();
-          return 'opened';
-        } catch (error) {
-          return error;
-        }
-      })();
-      const takenOver = async (): Promise<boolean> => {
-        try {
-          const contents = await readFile(`${filePath}.lock`, 'utf8');
-          return contents.startsWith(`${process.pid}\n`);
-        } catch {
-          return false;
-        }
-      };
-      // Polls until the taker has written its marker, inside its settle window.
-      // oxlint-disable-next-line no-await-in-loop -- one probe at a time.
-      while (!(await takenOver())) {
-        // oxlint-disable-next-line no-await-in-loop -- one probe at a time.
-        await sleep(5);
-      }
-      await rm(`${filePath}.lock`, { force: true });
-      await writeFile(`${filePath}.lock`, '424242\n');
-
-      await expect(outcome).resolves.toMatchObject({ code: 'WRITER_LOCKED' });
-      expect(await readFile(`${filePath}.lock`, 'utf8')).toBe('424242\n');
+      await takeOverAgainstStraggler(createUnlocked);
     } finally {
       vi.doUnmock('@taucad/filesystem/backend/node');
       vi.resetModules();
     }
+  });
+
+  it('should refuse a takeover whose marker a straggler replaced while holding the kernel lock', async () => {
+    await takeOverAgainstStraggler(createNodeEventLog);
   });
 
   // CL-A9, I1 on Node: the kernel lock is the fence; the pid marker is only a courtesy for older builds.

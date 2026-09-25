@@ -144,7 +144,10 @@ Rules == {"SequenceContiguous", "EpochNotReopened", "EpochStartsAtZero", "Epochs
 
 \* Evaluated as a value: in an action TLC branches on both sides of a disjunction, and some rules
 \* read a map only where a left disjunct fails (`lifecycle[current]`, `e.attempt`).
-Broken(e) == {rule \in Rules : ~Holds(rule, e)}
+\* `formal logs` waives a rule a known host defect breaks (FORMAL_WAIVE_<rule> set), so the rows after it are
+\* still checked to the end; a spec run sets none.
+Waived == {rule \in Rules : ("FORMAL_WAIVE_" \o rule) \in DOMAIN IOEnv}
+Broken(e) == {rule \in Rules \ Waived : ~Holds(rule, e)}
 
 Init ==
   /\ i = 0 /\ epoch = "" /\ seq = -1 /\ closed = {} /\ maxEpoch = 0 /\ termEpoch = 0

@@ -692,12 +692,9 @@ const runIdTakenRefusal = (input: { readonly runId: string; readonly held: strin
 const assertExecutable = (chatId: string, ledger: ChatLedger): void => {
   const code = executionRefusal(ledger);
   if (code === 'RUN_UNREADABLE') {
-    throw Object.assign(
-      new Error(`A newer version of Tau wrote chat ${chatId}'s current run. Update Tau to continue it.`),
-      {
-        code,
-      },
-    );
+    throw Object.assign(new Error(`A newer version of Tau wrote part of chat ${chatId}. Update Tau to continue it.`), {
+      code,
+    });
   }
   if (code === 'HISTORY_INVALID') {
     throw Object.assign(new Error(`Chat ${chatId}'s history cannot be replayed; start a new chat.`), { code });

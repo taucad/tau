@@ -119,9 +119,9 @@ describe('validateCapturedLogs', () => {
     };
     const rejectedBy =
       (rules: Record<string, readonly string[]>): LogValidator =>
-      async (sanitized) => {
+      async (sanitized, waived = []) => {
         const rule = Object.entries(rules).find(([name]) => sanitized.endsWith(name))?.[1];
-        return rule === undefined
+        return rule === undefined || rule.every((name) => waived.includes(name))
           ? { outcome: 'pass', seconds: 1 }
           : { outcome: { rejected: { row: 7, rules: rule } }, seconds: 1 };
       };
@@ -143,9 +143,29 @@ describe('validateCapturedLogs', () => {
         accepted: true,
         verdict: 'rejected at row 7 by RowsNeedRun',
         knownDefect: 'RowsNeedRun (fixed by W7 RA-S5)',
-        seconds: 1,
+        // The first run and the waived rerun that passed to the end.
+        seconds: 2,
       });
       expect(lines.join('\n')).toContain('1 known defect');
+    });
+
+    // TLC stops at the first rejected row: a waived rerun checks the rows after the known one to the end.
+    it('should fail a log whose known row hides a later violation of an unlisted rule', async () => {
+      const context = temporaryContext();
+      register(context);
+      capture(context, { 'chat.spec/a.jsonl': '{}\n' });
+      const validate: LogValidator = async (_sanitized, waived = []) =>
+        waived.includes('RowsNeedRun')
+          ? { outcome: { rejected: { row: 12, rules: ['SettledOnce'] } }, seconds: 1 }
+          : { outcome: { rejected: { row: 7, rules: ['RowsNeedRun'] } }, seconds: 1 };
+
+      const code = await validateCapturedLogs(context, { project: 'ui-e2e', validate, log: () => undefined });
+
+      expect(code).toBe(1);
+      expect(JSON.parse(readFileSync(verdictsFile(context, 'ui-e2e'), 'utf8'))['chat.spec/a.jsonl']).toMatchObject({
+        accepted: false,
+        verdict: 'rejected at row 12 by SettledOnce (with RowsNeedRun waived)',
+      });
     });
 
     it('should fail a log rejected by a rule the registry does not list', async () => {

@@ -11,6 +11,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
 import { DiffViewer } from '#components/code/diff-viewer.js';
+import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
 import { RevisionConflictEditor } from '#routes/w.$workspace.$project/revision-conflict-editor.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions';
@@ -241,7 +242,7 @@ function ConflictCard({
                 <DiffViewer
                   originalContent={materialized.ours}
                   modifiedContent={materialized.theirs}
-                  language={path}
+                  language={resolveHighlightLanguageForPath(path).shikiLanguage}
                   className='rounded-md border'
                 />
               ) : null}

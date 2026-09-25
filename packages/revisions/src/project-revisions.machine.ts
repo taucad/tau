@@ -493,6 +493,11 @@ const answerCut = (
   if (event.turnId === undefined) {
     enq.sendTo('branch', event);
     enq.sendTo('restore', event);
+    /* `sync` asks for a `merge` cut before it integrates a dirty checkout (D12);
+     * it already hears every `revisionMinted` below. */
+    if (event.type !== 'revisionMinted') {
+      enq.sendTo('sync', event);
+    }
     return;
   }
   /* A turn whose ref has already gone is not the `branch` child's answer:
@@ -529,8 +534,9 @@ const releaseAdmissions = (
 /*
  * A turn's settlement: the registry retires its lease, the host hears it, and the root drops the ref.
  *
- * Forwarded verbatim, as it always was — `turnConflicted` included, which the
- * registry does not handle — so the registry is addressed as any actor.
+ * Forwarded verbatim, `turnConflicted` included: a conflicted turn deleted its
+ * lease file too, and a scheduler parked behind it resumes only on the
+ * registry's `leaseRetired` (rule 9, RV-W5b F1).
  */
 const settleTurn = (
   context: ProjectRevisionsMachineContext,
@@ -905,6 +911,14 @@ const projectRevisionsMachineDefinition = setup({
                 ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
                 reason,
               });
+              /* The scheduler's merge cut, too, rather than its pull deadline (RV-W5b F8). */
+              enq.sendTo('sync', {
+                type: 'cutFailed',
+                checkoutId: event.checkoutId,
+                trigger: event.trigger,
+                ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+                reason,
+              });
               return {};
             }
             const turnRef = context.turnRefs[event.turnId];
@@ -1068,6 +1082,8 @@ const projectRevisionsMachineDefinition = setup({
         /* R11: registry facts a host has to show reach it through the root. */
         leaseRetired: ({ event }, enq) => {
           enq.emit(event);
+          /* A fetch parked behind this lease applies now (D12, rule 9). */
+          enq.sendTo('sync', event);
           return {};
         },
         removalOffered: ({ event }, enq) => {

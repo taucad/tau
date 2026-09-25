@@ -40,6 +40,9 @@ import {
   syncQuiesceMilliseconds,
 } from '#revision-effects.js';
 import type { RevisionActors, RevisionActorsOptions } from '#revision-effects.js';
+import type { ParameterRecordCodec, RevisionId } from '#algorithms/index.js';
+import type { SyncMergeActorOutput } from '#sync.machine.js';
+import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { syncPullDeadlineMilliseconds } from '#sync.machine.js';
 import { turnCutSettlementMilliseconds } from '#turn.machine.js';
 
@@ -1140,8 +1143,11 @@ for (const actorSet of actorSets) {
     it('preserves dirty and leased files, and rejects protected target paths before writing', async () => {
       const context = await synchronized();
       await context.filesystem.writeFile('main.ts', 'unsaved\n');
-      await expect(run(context.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toMatchObject({
-        code: 'CHECKOUT_CONFLICT',
+      /* Held, not failed (D12): the scheduler mints a dirty checkout first. */
+      await expect(run(context.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+        status: 'held',
+        hold: 'dirty',
+        revisionId: context.remote,
       });
       expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('unsaved\n');
       expect(await context.port.readRef('main')).toBe(context.base);
@@ -1153,8 +1159,11 @@ for (const actorSet of actorSets) {
         chatId: 'chat-1',
         checkoutId: 'live',
       });
-      await expect(run(context.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toMatchObject({
-        code: 'CHECKOUT_CONFLICT',
+      /* And a leased one waits for its lease (rule 9). */
+      await expect(run(context.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+        status: 'held',
+        hold: 'leased',
+        revisionId: context.remote,
       });
       expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('base\n');
       await run(context.actors.turn.retireLease, { runId: 'run-1' });
@@ -1355,6 +1364,155 @@ for (const actorSet of actorSets) {
       });
       expect(await context.port.readRef('main')).toBe(local.commitId);
       expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('new local revision\n');
+    }, 30_000);
+
+    /**
+     * Two lines from one base: `local` is this device's head and its files,
+     * `remote` is what the fetch left in `refs/remotes/tau/main`.
+     *
+     * @param lines - The base files, and what each side changed.
+     * @param extra - Host options, such as the parameters codec.
+     * @returns The fixture and the three revisions.
+     */
+    const divergedLines = async (
+      lines: Readonly<{
+        base: Readonly<Record<string, string>>;
+        local: Readonly<Record<string, string>>;
+        remote: Readonly<Record<string, string>>;
+      }>,
+      extra: FixtureOptions = {},
+    ) => {
+      const context = await fixture(lines.base, (filesystem) => filesystem, { actorSet: actorSet.name, ...extra });
+      const { port, filesystem } = context;
+      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const capture = async () => captureRevisionTree(filesystem, { exclude: (path) => !classify(path).versioned });
+      const record = async (parents: readonly RevisionId[], tree: ImmutableRevisionTree, summary: string) => {
+        const written = await port.writeRevision({
+          parents,
+          tree,
+          provenance: { source: 'user', actorId: summary, createdAt: Date.UTC(2026, 8, 25) },
+          summary: { generated: summary },
+        });
+        return revisionId(written.commitId);
+      };
+      const baseTree = await capture();
+      const base = await record([], baseTree, 'Base');
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: base });
+      await port.setHead('main');
+      for (const [path, content] of Object.entries(lines.local)) {
+        // oxlint-disable-next-line no-await-in-loop -- a handful of fixture files, in order.
+        await filesystem.writeFile(path, content);
+      }
+      const local = await record([base], await capture(), 'Local');
+      await port.updateRef({ name: 'main', expectedHead: base, head: local });
+      const remoteTree = new ImmutableRevisionTree([
+        ...baseTree
+          .entries()
+          .filter((entry) => !(entry.path in lines.remote))
+          .map((entry) => [entry.path, entry.content, entry.mode] as const),
+        ...Object.entries(lines.remote),
+      ]);
+      const remote = await record([base], remoteTree, 'Remote');
+      await port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+      return { ...context, base, local, remote };
+    };
+
+    it('auto-merges a diverged clean checkout that changed other files, and lands the merge revision (D12)', async () => {
+      const context = await divergedLines({
+        base: { 'main.ts': 'base\n' },
+        local: { 'local.ts': 'mine\n' },
+        remote: { 'main.ts': 'theirs\n' },
+      });
+
+      const outcome = await run<SyncMergeActorOutput>(context.actors.sync.merge, { remote: 'tau', branch: 'main' });
+
+      const head = await context.port.readRef('main');
+      expect(outcome).toEqual({
+        status: 'merged',
+        moved: { checkoutId: 'live', revisionId: head, treeId: expect.any(String) as string },
+      });
+      const landed = await context.port.readRevision(revisionId(head ?? ''));
+      expect(landed?.parents).toEqual([context.local, context.remote]);
+      expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('theirs\n');
+      expect(await context.filesystem.readFile('local.ts', 'utf8')).toBe('mine\n');
+    }, 30_000);
+
+    it('applies nothing to a checkout a turn holds, and says it is held rather than failed (rule 9)', async () => {
+      const context = await divergedLines({
+        base: { 'main.ts': 'base\n' },
+        local: { 'local.ts': 'mine\n' },
+        remote: { 'main.ts': 'theirs\n' },
+      });
+      await run(context.actors.turn.writeLease, {
+        runId: 'run-1',
+        turnId: 'turn-1',
+        chatId: 'chat-1',
+        checkoutId: 'live',
+      });
+      const held = { status: 'held', hold: 'leased', checkoutId: 'live', revisionId: context.remote };
+
+      /* Clean: nothing is re-based under the turn. */
+      await expect(run(context.actors.sync.merge, { remote: 'tau', branch: 'main' })).resolves.toEqual(held);
+      expect(await context.port.readRef('main')).toBe(context.local);
+      expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('base\n');
+
+      /* The turn's own writes make the checkout dirty; it is still read as leased, never minted. */
+      await context.filesystem.writeFile('local.ts', 'the agent is writing\n');
+      await expect(run(context.actors.sync.merge, { remote: 'tau', branch: 'main' })).resolves.toEqual(held);
+      expect(await context.port.readRef('main')).toBe(context.local);
+
+      /* The same guard refuses a person's *Merge into* in the agent sentence. */
+      await context.port.updateRef({ name: 'side', expectedHead: undefined, head: context.remote });
+      await expect(
+        run(context.actors.branch.merge, { projectId: 'project-1', branch: 'side', into: 'main' }),
+      ).rejects.toThrow('An agent is working in this project’s files.');
+    }, 30_000);
+
+    it('holds a dirty checkout for its merge cut instead of refusing the merge (D12)', async () => {
+      const context = await divergedLines({
+        base: { 'main.ts': 'base\n' },
+        local: { 'local.ts': 'mine\n' },
+        remote: { 'main.ts': 'theirs\n' },
+      });
+      await context.filesystem.writeFile('local.ts', 'unsaved\n');
+
+      await expect(run(context.actors.sync.merge, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+        status: 'held',
+        hold: 'dirty',
+        revisionId: context.remote,
+      });
+      expect(await context.port.readRef('main')).toBe(context.local);
+      expect(await context.filesystem.readFile('local.ts', 'utf8')).toBe('unsaved\n');
+    }, 30_000);
+
+    it('merges disjoint `.tau/parameters` keys through the codec the host injects, at every merge (D12)', async () => {
+      const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+      const parameters: ParameterRecordCodec = {
+        read: (bytes) => JSON.parse(decoder.decode(bytes)) as unknown,
+        serialize: (record) => encoder.encode(`${JSON.stringify(record)}\n`),
+      };
+      const lines = {
+        base: { '.tau/parameters/x.json': '{"a":1,"b":1}\n' },
+        local: { '.tau/parameters/x.json': '{"a":2,"b":1}\n' },
+        remote: { '.tau/parameters/x.json': '{"a":1,"b":2}\n' },
+      };
+
+      const withCodec = await divergedLines(lines, { parameters });
+      await expect(run(withCodec.actors.sync.merge, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+        status: 'merged',
+      });
+      expect(JSON.parse(await withCodec.filesystem.readFile('.tau/parameters/x.json', 'utf8'))).toEqual({
+        a: 2,
+        b: 2,
+      });
+
+      /* Without one, the record is never merged unvalidated. */
+      const withoutCodec = await divergedLines(lines);
+      await expect(run(withoutCodec.actors.sync.merge, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+        status: 'conflicted',
+        paths: ['.tau/parameters/x.json'],
+      });
     }, 30_000);
 
     it('does not advance a branch that another checkout has open', async () => {
@@ -2216,6 +2374,81 @@ describe('the path policy a project is given', () => {
     expect(paths).toContain('node_modules/left/index.js');
     expect(paths).toContain('thumbnail.webp');
   }, 30_000);
+});
+
+describe('the revision stream subscription (W5b; RV-W5b F3, F5, F9)', () => {
+  type Stream = { handlers: RevisionStreamHandlers; stopped: boolean };
+  const subscription = () => {
+    const streams: Stream[] = [];
+    const actors = createRevisionActors({
+      port: { init: vi.fn(async () => undefined) } as unknown as RevisionPort,
+      projectId: 'p',
+      authorityEpoch: 'e',
+      filesystem: () => {
+        throw new Error('unused');
+      },
+      remoteMoves: (_input, handlers) => {
+        const stream: Stream = { handlers, stopped: false };
+        streams.push(stream);
+        return () => {
+          stream.stopped = true;
+        };
+      },
+    });
+    const actor = createActor(actors.sync.remoteMoves, { input: { projectId: 'p' } });
+    actor.start();
+    return { actors, actor, streams };
+  };
+  const refusal = new RevisionPortError('REMOTE_UNAUTHORIZED', 'This credential cannot read the stream.');
+
+  it('ignores a late refusal from a stream it already stopped, so the live one stays owned (F3)', () => {
+    const { actor, streams } = subscription();
+    actor.send({ type: 'watch', remote: 'tau' });
+    actor.send({ type: 'unwatch' });
+    actor.send({ type: 'watch', remote: 'tau' });
+    expect(streams).toHaveLength(2);
+
+    streams[0]?.handlers.refused(refusal);
+    actor.send({ type: 'unwatch' });
+
+    expect(streams[1]?.stopped).toBe(true);
+    actor.stop();
+  });
+
+  it('does not re-read a stream that refused this session until the remote is watched afresh (F5)', () => {
+    const { actor, streams } = subscription();
+    actor.send({ type: 'watch', remote: 'tau' });
+    streams[0]?.handlers.refused(refusal);
+
+    /* Every open re-sends `watch`: a refused stream must not become a request per pull. */
+    actor.send({ type: 'watch', remote: 'tau' });
+    expect(streams).toHaveLength(1);
+
+    actor.send({ type: 'unwatch' });
+    actor.send({ type: 'watch', remote: 'tau' });
+    expect(streams).toHaveLength(2);
+    actor.stop();
+  });
+
+  it('lets a stopped open pull go without waiting out the tail (F9)', async () => {
+    const { actors, actor } = subscription();
+    actor.send({ type: 'watch', remote: 'tau' });
+    const fetch = createActor(actors.sync.fetch, {
+      input: { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 },
+    });
+    fetch.subscribe({ error: () => undefined });
+    fetch.start();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    fetch.stop();
+    const stopped = performance.now();
+    await actors.settled();
+
+    expect(performance.now() - stopped).toBeLessThan(1000);
+    actor.stop();
+  });
 });
 
 describe('the fact a released turn publishes', () => {

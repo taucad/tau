@@ -59,6 +59,8 @@ export type CheckoutsMachineEvent =
   | Readonly<{ type: 'leaseStale'; runId: string }>
   | Readonly<{ type: 'leaseWritten'; checkoutId: string | undefined; runId: string }>
   | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement)
+  /* A conflicted turn deleted its lease file as it settled, like a finalized one (RV-W5b F1). */
+  | (Readonly<{ type: 'turnConflicted' }> & TurnSettlement)
   /* A turn that ended without a settlement still had a lease (R12). */
   | Readonly<{ type: 'turnReleased'; turnId: string; checkoutId: string | undefined; runId: string }>;
 
@@ -195,7 +197,12 @@ const queueRetirements = (
    * the checkout. Retiring all of them takes the other chat's lease
    * (AC9), so a settlement retires only its own `runId`. */
   const runIds =
-    event.type === 'leaseStale' || event.type === 'turnFinalized' || event.type === 'turnReleased' ? [event.runId] : [];
+    event.type === 'leaseStale' ||
+    event.type === 'turnFinalized' ||
+    event.type === 'turnConflicted' ||
+    event.type === 'turnReleased'
+      ? [event.runId]
+      : [];
   const added = runIds.filter((runId) => !context.pendingRetirements.includes(runId));
   return { pendingRetirements: [...context.pendingRetirements, ...added] };
 };
@@ -365,6 +372,7 @@ const checkoutsMachineDefinition = setup({
     },
     leaseStale: { context: ({ context, event }) => queueRetirements(context, event) },
     turnFinalized: { context: ({ context, event }) => queueRetirements(context, event) },
+    turnConflicted: { context: ({ context, event }) => queueRetirements(context, event) },
     turnReleased: { context: ({ context, event }) => queueRetirements(context, event) },
     addCheckout: { context: ({ context, event }) => ({ pendingVerbs: [...context.pendingVerbs, event] }) },
     removeCheckout: { context: ({ context, event }) => ({ pendingVerbs: [...context.pendingVerbs, event] }) },

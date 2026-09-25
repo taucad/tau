@@ -344,6 +344,23 @@ describe('SharedWorkerGate', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
+  /* The app-wide gate sits above the shell, where nothing sizes it; its notice
+   * collapsed to the top of its icon until it took the window. */
+  it('lets the notice of a gate above the shell take the window', async () => {
+    mockWaitForWorkerReady.mockRejectedValue(new Error('worker never became ready'));
+
+    render(
+      <HomeFileManagerProvider rootDirectory='/'>
+        <SharedWorkerGate withShellFrame>
+          <div>subtree</div>
+        </SharedWorkerGate>
+      </HomeFileManagerProvider>,
+    );
+
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveClass('h-dvh', 'w-full');
+  });
+
   /* Connecting is progress, and a route that knows what it is opening says so instead of a blank. */
   it('shows the caller\u2019s placeholder while the worker connects', async () => {
     /* `Once`, so the pending promise does not leak into the suites below (`clearAllMocks` keeps implementations). */

@@ -467,6 +467,18 @@ describe('syncMachine', () => {
       paths: ['main.scad'],
     });
 
+    /* A re-pull that lands on the same waiting conflict announces nothing new. */
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('merge')).toHaveLength(2);
+      expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
+    });
+    expect(harness.parent.events.filter((event) => event.type === 'mergeConflicted')).toHaveLength(1);
+
     harness.stop();
   });
 

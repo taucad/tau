@@ -553,6 +553,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       : createLfsClient({
           url: remote.url,
           http: options.http,
+          remote: remote.name,
           ...(remote.kind === 'tau' ? { fetch: globalThis.fetch.bind(globalThis) } : {}),
         });
   };

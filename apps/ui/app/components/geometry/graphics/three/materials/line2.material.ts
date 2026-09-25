@@ -7,6 +7,7 @@
 /* oxlint-disable unicorn-js/prevent-abbreviations -- identifiers match upstream Line2NodeMaterial.js */
 
 import type { Line2NodeMaterialParameters as ThreeLine2NodeMaterialParameters } from 'three/webgpu';
+import { NoBlending } from 'three';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
 import {
   attribute,
@@ -498,7 +499,8 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
     })();
 
     if (self.transparent && self.useViewportSrgbBlend !== false) {
-      const opacityNode = self.opacityNode ? float(self.opacityNode) : materialOpacity;
+      const opacityNode = (self.opacityNode ? float(self.opacityNode) : materialOpacity).mul(self.colorNode.a);
+      const viewportColor = tauOpaqueViewportTexture();
 
       // Divergence 4: perform the line-vs-background alpha mix in sRGB (gamma) space
       // so saturated overlay tints match WebGL's gamma-space framebuffer blend instead
@@ -506,12 +508,19 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
       // `LinearSRGBColorSpace`) would otherwise produce. Source for the viewport is the
       // Tau-owned non-mip singleton (see `tauOpaqueViewportTexture` above) — the mip
       // chain that upstream `viewportOpaqueMipTexture` generates every frame is never
-      // read by this blend.
+      // read by this blend. Both operands are premultiplied, as WebGL's canvas values are.
       const colorSrgb = sRGBTransferOETF(self.colorNode.rgb);
-      const viewportSrgb = sRGBTransferOETF(tauOpaqueViewportTexture().rgb);
+      const viewportSrgb = sRGBTransferOETF(viewportColor.rgb);
       const blendedSrgb = colorSrgb.mul(opacityNode).add(viewportSrgb.mul(opacityNode.oneMinus()));
 
-      self.outputNode = vec4(sRGBTransferEOTF(blendedSrgb), self.colorNode.a);
+      // The composite already contains the destination, so it replaces it with the composited
+      // alpha. Blending it again forced opaque alpha over the transparent canvas, turning the
+      // tint × opacity mix against transparent black into a dark opaque line.
+      self.outputNode = vec4(
+        sRGBTransferEOTF(blendedSrgb),
+        opacityNode.add(viewportColor.a.mul(opacityNode.oneMinus())),
+      );
+      self.blending = NoBlending;
     }
 
     // Skip `ThreeLine2NodeMaterial.setup` (which would rebuild `vertexNode`/`colorNode`/`outputNode`

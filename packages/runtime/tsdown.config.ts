@@ -2,7 +2,7 @@ import { bundlePattern, workspace } from '@taucad/nx';
 import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 // oxlint-disable-next-line no-restricted-imports -- Build config consumes its adjacent declaration assembly hook.
-import { assembleBundledDeclarations } from './scripts/assemble-bundled-declarations.mts';
+import { assembleRuntimeDeclarations } from './scripts/assemble-bundled-declarations.mts';
 
 export const runtimeCopyTargets = (outDirectory: string): Array<{ from: string; to: string; rename?: string }> => [
   {
@@ -73,7 +73,7 @@ const baseConfig: UserConfig = {
   copy: ({ outDir }) => runtimeCopyTargets(outDir),
   hooks: {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- tsdown's hook API uses colon-delimited names.
-    'build:done': async ({ options }) => assembleBundledDeclarations(process.cwd(), options.outDir),
+    'build:done': async ({ options }) => assembleRuntimeDeclarations(process.cwd(), options.outDir),
   },
   tsconfig: 'tsconfig.build.json',
   target: 'es2024',

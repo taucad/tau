@@ -127,9 +127,9 @@ export async function createRenderer(
 
   const webGlOptions: THREE.WebGLRendererParameters = {
     canvas: backingCanvas,
+    // Premultiplied, like WebGPU's canvas: overlays alpha-blend onto a transparent clear, which
+    // leaves premultiplied pixels; a straight-alpha canvas darkens every fractional-alpha pixel.
     alpha: true,
-    // Postprocessing writes straight-alpha color; keep canvas export and compositing consistent.
-    premultipliedAlpha: false,
     antialias: true,
     powerPreference: 'high-performance',
   };

@@ -1,9 +1,8 @@
 import { existsSync, globSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { bundledLibraryProjects, workspace } from '@taucad/nx';
+import { bundledDeclarationProjects, rewriteDeclarationImports } from '@taucad/nx/bundled-declarations';
 import { describe, expect, it } from 'vitest';
-// oxlint-disable-next-line no-restricted-imports -- Unit test for this adjacent, unexported build script.
-import { bundledDeclarationProjects, rewriteDeclarationImports } from './assemble-bundled-declarations.mts';
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..');
 

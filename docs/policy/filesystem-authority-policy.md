@@ -29,7 +29,7 @@ related:
 
 Internal reference for filesystem topology: who owns storage, who may instantiate providers, how routing is configured, how projects are discovered, and how tabs stay coherent. Read/write semantics, watch pipelines, and RPC patterns stay in `docs/policy/filesystem-policy.md`; this policy governs the layer beneath them.
 
-This policy absorbs the former "Backend & Provider Rules" of `docs/policy/filesystem-policy.md` (old Rules 11–13e — mapping table at the end). The ZenFS-era mechanics those rules prescribed (`resolveMountConfig`, `IndexedDBStore` preload) are retired; the live architecture is `MountTable` + `ProviderRegistry` + direct providers (`libs/filesystem/src/{mount-table,provider-registry}.ts`, `backend/direct-idb-provider.ts`).
+This policy absorbs the former "Backend & Provider Rules" of `docs/policy/filesystem-policy.md` (old Rules 11–13e — mapping table at the end). The ZenFS-era mechanics those rules prescribed (`resolveMountConfig`, `IndexedDBStore` preload) are retired; the live architecture is `MountTable` + `ProviderRegistry` + direct providers (`packages/filesystem/src/{mount-table,provider-registry}.ts`, `backend/direct-idb-provider.ts`).
 
 ## Rationale
 
@@ -111,7 +111,7 @@ Route access and project listing classify against a current discovery pass after
 
 ### 6. Cross-tab coherence has one mechanism
 
-Cross-tab writes serialize via Web Locks (`tau-fs-write:<path>`) and propagate via BroadcastChannel (`tau-fs-changes`) — `libs/filesystem/src/cross-tab-coordinator.ts`. The provider index-repair fallback (consult the backing store on index miss before reporting ENOENT) is defense-in-depth for cross-tab races only; within a tab, Rule 2 makes index staleness structurally impossible. Do not add new coherence side channels.
+Cross-tab writes serialize via Web Locks (`tau-fs-write:<path>`) and propagate via BroadcastChannel (`tau-fs-changes`) — `packages/filesystem/src/cross-tab-coordinator.ts`. The provider index-repair fallback (consult the backing store on index miss before reporting ENOENT) is defense-in-depth for cross-tab races only; within a tab, Rule 2 makes index staleness structurally impossible. Do not add new coherence side channels.
 
 ### 7. Backend isolation
 
@@ -231,7 +231,7 @@ Control-plane paths are refused by every composed view before provider I/O, whic
 
 ### 17. What a path policy must satisfy
 
-A path policy is one function, `classify(path) → PathClassification`, answering four questions about every path in a project: its storage class (Rule 16), whether it is `versioned`, its `agentAccess` (`read-write`, `read-only`, `hidden` — `hidden` is hidden from people too), and its `watch` plane. It is a `.gitignore` that answers four questions instead of one. Tau's instance, `tauPathPolicy`, is the registry table in `libs/filesystem/src/path-registry.ts`; it describes Tau's reserved layout and is not user-editable. The person's own ignore rules stay in their `.gitignore`, whose generated block is derived from the same rows.
+A path policy is one function, `classify(path) → PathClassification`, answering four questions about every path in a project: its storage class (Rule 16), whether it is `versioned`, its `agentAccess` (`read-write`, `read-only`, `hidden` — `hidden` is hidden from people too), and its `watch` plane. It is a `.gitignore` that answers four questions instead of one. Tau's instance, `tauPathPolicy`, is the registry table in `packages/filesystem/src/path-registry.ts`; it describes Tau's reserved layout and is not user-editable. The person's own ignore rules stay in their `.gitignore`, whose generated block is derived from the same rows.
 
 Every path policy — Tau's or a test's — satisfies these:
 
@@ -286,7 +286,7 @@ Code and docs citing the old numbers resolve here:
 
 ## References
 
-- Implementation: `libs/filesystem/src/{mount-table.ts,provider-registry.ts,cross-tab-coordinator.ts,workspace-file-service.ts}`, `libs/filesystem/src/backend/direct-idb-provider.ts`, `apps/ui/app/filesystem/{handle-store.ts,workspace-errors.ts}`, `apps/ui/app/machines/file-manager.{machine,worker}.ts`
+- Implementation: `packages/filesystem/src/{mount-table.ts,provider-registry.ts,cross-tab-coordinator.ts,workspace-file-service.ts}`, `packages/filesystem/src/backend/direct-idb-provider.ts`, `apps/ui/app/filesystem/{handle-store.ts,workspace-errors.ts}`, `apps/ui/app/machines/file-manager.{machine,worker}.ts`
 - Research: `docs/research/headless-thumbnail-rendering-architecture-v4.md` (Finding 5, R3)
 - Research: `docs/research/runtime-model-load-project-root-regression-v3.md` (rooted runtime filesystem boundary)
 - Research: `docs/research/workspace-naming-and-storage-backend-abstraction.md` (Home identity and engine pinning)

@@ -20,7 +20,7 @@ export function ResetCameraControl(): React.JSX.Element {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant='overlay' size='icon' onClick={handleReset}>
+        <Button variant='overlay' size='icon' aria-label='Reset camera' onClick={handleReset}>
           {ticked ? <Check className='size-4 text-success' /> : <Focus className='size-4' />}
         </Button>
       </TooltipTrigger>

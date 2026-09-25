@@ -12,7 +12,7 @@
  * `smoothSplineTo` computes — see `profilePoles` — so the solid is unchanged.
  */
 import { draw } from 'replicad';
-import type { Shape3D, Point2D } from 'replicad';
+import type { Shape3D, ShapeConfig, Point2D } from 'replicad';
 
 export const defaultParams = {
   height: 100,
@@ -135,11 +135,12 @@ const vase = (p: Params): Shape3D => {
   );
 };
 
-export default function main(p: Params = defaultParams): Shape3D {
+export default function main(p: Params = defaultParams): ShapeConfig[] {
   const offset = (maxRadius(p) * p.spacing) / 2;
 
-  return vase(p)
-    .clone()
-    .translate([-offset, 0, 0])
-    .fuse(vase(p).translate([offset, 0, 0]));
+  const shape = vase(p);
+  return [
+    { name: 'Left Vase', shape: shape.clone().translate([-offset, 0, 0]) },
+    { name: 'Right Vase', shape: shape.clone().translate([offset, 0, 0]) },
+  ];
 }

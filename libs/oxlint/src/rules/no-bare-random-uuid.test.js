@@ -16,7 +16,7 @@ const ruleTester = new RuleTester({
 
 const root = process.cwd();
 const helperFile = path.join(root, 'libs/utils/src/id.utils.ts');
-const testFile = path.join(root, 'libs/filesystem/src/backend/direct-idb-provider.test.ts');
+const testFile = path.join(root, 'packages/filesystem/src/backend/direct-idb-provider.test.ts');
 const browserFile = path.join(root, 'packages/runtime/src/framework/runtime-worker-client.ts');
 
 describe('no-bare-random-uuid', () => {

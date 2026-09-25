@@ -161,7 +161,7 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button variant='overlay' size='icon' className={cn(className)}>
+            <Button variant='overlay' size='icon' aria-label='Viewer settings' className={cn(className)}>
               <Settings />
             </Button>
           </DropdownMenuTrigger>

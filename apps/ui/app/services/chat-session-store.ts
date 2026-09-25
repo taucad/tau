@@ -1477,6 +1477,9 @@ export class ChatSessionStore {
     // oxlint-disable-next-line eslint/prefer-const -- initialised only after the actor/chat callbacks that close over it are constructed.
     let session: InternalSession;
     let approvalWasPending = false;
+    /* Whether the current request wrote any assistant output. Opening a chat resumes it, and a host
+     * holding no run closes that stream without a chunk; its `onFinish` is not a run finishing. */
+    let requestWroteOutput = false;
 
     // `undefined` is a chat with no project: it has nowhere to keep a composer, so its record I/O fails.
     const composer = Promise.withResolvers<ComposerBinding | undefined>();
@@ -1796,7 +1799,7 @@ export class ChatSessionStore {
           this.#reconcileUnsettledRun(session, { runId: durableRunId, isAbort, isError });
         }
         persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
-        if (!isAbort && !isDisconnect) {
+        if (!isAbort && !isDisconnect && (requestWroteOutput || isError)) {
           markUnreadIfUnattended();
         }
         this.#scheduleRunReleaseIfTerminal(session);
@@ -2046,7 +2049,11 @@ export class ChatSessionStore {
       const next = chat.status;
       if (session.status !== next) {
         session.status = next;
+        if (next === 'submitted') {
+          requestWroteOutput = false;
+        }
         if (next === 'streaming') {
+          requestWroteOutput = true;
           persistenceActorRef.send({ type: 'streamResumed' });
         }
         if (session.durableRunId && (next === 'submitted' || next === 'streaming')) {

@@ -192,7 +192,7 @@ export function isFileManagerNotReadyError(error: unknown): error is FileManager
 
 /**
  * Mirror of the worker-side `WorkspaceMutationErrorCode` discriminated
- * union. Keep in lockstep with `libs/filesystem/src/workspace-errors.ts`.
+ * union. Keep in lockstep with `packages/filesystem/src/workspace-errors.ts`.
  * Surfaced via {@link workspaceMutationErrorCopy} so toast/banner UIs
  * never re-parse `error.message`.
  */

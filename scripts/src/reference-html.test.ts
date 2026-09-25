@@ -447,6 +447,15 @@ describe('HTML semantic snapshot', () => {
     expect(snapshot).not.toMatch(/script|style|tracker|javascript:|Navigation noise/u);
   });
 
+  it('should keep whitespace between highlighted token spans in preformatted code', () => {
+    const snapshot = createHtmlSnapshotFromHtml({
+      baseUrl: 'https://fixture.test/article',
+      report: report(),
+      html: '<main><h1>Code</h1><pre>\n<span>const</span> <span>a</span> = 1;\n<span>const</span> b;\n</pre></main>',
+    });
+    expect(snapshot).toContain('<pre><code class="language-text">const a = 1;\nconst b;');
+  });
+
   it('should reject active markup added to a cached snapshot', () => {
     const paths = temporaryHtmlPaths();
     writeFileSync(

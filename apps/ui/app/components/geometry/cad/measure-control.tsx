@@ -24,7 +24,8 @@ export function MeasureControl(): React.JSX.Element {
         <Button
           variant='overlay'
           size='icon'
-          aria-label={label}
+          aria-label='Measure'
+          aria-pressed={isMeasureActive}
           data-active={isMeasureActive ? 'true' : 'false'}
           className={cn('data-[active=true]:bg-accent data-[active=true]:text-primary', is2dGeometry && 'hidden')}
           onClick={handleClick}

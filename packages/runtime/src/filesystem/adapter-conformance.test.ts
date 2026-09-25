@@ -1,7 +1,7 @@
 /**
  * X9 — one conformance table every first-party `RuntimeFileSystemBase`
  * adapter runs through, mirroring the shape of
- * `libs/filesystem/src/backend/provider-tree-conformance.test.ts`
+ * `packages/filesystem/src/backend/provider-tree-conformance.test.ts`
  * (`describe.each` over `'$name …'` rows plus an `expectCode` helper). That
  * suite cannot be extended to these adapters: it would have to import
  * `packages/runtime`, and the dependency runs the other way. `packages/runtime`
@@ -64,7 +64,7 @@ type ContractId =
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory File System Access root for the `browser` row.
-// `libs/filesystem`'s richer `createMockRootHandle` is unreachable from here —
+// `packages/filesystem`'s richer `createMockRootHandle` is unreachable from here —
 // it sits behind that package's private `#testing/` import and the package
 // exposes no `./testing` subpath, which this batch's scope forbids adding.
 // ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ const rows: readonly AdapterRow[] = [
     create: async () => new MemoryProvider() as unknown as RuntimeFileSystemBase,
     diverges: {
       containment:
-        'The `libs/filesystem` oracle is not a runtime adapter: it has no rooted-path validation of its own. Runtime adapters add that through `assertRootedPath`.',
+        'The `packages/filesystem` oracle is not a runtime adapter: it has no rooted-path validation of its own. Runtime adapters add that through `assertRootedPath`.',
       symlinks: 'An in-memory provider has no links.',
       watch: 'Not a `RuntimeFileSystemBase` factory; watch is the runtime adapters’ concern.',
     },

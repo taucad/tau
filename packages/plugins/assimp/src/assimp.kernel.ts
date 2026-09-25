@@ -69,7 +69,8 @@ export const assimpKernel = defineKernel({
   version: '0.1.1',
   exportFormats: { glb: { optionsSchema: glbOptionsSchema } },
 
-  async initialize() {
+  // The exported `Assimp` alias keeps declaration emit off libassimp's unexported internals (TS2742).
+  async initialize(): Promise<{ assimp: Assimp }> {
     return { assimp: await createAssimp() };
   },
 

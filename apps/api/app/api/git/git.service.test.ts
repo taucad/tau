@@ -32,6 +32,7 @@ import type { CommercialEntitlementsService } from '#api/entitlements/commercial
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 import { commitLease } from '#api/git/store/commit.js';
+import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
@@ -128,7 +129,7 @@ const memoryStore = (): RepositoryStore => {
     getObject: async (locator, key) => {
       const body = objects.get(`${prefix(locator)}${key}`);
       if (body === undefined) {
-        throw new Error(`no such object: ${key}`);
+        throw new RepositoryStoreError('missing-pack', `the store holds no '${key}'`);
       }
       return Readable.from([Buffer.from(body)]);
     },
@@ -636,10 +637,10 @@ describe('GitRepositoryService security floor (W9)', () => {
   it('answers a manifest naming a missing pack with a terminal 500 that opens with the marker', async () => {
     const damaged: RepositoryStore = {
       ...store,
-      listObjects: () =>
-        (async function* () {
-          /* The store holds none of the packs the manifest names. */
-        })(),
+      /* The store holds none of the packs the manifest names. */
+      getObject: async (_locator, key) => {
+        throw new RepositoryStoreError('missing-pack', `the store holds no '${key}'`);
+      },
     };
 
     const refusal = createService(damaged, caughtUp()).advertiseRefs(access, 'git-upload-pack');

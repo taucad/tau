@@ -164,6 +164,34 @@ const countingStore = (inner: RepositoryStore, reads: string[]): RepositoryStore
     },
   });
 
+type HydrateTally = { reads: number; listings: number; inFlight: number; mostInFlight: number };
+
+/**
+ * A store that counts a hydrate's reads and listings, and how many reads were
+ * open at once. Each read waits `delayMilliseconds` before answering, as a
+ * remote store would, so reads made one after another never overlap.
+ */
+const tallyingStore = (inner: RepositoryStore, tally: HydrateTally, delayMilliseconds = 20): RepositoryStore =>
+  wrapStore(inner, {
+    getObject: async (locator, key, range) => {
+      tally.reads += 1;
+      tally.inFlight += 1;
+      tally.mostInFlight = Math.max(tally.mostInFlight, tally.inFlight);
+      try {
+        await new Promise((resolve) => {
+          setTimeout(resolve, delayMilliseconds);
+        });
+        return await inner.getObject(locator, key, range);
+      } finally {
+        tally.inFlight -= 1;
+      }
+    },
+    listObjects: (locator, prefix) => {
+      tally.listings += 1;
+      return inner.listObjects(locator, prefix);
+    },
+  });
+
 /** A store whose manifest write fails with the backend's rate-limit status the first `times` calls. */
 const rateLimitedStore = (inner: RepositoryStore, times: number, calls: { count: number }): RepositoryStore =>
   wrapStore(inner, {
@@ -600,6 +628,92 @@ describe('repository store commit protocol', () => {
       );
       await lease.dispose();
     }, 60_000);
+
+    it('should hydrate with a bounded number of reads and no listing however many pushes came before (W13b)', async () => {
+      const locator = newRepository();
+      const client = newClient();
+      const readsAfterPush: number[] = [];
+
+      // Three times the pack bound: every push adds a pack and two stored
+      // objects, and the retired ones stay in the store for the retention window.
+      for (let revision = 2; revision <= 3 * livePackBound + 1; revision += 1) {
+        client.revise(revision);
+        // oxlint-disable-next-line no-await-in-loop -- pushes are sequential by definition
+        await pushAndCommit({ locator, client: client.directory });
+        const tally: HydrateTally = { reads: 0, listings: 0, inFlight: 0, mostInFlight: 0 };
+        // oxlint-disable-next-line no-await-in-loop -- one hydrate per push, as the write path does
+        const lease = await hydrateLease({
+          store: tallyingStore(store, tally, 0),
+          locator,
+          parentDirectory: scratch('lease'),
+        });
+        // oxlint-disable-next-line no-await-in-loop -- same reason
+        await lease.dispose();
+        expect(tally.listings).toBe(0);
+        // A pack and its stored index per live pack, and nothing else.
+        expect(tally.reads).toBe(2 * (lease.manifest?.packs.length ?? 0));
+        readsAfterPush.push(tally.reads);
+      }
+
+      const stored = await listPacks(locator);
+      // The store keeps growing — two objects per push, retired ones included —
+      // while what a hydrate reads stays within the bound.
+      expect(stored.length).toBeGreaterThanOrEqual(2 * 3 * livePackBound);
+      expect(Math.max(...readsAfterPush)).toBeLessThanOrEqual(2 * livePackBound);
+    }, 180_000);
+
+    it('should read every live pack and index in one round rather than one after another (W13b)', async () => {
+      const locator = newRepository();
+      const client = newClient();
+      for (let revision = 2; revision <= livePackBound + 1; revision += 1) {
+        client.revise(revision);
+        // oxlint-disable-next-line no-await-in-loop -- pushes are sequential by definition
+        await pushAndCommit({ locator, client: client.directory });
+      }
+      const tally: HydrateTally = { reads: 0, listings: 0, inFlight: 0, mostInFlight: 0 };
+
+      const lease = await hydrateLease({
+        store: tallyingStore(store, tally),
+        locator,
+        parentDirectory: scratch('lease'),
+      });
+
+      expect(lease.manifest?.packs.length).toBeGreaterThan(1);
+      expect(tally.mostInFlight).toBe(tally.reads);
+      expect(git(lease.directory, 'fsck', '--strict').trim()).toBe('');
+      expect(git(lease.directory, 'rev-parse', 'refs/heads/main').trim()).toBe(
+        git(client.directory, 'rev-parse', 'main').trim(),
+      );
+      await lease.dispose();
+    }, 180_000);
+
+    it('should refuse a manifest naming a pack the store lost as missing-pack and leave no lease behind (W13b)', async () => {
+      const locator = newRepository();
+      const client = newClient();
+      for (let revision = 2; revision <= 4; revision += 1) {
+        client.revise(revision);
+        // oxlint-disable-next-line no-await-in-loop -- pushes are sequential by definition
+        await pushAndCommit({ locator, client: client.directory });
+      }
+      const committed = await readManifest(locator);
+      const lost = committed?.packs[0]?.key ?? '';
+      await store.deleteObjects(locator, [lost]);
+      const parent = scratch('lease');
+
+      // The other reads are still in flight when the lost one fails.
+      await expect(
+        hydrateLease({
+          store: tallyingStore(store, { reads: 0, listings: 0, inFlight: 0, mostInFlight: 0 }),
+          locator,
+          parentDirectory: parent,
+        }),
+      ).rejects.toMatchObject({
+        name: 'RepositoryStoreError',
+        code: 'missing-pack',
+        message: `manifest generation ${String(committed?.generation)} names bytes the store lost: the store holds no '${lost}'`,
+      });
+      expect(readdirSync(parent)).toStrictEqual([]);
+    }, 180_000);
 
     it('should use a stored pack index instead of deriving one when the manifest says so', async () => {
       const locator = newRepository();

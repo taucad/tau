@@ -136,10 +136,10 @@ const indexFileName = (key: string): string => `${packFileName(key).slice(0, -'.
 /**
  * Builds a disposable bare directory holding the manifest's packs and refs.
  *
- * Every live pack is checked against a single listing of the repository's own
- * `packs/` prefix before it is fetched — the port offers no `headObject`, and
- * the answer a hydrate needs is "which keys are there" rather than "is this one
- * there".
+ * A hydrate is one manifest read and one parallel round of pack and index
+ * reads (W13b). It never lists the `packs/` prefix: that listing also holds
+ * every retired pack for the retention window, so it grew with every push, and
+ * a pack the store does not hold is already `missing-pack` from `getObject`.
  */
 export const hydrateLease = async (args: HydrateLeaseArguments): Promise<RepositoryLease> => {
   const read = await args.store.readManifest(args.locator);
@@ -201,39 +201,42 @@ const fetchPacks = async (args: {
     return new Set();
   }
 
-  const present = new Set<string>();
-  for await (const object of store.listObjects(locator, 'packs/')) {
-    present.add(object.key);
-  }
+  const download = async (key: string, file: string): Promise<void> => {
+    await pipeline(await store.getObject(locator, key), createWriteStream(path.join(packDirectory, file)));
+  };
 
-  const names = new Set<string>();
-  for (const pack of manifest.packs) {
-    if (!present.has(pack.key)) {
-      throw new RepositoryStoreError(
-        'missing-pack',
-        `manifest generation ${String(manifest.generation)} names '${pack.key}', which the store does not hold`,
-      );
-    }
-
-    const file = path.join(packDirectory, packFileName(pack.key));
-    // oxlint-disable-next-line no-await-in-loop -- one pack at a time bounds the lease's peak disk and memory
-    // oxlint-disable-next-line no-await-in-loop -- one pack at a time bounds the lease's peak disk and memory
-    const body = await store.getObject(locator, pack.key);
-    // oxlint-disable-next-line no-await-in-loop -- same reason
-    await pipeline(body, createWriteStream(file));
-    if (pack.indexStored) {
-      const indexKey = indexKeyFor(pack.key);
-      // oxlint-disable-next-line no-await-in-loop -- same reason
-      const index = await store.getObject(locator, indexKey);
-      // oxlint-disable-next-line no-await-in-loop -- same reason
-      await pipeline(index, createWriteStream(path.join(packDirectory, indexFileName(pack.key))));
-    } else {
-      // oxlint-disable-next-line no-await-in-loop -- same reason
-      await runGit(directory, ['index-pack', path.join('objects/pack', packFileName(pack.key))]);
-    }
-    names.add(packFileName(pack.key));
+  /*
+   * Every pack and index at once, so a hydrate costs one round trip however
+   * many packs are live. Sequential reads made it one round trip per object.
+   * ponytail: unbounded fan-out, because the committer compacts past
+   * `livePackBound` (8), so this is at most 16 reads; bound it if a manifest
+   * can ever list more. Settled rather than raced, so the caller never removes
+   * the directory while a read is still writing into it.
+   */
+  const settled = await Promise.allSettled(
+    manifest.packs.map(async (pack) => {
+      const name = packFileName(pack.key);
+      if (!pack.indexStored) {
+        await download(pack.key, name);
+        await runGit(directory, ['index-pack', path.join('objects/pack', name)]);
+        return;
+      }
+      await Promise.all([download(pack.key, name), download(indexKeyFor(pack.key), indexFileName(pack.key))]);
+    }),
+  );
+  const failure = settled.find((outcome) => outcome.status === 'rejected');
+  if (failure === undefined) {
+    return new Set(manifest.packs.map((pack) => packFileName(pack.key)));
   }
-  return names;
+  const reason: unknown = failure.reason;
+  if (reason instanceof RepositoryStoreError && reason.code === 'missing-pack') {
+    throw new RepositoryStoreError(
+      'missing-pack',
+      `manifest generation ${String(manifest.generation)} names bytes the store lost: ${reason.message}`,
+      { cause: reason },
+    );
+  }
+  throw reason instanceof Error ? reason : new Error(String(reason));
 };
 
 /**

@@ -1567,6 +1567,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (input.branch === undefined) {
           return { status: 'updated', head: input.head };
         }
+        /* W0.10 (W5 F7): the mint runs inside the checkout fence, which every
+         * move of this checkout also takes. A checkout that has left the mint's
+         * branch refuses here, or a fresh branch's equal head would let its
+         * save land on the branch it left. */
+        const place = await placeOf(input.checkoutId);
+        if (place.branch !== input.branch) {
+          return { status: 'conflicted', head: await headOf(place) };
+        }
         const result = await port.updateRef({
           name: input.branch,
           expectedHead: input.expectedHead === undefined ? undefined : revisionId(input.expectedHead),

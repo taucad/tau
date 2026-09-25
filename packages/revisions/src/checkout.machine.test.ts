@@ -49,6 +49,8 @@ import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/f
  *     turn-bearing requests keep their order (R13)
  * 24  the queue is capped, and the request that does not fit is answered
  *     `cutFailed { reason: 'queue-full' }` rather than dropped (R13)
+ * 25  a head fact during a mint is deferred: the mint's own compare-and-swap
+ *     answers, then the head is re-read, also after a failed mint (W0.9)
  * --  `getSimplePaths` generates no state value the table above leaves unexercised
  */
 
@@ -454,6 +456,64 @@ describe('checkoutMachine', () => {
 
     expect(actor.getSnapshot().matches('clean')).toBe(true);
     expect(actor.getSnapshot().context.headRevisionId).toBe('rev-7');
+
+    actor.stop();
+  });
+
+  /* W0.9, L7 D-L7-3: a head fact used to exit `minting` and answer nobody, so
+   * the turn waited out its 30 s bound while the abandoned `casHead` still
+   * published. The mint's own compare-and-swap answers; the head is re-read after. */
+  it('should defer a head move during a mint and re-read after it settles', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    const answers = () =>
+      parent.events.filter((event) => ['revisionMinted', 'nothingToSave', 'cutFailed', 'casLost'].includes(event.type));
+
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
+    await mintToCas(harness);
+    actor.send({ type: 'headChanged', revisionId: 'rev-0', treeId: 'tree-0' });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ minting: 'publishing' })).toBe(true);
+    expect(answers()).toEqual([]);
+
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
+    await flush();
+
+    expect(answers()).toEqual([
+      { type: 'revisionMinted', checkoutId: 'checkout-1', trigger: 'turn', turnId: 'turn-1', revisionId: 'rev-2' },
+    ]);
+    expect(promises.inputsFor('casHead')).toEqual([
+      { checkoutId: 'checkout-1', branch: 'main', expectedHead: 'rev-1', head: 'rev-2' },
+    ]);
+    expect(actor.getSnapshot().matches('rereading')).toBe(true);
+
+    promises.settle('readHead', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
+    await flush();
+
+    expect(actor.getSnapshot().context.headRevisionId).toBe('rev-3');
+    expect(answers()).toHaveLength(1);
+
+    actor.stop();
+  });
+
+  it('should re-read a head that moved during a mint that failed, answering once', async () => {
+    const harness = start();
+    const { actor, promises, callbacks, parent } = harness;
+
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    actor.send({ type: 'headChanged', revisionId: 'rev-0', treeId: 'tree-0', branch: 'feature' });
+    promises.settle('cut', { error: new Error('EIO') });
+    await flush();
+
+    expect(actor.getSnapshot().matches('rereading')).toBe(true);
+    expect(actor.getSnapshot().context.branch).toBe('feature');
+
+    promises.settle('readHead', { error: new Error('ESTALE') });
+    await flush();
+
+    expect(parent.events.filter((event) => event.type === 'cutFailed')).toHaveLength(1);
 
     actor.stop();
   });

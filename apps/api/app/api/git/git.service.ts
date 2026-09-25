@@ -271,12 +271,16 @@ export class GitRepositoryService {
   readonly #leasesByOwner = new Map<string, number>();
 
   /**
-   * Work a request started that outlives its response — today only the lease
-   * disposal that follows a fetch, whose child closes after the bytes are on
-   * the wire. Held in a set rather than fired and forgotten, so a failure has
-   * somewhere to be logged and a caller can wait for it.
+   * Work a request started that outlives its response: the lease disposal
+   * that follows a fetch, whose child closes after the bytes are on the wire,
+   * the D13 announcement and a compacting commit's sweep. Held in a set
+   * rather than fired and forgotten, so a failure has somewhere to be logged
+   * and a caller can wait for it.
    */
   readonly #background = new Set<Promise<void>>();
+
+  /** The projects whose sweep is running (`sweepAfterReply`). */
+  readonly #sweeping = new Set<string>();
 
   public constructor(
     private readonly databaseService: DatabaseService,
@@ -715,6 +719,7 @@ export class GitRepositoryService {
       if (result.committed) {
         await this.recordGeneration(args.access.projectId, result.manifest.generation);
         await this.derive({ access: args.access, lease, manifest: result.manifest, moved: result.moved });
+        this.sweepAfterReply(args.access.projectId, result);
       }
       return body;
     });
@@ -818,6 +823,7 @@ export class GitRepositoryService {
       if (decided.result.committed) {
         await this.recordGeneration(access.projectId, decided.result.manifest.generation);
         await this.derive({ access, lease, manifest: decided.result.manifest, moved: decided.result.moved });
+        this.sweepAfterReply(access.projectId, decided.result);
       }
       return {
         outcome: 'removed',
@@ -838,6 +844,30 @@ export class GitRepositoryService {
   /** Waits for the work a finished request left running. */
   public async settled(): Promise<void> {
     await Promise.all(this.#background);
+  }
+
+  /**
+   * Starts a compacting commit's sweep without the reply waiting on it (W13b):
+   * the sweep lists `packs/` and `retired/`, which grow with every push inside
+   * the retention window. Tracked, so `settled()` waits for it. At most one
+   * runs per project; a compaction that finds one running leaves its garbage
+   * to the next, which only delays a deletion, because a sweep deletes only
+   * keys the manifest it was handed does not list.
+   */
+  private sweepAfterReply(projectId: string, result: { compacted: boolean; sweep: () => Promise<unknown> }): void {
+    if (!result.compacted || this.#sweeping.has(projectId)) {
+      return;
+    }
+    this.#sweeping.add(projectId);
+    this.track(
+      (async (): Promise<void> => {
+        try {
+          await result.sweep();
+        } finally {
+          this.#sweeping.delete(projectId);
+        }
+      })(),
+    );
   }
 
   /**

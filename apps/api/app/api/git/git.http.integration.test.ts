@@ -47,7 +47,8 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
+import { livePackBound } from '#api/git/store/limits.js';
+import type { RepositoryStore, StoredObject } from '#api/git/store/port.js';
 
 /**
  * The Tau Hosted Remote end to end over the repository store (W4).
@@ -166,10 +167,15 @@ class GitTestAuthGuard implements CanActivate {
 /**
  * Delegates every port member to `inner` and lets one test replace
  * `commitManifest`, which is how a rate-limited or lost conditional write is
- * reproduced against the real adapter rather than a fake one.
+ * reproduced against the real adapter rather than a fake one, or
+ * `listObjects`, which only a compacting commit's sweep calls.
  */
-const storeControl: { commitManifest: RepositoryStore['commitManifest'] | undefined } = {
+const storeControl: {
+  commitManifest: RepositoryStore['commitManifest'] | undefined;
+  listObjects: RepositoryStore['listObjects'] | undefined;
+} = {
   commitManifest: undefined,
+  listObjects: undefined,
 };
 
 const wrapStore = (inner: RepositoryStore): RepositoryStore => ({
@@ -180,7 +186,7 @@ const wrapStore = (inner: RepositoryStore): RepositoryStore => ({
   // oxlint-disable-next-line max-params -- the port's own signature
   putObject: async (locator, key, body, options) => inner.putObject(locator, key, body, options),
   getObject: async (locator, key, range) => inner.getObject(locator, key, range),
-  listObjects: (locator, prefix) => inner.listObjects(locator, prefix),
+  listObjects: (locator, prefix) => (storeControl.listObjects ?? inner.listObjects.bind(inner))(locator, prefix),
   deleteObjects: async (locator, keys) => inner.deleteObjects(locator, keys),
 });
 
@@ -901,4 +907,50 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(put.status).toBe(400);
     expect(((await put.json()) as { code?: string }).code).toBe('GIT_LFS_HANDLE_REFUSED');
   });
+
+  /**
+   * W13b: a compacting push's sweep lists `packs/` and `retired/`, which grow
+   * with every push inside the retention window, so it runs after the reply.
+   * Every push here is answered while the sweep's listing is parked, and the
+   * sweep then failing costs no push anything.
+   */
+  it('answers a compacting push without waiting on its sweep, and a failed sweep fails no push', async () => {
+    const clone = path.join(workspace, 'sweep');
+    await gitOk(['clone', remoteUrl, clone], workspace);
+    const parked = Promise.withResolvers<void>();
+    let listings = 0;
+    storeControl.listObjects = () => {
+      listings += 1;
+      return {
+        [Symbol.asyncIterator]: () => ({
+          next: async (): Promise<IteratorResult<StoredObject>> => {
+            await parked.promise;
+            throw new Error('storage refused the listing');
+          },
+        }),
+      };
+    };
+    try {
+      /* One push more than the pack bound compacts at least once, whatever the earlier rows left live. */
+      for (let revision = 0; revision <= livePackBound; revision += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- pushes are sequential by definition
+        await writeFile(path.join(clone, 'part.ts'), `export const width = ${String(100 + revision)};\n`, 'utf8');
+        // oxlint-disable-next-line no-await-in-loop -- same reason
+        await gitOk(['add', '.'], clone);
+        // oxlint-disable-next-line no-await-in-loop -- same reason
+        await gitOk(['commit', '-m', `sweep revision ${String(revision)}`], clone);
+        // oxlint-disable-next-line no-await-in-loop -- same reason
+        const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+        expect(pushed.code, pushed.stderr).toBe(0);
+      }
+      expect(listings, 'no push compacted, so no sweep ran').toBeGreaterThan(0);
+    } finally {
+      parked.resolve();
+      await repositories.settled();
+      storeControl.listObjects = undefined;
+    }
+
+    const head = await gitOk(['rev-parse', 'HEAD'], clone);
+    expect(await advertised()).toContain(head.stdout.trim());
+  }, 180_000);
 });

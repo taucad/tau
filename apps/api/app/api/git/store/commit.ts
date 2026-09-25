@@ -64,7 +64,14 @@ export type CommitResult =
       readonly manifest: Manifest;
       readonly token: CommitToken;
       readonly compacted: boolean;
-      readonly swept: readonly string[];
+      /**
+       * The compacting holder's housekeeping (NI4), for the caller to run once
+       * its reply no longer waits on it (W13b): the sweep lists `packs/` and
+       * `retired/`, which grow with every push inside the retention window.
+       * Resolves to the keys it deleted, none when this commit did not
+       * compact, and never rejects.
+       */
+      readonly sweep: () => Promise<readonly string[]>;
       /** The ref-map difference this commit recorded. */
       readonly moved: readonly MovedRef[];
     };
@@ -209,8 +216,9 @@ const uploadKeyFor = (packFile: string): string =>
  * Commits whatever the push left in the lease, or nothing.
  *
  * The caller withholds the entire HTTP response — headers included — until
- * this resolves (D4, NI2). A thrown `RepositoryStoreError` with code `lost` is
- * the 503 signal; every other code is a refusal the client should see.
+ * this resolves (D4, NI2), and starts the result's `sweep` only after that. A
+ * thrown `RepositoryStoreError` with code `lost` is the 503 signal; every
+ * other code is a refusal the client should see.
  */
 // oxlint-disable-next-line max-lines-per-function -- the write path is one sequence; splitting it hides the order that makes it safe
 export const commitLease = async (args: CommitLeaseArguments): Promise<CommitResult> => {
@@ -293,40 +301,41 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
   });
   await args.faults?.('after-manifest-commit');
 
-  /*
-   * Past this line the push is durable and the client is owed the truth about
-   * it (NI2). The sweep is housekeeping on garbage nothing reads, and only the
-   * compacting holder runs it: if it fails, or the worker dies inside it, the
-   * keys it would have removed simply wait for the next compacting committer.
-   * Rejecting here would tell a client its committed push failed, which is the
-   * one lie this protocol must not tell.
-   */
-  let swept: readonly string[] = [];
-  if (compacted) {
-    try {
-      swept = await sweepRepository({
-        store,
-        locator: lease.locator,
-        committed: next,
-        at,
-        ...(args.faults === undefined ? {} : { faults: args.faults }),
-      });
-    } catch (error) {
-      logger.warn(
-        `sweep after generation ${String(next.generation)} of ${lease.locator.projectId} failed; ` +
-          `expired and orphaned keys remain for the next compacting committer: ${String(error)}`,
-      );
-    }
-  }
-
   return {
     committed: true,
     manifest: next,
     token,
     compacted,
-    swept,
+    sweep: async () =>
+      compacted
+        ? sweepQuietly({
+            store,
+            locator: lease.locator,
+            committed: next,
+            at,
+            ...(args.faults === undefined ? {} : { faults: args.faults }),
+          })
+        : [],
     moved: movedReferences(lease.manifest?.refs ?? {}, references),
   };
+};
+
+/**
+ * The sweep, after a durable commit. The push is owed the truth about it
+ * (NI2), and the sweep is housekeeping on garbage nothing reads: if it fails,
+ * or the worker dies inside it, the keys it would have removed wait for the
+ * next compacting committer. So it logs and never rejects.
+ */
+const sweepQuietly = async (args: Parameters<typeof sweepRepository>[0]): Promise<readonly string[]> => {
+  try {
+    return await sweepRepository(args);
+  } catch (error) {
+    logger.warn(
+      `sweep after generation ${String(args.committed.generation)} of ${args.locator.projectId} failed; ` +
+        `expired and orphaned keys remain for the next compacting committer: ${String(error)}`,
+    );
+    return [];
+  }
 };
 
 /**

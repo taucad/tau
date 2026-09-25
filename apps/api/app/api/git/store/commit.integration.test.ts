@@ -14,6 +14,7 @@ import { StorageModule } from '#storage/storage.module.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import type { CommitToken, RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { commitLease, commitTombstone } from '#api/git/store/commit.js';
+import type { CommitResult } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import { decodeManifest, encodeManifest, succeedManifest } from '#api/git/store/manifest.js';
@@ -208,6 +209,10 @@ const rateLimitedStore = (inner: RepositoryStore, times: number, calls: { count:
     },
   });
 
+/** What the write path does once it has replied: run the commit's sweep. */
+const sweepAfter = async (outcome: CommitResult): Promise<readonly string[]> =>
+  outcome.committed ? outcome.sweep() : [];
+
 // === suite ===============================================================
 
 describe('repository store commit protocol', () => {
@@ -279,7 +284,9 @@ describe('repository store commit protocol', () => {
     const lease = await hydrateLease({ store, locator: args.locator, parentDirectory: scratch('lease') });
     try {
       push(args.client, lease.directory, args.refspecs ?? ['main']);
-      return await commitLease({ store, lease, committedBy, ...args.overrides });
+      const outcome = await commitLease({ store, lease, committedBy, ...args.overrides });
+      await sweepAfter(outcome);
+      return outcome;
     } finally {
       await lease.dispose();
     }
@@ -1268,6 +1275,30 @@ describe('repository store commit protocol', () => {
       expect(retired.size).toBeGreaterThanOrEqual(20);
     }, 180_000);
 
+    /**
+     * W13b a3: the sweep's listings grow with pushes inside the retention
+     * window, so the commit the client waits on lists nothing; the sweep the
+     * write path starts after its reply does all the listing.
+     */
+    it('should commit a compacting push without listing, and leave the listing to its sweep', async () => {
+      const locator = newRepository();
+      const client = newClient();
+      await buildRetiringShape(locator, client);
+      client.revise(3);
+      const tally: HydrateTally = { reads: 0, listings: 0, inFlight: 0, mostInFlight: 0 };
+      const lease = await hydrateLease({ store, locator, parentDirectory: scratch('lease') });
+      push(client.directory, lease.directory, ['main']);
+
+      const outcome = await commitLease({ store: tallyingStore(store, tally, 0), lease, committedBy, packBound: 1 });
+      await lease.dispose();
+
+      expect(outcome).toMatchObject({ committed: true, compacted: true });
+      expect(tally.listings).toBe(0);
+      await sweepAfter(outcome);
+      // `retired/`, then `packs/`.
+      expect(tally.listings).toBe(2);
+    }, 120_000);
+
     it('should keep the manifest readable through every sweep', async () => {
       const locator = newRepository();
       const client = newClient();
@@ -1415,7 +1446,8 @@ describe('repository store commit protocol', () => {
         now: () => new Date(Date.now() + orphanThresholdMilliseconds * 2),
       });
 
-      expect(outcome).toMatchObject({ committed: true, swept: [] });
+      expect(outcome).toMatchObject({ committed: true, compacted: true });
+      await expect(sweepAfter(outcome)).resolves.toStrictEqual([]);
       const manifest = await readManifest(locator);
       expect(manifest?.generation).toBe(2);
       // The garbage is still there; the next compacting committer will take it.
@@ -1437,16 +1469,16 @@ describe('repository store commit protocol', () => {
       // A crash inside the sweep is not a failed push: the manifest is durable
       // before the first DELETE, so the client is told the truth and the
       // garbage waits for the next compacting committer.
-      await expect(
-        commitLease({
-          store,
-          lease,
-          committedBy,
-          packBound: 1,
-          now: () => new Date(Date.now() + retentionWindowMilliseconds * 2),
-          faults: crashAt('mid-sweep'),
-        }),
-      ).resolves.toMatchObject({ committed: true, swept: [] });
+      const outcome = await commitLease({
+        store,
+        lease,
+        committedBy,
+        packBound: 1,
+        now: () => new Date(Date.now() + retentionWindowMilliseconds * 2),
+        faults: crashAt('mid-sweep'),
+      });
+      expect(outcome).toMatchObject({ committed: true, compacted: true });
+      await expect(sweepAfter(outcome)).resolves.toStrictEqual([]);
       await lease.dispose();
 
       // The sweep runs after the commit, so the manifest is durable and every

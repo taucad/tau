@@ -20,7 +20,7 @@ const relayTag = 'tau:services-port';
  * @param options - `foreign` posts the relay from another frame instead.
  * @returns The stub's captured calls and the port it relays.
  */
-const installShellGlobal = (options: { foreign?: boolean } = {}) => {
+const installShellGlobal = (options: { foreign?: boolean; slicers?: unknown } = {}) => {
   const port = new MessageChannel().port1;
   const requestServicesPort = vi.fn((requestId: string, _concern: string, _context?: Record<string, string>) => {
     globalThis.dispatchEvent(
@@ -61,6 +61,7 @@ const installShellGlobal = (options: { foreign?: boolean } = {}) => {
     appIcon: { setTheme: setAppIconTheme },
     quit: { isReady: isQuitReady, onAsk: onQuitAsk, reportQuiesced: vi.fn() },
     dialog: { selectDirectory },
+    ...(options.slicers === undefined ? {} : { slicers: options.slicers }),
   });
   return {
     port,
@@ -226,5 +227,63 @@ describe('desktopBridge', () => {
     ]);
 
     expect(settlement).toBe('pending');
+  });
+
+  describe('Bambu Studio', () => {
+    const catalog = { installation: {}, printers: [], processes: [], filaments: [], plates: [] };
+    const installBambuStudio = () => {
+      const bambuStudio = {
+        status: vi.fn(async () => ({ available: true, version: '02.08.02.61', executable: '/opt/BambuStudio' })),
+        catalog: vi.fn(async (_filter?: unknown): Promise<unknown> => ({ ok: true, value: catalog })),
+        resolveSelection: vi.fn(
+          async (_input?: unknown): Promise<unknown> => ({
+            ok: false,
+            error: { code: 'BAMBU_STUDIO_PRESET_NOT_FOUND', message: 'No printer preset for "Z9".' },
+          }),
+        ),
+        settings: vi.fn(
+          async (_input?: unknown): Promise<unknown> => ({
+            ok: false,
+            error: { code: 'BAMBU_STUDIO_UNAVAILABLE', message: 'Bambu Studio was not found.' },
+          }),
+        ),
+      };
+      installShellGlobal({ slicers: { bambuStudio } });
+      return bambuStudio;
+    };
+
+    it('should be absent when the shell exposes no slicers', async () => {
+      installShellGlobal();
+      const { desktopBridge } = await loadBridge();
+
+      expect(desktopBridge()?.slicers).toBeUndefined();
+    });
+
+    it('should report status and unwrap answers from main', async () => {
+      const calls = installBambuStudio();
+      const { desktopBridge } = await loadBridge();
+      const bambuStudio = desktopBridge()?.slicers?.bambuStudio;
+
+      await expect(bambuStudio?.status()).resolves.toEqual({
+        available: true,
+        version: '02.08.02.61',
+        executable: '/opt/BambuStudio',
+      });
+      await expect(bambuStudio?.catalog({ model: 'X1C' })).resolves.toBe(catalog);
+      expect(calls.catalog).toHaveBeenCalledExactlyOnceWith({ model: 'X1C' });
+    });
+
+    it('should reject a refusal as an error that keeps the engine code', async () => {
+      installBambuStudio();
+      const { desktopBridge } = await loadBridge();
+      const bambuStudio = desktopBridge()?.slicers?.bambuStudio;
+
+      const refusal = bambuStudio?.resolveSelection({ hints: { model: 'Z9', materials: [] } });
+      await expect(refusal).rejects.toThrow('No printer preset for "Z9".');
+      await expect(refusal).rejects.toMatchObject({ name: 'BambuStudioError', code: 'BAMBU_STUDIO_PRESET_NOT_FOUND' });
+      await expect(bambuStudio?.settings({ printer: 'p', process: 'q', filaments: [] })).rejects.toMatchObject({
+        code: 'BAMBU_STUDIO_UNAVAILABLE',
+      });
+    });
   });
 });

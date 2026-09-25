@@ -58,6 +58,21 @@ export const machinesChannels = {
   completeBinding: 'tau:machines:complete-binding',
 } as const;
 
+/**
+ * Read-only Bambu Studio presets and settings for the Print pane (blueprint D12).
+ *
+ * Request/response only: the slice itself runs in the kernel utility on the
+ * export route, never over these channels.
+ */
+export const slicersChannels = {
+  bambuStudio: {
+    status: 'tau:slicers:bambu-studio:status',
+    catalog: 'tau:slicers:bambu-studio:catalog',
+    resolveSelection: 'tau:slicers:bambu-studio:resolve-selection',
+    settings: 'tau:slicers:bambu-studio:settings',
+  },
+} as const;
+
 /** IPC methods for bounded compute-store authority controls. */
 export const computeControlChannels = {
   inspect: 'tau:compute:inspect',

@@ -380,7 +380,11 @@ const refusalBody = (body: string | undefined): RemoteRefusal => {
   try {
     parsed = JSON.parse(body);
   } catch {
-    return {};
+    /* GitHub's git endpoint refuses in plain text ("Write access to repository
+     * not granted."), and that sentence is the remote's answer (N4). An HTML
+     * error page is not a sentence. */
+    const said = body.trim().split('\n')[0]?.trim() ?? '';
+    return said === '' || said.startsWith('<') || said.length > 300 ? {} : { message: said };
   }
   if (typeof parsed !== 'object' || parsed === null) {
     return {};

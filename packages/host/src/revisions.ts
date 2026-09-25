@@ -33,8 +33,10 @@ import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId } from '@taucad/revisions/algorithms';
 import {
   admissionMilliseconds,
+  awaitCheckoutCuts,
   awaitSyncSettled,
   createProjectRevisionsActor,
+  syncQuiesceMilliseconds,
   describeTurnSettlement,
   describeTurnRelease,
 } from '@taucad/revisions/revision-effects';
@@ -57,9 +59,11 @@ import {
   tauRemoteUrl,
 } from '@taucad/revisions';
 import type { branchMachine } from '@taucad/revisions/branch-machine';
+import { isAmbientCut } from '@taucad/revisions/checkout-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
 import type {
+  CheckoutRecord,
   CreateRevisionTagInput,
   PublishDraft,
   PublishPublicationActorInput,
@@ -294,8 +298,26 @@ const terminalStates = new Set(['completed', 'failed', 'cancelled']);
  */
 const watchCoalesceMilliseconds = 50;
 
+/* The live checkout's watch key: its id is the registry's, and writes can land before the registry answers. */
+const liveRoot = Symbol('live checkout');
+
+/** A watched checkout root: the live one, or a linked checkout by id. */
+type WatchKey = string | typeof liveRoot;
+
 /** How long a host waits for the `close` mint before it lets the project go. */
 const closeFlushMilliseconds = 5000;
+
+/**
+ * The longest `release()` holds one project before it lets go (rule 9).
+ *
+ * The close flush runs three bounded waits in sequence: the live checkout
+ * (a registry that answers late), the close cuts, then the scheduler's
+ * quiesce. A caller that waits on `release()` — desktop quit — nests strictly
+ * outside this, so the host's own reason lands before the caller's generic one.
+ *
+ * @public
+ */
+export const projectReleaseMilliseconds = closeFlushMilliseconds * 2 + syncQuiesceMilliseconds;
 
 const hostRevisionRequestSchema = z.object({ command: z.string().min(1) }).catchall(jsonValueSchema);
 
@@ -650,18 +672,28 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const turns = new Map<string, string>();
   /** Monotonic per checkout, one increment per content-change event (A38, F9). */
   const generations = new Map<string, number>();
-  const applyingPaths = new Map<string, number>();
-  const isApplyingPath = (path: string): boolean =>
-    (path === basename(options.workspaceRoot) && applyingPaths.size > 0) ||
-    [...applyingPaths.keys()].some((applying) => {
-      const separator = applying.lastIndexOf('/');
-      const temporaryPrefix = `${separator === -1 ? '' : applying.slice(0, separator + 1)}.${applying.slice(separator + 1)}.`;
-      return (
-        applying === path ||
-        applying.startsWith(`${path}/`) ||
-        (path.startsWith(temporaryPrefix) && path.endsWith('.tmp'))
-      );
-    });
+  /*
+   * The paths each checkout is materializing right now, keyed like its watcher
+   * (the live root, or a linked checkout's id), so a checkout's own apply never
+   * reads as somebody's write.
+   */
+  const applyingPaths = new Map<WatchKey, Map<string, number>>();
+  const isApplyingPath = (key: WatchKey, root: string, path: string): boolean => {
+    const applying = applyingPaths.get(key);
+    if (applying === undefined || applying.size === 0) {
+      return false;
+    }
+    return (
+      path === basename(root) ||
+      [...applying.keys()].some((entry) => {
+        const separator = entry.lastIndexOf('/');
+        const temporaryPrefix = `${separator === -1 ? '' : entry.slice(0, separator + 1)}.${entry.slice(separator + 1)}.`;
+        return (
+          entry === path || entry.startsWith(`${path}/`) || (path.startsWith(temporaryPrefix) && path.endsWith('.tmp'))
+        );
+      })
+    );
+  };
 
   const filesystems =
     options.filesystem ??
@@ -698,20 +730,20 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     filesystem: filesystems,
     ...(options.useFileSystem === undefined ? {} : { useFileSystem: options.useFileSystem }),
     onApplyingTree: (checkout, paths) => {
-      if (checkout.kind !== 'live') {
-        return;
-      }
+      const key: WatchKey = checkout.kind === 'live' ? liveRoot : checkout.id;
+      const applying = applyingPaths.get(key) ?? new Map<string, number>();
+      applyingPaths.set(key, applying);
       for (const path of paths) {
-        applyingPaths.set(path, (applyingPaths.get(path) ?? 0) + 1);
+        applying.set(path, (applying.get(path) ?? 0) + 1);
       }
       return () => {
         setTimeout(() => {
           for (const path of paths) {
-            const count = applyingPaths.get(path) ?? 0;
+            const count = applying.get(path) ?? 0;
             if (count <= 1) {
-              applyingPaths.delete(path);
+              applying.delete(path);
             } else {
-              applyingPaths.set(path, count - 1);
+              applying.set(path, count - 1);
             }
           }
         }, watchCoalesceMilliseconds * 2).unref();
@@ -876,31 +908,54 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       value: revisionJson({
         type: 'restored',
         revisionNumber: toast.revisionNumber,
-        unrecoverable: toast.unrecoverable,
       }),
     });
   });
-  restoreChild?.on('toast.error', (toast) => {
+  /* Whole, like the branch child's below: the code is what phrases the refusal
+   * on the page, so a relay that kept only the sentence showed desktop clients
+   * the generic restore copy. */
+  restoreChild?.on('toast.error', ({ type: _type, ...toast }) => {
+    emitChannel({
+      kind: 'toast',
+      value: revisionJson({ ...toast, type: 'error', subject: 'restore' }),
+    });
+  });
+  /* The worker's save channel, drawn at the same line (M3): an operation's own
+   * cut is answered by the child that asked, so it must not also read as a
+   * failed save. */
+  actor.on('cutFailed', (failure) => {
+    if (!isAmbientCut(failure)) {
+      return;
+    }
+    emitChannel({
+      kind: 'toast',
+      value: revisionJson({ type: 'error', subject: 'save', message: failure.reason }),
+    });
+  });
+  /* D3 on desktop too: a *Save* another writer beat is an answer, not a silent
+   * `dirty`. Only `save`, as in the worker (N6). */
+  actor.on('casLost', (lost) => {
+    if (lost.turnId !== undefined || lost.trigger !== 'save') {
+      return;
+    }
     emitChannel({
       kind: 'toast',
       value: revisionJson({
         type: 'error',
-        subject: 'restore',
-        message: toast.message,
+        subject: 'save',
+        message: 'Something else changed this project first. Try again.',
+        code: 'CAS_LOST',
       }),
     });
   });
-  actor.on('cutFailed', (failure) => {
-    if (failure.turnId === undefined) {
-      emitChannel({
-        kind: 'toast',
-        value: revisionJson({
-          type: 'error',
-          subject: 'save',
-          message: failure.reason,
-        }),
-      });
+  actor.on('nothingToSave', (event) => {
+    if (event.trigger === 'save' && event.turnId === undefined) {
+      emitChannel({ kind: 'toast', value: revisionJson({ type: 'nothingToSave' }) });
     }
+  });
+  /* The remote and resolution children's own sentences (L2-F8). */
+  actor.on('childToast', ({ type: _type, ...toast }) => {
+    emitChannel({ kind: 'toast', value: revisionJson({ ...toast, type: 'notice' }) });
   });
   actor.on('switchRefused', (refusal) => {
     emitChannel({
@@ -1012,12 +1067,20 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    * *events*, not paths (A38, F9). Derived content is filtered by the path
    * registry rather than by a second ignore list, so `thumbnail.webp` and
    * `.tau/types/**` cannot start an idle window.
+   *
+   * One watcher per live checkout root, and a write is raised against the
+   * checkout whose root it landed in (L2-F4, policy rule 3): linked checkouts
+   * live in this host's data directory, outside the workspace, so watching the
+   * workspace alone left them never dirty — no idle revision, no write
+   * generation guard, and a quit that could let their work go.
    */
-  let watcher: FSWatcher | undefined;
-  let pendingPaths = new Set<string>();
+  const watchers = new Map<WatchKey, FSWatcher | undefined>();
+  const pendingPaths = new Map<WatchKey, Set<string>>();
   let coalescing: ReturnType<typeof setTimeout> | undefined;
+  let watchedCheckouts: readonly CheckoutRecord[] | undefined;
+  let stopWatchingCheckouts = (): void => undefined;
   /**
-   * Raise the gathered paths once, or wait again for the registry.
+   * Raise the gathered paths once per checkout, or wait again for the registry.
    *
    * The registry answers asynchronously, and a project's very first writes
    * routinely land before it does. Dropping them would leave the checkout
@@ -1029,56 +1092,84 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const raise = (): ReturnType<typeof setTimeout> =>
     setTimeout(() => {
       coalescing = undefined;
-      const checkoutId = actor.getSnapshot().context.liveCheckoutId;
-      if (checkoutId === undefined) {
-        if (pendingPaths.size > 0) {
-          coalescing = raise();
+      const { liveCheckoutId } = actor.getSnapshot().context;
+      for (const [key, paths] of pendingPaths) {
+        const checkoutId = key === liveRoot ? liveCheckoutId : key;
+        if (checkoutId !== undefined) {
+          pendingPaths.delete(key);
+          revisions.changed(checkoutId, [...paths]);
         }
-        return;
       }
-      const paths = [...pendingPaths];
-      pendingPaths = new Set();
-      if (paths.length > 0) {
-        revisions.changed(checkoutId, paths);
+      if (pendingPaths.size > 0) {
+        coalescing = raise();
       }
     }, watchCoalesceMilliseconds).unref();
+  const watchRoot = (key: WatchKey, root: string): void => {
+    try {
+      watchers.set(
+        key,
+        watchDirectory(root, { recursive: true, persistent: false }, (_event, filename) => {
+          if (filename === null) {
+            return;
+          }
+          const path = filename.toString().split(sep).join('/');
+          const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
+          if (path === '' || !classify(path).versioned || isApplyingPath(key, root, path)) {
+            return;
+          }
+          if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
+            return;
+          }
+          const pending = pendingPaths.get(key) ?? new Set<string>();
+          pending.add(path);
+          pendingPaths.set(key, pending);
+          coalescing ??= raise();
+        }),
+      );
+    } catch {
+      /* A platform or a filesystem with no recursive watch records revisions on
+       * every other trigger; it simply never mints an idle one on its own. The
+       * key is still recorded, so a root that cannot be watched is not retried
+       * on every transition. */
+      watchers.set(key, undefined);
+    }
+  };
+  /* Follow the registry: watch each linked checkout it adds, stop each it drops. */
+  const watchLinkedCheckouts = (checkouts: readonly CheckoutRecord[]): void => {
+    if (checkouts === watchedCheckouts) {
+      return;
+    }
+    watchedCheckouts = checkouts;
+    const linked = new Map(
+      checkouts.flatMap((checkout) => (checkout.kind === 'linked' ? [[checkout.id, checkout.root] as const] : [])),
+    );
+    for (const [key, watcher] of watchers) {
+      if (key !== liveRoot && !linked.has(key)) {
+        watcher?.close();
+        watchers.delete(key);
+        pendingPaths.delete(key);
+      }
+    }
+    for (const [id, root] of linked) {
+      if (!watchers.has(id)) {
+        watchRoot(id, root);
+      }
+    }
+  };
   const startWatching = (): void => {
     if (options.watchWorkspace === false) {
       return;
     }
-    try {
-      watcher = watchDirectory(options.workspaceRoot, { recursive: true, persistent: false }, (_event, filename) => {
-        if (filename === null) {
-          return;
-        }
-        const path = filename.toString().split(sep).join('/');
-        const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
-        if (path === '' || !classify(path).versioned || isApplyingPath(path)) {
-          return;
-        }
-        if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
-          return;
-        }
-        pendingPaths.add(path);
-        coalescing ??= raise();
-      });
-    } catch {
-      /* A platform or a filesystem with no recursive watch records revisions on
-       * every other trigger; it simply never mints an idle one on its own. */
-      watcher = undefined;
-    }
+    watchRoot(liveRoot, options.workspaceRoot);
+    watchLinkedCheckouts(actor.getSnapshot().context.checkouts);
+    const subscription = actor.subscribe((snapshot) => {
+      watchLinkedCheckouts(snapshot.context.checkouts);
+    });
+    stopWatchingCheckouts = () => {
+      subscription.unsubscribe();
+    };
   };
 
-  /**
-   * Record what is on disk before this host lets the project go (S30 `close`).
-   *
-   * The checkout's I5 gate decides whether anything is minted, so a clean
-   * project pays one tree hash. Bounded, because quitting must not hang on a
-   * store that stopped answering: a revision that was not minted here is minted
-   * by the next host to open the project, from the same bytes.
-   *
-   * @returns Nothing; the outcome is the revision, or the absence of one.
-   */
   /**
    * The live checkout, once the registry has one, or `undefined` at the bound.
    *
@@ -1106,6 +1197,16 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     }
   };
 
+  /**
+   * Record what is on disk before this host lets the project go (S30 `close`).
+   *
+   * The checkout's I5 gate decides whether anything is minted, so a clean
+   * checkout pays one tree hash. Bounded, because quitting must not hang on a
+   * store that stopped answering: a revision that was not minted here is minted
+   * by the next host to open the project, from the same bytes.
+   *
+   * @returns Nothing; the outcome is the revision, or the absence of one.
+   */
   const flushClose = async (): Promise<void> => {
     /*
      * A missing live checkout is *not yet*, not "nothing to do" (W6-a3).
@@ -1117,70 +1218,51 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * host to open the project.
      */
     const checkoutId = await waitForLiveCheckout();
-    const { checkouts, turnRefs } = actor.getSnapshot().context;
     if (checkoutId === undefined) {
       throw new Error('The project checkout was not ready before the close deadline.');
     }
     /*
-     * A turn holding this checkout is already recording these bytes.
+     * Every checkout no turn holds, live and linked (the close ruling, D6).
      *
-     * The lease is the shared fact, so this holds for a *second* window over the
-     * same project as much as for this one's own turns: minting here would pass
-     * the I5 gate first and leave the turn's own settlement with an unchanged
-     * tree — the turn's revision, recorded under `close` and credited to nobody.
-     * A process that dies before the turn settles loses nothing either: the next
-     * host to open the project mints from the same bytes.
+     * A turn holding a checkout is already recording those bytes: minting here
+     * would pass the I5 gate first and leave the turn's own settlement with an
+     * unchanged tree — the turn's revision, recorded under `close` and credited
+     * to nobody. A process that dies before the turn settles loses nothing
+     * either: the next host to open the project mints from the same bytes.
      */
-    const live = checkouts.find((checkout) => checkout.id === checkoutId);
-    if (Object.keys(turnRefs).length > 0 || (live?.leaseRunIds.length ?? 0) > 0) {
-      return;
-    }
-    const settledCut = Promise.withResolvers<void>();
-    const subscriptions = [
-      actor.on('revisionMinted', (event) => {
-        if (event.checkoutId === checkoutId && event.trigger === 'close') {
-          settledCut.resolve();
-        }
-      }),
-      actor.on('nothingToSave', (event) => {
-        if (event.checkoutId === checkoutId && event.trigger === 'close') {
-          settledCut.resolve();
-        }
-      }),
-      actor.on('cutFailed', (event) => {
-        if (event.checkoutId === checkoutId && event.trigger === 'close') {
-          settledCut.reject(new Error(event.reason));
-        }
-      }),
-    ];
-    const bound = setTimeout(() => {
-      settledCut.reject(new Error('The close revision was not recorded before the deadline.'));
-    }, closeFlushMilliseconds).unref();
+    let refused: Error | undefined;
     try {
-      actor.send({ type: 'cut', trigger: 'close', checkoutId, leaseIds: [] });
-      await settledCut.promise;
-    } finally {
-      clearTimeout(bound);
-      for (const subscription of subscriptions) {
-        subscription.unsubscribe();
-      }
+      await awaitCheckoutCuts(actor, 'close', closeFlushMilliseconds);
+    } catch (error) {
+      refused = error instanceof Error ? error : new Error(String(error));
     }
     /*
-     * And then the scheduler, inside its own bound (W13 P33).
+     * And then the scheduler, inside its own bound (W13 P33), even after a
+     * refused cut: whatever the other checkouts minted still has to reach the
+     * remote or its record.
      *
      * The same seam the browser worker's `release` uses, because it is the same
      * question: has the close revision reached the remote, or at least the
      * record? A quit that does not wait leaves a revision nothing knows is
      * unsent; after the bound, `.git/sync-pending` is the guarantee
-     * and the next open retries it (D28, AC21).
+     * and the next open retries it (D28, AC21). The bound is rule 9's quiesce,
+     * which outlasts the open pull it may be waiting on.
      */
-    await awaitSyncSettled(actor, closeFlushMilliseconds);
+    await awaitSyncSettled(actor);
+    if (refused !== undefined) {
+      throw refused;
+    }
   };
 
   const release = async (): Promise<void> => {
+    /* A refused close keeps everything: the caller's next close re-attempts
+     * the cut, so nothing below runs until one succeeds. */
     await flushClose();
-    watcher?.close();
-    watcher = undefined;
+    stopWatchingCheckouts();
+    for (const watcher of watchers.values()) {
+      watcher?.close();
+    }
+    watchers.clear();
     if (coalescing !== undefined) {
       clearTimeout(coalescing);
       coalescing = undefined;
@@ -1347,7 +1429,6 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           revisionId: text('revisionId'),
         });
         break;
-      case 'returnToLatest':
       case 'undo':
       case 'confirm':
       case 'cancel':

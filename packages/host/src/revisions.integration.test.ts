@@ -19,13 +19,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { ToolRegistry } from '@taucad/agent-host';
-import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
+import { createIsomorphicGitRevisionPort, readRevisionLog } from '@taucad/revisions';
 import { createNativeGitRevisionPort } from '@taucad/revisions/node';
 import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 
-import { createProjectRevisionPort, createProjectRevisions, openProjectRevisions } from '#revisions.js';
+import {
+  createProjectRevisionPort,
+  createProjectRevisions,
+  openProjectRevisions,
+  requireRevisionToolchain,
+} from '#revisions.js';
 import type { HostRevisionEvent, ProjectRevisions, TurnCheckout, TurnFinalizedEvent } from '#revisions.js';
 import type { RevisionOpenOutcome } from '#index.js';
 
@@ -83,14 +88,12 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
-const hasGit = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+/* The same `git` + `git lfs` probe the host refuses on (OQ-B8), so a machine
+ * without `git-lfs` skips these rows instead of failing them. */
+const gitToolchainOnPath = await requireRevisionToolchain().then(
+  () => true,
+  () => false,
+);
 
 type Harness = {
   readonly launcher: NodeAgentLauncher;
@@ -264,7 +267,7 @@ const ports = [
     name: 'native-git',
     /* Never skipped: a machine with no `git` cannot answer for this row, and a
      * row that silently passed would be worse than one that did not run. */
-    enabled: hasGit,
+    enabled: gitToolchainOnPath,
     create: (workspaceRoot: string, checkoutsDirectory: string): RevisionPort =>
       createNativeGitRevisionPort({
         repositoryPath: workspaceRoot,
@@ -280,7 +283,7 @@ const ports = [
  * invisible — the app opened, files edited, and no revision ever appeared. The
  * host now says so once, by name, when the project opens.
  */
-describe.runIf(hasGit)('a disk host that cannot record', () => {
+describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
   it('reports the missing binaries once, and records with the executables it is given', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-toolchain-'));
     roots.push(workspaceRoot);
@@ -415,7 +418,7 @@ for (const row of ports) {
       );
       expect(history.status).toMatchObject({
         projectId: 'project-1',
-        branch: 'main',
+        line: { kind: 'branch', name: 'main' },
       });
       await expect(held.revisions.channel.request({ command: 'open' })).resolves.toMatchObject({
         status: { projectId: 'project-1' },
@@ -432,7 +435,9 @@ for (const row of ports) {
         command: 'switch',
         branch: 'isolated-run',
       });
-      await expect.poll(() => held.revisions.status().branch, { timeout: 10_000 }).toBe('isolated-run');
+      await expect
+        .poll(() => held.revisions.status().line, { timeout: 10_000 })
+        .toEqual({ kind: 'branch', name: 'isolated-run' });
       const linkedStatusResponse: unknown = await held.revisions.channel.request({ command: 'status' });
       const linkedStatus = linkedStatusResponse as Readonly<{
         status: RevisionStatusProjection;
@@ -461,10 +466,122 @@ for (const row of ports) {
         done: false,
         value: {
           kind: 'status',
-          value: { projectId: 'project-1', branch: 'isolated-run' },
+          value: { projectId: 'project-1', line: { kind: 'branch', name: 'isolated-run' } },
         },
       });
       abort.abort();
+    }, 30_000);
+
+    /* L2-F4: linked checkouts live in this host's data directory, outside the
+     * workspace, so a watcher on the workspace alone never saw their writes —
+     * no dirty state, no idle revision, no write-generation guard. Native only:
+     * the isomorphic row's linked checkout is a route, not a directory. */
+    it.runIf(row.name === 'native-git')(
+      'raises a write under a linked checkout against that checkout (L2-F4)',
+      async () => {
+        const held = await harness(row.create);
+        await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+        await held.settlementFor('run-1');
+        await held.revisions.channel.request({ command: 'createBranch', name: 'isolated-run' });
+        await expect
+          .poll(() => held.revisions.status().branches.some((branch) => branch.name === 'isolated-run'), {
+            timeout: 10_000,
+          })
+          .toBe(true);
+        const checkouts = await held.port.listCheckouts?.();
+        const linked = checkouts?.find((checkout) => checkout.kind === 'linked');
+        expect(linked).toBeDefined();
+        const changed = vi.spyOn(held.revisions, 'changed');
+
+        await writeFile(join(linked?.root ?? '', 'part.ts'), 'export const part = 1;\n');
+
+        /* Raised against the checkout whose root it landed in, never the live one. */
+        await expect.poll(() => changed.mock.calls, { timeout: 10_000 }).toContainEqual([linked?.id, ['part.ts']]);
+        expect(changed.mock.calls.filter(([, paths]) => paths.includes('part.ts'))).toEqual([
+          [linked?.id, ['part.ts']],
+        ]);
+      },
+      30_000,
+    );
+
+    /* The close ruling: letting a project go records every dirty checkout, live
+     * and linked, not only the live one. Native only, like L2-F4 above. */
+    it.runIf(row.name === 'native-git')(
+      'records a dirty linked checkout when the host lets the project go (close ruling)',
+      async () => {
+        const held = await harness(row.create);
+        await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+        await held.settlementFor('run-1');
+        await held.revisions.channel.request({ command: 'createBranch', name: 'isolated-run' });
+        await expect
+          .poll(() => held.revisions.status().branches.some((branch) => branch.name === 'isolated-run'), {
+            timeout: 10_000,
+          })
+          .toBe(true);
+        const checkouts = await held.port.listCheckouts?.();
+        const linked = checkouts?.find((checkout) => checkout.kind === 'linked');
+        const changed = vi.spyOn(held.revisions, 'changed');
+        const before = await readRevisionLog(held.port, { branch: 'isolated-run' });
+        await writeFile(join(linked?.root ?? '', 'part.ts'), 'export const part = 1;\n');
+        await expect.poll(() => changed.mock.calls, { timeout: 10_000 }).toContainEqual([linked?.id, ['part.ts']]);
+
+        await held.revisions.channel.request({ command: 'quiesce' });
+
+        const after = await readRevisionLog(held.port, { branch: 'isolated-run' });
+        expect(after).toHaveLength(before.length + 1);
+        expect(after[0]).toMatchObject({ trigger: 'close' });
+      },
+      30_000,
+    );
+
+    /* M3: the host's save channel is the worker's. A *Save* another writer beat
+     * says so, and a close that loses its CAS lets the project go at once
+     * rather than holding quit for the whole bound. */
+    it('answers a lost save on the save channel, and settles a lost close at once (M3)', async () => {
+      let lose = false;
+      const held = await harness(row.create, {
+        wrapPort: (port) => ({
+          ...port,
+          updateRef: async (input) =>
+            lose
+              ? {
+                  status: 'conflicted',
+                  name: input.name,
+                  expectedHead: input.expectedHead,
+                  actualHead: input.expectedHead,
+                  proposedHead: input.head,
+                }
+              : port.updateRef(input),
+        }),
+      });
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await held.settlementFor('run-1');
+      const abort = new AbortController();
+      const frames: Array<Readonly<{ kind: string; value: unknown }>> = [];
+      const reading = (async (): Promise<void> => {
+        for await (const frame of held.revisions.channel.events(abort.signal)) {
+          frames.push(frame);
+        }
+      })();
+      try {
+        lose = true;
+        await writeFile(join(held.workspaceRoot, 'main.ts'), 'export const size = 42;\n');
+        await held.revisions.channel.request({ command: 'saveRevision' });
+
+        await expect
+          .poll(() => frames.find((frame) => frame.kind === 'toast'), { timeout: 10_000 })
+          .toMatchObject({ kind: 'toast', value: { type: 'error', subject: 'save', code: 'CAS_LOST' } });
+
+        const started = Date.now();
+        await expect(held.revisions.channel.request({ command: 'quiesce' })).rejects.toThrow(
+          /moved this branch first/u,
+        );
+        expect(Date.now() - started).toBeLessThan(4000);
+      } finally {
+        lose = false;
+        abort.abort();
+        await reading.catch(() => undefined);
+      }
     }, 30_000);
 
     /* Red pin (attempt a2): a project that holds a large object records like any other.
@@ -556,7 +673,9 @@ for (const row of ports) {
       /* AC9's other half: the settlement names every lease on the checkout, and
        * the revision itself still carries the run that minted it — the case
        * where a naive "one lease, one run" rule would drop attribution. */
-      expect(secondSettlement.runIds).toEqual(['run-2', 'run-1']);
+      /* Sorted by the one producer (`revision-effects.ts`, 13cd18254), so two
+       * views of one settlement spell it one way; the set is what AC9 pins. */
+      expect(secondSettlement.runIds).toEqual(['run-1', 'run-2']);
       expect(firstSettlement.runIds).toContain('run-1');
       /* Which of the two mints the shared content is not fixed — the later
        * chat's *base* mint records whatever the earlier one has already written,
@@ -1021,7 +1140,7 @@ for (const row of ports) {
  * without a port and that default is native Git over the project directory,
  * with linked checkouts in the host's own data directory. No mode exists to
  * choose (S12, A10, D9). */
-describe.runIf(hasGit)('the disk-host default', () => {
+describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
   it('gives browser, desktop and CLI identical revision identity and keeps desktop checkouts outside the project', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-default-'));
     const cliRoot = await mkdtemp(join(tmpdir(), 'tau-cli-default-'));
@@ -1172,7 +1291,7 @@ describe.runIf(hasGit)('the disk-host default', () => {
    * empty directory with nothing but the project's id and where its remote is,
    * and `openFromRemote` is the whole gesture.
    */
-  it.runIf(hasGit)(
+  it.runIf(gitToolchainOnPath)(
     'opens a project this machine has never held from its remote',
     async () => {
       const bare = await mkdtemp(join(tmpdir(), 'tau-host-open-remote-'));
@@ -1250,7 +1369,7 @@ describe.runIf(hasGit)('the disk-host default', () => {
    * "there is anything to open" are different facts. An empty remote must not
    * be reported as opened over an empty directory.
    */
-  it.runIf(hasGit)(
+  it.runIf(gitToolchainOnPath)(
     'refuses to open a project whose Tau Cloud repository is still empty',
     async () => {
       const bare = await mkdtemp(join(tmpdir(), 'tau-host-open-empty-'));
@@ -1294,7 +1413,7 @@ describe.runIf(hasGit)('the disk-host default', () => {
    * refusal is prompt and in the remote's own words, and is never the "did not
    * answer in time" sentence the unhandled states used to produce.
    */
-  it.runIf(hasGit)(
+  it.runIf(gitToolchainOnPath)(
     'refuses an open that collides with work this machine already has',
     async () => {
       const bare = await mkdtemp(join(tmpdir(), 'tau-host-open-clash-'));
@@ -1492,6 +1611,57 @@ describe('a branch refusal over the host channel', () => {
   }, 30_000);
 });
 
+describe('a restore refusal over the host channel', () => {
+  it('carries the refusal code, not only a sentence', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-restore-refusal-'));
+    roots.push(workspaceRoot);
+    const revisions = createProjectRevisions({
+      workspaceRoot,
+      projectId: 'project-1',
+      port: createIsomorphicGitRevisionPort({
+        filesystem: new NodeFsProvider(workspaceRoot),
+        checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+      }),
+    });
+    const abort = new AbortController();
+    const frames: Array<Readonly<{ kind: string; value: unknown }>> = [];
+    const reading = (async (): Promise<void> => {
+      for await (const frame of revisions.channel.events(abort.signal)) {
+        frames.push(frame);
+      }
+    })();
+    try {
+      await revisions.channel.request({ command: 'open' });
+      await expect.poll(() => revisions.status().checkoutId, { timeout: 10_000 }).toBeDefined();
+      /* A revision this store never held: the cheapest refusal a restore mints. */
+      await revisions.channel.request({ command: 'restore', revisionId: '0'.repeat(40) });
+
+      await expect
+        .poll(
+          () =>
+            frames.find(
+              (frame) =>
+                frame.kind === 'toast' && (frame.value as { type?: string; subject?: string }).subject === 'restore',
+            ),
+          { timeout: 10_000 },
+        )
+        .toMatchObject({
+          kind: 'toast',
+          value: {
+            type: 'error',
+            subject: 'restore',
+            code: expect.any(String) as unknown as string,
+            message: expect.any(String) as unknown as string,
+          },
+        });
+    } finally {
+      abort.abort();
+      await reading.catch(() => undefined);
+      await revisions.release();
+    }
+  }, 30_000);
+});
+
 /**
  * The host half of D4/D16b and D3.
  *
@@ -1501,7 +1671,7 @@ describe('a branch refusal over the host channel', () => {
  * so none of this row touches the network. `authorizeRemote` is how the page
  * re-validates once it has re-minted.
  */
-describe.runIf(hasGit)('a Tau-managed remote credential over the host channel', () => {
+describe.runIf(gitToolchainOnPath)('a Tau-managed remote credential over the host channel', () => {
   it('should hold an unavailable frame and re-validate on authorizeRemote', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-remote-credential-'));
     roots.push(workspaceRoot);

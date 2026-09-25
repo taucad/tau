@@ -19,6 +19,7 @@ export const codeLanguages = {
   jsonl: 'jsonl',
   jsonc: 'jsonc',
   markdown: 'markdown',
+  yaml: 'yaml',
 } as const;
 
 /**
@@ -56,4 +57,6 @@ export const languageFromExtension = {
   mdwn: 'markdown',
   mdtxt: 'markdown',
   mdtext: 'markdown',
+  yaml: 'yaml',
+  yml: 'yaml',
 } as const;

@@ -20,6 +20,7 @@ export const supportedHighlightLanguages = [
   'tsx',
   'typescript',
   'usd',
+  'yaml',
 ] as const;
 
 export type HighlightLanguage = (typeof supportedHighlightLanguages)[number];
@@ -45,6 +46,7 @@ export const builtinHighlightLanguages = [
   'csharp',
   'tsx',
   'typescript',
+  'yaml',
 ] as const satisfies readonly HighlightLanguage[];
 
 export const customHighlightLanguages = [

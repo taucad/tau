@@ -7,7 +7,6 @@ export function CommercialUpgradeLabel(): React.JSX.Element | undefined {
 export const useCommercialFeatures = (): {
   readonly canCreatePrivateShares: boolean;
   readonly canSyncFiles: boolean;
-  readonly canConnectGitHub: boolean;
   readonly hasNoTrainGuarantee: boolean;
   readonly isResolved: boolean;
   readonly requestUpgrade: () => void;
@@ -15,7 +14,6 @@ export const useCommercialFeatures = (): {
   canCreatePrivateShares: true,
   /* A self-host build sells nothing, so it gates nothing (N4). */
   canSyncFiles: true,
-  canConnectGitHub: true,
   hasNoTrainGuarantee: false,
   isResolved: true,
   requestUpgrade: useCallback(() => undefined, []),

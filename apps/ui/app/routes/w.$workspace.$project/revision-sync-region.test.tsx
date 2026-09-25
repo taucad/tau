@@ -967,14 +967,14 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     expect(within(row).queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('offers Available on Pro instead of a connect a free plan cannot have (C5, N4)', async () => {
+  it('offers Available on Pro for Tau Cloud and a Git remote on every plan (C5, N4)', async () => {
     const user = userEvent.setup();
-    const region = renderRegion(facet(), syncFacet(), { canSyncFiles: false, canConnectGitHub: false });
+    const region = renderRegion(facet(), syncFacet(), { canSyncFiles: false });
 
     expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeDisabled();
-    expect(screen.getByRole('radio', { name: 'Git remote' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Git remote' })).toBeEnabled();
     const upgrades = screen.getAllByRole('button', { name: /Available on Pro/u });
-    expect(upgrades).toHaveLength(2);
+    expect(upgrades).toHaveLength(1);
 
     await user.click(upgrades[0]!);
     expect(region.upgrade).toHaveBeenCalled();

@@ -20,7 +20,7 @@ import type { SnapshotFrom } from 'xstate';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, watch as watchDirectory, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { z } from 'zod';
@@ -299,6 +299,31 @@ const terminalStates = new Set(['completed', 'failed', 'cancelled']);
  * write — content, then a rename of the temporary file — is one event.
  */
 const watchCoalesceMilliseconds = 50;
+
+/**
+ * How long a watch barrier waits for its cookie before it gives up on the feed.
+ *
+ * The cookie usually returns in about 20 ms. One that does not return means the
+ * watcher lost track, and the checkout reads everything at its next cut, which
+ * is correct, only slower.
+ */
+const watchSettleMilliseconds = 500;
+
+/* The channel requests that never record, so they do not wait for the watcher. */
+const unrecordingCommands: ReadonlySet<string> = new Set([
+  'status',
+  'setActor',
+  'setDeviceId',
+  'flushKeepalive',
+  'remoteCredential',
+  'log',
+  'divergence',
+  'diff',
+  'compare',
+]);
+
+/* A cookie's name is a staged temporary sibling, so a capture that meets one leaves it out. */
+const watchCookiePrefix = '.tau-watch.tau-staged.';
 
 /* The live checkout's watch key: its id is the registry's, and writes can land before the registry answers. */
 const liveRoot = Symbol('live checkout');
@@ -686,29 +711,6 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const turns = new Map<string, string>();
   /** Monotonic per checkout, one increment per content-change event (A38, F9). */
   const generations = new Map<string, number>();
-  /*
-   * The paths each checkout is materializing right now, keyed like its watcher
-   * (the live root, or a linked checkout's id), so a checkout's own apply never
-   * reads as somebody's write.
-   */
-  const applyingPaths = new Map<WatchKey, Map<string, number>>();
-  const isApplyingPath = (key: WatchKey, root: string, path: string): boolean => {
-    const applying = applyingPaths.get(key);
-    if (applying === undefined || applying.size === 0) {
-      return false;
-    }
-    return (
-      path === basename(root) ||
-      [...applying.keys()].some((entry) => {
-        const separator = entry.lastIndexOf('/');
-        const temporaryPrefix = `${separator === -1 ? '' : entry.slice(0, separator + 1)}.${entry.slice(separator + 1)}.`;
-        return (
-          entry === path || entry.startsWith(`${path}/`) || (path.startsWith(temporaryPrefix) && path.endsWith('.tmp'))
-        );
-      })
-    );
-  };
-
   const filesystems =
     options.filesystem ??
     ((checkout: Parameters<NonNullable<ProjectRevisionsOptions['filesystem']>>[0]) =>
@@ -743,26 +745,18 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      */
     filesystem: filesystems,
     ...(options.useFileSystem === undefined ? {} : { useFileSystem: options.useFileSystem }),
-    onApplyingTree: (checkout, paths) => {
-      const key: WatchKey = checkout.kind === 'live' ? liveRoot : checkout.id;
-      const applying = applyingPaths.get(key) ?? new Map<string, number>();
-      applyingPaths.set(key, applying);
-      for (const path of paths) {
-        applying.set(path, (applying.get(path) ?? 0) + 1);
-      }
-      return () => {
-        setTimeout(() => {
-          for (const path of paths) {
-            const count = applying.get(path) ?? 0;
-            if (count <= 1) {
-              applying.delete(path);
-            } else {
-              applying.set(path, count - 1);
-            }
-          }
-        }, watchCoalesceMilliseconds * 2).unref();
-      };
-    },
+    /*
+     * E1: the watcher below reports every write, the host's own applies
+     * included, and each cut waits for it to catch up (`settleWatch`), so a cut
+     * re-reads only the paths it names. A host that brings its own change
+     * source (`watchWorkspace: false`) makes no such promise.
+     *
+     * Applies are not hidden from the feed: hiding them would let a write that
+     * raced an apply drop out of every later incremental cut. A restore or a
+     * switch therefore reads dirty until its idle cut finds nothing to record,
+     * as it does in the browser.
+     */
+    completeChanges: options.watchWorkspace !== false,
     ...(apiBaseUrl === undefined ? {} : { remoteUrl: (id: string) => tauRemoteUrl(apiBaseUrl, id) }),
     ...(apiBaseUrl === undefined || options.tauCredential === undefined
       ? {}
@@ -1053,7 +1047,10 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       refuseAdmission(input.runId, 'it was never leased.');
     }, admissionMilliseconds);
     /* No wait for the registry: the root holds an admission that arrives before
-     * it and replays it, so there is nothing here to compensate for (A38). */
+     * it and replays it, so there is nothing here to compensate for (A38). The
+     * watcher is caught up, so the dirty base the turn mints holds the
+     * person's last writes and not the agent's (E1). */
+    await settleWatch();
     actor.send({
       type: 'admitTurn',
       turnId: input.turnId,
@@ -1089,62 +1086,139 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    * generation guard, and a quit that could let their work go.
    */
   const watchers = new Map<WatchKey, FSWatcher | undefined>();
+  const watchedRoots = new Map<WatchKey, string>();
   const pendingPaths = new Map<WatchKey, Set<string>>();
+  /* The barriers waiting on a cookie, by the cookie's name. */
+  const cookies = new Map<string, () => void>();
   let coalescing: ReturnType<typeof setTimeout> | undefined;
   let watchedCheckouts: readonly CheckoutRecord[] | undefined;
   let stopWatchingCheckouts = (): void => undefined;
   /**
-   * Raise the gathered paths once per checkout, or wait again for the registry.
+   * Raise the gathered paths once per checkout, or hold them for the registry.
    *
    * The registry answers asynchronously, and a project's very first writes
    * routinely land before it does. Dropping them would leave the checkout
    * reading clean over an edited tree for the rest of the session, so the burst
    * is held and re-timed instead.
-   *
-   * @returns The scheduled timer.
    */
+  const flush = (): void => {
+    const { liveCheckoutId } = actor.getSnapshot().context;
+    for (const [key, paths] of pendingPaths) {
+      const checkoutId = key === liveRoot ? liveCheckoutId : key;
+      if (checkoutId !== undefined) {
+        pendingPaths.delete(key);
+        revisions.changed(checkoutId, [...paths]);
+      }
+    }
+    if (pendingPaths.size > 0) {
+      coalescing ??= raise();
+    }
+  };
+  /* The coalescing window, which ends in a flush. */
   const raise = (): ReturnType<typeof setTimeout> =>
     setTimeout(() => {
       coalescing = undefined;
-      const { liveCheckoutId } = actor.getSnapshot().context;
-      for (const [key, paths] of pendingPaths) {
-        const checkoutId = key === liveRoot ? liveCheckoutId : key;
-        if (checkoutId !== undefined) {
-          pendingPaths.delete(key);
-          revisions.changed(checkoutId, [...paths]);
-        }
-      }
-      if (pendingPaths.size > 0) {
-        coalescing = raise();
-      }
+      flush();
     }, watchCoalesceMilliseconds).unref();
+  const reportWrite = (key: WatchKey, path: string): void => {
+    const pending = pendingPaths.get(key) ?? new Set<string>();
+    pending.add(path);
+    pendingPaths.set(key, pending);
+    coalescing ??= raise();
+  };
+  /*
+   * E1: a watcher that cannot say what changed reports the root, `''`, which
+   * the checkout's next cut reads as "read everything". That covers a null file
+   * name, an error (an overflow, a watched root that went away), and a root
+   * that could not be watched at all.
+   */
+  const lose = (key: WatchKey): void => {
+    reportWrite(key, '');
+  };
+  /**
+   * Wait until the watchers have reported every write that landed before this call.
+   *
+   * Each watched root gets a cookie file, the sync cookie watchman uses. A
+   * watcher delivers events in order, so once the cookie's own event arrives
+   * every earlier write has arrived too, and the coalescing window is flushed
+   * at once. A cut request goes to the tree only after this, so the paths the
+   * cut takes name every write made before the request. That includes writes
+   * from another process (an editor, the agent's filesystem server), which
+   * reach this host only through the watcher. A root with no watcher, or a
+   * cookie that never comes back, is reported as `''`.
+   *
+   * @returns Once every watched root has caught up, or has been marked unknown.
+   */
+  const settleWatch = async (): Promise<void> => {
+    await Promise.all(
+      [...watchers].map(async ([key, watcher]) => {
+        const root = watchedRoots.get(key);
+        if (watcher === undefined || root === undefined) {
+          lose(key);
+          return;
+        }
+        const name = `${watchCookiePrefix}${randomUUID()}.tmp`;
+        const seen = Promise.withResolvers<boolean>();
+        cookies.set(name, () => {
+          seen.resolve(true);
+        });
+        const bound = setTimeout(() => {
+          seen.resolve(false);
+        }, watchSettleMilliseconds).unref();
+        try {
+          await writeFile(join(root, name), '');
+          if (!(await seen.promise)) {
+            lose(key);
+          }
+        } catch {
+          lose(key);
+        } finally {
+          clearTimeout(bound);
+          cookies.delete(name);
+          await rm(join(root, name), { force: true }).catch(() => undefined);
+        }
+      }),
+    );
+    if (coalescing !== undefined) {
+      clearTimeout(coalescing);
+      coalescing = undefined;
+    }
+    flush();
+  };
   const watchRoot = (key: WatchKey, root: string): void => {
+    watchedRoots.set(key, root);
     try {
-      watchers.set(
-        key,
-        watchDirectory(root, { recursive: true, persistent: false }, (_event, filename) => {
-          if (filename === null) {
-            return;
-          }
-          const path = filename.toString().split(sep).join('/');
-          const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
-          if (path === '' || !classify(path).versioned || isApplyingPath(key, root, path)) {
-            return;
-          }
-          if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
-            return;
-          }
-          const pending = pendingPaths.get(key) ?? new Set<string>();
-          pending.add(path);
-          pendingPaths.set(key, pending);
-          coalescing ??= raise();
-        }),
-      );
+      const watcher = watchDirectory(root, { recursive: true, persistent: false }, (_event, filename) => {
+        if (filename === null) {
+          lose(key);
+          return;
+        }
+        const path = filename.toString().split(sep).join('/');
+        if (path.startsWith(watchCookiePrefix)) {
+          cookies.get(path)?.();
+          return;
+        }
+        const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
+        if (path === '' || !classify(path).versioned) {
+          return;
+        }
+        if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
+          return;
+        }
+        reportWrite(key, path);
+      });
+      watcher.on('error', () => {
+        lose(key);
+        watcher.close();
+        watchers.set(key, undefined);
+      });
+      watchers.set(key, watcher);
     } catch {
       /* A platform or a filesystem with no recursive watch records revisions on
-       * every other trigger; it simply never mints an idle one on its own. The
-       * key is still recorded, so a root that cannot be watched is not retried
-       * on every transition. */
+       * every other trigger; it simply never mints an idle one on its own, and
+       * every cut on it reads the whole tree (`settleWatch`). The key is still
+       * recorded, so a root that cannot be watched is not retried on every
+       * transition. */
       watchers.set(key, undefined);
     }
   };
@@ -1161,6 +1235,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       if (key !== liveRoot && !linked.has(key)) {
         watcher?.close();
         watchers.delete(key);
+        watchedRoots.delete(key);
         pendingPaths.delete(key);
       }
     }
@@ -1251,6 +1326,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     }
     let refused: Error | undefined;
     try {
+      await settleWatch();
       await awaitCheckoutCuts(actor, 'close');
     } catch (error) {
       refused = error instanceof Error ? error : new Error(String(error));
@@ -1356,6 +1432,10 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     const request = hostRevisionRequestSchema.parse(value) as {
       command: string;
     } & Record<string, JsonValue>;
+    /* Anything that may record waits for the watcher first (E1); reads do not. */
+    if (!unrecordingCommands.has(request.command)) {
+      await settleWatch();
+    }
     const text = (key: string): string => requiredText(request, key);
     /* The cases intentionally mirror the existing worker command vocabulary;
      * braces and destructuring here add ceremony without narrowing the wire. */
@@ -1383,10 +1463,13 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         return revisionJson(
           await readRevisionLog(port, {
             ...(optionalText(request, 'branch') === undefined ? {} : { branch: optionalText(request, 'branch') }),
+            ...(optionalText(request, 'from') === undefined ? {} : { from: optionalText(request, 'from') }),
             ...(limit === undefined ? {} : { limit }),
           }),
         );
       }
+      case 'divergence':
+        return revisionJson(await port.divergence({ head: revisionId(text('head')), base: revisionId(text('base')) }));
       case 'diff': {
         const to = text('revisionId');
         const record = await port.readRevision(revisionId(to));
@@ -1547,6 +1630,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           event: {
             type: 'publish',
             ...(optionalText(request, 'tag') ? { tag: optionalText(request, 'tag') } : {}),
+            ...(optionalText(request, 'revisionId') ? { revisionId: optionalText(request, 'revisionId') } : {}),
           },
         });
         break;
@@ -1713,7 +1797,10 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             }
             /* Sent straight through: `turn.machine` buffers a completion that
              * arrives while it is still `preparing` and replays it on
-             * `leased.held`, so the host holds nothing (W6). */
+             * `leased.held`, so the host holds nothing (W6). The turn's own
+             * last writes reach the checkout before its cut does (E1). */
+            // oxlint-disable-next-line no-await-in-loop -- each completion waits for the writes before it.
+            await settleWatch();
             actor.send({ type: 'turnCompleted', turnId });
           }
         } catch (error) {

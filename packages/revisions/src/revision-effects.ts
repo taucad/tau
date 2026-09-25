@@ -1472,6 +1472,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const merged = mergeRevisionTrees(baseTree, oursTree, theirsTree);
     if (merged.status === 'conflicted') {
+      const paths = merged.conflicts.map((conflict) => conflict.path);
+      const conflictBranch = input.conflictBranch ?? input.branch;
+      const previousConflictHead = conflictBranch === input.branch ? theirs : await port.readRef(conflictBranch);
+      /* D55: a pull that runs again while this conflict waits (Sync now, a
+       * reconnect) finds the same two sides. The waiting revision already
+       * records them, and writing another would move the card to a new
+       * revision and drop every side the person had already chosen. */
+      if (previousConflictHead !== undefined && previousConflictHead !== theirs) {
+        const recent = await port.log({ heads: [previousConflictHead], limit: 3 });
+        const waiting = recent.find((entry) => entry.id === previousConflictHead);
+        if (waiting?.conflicted === true && waiting.parents.join(',') === [theirs, ours].join(',')) {
+          return { status: 'conflicted', paths };
+        }
+      }
       const [oursTreeId, baseTreeId, theirsTreeId] = await Promise.all([
         treeIdOf(ours),
         treeIdOf(base),
@@ -1487,15 +1501,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           labels: conflictLabels({ ours: input.into, theirs: sourceLabel }),
         },
       });
-      const conflictBranch = input.conflictBranch ?? input.branch;
-      const previousConflictHead = conflictBranch === input.branch ? theirs : await port.readRef(conflictBranch);
       const conflictRevision = revisionId(receipt.commitId);
       await publishMerge(conflictBranch, previousConflictHead, conflictRevision);
       const descriptor = await describePort();
-      if (conflictBranch !== input.branch && port.addCheckout !== undefined && descriptor.checkouts) {
+      /* D55: a conflict that moved on (either side has a new revision) keeps
+       * the checkout the earlier one opened; a second `addCheckout` for the
+       * same branch is refused, and the pull failed on it every retry. */
+      const waitingPlace = places.find((place) => place.branch === conflictBranch);
+      if (conflictBranch !== input.branch && waitingPlace !== undefined) {
+        await materializeTree(waitingPlace, theirsTree);
+      } else if (conflictBranch !== input.branch && port.addCheckout !== undefined && descriptor.checkouts) {
         await port.addCheckout({ branch: conflictBranch, from: conflictRevision });
       }
-      return { status: 'conflicted', paths: merged.conflicts.map((conflict) => conflict.path) };
+      return { status: 'conflicted', paths };
     }
 
     const receipt = await port.writeRevision({

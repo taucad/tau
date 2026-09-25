@@ -192,7 +192,7 @@ describe('ChatAgentSheet', () => {
   it('chooses the agent in a row of its own, listing each host’s agents under that host', async () => {
     state.placements = [
       codex(),
-      { ...codex('EXTERNAL_AGENT_AUTH_REQUIRED'), hostId: 'studio', label: 'studio', rung: 'remote' },
+      { ...codex('EXTERNAL_AGENT_AUTH_REQUIRED'), hostId: 'studio', label: 'studio', rung: 2 },
     ];
     renderSheet();
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));

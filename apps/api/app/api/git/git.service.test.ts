@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { ServiceUnavailableException, VersioningType } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -26,6 +27,7 @@ import {
 } from '#api/git/git.constants.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
@@ -229,7 +231,10 @@ const roomyBudget = {
 const createService = (
   store: RepositoryStore,
   database: DatabaseService,
-  rateLimiter: PublicationRateLimiterService = roomyBudget,
+  {
+    rateLimiter = roomyBudget,
+    durableEvents = mock<DurableEventsService>(),
+  }: { rateLimiter?: PublicationRateLimiterService; durableEvents?: DurableEventsService } = {},
 ): GitRepositoryService =>
   new GitRepositoryService(
     database,
@@ -241,6 +246,7 @@ const createService = (
     } as unknown as ProjectAccessService,
     store,
     rateLimiter,
+    durableEvents,
   );
 
 const access: GitAccess = {
@@ -342,7 +348,8 @@ describe('GitRepositoryService derived state (D19)', () => {
   it('leaves derived_generation behind when the derivation cannot finish, and still serves', async () => {
     const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
     const control = { failTransaction: true };
-    const service = createService(store, databaseStub(row, control));
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(store, databaseStub(row, control), { durableEvents });
 
     const advertisement = await service.advertiseRefs(access, 'git-upload-pack');
 
@@ -351,16 +358,44 @@ describe('GitRepositoryService derived state (D19)', () => {
     expect(Buffer.from(advertisement).toString('utf8')).toContain('refs/heads/main');
     expect(row.derivedGeneration).toBe(0);
     expect(row.storageBytes).toBe(0);
+    /* D13 (review finding 4): the manifest is durable, so it is announced even
+       though the rebuild failed; a parked reader makes no request that repairs it. */
+    await service.settled();
+    expect(durableEvents.appendRevision.mock.calls).toEqual([
+      [{ projectId, ownerId, generation: 1, refs: ['refs/heads/main', 'refs/tags/v1'] }],
+    ]);
+  }, 60_000);
+
+  it('answers without waiting for a slow announcement, which never holds the lease', async () => {
+    const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    const appended = Promise.withResolvers<{ appended: false; reason: 'not-found' }>();
+    durableEvents.appendRevision.mockReturnValue(appended.promise);
+    const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents });
+
+    const advertisement = await service.advertiseRefs(access, 'git-upload-pack');
+
+    expect(Buffer.from(advertisement).toString('utf8')).toContain('refs/heads/main');
+    expect(row.derivedGeneration).toBe(1);
+    expect(durableEvents.appendRevision).toHaveBeenCalledOnce();
+    appended.resolve({ appended: false, reason: 'not-found' });
+    await service.settled();
   }, 60_000);
 
   it('repairs the mismatch on the next request, with no job in between', async () => {
     const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
     const control = { failTransaction: false };
-    const service = createService(store, databaseStub(row, control));
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(store, databaseStub(row, control), { durableEvents });
 
     await service.advertiseRefs(access, 'git-upload-pack');
+    await service.settled();
 
     expect(row.derivedGeneration).toBe(1);
+    /* D13: one `revision` entry for the committed manifest, refs only. */
+    expect(durableEvents.appendRevision.mock.calls).toEqual([
+      [{ projectId, ownerId, generation: 1, refs: ['refs/heads/main', 'refs/tags/v1'] }],
+    ]);
     /* Accounting is the manifest's own live pack bytes — nothing walks a
        directory to find out how large a repository is any more. */
     expect(row.storageBytes).toBe(committedBytes);
@@ -368,12 +403,14 @@ describe('GitRepositoryService derived state (D19)', () => {
 
   it('does nothing when the row is already caught up', async () => {
     const row: GitRow = { generation: 1, derivedGeneration: 1, storageBytes: 7 };
-    const service = createService(store, databaseStub(row, { failTransaction: true }));
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(store, databaseStub(row, { failTransaction: true }), { durableEvents });
 
     await service.advertiseRefs(access, 'git-upload-pack');
 
     // The failing transaction is never opened, which is how "no work" is visible.
     expect(row.storageBytes).toBe(7);
+    expect(durableEvents.appendRevision).not.toHaveBeenCalled();
   }, 60_000);
 
   /**
@@ -552,7 +589,7 @@ describe('GitRepositoryService security floor (W9)', () => {
     } as unknown as RedisService);
     const day = Math.floor(Date.now() / 86_400_000);
     counters.set(`git:hydrate:${ownerId}:caller:user-w9-reader:w86400:${String(day)}`, hydratesPerCallerPerDay);
-    const service = createService(store, caughtUp(), limiter);
+    const service = createService(store, caughtUp(), { rateLimiter: limiter });
     const reader: GitAccess = { ...access, role: 'read', callerId: 'user-w9-reader' };
 
     await expect(service.advertiseRefs(reader, 'git-upload-pack')).rejects.toMatchObject({
@@ -587,7 +624,7 @@ describe('GitRepositoryService security floor (W9)', () => {
     } as unknown as PublicationRateLimiterService;
 
     await expect(
-      createService(watched, caughtUp(), spent).advertiseRefs(access, 'git-upload-pack'),
+      createService(watched, caughtUp(), { rateLimiter: spent }).advertiseRefs(access, 'git-upload-pack'),
     ).rejects.toMatchObject({
       status: 429,
       response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED', retryAfterSeconds: 3600 },
@@ -816,12 +853,20 @@ describe('GitRepositoryService security floor (W9)', () => {
     }, 60_000);
 
     it('removes an abandoned conflict line at the owner’s request and records it without a tip (EQ11)', async () => {
-      const service = createService(store, caughtUp());
+      const durableEvents = mock<DurableEventsService>();
+      const service = createService(store, caughtUp(), { durableEvents });
 
       await service.removeRef({ access, ref: 'refs/heads/conflicts/main/device-b', committedBy: ownerId });
+      await service.settled();
 
       const read = await store.readManifest(locator);
       const manifest = decodeManifest(read?.manifest ?? new Uint8Array());
+      /* A removal is a committed manifest like a push, so open clients hear of it (D13).
+         Last, because `caughtUp()` pins the row at generation 1 and the request's
+         own repair announces the earlier removal's generation first. */
+      expect(durableEvents.appendRevision.mock.lastCall).toEqual([
+        { projectId, ownerId, generation: manifest.generation, refs: ['refs/heads/conflicts/main/device-b'] },
+      ]);
       expect(manifest.refs).not.toHaveProperty(['refs/heads/conflicts/main/device-b']);
       expect(manifest.refs).toHaveProperty(['refs/heads/main']);
       expect(manifest.pushes.at(-1)).toMatchObject({

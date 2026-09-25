@@ -34,6 +34,7 @@ import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { StorageModule } from '#storage/storage.module.js';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { repositoryStoreKey } from '#api/git/git.constants.js';
@@ -97,6 +98,8 @@ const state = {
 
 /** What one request cost the plan lookups, so the read path's cost is a fact. */
 const queries = { entitlements: 0, usage: 0 };
+/** Every committed manifest announced on the project's `revision` stream (D13), in order. */
+const announced: Array<{ readonly generation: number; readonly refs: readonly string[] }> = [];
 
 const runGit = async (
   args: readonly string[],
@@ -295,6 +298,14 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         },
         { provide: ProjectAccessService, useValue: projectAccessStub },
         {
+          provide: DurableEventsService,
+          useValue: {
+            appendRevision: async (entry: { generation: number; refs: readonly string[] }) => {
+              announced.push({ generation: entry.generation, refs: entry.refs });
+            },
+          },
+        },
+        {
           provide: commercialEntitlementsKey,
           useValue: {
             getEntitlements: async () => {
@@ -405,6 +416,8 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(state.generation).toBe(1);
     expect(state.derivedGeneration).toBe(1);
     expect(state.storageBytes).toBeGreaterThan(0);
+    /* D13: the push is announced once, by generation and ref name only. */
+    expect(announced).toEqual([{ generation: 1, refs: ['refs/heads/main'] }]);
 
     const second = path.join(workspace, 'second');
     await gitOk(['clone', remoteUrl, second], workspace);
@@ -843,6 +856,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await gitOk(['update-ref', 'refs/tau/chats/chat_cas', 'HEAD'], clone);
     await gitOk(['push', 'origin', 'refs/tau/chats/chat_cas'], clone);
 
+    const announcedBeforeRefusals = announced.length;
     const deletedTag = await runGit(['push', 'origin', ':refs/tags/v-cas'], clone);
     expect(deletedTag.code, `tag deletion was accepted: ${deletedTag.stderr}`).not.toBe(0);
 
@@ -853,6 +867,8 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await gitOk(['reset', '--hard', 'HEAD~1'], clone);
     const rewound = await runGit(['push', '--force', 'origin', 'HEAD:refs/heads/main'], clone);
     expect(rewound.code, `a force push was accepted: ${rewound.stderr}`).not.toBe(0);
+    /* D13: a refused push commits no manifest, so nothing is announced. */
+    expect(announced).toHaveLength(announcedBeforeRefusals);
 
     const references = await advertised();
     expect(references).toContain('refs/tags/v-cas');

@@ -28,6 +28,7 @@ import { DatabaseService } from '#database/database.service.js';
 import { project, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
+import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import {
@@ -286,6 +287,7 @@ export class GitRepositoryService {
     @Inject(repositoryStoreKey)
     private readonly store: RepositoryStore,
     private readonly rateLimiter: PublicationRateLimiterService,
+    private readonly durableEvents: DurableEventsService,
   ) {
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
        first chance to give the dead worker's disk back (W10 defect 2). Tracked
@@ -1292,6 +1294,16 @@ export class GitRepositoryService {
     moved: readonly MovedRef[];
   }): Promise<void> {
     const { access, manifest } = args;
+    /* D13: tell every open client of this project that the remote moved. First
+       and whatever the rebuild below does, because the manifest is already
+       durable and a reader parked on the long poll makes no git request that
+       would repair it. Fire-and-forget rather than a timeout: the append is a
+       database transaction a timeout could not cancel, so bounding the wait
+       would only stop this request knowing whether it landed while it still
+       held the lease; tracked, it holds neither the lease nor the response and
+       `settled()` still waits for it. A repair re-announces its generation,
+       which costs a reader one fetch that finds nothing new. */
+    this.track(this.announce(access, manifest.generation, args.moved));
     const storageBytes = manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
     try {
       const tags = args.moved.flatMap((ref) =>
@@ -1348,6 +1360,23 @@ export class GitRepositoryService {
            `storage_bytes` with it — backwards. */
         setWhere: lt(projectGit.derivedGeneration, manifest.generation),
       });
+  }
+
+  /** One `revision` entry for a committed manifest (D13); a failure is logged, never raised. */
+  private async announce(access: GitAccess, generation: number, moved: readonly MovedRef[]): Promise<void> {
+    try {
+      await this.durableEvents.appendRevision({
+        projectId: access.projectId,
+        ownerId: access.ownerId,
+        generation,
+        refs: moved.map((ref) => ref.ref),
+      });
+    } catch (error) {
+      this.#logger.warn(
+        { err: error, projectId: access.projectId, generation },
+        'Committed manifest not announced on the revision stream; open clients learn of it on their next fetch',
+      );
+    }
   }
 
   /**

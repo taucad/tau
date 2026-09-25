@@ -5,6 +5,7 @@ import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
 import { DatabaseModule } from '#database/database.module.js';
 import { ProjectAccessModule } from '#api/collaboration/project-access.module.js';
+import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitController } from '#api/git/git.controller.js';
@@ -24,7 +25,7 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
  * asks for the port and cannot name a provider.
  */
 @Module({
-  imports: [DatabaseModule, ProjectAccessModule],
+  imports: [DatabaseModule, ProjectAccessModule, DurableEventsModule],
   controllers: [GitController, GitProxyController, RevisionSaltController],
   providers: [
     GitRepositoryService,

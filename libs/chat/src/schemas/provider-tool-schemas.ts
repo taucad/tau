@@ -37,6 +37,7 @@ export const cadProviderFacingToolNames = [
   toolName.revisions,
   toolName.updateTodos,
   toolName.getMachine,
+  toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
   toolName.listPrintRequests,

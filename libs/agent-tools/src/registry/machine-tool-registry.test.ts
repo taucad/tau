@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio setting keys are its own wire vocabulary */
 import { readFileSync } from 'node:fs';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -26,6 +27,7 @@ import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import { createMachineToolRegistry } from '#registry/machine-tool-registry.js';
 import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
+import type { BambuStudioEngine } from '#registry/print-profiles.js';
 import { createRuntimeAgentClients } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 
@@ -40,6 +42,7 @@ const machineToolNames = [
   'begin_machine_binding',
   'list_machines',
   'get_machine',
+  'get_print_profiles',
   'request_print',
   'get_print_request',
   'list_print_requests',
@@ -415,6 +418,21 @@ describe('machine tool registry', () => {
       });
     });
 
+    it('should hand the planner the Bambu Studio profiles and settings the agent chose', async () => {
+      planPrint.mockClear();
+      await invoke(clientFixture().client, 'request_print', {
+        targetFile: 'main.ts',
+        profiles: { process: '0.12mm Fine @BBL X1C', filaments: ['Bambu PETG Basic @BBL X1C'] },
+        settings: { sparse_infill_density: '20%', enable_support: true },
+      });
+      expect(planPrint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profiles: { process: '0.12mm Fine @BBL X1C', filaments: ['Bambu PETG Basic @BBL X1C'] },
+          settings: { sparse_infill_density: '20%', enable_support: true },
+        }),
+      );
+    });
+
     it('should say a very short print takes under a minute, without "about"', async () => {
       const approve = approveWith('approved');
       planPrint.mockResolvedValueOnce({
@@ -520,6 +538,224 @@ describe('machine tool registry', () => {
       });
       expect(none.requestPrint).not.toHaveBeenCalled();
       expect(two.requestPrint).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('get_print_profiles', () => {
+    const bambuProvider = {
+      id: 'bambu',
+      vendor: 'Bambu Lab',
+      manifest: { toolhead: { nozzles: [{ id: 'nozzle-0.4', diameter: { value: 0.4, unit: 'mm' } }] } },
+    } as unknown as MachineProvider;
+    const install = { executable: '/bin/bambu', version: '02.08.02.61', resourcesDir: '/res' };
+    const printers = ['Bambu Lab X1 Carbon 0.4 nozzle'];
+    const catalog = {
+      installation: install,
+      printers: [
+        {
+          name: printers[0]!,
+          kind: 'machine',
+          source: 'system',
+          printerModel: 'Bambu Lab X1 Carbon',
+          nozzleDiameter: 0.4,
+        },
+      ],
+      processes: [
+        {
+          name: '0.20mm Standard @BBL X1C',
+          kind: 'process',
+          source: 'system',
+          layerHeight: 0.2,
+          compatiblePrinters: printers,
+        },
+        {
+          name: '0.20mm Gyroid @BBL X1C',
+          kind: 'process',
+          source: 'user',
+          layerHeight: 0.2,
+          compatiblePrinters: printers,
+        },
+      ],
+      filaments: [
+        { name: 'Generic PETG', kind: 'filament', source: 'system', filamentId: 'GFG99', filamentType: 'PETG' },
+        {
+          name: 'Bambu PETG Basic @BBL X1C',
+          kind: 'filament',
+          source: 'system',
+          filamentId: 'GFG00',
+          filamentType: 'PETG',
+        },
+      ],
+      plates: [
+        { id: 'cool', bambuName: 'Cool Plate' },
+        { id: 'textured-pei', bambuName: 'Textured PEI Plate' },
+      ],
+    } as const;
+    const leaf = (extra: Readonly<Record<string, unknown>>) => ({
+      title: 'Setting',
+      description: 'What it does.',
+      ...extra,
+    });
+    const engine = () => ({
+      findBambuStudio: vi.fn<BambuStudioEngine['findBambuStudio']>(async () => install),
+      loadBambuStudioCatalog: vi.fn<BambuStudioEngine['loadBambuStudioCatalog']>(async () => catalog),
+      describeBambuStudioSettings: vi.fn<BambuStudioEngine['describeBambuStudioSettings']>(async () => ({
+        schema: {
+          properties: {
+            process: {
+              properties: {
+                quality: {
+                  properties: {
+                    layer_height: leaf({ type: 'number', minimum: 0.05, 'x-tau-unit': 'mm' }),
+                    seam_position: leaf({
+                      type: 'string',
+                      oneOf: [
+                        { const: 'aligned', title: 'Aligned' },
+                        { const: 'back', title: 'Back' },
+                      ],
+                    }),
+                  },
+                },
+              },
+            },
+            filament: {
+              properties: {
+                temperatures: {
+                  properties: { nozzle_temperature: leaf({ type: 'array', items: { type: 'integer' } }) },
+                },
+              },
+            },
+          },
+        },
+        values: {
+          process: { quality: { layer_height: 0.2, seam_position: 'aligned' } },
+          filament: { temperatures: { nozzle_temperature: [255] } },
+        },
+        groups: [],
+      })),
+    });
+    const profilesOf = async (
+      bambuStudio: BambuStudioEngine,
+      input: JsonValue,
+      host: Readonly<{ provider?: MachineProvider; entries?: readonly MachineDirectoryEntry[] }> = {},
+    ) => {
+      const { provider = bambuProvider, entries } = host;
+      const { client } = clientFixture(entries === undefined ? {} : { entries });
+      return createMachineToolRegistry({ ...client, listProviders: async () => [provider] }, { bambuStudio }).invoke({
+        toolCallId: 'call-1',
+        toolName: 'get_print_profiles',
+        input,
+        signal: new AbortController().signal,
+      });
+    };
+
+    it('lists the defaults from what the printer reports, the compatible presets and every setting compactly', async () => {
+      const bambuStudio = engine();
+      const result = await profilesOf(bambuStudio, {});
+      expect(result).toEqual({
+        isError: false,
+        content: {
+          machineId: 'machine-1',
+          engine: 'bambu-studio',
+          version: '02.08.02.61',
+          defaults: {
+            printer: 'Bambu Lab X1 Carbon 0.4 nozzle',
+            process: '0.20mm Standard @BBL X1C',
+            filaments: ['Bambu PETG Basic @BBL X1C'],
+            plate: 'textured-pei',
+          },
+          printers: [{ name: 'Bambu Lab X1 Carbon 0.4 nozzle' }],
+          processes: [
+            { name: '0.20mm Standard @BBL X1C', layerHeight: 0.2 },
+            { name: '0.20mm Gyroid @BBL X1C', source: 'user', layerHeight: 0.2 },
+          ],
+          filaments: [
+            { name: 'Generic PETG', filamentType: 'PETG', filamentId: 'GFG99' },
+            { name: 'Bambu PETG Basic @BBL X1C', filamentType: 'PETG', filamentId: 'GFG00' },
+          ],
+          plates: ['cool', 'textured-pei'],
+          settings: {
+            quality: { layer_height: 0.2, seam_position: 'aligned' },
+            temperatures: { nozzle_temperature: [255] },
+          },
+          choices: { seam_position: ['aligned', 'back'] },
+        },
+      });
+      expect(bambuStudio.loadBambuStudioCatalog).toHaveBeenCalledWith(install, { model: 'X1C', nozzleDiameter: 0.4 });
+      expect(bambuStudio.describeBambuStudioSettings).toHaveBeenCalledWith(install, {
+        printer: 'Bambu Lab X1 Carbon 0.4 nozzle',
+        process: '0.20mm Standard @BBL X1C',
+        filaments: ['Bambu PETG Basic @BBL X1C'],
+      });
+    });
+
+    it('picks the loaded spool by its filament id, reads a chosen selection, and describes asked keys in full', async () => {
+      const bambuStudio = engine();
+      const spool = entry('machine-1', 'Workshop X1C');
+      const withProfile = {
+        ...spool,
+        snapshot: {
+          ...spool.snapshot,
+          setup: { materials: [{ slot: 1, state: 'loaded', materialId: 'PETG', profileId: 'GFG99' }] },
+        },
+      } as unknown as MachineDirectoryEntry;
+      const result = await profilesOf(
+        bambuStudio,
+        { profiles: { process: '0.20mm Gyroid @BBL X1C' }, keys: ['layer_height', 'seam_position', 'no_such_key'] },
+        { entries: [withProfile] },
+      );
+      expect(result.content).toMatchObject({
+        /* The printer reports no plate, so none is defaulted: the person confirms it. */
+        defaults: { process: '0.20mm Gyroid @BBL X1C', filaments: ['Generic PETG'] },
+        details: {
+          layer_height: {
+            scope: 'process',
+            group: 'quality',
+            title: 'Setting',
+            description: 'What it does.',
+            type: 'number',
+            unit: 'mm',
+            minimum: 0.05,
+            value: 0.2,
+          },
+          seam_position: {
+            type: 'string',
+            choices: [
+              { value: 'aligned', title: 'Aligned' },
+              { value: 'back', title: 'Back' },
+            ],
+            value: 'aligned',
+          },
+        },
+        unknownKeys: ['no_such_key'],
+      });
+      expect((result.content as { defaults: Record<string, unknown> }).defaults).not.toHaveProperty('plate');
+    });
+
+    it('names the reference engine and why, without Bambu Studio or for another vendor', async () => {
+      const missing = { ...engine(), findBambuStudio: async () => undefined };
+      await expect(profilesOf(missing, {})).resolves.toMatchObject({
+        isError: false,
+        content: {
+          engine: 'reference',
+          reason: expect.stringContaining('needs the Tau desktop app with Bambu Studio installed') as string,
+        },
+      });
+      const bambuStudio = engine();
+      await expect(
+        profilesOf(bambuStudio, {}, { provider: { ...bambuProvider, vendor: 'Prusa Research' } }),
+      ).resolves.toMatchObject({
+        content: { engine: 'reference', reason: expect.stringContaining('not a Bambu printer') as string },
+      });
+      expect(bambuStudio.findBambuStudio).not.toHaveBeenCalled();
+    });
+
+    it('refuses more than 64 keys before reading anything', async () => {
+      const bambuStudio = engine();
+      await expect(
+        profilesOf(bambuStudio, { keys: Array.from({ length: 65 }, (_, index) => `key_${String(index)}`) }),
+      ).resolves.toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+      expect(bambuStudio.findBambuStudio).not.toHaveBeenCalled();
     });
   });
 

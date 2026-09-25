@@ -23,6 +23,8 @@ import {
   cancelPrintOutputSchema,
   getMachineInputSchema,
   getMachineOutputSchema,
+  getPrintProfilesInputSchema,
+  getPrintProfilesOutputSchema,
   getPrintRequestInputSchema,
   getPrintRequestOutputSchema,
   listPrintRequestsInputSchema,
@@ -136,6 +138,10 @@ export const uiMessageTools = {
   [toolName.getMachine]: {
     inputSchema: getMachineInputSchema,
     outputSchema: getMachineOutputSchema,
+  },
+  [toolName.getPrintProfiles]: {
+    inputSchema: getPrintProfilesInputSchema,
+    outputSchema: getPrintProfilesOutputSchema,
   },
   [toolName.requestPrint]: {
     inputSchema: requestPrintInputSchema,

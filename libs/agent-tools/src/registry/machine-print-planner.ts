@@ -9,13 +9,16 @@ import type {
   PrintRequest,
   PrintRequestSummary,
 } from '@taucad/runtime/machine';
-import { bambuPlateMember, readBambuContainer } from '@taucad/slicer/container';
+import { bambuPlates } from '@taucad/slicer/bambu-studio';
+import { bambuPlateMember, readBambuContainer, readBambuContainerProducer } from '@taucad/slicer/container';
 import { parseGcode } from '@taucad/slicer/toolpath';
 import { quantityKinds } from '@taucad/units/quantity';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { z } from 'zod';
 
 import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
+import { bambuHints, defaultBambuStudioEngine, isBambuProvider, loadedMaterial } from '#registry/print-profiles.js';
+import type { BambuStudioEngine } from '#registry/print-profiles.js';
 
 /** The export target every print goes through (blueprint D3). */
 const printFormat = 'gcode.3mf';
@@ -32,6 +35,8 @@ export type MachinePrintPlannerDependencies = Readonly<{
   }>;
   /** Supplies the provider manifest the expected setup is composed from. */
   machines: Pick<MachineClient, 'listProviders'>;
+  /** Decides whether Bambu Studio slices for a Bambu printer; defaults to this host's `@taucad/slicer/bambu-studio`. */
+  bambuStudio?: Pick<BambuStudioEngine, 'findBambuStudio'> | undefined;
   /**
    * The registry's own `export_geometry` route, which also carries the slicer
    * options the model-facing tool cannot. Going through it records the slice
@@ -124,8 +129,7 @@ const expectedSetup = (
   machine: MachineDirectoryEntry,
   requestedPlate: string | undefined,
 ): Readonly<{ configuration: PrintRequest['configuration']; plate: string }> => {
-  const { setup } = machine.snapshot;
-  const loaded = setup.materials.find((material) => material.state === 'loaded' && material.materialId !== undefined);
+  const loaded = loadedMaterial(machine);
   if (loaded?.materialId === undefined) {
     throw new Error(`No material is loaded in ${machine.descriptor.name}; load one, then ask again.`);
   }
@@ -153,20 +157,81 @@ const expectedSetup = (
  * Advisory facts for the approval prompt.
  *
  * @param bytes - The container the slicer produced.
- * @returns Layers, seconds and filament; nothing when the plate cannot be timed,
- *   since preflight refuses a container the machine cannot take anyway.
+ * @returns Its producer, layers, seconds (the slicer's own estimate when its
+ *   header carries one) and filament; no toolpath facts when the plate cannot
+ *   be timed, since preflight refuses a container the machine cannot take anyway.
  */
 const summarize = (bytes: Uint8Array<ArrayBuffer>): Omit<PrintRequestSummary, 'fileName'> | undefined => {
+  const producer = readBambuContainerProducer(bytes);
+  const made = producer === undefined ? undefined : { producer };
   try {
     const program = parseGcode(readBambuContainer(bytes).gcode);
     return {
+      ...made,
       layers: program.layerTable.length,
-      estimatedDuration: program.duration,
+      estimatedDuration: program.headerEstimate?.seconds ?? program.duration,
       filamentLength: program.filamentLength,
     };
   } catch {
-    return undefined;
+    return made;
   }
+};
+
+/**
+ * The export options for one print. A Bambu printer slices through Bambu
+ * Studio when this host has it: its presets own temperatures and the rest, so
+ * the machine's reference options stay out and the call's `options` refuse.
+ * Anything else, or no Bambu Studio, slices with the reference engine exactly
+ * as before; a real Bambu printer then refuses the file at preflight.
+ *
+ * @param deps - The planner's dependencies.
+ * @param provider - The machine's provider.
+ * @param input - The planner call, with the plate resolved.
+ * @returns Slicer options for the export route.
+ * @throws When the call's slicer fields do not fit the engine that slices.
+ */
+const sliceOptions = async (
+  deps: MachinePrintPlannerDependencies,
+  provider: MachineProvider,
+  input: Parameters<MachinePrintPlanner>[0] & Readonly<{ plate: string }>,
+): Promise<JsonObject> => {
+  const bambuStudio =
+    isBambuProvider(provider) && (await (deps.bambuStudio ?? defaultBambuStudioEngine).findBambuStudio()) !== undefined;
+  const { machine, options, profiles, settings, preset, plate } = input;
+  if (!bambuStudio) {
+    if (profiles !== undefined || settings !== undefined) {
+      throw new Error(
+        `Bambu Studio does not slice for ${machine.descriptor.name} on this host, so profiles and settings do not apply; use options instead (get_print_profiles says why).`,
+      );
+    }
+    /* The machine's own options first, then the call's keys, the preset from
+     * its own field (the registry refuses one inside `options`). */
+    return {
+      ...machineSliceOptions(provider.manifest, plate),
+      ...options,
+      ...(preset === undefined ? {} : { preset }),
+    };
+  }
+  if (options !== undefined && Object.keys(options).length > 0) {
+    throw new Error(
+      `Bambu Studio slices for ${machine.descriptor.name}, so options do not apply; set Bambu Studio settings instead, with keys from get_print_profiles.`,
+    );
+  }
+  const bambuPlate = bambuPlates.find(({ id }) => id === plate)?.id;
+  if (bambuPlate === undefined) {
+    throw new Error(
+      `Bambu Studio has no build plate "${plate}"; ask the person which plate is installed, then pass plate as one of ${bambuPlates.map(({ id }) => id).join(', ')}.`,
+    );
+  }
+  return {
+    engine: 'bambu-studio',
+    bambuStudio: {
+      ...profiles,
+      plate: bambuPlate,
+      ...(settings === undefined ? {} : { settings }),
+      hints: bambuHints(provider, machine, { preset, plate }),
+    },
+  };
 };
 
 /**
@@ -195,13 +260,7 @@ export const createMachinePrintPlanner =
       throw new Error(`No provider ${machine.providerId} backs ${machine.descriptor.name}.`);
     }
     const { configuration, plate } = expectedSetup(provider, machine, input.plate);
-    /* The machine's own options first, then the call's keys, the preset from
-     * its own field (the registry refuses one inside `options`). */
-    const exportOptions = {
-      ...machineSliceOptions(provider.manifest, plate),
-      ...input.options,
-      ...(input.preset === undefined ? {} : { preset: input.preset }),
-    };
+    const exportOptions = await sliceOptions(deps, provider, { ...input, plate });
     const result = await deps.exportGeometry({
       toolCallId: input.toolCallId,
       targetFile: input.targetFile,

@@ -97,6 +97,14 @@ const sameQuantity = (observed: Quantity | undefined, declared: MachineQuantityD
   return compared.status === 'success' && compared.value.value === 0;
 };
 
+/**
+ * How long a discovery pass listens. An X1C advertises on UDP 2021 about every
+ * 5.05 s (5.0–5.1 s measured on 192.168.0.112, 2026-09-26), so a pass as long
+ * as one period misses the printer whenever it starts just after an
+ * advertisement; two periods plus a margin always hear one. Milliseconds.
+ */
+const advertisementWindow = 11_000;
+
 /** Execute one bounded provider discovery pass through the host-owned datagram port.
  * @param input - Qualified provider configuration and cancellation.
  * @param runtime - Host-owned bounded datagram authority.
@@ -134,7 +142,7 @@ export async function* discoverBambuMachines(
   const seen = new Set<string>();
   for await (const datagram of runtime.listenDatagrams({
     port: 2021,
-    durationMs: 5000,
+    durationMs: advertisementWindow,
     maximumDatagrams: 128,
     maximumDatagramBytes: 8192,
     signal: input.signal,

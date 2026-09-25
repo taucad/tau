@@ -1,12 +1,12 @@
 /* oxlint-disable max-lines -- the root's path table and its enumeration row (MC-S5) are one suite */
-import { createActor } from 'xstate';
+import { createActor, initialTransition, transition } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#project-revisions.machine.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
 import type { ProjectRevisionsMachineEvent } from '#project-revisions.machine.js';
-import { checkoutMachine } from '#checkout.machine.js';
+import { checkoutIgnoredEvents, checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -15,8 +15,9 @@ import { remoteMachine } from '#remote.machine.js';
 import { resolutionMachine } from '#resolution.machine.js';
 import { restoreMachine } from '#restore.machine.js';
 import { syncMachine } from '#sync.machine.js';
-import { turnMachine } from '#turn.machine.js';
+import { turnIgnoredEvents, turnMachine } from '#turn.machine.js';
 import type { TurnLeaseActorInput } from '#turn.machine.js';
+import type { TurnAttemptKey } from '#turn.types.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { createFakeCallbackActors, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
 import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
@@ -77,29 +78,8 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  *     the `RevisionStatus` projection; serializable snapshot; one machine value
  */
 
-/**
- * Known defects (MC-S5): public events a reachable state neither takes nor
- * declares ignored, keyed by the machine id of the actor that dropped them. The
- * root runs its real children, so their drops are rows here too. W5 answers
- * each one or moves it to that machine's exported `<name>IgnoredEvents` (D13,
- * MC-R17), and deletes the row as it lands.
- */
-const knownDefects: IgnoredEvents = {
-  branch: [
-    // W5: every registry announcement is forwarded, and `idle` has no verb to settle.
-    ['idle', 'branchesChanged'],
-    // W5: a trigger-only cut's answer is forwarded whether or not a verb asked for it.
-    ['idle', 'nothingToSave'],
-  ],
-  checkouts: [
-    // W5: a reopen (`branchMerged`, `conflictResolved`) that lands while the first open is still sweeping.
-    ['recovering', 'open'],
-  ],
-  sync: [
-    // W5: a composed conflict reaches the scheduler before it has read its queue.
-    ['reading.queue', 'conflictResolved'],
-  ],
-};
+/* Known defects (MC-S5): W5 answered every row the root's real children reached (RM-R11), so nothing is ignored. */
+const knownDefects: IgnoredEvents = {};
 
 /** Let every queued microtask and the actors' promise handlers run. */
 const flush = async (): Promise<void> => {
@@ -142,7 +122,7 @@ type Harness = Readonly<{
 }>;
 
 const start = (): Harness => {
-  const guard = guardActors({ ignore: knownDefects });
+  const guard = guardActors({ ignore: { ...knownDefects, turn: turnIgnoredEvents, checkout: checkoutIgnoredEvents } });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const actor = createActor(
@@ -216,6 +196,7 @@ const start = (): Harness => {
             retireLease: promises.actor('retireTurnLease'),
             capture: promises.actor('capture'),
             merge: promises.actor('merge'),
+            find: promises.actor('find'),
             lease: callbacks.actor<TurnLeaseActorInput>('lease'),
           },
         }),
@@ -247,23 +228,55 @@ const readyRegistry = async (
   await flush();
 };
 
-/** Admit a turn and drive it to the point where it asks its checkout to cut. */
-const turnToRequesting = async (harness: Harness): Promise<void> => {
-  harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-  harness.promises.settle('prepare', {
-    output: {
-      checkoutId: 'checkout-b',
-      branch: 'agent/b',
-      baseRevisionId: 'rev-1',
-      dirty: false,
-      staleRunIds: [],
-    },
-  });
+const attemptKey = (runId = 'run-1', turnId = 'turn-1', attempt = 0): TurnAttemptKey => ({
+  chatId: 'chat-1',
+  turnId,
+  runId,
+  attempt,
+});
+const key1 = attemptKey();
+
+/** Today's page and daemon admit legacy attempts (RM-S10's interim). */
+const admit = (harness: Harness, key: TurnAttemptKey = key1): void => {
+  harness.actor.send({ type: 'admitTurn', key, legacy: true });
+};
+
+/** The `writeLease` effect's answer: the record, and the checkout's lease set with this run first. */
+const leaseWritten = (checkoutId: string, key: TurnAttemptKey = key1) => ({
+  output: {
+    lease: { ...key, checkoutId, authorityEpoch: 'epoch-1', startedAt: 1 },
+    leaseIds: [key.runId],
+    held: [],
+  },
+});
+
+const prepared = (checkoutId: string, branch: string) => ({
+  output: { checkoutId, branch, baseRevisionId: 'rev-1', dirty: false, staleRunIds: [] },
+});
+
+/** The attempt actor for a key: the root keys them by run and attempt (RM-S4). */
+const turnRefOf = (harness: Harness, key: TurnAttemptKey = key1) =>
+  harness.actor.getSnapshot().context.turnRefs[`${key.runId}/${String(key.attempt)}`];
+
+/** The id of the attempt's result cut (RM-R1). */
+const resultCutId = (key: TurnAttemptKey = key1, sequence = 0): string =>
+  `${key.runId}/${String(key.attempt)}/result/${String(sequence)}`;
+
+/** Admit a turn and drive it to where it holds its lease on `checkout-b`. */
+const turnToHeld = async (harness: Harness, key: TurnAttemptKey = key1): Promise<void> => {
+  admit(harness, key);
+  harness.promises.settle('prepare', prepared('checkout-b', 'agent/b'));
   await flush();
-  harness.promises.settle('writeLease', { output: { leaseIds: ['run-1'] } });
+  harness.promises.settle('writeLease', leaseWritten('checkout-b', key));
   await flush();
   harness.callbacks.sendBack('lease', { type: 'leaseGranted' });
-  harness.actor.send({ type: 'turnCompleted', turnId: 'turn-1' });
+  await flush();
+};
+
+/** Admit a turn and drive it to the point where it asks its checkout to cut. */
+const turnToRequesting = async (harness: Harness, key: TurnAttemptKey = key1): Promise<void> => {
+  await turnToHeld(harness, key);
+  harness.actor.send({ type: 'turnCompleted', key });
   harness.promises.settle('capture', { output: { captureId: 'capture-1' } });
   await flush();
   harness.promises.settle('merge', { output: { status: 'recorded' } });
@@ -314,18 +327,19 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
-  it('adopts a changed head when the registry refreshes an existing checkout', () => {
+  /* RM-R5: the registry's head is spawn input only; the checkout's own head is the one shown. */
+  it('keeps the head the checkout holds when the registry refreshes its record', () => {
     const harness = start();
     registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }, linked]);
 
     registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-2', headTreeId: 'tree-2' }, linked]);
 
     expect(harness.actor.getSnapshot().context.checkoutRefs['checkout-live']?.getSnapshot().context).toMatchObject({
-      headRevisionId: 'rev-2',
-      headTreeId: 'tree-2',
+      headRevisionId: 'rev-1',
+      headTreeId: 'tree-1',
     });
     expect(selectRevisionStatus(harness.actor.getSnapshot())).toMatchObject({
-      headRevisionId: 'rev-2',
+      headRevisionId: 'rev-1',
       dirty: false,
     });
     harness.actor.stop();
@@ -345,17 +359,51 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
-  it('admits one turn per turn id', () => {
+  /* TS-R2: an admission replayed for an attempt is answered by that attempt, never a second actor. */
+  it('admits one actor per attempt', () => {
     const harness = start();
 
     registerCheckouts(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
+    admit(harness);
+    admit(harness);
 
-    expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['turn-1']);
-    expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
+    expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['run-1/0']);
+    expect(harness.promises.inputsFor('prepare')).toEqual([{ key: key1 }]);
 
     harness.actor.stop();
+  });
+
+  /*
+   * V8, RM-S4: an edit or a *Try again* reuses the turn id of the message it
+   * rewinds to under a new run. Request ids route every answer, so the new
+   * run runs beside the old one, and a verb names exactly one attempt.
+   */
+  it('should end only the named attempt when a turn id is reused', () => {
+    const [initial] = initialTransition(projectRevisionsMachine, {
+      projectId: 'project-1',
+      liveCheckoutId: 'checkout-live',
+    });
+    const second = attemptKey('run-2');
+    const events: ProjectRevisionsMachineEvent[] = [
+      { type: 'checkoutsChanged', checkouts: [live] },
+      { type: 'admitTurn', key: key1, legacy: true },
+      { type: 'admitTurn', key: second, legacy: true },
+    ];
+    let admitted = initial;
+    for (const event of events) {
+      [admitted] = transition(projectRevisionsMachine, admitted, event);
+    }
+
+    expect(Object.keys(admitted.context.turnFacts)).toEqual(['run-1/0', 'run-2/0']);
+
+    const [ended, actions] = transition(projectRevisionsMachine, admitted, { type: 'turnAbandoned', key: second });
+    const targets = actions.flatMap((action) => {
+      const { target, event } = action as unknown as { target?: { id?: unknown }; event?: { type?: unknown } };
+      return event?.type === 'turnAbandoned' ? [target?.id] : [];
+    });
+
+    expect(targets).toEqual(['turn:run-2:0']);
+    expect(Object.keys(ended.context.turnFacts)).toEqual(['run-1/0', 'run-2/0']);
   });
 
   /*
@@ -367,34 +415,16 @@ describe('projectRevisionsMachine', () => {
    * banner in front of the person for a condition that clears itself in well
    * under a second. The root knows when the hold ends, so the root waits.
    */
-  it('queues an admission for a held turn id and answers it when that turn retires', async () => {
+  /* TS-R2: the page re-admits an attempt it is already waiting on; the attempt answers with its placement. */
+  it('answers a replayed admission from the placed attempt it names', async () => {
     const harness = start();
 
     registerCheckouts(harness);
-    await turnToRequesting(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
+    await turnToHeld(harness);
+    admit(harness);
 
-    expect(harness.emitted.filter((event) => event.type === 'turnRefused')).toEqual([]);
-    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([
-      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' },
-    ]);
-    expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
-
-    harness.actor.send({
-      type: 'turnReleased',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      checkoutId: 'checkout-b',
-      runId: 'run-1',
-      outcome: 'released',
-    });
-    await flush();
-
-    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
-    expect(harness.promises.inputsFor('prepare')).toEqual([
-      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' },
-      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' },
-    ]);
+    expect(harness.promises.inputsFor('prepare')).toEqual([{ key: key1 }]);
+    expect(harness.emitted.filter((event) => event.type === 'turnPlaced')).toHaveLength(2);
 
     harness.actor.stop();
   });
@@ -402,14 +432,15 @@ describe('projectRevisionsMachine', () => {
   /* The one thing `TURN_ALREADY_LEASED` still means (V9): a run id is minted
    * once per gesture and is the idempotency key, so the same one admitted
    * twice is a bug in the caller, never a queue. */
-  it('refuses the same run id admitted twice', async () => {
+  /* V9: a run id is its lease's own key, so a second attempt of it while one is live is refused. */
+  it('refuses a second attempt of a run while the first is live', async () => {
     const harness = start();
 
     registerCheckouts(harness);
     await turnToRequesting(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    admit(harness, attemptKey('run-1', 'turn-1', 1));
 
-    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+    expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['run-1/0']);
     expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({
       turnId: 'turn-1',
       chatId: 'chat-1',
@@ -433,38 +464,20 @@ describe('projectRevisionsMachine', () => {
    * up is its only liveness signal — the verb that host already sends has to
    * reach the queue as well as the ref.
    */
-  it('should drop a queued admission whose caller abandoned its run before the holding turn retired', async () => {
+  it('should drop a queued admission whose caller abandoned its run before the registry answered', async () => {
     const harness = start();
 
-    registerCheckouts(harness);
-    await turnToRequesting(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
+    admit(harness);
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([{ key: key1, legacy: true }]);
 
-    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([
-      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' },
-    ]);
-
-    /* The caller's wait expired. It names the run it gave up on, which is not
-     * the run the same turn id is still held by (V8). */
-    harness.actor.send({ type: 'turnAbandoned', turnId: 'turn-1', runId: 'run-2' });
-
+    /* The caller's wait expired; it names the attempt it gave up on. */
+    harness.actor.send({ type: 'turnAbandoned', key: key1 });
     expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
-    /* The other run of that turn id is still recording. */
-    expect(harness.actor.getSnapshot().context.turnRefs['turn-1']?.getSnapshot().context.outcome).toBeUndefined();
 
-    harness.actor.send({
-      type: 'turnReleased',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      checkoutId: 'checkout-b',
-      runId: 'run-1',
-      outcome: 'released',
-    });
-    await flush();
+    await readyRegistry(harness);
 
-    /* Nothing is raised for the abandoned run, so no turn takes a lease that
-     * nothing will ever retire. */
-    expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
+    /* Nothing is raised for the abandoned run, so no turn takes a lease that nothing will ever retire. */
+    expect(harness.promises.inputsFor('prepare')).toEqual([]);
 
     harness.actor.stop();
   });
@@ -481,10 +494,9 @@ describe('projectRevisionsMachine', () => {
 
     registerCheckouts(harness);
     await turnToRequesting(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-2', chatId: 'chat-1', runId: 'run-1' });
+    admit(harness, attemptKey('run-1', 'turn-2'));
 
-    expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['turn-1']);
-    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+    expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['run-1/0']);
     expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({
       turnId: 'turn-2',
       chatId: 'chat-1',
@@ -501,8 +513,9 @@ describe('projectRevisionsMachine', () => {
     registerCheckouts(harness);
     harness.actor.send({
       type: 'cut',
+      requestId: resultCutId(),
       trigger: 'turn',
-      turnId: 'turn-1',
+      turn: { key: key1, turnCut: 'result' },
       checkoutId: 'checkout-b',
       leaseIds: ['run-1'],
     });
@@ -521,50 +534,58 @@ describe('projectRevisionsMachine', () => {
     registerCheckouts(harness);
     await turnToRequesting(harness);
 
-    expect(
-      harness.actor.getSnapshot().context.turnRefs['turn-1']?.getSnapshot().matches({ finalizing: 'requesting' }),
-    ).toBe(true);
+    expect(turnRefOf(harness)?.getSnapshot().matches('requesting')).toBe(true);
 
     harness.actor.send({
       type: 'revisionMinted',
       checkoutId: 'checkout-b',
       trigger: 'turn',
-      turnId: 'turn-1',
+      requestId: resultCutId(),
+      turn: { key: key1, turnCut: 'result' },
       revisionId: 'rev-2',
+      branch: 'agent/b',
     });
 
-    expect(harness.actor.getSnapshot().context.turnRefs['turn-1']?.getSnapshot().matches('retiring')).toBe(true);
+    /* A legacy attempt is acknowledged by the root once it settles (RM-S10's interim). */
+    expect(turnRefOf(harness)?.getSnapshot().matches('retiring')).toBe(true);
     expect(harness.emitted.map((event) => event.type)).toContain('revisionMinted');
+    expect(harness.emitted.map((event) => event.type)).toContain('turnFinalized');
 
     harness.actor.stop();
   });
 
-  it('sends a finalized turn to checkouts, stops the turn and re-emits it', async () => {
+  it('sends a retired turn to checkouts, stops the turn and re-emits its settlement', async () => {
     const harness = start();
 
-    registerCheckouts(harness);
     /* The registry has to hold the lease for its retirement to mean anything:
-     * a run id no record holds is left to `sweepLeases` (R23/R30). */
-    await readyRegistry(harness, [{ ...live, leaseRunIds: ['run-1'] }, linked]);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    const turnRef = harness.actor.getSnapshot().context.turnRefs['turn-1'];
+     * a run id no record holds is left to `sweepLeases` (R23/R30); `leaseWritten` puts it there. */
+    await readyRegistry(harness);
+    await turnToRequesting(harness);
+    const turnRef = turnRefOf(harness);
 
     harness.actor.send({
-      type: 'turnFinalized',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
+      type: 'revisionMinted',
       checkoutId: 'checkout-b',
-      runId: 'run-1',
-      revisionId: 'rev-2',
       trigger: 'turn',
-      branch: 'main',
-      runIds: ['run-1'],
+      requestId: resultCutId(),
+      turn: { key: key1, turnCut: 'result' },
+      revisionId: 'rev-2',
+      branch: 'agent/b',
     });
-
-    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([{ projectId: 'project-1', runId: 'run-1' }]);
-    expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
-    expect(turnRef?.getSnapshot().status).toBe('stopped');
     expect(harness.emitted.map((event) => event.type)).toContain('turnFinalized');
+    /* RM-R10: the lease outlives the settlement until the retirement lands. */
+    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([]);
+
+    harness.promises.settle('retireTurnLease', { output: undefined });
+    await flush();
+
+    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([
+      { projectId: 'project-1', runId: 'run-1', key: key1 },
+    ]);
+    expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
+    /* The attempt reached its final state, and the root dropped it. */
+    expect(turnRef?.getSnapshot().status).toBe('done');
+    expect(harness.emitted.map((event) => event.type)).toContain('turnRetired');
 
     harness.actor.stop();
   });
@@ -584,7 +605,7 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     registerCheckouts(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    admit(harness);
     const { checkoutRefs, turnRefs } = harness.actor.getSnapshot().context;
 
     harness.actor.stop();
@@ -598,13 +619,7 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     registerCheckouts(harness);
-    harness.actor.send({
-      type: 'turnPrepared',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      checkoutId: 'checkout-b',
-      branch: 'agent/b',
-    });
+    harness.actor.send({ type: 'turnPrepared', key: key1, checkoutId: 'checkout-b', branch: 'agent/b' });
 
     harness.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
     expect(harness.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-b');
@@ -627,11 +642,12 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     registerCheckouts(harness);
-    harness.actor.send({ type: 'switch', branch: 'agent/b' });
+    harness.actor.send({ type: 'switch', requestId: 'switch-1', branch: 'agent/b' });
 
     expect(harness.actor.getSnapshot().context.selectedCheckoutId).toBe('checkout-b');
     expect(harness.emitted.find((event) => event.type === 'switchResolved')).toEqual({
       type: 'switchResolved',
+      requestId: 'switch-1',
       branch: 'agent/b',
       mode: 'reroot',
       checkoutId: 'checkout-b',
@@ -644,7 +660,7 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     registerCheckouts(harness);
-    harness.actor.send({ type: 'switch', branch: 'agent/new' });
+    harness.actor.send({ type: 'switch', requestId: 'switch-1', branch: 'agent/new' });
 
     expect(harness.emitted.find((event) => event.type === 'switchResolved')).toMatchObject({
       mode: 'applyToLive',
@@ -666,7 +682,7 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     registerCheckouts(harness, [{ ...live, leaseRunIds: ['run-1'] }, linked]);
-    harness.actor.send({ type: 'switch', branch: 'agent/new' });
+    harness.actor.send({ type: 'switch', requestId: 'switch-1', branch: 'agent/new' });
 
     expect(harness.emitted.find((event) => event.type === 'switchRefused')).toMatchObject({
       branch: 'agent/new',
@@ -676,22 +692,20 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
-  it('re-heads a checkout that a restore moved', () => {
+  /* RM-R5: a producer's fact is a hint, so the checkout re-reads and reports its own head. */
+  it('re-heads a checkout that a restore moved', async () => {
     const harness = start();
 
     registerCheckouts(harness);
-    harness.actor.send({
-      type: 'checkoutChanged',
-      checkoutId: 'checkout-b',
-      revisionId: 'rev-4',
-      treeId: 'tree-4',
-      branch: undefined,
-    });
+    harness.actor.send({ type: 'checkoutChanged', checkoutId: 'checkout-b', revisionId: 'rev-4', treeId: 'tree-4' });
+    harness.promises.settle('readHead', { output: { revisionId: 'rev-4', treeId: 'tree-4', branch: undefined } });
+    await flush();
 
     const ref = harness.actor.getSnapshot().context.checkoutRefs['checkout-b'];
     expect(ref?.getSnapshot().context.headRevisionId).toBe('rev-4');
     expect(ref?.getSnapshot().context.headTreeId).toBe('tree-4');
-    expect(harness.actor.getSnapshot().context.checkouts[1]).toMatchObject({
+    harness.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
+    expect(selectRevisionStatus(harness.actor.getSnapshot())).toMatchObject({
       headRevisionId: 'rev-4',
       branch: undefined,
     });
@@ -818,7 +832,7 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
-  it('forwards a content change and the three turn verbs from the root', async () => {
+  it('forwards a content change and the turn verbs from the root', async () => {
     const harness = start();
 
     registerCheckouts(harness);
@@ -831,23 +845,11 @@ describe('projectRevisionsMachine', () => {
       true,
     );
 
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    harness.promises.settle('prepare', {
-      output: {
-        checkoutId: 'checkout-b',
-        branch: 'agent/b',
-        baseRevisionId: 'rev-1',
-        dirty: false,
-        staleRunIds: [],
-      },
-    });
-    await flush();
-    harness.promises.settle('writeLease', { output: { leaseIds: ['run-1'] } });
-    await flush();
-    harness.callbacks.sendBack('lease', { type: 'leaseGranted' });
+    await turnToHeld(harness);
+    harness.actor.send({ type: 'turnAbandoned', key: key1 });
 
-    harness.actor.send({ type: 'turnAbandoned', turnId: 'turn-1' });
-    expect(harness.actor.getSnapshot().context.turnRefs['turn-1']?.getSnapshot().matches('retiring')).toBe(true);
+    /* Released, then acknowledged by the root for today's commands, so its record retires (RM-R10). */
+    expect(turnRefOf(harness)?.getSnapshot().matches('retiring')).toBe(true);
 
     harness.actor.stop();
   });
@@ -856,18 +858,10 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    harness.promises.settle('prepare', {
-      output: {
-        checkoutId: 'checkout-live',
-        branch: 'main',
-        baseRevisionId: 'rev-1',
-        dirty: false,
-        staleRunIds: [],
-      },
-    });
+    admit(harness);
+    harness.promises.settle('prepare', prepared('checkout-live', 'main'));
     await flush();
-    harness.promises.settle('writeLease', { output: { leaseIds: ['run-1'] } });
+    harness.promises.settle('writeLease', leaseWritten('checkout-live'));
     await flush();
 
     /* A25/I9: the registry now knows the live checkout is held. */
@@ -878,7 +872,7 @@ describe('projectRevisionsMachine', () => {
     });
 
     /* D10: and the switch guard reads the same set. */
-    harness.actor.send({ type: 'switch', branch: 'agent/new' });
+    harness.actor.send({ type: 'switch', requestId: 'switch-1', branch: 'agent/new' });
     expect(harness.emitted.find((event) => event.type === 'switchRefused')).toMatchObject({ branch: 'agent/new' });
     expect(harness.emitted.find((event) => event.type === 'switchResolved')).toBeUndefined();
 
@@ -891,8 +885,8 @@ describe('projectRevisionsMachine', () => {
     registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
     harness.actor.send({
       type: 'cut',
+      requestId: 'save-1',
       trigger: 'save',
-      turnId: 'turn-1',
       checkoutId: 'checkout-live',
       leaseIds: [],
     });
@@ -914,19 +908,35 @@ describe('projectRevisionsMachine', () => {
 
     registerCheckouts(harness);
     await turnToRequesting(harness);
-    /* One loss is a re-cut against the head the checkout just re-read (D24). */
-    harness.actor.send({ type: 'casLost', checkoutId: 'checkout-b', trigger: 'turn', turnId: 'turn-1' });
+    const turnRef = turnRefOf(harness);
+    const lost = (sequence: number) =>
+      ({
+        type: 'casLost',
+        checkoutId: 'checkout-b',
+        trigger: 'turn',
+        requestId: resultCutId(key1, sequence),
+        turn: { key: key1, turnCut: 'result' },
+      }) as const;
 
-    const turnRef = harness.actor.getSnapshot().context.turnRefs['turn-1'];
-    expect(turnRef?.getSnapshot().matches({ finalizing: 'requesting' })).toBe(true);
+    /* One loss looks for the attempt's own result, then re-cuts against the head the checkout re-read (RM-R14, D24). */
+    harness.actor.send(lost(0));
+    expect(turnRef?.getSnapshot().matches('finding')).toBe(true);
+    harness.promises.settle('find', { output: {} });
+    await flush();
+    expect(turnRef?.getSnapshot().matches('requesting')).toBe(true);
     expect(turnRef?.getSnapshot().context.casRetries).toBe(1);
 
-    /* The second is contention this turn cannot win by trying harder. */
-    harness.actor.send({ type: 'casLost', checkoutId: 'checkout-b', trigger: 'turn', turnId: 'turn-1' });
+    /* The second is contention this turn cannot win by trying harder: the cut is refused and the lease kept (RM-R13). */
+    harness.actor.send(lost(1));
+    harness.promises.settle('find', { output: {} });
+    await flush();
 
+    /* A legacy attempt gives up on a refused cut, so it settles failed as before W5. */
     expect(turnRef?.getSnapshot().matches('retiring')).toBe(true);
-    expect(turnRef?.getSnapshot().context.reason).toBe('cas-lost');
-    expect(harness.emitted.map((event) => event.type)).toContain('casLost');
+    expect(turnRef?.getSnapshot().context).toMatchObject({ outcome: 'failed', code: 'CAS_LOST' });
+    expect(harness.emitted.map((event) => event.type)).toEqual(
+      expect.arrayContaining(['casLost', 'turnCutRefused', 'turnReleased']),
+    );
 
     harness.actor.stop();
   });
@@ -941,45 +951,56 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     registerCheckouts(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    harness.promises.settle('prepare', {
-      output: { checkoutId: 'checkout-b', branch: 'agent/b', baseRevisionId: 'rev-1', dirty: false, staleRunIds: [] },
-    });
-    await flush();
-    harness.promises.settle('writeLease', { output: { leaseIds: ['run-1'] } });
-    await flush();
-    harness.callbacks.sendBack('lease', { type: 'leaseGranted' });
+    await turnToHeld(harness);
 
     /* The person switches tab while the agent is still writing. */
-    harness.actor.send({ type: 'cut', trigger: 'hidden', checkoutId: 'checkout-b', leaseIds: [] });
+    harness.actor.send({
+      type: 'cut',
+      requestId: 'hidden-1',
+      trigger: 'hidden',
+      checkoutId: 'checkout-b',
+      leaseIds: [],
+    });
 
     expect(harness.actor.getSnapshot().context.checkoutRefs['checkout-b']?.getSnapshot().matches('clean')).toBe(true);
     expect(harness.callbacks.inputsFor('fence')).toEqual([]);
     /* Declined, never dropped: the page renders *Nothing to save* and a host
-     * flushing on close stops waiting (R2 — no outcome is silent). */
+     * flushing on close stops waiting on its own id (R2, RM-R16). */
     expect(harness.emitted.filter((event) => event.type === 'nothingToSave')).toEqual([
-      { type: 'nothingToSave', checkoutId: 'checkout-b', trigger: 'hidden' },
+      { type: 'nothingToSave', checkoutId: 'checkout-b', trigger: 'hidden', requestId: 'hidden-1', heldBy: key1 },
     ]);
+    expect(harness.emitted).toContainEqual({ type: 'leaseHeld', key: key1, checkoutId: 'checkout-b' });
 
     /* A checkout no turn holds still records: the decline is per checkout. */
-    harness.actor.send({ type: 'cut', trigger: 'hidden', checkoutId: 'checkout-live', leaseIds: [] });
+    harness.actor.send({
+      type: 'cut',
+      requestId: 'hidden-2',
+      trigger: 'hidden',
+      checkoutId: 'checkout-live',
+      leaseIds: [],
+    });
     expect(harness.callbacks.inputsFor('fence')).toEqual([{ checkoutId: 'checkout-live' }]);
 
     harness.actor.stop();
   });
 
-  /* The second window over one project: no turn actor of this root's own, and
-   * the lease is the only fact that says someone is recording (a2 R1). */
-  it('declines a trigger-only cut while another host holds the lease', () => {
+  /* The second window over one project, or a refused turn whose retirement the
+   * registry has not heard yet: the registry's list lags, so the cut reads the
+   * records itself and the fresh fence answers `nothingToSave{heldBy}` (RM-R16, D10). */
+  it('should leave a lease it does not hold to the fresh fence rather than the registry list', () => {
     const harness = start();
 
     registerCheckouts(harness, [{ ...live, leaseRunIds: ['run-elsewhere'] }, linked]);
-    harness.actor.send({ type: 'cut', trigger: 'close', checkoutId: 'checkout-live', leaseIds: [] });
+    harness.actor.send({
+      type: 'cut',
+      requestId: 'close-1',
+      trigger: 'close',
+      checkoutId: 'checkout-live',
+      leaseIds: [],
+    });
 
-    expect(harness.callbacks.inputsFor('fence')).toEqual([]);
-    expect(harness.emitted.filter((event) => event.type === 'nothingToSave')).toEqual([
-      { type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'close' },
-    ]);
+    expect(harness.callbacks.inputsFor('fence')).toEqual([{ checkoutId: 'checkout-live' }]);
+    expect(harness.emitted.filter((event) => event.type === 'nothingToSave')).toEqual([]);
 
     harness.actor.stop();
   });
@@ -988,16 +1009,32 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     registerCheckouts(harness);
+    /* A host's own save waits on its id, so the refusal is emitted with it (RM-R11). */
+    harness.actor.send({
+      type: 'cut',
+      requestId: 'save-1',
+      trigger: 'save',
+      checkoutId: 'checkout-ghost',
+      leaseIds: [],
+    });
+    expect(harness.emitted.find((event) => event.type === 'cutFailed')).toMatchObject({
+      requestId: 'save-1',
+      code: 'CHECKOUT_UNKNOWN',
+    });
+
+    /* A turn's cut is answered to the attempt, which keeps its lease and refuses the cut (RM-R13). */
     await turnToRequesting(harness);
     harness.actor.send({
       type: 'cut',
+      requestId: resultCutId(),
       trigger: 'turn',
-      turnId: 'turn-1',
+      turn: { key: key1, turnCut: 'result' },
       checkoutId: 'checkout-ghost',
       leaseIds: ['run-1'],
     });
 
-    const turnRef = harness.actor.getSnapshot().context.turnRefs['turn-1'];
+    const turnRef = turnRefOf(harness);
+    expect(harness.emitted.find((event) => event.type === 'turnCutRefused')).toMatchObject({ key: key1 });
     expect(turnRef?.getSnapshot().matches('retiring')).toBe(true);
     expect(turnRef?.getSnapshot().context.reason).toContain('checkout-ghost');
 
@@ -1030,28 +1067,22 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    harness.promises.settle('prepare', {
-      output: {
-        checkoutId: 'checkout-live',
-        branch: 'main',
-        baseRevisionId: 'rev-1',
-        dirty: false,
-        staleRunIds: [],
-      },
-    });
+    admit(harness);
+    harness.promises.settle('prepare', prepared('checkout-live', 'main'));
     await flush();
-    harness.promises.settle('writeLease', { output: { leaseIds: ['run-1'] } });
+    harness.promises.settle('writeLease', leaseWritten('checkout-live'));
     await flush();
-    const turnRef = harness.actor.getSnapshot().context.turnRefs['turn-1'];
+    const turnRef = turnRefOf(harness);
 
-    harness.actor.send({ type: 'turnAbandoned', turnId: 'turn-1' });
+    harness.actor.send({ type: 'turnAbandoned', key: key1 });
     harness.promises.settle('retireTurnLease', { output: undefined });
     await flush();
 
     expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
     expect(turnRef?.getSnapshot().status).not.toBe('active');
-    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([{ projectId: 'project-1', runId: 'run-1' }]);
+    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([
+      { projectId: 'project-1', runId: 'run-1', key: key1 },
+    ]);
 
     harness.promises.settle('retireRegistryLease', { output: undefined });
     await flush();
@@ -1083,32 +1114,22 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     /* Nothing orders `admitTurn` after the first `checkoutsChanged`. */
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    admit(harness);
 
     /* Held, not run: placement resolving here would name a checkout no actor
      * represents, and the turn's cut would be answered `cutFailed`. */
     expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
     expect(harness.promises.inputsFor('prepare')).toEqual([]);
-    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([
-      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' },
-    ]);
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([{ key: key1, legacy: true }]);
 
     await readyRegistry(harness);
 
-    expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
+    expect(harness.promises.inputsFor('prepare')).toEqual([{ key: key1 }]);
     expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
 
-    harness.promises.settle('prepare', {
-      output: {
-        checkoutId: 'checkout-live',
-        branch: 'main',
-        baseRevisionId: 'rev-1',
-        dirty: false,
-        staleRunIds: [],
-      },
-    });
+    harness.promises.settle('prepare', prepared('checkout-live', 'main'));
     await flush();
-    harness.promises.settle('writeLease', { output: { leaseIds: ['run-1'] } });
+    harness.promises.settle('writeLease', leaseWritten('checkout-live'));
     await flush();
 
     expect(harness.actor.getSnapshot().context.checkouts[0]).toMatchObject({
@@ -1120,18 +1141,42 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /* RM-R11: an empty registry is still an answer, so a buffered admission is released and `prepare` refuses it. */
+  it('should answer an admission when the registry lists no checkouts', async () => {
+    const harness = start();
+
+    admit(harness);
+    await readyRegistry(harness, []);
+
+    expect(harness.promises.inputsFor('prepare')).toEqual([{ key: key1 }]);
+    harness.promises.settle('prepare', {
+      error: new RevisionPortError(
+        'CHECKOUT_CONFLICT',
+        'That chat is working in files this project does not have open.',
+      ),
+    });
+    await flush();
+
+    expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({
+      key: key1,
+      code: 'CHECKOUT_CONFLICT',
+    });
+    expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
+
+    harness.actor.stop();
+  });
+
   it('writes no lease at all inside the held window, so no phantom run id survives', async () => {
     const harness = start();
 
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    admit(harness);
     /* The whole turn happens inside the window the buffer exists for. */
-    harness.actor.send({ type: 'turnAbandoned', turnId: 'turn-1' });
+    harness.actor.send({ type: 'turnAbandoned', key: key1 });
     await flush();
     await readyRegistry(harness);
 
-    /* A held admission is still replayed: the turn ran nowhere, so abandoning
-     * it before the registry answered reached no actor. It is the lease that
-     * must not exist, and none was written. */
+    /* The abandoned admission leaves the buffer, so nothing is placed and no lease exists. */
+    expect(harness.promises.inputsFor('prepare')).toEqual([]);
     expect(harness.promises.inputsFor('writeLease')).toEqual([]);
     expect(harness.actor.getSnapshot().context.checkouts[0]).toMatchObject({
       id: 'checkout-live',
@@ -1141,7 +1186,7 @@ describe('projectRevisionsMachine', () => {
 
     /* D10 and A25/I9 both read that set; a phantom run id blocks them for the
      * rest of the session. */
-    harness.actor.send({ type: 'switch', branch: 'agent/new' });
+    harness.actor.send({ type: 'switch', requestId: 'switch-1', branch: 'agent/new' });
     expect(harness.emitted.find((event) => event.type === 'switchRefused')).toBeUndefined();
     expect(harness.emitted.find((event) => event.type === 'switchResolved')).toMatchObject({
       mode: 'applyToLive',
@@ -1155,13 +1200,151 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    admit(harness);
     harness.promises.settle('prepare', { error: new Error('no checkout') });
     await flush();
 
     expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
+    expect(harness.promises.inputsFor('retireTurnLease')).toEqual([]);
     expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([]);
+    expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({ key: key1 });
     expect(harness.emitted.map((event) => event.type)).not.toContain('checkoutFailed');
+
+    harness.actor.stop();
+  });
+
+  /* RM-R14: a restarted root adopts the record a verb names; the attempt finds its own result, so no second cut is made. */
+  it('should adopt a lease record and settle it without a second cut', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', leaseRunIds: ['run-1'] }, linked]);
+    harness.actor.send({ type: 'turnCompleted', key: key1 });
+    const turnRef = turnRefOf(harness);
+
+    expect(turnRef?.getSnapshot().matches('adopting')).toBe(true);
+    expect(harness.promises.inputsFor('find')).toEqual([{ key: key1, checkoutId: 'checkout-live', stopAt: undefined }]);
+    harness.promises.settle('find', { output: { result: 'rev-7' } });
+    await flush();
+
+    expect(harness.emitted.find((event) => event.type === 'turnFinalized')).toMatchObject({ revisionId: 'rev-7' });
+    expect(harness.callbacks.inputsFor('fence')).toEqual([]);
+    expect(harness.promises.inputsFor('capture')).toEqual([]);
+
+    /* Not a legacy admission, so the lease stays until the host acknowledges (RM-R10). */
+    expect(turnRef?.getSnapshot().matches('settled')).toBe(true);
+    harness.actor.send({ type: 'acknowledge', key: key1 });
+    expect(harness.promises.inputsFor('retireTurnLease')).toEqual([
+      { key: key1, checkoutId: 'checkout-live', outcome: 'finalized' },
+    ]);
+
+    harness.actor.stop();
+  });
+
+  /* RM-S10's interim: today's host gives up on a refused cut, so a legacy attempt settles failed and retires its record. */
+  it('should settle a legacy admission failed and retire its lease when its cut is refused', async () => {
+    const harness = start();
+
+    await readyRegistry(harness);
+    await turnToRequesting(harness);
+    harness.actor.send({
+      type: 'cutFailed',
+      checkoutId: 'checkout-b',
+      trigger: 'turn',
+      requestId: resultCutId(),
+      turn: { key: key1, turnCut: 'result' },
+      reason: 'disk full',
+    });
+    await flush();
+
+    expect(harness.emitted.find((event) => event.type === 'turnCutRefused')).toMatchObject({
+      key: key1,
+      cutFailures: 1,
+    });
+    expect(harness.emitted.find((event) => event.type === 'turnReleased')).toMatchObject({
+      key: key1,
+      outcome: 'failed',
+    });
+    harness.promises.settle('retireTurnLease', { output: undefined });
+    await flush();
+
+    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([
+      { projectId: 'project-1', runId: 'run-1', key: key1 },
+    ]);
+    expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
+
+    harness.actor.stop();
+  });
+
+  /* A retired attempt of this root is not a record to adopt, though the registry still lists its run (I20). */
+  it('should not re-adopt an attempt it retired when a late verb names it', async () => {
+    const harness = start();
+
+    await readyRegistry(harness);
+    await turnToRequesting(harness);
+    harness.actor.send({
+      type: 'cutFailed',
+      checkoutId: 'checkout-b',
+      trigger: 'turn',
+      requestId: resultCutId(),
+      turn: { key: key1, turnCut: 'result' },
+      reason: 'disk full',
+    });
+    await flush();
+    harness.promises.settle('retireTurnLease', { output: undefined });
+    await flush();
+    /* The registry has not dropped the run yet: its retirement is still running. */
+    expect(
+      harness.actor.getSnapshot().context.checkouts.find((checkout) => checkout.id === 'checkout-b'),
+    ).toMatchObject({
+      leaseRunIds: ['run-1'],
+    });
+
+    harness.actor.send({ type: 'turnCompleted', key: key1 });
+
+    expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
+    expect(harness.promises.inputsFor('find')).toEqual([]);
+
+    harness.actor.stop();
+  });
+
+  it('should forget a retired attempt once the registry drops its run', async () => {
+    const harness = start();
+
+    await readyRegistry(harness);
+    await turnToRequesting(harness);
+    harness.actor.send({
+      type: 'cutFailed',
+      checkoutId: 'checkout-b',
+      trigger: 'turn',
+      requestId: resultCutId(),
+      turn: { key: key1, turnCut: 'result' },
+      reason: 'disk full',
+    });
+    await flush();
+    harness.promises.settle('retireTurnLease', { output: undefined });
+    await flush();
+    expect(harness.actor.getSnapshot().context.retiredAttempts).toEqual(['run-1/0']);
+
+    registerCheckouts(harness, [live, linked]);
+
+    expect(harness.actor.getSnapshot().context.retiredAttempts).toEqual([]);
+
+    harness.actor.stop();
+  });
+
+  /* RM-S9's interim: a restarted root adopting on today's command acknowledges the attempt itself. */
+  it('should adopt a lease record as legacy when a legacy verb names it', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', leaseRunIds: ['run-1'] }, linked]);
+    harness.actor.send({ type: 'turnCompleted', key: key1, legacy: true });
+    harness.promises.settle('find', { output: { result: 'rev-7' } });
+    await flush();
+
+    expect(harness.emitted.find((event) => event.type === 'turnFinalized')).toMatchObject({ revisionId: 'rev-7' });
+    expect(harness.promises.inputsFor('retireTurnLease')).toEqual([
+      { key: key1, checkoutId: 'checkout-live', outcome: 'finalized' },
+    ]);
 
     harness.actor.stop();
   });
@@ -1170,7 +1353,7 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     registerCheckouts(harness);
-    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    admit(harness);
     const persisted = harness.actor.getPersistedSnapshot();
 
     expect(() => JSON.stringify(persisted)).not.toThrow();
@@ -1184,7 +1367,10 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness);
-    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2', from: 'rev-12' } });
+    harness.actor.send({
+      type: 'branch',
+      event: { type: 'create', requestId: 'create-1', name: 'enclosure-v2', from: 'rev-12' },
+    });
     await flush();
 
     /* The registry is the one writer: `branch` never calls the port itself. */
@@ -1223,7 +1409,7 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness, [live]);
-    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
+    harness.actor.send({ type: 'branch', event: { type: 'create', requestId: 'create-1', name: 'isolated-run' } });
     await flush();
 
     /* The root names where the person is standing; only it knows. */
@@ -1238,7 +1424,14 @@ describe('projectRevisionsMachine', () => {
     const liveCheckout: ActorRefFrom<typeof checkoutMachine> | undefined = children['checkout:checkout-live'];
     expect(liveCheckout?.getSnapshot().matches('minting')).toBe(true);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'create-1/cut',
+      revisionId: 'rev-1',
+      branch: 'main',
+    });
     await flush();
 
     expect(harness.promises.inputsFor('addCheckout')).toEqual([
@@ -1252,14 +1445,19 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
-    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
+    harness.actor.send({ type: 'branch', event: { type: 'create', requestId: 'create-1', name: 'isolated-run' } });
     await flush();
 
     expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context).toMatchObject({
       checkoutId: 'checkout-live',
       head: 'rev-1',
     });
-    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    harness.actor.send({
+      type: 'nothingToSave',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'create-1/cut',
+    });
     await flush();
 
     expect(harness.promises.inputsFor('addCheckout')).toEqual([
@@ -1287,6 +1485,7 @@ describe('projectRevisionsMachine', () => {
       type: 'checkoutStatusChanged',
       checkoutId: 'checkout-live',
       status: 'clean',
+      branch: 'main',
       headRevisionId: 'rev-2',
     });
     await flush();
@@ -1310,13 +1509,14 @@ describe('projectRevisionsMachine', () => {
     /* The child's own words for this refusal, which the page keys on: a name
      * collision it is not, so *Pick another name* would never clear it. */
     const refusals = recordEmitted(harness.actor.getSnapshot().children.branch!);
-    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
+    harness.actor.send({ type: 'branch', event: { type: 'create', requestId: 'create-1', name: 'isolated-run' } });
     await flush();
 
     expect(harness.actor.getSnapshot().children.branch?.getSnapshot().matches('idle')).toBe(true);
     expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reasonCode).toBe('CHECKOUT_UNKNOWN');
     expect(refusals).toContainEqual({
       type: 'toast.error',
+      requestId: 'create-1',
       operation: 'create',
       branch: 'isolated-run',
       message: 'This project has no checkout checkout-live.',
@@ -1332,9 +1532,14 @@ describe('projectRevisionsMachine', () => {
     /* A head to branch from: with none, the verb records the files first. The
      * cut's answer is what takes it to the registry now (P3). */
     await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }, linked]);
-    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2' } });
+    harness.actor.send({ type: 'branch', event: { type: 'create', requestId: 'create-1', name: 'enclosure-v2' } });
     await flush();
-    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    harness.actor.send({
+      type: 'nothingToSave',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'create-1/cut',
+    });
     await flush();
     harness.promises.settle('addCheckout', {
       error: new RevisionPortError('CHECKOUT_CONFLICT', 'That branch already has a checkout.'),
@@ -1344,6 +1549,7 @@ describe('projectRevisionsMachine', () => {
     /* P4: the code rides out with the refusal, so the page can choose words. */
     expect(harness.emitted).toContainEqual({
       type: 'checkoutFailed',
+      requestId: 'create-1/add',
       operation: 'add',
       reason: 'That branch already has a checkout.',
       code: 'CHECKOUT_CONFLICT',
@@ -1358,7 +1564,7 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness);
-    harness.actor.send({ type: 'addCheckout', branch: 'enclosure-v2', from: 'rev-12' });
+    harness.actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'enclosure-v2', from: 'rev-12' });
     await flush();
     expect(harness.promises.inputsFor('addCheckout')).toEqual([
       { projectId: 'project-1', branch: 'enclosure-v2', from: 'rev-12' },
@@ -1378,7 +1584,7 @@ describe('projectRevisionsMachine', () => {
     });
     await flush();
 
-    harness.actor.send({ type: 'removeCheckout', id: 'checkout-c' });
+    harness.actor.send({ type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-c' });
     await flush();
     expect(harness.promises.inputsFor('removeCheckout')).toEqual([{ projectId: 'project-1', id: 'checkout-c' }]);
 
@@ -1668,10 +1874,12 @@ describe('projectRevisionsMachine', () => {
 
   it('should answer every public event in every reachable state', () => {
     const settlement = {
+      key: key1,
       turnId: 'turn-1',
       chatId: 'chat-1',
       checkoutId: 'checkout-b',
       runId: 'run-1',
+      attempt: 0,
       revisionId: 'rev-2',
       trigger: 'turn',
       branch: 'agent/b',
@@ -1680,42 +1888,64 @@ describe('projectRevisionsMachine', () => {
     const publicEvents: readonly ProjectRevisionsMachineEvent[] = [
       { type: 'checkoutsChanged', checkouts: [live, linked] },
       { type: 'branchesFetched', branches: [{ name: 'remote-feature', head: 'rev-remote' }] },
-      { type: 'checkoutStatusChanged', checkoutId: 'checkout-live', status: 'dirty', headRevisionId: 'rev-1' },
-      { type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' },
-      { type: 'turnPrepared', turnId: 'turn-1', chatId: 'chat-1', checkoutId: 'checkout-b', branch: 'agent/b' },
-      { type: 'cut', trigger: 'save', checkoutId: 'checkout-live', leaseIds: [] },
-      { type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'save', revisionId: 'rev-2' },
-      { type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'save' },
-      { type: 'cutFailed', checkoutId: 'checkout-live', trigger: 'save', reason: 'write failed' },
-      { type: 'casLost', checkoutId: 'checkout-live', trigger: 'save' },
+      {
+        type: 'checkoutStatusChanged',
+        checkoutId: 'checkout-live',
+        status: 'dirty',
+        branch: 'main',
+        headRevisionId: 'rev-1',
+      },
+      { type: 'admitTurn', key: key1, legacy: true },
+      { type: 'turnPrepared', key: key1, checkoutId: 'checkout-b', branch: 'agent/b' },
+      { type: 'cut', requestId: 'save-1', trigger: 'save', checkoutId: 'checkout-live', leaseIds: [] },
+      { type: 'cancelCut', requestId: 'save-1', checkoutId: 'checkout-live' },
+      {
+        type: 'revisionMinted',
+        checkoutId: 'checkout-live',
+        trigger: 'save',
+        requestId: 'save-1',
+        revisionId: 'rev-2',
+        branch: 'main',
+      },
+      { type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'save', requestId: 'save-1' },
+      { type: 'cutFailed', checkoutId: 'checkout-live', trigger: 'save', requestId: 'save-1', reason: 'write failed' },
+      { type: 'casLost', checkoutId: 'checkout-live', trigger: 'save', requestId: 'save-1' },
+      { type: 'cutCancelled', checkoutId: 'checkout-live', requestId: 'save-1' },
       { type: 'turnFinalized', ...settlement },
       { type: 'turnConflicted', ...settlement },
       { type: 'leaseStale', runId: 'run-9' },
       { type: 'checkoutChanged', checkoutId: 'checkout-b', revisionId: 'rev-4', treeId: 'tree-4', branch: undefined },
       { type: 'changed', checkoutId: 'checkout-b', paths: ['a.ts'], generation: 1 },
-      { type: 'turnCompleted', turnId: 'turn-1' },
-      { type: 'turnAbandoned', turnId: 'turn-1' },
-      { type: 'release', turnId: 'turn-1' },
-      { type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-1' },
+      { type: 'turnCompleted', key: key1 },
+      { type: 'turnAbandoned', key: key1 },
+      { type: 'acknowledge', key: key1 },
+      { type: 'leaseWritten', key: key1, checkoutId: 'checkout-live', leaseIds: ['run-1'] },
+      { type: 'turnPlaced', key: key1, checkoutId: 'checkout-b', branch: 'agent/b', baseRevisionId: 'rev-1' },
+      { type: 'turnCutRefused', key: key1, reason: 'disk full', cutFailures: 1 },
       {
         type: 'turnReleased',
+        key: key1,
         turnId: 'turn-1',
         chatId: 'chat-1',
         checkoutId: 'checkout-b',
         runId: 'run-1',
+        attempt: 0,
         outcome: 'released',
       },
+      { type: 'turnRefused', key: key1, code: 'LEASE_UNAVAILABLE', reason: 'held elsewhere' },
+      { type: 'turnRetired', key: key1, checkoutId: 'checkout-b' },
+      { type: 'acknowledgeRefused', key: key1, code: 'REVISIONS_BUSY', reason: 'This turn has not settled yet.' },
       { type: 'leaseRetired', runId: 'run-0' },
       { type: 'removalOffered', checkoutId: 'checkout-b' },
       { type: 'checkoutFailed', operation: 'add', reason: 'That branch already has a checkout.' },
-      { type: 'addCheckout', branch: 'enclosure-v2', from: 'rev-12' },
-      { type: 'removeCheckout', id: 'checkout-b' },
-      { type: 'switch', branch: 'agent/b' },
+      { type: 'addCheckout', requestId: 'add-1', branch: 'enclosure-v2', from: 'rev-12' },
+      { type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-b' },
+      { type: 'switch', requestId: 'switch-1', branch: 'agent/b' },
       { type: 'followChat', chatId: 'chat-1' },
       { type: 'pinTo', checkoutId: 'checkout-b' },
       { type: 'remote', event: { type: 'connect', kind: 'tau' } },
-      { type: 'branch', event: { type: 'create', name: 'enclosure-v2', from: 'rev-12' } },
-      { type: 'publish', event: { type: 'publish' } },
+      { type: 'branch', event: { type: 'create', requestId: 'create-1', name: 'enclosure-v2', from: 'rev-12' } },
+      { type: 'publish', event: { type: 'publish', requestId: 'publish-1' } },
       { type: 'sync', event: { type: 'online' } },
       { type: 'syncNow', pushId: 'push-1' },
       { type: 'pushSettled', pushId: 'push-1', outcome: 'backedUp' },
@@ -1746,10 +1976,10 @@ describe('projectRevisionsMachine', () => {
       serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
     };
 
-    /* W5 (RV4-F3): the root spawns `checkout`, `turn` and `resolution` by string
-     * key, which pure `transition` cannot resolve, so the walk throws on the first
-     * `checkoutsChanged`. Spawning by logic value lets it run; then both become
-     * `toEqual([])`, the first with `ignore: knownDefects['project-revisions']`. */
+    /* RV4-F3, still open: the root spawns `checkout`, `turn` and `resolution` by
+     * string key, which the walk cannot resolve. Spawning by logic value
+     * overflows the definition's declaration type (TS7056), so it waits on W2's
+     * machine contract. */
     const notProvided = "Actor source 'checkout' is not provided";
     expect(() => unansweredEvents(projectRevisionsMachine, options)).toThrow(notProvided);
     expect(() => unreachedStates(projectRevisionsMachine, options)).toThrow(notProvided);

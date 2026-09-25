@@ -262,40 +262,62 @@ describe('a turn lease', () => {
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
 
     const first = await run<{ leaseIds: readonly string[] }>(actors.turn.writeLease, {
-      runId: 'run-1',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
+      key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
       checkoutId: 'live',
-      baseRevisionId: undefined,
+      headRevisionId: undefined,
     });
     expect(first.leaseIds).toEqual(['run-1']);
 
     /* Leases are plural: a second chat on the same checkout sees both, which is
      * the provenance set a settlement carries (AC9). */
-    const second = await run<{ leaseIds: readonly string[] }>(actors.turn.writeLease, {
-      runId: 'run-2',
-      turnId: 'turn-2',
-      chatId: 'chat-2',
+    const secondKey = { runId: 'run-2', turnId: 'turn-2', chatId: 'chat-2', attempt: 0 };
+    const second = await run<{ leaseIds: readonly string[]; held: readonly unknown[] }>(actors.turn.writeLease, {
+      key: secondKey,
       checkoutId: 'live',
-      baseRevisionId: undefined,
+      headRevisionId: undefined,
     });
     /* This turn's own run first: the head of the set is the attribution a mint
      * records, and a directory read has no order of its own. */
     expect(second.leaseIds).toEqual(['run-2', 'run-1']);
+    /* The other attempt holding the checkout, announced as `leaseHeld` (RM-R16). */
+    expect(second.held).toEqual([{ runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 }]);
     expect(JSON.parse(await filesystem.readFile('.tau/runs/run-2.json', 'utf8'))).toMatchObject({
       runId: 'run-2',
       turnId: 'turn-2',
       chatId: 'chat-2',
       checkoutId: 'live',
+      attempt: 0,
       authorityEpoch: 'epoch-1',
     });
 
-    await run(actors.turn.retireLease, { runId: 'run-2', turnId: 'turn-2', checkoutId: 'live', outcome: 'finalized' });
+    /* Another attempt of the same run leaves the record alone (TS-R5). */
+    await run(actors.turn.retireLease, { key: { ...secondKey, attempt: 1 }, checkoutId: 'live', outcome: 'finalized' });
+    expect(await filesystem.exists('.tau/runs/run-2.json')).toBe(true);
+    await run(actors.turn.retireLease, { key: secondKey, checkoutId: 'live', outcome: 'finalized' });
     /* Retiring one that is already gone resolves: a rejection here would reach
      * the host as a user-visible failure for a non-event (R17). */
-    await run(actors.turn.retireLease, { runId: 'run-2', turnId: 'turn-2', checkoutId: 'live', outcome: 'finalized' });
+    await run(actors.turn.retireLease, { key: secondKey, checkoutId: 'live', outcome: 'finalized' });
     expect(await filesystem.exists('.tau/runs/run-2.json')).toBe(false);
     expect(await filesystem.exists('.tau/runs/run-1.json')).toBe(true);
+  }, 30_000);
+
+  /* A stray `acknowledge` reaches the registry with its key: another attempt's or holder's record stays (TS-R5). */
+  it('should retire a registry lease only when its record names the retiring attempt', async () => {
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const key = { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 1 };
+    await run(actors.turn.writeLease, { key, checkoutId: 'live', headRevisionId: undefined });
+
+    await run(actors.checkouts.retireLease, { projectId: 'project-1', runId: 'run-1', key: { ...key, attempt: 0 } });
+    await run(actors.checkouts.retireLease, {
+      projectId: 'project-1',
+      runId: 'run-1',
+      key: { ...key, chatId: 'chat-2' },
+    });
+    expect(await filesystem.exists('.tau/runs/run-1.json')).toBe(true);
+
+    await run(actors.checkouts.retireLease, { projectId: 'project-1', runId: 'run-1', key });
+    expect(await filesystem.exists('.tau/runs/run-1.json')).toBe(false);
   }, 30_000);
 
   it('sweeps only the leases a superseded authority wrote, and lists the rest on the record', async () => {
@@ -313,11 +335,9 @@ describe('a turn lease', () => {
       }),
     );
     await run(actors.turn.writeLease, {
-      runId: 'run-live',
-      turnId: 'turn-live',
-      chatId: 'chat-live',
+      key: { runId: 'run-live', turnId: 'turn-live', chatId: 'chat-live', attempt: 0 },
       checkoutId: 'live',
-      baseRevisionId: undefined,
+      headRevisionId: undefined,
     });
 
     const swept = await run<{ retiredRunIds: readonly string[] }>(actors.checkouts.sweepLeases, {
@@ -485,14 +505,58 @@ describe('settling a turn', () => {
       treeId: cut.treeId,
       parents: [],
       trigger: 'turn',
-      turnId: 'turn-2',
+      turn: { key: { runId: 'run-2', turnId: 'turn-2', chatId: 'chat-2', attempt: 1 }, turnCut: 'result' },
       /* `writeLease` puts the minting turn's own run first; a second chat
        * holding the same checkout must not cost the revision its attribution. */
       leaseIds: ['run-2', 'run-1'],
     });
 
+    /* RM-R9: the attempt and the cut are durable on the revision, and the other lease is named apart. */
     const record = await port.readRevision(revisionId(written.revisionId));
-    expect(record?.provenance).toMatchObject({ source: 'agent', runId: 'run-2' });
+    expect(record?.provenance).toMatchObject({
+      source: 'agent',
+      runId: 'run-2',
+      attempt: 1,
+      turnCut: 'result',
+      turnId: 'turn-2',
+      heldRunIds: ['run-1'],
+    });
+  }, 30_000);
+
+  it('should answer nothingToSave naming the lease when a save finds a lease another tab wrote', async () => {
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    /* Another tab's record, written after this save captured: its agent bytes may be in the tree. */
+    await filesystem.writeFile(
+      '.tau/runs/run-tab.json',
+      JSON.stringify({
+        runId: 'run-tab',
+        turnId: 'turn-tab',
+        chatId: 'chat-tab',
+        checkoutId: 'live',
+        attempt: 0,
+        authorityEpoch: 'epoch-other',
+        startedAt: 1,
+      }),
+    );
+
+    const written = await run<Readonly<Record<string, unknown>>>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: cut.cutId,
+      treeId: cut.treeId,
+      parents: [],
+      trigger: 'save',
+      leaseIds: [],
+    });
+
+    expect(written).toEqual({
+      status: 'held',
+      heldBy: { runId: 'run-tab', turnId: 'turn-tab', chatId: 'chat-tab', attempt: 0 },
+    });
   }, 30_000);
 
   it('reports a structural conflict as a conflicted turn rather than throwing', async () => {
@@ -703,9 +767,7 @@ describe('the checkout registry', () => {
     });
 
     await run(actors.turn.prepare, {
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      runId: 'run-1',
+      key: { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1', attempt: 0 },
       checkoutId: linked?.id,
     });
     expect(events).toEqual(['open:linked', 'close:linked', 'placed']);
@@ -714,9 +776,7 @@ describe('the checkout registry', () => {
     refuse = true;
     await expect(
       run(actors.turn.prepare, {
-        turnId: 'turn-2',
-        chatId: 'chat-1',
-        runId: 'run-2',
+        key: { turnId: 'turn-2', chatId: 'chat-1', runId: 'run-2', attempt: 0 },
         checkoutId: linked?.id,
       }),
     ).rejects.toThrow('candidate admission refused');
@@ -857,16 +917,19 @@ for (const actorSet of actorSets) {
 
       await context.filesystem.writeFile('main.ts', 'base\n');
       await run(context.actors.turn.writeLease, {
-        runId: 'run-1',
-        turnId: 'turn-1',
-        chatId: 'chat-1',
+        key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
         checkoutId: 'live',
+        headRevisionId: undefined,
       });
       await expect(run(context.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toMatchObject({
         code: 'CHECKOUT_CONFLICT',
       });
       expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('base\n');
-      await run(context.actors.turn.retireLease, { runId: 'run-1' });
+      await run(context.actors.turn.retireLease, {
+        key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
+        checkoutId: 'live',
+        outcome: 'finalized',
+      });
 
       const protectedTree = new ImmutableRevisionTree([
         ...context.remoteTree.entries().map((entry) => [entry.path, entry.content, entry.mode] as const),
@@ -1977,10 +2040,10 @@ describe('the fact a released turn publishes', () => {
       describeTurnRelease({
         ...released,
         outcome: 'failed',
-        reason: 'The checkout did not settle the cut in time.',
-        code: 'CUT_TIMED_OUT',
+        reason: 'The checkout could not record the turn.',
+        code: 'BASE_CUT_FAILED',
       }),
-    ).toMatchObject({ type: 'turn.failed', code: 'CUT_TIMED_OUT' });
+    ).toMatchObject({ type: 'turn.failed', code: 'BASE_CUT_FAILED' });
   });
 
   /* E5: a failure nothing classified carries no code at all, and the page says

@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-23'
+updated: '2026-09-26'
 related:
   - docs/research/git-storage-substrate-charter.md
   - docs/architecture/revisions-cloud-handbook.md
@@ -163,7 +163,7 @@ Keep the idle window configurable per workspace, never per project. Keep every a
 
 Write leases and run records under `.tau/runs/<runId>.json` through the host record writer. Retire a lease at turn end, keep its checkout, and use the authority epoch to retire stale leases on next prepare. Never add heartbeat leases.
 
-Mint a turn revision from the entire checkout's versioned tree and identify all active leases in provenance. A turn produces at most one revision. Do not let turn completion delete a checkout.
+Mint a turn revision from the entire checkout's versioned tree. Its provenance names the admitting attempt `{turnId, runId, attempt}` and its `turnCut`, `base` or `result`, and lists the checkout's other leases in `heldRunIds`. A turn produces at most one revision. Do not let turn completion delete a checkout.
 
 Create conflicts only from branch merge or sync divergence. Record a conflicted revision on the source branch, never on `main` and never as unowned loose files. Refuse to push conflicted revisions. Offer explicit per-file **Keep mine**, **Keep theirs**, **Open in editor**, and **Ask chat to resolve** for text; offer choose-one only for binary and parametric files. Let **Ask chat to resolve** seed a turn on that branch. Mint a normal revision after resolution and require an explicit merge or sync retry.
 

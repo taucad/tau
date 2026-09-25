@@ -1,17 +1,18 @@
 {
   "alphabet": [
+    "acknowledge",
     "casLost",
+    "cutCancelled",
     "cutFailed",
     "leaseGranted",
     "leaseRefused",
     "nothingToSave",
-    "release",
     "revisionMinted",
     "turnAbandoned",
     "turnCompleted"
   ],
   "specs": {
-    "TurnProtocol.tla": "a5ba2cdf82a852edd3f995d1ba0a032566e72e7bcbd4324083ee946caf07fc45"
+    "TurnProtocol.tla": "17363865962a01d204c07278749ba3eb79d6627ce2dd2c3290e81671c621ef66"
   },
   "tables": {}
 }

@@ -257,7 +257,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
 
       const scheduler = one.scheduler();
       scheduler.start();
-      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(scheduler.getSnapshot()).state).toBe('queued');
@@ -309,7 +309,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
 
     const first = one.scheduler();
     first.start();
-    first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: head });
+    first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: head, branch: 'main' });
     await vi.waitFor(
       async () => {
         const queued = await queueOf(one);
@@ -412,7 +412,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       });
       const first = one.scheduler();
       first.start();
-      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
@@ -496,7 +496,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       });
       const source = one.scheduler();
       source.start();
-      source.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      source.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
       await vi.waitFor(
         () => {
           expect(selectSyncFacet(source.getSnapshot()).state).toBe('backedUp');
@@ -697,7 +697,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
 
     const offline = one.scheduler();
     offline.start();
-    offline.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: ahead });
+    offline.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: ahead, branch: 'main' });
     await vi.waitFor(
       async () => {
         const queued = await queueOf(one);

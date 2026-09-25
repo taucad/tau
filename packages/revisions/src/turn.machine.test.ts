@@ -1,10 +1,11 @@
 import { createActor } from 'xstate';
-import type { AnyMachineSnapshot } from 'xstate';
+import type { AnyEventObject, AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#turn.machine.js';
-import { selectTurnHoldsLease, turnMachine } from '#turn.machine.js';
-import type { TurnLeaseActorInput, TurnMachineEvent } from '#turn.machine.js';
+import { selectTurnHoldsLease, turnIgnoredEvents, turnMachine } from '#turn.machine.js';
+import type { TurnLeaseActorInput, TurnMachineEvent, TurnMachineInput } from '#turn.machine.js';
+import type { TurnAttemptKey, TurnLease } from '#turn.types.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import {
   createFakeCallbackActors,
@@ -14,110 +15,49 @@ import {
 } from '@taucad/xstate-testing/fakes';
 import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
 import { guardActors } from '@taucad/xstate-testing/inspect';
-import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
- * Path table — `turn.machine` (catalogue: 14).
+ * Path table — `turn.machine` (catalogue: 14; W5 target, `TurnProtocol.target.cfg`).
  *
- *  1  starts in `preparing.resolving` and calls `prepare` with its input
- *  2  a resolved placement writes the lease and reaches `leased`; `turnPrepared`
- *     and `leaseWritten` reach the parent (R1)
+ *  1  starts in `resolving` and calls `prepare` with its attempt key
+ *  2  a resolved placement writes the record first, naming the attempt and the
+ *     head; `turnPrepared` and `leaseWritten` reach the parent (R1, RM-R12)
  *  3  a superseded epoch sends `leaseStale { runId }` to the parent (F13)
- *  4  `prepare` failure → `failed` with no lease to retire
- *  5  `writeLease` failure → `failed`
- *  6  the lease is held for the whole `leased` state and released on exit (F6)
- *  7  `leaseRefused` is an event, never `onError`
- *  8  `leased.acquiring` waits for `leaseGranted`; `turnCompleted` is buffered
- *     until `leased.held`, and only `held` reports holding the lease (R6)
- *  9  `turnCompleted` captures, merges, then *sends* `cut` to the parent; this
- *     machine never calls `writeRevision`
- * 10  `revisionMinted` → lease retired → `finalized` + `turnFinalized`, whose
- *     `runId` is this turn's own lease and `runIds` the provenance set (R2)
- * 11  `nothingToSave` → `finalized` with `revisionId: undefined` (I5)
- * 12  `cutFailed` → `failed`
- * 13  `casLost` → fails fast with reason `cas-lost` (R5; retry policy is W6)
- * 14  no answer inside the bound (step clock) → `failed`
- * 15  a conflicted merge → `conflicted` + `turnConflicted`
- * 16  `turnAbandoned` while leased → lease retired → `released`, and the parent
- *     is told `turnReleased` so the registry can drop the lease (R12)
- * 17  `release` while finalizing → `released`
- * 18  `capture` and `merge` failures → `failed`
- * 19  a retirement failure *after* a mint keeps the settlement (R7); one before
- *     the mint still fails
- * 20  a dirty base is minted before the lease is written, through the checkout
- *     (R10): `revisionMinted` adopts the base, `nothingToSave` skips it,
- *     `cutFailed` fails the turn
- * 21  the base mint has the same escapes as the cut it mirrors (R21): `casLost`
- *     fails it fast, the settlement bound ends it, and `release` /
- *     `turnAbandoned` end any of `preparing` with no lease to retire
- * 22  every failure names a `code` the page can phrase (P4): the port's own on
- *     a rejection that carried one, the turn's own for a lost CAS, a waited-out
- *     cut or base cut and a refused lease, and none at all when nothing
- *     classified it (E5)
+ *  4  `prepare` failure → `refused` with the port's code and nothing to retire
+ *  5  `writeLease` failure → `refused`
+ *  6  the live-tree lease is held while acquiring and held, never after (F6)
+ *  7  `leaseRefused` is an event: the record is retired, then `turnRefused` (TS-R1)
+ *  8  `turnCompleted` before placement is buffered and replayed once placed (R6)
+ *  9  `turnCompleted` captures, merges, then *sends* `cut{turn: result}`; this
+ *     machine never mints
+ * 10  `revisionMinted` → `settled` + `turnFinalized` naming the attempt, its
+ *     own lease and the provenance set; the lease stays until `acknowledge`
+ * 11  `nothingToSave` → `settled` finalized with no revision (I5)
+ * 12  `cutFailed` → `turnCutRefused` (`CUT_FAILED`), back to `held` with the lease
+ * 13  `casLost` → `finding`; a found result settles, none re-cuts once, then
+ *     `turnCutRefused` with `CAS_LOST` (RM-R14, D24)
+ * 14  no bound ends a cut: a cut answers or is withdrawn (RM-R3)
+ * 15  a conflicted merge → `settled` + `turnConflicted`
+ * 16  `turnAbandoned` while held → `settled` released; `acknowledge` retires
+ *     the record and reports `turnRetired` (RM-R10)
+ * 17  `turnAbandoned` while an effect runs is deferred until it settles (RM-R4)
+ * 18  capture and merge failures → `turnCutRefused` and the lease is kept (RM-R13)
+ * 19  a failed retirement refuses the acknowledgement and stays `settled`
+ * 20  a dirty base is minted after the live-tree lease, through the checkout
+ *     (RM-R12): `revisionMinted` becomes the base, `nothingToSave` keeps the head,
+ *     `cutFailed` refuses `BASE_CUT_FAILED` after retiring the record
+ * 21  the base cut has the same escapes as the result cut: `casLost` re-cuts
+ *     once then refuses, and a release withdraws it with `cancelCut`
+ * 22  every refusal names a code the page can phrase (P4)
+ * 23  an answer to another request id is ignored (RM-R1)
+ * 24  an adopted record finds its revisions before it serves a verb (RM-R14)
+ * 25  `acknowledge` before settlement is refused `REVISIONS_BUSY` (RM-R11)
  * --  start and stop leak no child, the snapshot is serializable and holds no
  *     function, and the subpath exports exactly one machine value
  */
 
-/**
- * Known defects (MC-S5): public events a reachable state neither takes nor
- * declares ignored. W5 answers each one or moves it to an exported
- * `turnIgnoredEvents` (D13, MC-R17), and deletes the row as it lands.
- */
-const knownDefects: IgnoredEvents = {
-  turn: [
-    // W5: totality — a lease or cut answer, or a repeated turn signal, outside the state that waits for it.
-    ['preparing.resolving', 'leaseGranted'],
-    ['preparing.resolving', 'leaseRefused'],
-    ['preparing.resolving', 'revisionMinted'],
-    ['preparing.resolving', 'nothingToSave'],
-    ['preparing.resolving', 'cutFailed'],
-    ['preparing.resolving', 'casLost'],
-    ['preparing.basing', 'leaseGranted'],
-    ['preparing.basing', 'leaseRefused'],
-    ['preparing.writingLease', 'leaseGranted'],
-    ['preparing.writingLease', 'leaseRefused'],
-    ['preparing.writingLease', 'revisionMinted'],
-    ['preparing.writingLease', 'nothingToSave'],
-    ['preparing.writingLease', 'cutFailed'],
-    ['preparing.writingLease', 'casLost'],
-    ['leased.acquiring', 'revisionMinted'],
-    ['leased.acquiring', 'nothingToSave'],
-    ['leased.acquiring', 'cutFailed'],
-    ['leased.acquiring', 'casLost'],
-    ['leased.held', 'leaseGranted'],
-    ['leased.held', 'revisionMinted'],
-    ['leased.held', 'nothingToSave'],
-    ['leased.held', 'cutFailed'],
-    ['leased.held', 'casLost'],
-    ['finalizing.capturing', 'turnCompleted'],
-    ['finalizing.capturing', 'leaseGranted'],
-    ['finalizing.capturing', 'leaseRefused'],
-    ['finalizing.capturing', 'revisionMinted'],
-    ['finalizing.capturing', 'nothingToSave'],
-    ['finalizing.capturing', 'cutFailed'],
-    ['finalizing.capturing', 'casLost'],
-    ['finalizing.merging', 'turnCompleted'],
-    ['finalizing.merging', 'leaseGranted'],
-    ['finalizing.merging', 'leaseRefused'],
-    ['finalizing.merging', 'revisionMinted'],
-    ['finalizing.merging', 'nothingToSave'],
-    ['finalizing.merging', 'cutFailed'],
-    ['finalizing.merging', 'casLost'],
-    ['finalizing.requesting', 'turnCompleted'],
-    ['finalizing.requesting', 'leaseGranted'],
-    ['finalizing.requesting', 'leaseRefused'],
-    ['retiring', 'turnCompleted'],
-    ['retiring', 'turnAbandoned'],
-    ['retiring', 'release'],
-    ['retiring', 'leaseGranted'],
-    ['retiring', 'leaseRefused'],
-    ['retiring', 'revisionMinted'],
-    ['retiring', 'nothingToSave'],
-    ['retiring', 'cutFailed'],
-    ['retiring', 'casLost'],
-  ],
-};
+const key: TurnAttemptKey = { chatId: 'chat-1', turnId: 'turn-1', runId: 'run-1', attempt: 0 };
 
 /** Let every queued microtask and the actor's promise handlers run. */
 const flush = async (): Promise<void> => {
@@ -135,8 +75,8 @@ type Harness = Readonly<{
   clock: StepClock;
 }>;
 
-const start = (options?: Readonly<{ checkoutId?: string }>): Harness => {
-  const guard = guardActors({ ignore: knownDefects });
+const start = (options?: Readonly<{ checkoutId?: string; adopt?: TurnMachineInput['adopt'] }>): Harness => {
+  const guard = guardActors({ ignore: { turn: turnIgnoredEvents } });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const parent = createFakeParent();
@@ -149,6 +89,7 @@ const start = (options?: Readonly<{ checkoutId?: string }>): Harness => {
         retireLease: promises.actor('retireLease'),
         capture: promises.actor('capture'),
         merge: promises.actor('merge'),
+        find: promises.actor('find'),
         lease: callbacks.actor<TurnLeaseActorInput>('lease'),
       },
     }),
@@ -156,10 +97,9 @@ const start = (options?: Readonly<{ checkoutId?: string }>): Harness => {
       clock,
       inspect: guard.inspect,
       input: {
-        turnId: 'turn-1',
-        chatId: 'chat-1',
-        runId: 'run-1',
+        key,
         ...(options?.checkoutId === undefined ? {} : { checkoutId: options.checkoutId }),
+        ...(options?.adopt === undefined ? {} : { adopt: options.adopt }),
         parentRef: parent.ref,
       },
     },
@@ -177,16 +117,39 @@ const preparedOutput = {
   staleRunIds: [],
 };
 
-/** Drive a turn to `leased.held` with the lease granted. */
-const toLeased = async (harness: Harness, leaseIds: readonly string[] = ['run-1']): Promise<void> => {
-  harness.promises.settle('prepare', { output: preparedOutput });
+const lease: TurnLease = {
+  runId: 'run-1',
+  turnId: 'turn-1',
+  chatId: 'chat-1',
+  checkoutId: 'checkout-1',
+  attempt: 0,
+  headRevisionId: 'rev-1',
+  authorityEpoch: 'epoch-1',
+  startedAt: 1,
+};
+
+const written = (leaseIds: readonly string[] = ['run-1'], held: readonly TurnAttemptKey[] = []) => ({
+  output: { lease, leaseIds, held },
+});
+
+const cutsOf = (harness: Harness): readonly AnyEventObject[] =>
+  harness.parent.events.filter((event) => event.type === 'cut');
+
+const lastCutId = (harness: Harness): string => String(cutsOf(harness).at(-1)?.['requestId']);
+
+/** Drive a turn to `held`, placed, with the live-tree lease granted. */
+const toHeld = async (
+  harness: Harness,
+  options: Readonly<{ leaseIds?: readonly string[]; dirty?: boolean }> = {},
+): Promise<void> => {
+  harness.promises.settle('prepare', { output: { ...preparedOutput, dirty: options.dirty === true } });
   await flush();
-  harness.promises.settle('writeLease', { output: { leaseIds } });
+  harness.promises.settle('writeLease', written(options.leaseIds));
   await flush();
   harness.callbacks.sendBack('lease', { type: 'leaseGranted' });
 };
 
-/** Drive a leased turn to the point where the parent has been sent `cut`. */
+/** Drive a held turn to the point where the parent has been sent the result `cut`. */
 const toRequesting = async (harness: Harness): Promise<void> => {
   harness.actor.send({ type: 'turnCompleted' });
   harness.promises.settle('capture', { output: { captureId: 'capture-1' } });
@@ -198,49 +161,71 @@ const toRequesting = async (harness: Harness): Promise<void> => {
 const types = (events: ReadonlyArray<{ type: string }>): readonly string[] => events.map((event) => event.type);
 
 describe('turnMachine', () => {
-  it('starts by resolving its placement from input', () => {
+  it('starts by resolving its placement from its attempt key', () => {
     const { actor, promises } = start({ checkoutId: 'checkout-9' });
 
-    expect(actor.getSnapshot().matches({ preparing: 'resolving' })).toBe(true);
-    expect(promises.inputsFor('prepare')).toEqual([
-      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1', checkoutId: 'checkout-9' },
-    ]);
+    expect(actor.getSnapshot().matches('resolving')).toBe(true);
+    expect(promises.inputsFor('prepare')).toEqual([{ key, checkoutId: 'checkout-9' }]);
 
     actor.stop();
   });
 
-  it('writes the lease and reaches leased, telling the parent what was prepared and leased', async () => {
+  it('should write the lease record before it mints the base', async () => {
     const harness = start();
-    const { actor, promises, parent } = harness;
+    const { actor, promises, parent, callbacks } = harness;
 
-    await toLeased(harness);
+    promises.settle('prepare', { output: { ...preparedOutput, dirty: true } });
+    await flush();
 
-    expect(actor.getSnapshot().matches('leased')).toBe(true);
-    expect(actor.getSnapshot().context.checkoutId).toBe('checkout-1');
-    expect(promises.inputsFor('writeLease')).toEqual([
+    /* RM-R12: the record, naming the attempt and the head, before anything of the attempt is minted. */
+    expect(actor.getSnapshot().matches('writingLease')).toBe(true);
+    expect(promises.inputsFor('writeLease')).toEqual([{ key, checkoutId: 'checkout-1', headRevisionId: 'rev-1' }]);
+    expect(cutsOf(harness)).toEqual([]);
+
+    promises.settle('writeLease', written());
+    await flush();
+    expect(types(parent.events)).toEqual(['turnPrepared', 'leaseWritten']);
+    expect(cutsOf(harness)).toEqual([]);
+
+    callbacks.sendBack('lease', { type: 'leaseGranted' });
+    expect(actor.getSnapshot().matches('basing')).toBe(true);
+    expect(cutsOf(harness)).toEqual([
       {
-        runId: 'run-1',
-        turnId: 'turn-1',
-        chatId: 'chat-1',
+        type: 'cut',
+        requestId: 'run-1/0/base/0',
+        trigger: 'turn',
         checkoutId: 'checkout-1',
-        baseRevisionId: 'rev-1',
+        turn: { key, turnCut: 'base' },
+        leaseIds: ['run-1'],
       },
     ]);
-    expect(parent.events.find((event) => event.type === 'turnPrepared')).toEqual({
-      type: 'turnPrepared',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      checkoutId: 'checkout-1',
-      branch: 'main',
-    });
-    /* R1: the registry's lease set only grows if the turn says so. */
-    expect(parent.events.find((event) => event.type === 'leaseWritten')).toEqual({
-      type: 'leaseWritten',
-      checkoutId: 'checkout-1',
-      runId: 'run-1',
-    });
-
     actor.stop();
+  });
+
+  it('should name the admitting run in the pre-mint provenance when another chat holds a lease', async () => {
+    const harness = start();
+    const other: TurnAttemptKey = { chatId: 'chat-2', turnId: 'turn-9', runId: 'run-2', attempt: 0 };
+
+    await toHeld(harness, { dirty: true, leaseIds: ['run-1', 'run-2'] });
+
+    /* RM-R9: the base cut names this attempt, not the first lease on the checkout. */
+    expect(cutsOf(harness)[0]).toMatchObject({ turn: { key, turnCut: 'base' }, leaseIds: ['run-1', 'run-2'] });
+    expect(harness.parent.events.find((event) => event.type === 'leaseWritten')).toMatchObject({ key });
+    harness.actor.stop();
+
+    const listing = start();
+    listing.promises.settle('prepare', { output: preparedOutput });
+    await flush();
+    listing.promises.settle('writeLease', written(['run-1', 'run-2'], [other]));
+    await flush();
+    expect(listing.parent.events.find((event) => event.type === 'leaseWritten')).toEqual({
+      type: 'leaseWritten',
+      key,
+      checkoutId: 'checkout-1',
+      leaseIds: ['run-1', 'run-2'],
+      held: [other],
+    });
+    listing.actor.stop();
   });
 
   it('reports a superseded epoch as leaseStale to the parent', async () => {
@@ -258,520 +243,577 @@ describe('turnMachine', () => {
     actor.stop();
   });
 
-  it('fails when prepare rejects, with no lease to retire', async () => {
+  it('refuses when prepare rejects, with no record to retire', async () => {
     const harness = start();
-    const { actor, promises } = harness;
+    const { actor, promises, parent } = harness;
 
     promises.settle('prepare', {
       error: Object.assign(new Error('no checkout'), { code: 'ENGINE_UNAVAILABLE' }),
     });
     await flush();
 
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
-    expect(actor.getSnapshot().context.reason).toContain('no checkout');
+    expect(actor.getSnapshot().matches('refused')).toBe(true);
     /* P4: the port classified it, so the page never has to read the sentence. */
-    expect(actor.getSnapshot().context.code).toBe('ENGINE_UNAVAILABLE');
+    expect(parent.events.at(-1)).toEqual({
+      type: 'turnRefused',
+      key,
+      code: 'ENGINE_UNAVAILABLE',
+      reason: 'no checkout',
+    });
     expect(promises.inputsFor('retireLease')).toEqual([]);
 
     actor.stop();
   });
 
-  it('fails when the lease write rejects', async () => {
+  it('refuses when the record write rejects', async () => {
     const harness = start();
-    const { actor, promises } = harness;
+    const { actor, promises, parent } = harness;
 
     promises.settle('prepare', { output: preparedOutput });
     await flush();
     promises.settle('writeLease', { error: new Error('read-only') });
     await flush();
 
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
+    expect(actor.getSnapshot().matches('refused')).toBe(true);
     /* E5: nothing classified this, so the page says its own fallback. */
-    expect(actor.getSnapshot().context.code).toBeUndefined();
+    expect(parent.events.at(-1)).toEqual({ type: 'turnRefused', key, code: undefined, reason: 'read-only' });
 
     actor.stop();
   });
 
-  it('holds the lease for the whole leased state and releases it on exit', async () => {
+  it('holds the live-tree lease while acquiring and held, and lets it go when settled', async () => {
     const harness = start();
     const { actor, callbacks } = harness;
 
-    await toLeased(harness);
+    await toHeld(harness);
     expect(callbacks.active('lease')).toBe(1);
+    expect(selectTurnHoldsLease(actor.getSnapshot())).toBe(true);
 
-    actor.send({ type: 'turnCompleted' });
-
+    actor.send({ type: 'turnAbandoned' });
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
     expect(callbacks.active('lease')).toBe(0);
-    expect(callbacks.releases('lease')).toBe(1);
+    expect(selectTurnHoldsLease(actor.getSnapshot())).toBe(false);
 
     actor.stop();
   });
 
-  it('treats a refused lease as an event, not an error', async () => {
+  it('should retire the lease record before answering a refused pre-mint', async () => {
     const harness = start();
-    const { actor, callbacks } = harness;
-
-    harness.promises.settle('prepare', { output: preparedOutput });
-    await flush();
-    harness.promises.settle('writeLease', { output: { leaseIds: ['run-1'] } });
-    await flush();
-    callbacks.sendBack('lease', { type: 'leaseRefused', reason: 'another document holds it' });
-    await flush();
-
-    expect(actor.getSnapshot().matches('retiring')).toBe(true);
-    expect(actor.getSnapshot().context.reason).toContain('another document holds it');
-    expect(actor.getSnapshot().context.code).toBe('LEASE_UNAVAILABLE');
-
-    actor.stop();
-  });
-
-  it('waits for the lease to be granted, buffering turnCompleted until it is', async () => {
-    const harness = start();
-    const { actor, promises, callbacks } = harness;
+    const { actor, promises, callbacks, parent } = harness;
 
     promises.settle('prepare', { output: preparedOutput });
     await flush();
-    promises.settle('writeLease', { output: { leaseIds: ['run-1'] } });
+    promises.settle('writeLease', written());
     await flush();
+    callbacks.sendBack('lease', { type: 'leaseRefused', reason: 'held elsewhere' });
 
-    expect(actor.getSnapshot().matches({ leased: 'acquiring' })).toBe(true);
-    expect(selectTurnHoldsLease(actor.getSnapshot())).toBe(false);
+    /* TS-R1: the record goes first; the refusal is answered only after. */
+    expect(actor.getSnapshot().matches('refusing')).toBe(true);
+    expect(promises.inputsFor('retireLease')).toEqual([{ key, checkoutId: 'checkout-1', outcome: 'refused' }]);
+    expect(types(parent.events)).not.toContain('turnRefused');
 
-    actor.send({ type: 'turnCompleted' });
-    expect(actor.getSnapshot().matches({ leased: 'acquiring' })).toBe(true);
-
-    callbacks.sendBack('lease', { type: 'leaseGranted' });
-
-    expect(actor.getSnapshot().matches({ finalizing: 'capturing' })).toBe(true);
-
-    actor.stop();
-  });
-
-  it('reports holding the lease only once it is granted', async () => {
-    const harness = start();
-
-    await toLeased(harness);
-
-    expect(harness.actor.getSnapshot().matches({ leased: 'held' })).toBe(true);
-    expect(selectTurnHoldsLease(harness.actor.getSnapshot())).toBe(true);
-
-    harness.actor.stop();
-  });
-
-  it('sends cut to the parent and never writes a revision itself', async () => {
-    const harness = start();
-    const { actor, promises, parent } = harness;
-
-    await toLeased(harness);
-    await toRequesting(harness);
-
-    expect(actor.getSnapshot().matches({ finalizing: 'requesting' })).toBe(true);
-    expect(parent.events.find((event) => event.type === 'cut')).toEqual({
-      type: 'cut',
-      trigger: 'turn',
-      turnId: 'turn-1',
-      checkoutId: 'checkout-1',
-      leaseIds: ['run-1'],
+    promises.settle('retireLease', { output: undefined });
+    await flush();
+    expect(parent.events.at(-1)).toEqual({
+      type: 'turnRefused',
+      key,
+      code: 'LEASE_UNAVAILABLE',
+      reason: 'held elsewhere',
     });
-    expect(Object.keys(machineModule)).not.toContain('writeRevision');
-    expect(promises.calls.map((call) => call.name)).not.toContain('writeRevision');
-
-    actor.stop();
+    expect(actor.getSnapshot().status).toBe('done');
   });
 
-  it('finalizes on revisionMinted, naming its own lease and the provenance set', async () => {
-    const harness = start();
-    const { actor, promises, parent, emitted } = harness;
-
-    await toLeased(harness, ['run-1', 'run-2']);
-    await toRequesting(harness);
-    actor.send({ type: 'revisionMinted', trigger: 'turn', turnId: 'turn-1', revisionId: 'rev-2' });
-
-    expect(actor.getSnapshot().matches('retiring')).toBe(true);
-    promises.settle('retireLease', { output: undefined });
-    await flush();
-
-    expect(actor.getSnapshot().matches('finalized')).toBe(true);
-    const finalized = {
-      type: 'turnFinalized',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      checkoutId: 'checkout-1',
-      runId: 'run-1',
-      revisionId: 'rev-2',
-      trigger: 'turn',
-      /* R7: the settling checkout's branch, carried rather than read off the
-       * store's HEAD, which names the live checkout. */
-      branch: 'main',
-      runIds: ['run-1', 'run-2'],
-    };
-    expect(emitted.find((event) => event.type === 'turnFinalized')).toEqual(finalized);
-    expect(parent.events.find((event) => event.type === 'turnFinalized')).toEqual(finalized);
-
-    actor.stop();
-  });
-
-  it('finalizes with no revision when nothing changed', async () => {
-    const harness = start();
-    const { actor, promises, emitted } = harness;
-
-    await toLeased(harness);
-    await toRequesting(harness);
-    actor.send({ type: 'nothingToSave', trigger: 'turn', turnId: 'turn-1' });
-    promises.settle('retireLease', { output: undefined });
-    await flush();
-
-    expect(actor.getSnapshot().matches('finalized')).toBe(true);
-    expect(emitted.find((event) => event.type === 'turnFinalized')).toMatchObject({ revisionId: undefined });
-
-    actor.stop();
-  });
-
-  it('fails when the cut fails', async () => {
+  it('should buffer turnCompleted while basing and replay it once held', async () => {
     const harness = start();
     const { actor, promises } = harness;
 
-    await toLeased(harness);
-    await toRequesting(harness);
-    actor.send({ type: 'cutFailed', trigger: 'turn', turnId: 'turn-1', reason: 'disk full' });
-    promises.settle('retireLease', { output: undefined });
-    await flush();
+    await toHeld(harness, { dirty: true });
+    actor.send({ type: 'turnCompleted' });
+    expect(promises.inputsFor('capture')).toEqual([]);
 
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
-    expect(actor.getSnapshot().context.reason).toContain('disk full');
+    actor.send({ type: 'revisionMinted', requestId: lastCutId(harness), revisionId: 'rev-base' });
 
+    expect(actor.getSnapshot().matches('capturing')).toBe(true);
+    expect(promises.inputsFor('capture')).toEqual([{ checkoutId: 'checkout-1', turnId: 'turn-1' }]);
+    /* The placement is reported once, after the base (RM-S14). */
+    expect(harness.parent.events.filter((event) => event.type === 'turnPlaced')).toEqual([
+      { type: 'turnPlaced', key, checkoutId: 'checkout-1', branch: 'main', baseRevisionId: 'rev-base' },
+    ]);
     actor.stop();
   });
 
-  it('re-cuts once when its cut loses the CAS, then fails', async () => {
+  it('should ignore leaseRefused once held', async () => {
+    const harness = start();
+
+    await toHeld(harness);
+    harness.callbacks.sendBack('lease', { type: 'leaseRefused', reason: 'too late' });
+
+    expect(harness.actor.getSnapshot().matches('held')).toBe(true);
+    expect(harness.promises.inputsFor('retireLease')).toEqual([]);
+    harness.actor.stop();
+  });
+
+  it('sends the result cut to the parent and never writes a revision itself', async () => {
+    const harness = start();
+
+    await toHeld(harness);
+    await toRequesting(harness);
+
+    expect(harness.actor.getSnapshot().matches('requesting')).toBe(true);
+    expect(cutsOf(harness)).toEqual([
+      {
+        type: 'cut',
+        requestId: 'run-1/0/result/0',
+        trigger: 'turn',
+        checkoutId: 'checkout-1',
+        turn: { key, turnCut: 'result' },
+        leaseIds: ['run-1'],
+      },
+    ]);
+    harness.actor.stop();
+  });
+
+  it('should keep the lease until the settlement is acknowledged', async () => {
+    const harness = start();
+    const { actor, promises, parent, emitted } = harness;
+
+    await toHeld(harness, { leaseIds: ['run-1', 'run-2'] });
+    await toRequesting(harness);
+    actor.send({ type: 'revisionMinted', requestId: lastCutId(harness), revisionId: 'rev-2' });
+
+    /* RM-R10: announced on entering `settled`, and nothing is retired yet. */
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(emitted).toEqual([
+      {
+        type: 'turnFinalized',
+        turnId: 'turn-1',
+        chatId: 'chat-1',
+        checkoutId: 'checkout-1',
+        runId: 'run-1',
+        attempt: 0,
+        revisionId: 'rev-2',
+        trigger: 'turn',
+        branch: 'main',
+        runIds: ['run-1', 'run-2'],
+      },
+    ]);
+    expect(promises.inputsFor('retireLease')).toEqual([]);
+
+    actor.send({ type: 'acknowledge' });
+    expect(promises.inputsFor('retireLease')).toEqual([{ key, checkoutId: 'checkout-1', outcome: 'finalized' }]);
+    promises.settle('retireLease', { output: undefined });
+    await flush();
+
+    expect(parent.events.at(-1)).toEqual({ type: 'turnRetired', key, checkoutId: 'checkout-1' });
+    expect(actor.getSnapshot().status).toBe('done');
+    /* Announced once, whatever came after it. */
+    expect(emitted).toHaveLength(1);
+  });
+
+  it('should stay settled and refuse the acknowledgement when the retirement fails', async () => {
+    const harness = start();
+    const { actor, promises, parent, emitted } = harness;
+
+    await toHeld(harness);
+    await toRequesting(harness);
+    actor.send({ type: 'nothingToSave', requestId: lastCutId(harness) });
+    actor.send({ type: 'acknowledge' });
+    promises.settle('retireLease', { error: Object.assign(new Error('lease file busy'), { code: 'ENGINE_FAILED' }) });
+    await flush();
+
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(parent.events.at(-1)).toEqual({
+      type: 'acknowledgeRefused',
+      key,
+      code: 'ENGINE_FAILED',
+      reason: 'lease file busy',
+    });
+    expect(emitted).toHaveLength(1);
+    /* I5: nothing changed, so nothing was minted. */
+    expect(actor.getSnapshot().context.revisionId).toBeUndefined();
+
+    actor.send({ type: 'acknowledge' });
+    promises.settle('retireLease', { output: undefined });
+    await flush();
+    expect(actor.getSnapshot().status).toBe('done');
+  });
+
+  it('should refuse an acknowledgement before the attempt settles', async () => {
+    const harness = start();
+
+    await toHeld(harness);
+    harness.actor.send({ type: 'acknowledge' });
+
+    expect(harness.parent.events.at(-1)).toEqual({
+      type: 'acknowledgeRefused',
+      key,
+      code: 'REVISIONS_BUSY',
+      reason: 'This turn has not settled yet.',
+    });
+    expect(harness.actor.getSnapshot().matches('held')).toBe(true);
+    harness.actor.stop();
+  });
+
+  it('should keep the lease and answer CUT_FAILED when the capture fails', async () => {
     const harness = start();
     const { actor, promises, parent } = harness;
 
-    await toLeased(harness);
-    await toRequesting(harness);
-    const cutsBefore = parent.events.filter((event) => event.type === 'cut').length;
-    actor.send({ type: 'casLost', trigger: 'turn', turnId: 'turn-1' });
-
-    /* The checkout re-read the head before it answered, so one re-ask records
-     * onto what the branch names now (D24). */
-    expect(actor.getSnapshot().matches({ finalizing: 'requesting' })).toBe(true);
-    expect(actor.getSnapshot().context.casRetries).toBe(1);
-    expect(parent.events.filter((event) => event.type === 'cut').length).toBe(cutsBefore + 1);
-
-    actor.send({ type: 'casLost', trigger: 'turn', turnId: 'turn-1' });
-
-    expect(actor.getSnapshot().matches('retiring')).toBe(true);
-    promises.settle('retireLease', { output: undefined });
+    await toHeld(harness);
+    actor.send({ type: 'turnCompleted' });
+    promises.settle('capture', { error: Object.assign(new Error('disk gone'), { code: 'ENGINE_FAILED' }) });
     await flush();
 
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
-    expect(actor.getSnapshot().context.reason).toBe('cas-lost');
-    expect(actor.getSnapshot().context.code).toBe('CAS_LOST');
-    /* The code travels with the release, which is what the page reads. */
-    expect(parent.events.find((event) => event.type === 'turnReleased')).toMatchObject({ code: 'CAS_LOST' });
+    /* RM-R13: the attempt keeps its lease, so the host may complete it again. */
+    expect(actor.getSnapshot().matches('held')).toBe(true);
+    expect(parent.events.at(-1)).toEqual({
+      type: 'turnCutRefused',
+      key,
+      code: 'ENGINE_FAILED',
+      reason: 'disk gone',
+      cutFailures: 1,
+    });
+    expect(promises.inputsFor('retireLease')).toEqual([]);
 
+    actor.send({ type: 'turnCompleted' });
+    expect(actor.getSnapshot().matches('capturing')).toBe(true);
     actor.stop();
   });
 
-  it('fails when no cut outcome arrives inside the bound', async () => {
+  it('answers a failed merge and a failed cut with CUT_FAILED, keeping the lease', async () => {
     const harness = start();
-    const { actor, promises, clock } = harness;
+    const { actor, promises, parent } = harness;
 
-    await toLeased(harness);
+    await toHeld(harness);
+    actor.send({ type: 'turnCompleted' });
+    promises.settle('capture', { output: { captureId: 'capture-1' } });
+    await flush();
+    promises.settle('merge', { error: new Error('merge broke') });
+    await flush();
+    expect(actor.getSnapshot().matches('held')).toBe(true);
+
     await toRequesting(harness);
-    clock.advance(60_000);
-    promises.settle('retireLease', { output: undefined });
+    actor.send({ type: 'cutFailed', requestId: lastCutId(harness), reason: 'disk full' });
+
+    expect(actor.getSnapshot().matches('held')).toBe(true);
+    expect(
+      parent.events.filter((event) => event.type === 'turnCutRefused').map((event): unknown => event['cutFailures']),
+    ).toEqual([1, 2]);
+    /* A release after a refused cut gives up on it: the attempt failed. */
+    actor.send({ type: 'turnAbandoned' });
+    expect(parent.events.at(-1)).toMatchObject({ type: 'turnReleased', outcome: 'failed', key });
+    actor.stop();
+  });
+
+  it('should settle from the result it finds after losing the compare-and-swap', async () => {
+    const harness = start();
+    const { actor, promises, emitted } = harness;
+
+    await toHeld(harness);
+    await toRequesting(harness);
+    actor.send({ type: 'casLost', requestId: lastCutId(harness) });
+
+    expect(actor.getSnapshot().matches('finding')).toBe(true);
+    expect(promises.inputsFor('find')).toEqual([{ key, checkoutId: 'checkout-1', stopAt: 'rev-1' }]);
+    promises.settle('find', { output: { result: 'rev-won' } });
     await flush();
 
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
-    expect(actor.getSnapshot().context.code).toBe('CUT_TIMED_OUT');
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(emitted).toMatchObject([{ type: 'turnFinalized', revisionId: 'rev-won' }]);
+    /* One result per attempt: nothing was cut again. */
+    expect(cutsOf(harness)).toHaveLength(1);
+    actor.stop();
+  });
 
+  it('re-cuts once when nothing is found after a lost CAS, then answers CAS_LOST', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    await toHeld(harness);
+    await toRequesting(harness);
+    actor.send({ type: 'casLost', requestId: lastCutId(harness) });
+    promises.settle('find', { output: {} });
+    await flush();
+
+    expect(actor.getSnapshot().matches('requesting')).toBe(true);
+    expect(lastCutId(harness)).toBe('run-1/0/result/1');
+
+    actor.send({ type: 'casLost', requestId: lastCutId(harness) });
+    promises.settle('find', { output: {} });
+    await flush();
+
+    expect(actor.getSnapshot().matches('held')).toBe(true);
+    expect(parent.events.at(-1)).toMatchObject({ type: 'turnCutRefused', code: 'CAS_LOST' });
+    actor.stop();
+  });
+
+  it('should ignore an answer to another request id', async () => {
+    const harness = start();
+    const { actor } = harness;
+
+    await toHeld(harness);
+    await toRequesting(harness);
+    actor.send({ type: 'revisionMinted', requestId: 'run-1/0/base/0', revisionId: 'rev-stale' });
+    actor.send({ type: 'revisionMinted', revisionId: 'rev-idle' });
+
+    expect(actor.getSnapshot().matches('requesting')).toBe(true);
+    actor.send({ type: 'revisionMinted', requestId: lastCutId(harness), revisionId: 'rev-2' });
+    expect(actor.getSnapshot().context.revisionId).toBe('rev-2');
     actor.stop();
   });
 
   it('reaches conflicted when the merge conflicts', async () => {
     const harness = start();
-    const { actor, promises, parent, emitted } = harness;
+    const { actor, promises, emitted } = harness;
 
-    await toLeased(harness);
+    await toHeld(harness);
     actor.send({ type: 'turnCompleted' });
     promises.settle('capture', { output: { captureId: 'capture-1' } });
     await flush();
     promises.settle('merge', { output: { status: 'conflicted', conflictRevisionId: 'rev-c' } });
     await flush();
-    promises.settle('retireLease', { output: undefined });
-    await flush();
 
-    expect(actor.getSnapshot().matches('conflicted')).toBe(true);
-    expect(types(emitted)).toContain('turnConflicted');
-    expect(types(parent.events)).toContain('turnConflicted');
-    expect(emitted.find((event) => event.type === 'turnConflicted')).toMatchObject({ revisionId: 'rev-c' });
-
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(emitted).toMatchObject([{ type: 'turnConflicted', revisionId: 'rev-c' }]);
     actor.stop();
   });
 
-  it('releases an abandoned turn, retires its lease and tells the parent', async () => {
+  it('settles an abandoned turn released and retires its record only when acknowledged', async () => {
     const harness = start();
     const { actor, promises, parent } = harness;
 
-    await toLeased(harness);
+    await toHeld(harness);
     actor.send({ type: 'turnAbandoned' });
 
-    expect(actor.getSnapshot().matches('retiring')).toBe(true);
-    promises.settle('retireLease', { output: undefined });
-    await flush();
-
-    expect(actor.getSnapshot().matches('released')).toBe(true);
-    expect(promises.inputsFor('retireLease')).toEqual([
-      { runId: 'run-1', turnId: 'turn-1', checkoutId: 'checkout-1', outcome: 'released' },
-    ]);
-    /* R12: the root drops the ref, and the registry drops the lease. */
-    expect(parent.events.find((event) => event.type === 'turnReleased')).toEqual({
+    expect(parent.events.at(-1)).toEqual({
       type: 'turnReleased',
+      key,
       turnId: 'turn-1',
       chatId: 'chat-1',
-      checkoutId: 'checkout-1',
       runId: 'run-1',
+      attempt: 0,
+      checkoutId: 'checkout-1',
       outcome: 'released',
+      reason: undefined,
+      code: undefined,
     });
-
+    expect(promises.inputsFor('retireLease')).toEqual([]);
+    actor.send({ type: 'acknowledge' });
+    expect(promises.inputsFor('retireLease')).toEqual([{ key, checkoutId: 'checkout-1', outcome: 'released' }]);
     actor.stop();
   });
 
-  it('tells the parent when it ends failed', async () => {
+  it('should retire the lease it wrote when released while writing it', async () => {
     const harness = start();
     const { actor, promises, parent } = harness;
 
-    await toLeased(harness);
-    await toRequesting(harness);
-    actor.send({ type: 'cutFailed', trigger: 'turn', turnId: 'turn-1', reason: 'disk full' });
-    promises.settle('retireLease', { output: undefined });
+    promises.settle('prepare', { output: preparedOutput });
     await flush();
-
-    expect(parent.events.find((event) => event.type === 'turnReleased')).toMatchObject({
-      turnId: 'turn-1',
-      runId: 'run-1',
-      outcome: 'failed',
-    });
-
-    actor.stop();
-  });
-
-  it('releases a turn that is released while finalizing', async () => {
-    const harness = start();
-    const { actor, promises } = harness;
-
-    await toLeased(harness);
-    await toRequesting(harness);
-    actor.send({ type: 'release' });
-    promises.settle('retireLease', { output: undefined });
-    await flush();
-
-    expect(actor.getSnapshot().matches('released')).toBe(true);
-
-    actor.stop();
-  });
-
-  it('fails when capture or merge rejects', async () => {
-    const first = start();
-    await toLeased(first);
-    first.actor.send({ type: 'turnCompleted' });
-    first.promises.settle('capture', { error: new Error('capture broke') });
-    await flush();
-    first.promises.settle('retireLease', { output: undefined });
-    await flush();
-    expect(first.actor.getSnapshot().matches('failed')).toBe(true);
-    first.actor.stop();
-
-    const second = start();
-    await toLeased(second);
-    second.actor.send({ type: 'turnCompleted' });
-    second.promises.settle('capture', { output: { captureId: 'capture-1' } });
-    await flush();
-    second.promises.settle('merge', {
-      error: Object.assign(new Error('merge broke'), { code: 'MISSING_LARGE_OBJECT' }),
-    });
-    await flush();
-    second.promises.settle('retireLease', { output: undefined });
-    await flush();
-    expect(second.actor.getSnapshot().matches('failed')).toBe(true);
-    expect(second.actor.getSnapshot().context.code).toBe('MISSING_LARGE_OBJECT');
-    second.actor.stop();
-  });
-
-  it('keeps a finalized settlement when retiring the lease fails after the mint', async () => {
-    const harness = start();
-    const { actor, promises, emitted, parent } = harness;
-
-    await toLeased(harness);
-    await toRequesting(harness);
-    actor.send({ type: 'revisionMinted', trigger: 'turn', turnId: 'turn-1', revisionId: 'rev-2' });
-    promises.settle('retireLease', { error: new Error('lease file gone') });
-    await flush();
-
-    /* A4: the host-attested settlement survives a failed lease cleanup; the
-     * orphan lease is `sweepLeases`' problem (F13). */
-    expect(actor.getSnapshot().matches('finalized')).toBe(true);
-    expect(emitted.find((event) => event.type === 'turnFinalized')).toMatchObject({ revisionId: 'rev-2' });
-    expect(types(parent.events)).toContain('turnFinalized');
-
-    actor.stop();
-  });
-
-  it('still fails when the retirement fails before any mint', async () => {
-    const harness = start();
-    const { actor, promises } = harness;
-
-    await toLeased(harness);
     actor.send({ type: 'turnAbandoned' });
-    promises.settle('retireLease', { error: new Error('lease file gone') });
+
+    /* RM-R4: the write is still running, so the attempt waits for it. */
+    expect(actor.getSnapshot().matches('writingLease')).toBe(true);
+    promises.settle('writeLease', written());
     await flush();
 
-    expect(actor.getSnapshot().matches('released')).toBe(true);
-
-    const second = start();
-    await toLeased(second);
-    await toRequesting(second);
-    second.actor.send({ type: 'cutFailed', trigger: 'turn', turnId: 'turn-1', reason: 'quota' });
-    second.promises.settle('retireLease', { error: new Error('lease file gone') });
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(parent.events.at(-1)).toMatchObject({ type: 'turnReleased', outcome: 'released' });
+    actor.send({ type: 'acknowledge' });
+    expect(promises.inputsFor('retireLease')).toEqual([{ key, checkoutId: 'checkout-1', outcome: 'released' }]);
+    promises.settle('retireLease', { output: undefined });
     await flush();
-
-    expect(second.actor.getSnapshot().matches('failed')).toBe(true);
-
-    actor.stop();
-    second.actor.stop();
+    expect(actor.getSnapshot().status).toBe('done');
   });
 
-  it('mints a dirty base through the checkout before writing its lease', async () => {
+  it('releases a turn abandoned before it resolved, with no record to retire', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'turnAbandoned' });
+    promises.settle('prepare', { output: preparedOutput });
+    await flush();
+
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    actor.send({ type: 'acknowledge' });
+    expect(actor.getSnapshot().status).toBe('done');
+    expect(promises.inputsFor('retireLease')).toEqual([]);
+    expect(promises.inputsFor('writeLease')).toEqual([]);
+  });
+
+  it('should not leave merging until the merge settles', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    await toHeld(harness);
+    actor.send({ type: 'turnCompleted' });
+    promises.settle('capture', { output: { captureId: 'capture-1' } });
+    await flush();
+    actor.send({ type: 'turnAbandoned' });
+
+    expect(actor.getSnapshot().matches('merging')).toBe(true);
+    expect(promises.running('merge')).toBe(1);
+    promises.settle('merge', { output: { status: 'recorded' } });
+    await flush();
+
+    /* A merge that landed after the release asks for no cut: the attempt was let go. */
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(cutsOf(harness)).toEqual([]);
+    actor.stop();
+  });
+
+  it('should settle released after the effect when abandoned while finalizing', async () => {
     const harness = start();
     const { actor, promises, parent } = harness;
 
-    promises.settle('prepare', { output: { ...preparedOutput, dirty: true } });
+    await toHeld(harness);
+    actor.send({ type: 'turnCompleted' });
+    actor.send({ type: 'turnAbandoned' });
+    expect(actor.getSnapshot().matches('capturing')).toBe(true);
+    promises.settle('capture', { output: { captureId: 'capture-1' } });
     await flush();
 
-    expect(actor.getSnapshot().matches({ preparing: 'basing' })).toBe(true);
-    /* `turn`, not `save`: the base mint is this turn's own first act, so the
-     * revision is attributed to the turn rather than to a person who did not
-     * ask for it. */
-    expect(parent.events.find((event) => event.type === 'cut')).toEqual({
-      type: 'cut',
-      trigger: 'turn',
-      turnId: 'turn-1',
-      checkoutId: 'checkout-1',
-      leaseIds: [],
-    });
-    expect(promises.inputsFor('writeLease')).toEqual([]);
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(parent.events.at(-1)).toMatchObject({ type: 'turnReleased', outcome: 'released' });
+    actor.stop();
+  });
 
-    actor.send({ type: 'revisionMinted', trigger: 'save', turnId: 'turn-1', revisionId: 'rev-base' });
-    await flush();
+  it('should cancel a queued cut when released while requesting', async () => {
+    const harness = start();
+    const { actor, parent } = harness;
 
-    expect(actor.getSnapshot().context.baseRevisionId).toBe('rev-base');
-    expect(promises.inputsFor('writeLease')).toEqual([
-      {
-        runId: 'run-1',
-        turnId: 'turn-1',
-        chatId: 'chat-1',
-        checkoutId: 'checkout-1',
-        baseRevisionId: 'rev-base',
-      },
+    await toHeld(harness);
+    await toRequesting(harness);
+    const requestId = lastCutId(harness);
+    actor.send({ type: 'turnAbandoned' });
+    actor.send({ type: 'turnAbandoned' });
+
+    expect(parent.events.filter((event) => event.type === 'cancelCut')).toEqual([
+      { type: 'cancelCut', requestId, checkoutId: 'checkout-1' },
     ]);
+    expect(actor.getSnapshot().matches('requesting')).toBe(true);
 
+    actor.send({ type: 'cutCancelled', requestId });
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(parent.events.at(-1)).toMatchObject({ type: 'turnReleased', outcome: 'released' });
     actor.stop();
   });
 
-  it('keeps the resolved base when the dirty base has nothing to save', async () => {
+  it('should finalize when the mint wins the race with a release', async () => {
+    const harness = start();
+    const { actor, emitted } = harness;
+
+    await toHeld(harness);
+    await toRequesting(harness);
+    actor.send({ type: 'turnAbandoned' });
+    actor.send({ type: 'revisionMinted', requestId: lastCutId(harness), revisionId: 'rev-2' });
+
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(emitted).toMatchObject([{ type: 'turnFinalized', revisionId: 'rev-2' }]);
+    actor.stop();
+  });
+
+  it('mints a dirty base after the lease and builds on it', async () => {
     const harness = start();
     const { actor, promises } = harness;
 
-    promises.settle('prepare', { output: { ...preparedOutput, dirty: true } });
-    await flush();
-    actor.send({ type: 'nothingToSave', trigger: 'save', turnId: 'turn-1' });
+    await toHeld(harness, { dirty: true });
+    actor.send({ type: 'revisionMinted', requestId: lastCutId(harness), revisionId: 'rev-base' });
+    actor.send({ type: 'turnCompleted' });
+    promises.settle('capture', { output: { captureId: 'capture-1' } });
     await flush();
 
-    expect(actor.getSnapshot().context.baseRevisionId).toBe('rev-1');
-    expect(promises.inputsFor('writeLease')).toHaveLength(1);
-
+    expect(promises.inputsFor('merge')).toEqual([
+      { checkoutId: 'checkout-1', captureId: 'capture-1', baseRevisionId: 'rev-base' },
+    ]);
     actor.stop();
   });
 
-  it('fails when the dirty base cannot be minted', async () => {
+  it('keeps the resolved head when the dirty base has nothing to save', async () => {
     const harness = start();
-    const { actor, promises } = harness;
 
-    promises.settle('prepare', { output: { ...preparedOutput, dirty: true } });
-    await flush();
-    actor.send({ type: 'cutFailed', trigger: 'save', turnId: 'turn-1', reason: 'quota' });
-    await flush();
+    await toHeld(harness, { dirty: true });
+    harness.actor.send({ type: 'nothingToSave', requestId: lastCutId(harness) });
 
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
-    expect(promises.inputsFor('writeLease')).toEqual([]);
-
-    actor.stop();
+    expect(harness.actor.getSnapshot().matches('held')).toBe(true);
+    expect(harness.actor.getSnapshot().context.baseRevisionId).toBe('rev-1');
+    harness.actor.stop();
   });
 
-  it('re-cuts a dirty base once when its mint loses the CAS, then fails', async () => {
+  it('refuses BASE_CUT_FAILED after retiring the record when the base cannot be minted', async () => {
     const harness = start();
     const { actor, promises, parent } = harness;
 
-    promises.settle('prepare', { output: { ...preparedOutput, dirty: true } });
+    await toHeld(harness, { dirty: true });
+    actor.send({ type: 'cutFailed', requestId: lastCutId(harness), reason: 'disk full' });
+
+    expect(actor.getSnapshot().matches('refusing')).toBe(true);
+    promises.settle('retireLease', { output: undefined });
     await flush();
-    const cutsBefore = parent.events.filter((event) => event.type === 'cut').length;
-    actor.send({ type: 'casLost', trigger: 'turn', turnId: 'turn-1' });
-
-    expect(actor.getSnapshot().matches({ preparing: 'basing' })).toBe(true);
-    expect(actor.getSnapshot().context.casRetries).toBe(1);
-    expect(parent.events.filter((event) => event.type === 'cut').length).toBe(cutsBefore + 1);
-
-    actor.send({ type: 'casLost', trigger: 'turn', turnId: 'turn-1' });
-
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
-    expect(actor.getSnapshot().context.reason).toBe('cas-lost');
-    expect(actor.getSnapshot().context.code).toBe('CAS_LOST');
-    expect(promises.inputsFor('writeLease')).toEqual([]);
-
-    actor.stop();
+    expect(parent.events.at(-1)).toEqual({ type: 'turnRefused', key, code: 'BASE_CUT_FAILED', reason: 'disk full' });
   });
 
-  it('fails a dirty base the checkout never answers', async () => {
+  it('re-cuts a dirty base once when its mint loses the CAS, then refuses', async () => {
     const harness = start();
-    const { actor, promises, clock } = harness;
+    const { actor } = harness;
 
-    promises.settle('prepare', { output: { ...preparedOutput, dirty: true } });
-    await flush();
-    clock.advance(60_000);
+    await toHeld(harness, { dirty: true });
+    actor.send({ type: 'casLost', requestId: lastCutId(harness) });
+    expect(lastCutId(harness)).toBe('run-1/0/base/1');
+    actor.send({ type: 'casLost', requestId: lastCutId(harness) });
 
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
-    /* Its own code: the base cut and the turn's cut fail for different reasons
-     * and a person is told different things (P4). */
-    expect(actor.getSnapshot().context.code).toBe('BASE_CUT_TIMED_OUT');
-    expect(promises.inputsFor('writeLease')).toEqual([]);
-
+    expect(actor.getSnapshot().matches('refusing')).toBe(true);
+    expect(actor.getSnapshot().context.code).toBe('BASE_CUT_FAILED');
     actor.stop();
   });
 
-  it('releases a preparing turn with no lease to retire', async () => {
-    const first = start();
-    first.actor.send({ type: 'turnAbandoned' });
+  it('withdraws the base cut when released while basing, and settles on its answer', async () => {
+    const harness = start();
+    const { actor, parent } = harness;
 
-    expect(first.actor.getSnapshot().matches('released')).toBe(true);
-    expect(first.promises.inputsFor('retireLease')).toEqual([]);
-    first.actor.stop();
+    await toHeld(harness, { dirty: true });
+    actor.send({ type: 'turnAbandoned' });
 
-    const second = start();
-    second.promises.settle('prepare', { output: { ...preparedOutput, dirty: true } });
+    expect(parent.events.at(-1)).toEqual({ type: 'cancelCut', requestId: 'run-1/0/base/0', checkoutId: 'checkout-1' });
+    actor.send({ type: 'revisionMinted', requestId: 'run-1/0/base/0', revisionId: 'rev-base' });
+
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    /* The release names the base it minted (RM-S15). */
+    expect(parent.events.at(-1)).toMatchObject({ type: 'turnReleased', outcome: 'released', revisionId: 'rev-base' });
+    actor.stop();
+  });
+
+  it('holds no bound on a cut: the result waits however long the checkout takes', async () => {
+    const harness = start();
+
+    await toHeld(harness);
+    await toRequesting(harness);
+    harness.clock.advance(10 * 60_000);
+
+    expect(harness.actor.getSnapshot().matches('requesting')).toBe(true);
+    harness.actor.stop();
+  });
+
+  it('should find its revisions before serving a completion when adopted', async () => {
+    const harness = start({ adopt: { checkoutId: 'checkout-1', headRevisionId: 'rev-1' } });
+    const { actor, promises, emitted } = harness;
+
+    expect(actor.getSnapshot().matches('adopting')).toBe(true);
+    actor.send({ type: 'turnCompleted' });
+    expect(promises.inputsFor('find')).toEqual([{ key, checkoutId: 'checkout-1', stopAt: 'rev-1' }]);
+    promises.settle('find', { output: { base: 'rev-base', result: 'rev-result' } });
     await flush();
-    second.actor.send({ type: 'release' });
 
-    expect(second.actor.getSnapshot().matches('released')).toBe(true);
-    expect(second.promises.inputsFor('retireLease')).toEqual([]);
-    second.actor.stop();
+    /* The result is already on disk, so the completion settles without a second cut. */
+    expect(actor.getSnapshot().matches('settled')).toBe(true);
+    expect(emitted).toMatchObject([{ type: 'turnFinalized', revisionId: 'rev-result' }]);
+    expect(cutsOf(harness)).toEqual([]);
+    actor.stop();
   });
 
   it('starts and stops with no leaked child, a serializable snapshot and no function in context', async () => {
     const harness = start();
     const { actor, callbacks } = harness;
 
-    await toLeased(harness);
+    await toHeld(harness);
     const persisted = actor.getPersistedSnapshot();
 
     expect(() => JSON.stringify(persisted)).not.toThrow();
@@ -793,46 +835,73 @@ describe('turnMachine', () => {
 
   it('should answer every public event in every reachable state', () => {
     const invokeId = (path: string): string => turnMachine.getStateNodeById(`turn.${path}`).invoke[0]?.id ?? '';
-    const prepareInvoke = invokeId('preparing.resolving');
-    const writeLeaseInvoke = invokeId('preparing.writingLease');
-    const captureInvoke = invokeId('finalizing.capturing');
-    const mergeInvoke = invokeId('finalizing.merging');
-    const retireInvoke = invokeId('retiring');
+    const ids = {
+      prepare: invokeId('resolving'),
+      writeLease: invokeId('writingLease'),
+      capture: invokeId('capturing'),
+      merge: invokeId('merging'),
+      find: invokeId('finding'),
+      adopt: invokeId('adopting'),
+      retire: invokeId('retiring'),
+      refuse: invokeId('refusing'),
+    };
     const publicEvents: readonly TurnMachineEvent[] = [
       { type: 'turnCompleted' },
       { type: 'turnAbandoned' },
-      { type: 'release' },
+      { type: 'acknowledge' },
       { type: 'leaseGranted' },
       { type: 'leaseRefused', reason: 'held elsewhere' },
-      { type: 'revisionMinted', trigger: 'turn', turnId: 'turn-1', revisionId: 'rev-2' },
-      { type: 'nothingToSave', trigger: 'turn', turnId: 'turn-1' },
-      { type: 'cutFailed', trigger: 'turn', turnId: 'turn-1', reason: 'disk full' },
-      { type: 'casLost', trigger: 'turn', turnId: 'turn-1' },
+      { type: 'revisionMinted', requestId: 'run-1/0/base/0', revisionId: 'rev-base' },
+      { type: 'revisionMinted', requestId: 'run-1/0/result/0', revisionId: 'rev-2' },
+      { type: 'nothingToSave', requestId: 'run-1/0/result/0' },
+      { type: 'cutFailed', requestId: 'run-1/0/result/0', reason: 'disk full' },
+      { type: 'casLost', requestId: 'run-1/0/result/0' },
+      { type: 'cutCancelled', requestId: 'run-1/0/result/0' },
+    ];
+    const effects = (id: string, output: unknown) => [
+      { type: `xstate.done.actor.${id}`, output },
+      { type: `xstate.error.actor.${id}`, error: new Error('broke') },
+    ];
+    const outcomes = [
+      ...effects(ids.prepare, { ...preparedOutput, dirty: true }),
+      /* A clean placement too, so the result cut takes the first sequence and its answers reach `finding`. */
+      { type: `xstate.done.actor.${ids.prepare}`, output: preparedOutput },
+      ...effects(ids.writeLease, written().output),
+      ...effects(ids.capture, { captureId: 'capture-1' }),
+      ...effects(ids.merge, { status: 'recorded' }),
+      { type: `xstate.done.actor.${ids.merge}`, output: { status: 'conflicted', conflictRevisionId: 'rev-c' } },
+      ...effects(ids.find, { result: 'rev-found' }),
+      { type: `xstate.done.actor.${ids.find}`, output: {} },
+      ...effects(ids.retire, undefined),
+      ...effects(ids.refuse, undefined),
     ];
     const options = {
-      input: { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1', parentRef: undefined },
+      input: { key, parentRef: undefined },
       /* Effect outcomes reach the states behind each invoke; they are not public. */
-      events: [
-        ...publicEvents,
-        { type: `xstate.done.actor.${prepareInvoke}`, output: { ...preparedOutput, dirty: true } },
-        { type: `xstate.error.actor.${prepareInvoke}`, error: new Error('no checkout') },
-        { type: `xstate.done.actor.${writeLeaseInvoke}`, output: { leaseIds: ['run-1'] } },
-        { type: `xstate.error.actor.${writeLeaseInvoke}`, error: new Error('read-only') },
-        { type: `xstate.done.actor.${captureInvoke}`, output: { captureId: 'capture-1' } },
-        { type: `xstate.error.actor.${captureInvoke}`, error: new Error('capture broke') },
-        { type: `xstate.done.actor.${mergeInvoke}`, output: { status: 'recorded' } },
-        { type: `xstate.done.actor.${mergeInvoke}`, output: { status: 'conflicted', conflictRevisionId: 'rev-c' } },
-        { type: `xstate.error.actor.${mergeInvoke}`, error: new Error('merge broke') },
-        { type: `xstate.done.actor.${retireInvoke}`, output: undefined },
-        { type: `xstate.error.actor.${retireInvoke}`, error: new Error('lease file gone') },
-      ],
+      events: [...publicEvents, ...outcomes],
       limit: 20_000,
-      /* `retiring` settles on the outcome it carries, so the projection keeps it. */
-      serializeState: (snapshot: AnyMachineSnapshot) =>
-        JSON.stringify([snapshot.value, (snapshot.context as { outcome?: unknown }).outcome]),
+      serializeState: (snapshot: AnyMachineSnapshot) => {
+        const context = snapshot.context as Record<string, unknown>;
+        return JSON.stringify([
+          snapshot.value,
+          context['outcome'],
+          context['releasing'],
+          context['cutSequence'],
+          context['dirtyBase'],
+        ]);
+      },
     };
 
-    expect(unansweredEvents(turnMachine, { ...options, ignore: knownDefects['turn'] })).toEqual([]);
-    expect(unreachedStates(turnMachine, options)).toEqual([]);
+    expect(unansweredEvents(turnMachine, { ...options, ignore: turnIgnoredEvents })).toEqual([]);
+    /* `admitting` is transient; `adopting` is reached only from an adopted input, which the next row walks. */
+    expect(unreachedStates(turnMachine, options)).toEqual(['turn.admitting', 'turn.adopting']);
+    expect(
+      unansweredEvents(turnMachine, {
+        ...options,
+        ignore: turnIgnoredEvents,
+        input: { key, adopt: { checkoutId: 'checkout-1', headRevisionId: 'rev-1' }, parentRef: undefined },
+        events: [...publicEvents, ...effects(ids.adopt, { result: 'rev-found' }), ...outcomes],
+      }),
+    ).toEqual([]);
   });
 });

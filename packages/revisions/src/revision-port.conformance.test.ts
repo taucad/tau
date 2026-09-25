@@ -285,6 +285,27 @@ const conformance = (adapter: Adapter): void => {
       expect(rows.find((entry) => entry.revisionId === child)?.turnId).toBeUndefined();
     }, 180_000);
 
+    /* RM-R9: find-or-cut and adoption read the attempt and its cut back from the revision itself. */
+    it('should round-trip run, attempt, cut and held leases in the trailer', async () => {
+      const written: RevisionProvenance = {
+        ...provenance('agent'),
+        turnId: 'turn-lane-2',
+        runId: 'run-lane-2',
+        attempt: 1,
+        turnCut: 'result',
+        heldRunIds: ['run-other'],
+      };
+      const receipt = await port.writeRevision({
+        parents: [child],
+        tree: tree({ 'a.txt': 'a4\n' }),
+        provenance: written,
+        summary: summary('Turn result'),
+      });
+
+      const record = await port.readRevision(revisionId(receipt.commitId));
+      expect(record?.provenance).toStrictEqual(written);
+    }, 180_000);
+
     /**
      * S31: a named version is an annotated tag, on both engines.
      *

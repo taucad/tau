@@ -28,12 +28,10 @@ import type { CheckoutRecord } from '#revision-port.js';
 import { syncMachine } from '#sync.machine.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnLeaseActorInput } from '#turn.machine.js';
-import {
-  createFakeCallbackActors,
-  createFakePromiseActors,
-  createManualClock,
-  recordEmitted,
-} from '#test/fake-actors.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFakeCallbackActors, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
 
 const flush = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
@@ -51,7 +49,14 @@ const live: CheckoutRecord = {
   leaseChatIds: [],
 };
 
+/** Defects this suite reaches, as in `project-revisions.machine.test.ts`; W5 deletes each row as it lands. */
+const knownDefects: IgnoredEvents = {
+  // W5: every registry announcement is forwarded, and `idle` has no verb to settle.
+  branch: [['idle', 'branchesChanged']],
+};
+
 const start = () => {
+  const guard = guardActors({ ignore: knownDefects });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const stub = promises.actor;
@@ -120,7 +125,11 @@ const start = () => {
         }),
       },
     }),
-    { clock: createManualClock(), input: { projectId: 'project-1', liveCheckoutId: 'checkout-live' } },
+    {
+      clock: new StepClock(),
+      inspect: guard.inspect,
+      input: { projectId: 'project-1', liveCheckoutId: 'checkout-live' },
+    },
   );
   const emitted = recordEmitted(actor);
   actor.start();

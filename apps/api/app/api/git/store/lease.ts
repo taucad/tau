@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -72,6 +72,29 @@ const leaseConfiguration: Readonly<Record<string, string>> = {
   'receive.fsckObjects': 'true',
 };
 
+/** A config value or subsection name as git reads it inside double quotes. */
+const quoted = (text: string): string => `"${text.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}"`;
+
+/**
+ * `section.key` and `section.subsection.key` settings as git config text.
+ *
+ * One append after `git init` replaces one `git config` spawn per key (E10):
+ * every request hydrates a lease, and a push is two requests. A later line for
+ * the same key wins, which is how git itself reads a repeated key.
+ *
+ * @param settings - The settings, by dotted name.
+ * @returns The config file text.
+ */
+const leaseConfigText = (settings: Readonly<Record<string, string>>): string =>
+  Object.entries(settings)
+    .map(([key, value]) => {
+      const section = key.slice(0, key.indexOf('.'));
+      const name = key.slice(key.lastIndexOf('.') + 1);
+      const subsection = key.slice(section.length + 1, key.length - name.length - 1);
+      return `[${section}${subsection === '' ? '' : ` ${quoted(subsection)}`}]\n\t${name} = ${quoted(value)}\n`;
+    })
+    .join('');
+
 export const runGit = async (cwd: string, args: readonly string[]): Promise<string> => {
   const { stdout } = await execFileAsync('git', [...args], {
     cwd,
@@ -133,10 +156,7 @@ export const hydrateLease = async (args: HydrateLeaseArguments): Promise<Reposit
   try {
     // `--template=` keeps git's sample hooks out: the only hook in a lease is Tau's.
     await runGit(directory, ['init', '--bare', '--quiet', '--template=', '--initial-branch=main', '.']);
-    for (const [key, value] of Object.entries({ ...leaseConfiguration, ...args.config })) {
-      // oxlint-disable-next-line no-await-in-loop -- `git config` writes one file; parallel writers race it
-      await runGit(directory, ['config', key, value]);
-    }
+    await appendFile(path.join(directory, 'config'), leaseConfigText({ ...leaseConfiguration, ...args.config }));
     await installPreReceiveHook(directory);
 
     const hydratedPackFiles = await fetchPacks({ store: args.store, locator: args.locator, manifest, directory });

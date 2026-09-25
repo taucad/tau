@@ -20,6 +20,14 @@ runs:
       run: corepack enable
       shell: bash
 
+    # Native revision suites, the CLI and every disk host record with `git` and
+    # `git lfs` (`resolveGitToolchain`). The GitHub-hosted images ship git-lfs;
+    # this states that dependency and fails here, by name, on an image without it,
+    # rather than as product-shaped test failures later.
+    - name: Require git-lfs
+      run: git lfs version
+      shell: bash
+
     - name: Get pnpm store directory
       shell: bash
       run: |

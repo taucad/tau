@@ -99,6 +99,8 @@ export type CheckoutMachineContext = Readonly<{
   cutTreeId: string | undefined;
   revisionId: string | undefined;
   reason: string | undefined;
+  /** A head fact arrived during the mint; the head is re-read once the mint settles (W0.9). */
+  rereadAfterMint: boolean;
 }>;
 
 /** Events accepted by checkoutMachine. @public */
@@ -106,7 +108,8 @@ export type CheckoutMachineEvent =
   /** One content-change event, never one per path (A38). */
   | Readonly<{ type: 'changed'; paths: readonly string[]; generation: number }>
   | Readonly<{ type: 'cut'; trigger: CheckoutCutTrigger; turnId?: string; leaseIds: readonly string[] }>
-  | Readonly<{ type: 'headChanged'; revisionId: string; treeId: string }>
+  /* `branch` is present when the fact names one: a live switch moves the checkout to another branch (W0.10). */
+  | Readonly<{ type: 'headChanged'; revisionId: string; treeId: string; branch?: string }>
   | Readonly<{ type: 'fenceGranted' }>
   | Readonly<{ type: 'fenceRefused'; reason: string }>;
 
@@ -363,6 +366,7 @@ const checkoutMachineDefinition = setup({
   guards: {
     /* I5: a revision is minted only when the cut's tree differs from the head's. */
     treeUnchanged: (context: CheckoutMachineContext, treeId: string) => treeId === context.headTreeId,
+    headMovedDuringMint: (context: CheckoutMachineContext) => context.rereadAfterMint,
     /* F4: a write that landed during the mint leaves the checkout dirty. */
     writeGenerationUnchanged: (context: CheckoutMachineContext) => context.writeGeneration === context.cutGeneration,
     hasQueuedCut: (context: CheckoutMachineContext) => context.queued.length > 0,
@@ -384,6 +388,7 @@ const checkoutMachineDefinition = setup({
     cutTreeId: undefined,
     revisionId: undefined,
     reason: undefined,
+    rereadAfterMint: false,
   }),
   initial: 'clean',
   on: {
@@ -391,7 +396,11 @@ const checkoutMachineDefinition = setup({
     changed: { context: ({ context, event }) => recordWrite(context, event) },
     headChanged: {
       target: '.clean',
-      context: ({ event }) => ({ headRevisionId: event.revisionId, headTreeId: event.treeId }),
+      context: ({ event }) => ({
+        headRevisionId: event.revisionId,
+        headTreeId: event.treeId,
+        ...(event.branch === undefined ? {} : { branch: event.branch }),
+      }),
     },
     /* Reached only from `minting`, `stale` and `rereading`; the resting states
      * below take `cut` straight into a mint. */
@@ -456,6 +465,22 @@ const checkoutMachineDefinition = setup({
         id: 'fence',
         src: 'fence',
         input: ({ context }) => ({ checkoutId: context.checkoutId }),
+      },
+      on: {
+        /*
+         * W0.9 (L7 D-L7-3): a head fact never aborts a mint. An aborted
+         * `casHead` still reaches the store, so the requester would be answered
+         * before a revision appears. The mint's own compare-and-swap answers,
+         * and `casHead` refuses a branch the checkout left; the head is re-read
+         * once the mint settles. The branch is taken now because a move applies
+         * under this fence, so the tree being cut is already on it.
+         */
+        headChanged: {
+          context: ({ event }) => ({
+            rereadAfterMint: true,
+            ...(event.branch === undefined ? {} : { branch: event.branch }),
+          }),
+        },
       },
       initial: 'acquiring',
       states: {
@@ -538,9 +563,14 @@ const checkoutMachineDefinition = setup({
         },
         settled: { type: 'final' },
       },
-      /* F4: only an unchanged write generation may return to `clean`. */
+      /* F4: only an unchanged write generation may return to `clean`. The
+       * settled request was answered, so a failed re-read must not answer it again. */
       onDone: ({ context, guards }) =>
-        guards.writeGenerationUnchanged(context) ? { target: 'clean' } : { target: 'dirty' },
+        guards.headMovedDuringMint(context)
+          ? { target: 'rereading', context: { pending: undefined } }
+          : guards.writeGenerationUnchanged(context)
+            ? { target: 'clean' }
+            : { target: 'dirty' },
     },
     stale: {
       entry: ({ context }, enq) => {
@@ -549,6 +579,7 @@ const checkoutMachineDefinition = setup({
       always: { target: 'rereading' },
     },
     rereading: {
+      entry: () => ({ context: { rereadAfterMint: false } }),
       invoke: {
         src: 'readHead',
         input: ({ context }) => ({ checkoutId: context.checkoutId }),
@@ -570,6 +601,9 @@ const checkoutMachineDefinition = setup({
         reportStatus(context, enq, 'failed');
         return { context: drained };
       },
+      /* A head fact deferred by the failed mint is still news (W0.9). */
+      always: ({ context, guards }) =>
+        guards.headMovedDuringMint(context) ? { target: 'rereading', context: { pending: undefined } } : undefined,
       on: {
         changed: { target: 'dirty', context: ({ context, event }) => recordWrite(context, event) },
         cut: { target: 'minting', context: ({ context, event }) => takeRequest(context, event) },

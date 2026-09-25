@@ -1044,6 +1044,43 @@ describe('Compaction', () => {
     expect(append).toHaveBeenCalledWith(expect.objectContaining({ type: 'history.compacted' }));
   });
 
+  /*
+   * RV5-F1 (W0.20): pi reads a successful reply whose input exceeds the window
+   * as overflow, and Tau passes its capped window, so a charged reply was
+   * dropped and the step charged again. Only a refused call is retried.
+   */
+  const cappedReplies: ReadonlyArray<readonly [string, 'stop' | 'length', AssistantMessage]> = [
+    ['a stop', 'stop', answeredTurn(9000, 1)],
+    ['an empty length stop', 'length', { ...answeredTurn(8192, 1), content: [], stopReason: 'length' }],
+  ];
+  it.each(cappedReplies)(
+    'should keep %s reply whose input exceeds the capped window and charge the step once',
+    async (_name, reason, reply) => {
+      const messages = evictableHistory(8);
+      const append = vi.fn<SessionRecord['append']>(async () => undefined);
+      const agent = new Agent({ streamFn: dispatchedStream, initialState: { model: stubModel, messages } });
+      const compaction = installCompaction({
+        agent,
+        record: recordFor(messages, append),
+        projectHistory: async () => messages,
+        contextWindow: 8192,
+        summarize: async () => 'emergency summary',
+      });
+      const base = vi.fn(() => {
+        const stream = createAssistantMessageEventStream();
+        stream.push({ type: 'start', partial: reply });
+        stream.push({ type: 'done', reason, message: reply });
+        return stream;
+      }) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
+
+      const stream = await compaction.wrapStreamFn(base)(stubModel, { messages: messages as Context['messages'] });
+
+      expect(await stream.result()).toBe(reply);
+      expect(base).toHaveBeenCalledTimes(1);
+      expect(append).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'history.compacted' }));
+    },
+  );
+
   it('should persist an emergency overflow projection before retrying the model', async () => {
     const messages: UserMessage[] = Array.from({ length: 8 }, (_, index) => ({
       role: 'user',
@@ -1069,7 +1106,8 @@ describe('Compaction', () => {
     const base = vi.fn(() => {
       calls++;
       const stream = createAssistantMessageEventStream();
-      const stopReason: 'length' | 'stop' = calls === 1 ? 'length' : 'stop';
+      // The provider refuses the first call (pi's error case); only a refused call is sent again.
+      const stopReason: 'error' | 'stop' = calls === 1 ? 'error' : 'stop';
       const message: AssistantMessage = {
         role: 'assistant',
         content: [],
@@ -1085,11 +1123,15 @@ describe('Compaction', () => {
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         },
         stopReason,
-        ...(calls === 1 ? { errorMessage: 'provider overflow response body' } : {}),
+        ...(calls === 1 ? { errorMessage: 'prompt is too long: provider overflow response body' } : {}),
         timestamp: 0,
       };
       stream.push({ type: 'start', partial: message });
-      stream.push({ type: 'done', reason: stopReason, message });
+      stream.push(
+        stopReason === 'error'
+          ? { type: 'error', reason: stopReason, error: message }
+          : { type: 'done', reason: stopReason, message },
+      );
       return stream;
     });
 
@@ -1102,7 +1144,7 @@ describe('Compaction', () => {
     expect(compacted?.type === 'history.compacted' ? compacted.details : undefined).toMatchObject({
       lane: 'overflow',
       tier: 'summarization',
-      discardedOverflowError: 'provider overflow response body',
+      discardedOverflowError: 'prompt is too long: provider overflow response body',
     });
   });
 
@@ -1142,11 +1184,11 @@ describe('Compaction', () => {
       const stream = createAssistantMessageEventStream();
       const message: AssistantMessage = {
         ...answeredTurn(8192, 101),
-        stopReason: 'length',
-        errorMessage: 'still too long',
+        stopReason: 'error',
+        errorMessage: 'prompt is too long',
       };
       stream.push({ type: 'start', partial: message });
-      stream.push({ type: 'done', reason: 'length', message });
+      stream.push({ type: 'error', reason: 'error', error: message });
       return stream;
     }) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
     const stream = await compaction.wrapStreamFn(overflow)(stubModel, {

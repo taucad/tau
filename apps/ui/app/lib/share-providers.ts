@@ -42,7 +42,17 @@ export type GithubGistAuthorizationSurface = 'editor' | 'share-page';
 
 export type GithubGistAuthorizationReturn = {
   readonly outcome: 'returned' | 'cancelled' | 'failed';
+  /** What went wrong, when the grant failed; a retry cannot fix these two (D51). */
+  readonly failure?: string;
   readonly remainingSearch: string;
+};
+
+/* Better Auth's link refusals (`callback.ts`); `allowDifferentEmails` is false. */
+const githubLinkFailures: Readonly<Record<string, string>> = {
+  "email_doesn't_match":
+    'This GitHub account uses a different email address from your Tau account. Sign in to GitHub with an account that uses the same email, then try again.',
+  account_already_linked_to_different_user:
+    'This GitHub account is already linked to another Tau account. Sign in to GitHub with a different account, then try again.',
 };
 
 export const createGithubGistAuthorizationReturnUrl = ({
@@ -75,8 +85,10 @@ export const parseGithubGistAuthorizationReturn = (search: string): GithubGistAu
   parameters.delete('error');
   parameters.delete('error_description');
   const remaining = parameters.toString();
+  const failure = error === null ? undefined : githubLinkFailures[error];
   return {
     outcome: error === null ? 'returned' : error === 'access_denied' ? 'cancelled' : 'failed',
+    ...(failure === undefined ? {} : { failure }),
     remainingSearch: remaining ? `?${remaining}` : '',
   };
 };

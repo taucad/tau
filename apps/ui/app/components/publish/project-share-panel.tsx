@@ -44,6 +44,7 @@ export type ProjectSharePanelProps = {
   readonly collectSnapshot?: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
   readonly initialMethod?: ShareMethod;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
+  readonly githubAuthorizationFailure?: string;
 };
 
 export type ShareMethod = 'direct' | 'tau' | 'github-gist';
@@ -352,12 +353,14 @@ function PortableShareBody({
   collectSnapshot,
   signIn,
   githubAuthorizationOutcome,
+  githubAuthorizationFailure,
   onBusyChange,
 }: {
   readonly method: Exclude<ShareMethod, 'tau'>;
   readonly collectSnapshot: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
   readonly signIn: string;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
+  readonly githubAuthorizationFailure?: string;
   readonly onBusyChange: (busy: boolean) => void;
 }): React.JSX.Element {
   const [busy, setBusy] = useState(false);
@@ -616,7 +619,7 @@ function PortableShareBody({
             ? 'GitHub authorization returned. Checking Gist access…'
             : githubAuthorizationOutcome === 'cancelled'
               ? 'GitHub Gist access was not granted.'
-              : 'GitHub authorization could not be completed. Try again.'}
+              : (githubAuthorizationFailure ?? 'GitHub authorization could not be completed. Try again.')}
         </div>
       ) : null}
       {!isDirect && browserConsent ? (
@@ -705,6 +708,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     collectSnapshot,
     initialMethod,
     githubAuthorizationOutcome,
+    githubAuthorizationFailure,
   } = properties;
   const { pathname, search } = useLocation();
   const [shareMethod, setShareMethod] = useState<ShareMethod>(initialMethod ?? (collectSnapshot ? 'direct' : 'tau'));
@@ -855,6 +859,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
           collectSnapshot={collectSnapshot}
           signIn={signIn}
           githubAuthorizationOutcome={githubAuthorizationOutcome}
+          githubAuthorizationFailure={githubAuthorizationFailure}
           onBusyChange={setPortableBusy}
         />
       </SharePanelFrame>

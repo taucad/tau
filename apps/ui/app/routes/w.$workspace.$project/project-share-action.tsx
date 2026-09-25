@@ -16,6 +16,7 @@ type ProjectShareNavigationIntent = {
   readonly shouldOpen: boolean;
   readonly initialMethod?: ShareMethod;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
+  readonly githubAuthorizationFailure?: string;
   readonly remainingSearch: string;
 };
 
@@ -44,6 +45,7 @@ export const parseProjectShareNavigationIntent = (search: string): ProjectShareN
     shouldOpen,
     ...(initialMethod ? { initialMethod } : githubAuthorization ? { initialMethod: 'github-gist' } : {}),
     ...(githubAuthorization ? { githubAuthorizationOutcome: githubAuthorization.outcome } : {}),
+    ...(githubAuthorization?.failure === undefined ? {} : { githubAuthorizationFailure: githubAuthorization.failure }),
     remainingSearch: remaining ? `?${remaining}` : '',
   };
 };
@@ -186,6 +188,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       collectSnapshot={collectSnapshot}
       initialMethod={navigationIntent.initialMethod}
       githubAuthorizationOutcome={navigationIntent.githubAuthorizationOutcome}
+      githubAuthorizationFailure={navigationIntent.githubAuthorizationFailure}
     />
   );
 }

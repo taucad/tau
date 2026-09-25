@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { captureRevisionTree, createCaptureMemo } from '#algorithms/revision-capture.js';
 import type { RevisionCaptureFileSystem } from '#algorithms/revision-capture.js';
 import type { DirectoryEntry, FileStat, FileStatEntry } from '@taucad/filesystem';
+import { createMemoryProvider } from '@taucad/filesystem/backend';
 
 /**
  * A real filesystem can drop an entry between `readdir` and the `stat` that
@@ -540,5 +541,177 @@ describe('createCaptureMemo', () => {
     await captureRevisionTree(filesystem, { ...trustedMemo.unchanged(oldEnough, observedAt) });
     await captureRevisionTree(filesystem, { ...trustedMemo.unchanged(oldEnough, observedAt) });
     expect(reads).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('captureRevisionTree changedSince (E1)', () => {
+  const text = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+  const project = async () => {
+    const filesystem = await createMemoryProvider();
+    await Promise.all(
+      Array.from({ length: 30 }, async (_, index) =>
+        filesystem.writeFile(
+          `src/${String(index % 3)}/file-${String(index)}.ts`,
+          `export const x = ${String(index)};\n`,
+        ),
+      ),
+    );
+    await filesystem.writeFile('.git/HEAD', 'ref: refs/heads/main\n');
+    const reads = vi.spyOn(filesystem, 'readFile');
+    return { filesystem, reads };
+  };
+  const exclude = (path: string): boolean => path === '.git';
+
+  it('should read only the changed paths and equal a full capture', async () => {
+    const { filesystem, reads } = await project();
+    const previous = await captureRevisionTree(filesystem, { exclude });
+    await filesystem.writeFile('src/1/file-4.ts', 'export const x = "edited";\n');
+    await filesystem.writeFile('src/1/added.ts', 'export const added = true;\n');
+    await filesystem.unlink('src/2/file-5.ts');
+    reads.mockClear();
+
+    const incremental = await captureRevisionTree(filesystem, {
+      exclude,
+      changedSince: { tree: previous, paths: ['src/1/file-4.ts', 'src/1/added.ts', 'src/2/file-5.ts'] },
+    });
+
+    expect(reads.mock.calls.map(([path]) => path).toSorted()).toEqual(['src/1/added.ts', 'src/1/file-4.ts']);
+    const full = await captureRevisionTree(filesystem, { exclude });
+    expect(incremental.entries()).toEqual(full.entries());
+  });
+
+  it('should list a changed directory whole and drop one that is gone', async () => {
+    const { filesystem, reads } = await project();
+    const previous = await captureRevisionTree(filesystem, { exclude });
+    await filesystem.rename('src/0', 'lib/0');
+    reads.mockClear();
+
+    const incremental = await captureRevisionTree(filesystem, {
+      exclude,
+      changedSince: { tree: previous, paths: ['src/0', 'lib/0'] },
+    });
+
+    expect(reads).toHaveBeenCalledTimes(10);
+    expect(incremental.has('src/0/file-0.ts')).toBe(false);
+    const full = await captureRevisionTree(filesystem, { exclude });
+    expect(incremental.entries()).toEqual(full.entries());
+  });
+
+  it('should not read a changed path the full walk would never reach', async () => {
+    const { filesystem, reads } = await project();
+    const previous = await captureRevisionTree(filesystem, { exclude });
+    await filesystem.writeFile('.git/HEAD', 'ref: refs/heads/other\n');
+    reads.mockClear();
+
+    const incremental = await captureRevisionTree(filesystem, {
+      exclude,
+      changedSince: { tree: previous, paths: ['.git/HEAD'] },
+    });
+
+    expect(reads).not.toHaveBeenCalled();
+    expect(incremental.has('.git/HEAD')).toBe(false);
+    expect(incremental.size).toBe(previous.size);
+  });
+
+  it('should walk everything when a changed path names the root', async () => {
+    const { filesystem, reads } = await project();
+    const previous = await captureRevisionTree(filesystem, { exclude });
+    reads.mockClear();
+
+    await captureRevisionTree(filesystem, { exclude, changedSince: { tree: previous, paths: [''] } });
+
+    expect(reads).toHaveBeenCalledTimes(30);
+  });
+
+  it('should walk everything when the change set contradicts the previous tree', async () => {
+    const { filesystem } = await project();
+    await filesystem.writeFile('notes', 'a file\n');
+    const previous = await captureRevisionTree(filesystem, { exclude });
+    await filesystem.unlink('notes');
+    await filesystem.writeFile('notes/today.md', 'a directory now\n');
+
+    /* The deletion of `notes` was never reported, only the new file under it. */
+    const incremental = await captureRevisionTree(filesystem, {
+      exclude,
+      changedSince: { tree: previous, paths: ['notes/today.md'] },
+    });
+
+    expect(incremental.has('notes')).toBe(false);
+    const full = await captureRevisionTree(filesystem, { exclude });
+    expect(incremental.entries()).toEqual(full.entries());
+  });
+
+  it('should still refuse a required path the changed paths removed', async () => {
+    const { filesystem } = await project();
+    const previous = await captureRevisionTree(filesystem, { exclude });
+    await filesystem.unlink('src/0/file-0.ts');
+
+    await expect(
+      captureRevisionTree(filesystem, {
+        exclude,
+        requiredPaths: ['src/0/file-0.ts'],
+        changedSince: { tree: previous, paths: ['src/0/file-0.ts'] },
+      }),
+    ).rejects.toThrow('Required capture paths were not captured: src/0/file-0.ts');
+  });
+
+  it('should copy reused bytes it did not read itself, so their owner cannot rewrite the tree', async () => {
+    const { filesystem } = await project();
+    const foreign = text('export const x = 0;\n');
+
+    const tree = await captureRevisionTree(filesystem, {
+      exclude,
+      reuse: (path) => (path === 'src/0/file-0.ts' ? foreign : undefined),
+    });
+    foreign.fill(0);
+
+    expect(tree.get('src/0/file-0.ts')).toStrictEqual(text('export const x = 0;\n'));
+  });
+});
+
+describe('createCaptureMemo invalidation', () => {
+  const observedAt = 1_000_000;
+  const tree = { '': ['part.ts'], 'part.ts': 'export const x = 1;\n' };
+  const stat = (overrides: Readonly<{ size?: number; mtimeMs?: number }>): FileStatEntry[] => [
+    {
+      path: 'part.ts',
+      name: 'part.ts',
+      type: 'file',
+      size: tree['part.ts'].length,
+      mtimeMs: observedAt - 60_000,
+      contentKind: 'text',
+      lineCount: 1,
+      ...overrides,
+    },
+  ];
+
+  it.each([
+    ['its size changes', { size: 99 }],
+    ['its mtime changes', { mtimeMs: observedAt - 30_000 }],
+  ])('should read a memoised file again when %s', async (_label, overrides) => {
+    const filesystem = vanishingFileSystem(tree, new Set());
+    const reads = vi.spyOn(filesystem, 'readFileStream');
+    const memo = createCaptureMemo();
+    await captureRevisionTree(filesystem, memo.unchanged(stat({}), observedAt));
+    await captureRevisionTree(filesystem, memo.unchanged(stat({}), observedAt));
+    expect(reads).toHaveBeenCalledOnce();
+
+    await captureRevisionTree(filesystem, memo.unchanged(stat(overrides), observedAt));
+
+    expect(reads).toHaveBeenCalledTimes(2);
+  });
+
+  it('should read a file on every cut while its mtime is inside the racy window of the capture start', async () => {
+    const filesystem = vanishingFileSystem(tree, new Set());
+    const reads = vi.spyOn(filesystem, 'readFileStream');
+    const memo = createCaptureMemo();
+    const racy = stat({ mtimeMs: observedAt - 1000 });
+
+    for (let cut = 0; cut < 3; cut += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- consecutive cuts of one checkout.
+      await captureRevisionTree(filesystem, memo.unchanged(racy, observedAt));
+    }
+
+    expect(reads).toHaveBeenCalledTimes(3);
   });
 });

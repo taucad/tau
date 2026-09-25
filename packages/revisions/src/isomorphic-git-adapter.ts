@@ -63,6 +63,8 @@ import { walkRevisionLog } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import { createTreeIdMemo } from '#tree-id-memo.js';
+import type { TreeObject } from '#tree-id-memo.js';
 import { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
 import {
   isHostLocalRef,
@@ -221,31 +223,6 @@ const withRefLock = async <T>(name: string, operation: () => Promise<T>): Promis
     }
     return locks.request(`tau:revision-ref:${name}`, { mode: 'exclusive' }, async () => operation());
   });
-
-type TreeDraft = Readonly<{
-  files: Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>>;
-  directories: Map<string, TreeDraft>;
-}>;
-
-const treeDraft = (): TreeDraft => ({ files: new Map(), directories: new Map() });
-
-const draftOf = (tree: ImmutableRevisionTree): TreeDraft => {
-  const root = treeDraft();
-  for (const entry of tree.entries()) {
-    const segments = entry.path.split('/');
-    let node = root;
-    for (const segment of segments.slice(0, -1)) {
-      let child = node.directories.get(segment);
-      if (child === undefined) {
-        child = treeDraft();
-        node.directories.set(segment, child);
-      }
-      node = child;
-    }
-    node.files.set(segments.at(-1)!, { content: entry.content, mode: entry.mode });
-  }
-  return root;
-};
 
 /**
  * Empty one checkout route.
@@ -463,25 +440,37 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     return paths;
   };
 
-  const writeTreeGraph = async (node: TreeDraft): Promise<string> => {
-    const entries: TreeEntry[] = await Promise.all([
-      ...[...node.files].map(
-        async ([path, file]): Promise<TreeEntry> => ({
-          mode: file.mode,
-          path,
-          oid: await writeBlob({ fs, gitdir, blob: file.content }),
-          type: 'blob',
-        }),
-      ),
-      ...[...node.directories].map(
-        async ([path, child]): Promise<TreeEntry> => ({
-          mode: directoryMode,
-          path,
-          oid: await writeTreeGraph(child),
-          type: 'tree',
-        }),
-      ),
-    ]);
+  /* Ids of the trees this store writes, kept across mints (E3). */
+  const treeIds = createTreeIdMemo();
+  /*
+   * Whether the store already holds an object, asked the way isomorphic-git's
+   * own loose writer asks before it writes one.
+   *
+   * ponytail: loose objects only — an object that arrived in a fetched pack is
+   * written again loose, which costs one write and stays correct.
+   */
+  const holds = async (oid: string): Promise<boolean> =>
+    filesystem.exists(`${gitdir}/objects/${oid.slice(0, 2)}/${oid.slice(2)}`);
+
+  /*
+   * Store one tree object and whatever under it the store lacks, children
+   * first (B1). A tree is written only after everything it names, so a tree the
+   * store holds proves its whole subtree is held: a mint after a one-file edit
+   * writes that blob and the trees on its path, not the project.
+   */
+  const writeTreeGraph = async (node: TreeObject): Promise<string> => {
+    if (await holds(node.oid)) {
+      return node.oid;
+    }
+    const entries: TreeEntry[] = await Promise.all(
+      node.entries.map(async (entry): Promise<TreeEntry> => {
+        if (entry.type === 'tree') {
+          return { mode: directoryMode, path: entry.name, oid: await writeTreeGraph(entry.tree), type: 'tree' };
+        }
+        const oid = (await holds(entry.oid)) ? entry.oid : await writeBlob({ fs, gitdir, blob: entry.content });
+        return { mode: entry.mode, path: entry.name, oid, type: 'blob' };
+      }),
+    );
     return writeTree({ fs, gitdir, tree: entries });
   };
 
@@ -892,7 +881,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           ? { tree: input.tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
           : cleanLargeObjects(input.tree);
       await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
-      const treeId = await writeTreeGraph(draftOf(recorded.tree));
+      const treeId = await writeTreeGraph(treeIds.treeObject(recorded.tree, objectFormat));
       const trailer: RevisionTrailer = {
         parents: [...input.parents],
         provenance: input.provenance,
@@ -1265,7 +1254,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        */
       const configuredRemotes = await port.listRemotes();
       const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
-      if (!remoteCarriesLargeObjects(configuredRemote ?? input.remote)) {
+      /* An unconfigured name has no provider to ask, and no URL to push to either. */
+      if (configuredRemote === undefined || !remoteCarriesLargeObjects(configuredRemote)) {
         const large = await pointerPaths(input.refs);
         if (large.size > 0) {
           throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage([...large.values()]));

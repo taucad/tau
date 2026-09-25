@@ -967,7 +967,9 @@ const syncMachineDefinition = setup({
                 conflictRef: `refs/heads/${event.output.branch}`,
                 error: 'The remote and this device changed the same files.',
               };
-              if (context.parentRef !== undefined) {
+              /* A re-pull that lands on the conflict already waiting (D55) is
+               * not news: announcing it again toasted on every retry. */
+              if (context.parentRef !== undefined && context.conflictRef !== conflict.conflictRef) {
                 enq.sendTo(context.parentRef, {
                   type: 'mergeConflicted',
                   branch: event.output.branch,

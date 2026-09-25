@@ -50,7 +50,7 @@
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
-import type { Actor } from 'xstate';
+import type { Actor, AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
 
 import * as machineModule from '#sync.machine.js';
@@ -59,19 +59,62 @@ import type {
   SyncActors,
   SyncFetchActorOutput,
   SyncMachineEmitted,
+  SyncMachineEvent,
   SyncMergeActorOutput,
   SyncPushActorOutput,
   SyncReadRemoteActorOutput,
 } from '#sync.machine.js';
 import type { SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import {
   createFakeCallbackActors,
   createFakeParent,
   createFakePromiseActors,
-  createManualClock,
   recordEmitted,
-} from '#test/fake-actors.js';
-import type { FakeCallbackActors, FakeParent, FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+} from '@taucad/xstate-testing/fakes';
+import type { FakeCallbackActors, FakeParent, FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { ActorGuard, IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
+
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 answers each one or moves it to an exported
+ * `syncIgnoredEvents` (D13, MC-R17), and deletes the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  sync: [
+    // W5: a guarded handler that returns nothing drops the event (L7 F3): `open` with no
+    // remote, and `conflictResolved` naming a ref this machine is not conflicted about.
+    ['reading', 'open'],
+    ['noRemote', 'open'],
+    ['pushing', 'open'],
+    ['failed', 'open'],
+    ['conflicted', 'conflictResolved'],
+    // W5: every other public event a state does not take (totality).
+    ['reading', 'syncNow'],
+    ['reading', 'remoteConnected'],
+    ['reading', 'conflictResolved'],
+    ['noRemote', 'conflictResolved'],
+    ['opening', 'syncNow'],
+    ['opening', 'remoteConnected'],
+    ['opening', 'conflictResolved'],
+    ['backedUp', 'conflictResolved'],
+    ['pending', 'open'],
+    ['pending', 'remoteConnected'],
+    ['pending', 'conflictResolved'],
+    ['pushing', 'syncNow'],
+    ['pushing', 'remoteConnected'],
+    ['pushing', 'conflictResolved'],
+    ['recording', 'syncNow'],
+    ['recording', 'remoteConnected'],
+    ['recording', 'conflictResolved'],
+    ['queued', 'conflictResolved'],
+    ['failed', 'conflictResolved'],
+    // W5 (MC-R16): the offline backoff answers its own timer with nothing.
+    ['queued', 'xstate.after.syncBackoff.sync.queued'],
+  ],
+};
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
@@ -93,13 +136,14 @@ type Harness = Readonly<{
   effects: FakePromiseActors;
   holds: FakeCallbackActors;
   parent: FakeParent;
-  clock: ManualClock;
+  clock: StepClock;
+  guard: ActorGuard;
   emitted: ReadonlyArray<Record<string, unknown>>;
   stop: () => void;
 }>;
 
 /**
- * Start one scheduler over scripted effects and a manual clock.
+ * Start one scheduler over scripted effects and a step clock.
  *
  * @param options - What the record and git's remotes list answer at start.
  * @returns The running actor and everything the suite asserts against.
@@ -115,7 +159,8 @@ const start = (
   const effects = createFakePromiseActors();
   const holds = createFakeCallbackActors();
   const parent = createFakeParent();
-  const clock = createManualClock();
+  const guard = guardActors({ ignore: knownDefects });
+  const clock = new StepClock();
   effects.script(
     'readPending',
     options.queueError === undefined ? { output: options.pending ?? emptyQueue } : { error: options.queueError },
@@ -133,6 +178,7 @@ const start = (
   };
   const actor = createActor(syncMachine.provide({ actors }), {
     clock,
+    inspect: guard.inspect,
     input: {
       projectId: 'p1',
       parentRef: parent.ref,
@@ -147,6 +193,7 @@ const start = (
     holds,
     parent,
     clock,
+    guard,
     emitted,
     stop: () => {
       actor.stop();
@@ -1021,7 +1068,8 @@ describe('syncMachine', () => {
     const recorded: SyncQueueRecord[] = [];
     const effects = createFakePromiseActors();
     const holds = createFakeCallbackActors();
-    const clock = createManualClock();
+    const guard = guardActors({ ignore: knownDefects });
+    const clock = new StepClock();
     /* One durable record shared by the two lives of the scheduler: a restart
      * reads what the first life wrote, and nothing else (D29). */
     const store = { current: emptyQueue };
@@ -1054,6 +1102,7 @@ describe('syncMachine', () => {
 
     const first = createActor(syncMachine.provide({ actors: actors() }), {
       clock,
+      inspect: guard.inspect,
       input: { projectId: 'p1', online: true },
     });
     first.start();
@@ -1080,6 +1129,7 @@ describe('syncMachine', () => {
 
     const second = createActor(syncMachine.provide({ actors: actors() }), {
       clock,
+      inspect: guard.inspect,
       input: { projectId: 'p1', online: false },
     });
     second.start();
@@ -1304,5 +1354,72 @@ describe('syncMachine', () => {
     unconnected.clock.advance(2100);
     expect(unconnected.effects.running('push')).toBe(0);
     unconnected.stop();
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const invokeOf = (path: string): string => syncMachine.getStateNodeById(`sync.${path}`).invoke[0]?.id ?? '';
+    const [queueInvoke, remoteInvoke, fetchInvoke, fastForwardInvoke, mergeInvoke, pushInvoke, recordInvoke] = [
+      'reading.queue',
+      'reading.remote',
+      'opening.fetching',
+      'opening.fastForwarding',
+      'opening.merging',
+      'pushing',
+      'recording',
+    ].map((path) => invokeOf(path));
+    const publicEvents: readonly SyncMachineEvent[] = [
+      { type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' },
+      { type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r2' },
+      { type: 'recordsChanged' },
+      { type: 'syncNow', pushId: 'push-1', remote: 'tau' },
+      { type: 'open' },
+      { type: 'close' },
+      { type: 'remoteConnected', remote: 'tau' },
+      { type: 'remoteDisconnected' },
+      { type: 'online' },
+      { type: 'offline' },
+      { type: 'pushAcknowledged', refs: [{ name: mainRef, status: 'updated', head: 'r1' }] },
+      { type: 'pushFailed', reason: 'the network is unreachable' },
+      { type: 'conflictResolved', ref: syncRef, revisionId: 'r3' },
+    ];
+    const options = {
+      input: { projectId: 'p1' },
+      /* Effect outcomes reach the states behind each invoke; they are not public. */
+      events: [
+        ...publicEvents,
+        { type: `xstate.done.actor.${queueInvoke}`, output: emptyQueue },
+        { type: `xstate.done.actor.${remoteInvoke}`, output: { remote: 'tau' } },
+        { type: `xstate.done.actor.${remoteInvoke}`, output: { remote: undefined } },
+        ...(['upToDate', 'ahead', 'fastForward', 'diverged'] as const).map((integration) => ({
+          type: `xstate.done.actor.${fetchInvoke}`,
+          output: { leases: { [mainRef]: 'remote-head' }, integration } satisfies SyncFetchActorOutput,
+        })),
+        { type: `xstate.error.actor.${fetchInvoke}`, error: new Error('offline') },
+        {
+          type: `xstate.done.actor.${fastForwardInvoke}`,
+          output: { checkoutId: 'live', revisionId: 'remote-head', treeId: 'remote-tree' },
+        },
+        { type: `xstate.done.actor.${mergeInvoke}`, output: mergeConflict },
+        {
+          type: `xstate.done.actor.${pushInvoke}`,
+          output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }),
+        },
+        {
+          type: `xstate.done.actor.${pushInvoke}`,
+          output: pushResult({ name: mainRef, status: 'rejected', head: 'r1', reason: 'leaseLost' }),
+        },
+        {
+          type: `xstate.error.actor.${pushInvoke}`,
+          error: Object.assign(new Error('paid plan feature'), { code: 'REMOTE_NOT_ENTITLED' }),
+        },
+        { type: `xstate.done.actor.${recordInvoke}`, output: undefined },
+        { type: `xstate.error.actor.${recordInvoke}`, error: new Error('read-only store') },
+      ],
+      limit: 5000,
+      serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+    };
+
+    expect(unansweredEvents(syncMachine, { ...options, ignore: knownDefects['sync'] })).toEqual([]);
+    expect(unreachedStates(syncMachine, options)).toEqual([]);
   });
 });

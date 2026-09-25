@@ -1,17 +1,21 @@
 import { createActor } from 'xstate';
+import type { AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#turn.machine.js';
 import { selectTurnHoldsLease, turnMachine } from '#turn.machine.js';
-import type { TurnLeaseActorInput } from '#turn.machine.js';
+import type { TurnLeaseActorInput, TurnMachineEvent } from '#turn.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import {
   createFakeCallbackActors,
   createFakeParent,
   createFakePromiseActors,
-  createManualClock,
   recordEmitted,
-} from '#test/fake-actors.js';
-import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+} from '@taucad/xstate-testing/fakes';
+import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
  * Path table — `turn.machine` (catalogue: 14).
@@ -33,7 +37,7 @@ import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/f
  * 11  `nothingToSave` → `finalized` with `revisionId: undefined` (I5)
  * 12  `cutFailed` → `failed`
  * 13  `casLost` → fails fast with reason `cas-lost` (R5; retry policy is W6)
- * 14  no answer inside the bound (manual clock) → `failed`
+ * 14  no answer inside the bound (step clock) → `failed`
  * 15  a conflicted merge → `conflicted` + `turnConflicted`
  * 16  `turnAbandoned` while leased → lease retired → `released`, and the parent
  *     is told `turnReleased` so the registry can drop the lease (R12)
@@ -55,6 +59,66 @@ import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/f
  *     function, and the subpath exports exactly one machine value
  */
 
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 answers each one or moves it to an exported
+ * `turnIgnoredEvents` (D13, MC-R17), and deletes the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  turn: [
+    // W5: totality — a lease or cut answer, or a repeated turn signal, outside the state that waits for it.
+    ['preparing.resolving', 'leaseGranted'],
+    ['preparing.resolving', 'leaseRefused'],
+    ['preparing.resolving', 'revisionMinted'],
+    ['preparing.resolving', 'nothingToSave'],
+    ['preparing.resolving', 'cutFailed'],
+    ['preparing.resolving', 'casLost'],
+    ['preparing.basing', 'leaseGranted'],
+    ['preparing.basing', 'leaseRefused'],
+    ['preparing.writingLease', 'leaseGranted'],
+    ['preparing.writingLease', 'leaseRefused'],
+    ['preparing.writingLease', 'revisionMinted'],
+    ['preparing.writingLease', 'nothingToSave'],
+    ['preparing.writingLease', 'cutFailed'],
+    ['preparing.writingLease', 'casLost'],
+    ['leased.acquiring', 'revisionMinted'],
+    ['leased.acquiring', 'nothingToSave'],
+    ['leased.acquiring', 'cutFailed'],
+    ['leased.acquiring', 'casLost'],
+    ['leased.held', 'leaseGranted'],
+    ['leased.held', 'revisionMinted'],
+    ['leased.held', 'nothingToSave'],
+    ['leased.held', 'cutFailed'],
+    ['leased.held', 'casLost'],
+    ['finalizing.capturing', 'turnCompleted'],
+    ['finalizing.capturing', 'leaseGranted'],
+    ['finalizing.capturing', 'leaseRefused'],
+    ['finalizing.capturing', 'revisionMinted'],
+    ['finalizing.capturing', 'nothingToSave'],
+    ['finalizing.capturing', 'cutFailed'],
+    ['finalizing.capturing', 'casLost'],
+    ['finalizing.merging', 'turnCompleted'],
+    ['finalizing.merging', 'leaseGranted'],
+    ['finalizing.merging', 'leaseRefused'],
+    ['finalizing.merging', 'revisionMinted'],
+    ['finalizing.merging', 'nothingToSave'],
+    ['finalizing.merging', 'cutFailed'],
+    ['finalizing.merging', 'casLost'],
+    ['finalizing.requesting', 'turnCompleted'],
+    ['finalizing.requesting', 'leaseGranted'],
+    ['finalizing.requesting', 'leaseRefused'],
+    ['retiring', 'turnCompleted'],
+    ['retiring', 'turnAbandoned'],
+    ['retiring', 'release'],
+    ['retiring', 'leaseGranted'],
+    ['retiring', 'leaseRefused'],
+    ['retiring', 'revisionMinted'],
+    ['retiring', 'nothingToSave'],
+    ['retiring', 'cutFailed'],
+    ['retiring', 'casLost'],
+  ],
+};
+
 /** Let every queued microtask and the actor's promise handlers run. */
 const flush = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
@@ -68,14 +132,15 @@ type Harness = Readonly<{
   callbacks: FakeCallbackActors;
   parent: ReturnType<typeof createFakeParent>;
   emitted: ReturnType<typeof recordEmitted>;
-  clock: ManualClock;
+  clock: StepClock;
 }>;
 
 const start = (options?: Readonly<{ checkoutId?: string }>): Harness => {
+  const guard = guardActors({ ignore: knownDefects });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const parent = createFakeParent();
-  const clock = createManualClock();
+  const clock = new StepClock();
   const actor = createActor(
     turnMachine.provide({
       actors: {
@@ -89,6 +154,7 @@ const start = (options?: Readonly<{ checkoutId?: string }>): Harness => {
     }),
     {
       clock,
+      inspect: guard.inspect,
       input: {
         turnId: 'turn-1',
         chatId: 'chat-1',
@@ -723,5 +789,50 @@ describe('turnMachine', () => {
       typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([turnMachine]);
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const invokeId = (path: string): string => turnMachine.getStateNodeById(`turn.${path}`).invoke[0]?.id ?? '';
+    const prepareInvoke = invokeId('preparing.resolving');
+    const writeLeaseInvoke = invokeId('preparing.writingLease');
+    const captureInvoke = invokeId('finalizing.capturing');
+    const mergeInvoke = invokeId('finalizing.merging');
+    const retireInvoke = invokeId('retiring');
+    const publicEvents: readonly TurnMachineEvent[] = [
+      { type: 'turnCompleted' },
+      { type: 'turnAbandoned' },
+      { type: 'release' },
+      { type: 'leaseGranted' },
+      { type: 'leaseRefused', reason: 'held elsewhere' },
+      { type: 'revisionMinted', trigger: 'turn', turnId: 'turn-1', revisionId: 'rev-2' },
+      { type: 'nothingToSave', trigger: 'turn', turnId: 'turn-1' },
+      { type: 'cutFailed', trigger: 'turn', turnId: 'turn-1', reason: 'disk full' },
+      { type: 'casLost', trigger: 'turn', turnId: 'turn-1' },
+    ];
+    const options = {
+      input: { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1', parentRef: undefined },
+      /* Effect outcomes reach the states behind each invoke; they are not public. */
+      events: [
+        ...publicEvents,
+        { type: `xstate.done.actor.${prepareInvoke}`, output: { ...preparedOutput, dirty: true } },
+        { type: `xstate.error.actor.${prepareInvoke}`, error: new Error('no checkout') },
+        { type: `xstate.done.actor.${writeLeaseInvoke}`, output: { leaseIds: ['run-1'] } },
+        { type: `xstate.error.actor.${writeLeaseInvoke}`, error: new Error('read-only') },
+        { type: `xstate.done.actor.${captureInvoke}`, output: { captureId: 'capture-1' } },
+        { type: `xstate.error.actor.${captureInvoke}`, error: new Error('capture broke') },
+        { type: `xstate.done.actor.${mergeInvoke}`, output: { status: 'recorded' } },
+        { type: `xstate.done.actor.${mergeInvoke}`, output: { status: 'conflicted', conflictRevisionId: 'rev-c' } },
+        { type: `xstate.error.actor.${mergeInvoke}`, error: new Error('merge broke') },
+        { type: `xstate.done.actor.${retireInvoke}`, output: undefined },
+        { type: `xstate.error.actor.${retireInvoke}`, error: new Error('lease file gone') },
+      ],
+      limit: 20_000,
+      /* `retiring` settles on the outcome it carries, so the projection keeps it. */
+      serializeState: (snapshot: AnyMachineSnapshot) =>
+        JSON.stringify([snapshot.value, (snapshot.context as { outcome?: unknown }).outcome]),
+    };
+
+    expect(unansweredEvents(turnMachine, { ...options, ignore: knownDefects['turn'] })).toEqual([]);
+    expect(unreachedStates(turnMachine, options)).toEqual([]);
   });
 });

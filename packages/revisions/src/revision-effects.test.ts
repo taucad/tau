@@ -33,6 +33,14 @@ import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-conf
 import { restoreMachine } from '#restore.machine.js';
 import { createRevisionActors, describeTurnRelease, revisionTreeId } from '#revision-effects.js';
 import type { RevisionActors, RevisionActorsOptions } from '#revision-effects.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+
+/** A clock stopped at `time`: these rows read only its `now()`. */
+const clockAt = (time: number): StepClock => {
+  const clock = new StepClock();
+  clock.set(time);
+  return clock;
+};
 
 const roots: string[] = [];
 
@@ -735,7 +743,7 @@ describe('the checkout registry', () => {
       authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       /* Forty days after the revision both branches name. */
-      clock: () => recordedAt + 40 * day,
+      clock: clockAt(recordedAt + 40 * day),
     });
 
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
@@ -774,7 +782,7 @@ describe('the checkout registry', () => {
       projectId: 'project-1',
       authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
-      clock: () => recordedAt + 60_000,
+      clock: clockAt(recordedAt + 60_000),
     });
 
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
@@ -1129,6 +1137,40 @@ describe('checkout fence cancellation', () => {
     await actors.settled();
   });
 });
+
+for (const actorSet of actorSets) {
+  describe.runIf(actorSet.enabled)(`the checkout's compare-and-swap — ${actorSet.name}`, () => {
+    /* W0.10, W5 F7: after a live switch to a branch made from `main`, the two
+     * heads are equal, so an expected-old swap of `main` used to succeed and
+     * land the switched checkout's save on the branch it left. */
+    it('should refuse a compare-and-swap on a branch the checkout left', async () => {
+      const { port, actors } = await fixture({ 'main.ts': 'base\n' }, (filesystem) => filesystem, {
+        actorSet: actorSet.name,
+      });
+      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const commit = async (content: string, parents: readonly string[]) => {
+        const receipt = await port.writeRevision({
+          parents: parents.map((parent) => revisionId(parent)),
+          tree: new ImmutableRevisionTree([['main.ts', content]]),
+          provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 25) },
+          summary: { generated: content },
+        });
+        return revisionId(receipt.commitId);
+      };
+      const base = await commit('base\n', []);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: base });
+      await port.updateRef({ name: 'feature', expectedHead: undefined, head: base });
+      await port.setHead('feature');
+      const next = await commit('next\n', [base]);
+
+      await expect(
+        run(actors.checkout.casHead, { checkoutId: 'live', branch: 'main', expectedHead: base, head: next }),
+      ).resolves.toMatchObject({ status: 'conflicted' });
+      expect(await port.readRef('main')).toBe(base);
+      await actors.settled();
+    }, 30_000);
+  });
+}
 
 describe('independent sync record failures', () => {
   it('pushes history and a second chat when the first chat cannot be prepared', async () => {

@@ -33,6 +33,14 @@ import { RevisionPortError } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors } from '#revision-effects.js';
 import { tauRevisionPolicy } from '#workspace-config.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+
+/** A clock stopped at `time`: these rows read only its `now()`. */
+const clockAt = (time: number): StepClock => {
+  const clock = new StepClock();
+  clock.set(time);
+  return clock;
+};
 
 const roots: string[] = [];
 
@@ -235,7 +243,7 @@ const project = async (
         port,
         projectId: 'project-1',
         authorityEpoch: 'epoch-1',
-        clock: () => clockReading,
+        clock: clockAt(clockReading),
         filesystem: async () => checkout,
       }),
   };

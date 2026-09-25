@@ -1227,8 +1227,12 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
               : event.type === 'message.envelope-replaced'
                 ? event.replacement
                 : undefined;
+          /* A failure message carries the marker once the attempt is bound, but it
+           * is not evidence the reply was delivered (W11 Current System 8). */
           return (
             message?.role === 'assistant' &&
+            message.metadata?.stopReason !== 'error' &&
+            message.metadata?.stopReason !== 'aborted' &&
             message.metadata?.tauInternal?.['kind'] === 'billing-invocation' &&
             message.metadata.tauInternal['attemptId'] === prepared.attemptId
           );
@@ -1247,8 +1251,15 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         // The owner-scoped ledger has no operation for an unbound attempt only when admission refused it
         // (for example a 402 before a top-up), so nothing was charged and a fresh attempt is safe.
         const refused = transport.lookupAttempt !== undefined && recovered === undefined && !bound;
-        if (!refused) {
-          throw new Error(`Model invocation ${prepared.attemptId} has no durable result; it will not be sent again.`);
+        /* EQ1 (charge and proceed): a terminal receipt, charged or not, resolves
+         * the attempt, and the step continues under a new key. Only an attempt
+         * the lookup cannot resolve is in doubt; it is never sent again (D21).
+         * ponytail: no `model.invocation-settled` row records the charge until W11/W7. */
+        if (!refused && recovered?.status !== 'terminal') {
+          throw Object.assign(
+            new Error(`Model invocation ${prepared.attemptId} has no durable result; it will not be sent again.`),
+            { code: 'MODEL_ATTEMPT_IN_DOUBT' },
+          );
         }
       }
     }
@@ -1483,7 +1494,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         : final?.role === 'assistant' && final.stopReason === 'error'
           ? 'failed'
           : 'completed';
-    if (state === 'failed') {
+    // A cancelled run's early-started tools ran too; leaving them open made Resume fabricate a disconnect (L2a D16).
+    if (state !== 'completed') {
       await settlePrestartedTools();
     }
     // Without this the durable log said only "failed": the typed transport code

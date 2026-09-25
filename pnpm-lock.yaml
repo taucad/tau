@@ -3154,6 +3154,18 @@ importers:
         specifier: 'catalog:'
         version: 8.0.10(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
 
+  libs/xstate-testing:
+    devDependencies:
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.3.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
+      xstate:
+        specifier: 'catalog:'
+        version: 6.0.0-alpha.59
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
   packages/agent-host:
     dependencies:
       '@earendil-works/pi-agent-core':
@@ -4232,6 +4244,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../libs/xstate-testing
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -4566,7 +4581,11 @@ importers:
         specifier: 'catalog:'
         version: 5.9.3
 
-  tools/workspace-plugin: {}
+  tools/workspace-plugin:
+    devDependencies:
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../libs/xstate-testing
 
 packages:
 

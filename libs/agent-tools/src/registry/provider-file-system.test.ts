@@ -1,4 +1,5 @@
 import { ResourceQueue } from '@taucad/filesystem';
+import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { MemoryProvider } from '@taucad/filesystem/backend';
@@ -16,6 +17,46 @@ const fileSystemFor = (signal?: AbortSignal) =>
     mutations: new ResourceQueue(),
     ...(signal ? { signal } : {}),
   });
+
+type CheckedWrite = NonNullable<ComposedView['writeFileChecked']>;
+
+/**
+ * A checkout whose next agent write is preceded by someone else's edit, and
+ * which answers `writeFileChecked` the way an authority does: the byte
+ * compare and the write are one step, so an edit that lands first is seen.
+ */
+class RacedProvider extends MemoryProvider {
+  public beforeNextWrite: (() => Promise<void>) | undefined;
+
+  public override async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
+    await this._race();
+    return super.writeFile(path, data);
+  }
+
+  public async writeFileChecked(input: Parameters<CheckedWrite>[0]): ReturnType<CheckedWrite> {
+    await this._race();
+    const conflicts = [];
+    for (const { path, expected } of input.preconditions) {
+      // oxlint-disable-next-line no-await-in-loop -- A test double over one in-memory file.
+      const actual = (await this.exists(path)) ? await this.readFile(path) : null;
+      const wanted = typeof expected === 'string' ? new TextEncoder().encode(expected) : expected;
+      if (actual === null || wanted === null ? actual !== wanted : decoder.decode(actual) !== decoder.decode(wanted)) {
+        conflicts.push({ path, actual });
+      }
+    }
+    if (conflicts.length > 0) {
+      return { status: 'conflict', conflicts };
+    }
+    await super.writeFile(input.path, input.data);
+    return { status: 'applied', content: await this.readFile(input.path) };
+  }
+
+  private async _race(): Promise<void> {
+    const edit = this.beforeNextWrite;
+    this.beforeNextWrite = undefined;
+    await edit?.();
+  }
+}
 
 beforeEach(async () => {
   provider = new MemoryProvider();
@@ -143,5 +184,44 @@ describe('createProviderRpcFileSystem', () => {
     await expect(fileSystem.writeFile('late.md', 'x')).rejects.toThrow('cancelled mid-run');
     /* Reads are not gated: the abort only has to stop the tool from writing. */
     expect(decoder.decode(await provider.readFile('main.ts'))).toBe('export const main = 1;\n');
+  });
+
+  /* L4 D-103 / W0.18: the per-path queue fences the agent's own calls only. A
+   * person's edit reaches the checkout by another route, so it can land after
+   * the agent's last read and before its write; the write must then be
+   * refused on the bytes it would replace, never applied over them. */
+  it('answers an edit that lands between the agent\u2019s read and write as a conflict, never overwriting it', async () => {
+    const raced = new RacedProvider();
+    await raced.writeFile('main.ts', 'export const main = 1;\n');
+    raced.beforeNextWrite = async () => raced.writeFile('main.ts', 'export const main = 3;\n');
+    const fileSystem = createProviderRpcFileSystem({
+      provider: composeView({ filesystem: raced }, { consumer: 'agent', policy: tauPathPolicy }),
+      mutations: new ResourceQueue(),
+    });
+
+    await expect(fileSystem.editFile('main.ts', 'main = 1', 'main = 2')).rejects.toMatchObject({
+      code: 'EDIT_CONFLICT',
+    });
+    expect(decoder.decode(await raced.readFile('main.ts'))).toBe('export const main = 3;\n');
+  });
+
+  it('falls back to the queued compare when the view\u2019s checked write is unsupported', async () => {
+    class UncheckedProvider extends MemoryProvider {
+      public async writeFileChecked(): ReturnType<CheckedWrite> {
+        throw Object.assign(new Error('no authority'), {
+          code: 'CHECKED_WRITE_UNSUPPORTED',
+          applicationState: 'known-not-applied',
+        });
+      }
+    }
+    const unchecked = new UncheckedProvider();
+    await unchecked.writeFile('main.ts', 'export const main = 1;\n');
+    const fileSystem = createProviderRpcFileSystem({
+      provider: composeView({ filesystem: unchecked }, { consumer: 'agent', policy: tauPathPolicy }),
+      mutations: new ResourceQueue(),
+    });
+
+    await fileSystem.editFile('main.ts', 'main = 1', 'main = 2');
+    expect(decoder.decode(await unchecked.readFile('main.ts'))).toBe('export const main = 2;\n');
   });
 });

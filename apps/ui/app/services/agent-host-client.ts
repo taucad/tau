@@ -381,6 +381,11 @@ export const createAgentHostClient = (
     if (response.type !== 'attach') {
       throw new AgentHostWorkerError('WORKER_PROTOCOL_INVALID', `Agent host returned ${response.type} for attach.`);
     }
+    /* A reattached page learns its run only here; without it `cancel` answers
+     * `RUN_NOT_FOUND` and Stop never reaches the host (W0.3). */
+    if (response.snapshot) {
+      chatsByRun.set(response.snapshot.runId, response.snapshot.chatId);
+    }
     return {
       ...response.batch,
       leadership: response.leadership,

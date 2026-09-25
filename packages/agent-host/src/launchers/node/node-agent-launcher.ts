@@ -21,6 +21,7 @@
  * clients. Nothing here is tied to a socket lifetime.
  */
 
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
@@ -333,6 +334,15 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
    * rejected `EVENT_OUT_OF_ORDER` — or worse, accepted out of order.
    */
   const logs = new Map<string, Promise<DurableEventLog>>();
+  const eventLogPath = (chatId: string): string =>
+    join(options.workspaceRoot, '.tau', 'chats', requirePathSegment(chatId, 'chatId'), 'events.jsonl');
+  /* A chat nothing ever wrote: no open handle and no file on disk. */
+  const isUnwritten = async (chatId: string): Promise<boolean> =>
+    !logs.has(chatId) &&
+    (await access(eventLogPath(chatId)).then(
+      () => false,
+      () => true,
+    ));
   const openEventLog = async (chatId: string): Promise<DurableEventLog> => {
     const cached = logs.get(chatId);
     if (cached) {
@@ -340,7 +350,7 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
     }
     const opened = (async (): Promise<DurableEventLog> => {
       const log = await createNodeEventLog({
-        filePath: join(options.workspaceRoot, '.tau', 'chats', requirePathSegment(chatId, 'chatId'), 'events.jsonl'),
+        filePath: eventLogPath(chatId),
       });
       return {
         append: async (event: AgentLogEvent) => {
@@ -559,6 +569,13 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
 
   const execute = async (command: AgentChannelCommand): Promise<AgentChannelResponse> => {
     assertOpen();
+    /* A read of a chat nothing wrote is empty, and opens nothing: opening the
+     * log creates its directory, file and writer lock, and every desktop
+     * project open probes a sentinel chat this way (W0.12, L2b HD-8).
+     * ponytail: `tail` only; W6's RH-R1 makes every read verb open for read. */
+    if (command.type === 'tail' && (await isUnwritten(command.chatId))) {
+      return { type: 'tail', chatId: command.chatId, batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] } };
+    }
     generationFor(command.chatId);
     switch (command.type) {
       case 'tail': {

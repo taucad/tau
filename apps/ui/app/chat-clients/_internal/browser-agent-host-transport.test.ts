@@ -870,10 +870,46 @@ describe('BrowserPlacementChatTransport', () => {
 
     // A reload drops the in-memory run binding. The API never held this chat's
     // runs: asking it answered 503 and left the chat stuck "reattaching".
-    const stream = await transport.reconnectToStream({ chatId, metadata: undefined });
-    await expect(stream!.getReader().read()).resolves.toEqual({ done: true, value: undefined });
+    await expect(transport.reconnectToStream({ chatId, metadata: undefined })).resolves.toBeNull();
 
     expect(getBrowserAgentHostRun(chatId)).toBeUndefined();
+    unregister();
+  });
+
+  /* W0.2 (L3 D1). A resume the host answers for an empty log is no request at
+   * all: the SDK walked `submitted → ready` and called `onFinish`, which marked
+   * the chat unread if focus had moved on. A refused registration is still an
+   * error the person sees. */
+  it('should resume an empty log without finishing a request, and still fail a refused registration', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-empty-resume';
+    const onFinish = vi.fn();
+    let unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: 'project-empty', backend: 'opfs', providerBasePath: 'project-empty' }),
+      createClient: async () => clientFor(chatId, 'run-empty'),
+      markRunId: async () => undefined,
+    });
+    const chat = new Chat<MyUIMessage>({ id: chatId, transport: new BrowserPlacementChatTransport(), onFinish });
+
+    await chat.resumeStream();
+
+    expect(onFinish).not.toHaveBeenCalled();
+    expect(chat.status).toBe('ready');
+    unregister();
+
+    const refusal = new AgentHostWorkerError('WORKER_PROTOCOL_FAILED', 'The host would not open.');
+    unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: 'project-empty', backend: 'opfs', providerBasePath: 'project-empty' }),
+      createClient: async () => {
+        throw refusal;
+      },
+      markRunId: async () => undefined,
+    });
+
+    await chat.resumeStream();
+
+    expect(chat.status).toBe('error');
+    expect(chat.error).toBe(refusal);
     unregister();
   });
 

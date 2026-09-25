@@ -29,6 +29,10 @@ import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort 
 const acpPortCalls = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createAcpExternalAgentPort>[0]>);
 const toolRegistryCalls = vi.hoisted(() => [] as Array<Parameters<typeof AgentTools.createHostToolRegistry>[0]>);
 const runtimeClientCalls = vi.hoisted(() => [] as Array<ReturnType<typeof RuntimeClient.createRuntimeClient>>);
+/** One-shot hold on the next launcher close, so a test can act while that close is in flight. */
+const launcherCloseGate = vi.hoisted(() => ({
+  next: undefined as undefined | Readonly<{ entered: () => void; hold: Promise<void> }>,
+}));
 
 vi.mock('@taucad/host', async (importOriginal) => {
   const actual = await importOriginal<typeof TauHost>();
@@ -37,6 +41,27 @@ vi.mock('@taucad/host', async (importOriginal) => {
     createAcpExternalAgentPort: (options: Parameters<typeof TauHost.createAcpExternalAgentPort>[0]) => {
       acpPortCalls.push(options);
       return actual.createAcpExternalAgentPort(options);
+    },
+    createProjectRevisions: (options: Parameters<typeof TauHost.createProjectRevisions>[0]) => {
+      const revisions = actual.createProjectRevisions(options);
+      const { record } = revisions;
+      return Object.assign(revisions, {
+        record: (launcher: Parameters<typeof record>[0]) => {
+          const recorded = record(launcher);
+          const { close } = recorded;
+          return Object.assign(recorded, {
+            close: async () => {
+              const gate = launcherCloseGate.next;
+              launcherCloseGate.next = undefined;
+              if (gate !== undefined) {
+                gate.entered();
+                await gate.hold;
+              }
+              return close();
+            },
+          });
+        },
+      });
     },
   };
 });
@@ -1086,6 +1111,64 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     expect(log.mock.calls.findLast(([event]) => event === 'agent-host-served')?.[1]).toMatchObject({
       reused: false,
     });
+  });
+
+  /* L6 N2 / L2b HD-7 / W0.11: main allows a retain while a release is in
+   * flight. A remount whose connect arrived while the launcher was closing
+   * adopted it, the release finished closing it, and every later command
+   * answered LAUNCHER_CLOSED until the next release. */
+  it('serves a remount that arrives mid-release from a fresh launcher, never the closing one', async () => {
+    const released = vi.fn();
+    const { host, log, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
+    const connectAt = (attachmentGeneration: string): AgentChannelClient => {
+      const channel = new MessageChannel();
+      channels.push(channel);
+      host.handleMessage(
+        frame(
+          {
+            type: 'concern',
+            concern: 'agentHost',
+            context: { workspaceRoot, projectId: 'proj_test', attachmentGeneration },
+          },
+          [channel.port1 as unknown as UtilityPort],
+        ),
+      );
+      const client = createAgentChannelClient(
+        channel.port2 as unknown as Parameters<typeof createAgentChannelClient>[0],
+      );
+      clients.push(client);
+      return client;
+    };
+    connectAt('1');
+    const entered = Promise.withResolvers<void>();
+    const hold = Promise.withResolvers<void>();
+    launcherCloseGate.next = { entered: entered.resolve, hold: hold.promise };
+    host.handleMessage(
+      frame({
+        type: 'agent-host-release',
+        requestId: 'release-1',
+        workspaceRoot,
+        projectId: 'proj_test',
+        attachmentGeneration: 1,
+      }),
+    );
+    await entered.promise;
+
+    const remount = connectAt('2');
+    hold.resolve();
+    await vi.waitFor(
+      () => {
+        expect(released).toHaveBeenCalledWith('release-1');
+      },
+      { timeout: 10_000 },
+    );
+
+    await expect(remount.execute({ type: 'tail', chatId: 'chat-1', cursor: 0, limit: 8 })).resolves.toMatchObject({
+      type: 'tail',
+    });
+    expect(
+      log.mock.calls.filter(([event]) => event === 'agent-host-served').map(([, detail]) => detail as unknown),
+    ).toMatchObject([{ reused: false }, { reused: false }]);
   });
 
   it('keeps one always-on launcher per root across connections', async () => {

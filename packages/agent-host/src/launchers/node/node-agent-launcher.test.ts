@@ -4,7 +4,7 @@
  * approval survives as a durable event, and a reconnect replays from a cursor.
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -219,6 +219,22 @@ describe('createNodeAgentLauncher', () => {
     await expect(host.execute({ type: 'tail', chatId: '../escape', cursor: 0, limit: 16 })).rejects.toMatchObject({
       code: 'STORAGE_PATH_INVALID',
     });
+  });
+
+  /* W0.12 (L2b HD-8). The desktop registration probe tails a sentinel chat on
+   * every project open, and the tail opened its log: a chat directory, an
+   * `events.jsonl` and a writer lock for a chat that does not exist. */
+  it('should not create a chat log when tailing a missing chat', async () => {
+    const host = await makeLauncher(scriptedGateway());
+
+    await expect(
+      host.execute({ type: 'tail', chatId: '00000000-0000-4000-8000-000000000000', cursor: 0, limit: 1 }),
+    ).resolves.toEqual({
+      type: 'tail',
+      chatId: '00000000-0000-4000-8000-000000000000',
+      batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
+    });
+    await expect(stat(join(currentRoot(), '.tau'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('records an approval as a durable interrupt and resolves it from a later caller', async () => {

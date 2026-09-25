@@ -1,11 +1,17 @@
 import { createActor } from 'xstate';
+import type { AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#branch.machine.js';
 import { branchMachine, branchRegistryMilliseconds, selectBranchFacet } from '#branch.machine.js';
+import type { BranchMachineEvent } from '#branch.machine.js';
 import { RevisionPortError } from '#revision-port.js';
-import { createFakeParent, createFakePromiseActors, createManualClock, recordEmitted } from '#test/fake-actors.js';
-import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFakeParent, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
+import type { FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
  * Path table — `branch.machine` (S47).
@@ -46,6 +52,124 @@ import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
  *     function in context, one exported machine value
  */
 
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 answers each one (a busy verb gets `switchRefused{busy}`,
+ * L7 F4) or moves it to an exported `branchIgnoredEvents` (D13, MC-R17), and
+ * deletes the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  branch: [
+    // W5: an ambient cut's answer (another trigger) is dropped with `undefined`;
+    // a stale answer is answered `{}` after the correlation check (MC-R18, L7 F4).
+    ['applying.creating.recording', 'revisionMinted'],
+    // W5: every event a state does not name is dropped without an answer.
+    ['idle', 'confirm'],
+    ['idle', 'cancel'],
+    ['idle', 'branchesChanged'],
+    ['idle', 'operationFailed'],
+    ['idle', 'revisionMinted'],
+    ['idle', 'nothingToSave'],
+    ['idle', 'cutFailed'],
+    ['idle', 'casLost'],
+    ['checking', 'switch'],
+    ['checking', 'merge'],
+    ['checking', 'discard'],
+    ['checking', 'create'],
+    ['checking', 'rename'],
+    ['checking', 'confirm'],
+    ['checking', 'cancel'],
+    ['checking', 'branchesChanged'],
+    ['checking', 'operationFailed'],
+    ['checking', 'revisionMinted'],
+    ['checking', 'nothingToSave'],
+    ['checking', 'cutFailed'],
+    ['checking', 'casLost'],
+    ['confirming', 'switch'],
+    ['confirming', 'merge'],
+    ['confirming', 'discard'],
+    ['confirming', 'create'],
+    ['confirming', 'rename'],
+    ['confirming', 'branchesChanged'],
+    ['confirming', 'operationFailed'],
+    ['confirming', 'revisionMinted'],
+    ['confirming', 'nothingToSave'],
+    ['confirming', 'cutFailed'],
+    ['confirming', 'casLost'],
+    ['applying.switching', 'switch'],
+    ['applying.switching', 'merge'],
+    ['applying.switching', 'discard'],
+    ['applying.switching', 'create'],
+    ['applying.switching', 'rename'],
+    ['applying.switching', 'confirm'],
+    ['applying.switching', 'cancel'],
+    ['applying.switching', 'branchesChanged'],
+    ['applying.switching', 'operationFailed'],
+    ['applying.switching', 'revisionMinted'],
+    ['applying.switching', 'nothingToSave'],
+    ['applying.switching', 'cutFailed'],
+    ['applying.switching', 'casLost'],
+    ['applying.merging', 'switch'],
+    ['applying.merging', 'merge'],
+    ['applying.merging', 'discard'],
+    ['applying.merging', 'create'],
+    ['applying.merging', 'rename'],
+    ['applying.merging', 'confirm'],
+    ['applying.merging', 'cancel'],
+    ['applying.merging', 'branchesChanged'],
+    ['applying.merging', 'operationFailed'],
+    ['applying.merging', 'revisionMinted'],
+    ['applying.merging', 'nothingToSave'],
+    ['applying.merging', 'cutFailed'],
+    ['applying.merging', 'casLost'],
+    ['applying.discarding', 'switch'],
+    ['applying.discarding', 'merge'],
+    ['applying.discarding', 'discard'],
+    ['applying.discarding', 'create'],
+    ['applying.discarding', 'rename'],
+    ['applying.discarding', 'confirm'],
+    ['applying.discarding', 'cancel'],
+    ['applying.discarding', 'branchesChanged'],
+    ['applying.discarding', 'revisionMinted'],
+    ['applying.discarding', 'nothingToSave'],
+    ['applying.discarding', 'cutFailed'],
+    ['applying.discarding', 'casLost'],
+    ['applying.creating.adding', 'switch'],
+    ['applying.creating.adding', 'merge'],
+    ['applying.creating.adding', 'discard'],
+    ['applying.creating.adding', 'create'],
+    ['applying.creating.adding', 'rename'],
+    ['applying.creating.adding', 'confirm'],
+    ['applying.creating.adding', 'cancel'],
+    ['applying.creating.adding', 'branchesChanged'],
+    ['applying.creating.adding', 'revisionMinted'],
+    ['applying.creating.adding', 'nothingToSave'],
+    ['applying.creating.adding', 'cutFailed'],
+    ['applying.creating.adding', 'casLost'],
+    ['applying.creating.recording', 'switch'],
+    ['applying.creating.recording', 'merge'],
+    ['applying.creating.recording', 'discard'],
+    ['applying.creating.recording', 'create'],
+    ['applying.creating.recording', 'rename'],
+    ['applying.creating.recording', 'confirm'],
+    ['applying.creating.recording', 'cancel'],
+    ['applying.creating.recording', 'branchesChanged'],
+    ['applying.renaming', 'switch'],
+    ['applying.renaming', 'merge'],
+    ['applying.renaming', 'discard'],
+    ['applying.renaming', 'create'],
+    ['applying.renaming', 'rename'],
+    ['applying.renaming', 'confirm'],
+    ['applying.renaming', 'cancel'],
+    ['applying.renaming', 'branchesChanged'],
+    ['applying.renaming', 'operationFailed'],
+    ['applying.renaming', 'revisionMinted'],
+    ['applying.renaming', 'nothingToSave'],
+    ['applying.renaming', 'cutFailed'],
+    ['applying.renaming', 'casLost'],
+  ],
+};
+
 /** Let every queued microtask and the actor's promise handlers run. */
 const flush = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
@@ -58,13 +182,14 @@ type Harness = Readonly<{
   promises: FakePromiseActors;
   parent: ReturnType<typeof createFakeParent>;
   emitted: ReturnType<typeof recordEmitted>;
-  clock: ManualClock;
+  clock: StepClock;
 }>;
 
 const start = (): Harness => {
+  const guard = guardActors({ ignore: knownDefects });
   const promises = createFakePromiseActors();
   const parent = createFakeParent();
-  const clock = createManualClock();
+  const clock = new StepClock();
   const actor = createActor(
     branchMachine.provide({
       actors: {
@@ -77,6 +202,7 @@ const start = (): Harness => {
     {
       input: { projectId: 'project-1', currentBranch: 'main', parentRef: parent.ref },
       clock,
+      inspect: guard.inspect,
     },
   );
   const emitted = recordEmitted(actor);
@@ -614,7 +740,12 @@ describe('branchMachine', () => {
 
   it('still reaches the registry when no host check is provided', async () => {
     const parent = createFakeParent();
-    const actor = createActor(branchMachine, { input: { projectId: 'project-1', parentRef: parent.ref } });
+    const guard = guardActors({ ignore: knownDefects });
+    const actor = createActor(branchMachine, {
+      input: { projectId: 'project-1', parentRef: parent.ref },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
     actor.start();
 
     actor.send({ type: 'create', name: 'enclosure-v2', from: 'rev-12' });
@@ -646,5 +777,57 @@ describe('branchMachine', () => {
 
     actor.stop();
     expect(actor.getSnapshot().status).toBe('stopped');
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const parent = createFakeParent();
+    const outputs: Readonly<Record<string, unknown>> = {
+      checkBranch: { needsConfirmation: true, question: 'This overwrites changes that are not in a revision yet.' },
+      applySwitch: switched.output,
+      merge: { status: 'conflicted', paths: ['enclosure.ts'] },
+      rename: { branch: 'enclosure-v4' },
+    };
+    /* Effect outcomes reach the states behind each invoke; they are not public. */
+    const invokes = [
+      branchMachine.getStateNodeById('branch.checking'),
+      branchMachine.getStateNodeById('branch.applying.switching'),
+      branchMachine.getStateNodeById('branch.applying.merging'),
+      branchMachine.getStateNodeById('branch.applying.renaming'),
+    ].flatMap((node) => node.invoke);
+    const outcomes = invokes.flatMap((invoke) => [
+      { type: `xstate.done.actor.${invoke.id}`, output: outputs[typeof invoke.src === 'string' ? invoke.src : ''] },
+      { type: `xstate.error.actor.${invoke.id}`, error: new Error('failed') },
+    ]);
+    const publicEvents: readonly BranchMachineEvent[] = [
+      { type: 'switch', branch: 'bracket-fillet', mode: 'applyToLive' },
+      { type: 'merge', branch: 'enclosure-v2' },
+      { type: 'discard', branch: 'enclosure-v2' },
+      { type: 'create', name: 'enclosure-v2', from: 'rev-12' },
+      { type: 'create', name: 'enclosure-v3', checkoutId: 'checkout-live', head: 'rev-1' },
+      { type: 'rename', branch: 'enclosure-v2', name: 'enclosure-v4' },
+      { type: 'confirm' },
+      { type: 'cancel' },
+      { type: 'selectBranch', branch: 'main' },
+      { type: 'branchesChanged', branches: ['main', 'enclosure-v2', 'enclosure-v4'], checkouts: [] },
+      { type: 'branchesChanged', branches: ['main'], checkouts: [] },
+      { type: 'operationFailed', reason: 'That branch already has a checkout.' },
+      { type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-2' },
+      { type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' },
+      { type: 'cutFailed', checkoutId: 'checkout-live', trigger: 'switch', reason: 'The cut failed.' },
+      { type: 'casLost', checkoutId: 'checkout-live', trigger: 'switch' },
+    ];
+    const options = {
+      input: { projectId: 'project-1', currentBranch: 'main', parentRef: parent.ref },
+      events: [...publicEvents, ...outcomes],
+      limit: 20_000,
+      /* The verb and its base pick the `applying` branch, so the projection keeps both. */
+      serializeState: (snapshot: AnyMachineSnapshot) =>
+        JSON.stringify([snapshot.value, snapshot.context.operation, snapshot.context.from]),
+    };
+
+    expect(unansweredEvents(branchMachine, { ...options, ignore: knownDefects['branch'] })).toEqual([]);
+    // W5: `creating.routing` is a transient `always` node; a total `choice` state is never listed.
+    expect(unreachedStates(branchMachine, options)).toEqual(['branch.applying.creating.routing']);
+    parent.stop();
   });
 });

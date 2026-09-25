@@ -786,16 +786,20 @@ const createHostStream = <Message extends UIMessage>(input: {
   /**
    * Names the run this stream will rebuild and hands over the log it read,
    * once the host has answered `attach` and before any chunk is written — or
-   * `undefined` when it resolved no run. Called exactly once.
-   * See {@link registerAgentHostRunReset}.
+   * `undefined` when it resolved no run. Called exactly once. `idle` is true
+   * only when the host answered for a log with no run and this stream was not
+   * asked to drive one: nothing will ever be written, and the caller may treat
+   * the resume as no request at all. See {@link registerAgentHostRunReset}.
    */
-  readonly onRunResolved?: ((runId: string | undefined, events: readonly AgentLogEvent[]) => void) | undefined;
+  readonly onRunResolved?:
+    | ((runId: string | undefined, events: readonly AgentLogEvent[], idle: boolean) => void)
+    | undefined;
 }): ReadableStream<UIMessageChunk> => {
   let announceRun = input.onRunResolved;
-  const announce = (resolved: string | undefined, events: readonly AgentLogEvent[] = []): void => {
+  const announce = (resolved: string | undefined, events: readonly AgentLogEvent[] = [], idle = false): void => {
     const once = announceRun;
     announceRun = undefined;
-    once?.(resolved, events);
+    once?.(resolved, events, idle);
   };
   /* Consumed the moment the stream is created, so a later reattach this caller
    * did not ask for never inherits it. @see requestBrowserAgentHostResume */
@@ -1054,13 +1058,15 @@ const createHostStream = <Message extends UIMessage>(input: {
       runId ??= batch.snapshot?.runId;
       if (runId !== undefined) {
         /* Lifecycle observers need the resolved run identity before replay can
-         * publish its first host-attested settlement. */
+         * publish its first host-attested settlement. Stop needs it from the
+         * same moment: the SDK is handed this stream right after (W0.3). */
         boundRunIds.set(input.chatId, runId);
+        activeClients.set(input.chatId, { client: hostClient, runId });
       }
       const events = await collectLog(hostClient, batch);
       // Handed over before the first chunk is written, and only now that the
       // host has actually answered for this chat's log.
-      announce(runId, events);
+      announce(runId, events, runId === undefined && !driveResume && input.admission === undefined);
       for (const event of events) {
         queueEvent(event);
       }
@@ -1335,6 +1341,22 @@ const createHostStream = <Message extends UIMessage>(input: {
   });
 };
 
+/**
+ * Ask the host to cancel the run this chat's stream is attached to (W0.3, D17).
+ *
+ * The SDK's abort only detaches a stream it admitted, and a reattached stream
+ * has no abort at all; Stop is the host's `cancel`. A chat with no attached run
+ * cancels nothing.
+ *
+ * @param chatId - The chat whose attached run the person stopped.
+ */
+export const cancelBrowserAgentHostRun = async (chatId: string): Promise<void> => {
+  const active = activeClients.get(chatId);
+  if (active) {
+    await cancelClientRun(active.client, active.runId);
+  }
+};
+
 /** Resolve a projected browser-host approval without opening a new admission. */
 export const resolveBrowserAgentHostInterrupt = async (input: {
   readonly chatId: string;
@@ -1416,12 +1438,13 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
     const resolved = Promise.withResolvers<{
       readonly runId: string | undefined;
       readonly events: readonly AgentLogEvent[];
+      readonly idle: boolean;
     }>();
     const stream = createHostStream({
       chatId: options.chatId,
       ...(runId === undefined ? {} : { runId }),
-      onRunResolved: (resolvedRunId, events) => {
-        resolved.resolve({ runId: resolvedRunId, events });
+      onRunResolved: (resolvedRunId, events, idle) => {
+        resolved.resolve({ runId: resolvedRunId, events, idle });
       },
     });
     // The AI SDK snapshots the transcript *after* this method settles, so the
@@ -1429,6 +1452,14 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
     // it could be appended to a stale copy instead. A host that resolved no run
     // hands over nothing, and the transcript stands.
     const replayed = await resolved.promise;
+    /* The host answered for a log with no run (W0.2, L3 D1). A stream here
+     * made the SDK walk `submitted → ready` and call `onFinish`, which read as
+     * a run finishing and marked the chat unread. `null` is no request at all;
+     * the stream closes itself. A refused registration never answered, so it
+     * still returns its erroring stream. */
+    if (replayed.idle) {
+      return null;
+    }
     const reset = replayed.runId === undefined ? undefined : runResets.get(options.chatId);
     if (reset && replayed.runId !== undefined) {
       reset(await rebuildTranscript(replayed.events, replayed.runId));

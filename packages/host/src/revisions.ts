@@ -16,7 +16,7 @@
  * stream alone would race the first tool write.
  */
 
-import type { SnapshotFrom } from 'xstate';
+import type { ActorOptions, AnyActorLogic, SnapshotFrom } from 'xstate';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, watch as watchDirectory, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -151,8 +151,15 @@ export type HostRevisionEvent =
       readonly missing: readonly MissingGitTool[];
     };
 
-/** Options for {@link createProjectRevisions}. @public */
-export type ProjectRevisionsOptions = {
+/**
+ * Options for {@link createProjectRevisions}.
+ *
+ * `clock`, `inspect` and `onRejectedEvent` go to the revision actor tree (MC-R4):
+ * production passes none, and tests pass a `StepClock` and the harness inspector.
+ *
+ * @public
+ */
+export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> & {
   /** Absolute workspace root this host owns: the live checkout's tree. */
   readonly workspaceRoot: string;
   /**
@@ -671,6 +678,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     port,
     projectId,
     authorityEpoch: projectAuthorityEpoch(options.workspaceRoot, options.authorityEpoch ?? processAuthorityEpoch),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+    ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
     ...(options.actorId === undefined ? {} : { actorId: options.actorId }),
     ...(options.actor === undefined ? {} : { actor: options.actor }),
     /*
@@ -1846,7 +1856,8 @@ export const openProjectRevisions = (
     remoteUrl?: ((projectId: string) => string | undefined) | undefined;
     /** Creates or re-points the publication row. Only a signed-in host has it. */
     publishPublication?: ((input: PublishPublicationActorInput) => Promise<PublishPublicationActorOutput>) | undefined;
-  }>,
+  }> &
+    Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
 ): ProjectRevisionVerbs => {
   const projectId = options.projectId ?? basename(options.workspaceRoot);
   const { apiBaseUrl, apiToken } = options;
@@ -1903,6 +1914,9 @@ export const openProjectRevisions = (
         projectId,
         authorityEpoch: projectAuthorityEpoch(options.workspaceRoot, options.authorityEpoch ?? processAuthorityEpoch),
         filesystem: (checkout) => new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
+        ...(options.clock === undefined ? {} : { clock: options.clock }),
+        ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+        ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
         ...(registerRemoteProject === undefined ? {} : { registerRemoteProject }),

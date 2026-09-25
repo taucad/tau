@@ -1,0 +1,31 @@
+name: 'Setup formal toolchains'
+description: 'Java plus the TLC, Apalache and Lean toolchains pinned in tools/formal/toolchain.lock (run after setup-nx)'
+
+inputs:
+  tools:
+    description: 'Comma-separated tools for `formal setup`: tlc, lean, apalache'
+    required: false
+    default: 'tlc'
+
+runs:
+  using: 'composite'
+  steps:
+    # Temurin 25 LTS; the lock's minimum is 21, which Apalache needs.
+    - name: Setup Java
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      with:
+        distribution: 'temurin'
+        java-version: '25'
+
+    # Toolchains live under node_modules/.cache/formal, never in `pnpm install`.
+    # The key changes when the lock does, so a re-pin re-downloads and re-verifies.
+    - name: Restore formal toolchain cache
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: node_modules/.cache/formal
+        key: formal-${{ runner.os }}-${{ runner.arch }}-${{ inputs.tools }}-${{ hashFiles('tools/formal/toolchain.lock') }}
+
+    # Downloads what the cache lacks and refuses any bytes whose sha256 differs from the lock.
+    - name: Provision and verify toolchains
+      shell: bash
+      run: pnpm nx run formal:setup --tools=${{ inputs.tools }}

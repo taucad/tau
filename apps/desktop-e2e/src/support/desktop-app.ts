@@ -9,6 +9,7 @@ import type { DownloadItem, Event } from 'electron';
 import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
 import { expect } from 'vitest';
+import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 import {
   desktopE2EApiUrl,
   desktopE2ECompletedArtifact,
@@ -356,6 +357,11 @@ export const launchDesktopApp = async (options: {
       child.kill('SIGKILL');
     }
     await exited;
+    /* Field trace validation (formal-verification policy): copy every chat log the
+     * app wrote under Home or the picked project before the roots go. */
+    const chatLogs = chatLogDestination('desktop-e2e', expect.getState().testPath);
+    await captureChatLogs(userData, chatLogs);
+    await captureChatLogs(pickedParent, chatLogs);
     if (captured) {
       /* Keep the evidence a failing run just produced. */
       return;

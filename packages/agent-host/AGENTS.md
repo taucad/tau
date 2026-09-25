@@ -14,4 +14,4 @@
 
 Implement deterministic model fixtures through the host's `ModelTransport` and yield typed `ModelStreamEvent` values. Drive replay from the durable event log and provider-message roles; do not depend on a provider SDK's runtime class identity.
 
-Validate with `pnpm nx lint agent-host`, `pnpm nx test agent-host --watch=false`, `pnpm nx typecheck agent-host`, and `pnpm nx build agent-host`. Run `pnpm nx run agent-host:test:browser` for browser execution.
+Validate with `pnpm nx lint agent-host`, `pnpm nx test agent-host --watch=false`, `pnpm nx typecheck agent-host`, and `pnpm nx build agent-host`. Run `pnpm nx run agent-host:test:e2e` for browser execution; CI runs it in the e2e lane.

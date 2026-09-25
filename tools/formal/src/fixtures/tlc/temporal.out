@@ -1,0 +1,60 @@
+Implied-temporal checking--satisfiability problem has 2 branches.
+Computing initial states...
+Finished computing initial states: 2 distinct states generated at 2026-09-25 10:56:27.
+Checking 2 branches of temporal properties for the current state space with 31880 total distinct states at (2026-09-25 10:56:30)
+Error: Temporal property CompletedRunEventuallySettled was violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ page = "alive"
+/\ epoch = 1
+/\ focus = "a"
+/\ stolen = FALSE
+/\ chat = [ a |->
+      [ turn |-> "none",
+        lease |-> 0,
+        dirty |-> <<FALSE, FALSE>>,
+        baseResultNewest |-> <<0, 0, 0>>,
+        admittedCompletedFailed |-> <<FALSE, FALSE, FALSE>>,
+        row |-> <<"none", 0>>,
+        msg |-> <<"none", 0>>,
+        pageRun |-> "none",
+        known |-> FALSE,
+        stream |-> FALSE ] ]
+
+State 2: <PersonEdit("b") line 124, col 5 to line 127, col 96 of module TurnSettlementToday>
+/\ page = "alive"
+/\ epoch = 1
+/\ focus = "a"
+/\ stolen = FALSE
+/\ chat = [ a |->
+      [ turn |-> "none",
+        lease |-> 0,
+        dirty |-> <<FALSE, FALSE>>,
+        baseResultNewest |-> <<0, 0, 0>>,
+        admittedCompletedFailed |-> <<FALSE, FALSE, FALSE>>,
+        row |-> <<"none", 0>>,
+        msg |-> <<"none", 0>>,
+        pageRun |-> "none",
+        known |-> FALSE,
+        stream |-> FALSE ] ]
+
+State 3: <Gesture("a") line 138, col 5 to line 142, col 67 of module TurnSettlementToday>
+/\ page = "alive"
+/\ epoch = 1
+/\ focus = "a"
+/\ stolen = FALSE
+/\ chat = [ a |->
+      [ turn |-> "preparing",
+        lease |-> 0,
+        dirty |-> <<FALSE, FALSE>>,
+        baseResultNewest |-> <<0, 0, 0>>,
+        admittedCompletedFailed |-> <<FALSE, FALSE, FALSE>>,
+        row |-> <<"none", 0>>,
+        msg |-> <<"none", 0>>,
+        pageRun |-> "none",
+        known |-> FALSE,
+        stream |-> FALSE ] ]
+
+State 4: <Prepare("a") line 146, col 5 to line 152, col 76 of module TurnSettlementToday>

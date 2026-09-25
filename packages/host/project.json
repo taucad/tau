@@ -5,6 +5,12 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "formal": {},
+    "formal:nightly": {
+      "options": {
+        "command": "vitest run --root packages/host src/acp/run.integration.test.ts src/acp/run.interrupts.integration.test.ts; node tools/formal/src/cli.ts logs host && node tools/formal/src/cli.ts nightly packages/host"
+      }
+    },
     "test:acp-live": {
       "executor": "nx:run-commands",
       "cache": false,

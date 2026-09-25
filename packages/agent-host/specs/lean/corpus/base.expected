@@ -1,0 +1,9250 @@
+T tables
+HS - none
+HS admitted admitted
+HS running running
+HS paused paused
+HS completed terminal
+HS failed terminal
+HS cancelled terminal
+OP admit none true
+OP admit reserved false
+OP admit admitted false
+OP admit running false
+OP admit paused false
+OP admit terminal true
+OP resume none false
+OP resume reserved false
+OP resume admitted true
+OP resume running true
+OP resume paused true
+OP resume terminal true
+SL unadmitted false
+SL open true
+SL terminal true
+SL settled false
+LL admitted unadmitted - false true
+LL admitted unadmitted - true true
+LL admitted unadmitted admitted false true
+LL admitted unadmitted admitted true true
+LL admitted unadmitted running false true
+LL admitted unadmitted running true true
+LL admitted unadmitted paused false true
+LL admitted unadmitted paused true true
+LL admitted unadmitted completed false true
+LL admitted unadmitted completed true true
+LL admitted unadmitted failed false true
+LL admitted unadmitted failed true true
+LL admitted unadmitted cancelled false true
+LL admitted unadmitted cancelled true true
+LL admitted open - false false
+LL admitted open - true false
+LL admitted open admitted false false
+LL admitted open admitted true false
+LL admitted open running false false
+LL admitted open running true false
+LL admitted open paused false false
+LL admitted open paused true false
+LL admitted open completed false false
+LL admitted open completed true false
+LL admitted open failed false false
+LL admitted open failed true false
+LL admitted open cancelled false false
+LL admitted open cancelled true false
+LL admitted terminal - false false
+LL admitted terminal - true false
+LL admitted terminal admitted false false
+LL admitted terminal admitted true false
+LL admitted terminal running false false
+LL admitted terminal running true false
+LL admitted terminal paused false false
+LL admitted terminal paused true false
+LL admitted terminal completed false false
+LL admitted terminal completed true false
+LL admitted terminal failed false false
+LL admitted terminal failed true false
+LL admitted terminal cancelled false false
+LL admitted terminal cancelled true false
+LL admitted settled - false false
+LL admitted settled - true false
+LL admitted settled admitted false false
+LL admitted settled admitted true false
+LL admitted settled running false false
+LL admitted settled running true false
+LL admitted settled paused false false
+LL admitted settled paused true false
+LL admitted settled completed false false
+LL admitted settled completed true false
+LL admitted settled failed false false
+LL admitted settled failed true false
+LL admitted settled cancelled false false
+LL admitted settled cancelled true false
+LL running unadmitted - false true
+LL running unadmitted - true true
+LL running unadmitted admitted false true
+LL running unadmitted admitted true true
+LL running unadmitted running false true
+LL running unadmitted running true true
+LL running unadmitted paused false true
+LL running unadmitted paused true true
+LL running unadmitted completed false true
+LL running unadmitted completed true true
+LL running unadmitted failed false true
+LL running unadmitted failed true true
+LL running unadmitted cancelled false true
+LL running unadmitted cancelled true true
+LL running open - false true
+LL running open - true true
+LL running open admitted false true
+LL running open admitted true true
+LL running open running false true
+LL running open running true true
+LL running open paused false true
+LL running open paused true true
+LL running open completed false true
+LL running open completed true true
+LL running open failed false true
+LL running open failed true true
+LL running open cancelled false true
+LL running open cancelled true true
+LL running terminal - false true
+LL running terminal - true true
+LL running terminal admitted false true
+LL running terminal admitted true true
+LL running terminal running false true
+LL running terminal running true true
+LL running terminal paused false true
+LL running terminal paused true true
+LL running terminal completed false true
+LL running terminal completed true true
+LL running terminal failed false true
+LL running terminal failed true true
+LL running terminal cancelled false true
+LL running terminal cancelled true true
+LL running settled - false true
+LL running settled - true true
+LL running settled admitted false true
+LL running settled admitted true true
+LL running settled running false true
+LL running settled running true true
+LL running settled paused false true
+LL running settled paused true true
+LL running settled completed false false
+LL running settled completed true true
+LL running settled failed false false
+LL running settled failed true true
+LL running settled cancelled false false
+LL running settled cancelled true true
+LL paused unadmitted - false true
+LL paused unadmitted - true true
+LL paused unadmitted admitted false true
+LL paused unadmitted admitted true true
+LL paused unadmitted running false true
+LL paused unadmitted running true true
+LL paused unadmitted paused false true
+LL paused unadmitted paused true true
+LL paused unadmitted completed false true
+LL paused unadmitted completed true true
+LL paused unadmitted failed false true
+LL paused unadmitted failed true true
+LL paused unadmitted cancelled false true
+LL paused unadmitted cancelled true true
+LL paused open - false true
+LL paused open - true true
+LL paused open admitted false true
+LL paused open admitted true true
+LL paused open running false true
+LL paused open running true true
+LL paused open paused false true
+LL paused open paused true true
+LL paused open completed false true
+LL paused open completed true true
+LL paused open failed false true
+LL paused open failed true true
+LL paused open cancelled false true
+LL paused open cancelled true true
+LL paused terminal - false true
+LL paused terminal - true true
+LL paused terminal admitted false true
+LL paused terminal admitted true true
+LL paused terminal running false true
+LL paused terminal running true true
+LL paused terminal paused false true
+LL paused terminal paused true true
+LL paused terminal completed false true
+LL paused terminal completed true true
+LL paused terminal failed false true
+LL paused terminal failed true true
+LL paused terminal cancelled false true
+LL paused terminal cancelled true true
+LL paused settled - false true
+LL paused settled - true true
+LL paused settled admitted false true
+LL paused settled admitted true true
+LL paused settled running false true
+LL paused settled running true true
+LL paused settled paused false true
+LL paused settled paused true true
+LL paused settled completed false false
+LL paused settled completed true false
+LL paused settled failed false false
+LL paused settled failed true false
+LL paused settled cancelled false false
+LL paused settled cancelled true false
+LL completed unadmitted - false true
+LL completed unadmitted - true true
+LL completed unadmitted admitted false true
+LL completed unadmitted admitted true true
+LL completed unadmitted running false true
+LL completed unadmitted running true true
+LL completed unadmitted paused false true
+LL completed unadmitted paused true true
+LL completed unadmitted completed false true
+LL completed unadmitted completed true true
+LL completed unadmitted failed false true
+LL completed unadmitted failed true true
+LL completed unadmitted cancelled false true
+LL completed unadmitted cancelled true true
+LL completed open - false true
+LL completed open - true true
+LL completed open admitted false true
+LL completed open admitted true true
+LL completed open running false true
+LL completed open running true true
+LL completed open paused false true
+LL completed open paused true true
+LL completed open completed false true
+LL completed open completed true true
+LL completed open failed false true
+LL completed open failed true true
+LL completed open cancelled false true
+LL completed open cancelled true true
+LL completed terminal - false true
+LL completed terminal - true true
+LL completed terminal admitted false true
+LL completed terminal admitted true true
+LL completed terminal running false true
+LL completed terminal running true true
+LL completed terminal paused false true
+LL completed terminal paused true true
+LL completed terminal completed false true
+LL completed terminal completed true true
+LL completed terminal failed false true
+LL completed terminal failed true true
+LL completed terminal cancelled false true
+LL completed terminal cancelled true true
+LL completed settled - false true
+LL completed settled - true true
+LL completed settled admitted false true
+LL completed settled admitted true true
+LL completed settled running false true
+LL completed settled running true true
+LL completed settled paused false true
+LL completed settled paused true true
+LL completed settled completed false false
+LL completed settled completed true false
+LL completed settled failed false false
+LL completed settled failed true false
+LL completed settled cancelled false false
+LL completed settled cancelled true false
+LL failed unadmitted - false true
+LL failed unadmitted - true true
+LL failed unadmitted admitted false true
+LL failed unadmitted admitted true true
+LL failed unadmitted running false true
+LL failed unadmitted running true true
+LL failed unadmitted paused false true
+LL failed unadmitted paused true true
+LL failed unadmitted completed false true
+LL failed unadmitted completed true true
+LL failed unadmitted failed false true
+LL failed unadmitted failed true true
+LL failed unadmitted cancelled false true
+LL failed unadmitted cancelled true true
+LL failed open - false true
+LL failed open - true true
+LL failed open admitted false true
+LL failed open admitted true true
+LL failed open running false true
+LL failed open running true true
+LL failed open paused false true
+LL failed open paused true true
+LL failed open completed false true
+LL failed open completed true true
+LL failed open failed false true
+LL failed open failed true true
+LL failed open cancelled false true
+LL failed open cancelled true true
+LL failed terminal - false true
+LL failed terminal - true true
+LL failed terminal admitted false true
+LL failed terminal admitted true true
+LL failed terminal running false true
+LL failed terminal running true true
+LL failed terminal paused false true
+LL failed terminal paused true true
+LL failed terminal completed false true
+LL failed terminal completed true true
+LL failed terminal failed false true
+LL failed terminal failed true true
+LL failed terminal cancelled false true
+LL failed terminal cancelled true true
+LL failed settled - false true
+LL failed settled - true true
+LL failed settled admitted false true
+LL failed settled admitted true true
+LL failed settled running false true
+LL failed settled running true true
+LL failed settled paused false true
+LL failed settled paused true true
+LL failed settled completed false false
+LL failed settled completed true false
+LL failed settled failed false false
+LL failed settled failed true false
+LL failed settled cancelled false false
+LL failed settled cancelled true false
+LL cancelled unadmitted - false true
+LL cancelled unadmitted - true true
+LL cancelled unadmitted admitted false true
+LL cancelled unadmitted admitted true true
+LL cancelled unadmitted running false true
+LL cancelled unadmitted running true true
+LL cancelled unadmitted paused false true
+LL cancelled unadmitted paused true true
+LL cancelled unadmitted completed false true
+LL cancelled unadmitted completed true true
+LL cancelled unadmitted failed false true
+LL cancelled unadmitted failed true true
+LL cancelled unadmitted cancelled false true
+LL cancelled unadmitted cancelled true true
+LL cancelled open - false true
+LL cancelled open - true true
+LL cancelled open admitted false true
+LL cancelled open admitted true true
+LL cancelled open running false true
+LL cancelled open running true true
+LL cancelled open paused false true
+LL cancelled open paused true true
+LL cancelled open completed false true
+LL cancelled open completed true true
+LL cancelled open failed false true
+LL cancelled open failed true true
+LL cancelled open cancelled false true
+LL cancelled open cancelled true true
+LL cancelled terminal - false true
+LL cancelled terminal - true true
+LL cancelled terminal admitted false true
+LL cancelled terminal admitted true true
+LL cancelled terminal running false true
+LL cancelled terminal running true true
+LL cancelled terminal paused false true
+LL cancelled terminal paused true true
+LL cancelled terminal completed false true
+LL cancelled terminal completed true true
+LL cancelled terminal failed false true
+LL cancelled terminal failed true true
+LL cancelled terminal cancelled false true
+LL cancelled terminal cancelled true true
+LL cancelled settled - false true
+LL cancelled settled - true true
+LL cancelled settled admitted false true
+LL cancelled settled admitted true true
+LL cancelled settled running false true
+LL cancelled settled running true true
+LL cancelled settled paused false true
+LL cancelled settled paused true true
+LL cancelled settled completed false false
+LL cancelled settled completed true false
+LL cancelled settled failed false false
+LL cancelled settled failed true false
+LL cancelled settled cancelled false false
+LL cancelled settled cancelled true false
+X
+T log-0
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 duplicate
+A 7 appended
+A 8 appended
+A 9 EVENT_OUT_OF_ORDER
+A 10 appended
+A 11 appended
+R 1 - - unadmitted admit
+R 2 admitted 0:1 settled resume
+R 3 completed 0:4 settled admit
+C 2 admitted
+A 12 duplicate
+R 1 - - unadmitted admit
+R 2 admitted 0:1 settled resume
+R 3 completed 0:4 settled admit
+C 2 admitted
+QS skipped
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 1 2 10 0:1
+QB 3 4 10 0:3
+QB 10 10 10 
+X
+T log-1
+A 0 appended
+A 1 EVENT_OUT_OF_ORDER
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 EVENT_OUT_OF_ORDER
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 EVENT_OUT_OF_ORDER
+R 3 paused - open resume
+R 2 paused 0:10 settled admit
+R 1 completed 0:6 settled admit
+C 2 paused
+A 21 appended
+A 22 EVENT_OUT_OF_ORDER
+R 3 paused - open resume
+R 2 paused 0:10 settled admit
+R 1 completed 0:6 settled admit
+C 2 paused
+A 23 appended
+A 24 appended
+A 25 appended
+R 3 running - open resume
+R 2 paused 0:10 settled admit
+R 1 completed 0:6 settled admit
+C 3 running
+A 26 appended
+R 3 running - open resume
+R 2 paused 0:10 settled admit
+R 1 completed 0:6 settled admit
+C 3 running
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS appended
+QB 2 3 23 0:2
+QB 15 16 23 0:15
+QB 19 22 23 0:19,0:20,0:21
+X
+T log-2
+A 0 appended
+A 1 appended
+A 2 appended
+R 3 failed - terminal admit
+R 1 - - unadmitted admit
+R 2 completed - terminal admit
+C 2 terminal
+A 3 appended
+R 3 failed - terminal admit
+R 1 failed - terminal admit
+R 2 completed - terminal admit
+C 1 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 2 3 4 0:2
+QB 4 4 4 
+QB 4 4 4 
+X
+T log-3
+A 0 appended
+A 1 appended
+A 2 EVENT_MUTATED
+A 3 appended
+A 4 appended
+A 5 EVENT_OUT_OF_ORDER
+A 6 appended
+A 7 appended
+R 2 - 0:0 unadmitted admit
+R 3 admitted - open admit
+R 1 - 0:3 unadmitted admit
+C 3 admitted
+A 8 appended
+A 9 appended
+R 2 - 0:0 unadmitted admit
+R 3 admitted 0:7 settled admit
+R 1 - 0:3 unadmitted admit
+C 3 admitted
+A 10 EVENT_MUTATED
+A 11 appended
+R 2 running - open admit
+R 3 admitted 0:7 settled admit
+R 1 - 0:3 unadmitted admit
+C 2 running
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+R 2 paused - open admit
+R 3 admitted 0:7 settled admit
+R 1 admitted 0:3 settled admit
+C 1 admitted
+A 16 EVENT_OUT_OF_ORDER
+A 17 appended
+A 18 EVENT_MUTATED
+A 19 appended
+R 2 paused - open admit
+R 3 admitted 0:7 settled admit
+R 1 running - open admit
+C 1 running
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS appended
+QB 3 4 15 0:3
+QB 0 6 15 0:0,0:1,0:2,0:3,0:4,0:5
+QB 3 6 15 0:3,0:4,0:5
+X
+T log-4
+A 0 appended
+A 1 appended
+A 2 appended
+R 1 completed - terminal admit
+R 2 - 0:2 unadmitted admit
+C 1 terminal
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+R 1 completed - terminal admit
+R 2 - 0:2 unadmitted resume
+R 3 failed - terminal admit
+C 3 terminal
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 EVENT_MUTATED
+A 18 appended
+R 1 completed 2:8 settled admit
+R 2 - 0:2 unadmitted resume
+R 3 paused 2:5 settled resume
+C 3 paused
+A 19 appended
+A 20 appended
+A 21 EVENT_MUTATED
+R 1 completed 2:8 settled admit
+R 2 completed 0:2 settled settled
+R 3 failed 2:5 settled settled
+C 2 terminal
+A 22 appended
+A 23 appended
+R 1 completed 2:8 settled settled
+R 2 paused 0:2 settled resume
+R 3 failed 2:5 settled settled
+C 2 paused
+A 24 appended
+A 25 appended
+R 1 running - open resume
+R 2 completed 0:2 settled settled
+R 3 failed 2:5 settled settled
+C 1 running
+A 26 appended
+R 1 cancelled - terminal settled
+R 2 completed 0:2 settled settled
+R 3 failed 2:5 settled settled
+C 1 terminal
+A 27 appended
+R 1 cancelled - terminal settled
+R 2 completed 0:2 settled settled
+R 3 failed 2:5 settled settled
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 4 8 26 1:0,1:1,1:2,2:0
+QB 23 24 26 2:16
+QB 6 10 26 1:2,2:0,2:1,2:2
+X
+T log-5
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 duplicate
+A 4 duplicate
+A 5 appended
+A 6 appended
+A 7 appended
+R 2 admitted 0:0 settled admit
+R 1 paused 1:1 settled resume
+R 3 - 2:0 unadmitted admit
+C 2 admitted
+A 8 duplicate
+A 9 duplicate
+A 10 appended
+A 11 appended
+R 2 running - open admit
+R 1 paused 1:1 settled resume
+R 3 failed 2:0 settled admit
+C 3 terminal
+R 2 running - open admit
+R 1 paused 1:1 settled resume
+R 3 failed 2:0 settled admit
+C 3 terminal
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 2 3 8 1:0
+QB 8 8 8 
+QB 7 8 8 2:2
+X
+T log-6
+A 0 appended
+R 1 - 0:0 unadmitted admit
+C -
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 EVENT_OUT_OF_ORDER
+A 7 appended
+A 8 appended
+R 1 failed 0:0 settled admit
+R 2 paused - open resume
+R 3 running - open admit
+C 3 running
+A 9 appended
+R 1 failed 0:0 settled admit
+R 2 paused - open resume
+R 3 running - open admit
+C 3 running
+A 10 appended
+A 11 appended
+A 12 EVENT_MUTATED
+A 13 appended
+A 14 appended
+R 1 failed 2:0 settled admit
+R 2 paused - open resume
+R 3 running - open admit
+C 1 terminal
+A 15 duplicate
+A 16 appended
+A 17 duplicate
+A 18 EVENT_MUTATED
+A 19 appended
+R 1 failed 2:0 settled admit
+R 2 paused 2:3 settled resume
+R 3 running - open admit
+C 1 terminal
+R 1 failed 2:0 settled admit
+R 2 paused 2:3 settled resume
+R 3 running - open admit
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS skipped
+QB 7 12 15 1:6,1:7,1:8,2:0,2:1
+QB 3 7 15 1:2,1:3,1:4,1:5
+QB 3 6 15 1:2,1:3,1:4
+X
+T log-7
+A 0 appended
+A 1 appended
+A 2 appended
+R 3 completed 0:1 settled admit
+R 1 - - unadmitted admit
+C 3 terminal
+A 3 appended
+R 3 completed 0:1 settled admit
+R 1 - - unadmitted admit
+C 3 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 4 4 4 
+QB 0 2 4 0:0,0:1
+QB 3 4 4 0:3
+X
+T log-8
+A 0 appended
+A 1 appended
+A 2 EVENT_MUTATED
+A 3 appended
+R 2 - - unadmitted resume
+R 1 cancelled - terminal admit
+R 3 failed - terminal admit
+C 3 terminal
+A 4 appended
+A 5 appended
+R 2 - 1:1 unadmitted resume
+R 1 cancelled - terminal admit
+R 3 failed - terminal admit
+C 3 terminal
+A 6 appended
+A 7 appended
+A 8 duplicate
+A 9 EVENT_OUT_OF_ORDER
+R 2 - 1:1 unadmitted resume
+R 1 failed 2:0 settled admit
+R 3 failed - terminal admit
+C 1 terminal
+A 10 appended
+A 11 appended
+R 2 admitted 1:1 settled resume
+R 1 failed 2:0 settled admit
+R 3 failed - terminal settled
+C 2 admitted
+A 12 appended
+A 13 duplicate
+A 14 duplicate
+A 15 appended
+A 16 appended
+R 2 admitted 1:1 settled resume
+R 1 failed 2:0 settled admit
+R 3 failed 3:0 settled settled
+C 1 terminal
+R 2 admitted 1:1 settled resume
+R 1 failed 2:0 settled admit
+R 3 failed 3:0 settled settled
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QB 12 12 12 
+QB 9 10 12 3:0
+QB 5 6 12 2:0
+X
+T log-9
+A 0 appended
+R 2 - - unadmitted admit
+C -
+A 1 duplicate
+A 2 appended
+A 3 appended
+R 2 - - unadmitted admit
+R 1 running - open admit
+C 1 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 3 3 3 
+QB 2 3 3 0:2
+QB 1 3 3 0:1,0:2
+X
+T log-10
+A 0 appended
+A 1 appended
+R 1 paused 0:0 settled admit
+C 1 paused
+A 2 appended
+R 1 paused 0:0 settled admit
+R 2 - 0:2 unadmitted admit
+C 1 paused
+A 3 appended
+R 1 paused 0:0 settled admit
+R 2 - 0:2 unadmitted admit
+C 1 paused
+A 4 appended
+A 5 duplicate
+A 6 appended
+R 1 paused 0:0 settled admit
+R 2 - 0:2 unadmitted admit
+R 3 failed - terminal admit
+C 3 terminal
+A 7 appended
+A 8 appended
+A 9 EVENT_OUT_OF_ORDER
+A 10 EVENT_MUTATED
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 duplicate
+A 15 appended
+A 16 EVENT_MUTATED
+R 1 failed - terminal settled
+R 2 running - open admit
+R 3 failed - terminal admit
+C 1 terminal
+A 17 appended
+R 1 failed - terminal settled
+R 2 running - open admit
+R 3 failed - terminal admit
+C 2 running
+A 18 appended
+R 1 failed - terminal settled
+R 2 cancelled - terminal admit
+R 3 failed - terminal admit
+C 2 terminal
+A 19 appended
+A 20 appended
+A 21 appended
+R 1 cancelled 1:5 settled settled
+R 2 cancelled 1:3 settled admit
+R 3 failed - terminal admit
+C 1 terminal
+A 22 EVENT_MUTATED
+A 23 appended
+A 24 duplicate
+A 25 duplicate
+R 1 cancelled 1:5 settled settled
+R 2 cancelled 1:3 settled admit
+R 3 failed - terminal admit
+C 1 terminal
+A 26 appended
+A 27 appended
+R 1 cancelled 1:5 settled settled
+R 2 cancelled 1:3 settled admit
+R 3 admitted - open admit
+C 3 admitted
+A 28 appended
+R 1 cancelled 1:5 settled settled
+R 2 cancelled 1:3 settled admit
+R 3 admitted - open resume
+C 3 admitted
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 11 13 21 1:0,1:1
+QB 3 5 21 0:3,0:4
+QB 4 10 21 0:4,0:5,0:6,0:7,0:8,0:9
+X
+T log-11
+A 0 appended
+A 1 appended
+R 3 running - open admit
+C 3 running
+A 2 appended
+R 3 running - open admit
+R 2 admitted - open admit
+C 2 admitted
+A 3 appended
+A 4 appended
+A 5 duplicate
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+R 3 paused - open resume
+R 2 paused 1:2 settled admit
+R 1 - - unadmitted admit
+C 3 paused
+A 10 appended
+A 11 appended
+A 12 appended
+R 3 paused 2:0 settled resume
+R 2 paused 1:2 settled admit
+R 1 - - unadmitted admit
+C 3 paused
+A 13 appended
+R 3 paused 2:0 settled resume
+R 2 paused 1:2 settled admit
+R 1 - - unadmitted admit
+C 3 paused
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+R 3 paused 2:0 settled resume
+R 2 paused 1:2 settled admit
+R 1 - 2:3 unadmitted admit
+C 3 paused
+QS skipped
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 14 14 14 
+QB 3 7 14 1:2,1:3,1:4,1:5
+QB 7 9 14 1:6,1:7
+X
+T log-12
+A 0 appended
+A 1 EVENT_MUTATED
+A 2 EVENT_MUTATED
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 duplicate
+A 11 appended
+A 12 EVENT_MUTATED
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+R 2 admitted - open admit
+R 3 running 1:11 settled resume
+R 1 running 1:10 settled admit
+C 2 admitted
+A 19 appended
+A 20 appended
+R 2 running - open admit
+R 3 running 1:11 settled resume
+R 1 running 1:10 settled admit
+C 2 running
+R 2 running - open admit
+R 3 running 1:11 settled resume
+R 1 running 1:10 settled admit
+C 2 running
+QS appended
+QS SETTLEMENT_CONFLICT
+QS skipped
+QB 17 17 17 
+QB 8 11 17 1:6,1:7,1:8
+QB 17 17 17 
+X
+T log-13
+A 0 appended
+A 1 EVENT_OUT_OF_ORDER
+R 1 admitted - open admit
+C 1 admitted
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 1 admitted - open admit
+R 2 - 0:4 unadmitted admit
+R 3 - 0:3 unadmitted admit
+C 1 admitted
+A 6 appended
+A 7 appended
+A 8 EVENT_MUTATED
+A 9 appended
+R 1 admitted - open admit
+R 2 - 0:4 unadmitted admit
+R 3 admitted 0:3 settled admit
+C 3 admitted
+A 10 appended
+R 1 admitted - open admit
+R 2 - 0:4 unadmitted admit
+R 3 admitted 0:3 settled admit
+C 3 admitted
+A 11 appended
+A 12 appended
+R 1 admitted 1:4 settled admit
+R 2 running - open admit
+R 3 admitted 0:3 settled admit
+C 2 running
+A 13 appended
+A 14 appended
+A 15 duplicate
+R 1 admitted 1:4 settled admit
+R 2 running - open resume
+R 3 admitted 0:3 settled admit
+C 2 running
+A 16 appended
+A 17 appended
+R 1 admitted 1:4 settled admit
+R 2 running - open resume
+R 3 running - open admit
+C 3 running
+A 18 EVENT_MUTATED
+A 19 appended
+A 20 appended
+A 21 duplicate
+A 22 appended
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 EVENT_MUTATED
+A 27 appended
+A 28 appended
+A 29 appended
+R 1 failed 1:4 settled admit
+R 2 running - open resume
+R 3 cancelled - terminal settled
+C 3 terminal
+QS appended
+QS appended
+QS appended
+QB 22 23 24 2:7
+QB 24 24 24 
+QB 19 20 24 2:4
+X
+T log-14
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+R 2 - - unadmitted admit
+R 3 running - open admit
+R 1 - 0:2 unadmitted resume
+C 3 running
+A 5 appended
+A 6 appended
+A 7 appended
+R 2 failed - terminal admit
+R 3 running 1:1 settled admit
+R 1 - 0:2 unadmitted resume
+C 2 terminal
+A 8 appended
+A 9 appended
+R 2 completed - terminal admit
+R 3 running 1:1 settled admit
+R 1 - 0:2 unadmitted resume
+C 2 terminal
+A 10 appended
+A 11 appended
+R 2 completed - terminal admit
+R 3 running 1:1 settled admit
+R 1 - 0:2 unadmitted resume
+C 2 terminal
+A 12 appended
+A 13 appended
+R 2 running - open admit
+R 3 running 1:1 settled admit
+R 1 - 0:2 unadmitted resume
+C 2 running
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+R 2 running - open admit
+R 3 running 1:1 settled admit
+R 1 admitted - open resume
+C 1 admitted
+A 20 appended
+A 21 appended
+A 22 appended
+A 23 EVENT_OUT_OF_ORDER
+R 2 admitted - open admit
+R 3 running - open admit
+R 1 admitted 2:7 settled resume
+C 3 running
+R 2 admitted - open admit
+R 3 running - open admit
+R 1 admitted 2:7 settled resume
+C 3 running
+QS appended
+QS appended
+QS appended
+QB 14 19 23 2:1,2:2,2:3,2:4,2:5
+QB 6 11 23 1:1,1:2,1:3,1:4,1:5
+QB 13 16 23 2:0,2:1,2:2
+X
+T log-15
+A 0 appended
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+A 4 appended
+A 5 duplicate
+R 2 running 0:2 settled resume
+R 1 - - unadmitted admit
+C 2 running
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 EVENT_MUTATED
+R 2 running 0:2 settled resume
+R 1 paused - open resume
+R 3 cancelled - terminal admit
+C 1 paused
+A 11 appended
+R 2 running 0:2 settled resume
+R 1 failed - terminal settled
+R 3 cancelled - terminal admit
+C 1 terminal
+A 12 EVENT_MUTATED
+A 13 duplicate
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+R 2 running 0:2 settled resume
+R 1 failed 0:9 settled settled
+R 3 cancelled 1:2 settled admit
+C 1 terminal
+A 18 appended
+R 2 running 0:2 settled resume
+R 1 failed 0:9 settled settled
+R 3 cancelled 1:2 settled admit
+C 1 terminal
+A 19 appended
+R 2 running 0:2 settled resume
+R 1 failed 0:9 settled settled
+R 3 cancelled 1:2 settled admit
+C 1 terminal
+R 2 running 0:2 settled resume
+R 1 failed 0:9 settled settled
+R 3 cancelled 1:2 settled admit
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS skipped
+QS SETTLEMENT_CONFLICT
+QB 15 15 15 
+QB 3 5 15 0:3,0:4
+QB 5 7 15 0:5,0:6
+X
+T log-16
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+R 1 admitted - open admit
+R 3 cancelled - terminal admit
+R 2 - - unadmitted admit
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 0 1 4 0:2
+QB 0 4 4 0:2,0:3,0:4,0:5
+QB 0 4 4 0:2,0:3,0:4,0:5
+X
+T log-17
+A 0 appended
+A 1 duplicate
+R 2 running - open admit
+C 2 running
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 2 running - open admit
+R 1 failed 0:1 settled admit
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS skipped
+QB 0 3 5 0:0,0:1,0:2
+QB 4 5 5 1:1
+QB 5 5 5 
+X
+T log-18
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 EVENT_MUTATED
+A 6 EVENT_MUTATED
+A 7 appended
+A 8 appended
+R 1 paused - open admit
+R 3 failed - terminal admit
+C 1 paused
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 duplicate
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 duplicate
+R 1 completed - terminal settled
+R 3 failed 0:11 settled admit
+R 2 - 0:12 unadmitted admit
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 10 12 16 0:10,0:11
+QB 7 10 16 0:7,0:8,0:9
+QB 6 7 16 0:6
+X
+T log-19
+A 0 appended
+A 1 duplicate
+R 1 - - unadmitted admit
+C -
+A 2 appended
+A 3 EVENT_OUT_OF_ORDER
+R 1 - - unadmitted admit
+R 3 - 1:0 unadmitted admit
+C -
+A 4 appended
+A 5 appended
+A 6 appended
+R 1 - 1:3 unadmitted admit
+R 3 completed 1:0 settled admit
+R 2 failed - terminal admit
+C 2 terminal
+A 7 appended
+A 8 appended
+R 1 - 1:3 unadmitted admit
+R 3 completed 1:0 settled admit
+R 2 failed - terminal admit
+C 2 terminal
+A 9 appended
+A 10 EVENT_OUT_OF_ORDER
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+R 1 - 1:3 unadmitted admit
+R 3 cancelled - terminal admit
+R 2 running 2:2 settled admit
+C 2 running
+R 1 - 1:3 unadmitted admit
+R 3 cancelled - terminal admit
+R 2 running 2:2 settled admit
+C 2 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 1 3 12 1:0,1:1
+QB 1 3 12 1:0,1:1
+QB 4 5 12 1:3
+X
+T log-20
+A 0 appended
+A 1 EVENT_OUT_OF_ORDER
+A 2 appended
+A 3 duplicate
+A 4 appended
+A 5 EVENT_OUT_OF_ORDER
+R 2 - - unadmitted admit
+R 1 failed - terminal admit
+C 1 terminal
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+R 2 completed - terminal admit
+R 1 completed - terminal admit
+R 3 completed - terminal admit
+C 3 terminal
+A 10 appended
+A 11 appended
+A 12 duplicate
+R 2 completed - terminal admit
+R 1 completed 1:5 settled admit
+R 3 completed - terminal admit
+C 3 terminal
+A 13 appended
+A 14 appended
+A 15 appended
+R 2 completed - terminal admit
+R 1 completed 1:5 settled admit
+R 3 completed - terminal admit
+C 3 terminal
+A 16 appended
+A 17 EVENT_OUT_OF_ORDER
+A 18 EVENT_OUT_OF_ORDER
+A 19 appended
+R 2 paused - open resume
+R 1 completed 1:5 settled admit
+R 3 completed - terminal admit
+C 2 paused
+A 20 EVENT_OUT_OF_ORDER
+A 21 appended
+A 22 appended
+R 2 paused - open resume
+R 1 cancelled 1:5 settled admit
+R 3 admitted - open admit
+C 3 admitted
+A 23 appended
+A 24 appended
+R 2 cancelled - terminal settled
+R 1 cancelled 1:5 settled admit
+R 3 failed - terminal admit
+C 2 terminal
+A 25 duplicate
+R 2 cancelled - terminal settled
+R 1 cancelled 1:5 settled admit
+R 3 failed - terminal admit
+C 2 terminal
+A 26 appended
+A 27 appended
+A 28 appended
+A 29 appended
+A 30 EVENT_MUTATED
+R 2 cancelled 3:1 settled settled
+R 1 cancelled 1:5 settled admit
+R 3 failed - terminal admit
+C 3 terminal
+QS appended
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 12 13 22 1:9
+QB 17 20 22 2:3,2:4,2:5
+QB 2 6 22 0:2,1:0,1:1,1:2
+X
+T log-21
+A 0 appended
+A 1 appended
+A 2 appended
+R 2 failed 1:0 settled admit
+R 3 - - unadmitted admit
+C 2 terminal
+A 3 duplicate
+A 4 appended
+A 5 appended
+R 2 failed 1:0 settled admit
+R 3 - - unadmitted admit
+R 1 - - unadmitted resume
+C 2 terminal
+A 6 appended
+R 2 failed 1:0 settled admit
+R 3 - - unadmitted admit
+R 1 - - unadmitted resume
+C 2 terminal
+A 7 appended
+A 8 appended
+R 2 failed 1:0 settled admit
+R 3 running - open admit
+R 1 - - unadmitted resume
+C 3 running
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 duplicate
+A 13 appended
+R 2 failed 1:0 settled admit
+R 3 running 2:1 settled admit
+R 1 - 2:3 unadmitted resume
+C 3 running
+A 14 duplicate
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+R 2 failed 1:0 settled admit
+R 3 completed 2:1 settled admit
+R 1 - 2:3 unadmitted resume
+C 3 terminal
+A 19 appended
+A 20 appended
+A 21 EVENT_OUT_OF_ORDER
+A 22 appended
+A 23 appended
+R 2 failed 1:0 settled admit
+R 3 completed - terminal admit
+R 1 completed 2:3 settled settled
+C 3 terminal
+A 24 duplicate
+A 25 EVENT_MUTATED
+A 26 EVENT_OUT_OF_ORDER
+A 27 appended
+A 28 appended
+A 29 duplicate
+A 30 appended
+R 2 failed 1:0 settled admit
+R 3 completed - terminal admit
+R 1 cancelled 2:3 settled settled
+C 1 terminal
+QS appended
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 16 22 23 3:3,3:4,3:5,3:6,3:7,3:8
+QB 22 23 23 3:9
+QB 21 23 23 3:8,3:9
+X
+T log-22
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 duplicate
+A 6 appended
+A 7 appended
+R 2 running 1:1 settled admit
+R 1 running 1:3 settled admit
+R 3 - - unadmitted admit
+C 1 running
+A 8 EVENT_OUT_OF_ORDER
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+R 2 failed 1:1 settled admit
+R 1 running 1:3 settled admit
+R 3 - 1:7 unadmitted admit
+C 2 terminal
+A 13 appended
+A 14 appended
+R 2 failed 1:1 settled admit
+R 1 running 1:3 settled admit
+R 3 cancelled 1:7 settled admit
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 1 2 13 0:2
+QB 13 13 13 
+QB 13 13 13 
+X
+T log-23
+A 0 appended
+A 1 appended
+R 2 - - unadmitted admit
+R 1 running - open admit
+C 1 running
+A 2 appended
+R 2 - - unadmitted resume
+R 1 running - open admit
+C 1 running
+A 3 appended
+A 4 appended
+A 5 appended
+R 2 - - unadmitted resume
+R 1 running 1:2 settled admit
+R 3 running - open admit
+C 3 running
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+R 2 - 1:8 unadmitted resume
+R 1 running - open resume
+R 3 cancelled 2:0 settled admit
+C 1 running
+A 12 EVENT_MUTATED
+A 13 appended
+A 14 EVENT_OUT_OF_ORDER
+R 2 admitted 1:8 settled resume
+R 1 running - open resume
+R 3 cancelled 2:0 settled admit
+C 2 admitted
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+R 2 running - open resume
+R 1 running 2:5 settled resume
+R 3 cancelled 2:0 settled admit
+C 2 running
+A 21 appended
+A 22 EVENT_MUTATED
+A 23 duplicate
+A 24 appended
+A 25 appended
+R 2 admitted - open resume
+R 1 running 2:5 settled resume
+R 3 running - open admit
+C 3 running
+A 26 appended
+A 27 appended
+R 2 admitted - open resume
+R 1 running 2:5 settled resume
+R 3 completed - terminal admit
+C 3 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 9 14 23 1:8,2:0,2:1,2:2,2:3
+QB 19 23 23 3:3,3:4,3:5,3:6
+QB 12 15 23 2:2,2:3,2:4
+X
+T log-24
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 1 - 0:4 unadmitted resume
+R 3 - 0:2 unadmitted admit
+R 2 admitted - open admit
+C 2 admitted
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+R 1 - 0:4 unadmitted resume
+R 3 completed 0:2 settled settled
+R 2 running - open admit
+C 3 terminal
+A 10 appended
+A 11 appended
+R 1 - 0:4 unadmitted resume
+R 3 completed 0:2 settled settled
+R 2 running 0:12 settled admit
+C 3 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 3 6 12 0:4,0:5,0:6
+QB 12 12 12 
+QB 1 2 12 0:2
+X
+T log-25
+A 0 appended
+R 1 - 0:0 unadmitted admit
+C -
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 EVENT_OUT_OF_ORDER
+A 7 appended
+A 8 appended
+A 9 EVENT_OUT_OF_ORDER
+A 10 appended
+A 11 duplicate
+R 1 paused - open admit
+R 3 admitted 2:2 settled admit
+C 3 admitted
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 5 8 9 2:3,2:4,2:5
+QB 4 9 9 2:2,2:3,2:4,2:5,2:6
+QB 7 9 9 2:5,2:6
+X
+T log-26
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+R 3 - - unadmitted admit
+R 1 - 0:1 unadmitted admit
+C -
+A 4 appended
+A 5 appended
+A 6 duplicate
+A 7 appended
+R 3 running - open admit
+R 1 - 0:1 unadmitted admit
+R 2 completed - terminal admit
+C 3 running
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 EVENT_MUTATED
+A 16 appended
+A 17 duplicate
+R 3 running 2:6 settled admit
+R 1 - 0:1 unadmitted admit
+R 2 paused 2:5 settled admit
+C 2 paused
+QS skipped
+QS SETTLEMENT_CONFLICT
+QS skipped
+QB 8 13 15 0:8,0:9,1:0,2:3,2:4
+QB 4 6 15 0:4,0:5
+QB 12 15 15 2:4,2:5,2:6
+X
+T log-27
+A 0 appended
+A 1 appended
+R 1 running - open admit
+C 1 running
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 1 running - open resume
+R 2 running 1:1 settled admit
+R 3 - 1:2 unadmitted admit
+C 2 running
+A 6 appended
+A 7 duplicate
+R 1 running - open resume
+R 2 running 1:1 settled admit
+R 3 - 1:2 unadmitted admit
+C 2 running
+A 8 appended
+A 9 duplicate
+A 10 EVENT_OUT_OF_ORDER
+A 11 appended
+A 12 duplicate
+R 1 paused - open resume
+R 2 running 1:1 settled admit
+R 3 running - open admit
+C 3 running
+A 13 appended
+A 14 appended
+A 15 appended
+R 1 paused - open resume
+R 2 admitted 1:1 settled admit
+R 3 running - open admit
+C 1 paused
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 duplicate
+A 20 appended
+A 21 appended
+A 22 EVENT_OUT_OF_ORDER
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+R 1 cancelled 2:6 settled settled
+R 2 failed 1:1 settled admit
+R 3 running 3:2 settled admit
+C 2 terminal
+A 27 appended
+R 1 cancelled 2:6 settled settled
+R 2 failed 1:1 settled admit
+R 3 running 3:2 settled admit
+C 2 terminal
+A 28 appended
+A 29 appended
+R 1 cancelled 2:6 settled settled
+R 2 failed 1:1 settled admit
+R 3 running 3:5 settled admit
+C 3 running
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 19 23 24 3:1,3:2,3:3,3:4
+QB 15 20 24 2:5,2:6,2:7,3:0,3:1
+QB 22 24 24 3:4,3:5
+X
+T log-28
+A 0 appended
+A 1 appended
+A 2 appended
+R 2 failed - terminal admit
+R 1 - 0:2 unadmitted admit
+C 2 terminal
+A 3 appended
+A 4 appended
+R 2 failed - terminal admit
+R 1 admitted 0:2 settled admit
+R 3 paused - open admit
+C 1 admitted
+A 5 appended
+A 6 appended
+R 2 failed 0:5 settled admit
+R 1 completed 0:2 settled admit
+R 3 paused - open admit
+C 1 terminal
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 EVENT_OUT_OF_ORDER
+A 11 appended
+A 12 duplicate
+A 13 appended
+A 14 appended
+R 2 failed 0:5 settled settled
+R 1 running - open admit
+R 3 completed - terminal admit
+C 1 running
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS appended
+QB 13 13 13 
+QB 2 6 13 0:2,0:3,0:4,0:5
+QB 5 10 13 0:5,0:6,0:7,0:8,0:9
+X
+T log-29
+A 0 appended
+A 1 appended
+R 3 admitted - open admit
+R 2 running - open admit
+C 2 running
+A 2 appended
+A 3 duplicate
+A 4 appended
+A 5 EVENT_OUT_OF_ORDER
+R 3 admitted - open admit
+R 2 completed - terminal admit
+R 1 running - open admit
+C 1 running
+R 3 admitted - open admit
+R 2 completed - terminal admit
+R 1 running - open admit
+C 1 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 4 4 4 
+QB 0 2 4 0:0,0:1
+QB 0 4 4 0:0,0:1,0:2,0:3
+X
+T log-30
+A 0 appended
+A 1 appended
+R 3 running - open admit
+C 3 running
+A 2 duplicate
+A 3 duplicate
+A 4 appended
+A 5 appended
+A 6 appended
+R 3 cancelled - terminal admit
+R 1 - - unadmitted admit
+C 3 terminal
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+R 3 running - open admit
+R 1 running - open admit
+C 3 running
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 duplicate
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 duplicate
+A 20 appended
+A 21 appended
+A 22 appended
+R 3 admitted - open resume
+R 1 running - open admit
+R 2 - 0:16 unadmitted admit
+C 3 admitted
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 13 15 19 0:13,0:14
+QB 6 9 19 0:6,0:7,0:8
+QB 10 14 19 0:10,0:11,0:12,0:13
+X
+T log-31
+A 0 appended
+A 1 appended
+R 1 failed - terminal admit
+C 1 terminal
+A 2 appended
+R 1 failed - terminal admit
+R 3 failed - terminal admit
+C 3 terminal
+A 3 appended
+A 4 appended
+A 5 duplicate
+A 6 appended
+A 7 appended
+A 8 appended
+R 1 failed 0:7 settled admit
+R 3 failed - terminal admit
+R 2 running - open resume
+C 2 running
+A 9 appended
+A 10 EVENT_MUTATED
+A 11 appended
+R 1 failed 0:7 settled admit
+R 3 failed - terminal admit
+R 2 running 0:8 settled resume
+C 2 running
+A 12 appended
+A 13 EVENT_MUTATED
+A 14 appended
+R 1 paused 0:7 settled admit
+R 3 failed - terminal admit
+R 2 running 0:8 settled resume
+C 1 paused
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 7 12 12 0:7,0:8,0:9,0:10,0:11
+QB 8 9 12 0:8
+QB 0 3 12 0:0,0:1,0:2
+X
+T log-32
+A 0 appended
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+R 1 running - open admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 0 3 3 0:0,0:1,1:0
+QB 1 2 3 0:1
+QB 2 3 3 1:0
+X
+T log-33
+A 0 appended
+A 1 EVENT_MUTATED
+A 2 appended
+A 3 appended
+R 3 - 0:0 unadmitted admit
+R 1 - 0:1 unadmitted admit
+C -
+A 4 appended
+A 5 EVENT_MUTATED
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 duplicate
+R 3 running - open admit
+R 1 failed 0:1 settled admit
+R 2 - - unadmitted admit
+C 1 terminal
+A 11 duplicate
+A 12 appended
+A 13 appended
+R 3 running 4:1 settled admit
+R 1 running - open admit
+R 2 - - unadmitted admit
+C 1 running
+R 3 running 4:1 settled admit
+R 1 running - open admit
+R 2 - - unadmitted admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 7 10 10 3:1,4:0,4:1
+QB 1 3 10 0:1,0:2
+QB 7 10 10 3:1,4:0,4:1
+X
+T log-34
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 duplicate
+A 4 duplicate
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+R 3 running - open admit
+R 2 running - open resume
+R 1 running - open admit
+C 3 running
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 4 6 13 1:2,1:3
+QB 5 6 13 1:3
+QB 13 13 13 
+X
+T log-35
+A 0 appended
+A 1 duplicate
+R 3 - - unadmitted resume
+C -
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+A 4 EVENT_MUTATED
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 EVENT_MUTATED
+R 3 cancelled - terminal settled
+R 1 completed 0:4 settled admit
+C 1 terminal
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+R 3 paused 0:5 settled resume
+R 1 admitted 0:4 settled admit
+R 2 - 1:1 unadmitted admit
+C 1 admitted
+A 14 appended
+A 15 appended
+R 3 paused 0:5 settled resume
+R 1 admitted 0:4 settled admit
+R 2 - 1:1 unadmitted admit
+C 1 admitted
+A 16 EVENT_MUTATED
+A 17 EVENT_OUT_OF_ORDER
+R 3 paused 0:5 settled resume
+R 1 admitted 0:4 settled admit
+R 2 - 1:1 unadmitted admit
+C 1 admitted
+A 18 appended
+A 19 appended
+R 3 failed 0:5 settled settled
+R 1 admitted 0:4 settled admit
+R 2 - 1:1 unadmitted admit
+C 3 terminal
+A 20 EVENT_MUTATED
+R 3 failed 0:5 settled settled
+R 1 admitted 0:4 settled admit
+R 2 - 1:1 unadmitted admit
+C 3 terminal
+QS SETTLEMENT_CONFLICT
+QS skipped
+QS skipped
+QB 2 7 14 0:2,0:3,0:4,0:5,1:0
+QB 4 10 14 0:4,0:5,1:0,1:1,1:2,1:3
+QB 0 1 14 0:0
+X
+T log-36
+A 0 appended
+A 1 appended
+A 2 appended
+R 1 admitted - open admit
+R 2 paused - open admit
+C 2 paused
+A 3 duplicate
+A 4 appended
+A 5 appended
+R 1 admitted - open admit
+R 2 paused - open admit
+R 3 completed 0:3 settled admit
+C 3 terminal
+A 6 duplicate
+R 1 admitted - open admit
+R 2 paused - open admit
+R 3 completed 0:3 settled admit
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 5 5 5 
+QB 1 2 5 0:1
+QB 4 5 5 0:4
+X
+T log-37
+A 0 appended
+A 1 appended
+R 2 - 0:0 unadmitted admit
+R 1 - 1:0 unadmitted admit
+C -
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 2 failed 0:0 settled admit
+R 1 - 1:0 unadmitted admit
+R 3 - - unadmitted resume
+C 2 terminal
+A 6 appended
+R 2 failed 0:0 settled admit
+R 1 - 1:0 unadmitted admit
+R 3 - - unadmitted resume
+C 2 terminal
+A 7 appended
+A 8 appended
+A 9 appended
+R 2 cancelled 0:0 settled admit
+R 1 - 1:0 unadmitted resume
+R 3 admitted - open resume
+C 3 admitted
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS skipped
+QB 6 9 10 1:5,1:6,1:7
+QB 1 2 10 1:0
+QB 6 10 10 1:5,1:6,1:7,1:8
+X
+T log-38
+A 0 appended
+R 3 admitted - open admit
+C 3 admitted
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+R 3 running - open admit
+R 1 running - open admit
+C 3 running
+A 5 EVENT_OUT_OF_ORDER
+A 6 appended
+R 3 running - open admit
+R 1 running - open admit
+R 2 - 0:5 unadmitted admit
+C 3 running
+A 7 appended
+R 3 running - open admit
+R 1 running - open admit
+R 2 - 0:5 unadmitted admit
+C 3 running
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 4 6 7 0:4,0:5
+QB 1 4 7 0:1,0:2,0:3
+QB 6 7 7 0:6
+X
+T log-39
+A 0 appended
+R 2 - 0:0 unadmitted admit
+C -
+A 1 appended
+R 2 - 0:0 unadmitted admit
+R 3 - - unadmitted admit
+C -
+A 2 appended
+R 2 paused 0:0 settled admit
+R 3 - - unadmitted admit
+C 2 paused
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+R 2 paused 0:0 settled admit
+R 3 - 1:3 unadmitted admit
+R 1 admitted - open admit
+C 2 paused
+A 8 duplicate
+A 9 appended
+A 10 appended
+A 11 appended
+R 2 paused 0:0 settled admit
+R 3 completed 1:3 settled admit
+R 1 admitted - open admit
+C 1 admitted
+A 12 appended
+R 2 paused 0:0 settled admit
+R 3 failed 1:3 settled admit
+R 1 admitted - open admit
+C 3 terminal
+A 13 appended
+R 2 paused 0:0 settled admit
+R 3 failed 1:3 settled admit
+R 1 running - open admit
+C 1 running
+A 14 appended
+R 2 paused 0:0 settled admit
+R 3 failed 1:3 settled admit
+R 1 running - open admit
+C 1 running
+A 15 appended
+A 16 appended
+A 17 appended
+R 2 failed 0:0 settled admit
+R 3 failed 1:3 settled admit
+R 1 running 2:6 settled admit
+C 2 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 9 10 17 2:1
+QB 4 8 17 1:2,1:3,1:4,1:5
+QB 13 15 17 2:5,2:6
+X
+T log-40
+A 0 appended
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+A 4 EVENT_MUTATED
+R 2 completed - terminal admit
+R 1 - - unadmitted admit
+C 2 terminal
+A 5 appended
+R 2 completed - terminal admit
+R 1 - - unadmitted admit
+C 2 terminal
+A 6 appended
+R 2 completed - terminal admit
+R 1 - - unadmitted admit
+C 2 terminal
+A 7 EVENT_OUT_OF_ORDER
+A 8 appended
+A 9 appended
+A 10 EVENT_MUTATED
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 EVENT_MUTATED
+R 2 running - open admit
+R 1 failed 1:1 settled admit
+R 3 paused - open admit
+C 1 terminal
+A 15 EVENT_MUTATED
+A 16 appended
+A 17 appended
+A 18 duplicate
+A 19 duplicate
+A 20 EVENT_MUTATED
+A 21 appended
+A 22 duplicate
+R 2 running 1:4 settled admit
+R 1 failed 1:1 settled admit
+R 3 paused - open admit
+C 2 running
+A 23 EVENT_OUT_OF_ORDER
+A 24 appended
+R 2 running 1:4 settled admit
+R 1 failed 1:1 settled admit
+R 3 paused 1:5 settled admit
+C 2 running
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 0 5 14 0:0,0:1,0:2,0:3,0:4
+QB 6 9 14 0:6,0:7,1:0
+QB 4 9 14 0:4,0:5,0:6,0:7,1:0
+X
+T log-41
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_OUT_OF_ORDER
+A 5 appended
+A 6 duplicate
+A 7 appended
+A 8 appended
+R 1 - 0:2 unadmitted admit
+R 3 failed - terminal admit
+C 3 terminal
+R 1 - 0:2 unadmitted admit
+R 3 failed - terminal admit
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 4 5 7 0:4
+QB 3 6 7 0:3,0:4,1:1
+QB 7 7 7 
+X
+T log-42
+A 0 appended
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+R 1 running - open admit
+C 1 running
+A 3 appended
+A 4 appended
+A 5 duplicate
+A 6 appended
+A 7 appended
+R 1 cancelled - terminal admit
+R 3 failed - terminal admit
+R 2 - - unadmitted admit
+C 3 terminal
+A 8 appended
+A 9 duplicate
+A 10 EVENT_MUTATED
+A 11 duplicate
+R 1 cancelled - terminal settled
+R 3 failed - terminal admit
+R 2 - - unadmitted admit
+C 3 terminal
+A 12 appended
+A 13 appended
+R 1 cancelled - terminal settled
+R 3 failed - terminal admit
+R 2 - 0:8 unadmitted admit
+C 3 terminal
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+A 17 duplicate
+A 18 appended
+R 1 cancelled - terminal settled
+R 3 cancelled - terminal admit
+R 2 - 0:8 unadmitted admit
+C 3 terminal
+QS appended
+QS appended
+QS appended
+QB 1 3 12 0:1,0:2
+QB 5 9 12 0:5,0:6,0:7,0:8
+QB 0 6 12 0:0,0:1,0:2,0:3,0:4,0:5
+X
+T log-43
+A 0 appended
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+A 4 appended
+R 3 - - unadmitted resume
+R 1 - - unadmitted resume
+C -
+A 5 EVENT_OUT_OF_ORDER
+R 3 - - unadmitted resume
+R 1 - - unadmitted resume
+C -
+A 6 appended
+R 3 - - unadmitted resume
+R 1 - - unadmitted resume
+R 2 - - unadmitted admit
+C -
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 1 3 5 0:1,0:2
+QB 4 5 5 0:4
+QB 2 5 5 0:2,0:3,0:4
+X
+T log-44
+A 0 appended
+A 1 EVENT_MUTATED
+A 2 duplicate
+A 3 appended
+R 2 running - open admit
+R 3 - - unadmitted resume
+C 2 running
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 0 1 2 0:0
+QB 2 2 2 
+QB 2 2 2 
+X
+T log-45
+A 0 appended
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+A 4 appended
+R 1 completed 0:0 settled admit
+R 2 paused 0:2 settled admit
+C 1 terminal
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+R 1 failed 0:0 settled admit
+R 2 completed 0:2 settled admit
+R 3 running - open admit
+C 2 terminal
+A 10 appended
+A 11 appended
+R 1 failed 0:0 settled admit
+R 2 completed 0:2 settled admit
+R 3 running - open admit
+C 2 terminal
+A 12 appended
+A 13 duplicate
+R 1 failed 0:0 settled admit
+R 2 completed 0:2 settled admit
+R 3 running - open admit
+C 2 terminal
+A 14 appended
+A 15 appended
+R 1 running - open admit
+R 2 completed 0:2 settled admit
+R 3 running - open admit
+C 1 running
+A 16 appended
+A 17 appended
+R 1 running - open admit
+R 2 completed 0:2 settled admit
+R 3 admitted - open admit
+C 3 admitted
+A 18 appended
+A 19 appended
+R 1 cancelled - terminal admit
+R 2 completed 0:2 settled admit
+R 3 admitted 1:0 settled admit
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 13 18 18 0:13,0:14,0:15,1:0,1:1
+QB 1 2 18 0:1
+QB 18 18 18 
+X
+T log-46
+A 0 appended
+R 2 running - open admit
+C 2 running
+A 1 EVENT_MUTATED
+A 2 appended
+A 3 EVENT_MUTATED
+A 4 appended
+A 5 appended
+A 6 duplicate
+R 2 completed 1:0 settled admit
+R 3 - 2:0 unadmitted admit
+C 2 terminal
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 duplicate
+A 19 appended
+A 20 appended
+R 2 failed 1:0 settled admit
+R 3 running 5:0 settled admit
+R 1 - - unadmitted resume
+C 2 terminal
+A 21 appended
+R 2 failed 1:0 settled admit
+R 3 running 5:0 settled admit
+R 1 - 6:1 unadmitted resume
+C 2 terminal
+A 22 duplicate
+A 23 appended
+A 24 appended
+A 25 appended
+R 2 cancelled 1:0 settled admit
+R 3 failed 5:0 settled admit
+R 1 - 6:1 unadmitted resume
+C 2 terminal
+A 26 appended
+A 27 appended
+A 28 appended
+R 2 cancelled 1:0 settled admit
+R 3 completed 5:0 settled admit
+R 1 - 6:1 unadmitted resume
+C 3 terminal
+QS skipped
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 18 23 24 6:2,6:3,6:4,6:5,6:6
+QB 15 16 24 5:1
+QB 7 13 24 3:2,4:0,4:1,4:2,4:3,4:4
+X
+T log-47
+A 0 appended
+A 1 appended
+A 2 duplicate
+A 3 appended
+A 4 appended
+A 5 EVENT_OUT_OF_ORDER
+A 6 appended
+A 7 appended
+A 8 appended
+R 2 - - unadmitted admit
+R 1 running - open admit
+R 3 running - open resume
+C 1 running
+A 9 appended
+A 10 appended
+R 2 - - unadmitted admit
+R 1 failed - terminal admit
+R 3 running - open resume
+C 1 terminal
+A 11 appended
+A 12 appended
+R 2 - - unadmitted admit
+R 1 running - open admit
+R 3 running - open resume
+C 1 running
+A 13 duplicate
+A 14 appended
+A 15 appended
+R 2 - - unadmitted admit
+R 1 failed - terminal admit
+R 3 running 0:14 settled resume
+C 1 terminal
+A 16 duplicate
+A 17 appended
+A 18 EVENT_OUT_OF_ORDER
+A 19 appended
+A 20 duplicate
+A 21 appended
+R 2 - 0:15 unadmitted admit
+R 1 failed - terminal admit
+R 3 running 0:14 settled resume
+C 1 terminal
+A 22 appended
+A 23 appended
+R 2 - 0:15 unadmitted admit
+R 1 running - open admit
+R 3 running 0:14 settled resume
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 13 16 18 0:15,0:16,0:17
+QB 18 18 18 
+QB 6 8 18 0:8,0:9
+X
+T log-48
+A 0 appended
+R 1 - - unadmitted resume
+C -
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_MUTATED
+A 5 EVENT_MUTATED
+A 6 appended
+R 1 - - unadmitted resume
+R 2 completed - terminal admit
+R 3 - 0:2 unadmitted admit
+C 2 terminal
+A 7 duplicate
+A 8 appended
+R 1 - - unadmitted resume
+R 2 completed 0:5 settled admit
+R 3 - 0:2 unadmitted admit
+C 2 terminal
+A 9 EVENT_MUTATED
+R 1 - - unadmitted resume
+R 2 completed 0:5 settled admit
+R 3 - 0:2 unadmitted admit
+C 2 terminal
+A 10 appended
+A 11 EVENT_OUT_OF_ORDER
+A 12 EVENT_OUT_OF_ORDER
+A 13 appended
+R 1 admitted 0:7 settled resume
+R 2 completed 0:5 settled admit
+R 3 - 0:2 unadmitted admit
+C 1 admitted
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 EVENT_MUTATED
+A 17 appended
+A 18 appended
+A 19 EVENT_MUTATED
+A 20 appended
+A 21 appended
+R 1 cancelled 0:7 settled settled
+R 2 paused 0:5 settled admit
+R 3 - 0:2 unadmitted admit
+C 2 paused
+A 22 appended
+R 1 completed 0:7 settled settled
+R 2 paused 0:5 settled admit
+R 3 - 0:2 unadmitted admit
+C 1 terminal
+A 23 duplicate
+R 1 completed 0:7 settled settled
+R 2 paused 0:5 settled admit
+R 3 - 0:2 unadmitted admit
+C 1 terminal
+R 1 completed 0:7 settled settled
+R 2 paused 0:5 settled admit
+R 3 - 0:2 unadmitted admit
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 8 11 14 0:8,0:9,0:10
+QB 0 3 14 0:0,0:1,0:2
+QB 5 9 14 0:5,0:6,0:7,0:8
+X
+T log-49
+A 0 appended
+A 1 EVENT_MUTATED
+A 2 appended
+A 3 appended
+R 1 admitted - open admit
+R 2 failed - terminal admit
+C 2 terminal
+A 4 EVENT_MUTATED
+R 1 admitted - open admit
+R 2 failed - terminal admit
+C 2 terminal
+A 5 appended
+R 1 admitted 1:0 settled admit
+R 2 failed - terminal admit
+C 2 terminal
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 duplicate
+A 13 appended
+A 14 duplicate
+A 15 appended
+R 1 running - open admit
+R 2 failed - terminal admit
+R 3 running - open admit
+C 1 running
+A 16 appended
+A 17 appended
+R 1 running 3:0 settled admit
+R 2 failed - terminal admit
+R 3 running - open admit
+C 1 running
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+R 1 running 3:0 settled admit
+R 2 failed 3:4 settled admit
+R 3 running 3:3 settled admit
+C 1 running
+A 22 appended
+R 1 failed 3:0 settled admit
+R 2 failed 3:4 settled admit
+R 3 running 3:3 settled admit
+C 1 terminal
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+A 27 appended
+A 28 appended
+R 1 completed 3:0 settled settled
+R 2 cancelled - terminal admit
+R 3 running 3:3 settled admit
+C 2 terminal
+QS SETTLEMENT_CONFLICT
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 2 7 25 0:2,1:0,1:1,1:2,1:3
+QB 13 16 25 3:1,3:2,3:3
+QB 17 19 25 3:5,3:6
+X
+T log-50
+A 0 appended
+A 1 EVENT_MUTATED
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+R 2 running - open admit
+R 1 running - open admit
+R 3 - 2:0 unadmitted admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 10 10 10 
+QB 10 10 10 
+QB 6 7 10 2:2
+X
+T log-51
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 EVENT_OUT_OF_ORDER
+A 13 appended
+A 14 duplicate
+A 15 appended
+R 3 completed 0:4 settled settled
+R 2 paused 0:2 settled admit
+R 1 paused - open admit
+C 2 paused
+A 16 appended
+A 17 appended
+R 3 completed 0:4 settled settled
+R 2 paused 0:2 settled admit
+R 1 paused - open admit
+C 2 paused
+A 18 duplicate
+A 19 duplicate
+R 3 completed 0:4 settled settled
+R 2 paused 0:2 settled admit
+R 1 paused - open admit
+C 2 paused
+QS SETTLEMENT_CONFLICT
+QS appended
+QS skipped
+QB 1 3 16 0:1,0:2
+QB 6 12 16 0:6,0:7,0:8,0:9,0:10,0:11
+QB 10 16 16 0:10,0:11,0:12,0:13,1:0,1:1
+X
+T log-52
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 EVENT_OUT_OF_ORDER
+A 4 appended
+A 5 appended
+A 6 appended
+R 2 completed 0:2 settled admit
+R 3 paused - open admit
+C 3 paused
+A 7 appended
+A 8 appended
+A 9 duplicate
+A 10 EVENT_MUTATED
+R 2 running - open admit
+R 3 paused - open admit
+C 2 running
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 8 8 8 
+QB 5 7 8 0:5,0:6
+QB 1 3 8 0:1,0:2
+X
+T log-53
+A 0 appended
+A 1 appended
+A 2 duplicate
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 2 completed - terminal admit
+R 3 admitted - open admit
+R 1 paused - open admit
+C 3 admitted
+A 7 appended
+A 8 appended
+R 2 completed - terminal admit
+R 3 completed - terminal settled
+R 1 paused - open admit
+C 3 terminal
+A 9 duplicate
+R 2 completed - terminal admit
+R 3 completed - terminal settled
+R 1 paused - open admit
+C 3 terminal
+A 10 appended
+A 11 appended
+R 2 completed - terminal admit
+R 3 completed - terminal settled
+R 1 paused - open admit
+C 2 terminal
+A 12 EVENT_MUTATED
+A 13 appended
+R 2 completed - terminal admit
+R 3 completed - terminal settled
+R 1 running - open admit
+C 1 running
+A 14 appended
+A 15 appended
+R 2 completed - terminal admit
+R 3 completed - terminal settled
+R 1 running 1:1 settled admit
+C 3 terminal
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 EVENT_MUTATED
+A 21 appended
+A 22 appended
+A 23 appended
+A 24 duplicate
+A 25 appended
+R 2 completed 1:4 settled settled
+R 3 completed 2:1 settled settled
+R 1 failed 1:1 settled admit
+C 2 terminal
+A 26 appended
+A 27 appended
+A 28 appended
+R 2 running - open resume
+R 3 completed 2:1 settled settled
+R 1 failed 1:1 settled admit
+C 2 running
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 17 19 24 2:1,2:2
+QB 18 22 24 2:2,2:3,2:4,2:5
+QB 0 2 24 0:1,0:2
+X
+T log-54
+A 0 appended
+A 1 EVENT_OUT_OF_ORDER
+A 2 EVENT_MUTATED
+A 3 appended
+A 4 appended
+R 2 paused - open admit
+R 3 - 0:2 unadmitted admit
+C 2 paused
+A 5 appended
+R 2 paused - open admit
+R 3 running - open admit
+C 3 running
+A 6 appended
+A 7 appended
+A 8 appended
+R 2 paused - open resume
+R 3 running 0:4 settled admit
+R 1 - 0:5 unadmitted admit
+C 3 running
+A 9 appended
+A 10 appended
+A 11 EVENT_OUT_OF_ORDER
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 duplicate
+A 21 appended
+A 22 appended
+A 23 duplicate
+A 24 appended
+A 25 appended
+A 26 appended
+A 27 appended
+A 28 EVENT_OUT_OF_ORDER
+A 29 appended
+R 2 completed 0:8 settled settled
+R 3 running 4:3 settled admit
+R 1 running - open resume
+C 3 running
+QS appended
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 12 17 24 0:12,1:0,2:0,2:1,2:2
+QB 3 6 24 0:3,0:4,0:5
+QB 3 5 24 0:3,0:4
+X
+T log-55
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_OUT_OF_ORDER
+A 5 appended
+R 2 running - open admit
+R 3 - 0:3 unadmitted admit
+R 1 running - open admit
+C 1 running
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 EVENT_MUTATED
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+R 2 completed 0:5 settled admit
+R 3 - 0:3 unadmitted admit
+R 1 completed 1:0 settled admit
+C 2 terminal
+A 16 appended
+R 2 completed 0:5 settled settled
+R 3 - 0:3 unadmitted admit
+R 1 completed 1:0 settled admit
+C 2 terminal
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+A 23 appended
+R 2 paused 0:5 settled resume
+R 3 failed 0:3 settled admit
+R 1 running - open admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 19 21 22 3:0,3:1
+QB 3 6 22 0:3,0:4,0:5
+QB 8 10 22 0:8,0:9
+X
+T log-56
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 EVENT_OUT_OF_ORDER
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 EVENT_MUTATED
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+R 2 admitted - open resume
+R 3 failed 0:5 settled admit
+R 1 - 0:7 unadmitted resume
+C 2 admitted
+A 15 appended
+R 2 admitted - open resume
+R 3 paused 0:5 settled admit
+R 1 - 0:7 unadmitted resume
+C 3 paused
+A 16 EVENT_OUT_OF_ORDER
+R 2 admitted - open resume
+R 3 paused 0:5 settled admit
+R 1 - 0:7 unadmitted resume
+C 3 paused
+QS appended
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QB 14 14 14 
+QB 10 12 14 1:3,2:2
+QB 2 3 14 0:2
+X
+T log-57
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 duplicate
+A 4 appended
+R 2 paused - open admit
+R 1 completed - terminal admit
+C 2 paused
+A 5 EVENT_MUTATED
+A 6 duplicate
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+R 2 completed - terminal settled
+R 1 completed 2:1 settled admit
+R 3 - - unadmitted resume
+C 2 terminal
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 duplicate
+A 18 appended
+R 2 completed - terminal settled
+R 1 completed 2:1 settled admit
+R 3 completed - terminal settled
+C 3 terminal
+A 19 appended
+R 2 completed - terminal settled
+R 1 completed 2:1 settled admit
+R 3 completed - terminal settled
+C 3 terminal
+A 20 appended
+R 2 completed - terminal settled
+R 1 completed 2:1 settled admit
+R 3 completed - terminal settled
+C 3 terminal
+QS appended
+QS appended
+QS appended
+QB 8 12 17 2:0,2:1,2:2,2:3
+QB 10 11 17 2:2
+QB 0 1 17 0:0
+X
+T log-58
+A 0 appended
+R 1 - 0:0 unadmitted admit
+C -
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 duplicate
+R 1 running - open admit
+R 2 cancelled 2:5 settled admit
+R 3 running 2:1 settled admit
+C 1 running
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 13 13 13 
+QB 13 13 13 
+QB 0 4 13 0:0,1:0,1:1,2:0
+X
+T log-59
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 duplicate
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 EVENT_MUTATED
+A 10 appended
+A 11 EVENT_MUTATED
+R 3 failed 0:0 settled admit
+R 1 failed - terminal admit
+R 2 completed - terminal admit
+C 2 terminal
+A 12 EVENT_MUTATED
+A 13 duplicate
+A 14 appended
+A 15 appended
+A 16 EVENT_OUT_OF_ORDER
+A 17 appended
+R 3 failed 0:0 settled admit
+R 1 failed - terminal admit
+R 2 completed 1:6 settled admit
+C 2 terminal
+R 3 failed 0:0 settled admit
+R 1 failed - terminal admit
+R 2 completed 1:6 settled admit
+C 2 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 1 2 12 0:1
+QB 8 11 12 1:3,1:4,1:5
+QB 11 12 12 1:6
+X
+T log-60
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 EVENT_MUTATED
+A 10 appended
+A 11 appended
+R 2 running - open admit
+R 3 running - open resume
+R 1 running 2:1 settled admit
+C 2 running
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 5 9 11 1:0,1:1,1:2,2:0
+QB 2 7 11 0:2,0:3,0:4,1:0,1:1
+QB 1 2 11 0:1
+X
+T log-61
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+R 1 admitted - open admit
+R 3 completed - terminal admit
+R 2 running - open admit
+C 2 running
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+R 1 admitted - open admit
+R 3 completed 1:3 settled admit
+R 2 completed - terminal settled
+C 2 terminal
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+R 1 failed 3:2 settled settled
+R 3 completed 1:3 settled admit
+R 2 admitted 3:1 settled resume
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 15 16 16 3:6
+QB 2 5 16 1:1,1:2,1:3
+QB 12 14 16 3:3,3:4
+X
+T log-62
+A 0 appended
+R 2 failed - terminal admit
+C 2 terminal
+A 1 duplicate
+A 2 appended
+A 3 appended
+R 2 failed 0:2 settled admit
+R 1 - 0:1 unadmitted admit
+C 2 terminal
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 EVENT_OUT_OF_ORDER
+R 2 running - open admit
+R 1 running - open admit
+C 2 running
+A 9 appended
+A 10 appended
+R 2 running - open admit
+R 1 running - open admit
+C 2 running
+A 11 appended
+A 12 EVENT_OUT_OF_ORDER
+A 13 appended
+R 2 running - open admit
+R 1 failed - terminal admit
+R 3 - - unadmitted admit
+C 1 terminal
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+R 2 running 3:1 settled admit
+R 1 admitted 3:0 settled admit
+R 3 - - unadmitted admit
+C 1 admitted
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 5 10 17 0:5,0:6,0:7,0:8,1:0
+QB 13 17 17 2:4,3:0,3:1,3:2
+QB 4 6 17 0:4,0:5
+X
+T log-63
+A 0 appended
+A 1 duplicate
+A 2 appended
+R 3 completed - terminal admit
+R 1 - 0:1 unadmitted admit
+C 3 terminal
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 3 running - open admit
+R 1 completed 0:1 settled admit
+R 2 completed - terminal admit
+C 3 running
+A 7 appended
+A 8 appended
+A 9 appended
+R 3 running - open admit
+R 1 completed 0:1 settled admit
+R 2 completed - terminal admit
+C 3 running
+A 10 EVENT_OUT_OF_ORDER
+R 3 running - open admit
+R 1 completed 0:1 settled admit
+R 2 completed - terminal admit
+C 3 running
+A 11 appended
+A 12 duplicate
+A 13 appended
+A 14 appended
+R 3 failed - terminal admit
+R 1 completed 0:1 settled settled
+R 2 admitted - open admit
+C 3 terminal
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+R 3 admitted - open admit
+R 1 completed 0:1 settled settled
+R 2 failed - terminal admit
+C 2 terminal
+A 19 appended
+A 20 appended
+R 3 admitted - open admit
+R 1 completed 0:1 settled settled
+R 2 failed - terminal admit
+C 1 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 18 18 18 
+QB 8 10 18 2:1,2:2
+QB 13 14 18 4:0
+X
+T log-64
+A 0 appended
+A 1 EVENT_OUT_OF_ORDER
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 3 cancelled - terminal admit
+C 3 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 5 5 5 
+QB 0 1 5 0:0
+QB 2 5 5 0:2,1:0,1:1
+X
+T log-65
+A 0 appended
+R 1 - - unadmitted resume
+C -
+A 1 appended
+A 2 appended
+A 3 appended
+R 1 paused 0:1 settled resume
+C 1 paused
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 EVENT_OUT_OF_ORDER
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+R 1 paused 0:1 settled resume
+R 3 running 2:5 settled resume
+R 2 admitted - open admit
+C 3 running
+A 14 appended
+A 15 appended
+A 16 appended
+R 1 completed 0:1 settled settled
+R 3 running 2:5 settled resume
+R 2 running - open admit
+C 1 terminal
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+R 1 completed 0:1 settled settled
+R 3 completed 2:5 settled settled
+R 2 running - open admit
+C 1 terminal
+A 23 appended
+R 1 completed 0:1 settled settled
+R 3 completed 2:5 settled settled
+R 2 running - open admit
+C 1 terminal
+A 24 appended
+A 25 EVENT_OUT_OF_ORDER
+A 26 EVENT_MUTATED
+A 27 EVENT_MUTATED
+R 1 running - open resume
+R 3 completed 2:5 settled settled
+R 2 running - open admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS skipped
+QS appended
+QB 20 22 24 5:3,5:4
+QB 24 24 24 
+QB 21 22 24 5:4
+X
+T log-66
+A 0 appended
+R 1 admitted - open admit
+C 1 admitted
+A 1 appended
+A 2 appended
+R 1 admitted - open admit
+R 2 - 0:1 unadmitted admit
+C 1 admitted
+A 3 EVENT_MUTATED
+R 1 admitted - open admit
+R 2 - 0:1 unadmitted admit
+C 1 admitted
+A 4 appended
+A 5 appended
+A 6 duplicate
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 duplicate
+A 11 EVENT_MUTATED
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 duplicate
+A 19 EVENT_MUTATED
+A 20 appended
+R 1 admitted 0:9 settled admit
+R 2 running 0:12 settled admit
+R 3 - - unadmitted admit
+C 1 admitted
+R 1 admitted 0:9 settled admit
+R 2 running 0:12 settled admit
+R 3 - - unadmitted admit
+C 1 admitted
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 15 15 15 
+QB 15 15 15 
+QB 14 15 15 0:14
+X
+T log-67
+A 0 appended
+A 1 appended
+A 2 appended
+R 3 cancelled - terminal admit
+R 1 - - unadmitted resume
+C 3 terminal
+A 3 EVENT_MUTATED
+R 3 cancelled - terminal admit
+R 1 - - unadmitted resume
+C 3 terminal
+A 4 appended
+A 5 appended
+A 6 EVENT_OUT_OF_ORDER
+A 7 duplicate
+A 8 appended
+A 9 appended
+A 10 appended
+R 3 cancelled - terminal admit
+R 1 - - unadmitted resume
+R 2 failed - terminal admit
+C 2 terminal
+A 11 appended
+R 3 cancelled - terminal admit
+R 1 - - unadmitted resume
+R 2 completed - terminal admit
+C 2 terminal
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+R 3 failed - terminal admit
+R 1 - - unadmitted resume
+R 2 completed 0:11 settled settled
+C 3 terminal
+A 17 EVENT_MUTATED
+R 3 failed - terminal admit
+R 1 - - unadmitted resume
+R 2 completed 0:11 settled settled
+C 3 terminal
+A 18 appended
+R 3 failed - terminal admit
+R 1 completed - terminal settled
+R 2 completed 0:11 settled settled
+C 1 terminal
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+R 3 failed 2:0 settled admit
+R 1 completed - terminal settled
+R 2 running - open resume
+C 2 running
+A 23 appended
+A 24 appended
+R 3 failed 2:0 settled admit
+R 1 failed 2:4 settled settled
+R 2 running - open resume
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 21 21 21 
+QB 9 13 21 0:9,0:10,0:11,0:12
+QB 21 21 21 
+X
+T log-68
+A 0 appended
+R 1 - 0:0 unadmitted admit
+C -
+A 1 EVENT_OUT_OF_ORDER
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 EVENT_OUT_OF_ORDER
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 EVENT_OUT_OF_ORDER
+R 1 completed 0:0 settled admit
+R 2 failed 2:0 settled settled
+R 3 running - open admit
+C 2 terminal
+A 15 duplicate
+R 1 completed 0:0 settled admit
+R 2 failed 2:0 settled settled
+R 3 running - open admit
+C 2 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 4 7 12 0:4,1:0,2:0
+QB 8 9 12 2:2
+QB 8 12 12 2:2,2:3,2:4,2:5
+X
+T log-69
+A 0 appended
+A 1 appended
+R 2 - 0:0 unadmitted admit
+R 1 completed - terminal admit
+C 1 terminal
+A 2 appended
+A 3 appended
+R 2 completed 0:0 settled admit
+R 1 completed 0:3 settled admit
+C 2 terminal
+A 4 appended
+R 2 running - open admit
+R 1 completed 0:3 settled admit
+C 2 running
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+R 2 completed - terminal settled
+R 1 failed 0:3 settled admit
+R 3 - 0:6 unadmitted admit
+C 1 terminal
+A 12 appended
+A 13 duplicate
+A 14 appended
+R 2 completed - terminal settled
+R 1 failed 0:3 settled admit
+R 3 - 0:6 unadmitted resume
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 5 7 14 0:5,0:6
+QB 11 12 14 1:4
+QB 7 13 14 1:0,1:1,1:2,1:3,1:4,1:5
+X
+T log-70
+A 0 appended
+A 1 appended
+R 2 - 0:0 unadmitted admit
+R 3 - - unadmitted admit
+C -
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 EVENT_MUTATED
+A 7 appended
+R 2 completed 0:0 settled admit
+R 3 running - open admit
+R 1 running 0:4 settled admit
+C 2 terminal
+A 8 duplicate
+A 9 appended
+A 10 appended
+A 11 appended
+R 2 completed 0:0 settled admit
+R 3 running 2:3 settled admit
+R 1 running 0:4 settled resume
+C 2 terminal
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 EVENT_OUT_OF_ORDER
+R 2 completed 0:0 settled admit
+R 3 admitted 2:3 settled admit
+R 1 running 0:4 settled resume
+C 3 admitted
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 duplicate
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+A 27 appended
+R 2 completed 0:0 settled settled
+R 3 failed 2:3 settled admit
+R 1 cancelled 0:4 settled settled
+C 3 terminal
+QS skipped
+QS skipped
+QS skipped
+QB 21 23 24 4:1,4:2
+QB 10 15 24 2:5,2:6,2:7,2:8,2:9
+QB 8 12 24 2:3,2:4,2:5,2:6
+X
+T log-71
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 duplicate
+R 3 completed - terminal settled
+R 2 completed - terminal admit
+R 1 cancelled 0:2 settled admit
+C 1 terminal
+A 6 appended
+R 3 completed - terminal settled
+R 2 completed - terminal admit
+R 1 cancelled 0:2 settled admit
+C 1 terminal
+QS appended
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QB 2 5 6 0:2,0:3,0:4
+QB 4 6 6 0:4,1:0
+QB 3 6 6 0:3,0:4,1:0
+X
+T log-72
+A 0 appended
+R 3 paused - open admit
+C 3 paused
+A 1 appended
+R 3 paused - open admit
+R 2 - - unadmitted resume
+C 3 paused
+A 2 appended
+A 3 appended
+R 3 completed 0:4 settled admit
+R 2 - - unadmitted resume
+C 3 terminal
+A 4 appended
+A 5 appended
+A 6 EVENT_MUTATED
+A 7 appended
+A 8 appended
+A 9 duplicate
+A 10 EVENT_MUTATED
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 duplicate
+A 15 appended
+A 16 appended
+A 17 duplicate
+A 18 appended
+R 3 completed 0:4 settled settled
+R 2 running 1:2 settled resume
+R 1 failed - terminal admit
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 1 4 14 0:2,0:3,0:4
+QB 2 7 14 0:3,0:4,0:5,0:6,0:7
+QB 5 9 14 0:6,0:7,0:8,0:9
+X
+T log-73
+A 0 appended
+R 1 completed - terminal admit
+C 1 terminal
+A 1 appended
+A 2 appended
+R 1 completed 0:1 settled admit
+R 2 - - unadmitted resume
+C 1 terminal
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 1 completed 0:1 settled admit
+R 2 - 1:2 unadmitted resume
+R 3 paused - open admit
+C 3 paused
+A 7 appended
+R 1 completed 0:1 settled admit
+R 2 running - open resume
+R 3 paused - open admit
+C 2 running
+A 8 appended
+R 1 completed 0:1 settled admit
+R 2 running - open resume
+R 3 paused - open admit
+C 2 running
+R 1 completed 0:1 settled admit
+R 2 running - open resume
+R 3 paused - open admit
+C 2 running
+QS appended
+QS appended
+QS appended
+QB 4 6 9 1:2,1:3
+QB 5 6 9 1:3
+QB 6 9 9 1:4,1:5,1:6
+X
+T log-74
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 EVENT_MUTATED
+A 4 appended
+A 5 appended
+A 6 EVENT_OUT_OF_ORDER
+R 1 failed - terminal settled
+R 2 cancelled - terminal admit
+R 3 - 1:3 unadmitted admit
+C 2 terminal
+A 7 appended
+A 8 EVENT_MUTATED
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 EVENT_MUTATED
+A 13 appended
+A 14 appended
+R 1 completed - terminal settled
+R 2 running - open admit
+R 3 failed 1:3 settled admit
+C 2 running
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 11 11 11 
+QB 9 11 11 1:8,1:9
+QB 5 8 11 1:4,1:5,1:6
+X
+T log-75
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 3 paused 0:4 settled admit
+R 2 cancelled - terminal admit
+R 1 running - open admit
+C 1 running
+A 6 appended
+R 3 paused 0:4 settled admit
+R 2 cancelled - terminal admit
+R 1 running - open admit
+C 1 running
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+R 3 failed 0:4 settled admit
+R 2 running - open admit
+R 1 running - open admit
+C 3 terminal
+A 11 appended
+A 12 EVENT_MUTATED
+A 13 appended
+A 14 EVENT_MUTATED
+A 15 duplicate
+A 16 EVENT_OUT_OF_ORDER
+R 3 failed 0:4 settled admit
+R 2 cancelled - terminal admit
+R 1 running - open admit
+C 2 terminal
+A 17 EVENT_MUTATED
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+R 3 failed 0:4 settled admit
+R 2 cancelled - terminal admit
+R 1 paused - open admit
+C 3 terminal
+A 23 appended
+A 24 EVENT_MUTATED
+A 25 appended
+A 26 appended
+R 3 failed 0:4 settled admit
+R 2 cancelled - terminal admit
+R 1 paused - open admit
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS appended
+QB 4 5 21 0:4
+QB 20 21 21 2:2
+QB 9 13 21 0:9,1:0,1:1,1:2
+X
+T log-76
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 3 running - open resume
+R 2 failed - terminal admit
+C 2 terminal
+A 6 appended
+R 3 running - open resume
+R 2 failed - terminal admit
+R 1 cancelled - terminal admit
+C 1 terminal
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 duplicate
+A 14 appended
+A 15 appended
+A 16 appended
+R 3 running 1:7 settled resume
+R 2 admitted 1:9 settled admit
+R 1 running 1:8 settled admit
+C 2 admitted
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 EVENT_MUTATED
+A 21 appended
+R 3 running 1:7 settled resume
+R 2 completed 1:9 settled admit
+R 1 failed 1:8 settled admit
+C 2 terminal
+A 22 appended
+A 23 EVENT_OUT_OF_ORDER
+R 3 running 1:7 settled resume
+R 2 completed 1:9 settled admit
+R 1 failed 1:8 settled admit
+C 2 terminal
+A 24 appended
+A 25 appended
+R 3 running 1:7 settled resume
+R 2 failed 1:9 settled admit
+R 1 failed 1:8 settled admit
+C 2 terminal
+A 26 appended
+A 27 appended
+A 28 appended
+A 29 appended
+R 3 running 1:7 settled resume
+R 2 failed 1:9 settled settled
+R 1 running - open admit
+C 1 running
+A 30 duplicate
+R 3 running 1:7 settled resume
+R 2 failed 1:9 settled settled
+R 1 running - open admit
+C 1 running
+R 3 running 1:7 settled resume
+R 2 failed 1:9 settled settled
+R 1 running - open admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS skipped
+QB 13 14 27 1:9
+QB 16 22 27 2:0,2:1,2:2,2:3,2:4,2:5
+QB 5 6 27 1:1
+X
+T log-77
+A 0 appended
+A 1 appended
+R 2 - 0:0 unadmitted admit
+R 3 - - unadmitted admit
+C -
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 duplicate
+R 2 - 0:0 unadmitted admit
+R 3 - - unadmitted admit
+R 1 running 1:9 settled admit
+C 1 running
+A 13 duplicate
+R 2 - 0:0 unadmitted admit
+R 3 - - unadmitted admit
+R 1 running 1:9 settled admit
+C 1 running
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 EVENT_MUTATED
+A 19 appended
+A 20 appended
+R 2 - 0:0 unadmitted admit
+R 3 running - open resume
+R 1 completed 1:9 settled admit
+C 3 running
+A 21 EVENT_MUTATED
+A 22 EVENT_OUT_OF_ORDER
+R 2 - 0:0 unadmitted admit
+R 3 running - open resume
+R 1 completed 1:9 settled admit
+C 3 running
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS appended
+QB 10 13 18 1:8,1:9,1:10
+QB 0 3 18 0:0,0:1,1:0
+QB 2 5 18 1:0,1:1,1:2
+X
+T log-78
+A 0 appended
+R 3 - 0:0 unadmitted admit
+C -
+A 1 appended
+A 2 appended
+A 3 EVENT_MUTATED
+A 4 appended
+A 5 appended
+A 6 EVENT_MUTATED
+A 7 appended
+A 8 appended
+A 9 duplicate
+A 10 duplicate
+A 11 appended
+R 3 running - open admit
+R 1 completed 0:5 settled admit
+R 2 completed - terminal admit
+C 2 terminal
+R 3 running - open admit
+R 1 completed 0:5 settled admit
+R 2 completed - terminal admit
+C 2 terminal
+QS appended
+QS appended
+QS skipped
+QB 2 3 8 0:2
+QB 0 2 8 0:0,0:1
+QB 3 5 8 0:3,0:4
+X
+T log-79
+A 0 appended
+R 2 paused - open admit
+C 2 paused
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 2 paused - open admit
+R 3 running 0:2 settled admit
+C 3 running
+A 6 appended
+A 7 appended
+A 8 appended
+R 2 admitted - open admit
+R 3 running 0:2 settled admit
+C 2 admitted
+A 9 EVENT_MUTATED
+A 10 appended
+A 11 appended
+R 2 cancelled - terminal admit
+R 3 running 0:2 settled admit
+R 1 running - open admit
+C 2 terminal
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+R 2 admitted 2:1 settled admit
+R 3 admitted 0:2 settled admit
+R 1 running - open admit
+C 3 admitted
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+R 2 running - open admit
+R 3 admitted 0:2 settled admit
+R 1 running 3:5 settled admit
+C 2 running
+A 23 appended
+R 2 running - open admit
+R 3 admitted 0:2 settled admit
+R 1 running 3:5 settled admit
+C 2 running
+A 24 appended
+A 25 appended
+A 26 appended
+R 2 running - open admit
+R 3 completed 0:2 settled admit
+R 1 running - open admit
+C 1 running
+A 27 appended
+R 2 running - open admit
+R 3 admitted 0:2 settled admit
+R 1 running - open admit
+C 3 admitted
+R 2 running - open admit
+R 3 admitted 0:2 settled admit
+R 1 running - open admit
+C 3 admitted
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 27 27 27 
+QB 3 5 27 0:3,0:4
+QB 10 15 27 1:3,1:4,1:5,2:0,2:1
+X
+T log-80
+A 0 appended
+A 1 appended
+A 2 appended
+R 2 running - open resume
+R 1 cancelled - terminal admit
+C 1 terminal
+A 3 appended
+A 4 EVENT_OUT_OF_ORDER
+R 2 running - open resume
+R 1 cancelled - terminal admit
+R 3 - 0:3 unadmitted admit
+C 1 terminal
+A 5 appended
+A 6 duplicate
+A 7 appended
+A 8 duplicate
+R 2 running 0:5 settled resume
+R 1 cancelled - terminal admit
+R 3 - 0:3 unadmitted admit
+C 2 running
+A 9 appended
+A 10 appended
+R 2 running 0:5 settled resume
+R 1 cancelled - terminal admit
+R 3 running - open admit
+C 3 running
+A 11 appended
+R 2 running 0:5 settled resume
+R 1 running - open admit
+R 3 running - open admit
+C 1 running
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 5 7 9 0:5,0:6
+QB 9 9 9 
+QB 8 9 9 0:8
+X
+T log-81
+A 0 appended
+R 3 - - unadmitted resume
+C -
+A 1 appended
+R 3 - - unadmitted resume
+R 1 running - open admit
+C 1 running
+A 2 appended
+A 3 EVENT_OUT_OF_ORDER
+A 4 appended
+A 5 appended
+R 3 - 0:3 unadmitted resume
+R 1 running - open admit
+R 2 admitted 0:4 settled admit
+C 2 admitted
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 3 5 5 0:3,0:4
+QB 0 5 5 0:0,0:1,0:2,0:3,0:4
+QB 5 5 5 
+X
+T log-82
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+R 3 completed - terminal admit
+R 2 completed - terminal admit
+C 2 terminal
+A 5 appended
+A 6 appended
+A 7 EVENT_MUTATED
+A 8 EVENT_OUT_OF_ORDER
+R 3 completed - terminal settled
+R 2 completed - terminal settled
+C 2 terminal
+A 9 duplicate
+A 10 EVENT_OUT_OF_ORDER
+A 11 EVENT_OUT_OF_ORDER
+A 12 appended
+R 3 completed - terminal settled
+R 2 running - open resume
+C 2 running
+A 13 duplicate
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+R 3 completed 2:0 settled settled
+R 2 running - open resume
+R 1 cancelled - terminal admit
+C 1 terminal
+A 18 duplicate
+R 3 completed 2:0 settled settled
+R 2 running - open resume
+R 1 cancelled - terminal admit
+C 1 terminal
+A 19 EVENT_OUT_OF_ORDER
+R 3 completed 2:0 settled settled
+R 2 running - open resume
+R 1 cancelled - terminal admit
+C 1 terminal
+R 3 completed 2:0 settled settled
+R 2 running - open resume
+R 1 cancelled - terminal admit
+C 1 terminal
+QS appended
+QS appended
+QS skipped
+QB 3 6 12 1:1,1:2,1:3
+QB 12 12 12 
+QB 12 12 12 
+X
+T log-83
+A 0 appended
+R 3 - - unadmitted admit
+C -
+A 1 appended
+R 3 - - unadmitted admit
+R 2 - 1:0 unadmitted admit
+C -
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 3 running - open admit
+R 2 failed 1:0 settled admit
+R 1 - - unadmitted admit
+C 3 running
+A 7 appended
+R 3 running - open admit
+R 2 cancelled 1:0 settled admit
+R 1 - - unadmitted admit
+C 2 terminal
+A 8 appended
+A 9 appended
+R 3 running - open admit
+R 2 cancelled 1:0 settled admit
+R 1 - - unadmitted admit
+C 2 terminal
+A 10 appended
+R 3 running 1:9 settled admit
+R 2 cancelled 1:0 settled admit
+R 1 - - unadmitted admit
+C 2 terminal
+R 3 running 1:9 settled admit
+R 2 cancelled 1:0 settled admit
+R 1 - - unadmitted admit
+C 2 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QB 6 10 11 1:5,1:6,1:7,1:8
+QB 6 8 11 1:5,1:6
+QB 7 11 11 1:6,1:7,1:8,1:9
+X
+T log-84
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+R 2 - 0:0 unadmitted admit
+R 3 - - unadmitted admit
+R 1 - - unadmitted resume
+C -
+A 4 EVENT_OUT_OF_ORDER
+A 5 appended
+A 6 appended
+A 7 appended
+R 2 - 0:0 unadmitted admit
+R 3 running - open admit
+R 1 - 0:4 unadmitted resume
+C 3 running
+A 8 duplicate
+A 9 appended
+A 10 appended
+A 11 duplicate
+A 12 appended
+R 2 - 0:0 unadmitted admit
+R 3 completed - terminal admit
+R 1 - 0:4 unadmitted resume
+C 3 terminal
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 duplicate
+R 2 paused 0:0 settled admit
+R 3 failed - terminal admit
+R 1 failed 0:4 settled settled
+C 1 terminal
+R 2 paused 0:0 settled admit
+R 3 failed - terminal admit
+R 1 failed 0:4 settled settled
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 19 19 19 
+QB 10 12 19 1:4,1:5
+QB 19 19 19 
+X
+T log-85
+A 0 appended
+R 3 completed - terminal admit
+C 3 terminal
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+R 3 paused - open admit
+R 2 - 1:4 unadmitted admit
+R 1 running - open admit
+C 3 paused
+A 9 appended
+A 10 appended
+A 11 duplicate
+A 12 appended
+R 3 paused - open admit
+R 2 - 1:4 unadmitted admit
+R 1 paused 1:11 settled admit
+C 1 paused
+A 13 EVENT_OUT_OF_ORDER
+A 14 appended
+R 3 running - open admit
+R 2 - 1:4 unadmitted admit
+R 1 paused 1:11 settled admit
+C 3 running
+A 15 duplicate
+A 16 appended
+R 3 running - open admit
+R 2 cancelled 1:4 settled admit
+R 1 paused 1:11 settled admit
+C 2 terminal
+A 17 appended
+A 18 appended
+R 3 running - open admit
+R 2 cancelled 1:4 settled admit
+R 1 admitted 1:11 settled admit
+C 1 admitted
+A 19 appended
+R 3 admitted - open admit
+R 2 cancelled 1:4 settled admit
+R 1 admitted 1:11 settled admit
+C 3 admitted
+A 20 appended
+A 21 appended
+A 22 appended
+R 3 cancelled - terminal admit
+R 2 cancelled 1:4 settled admit
+R 1 admitted 1:11 settled resume
+C 3 terminal
+A 23 duplicate
+R 3 cancelled - terminal admit
+R 2 cancelled 1:4 settled admit
+R 1 admitted 1:11 settled resume
+C 3 terminal
+A 24 appended
+R 3 cancelled - terminal admit
+R 2 cancelled 1:4 settled admit
+R 1 admitted 1:11 settled resume
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 21 21 21 
+QB 16 20 21 2:0,2:1,3:0,3:1
+QB 10 12 21 1:10,1:11
+X
+T log-86
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 EVENT_OUT_OF_ORDER
+A 4 appended
+R 3 admitted - open admit
+R 2 - 0:1 unadmitted admit
+R 1 running - open admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 2 3 4 0:2
+QB 4 4 4 
+QB 3 4 4 0:3
+X
+T log-87
+A 0 appended
+A 1 appended
+R 1 - 0:0 unadmitted admit
+R 3 completed - terminal admit
+C 3 terminal
+A 2 appended
+A 3 appended
+A 4 duplicate
+A 5 appended
+A 6 appended
+A 7 appended
+R 1 running - open admit
+R 3 completed - terminal admit
+R 2 running - open admit
+C 2 running
+A 8 appended
+R 1 running - open admit
+R 3 completed - terminal admit
+R 2 running 1:3 settled admit
+C 2 running
+QS appended
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 2 6 8 0:2,0:3,1:0,1:1
+QB 6 7 8 1:2
+QB 8 8 8 
+X
+T log-88
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 EVENT_OUT_OF_ORDER
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+R 3 running - open resume
+R 1 failed 0:6 settled settled
+R 2 - 0:10 unadmitted admit
+C 3 running
+A 14 duplicate
+A 15 appended
+R 3 running - open resume
+R 1 failed 0:6 settled settled
+R 2 completed 0:10 settled admit
+C 2 terminal
+A 16 appended
+A 17 EVENT_MUTATED
+R 3 running - open resume
+R 1 failed 0:6 settled settled
+R 2 completed 0:10 settled admit
+C 2 terminal
+QS skipped
+QS appended
+QS skipped
+QB 6 10 15 0:6,0:7,0:8,0:9
+QB 6 8 15 0:6,0:7
+QB 8 14 15 0:8,0:9,0:10,0:11,0:12,1:0
+X
+T log-89
+A 0 appended
+A 1 appended
+R 3 - - unadmitted admit
+R 1 completed - terminal admit
+C 1 terminal
+A 2 appended
+A 3 appended
+R 3 running - open admit
+R 1 completed - terminal admit
+C 3 running
+A 4 appended
+R 3 running - open admit
+R 1 completed - terminal admit
+R 2 admitted - open admit
+C 2 admitted
+A 5 appended
+A 6 appended
+A 7 EVENT_OUT_OF_ORDER
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+R 3 running - open admit
+R 1 paused 1:3 settled admit
+R 2 cancelled - terminal settled
+C 3 running
+QS SETTLEMENT_CONFLICT
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 10 12 13 1:2,1:3
+QB 0 1 13 0:0
+QB 13 13 13 
+X
+T log-90
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+R 3 admitted - open admit
+R 2 running - open admit
+C 3 admitted
+A 4 appended
+A 5 appended
+R 3 admitted - open admit
+R 2 failed - terminal admit
+R 1 - - unadmitted admit
+C 2 terminal
+A 6 EVENT_OUT_OF_ORDER
+A 7 appended
+A 8 appended
+R 3 admitted - open admit
+R 2 failed - terminal settled
+R 1 admitted - open admit
+C 1 admitted
+A 9 appended
+R 3 admitted - open admit
+R 2 running - open resume
+R 1 admitted - open admit
+C 2 running
+A 10 appended
+A 11 appended
+R 3 admitted - open admit
+R 2 failed - terminal settled
+R 1 admitted - open resume
+C 2 terminal
+A 12 appended
+A 13 appended
+R 3 admitted - open admit
+R 2 failed - terminal settled
+R 1 admitted - open resume
+C 3 admitted
+A 14 appended
+A 15 appended
+R 3 admitted - open resume
+R 2 failed - terminal settled
+R 1 failed - terminal settled
+C 1 terminal
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+R 3 admitted - open resume
+R 2 failed 2:3 settled settled
+R 1 paused - open resume
+C 2 terminal
+A 21 appended
+R 3 running - open resume
+R 2 failed 2:3 settled settled
+R 1 paused - open resume
+C 3 running
+A 22 appended
+R 3 running - open resume
+R 2 failed 2:3 settled settled
+R 1 paused - open resume
+C 3 running
+A 23 appended
+A 24 appended
+A 25 appended
+R 3 running - open resume
+R 2 failed 2:3 settled settled
+R 1 paused - open resume
+C 3 running
+A 26 duplicate
+R 3 running - open resume
+R 2 failed 2:3 settled settled
+R 1 paused - open resume
+C 3 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 1 3 25 0:2,0:3
+QB 5 7 25 0:6,0:7
+QB 8 14 25 0:9,0:10,0:11,0:12,0:13,1:0
+X
+T log-91
+A 0 appended
+A 1 appended
+A 2 duplicate
+A 3 appended
+R 2 failed - terminal admit
+R 3 - 0:1 unadmitted admit
+C 2 terminal
+A 4 duplicate
+A 5 appended
+A 6 appended
+A 7 EVENT_OUT_OF_ORDER
+A 8 appended
+A 9 appended
+R 2 failed - terminal admit
+R 3 - 0:1 unadmitted admit
+C 2 terminal
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 EVENT_OUT_OF_ORDER
+A 19 EVENT_OUT_OF_ORDER
+A 20 EVENT_OUT_OF_ORDER
+R 2 admitted - open admit
+R 3 - 0:1 unadmitted admit
+R 1 completed - terminal settled
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS appended
+QB 6 7 15 0:6
+QB 11 12 15 0:11
+QB 7 8 15 0:7
+X
+T log-92
+A 0 appended
+A 1 appended
+R 3 running - open admit
+R 1 - - unadmitted admit
+C 3 running
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+R 3 running - open admit
+R 1 - - unadmitted admit
+R 2 completed - terminal admit
+C 2 terminal
+A 4 EVENT_OUT_OF_ORDER
+A 5 appended
+A 6 duplicate
+A 7 appended
+A 8 appended
+R 3 running 0:6 settled resume
+R 1 - 0:5 unadmitted admit
+R 2 completed - terminal admit
+C 2 terminal
+A 9 EVENT_OUT_OF_ORDER
+A 10 duplicate
+A 11 appended
+A 12 duplicate
+A 13 EVENT_OUT_OF_ORDER
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+R 3 failed 0:6 settled settled
+R 1 running - open admit
+R 2 completed 0:8 settled admit
+C 3 terminal
+A 19 appended
+R 3 failed 0:6 settled settled
+R 1 running - open admit
+R 2 completed 0:8 settled admit
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS skipped
+QB 13 13 13 
+QB 12 13 13 1:3
+QB 3 6 13 0:4,0:5,0:6
+X
+T log-93
+A 0 appended
+R 1 completed - terminal admit
+C 1 terminal
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+R 1 completed - terminal admit
+R 3 - 0:1 unadmitted admit
+C 1 terminal
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 EVENT_MUTATED
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 duplicate
+A 11 appended
+A 12 appended
+A 13 duplicate
+A 14 EVENT_OUT_OF_ORDER
+A 15 appended
+A 16 appended
+R 1 completed - terminal admit
+R 3 - 0:1 unadmitted resume
+R 2 - 2:2 unadmitted admit
+C 1 terminal
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 EVENT_OUT_OF_ORDER
+A 22 EVENT_MUTATED
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+A 27 appended
+A 28 appended
+A 29 appended
+A 30 appended
+R 1 failed 4:7 settled settled
+R 3 failed 0:1 settled settled
+R 2 - 2:2 unadmitted admit
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 19 24 24 4:8,4:9,5:2,5:3,5:4
+QB 14 18 24 4:3,4:4,4:5,4:6
+QB 23 24 24 5:4
+X
+T log-94
+A 0 appended
+A 1 appended
+R 2 - - unadmitted admit
+C -
+A 2 appended
+A 3 appended
+R 2 - 0:4 unadmitted admit
+R 3 running - open admit
+C 3 running
+A 4 appended
+A 5 EVENT_MUTATED
+A 6 appended
+R 2 - 0:4 unadmitted admit
+R 3 running - open admit
+R 1 failed - terminal admit
+C 3 running
+A 7 EVENT_OUT_OF_ORDER
+R 2 - 0:4 unadmitted admit
+R 3 running - open admit
+R 1 failed - terminal admit
+C 3 running
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 EVENT_OUT_OF_ORDER
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 EVENT_OUT_OF_ORDER
+A 19 appended
+A 20 appended
+A 21 EVENT_MUTATED
+R 2 running - open admit
+R 3 completed 0:10 settled admit
+R 1 failed - terminal admit
+C 2 running
+A 22 appended
+A 23 appended
+R 2 running - open admit
+R 3 completed 0:10 settled admit
+R 1 failed - terminal admit
+C 2 running
+A 24 appended
+A 25 appended
+A 26 appended
+R 2 running - open admit
+R 3 completed 0:10 settled admit
+R 1 failed 3:3 settled admit
+C 2 running
+A 27 appended
+R 2 running - open admit
+R 3 completed 0:10 settled admit
+R 1 failed 3:3 settled settled
+C 2 running
+A 28 appended
+R 2 running - open admit
+R 3 completed 0:10 settled admit
+R 1 failed 3:3 settled settled
+C 1 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 23 24 24 4:0
+QB 1 2 24 0:3
+QB 8 9 24 0:10
+X
+T log-95
+A 0 appended
+R 3 - - unadmitted admit
+C -
+A 1 EVENT_OUT_OF_ORDER
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+R 3 - 0:1 unadmitted admit
+C -
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+R 3 running - open admit
+R 2 running - open admit
+R 1 failed 0:7 settled admit
+C 2 running
+A 12 appended
+A 13 appended
+R 3 running - open admit
+R 2 running - open admit
+R 1 running - open admit
+C 1 running
+QS appended
+QS appended
+QS appended
+QB 9 12 12 0:9,0:10,0:11
+QB 11 12 12 0:11
+QB 3 6 12 0:3,0:4,0:5
+X
+T log-96
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 duplicate
+A 5 appended
+A 6 duplicate
+A 7 EVENT_OUT_OF_ORDER
+A 8 appended
+R 3 running 0:4 settled resume
+R 2 running - open admit
+R 1 completed - terminal admit
+C 1 terminal
+A 9 appended
+A 10 duplicate
+A 11 appended
+A 12 EVENT_MUTATED
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 EVENT_OUT_OF_ORDER
+R 3 completed 0:4 settled settled
+R 2 running - open admit
+R 1 completed - terminal settled
+C 3 terminal
+A 20 appended
+A 21 appended
+A 22 EVENT_OUT_OF_ORDER
+A 23 EVENT_OUT_OF_ORDER
+R 3 running - open resume
+R 2 running 1:6 settled admit
+R 1 completed - terminal settled
+C 3 running
+A 24 EVENT_MUTATED
+A 25 appended
+R 3 running - open resume
+R 2 running 1:6 settled admit
+R 1 completed 1:8 settled settled
+C 3 running
+A 26 appended
+A 27 appended
+A 28 appended
+A 29 EVENT_OUT_OF_ORDER
+R 3 running - open resume
+R 2 running 1:6 settled admit
+R 1 completed 1:8 settled settled
+C 3 running
+QS skipped
+QS skipped
+QS SETTLEMENT_CONFLICT
+QB 12 17 20 1:4,1:5,1:6,1:7,1:8
+QB 20 20 20 
+QB 20 20 20 
+X
+T log-97
+A 0 appended
+A 1 appended
+A 2 duplicate
+A 3 appended
+A 4 EVENT_OUT_OF_ORDER
+A 5 appended
+A 6 appended
+R 1 admitted 0:0 settled admit
+R 2 - - unadmitted admit
+R 3 running - open admit
+C 1 admitted
+A 7 appended
+A 8 appended
+A 9 appended
+R 1 admitted 0:0 settled admit
+R 2 cancelled - terminal admit
+R 3 running - open admit
+C 2 terminal
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+R 1 admitted 0:0 settled admit
+R 2 running 1:8 settled admit
+R 3 running 1:7 settled admit
+C 2 running
+R 1 admitted 0:0 settled admit
+R 2 running 1:8 settled admit
+R 3 running 1:7 settled admit
+C 2 running
+QS skipped
+QS skipped
+QS SETTLEMENT_CONFLICT
+QB 2 5 12 0:2,1:0,1:1
+QB 7 8 12 1:4
+QB 8 9 12 1:5
+X
+T log-98
+A 0 appended
+A 1 duplicate
+A 2 appended
+A 3 appended
+A 4 appended
+R 1 running - open admit
+R 2 completed - terminal settled
+C 1 running
+A 5 appended
+A 6 duplicate
+A 7 EVENT_OUT_OF_ORDER
+A 8 appended
+R 1 running - open admit
+R 2 completed - terminal settled
+R 3 - - unadmitted admit
+C 1 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 6 6 6 
+QB 4 6 6 0:4,0:5
+QB 3 6 6 0:3,0:4,0:5
+X
+T log-99
+A 0 appended
+A 1 appended
+R 3 completed - terminal admit
+R 1 - 0:4 unadmitted admit
+C 3 terminal
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 EVENT_OUT_OF_ORDER
+A 7 appended
+R 3 completed - terminal admit
+R 1 running - open admit
+R 2 running - open admit
+C 2 running
+A 8 appended
+A 9 appended
+A 10 appended
+R 3 completed - terminal admit
+R 1 running 2:2 settled admit
+R 2 running - open admit
+C 2 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 0 1 10 0:3
+QB 1 2 10 0:4
+QB 10 10 10 
+X
+T log-100
+A 0 appended
+A 1 appended
+R 2 - - unadmitted admit
+R 1 - 0:1 unadmitted admit
+C -
+A 2 duplicate
+A 3 appended
+A 4 EVENT_MUTATED
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 duplicate
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+R 2 - - unadmitted resume
+R 1 cancelled 0:1 settled admit
+R 3 failed 0:9 settled admit
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 5 7 13 0:5,0:6
+QB 13 13 13 
+QB 7 11 13 0:7,0:8,0:9,0:10
+X
+T log-101
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 duplicate
+A 6 appended
+A 7 appended
+A 8 appended
+R 2 cancelled - terminal admit
+R 3 completed - terminal admit
+R 1 paused 1:1 settled resume
+C 2 terminal
+A 9 appended
+R 2 cancelled - terminal admit
+R 3 completed - terminal admit
+R 1 admitted 1:1 settled resume
+C 1 admitted
+A 10 appended
+R 2 cancelled - terminal admit
+R 3 completed - terminal admit
+R 1 cancelled 1:1 settled settled
+C 1 terminal
+A 11 appended
+A 12 appended
+R 2 cancelled - terminal admit
+R 3 running - open admit
+R 1 cancelled 1:1 settled settled
+C 3 running
+A 13 appended
+A 14 EVENT_OUT_OF_ORDER
+A 15 appended
+A 16 EVENT_MUTATED
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+R 2 completed - terminal admit
+R 3 running - open admit
+R 1 cancelled 1:1 settled settled
+C 2 terminal
+A 21 appended
+A 22 appended
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+R 2 completed 3:4 settled admit
+R 3 running - open admit
+R 1 running - open resume
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 2 3 24 1:1
+QB 1 7 24 1:0,1:1,1:2,1:3,1:4,1:5
+QB 19 20 24 3:4
+X
+T log-102
+A 0 appended
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+A 4 appended
+R 3 - - unadmitted resume
+R 1 - 0:1 unadmitted admit
+R 2 running - open admit
+C 2 running
+A 5 duplicate
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 duplicate
+R 3 paused - open resume
+R 1 - 0:1 unadmitted admit
+R 2 running - open admit
+C 3 paused
+R 3 paused - open resume
+R 1 - 0:1 unadmitted admit
+R 2 running - open admit
+C 3 paused
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 3 6 8 0:3,0:4,0:5
+QB 5 6 8 0:5
+QB 2 4 8 0:2,0:3
+X
+T log-103
+A 0 appended
+A 1 appended
+R 1 admitted - open admit
+R 2 - 0:1 unadmitted admit
+C 1 admitted
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+R 1 admitted - open admit
+R 2 completed 0:1 settled admit
+R 3 running - open admit
+C 3 running
+A 8 appended
+A 9 appended
+R 1 paused - open admit
+R 2 completed 0:1 settled admit
+R 3 running - open admit
+C 3 running
+A 10 EVENT_MUTATED
+R 1 paused - open admit
+R 2 completed 0:1 settled admit
+R 3 running - open admit
+C 3 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 10 10 10 
+QB 3 4 10 0:3
+QB 10 10 10 
+X
+T log-104
+A 0 appended
+A 1 duplicate
+A 2 appended
+A 3 appended
+A 4 EVENT_MUTATED
+R 2 - - unadmitted resume
+R 3 running - open admit
+R 1 running - open admit
+C 1 running
+A 5 appended
+A 6 appended
+R 2 - - unadmitted resume
+R 3 running - open admit
+R 1 running - open admit
+C 1 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 3 4 5 0:3
+QB 5 5 5 
+QB 3 4 5 0:3
+X
+T log-105
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+R 1 failed - terminal admit
+R 3 - 0:2 unadmitted admit
+R 2 - 0:3 unadmitted admit
+C 1 terminal
+A 4 EVENT_MUTATED
+A 5 appended
+A 6 duplicate
+R 1 failed - terminal admit
+R 3 - 0:2 unadmitted admit
+R 2 running - open admit
+C 2 running
+A 7 EVENT_OUT_OF_ORDER
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 EVENT_MUTATED
+A 16 EVENT_MUTATED
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+A 23 duplicate
+A 24 duplicate
+R 1 failed 2:6 settled settled
+R 3 paused 0:2 settled resume
+R 2 admitted 1:0 settled admit
+C 3 paused
+A 25 EVENT_MUTATED
+A 26 appended
+R 1 failed 2:6 settled settled
+R 3 cancelled 0:2 settled settled
+R 2 admitted 1:0 settled admit
+C 3 terminal
+A 27 appended
+A 28 EVENT_MUTATED
+A 29 appended
+R 1 failed 2:6 settled settled
+R 3 cancelled 0:2 settled settled
+R 2 admitted 1:0 settled admit
+C 3 terminal
+R 1 failed 2:6 settled settled
+R 3 cancelled 0:2 settled settled
+R 2 admitted 1:0 settled admit
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS skipped
+QS SETTLEMENT_CONFLICT
+QB 18 21 21 3:4,3:5,3:6
+QB 15 17 21 2:5,2:6
+QB 6 10 21 0:6,1:0,1:1,1:2
+X
+T log-106
+A 0 appended
+A 1 duplicate
+A 2 appended
+R 1 cancelled 0:0 settled admit
+C 1 terminal
+A 3 appended
+R 1 cancelled 0:0 settled settled
+C 1 terminal
+A 4 appended
+A 5 appended
+R 1 cancelled 0:0 settled settled
+R 2 running - open admit
+C 2 running
+A 6 EVENT_OUT_OF_ORDER
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+R 1 cancelled 0:0 settled settled
+R 2 running 3:0 settled admit
+R 3 - 3:3 unadmitted admit
+C 1 terminal
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 EVENT_OUT_OF_ORDER
+A 17 appended
+R 1 running - open resume
+R 2 running - open resume
+R 3 failed 3:3 settled admit
+C 1 running
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 12 14 15 3:7,4:0
+QB 12 15 15 3:7,4:0,5:0
+QB 10 12 15 3:5,3:6
+X
+T log-107
+A 0 appended
+R 1 - 0:0 unadmitted admit
+C -
+A 1 appended
+A 2 appended
+A 3 appended
+R 1 - 0:0 unadmitted admit
+R 3 paused - open admit
+C 3 paused
+A 4 EVENT_OUT_OF_ORDER
+A 5 EVENT_MUTATED
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 EVENT_MUTATED
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+A 17 appended
+A 18 EVENT_MUTATED
+A 19 appended
+R 1 running 0:9 settled admit
+R 3 failed - terminal admit
+R 2 running - open admit
+C 2 running
+A 20 appended
+R 1 running 0:9 settled admit
+R 3 failed 2:3 settled admit
+R 2 running - open admit
+C 2 running
+A 21 appended
+A 22 appended
+A 23 duplicate
+R 1 completed 0:9 settled admit
+R 3 failed 2:3 settled admit
+R 2 running - open admit
+C 1 terminal
+A 24 appended
+A 25 duplicate
+R 1 completed 0:9 settled admit
+R 3 failed 2:3 settled settled
+R 2 running - open admit
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS appended
+QS appended
+QB 16 18 19 2:4,2:5
+QB 8 12 19 0:8,0:9,1:0,1:1
+QB 16 19 19 2:4,2:5,2:6
+X
+T log-108
+A 0 appended
+A 1 appended
+R 1 paused - open admit
+R 3 - 0:1 unadmitted admit
+C 1 paused
+A 2 appended
+R 1 completed - terminal admit
+R 3 - 0:1 unadmitted admit
+C 1 terminal
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+R 1 cancelled - terminal admit
+R 3 running - open resume
+R 2 failed 2:3 settled admit
+C 2 terminal
+A 14 appended
+A 15 appended
+A 16 EVENT_OUT_OF_ORDER
+A 17 appended
+A 18 appended
+R 1 cancelled - terminal admit
+R 3 running 4:2 settled resume
+R 2 failed 2:3 settled admit
+C 2 terminal
+A 19 appended
+A 20 appended
+R 1 cancelled - terminal admit
+R 3 running 4:2 settled resume
+R 2 failed 2:3 settled admit
+C 2 terminal
+A 21 appended
+R 1 cancelled 5:4 settled admit
+R 3 running 4:2 settled resume
+R 2 failed 2:3 settled admit
+C 2 terminal
+A 22 appended
+A 23 duplicate
+A 24 appended
+A 25 appended
+A 26 appended
+A 27 appended
+R 1 cancelled 5:4 settled admit
+R 3 running - open resume
+R 2 completed 2:3 settled admit
+C 3 running
+A 28 appended
+A 29 appended
+A 30 appended
+R 1 cancelled 5:4 settled admit
+R 3 running - open resume
+R 2 completed 2:3 settled admit
+C 2 terminal
+QS appended
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 14 17 29 3:2,3:3,3:4
+QB 27 29 29 5:11,5:12
+QB 21 25 29 5:5,5:6,5:7,5:8
+X
+T log-109
+A 0 appended
+R 2 - - unadmitted admit
+C -
+A 1 EVENT_MUTATED
+A 2 appended
+A 3 EVENT_OUT_OF_ORDER
+A 4 appended
+A 5 appended
+R 2 - - unadmitted resume
+R 1 - - unadmitted resume
+C -
+A 6 duplicate
+A 7 appended
+A 8 appended
+R 2 - 0:4 unadmitted resume
+R 1 - 0:5 unadmitted resume
+C -
+A 9 appended
+A 10 appended
+R 2 - 0:4 unadmitted resume
+R 1 admitted 0:5 settled resume
+C 1 admitted
+A 11 appended
+A 12 appended
+A 13 EVENT_OUT_OF_ORDER
+A 14 appended
+A 15 appended
+A 16 duplicate
+A 17 appended
+A 18 appended
+R 2 failed 0:4 settled settled
+R 1 admitted 0:5 settled resume
+R 3 cancelled - terminal admit
+C 2 terminal
+A 19 duplicate
+A 20 appended
+A 21 appended
+A 22 appended
+R 2 admitted 0:4 settled resume
+R 1 admitted 0:5 settled resume
+R 3 cancelled - terminal admit
+C 2 admitted
+A 23 appended
+A 24 appended
+A 25 EVENT_MUTATED
+R 2 paused 0:4 settled resume
+R 1 admitted 0:5 settled resume
+R 3 cancelled 0:17 settled admit
+C 2 paused
+A 26 appended
+A 27 EVENT_MUTATED
+R 2 paused 0:4 settled resume
+R 1 admitted 0:5 settled resume
+R 3 cancelled 0:17 settled admit
+C 2 paused
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QS skipped
+QB 20 20 20 
+QB 20 20 20 
+QB 5 10 20 0:5,0:6,0:7,0:8,0:9
+X
+T log-110
+A 0 appended
+A 1 duplicate
+A 2 appended
+R 1 - 0:0 unadmitted admit
+R 2 completed - terminal admit
+C 2 terminal
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 EVENT_OUT_OF_ORDER
+R 1 completed 0:0 settled settled
+R 2 failed - terminal admit
+R 3 running - open admit
+C 3 running
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+R 1 completed 0:0 settled settled
+R 2 failed 2:6 settled settled
+R 3 running - open resume
+C 3 running
+QS SETTLEMENT_CONFLICT
+QS appended
+QS appended
+QB 14 15 16 2:9
+QB 9 11 16 2:4,2:5
+QB 3 4 16 1:1
+X
+T log-111
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 EVENT_OUT_OF_ORDER
+R 3 failed 3:0 settled admit
+R 1 failed 0:3 settled admit
+R 2 running - open admit
+C 1 terminal
+A 13 EVENT_MUTATED
+A 14 appended
+A 15 appended
+R 3 failed 3:0 settled admit
+R 1 failed 0:3 settled admit
+R 2 running 3:2 settled admit
+C 1 terminal
+A 16 appended
+R 3 failed 3:0 settled admit
+R 1 failed 0:3 settled admit
+R 2 running 3:2 settled admit
+C 1 terminal
+A 17 EVENT_OUT_OF_ORDER
+R 3 failed 3:0 settled admit
+R 1 failed 0:3 settled admit
+R 2 running 3:2 settled admit
+C 1 terminal
+A 18 appended
+A 19 appended
+A 20 appended
+R 3 cancelled 3:0 settled admit
+R 1 completed 0:3 settled admit
+R 2 running 3:2 settled admit
+C 3 terminal
+A 21 appended
+A 22 appended
+A 23 EVENT_OUT_OF_ORDER
+A 24 appended
+A 25 appended
+R 3 completed 3:0 settled admit
+R 1 completed 0:3 settled admit
+R 2 running 3:2 settled resume
+C 3 terminal
+A 26 appended
+A 27 appended
+A 28 appended
+A 29 appended
+A 30 appended
+R 3 completed 3:0 settled admit
+R 1 running - open admit
+R 2 running 3:2 settled resume
+C 1 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 2 8 27 0:2,0:3,0:4,0:5,1:0,1:1
+QB 5 7 27 0:5,1:0
+QB 4 8 27 0:4,0:5,1:0,1:1
+X
+T log-112
+A 0 appended
+A 1 duplicate
+A 2 appended
+R 3 running - open admit
+R 1 - - unadmitted admit
+C 3 running
+A 3 EVENT_MUTATED
+A 4 appended
+A 5 EVENT_MUTATED
+A 6 EVENT_OUT_OF_ORDER
+A 7 appended
+A 8 appended
+R 3 running - open admit
+R 1 failed 0:3 settled admit
+C 1 terminal
+R 3 running - open admit
+R 1 failed 0:3 settled admit
+C 1 terminal
+QS appended
+QS appended
+QS appended
+QB 0 1 5 0:0
+QB 2 4 5 0:2,0:3
+QB 1 4 5 0:1,0:2,0:3
+X
+T log-113
+A 0 appended
+A 1 appended
+A 2 appended
+R 3 - - unadmitted admit
+R 2 failed - terminal admit
+R 1 completed - terminal admit
+C 1 terminal
+A 3 appended
+A 4 appended
+A 5 EVENT_MUTATED
+A 6 duplicate
+A 7 appended
+R 3 completed - terminal admit
+R 2 failed 1:5 settled admit
+R 1 completed - terminal admit
+C 3 terminal
+A 8 appended
+A 9 appended
+A 10 duplicate
+A 11 appended
+A 12 appended
+R 3 failed 3:0 settled admit
+R 2 failed 1:5 settled settled
+R 1 completed - terminal admit
+C 3 terminal
+A 13 appended
+A 14 appended
+R 3 failed 3:0 settled admit
+R 2 failed 1:5 settled settled
+R 1 completed - terminal admit
+C 3 terminal
+A 15 EVENT_MUTATED
+A 16 EVENT_OUT_OF_ORDER
+A 17 duplicate
+A 18 appended
+A 19 appended
+A 20 appended
+R 3 failed 3:0 settled admit
+R 2 failed 1:5 settled settled
+R 1 completed - terminal admit
+C 3 terminal
+A 21 appended
+A 22 appended
+A 23 appended
+R 3 failed 3:0 settled admit
+R 2 cancelled 1:5 settled settled
+R 1 paused - open admit
+C 1 paused
+A 24 EVENT_MUTATED
+R 3 failed 3:0 settled admit
+R 2 cancelled 1:5 settled settled
+R 1 paused - open admit
+C 1 paused
+QS SETTLEMENT_CONFLICT
+QS skipped
+QS SETTLEMENT_CONFLICT
+QB 18 18 18 
+QB 14 15 18 4:2
+QB 13 18 18 4:1,4:2,4:3,5:0,5:1
+X
+T log-114
+A 0 appended
+A 1 duplicate
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 EVENT_OUT_OF_ORDER
+R 3 - - unadmitted admit
+R 1 running - open resume
+C 1 running
+A 6 appended
+A 7 appended
+R 3 - - unadmitted admit
+R 1 running - open resume
+R 2 - - unadmitted admit
+C 1 running
+A 8 appended
+A 9 EVENT_MUTATED
+A 10 appended
+A 11 appended
+R 3 running - open admit
+R 1 completed - terminal settled
+R 2 completed - terminal admit
+C 3 running
+A 12 appended
+A 13 appended
+A 14 appended
+R 3 running - open admit
+R 1 completed - terminal settled
+R 2 failed 1:9 settled admit
+C 2 terminal
+A 15 appended
+A 16 appended
+A 17 EVENT_MUTATED
+A 18 EVENT_OUT_OF_ORDER
+R 3 running 1:11 settled admit
+R 1 completed - terminal settled
+R 2 failed 1:9 settled admit
+C 2 terminal
+A 19 appended
+A 20 duplicate
+A 21 appended
+R 3 completed 1:11 settled admit
+R 1 completed - terminal settled
+R 2 failed 1:9 settled admit
+C 3 terminal
+A 22 appended
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+A 27 appended
+R 3 completed 1:11 settled settled
+R 1 running - open resume
+R 2 completed 1:9 settled admit
+C 2 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS skipped
+QB 11 12 22 1:9
+QB 9 10 22 1:7
+QB 19 20 22 2:4
+X
+T log-115
+A 0 appended
+A 1 appended
+R 1 - 0:0 unadmitted admit
+R 3 - - unadmitted admit
+C -
+A 2 appended
+A 3 appended
+R 1 - 0:0 unadmitted admit
+R 3 - - unadmitted resume
+R 2 - 1:0 unadmitted admit
+C -
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+R 1 completed 0:0 settled admit
+R 3 running - open resume
+R 2 - 1:0 unadmitted admit
+C 1 terminal
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 EVENT_MUTATED
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 duplicate
+R 1 running - open admit
+R 3 running 1:10 settled resume
+R 2 - 1:0 unadmitted admit
+C 1 running
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+R 1 running - open admit
+R 3 running 1:10 settled resume
+R 2 - 1:0 unadmitted admit
+C 1 running
+R 1 running - open admit
+R 3 running 1:10 settled resume
+R 2 - 1:0 unadmitted admit
+C 1 running
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QS skipped
+QB 1 2 20 0:1
+QB 11 12 20 1:8
+QB 7 9 20 1:4,1:5
+X
+T log-116
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+R 2 failed - terminal admit
+R 1 running - open admit
+R 3 - 1:1 unadmitted admit
+C 2 terminal
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+R 2 completed - terminal settled
+R 1 running - open admit
+R 3 completed 1:1 settled admit
+C 3 terminal
+A 20 appended
+A 21 appended
+A 22 appended
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+R 2 completed - terminal settled
+R 1 paused 2:0 settled admit
+R 3 failed 1:1 settled admit
+C 2 terminal
+QS appended
+QS skipped
+QS appended
+QB 8 9 27 1:5
+QB 18 20 27 1:15,1:16
+QB 7 8 27 1:4
+X
+T log-117
+A 0 appended
+R 1 failed - terminal admit
+C 1 terminal
+A 1 appended
+A 2 EVENT_MUTATED
+R 1 failed - terminal admit
+R 3 - - unadmitted admit
+C 1 terminal
+A 3 appended
+A 4 appended
+A 5 EVENT_MUTATED
+A 6 appended
+A 7 appended
+A 8 duplicate
+A 9 appended
+A 10 appended
+R 1 failed 0:4 settled settled
+R 3 - - unadmitted admit
+R 2 - - unadmitted resume
+C 1 terminal
+A 11 appended
+A 12 appended
+R 1 failed 0:4 settled settled
+R 3 completed - terminal admit
+R 2 - - unadmitted resume
+C 3 terminal
+A 13 appended
+A 14 EVENT_MUTATED
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+R 1 completed 0:4 settled settled
+R 3 completed 1:6 settled admit
+R 2 running - open resume
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 2 7 15 0:2,0:3,0:4,0:5,0:6
+QB 2 4 15 0:2,0:3
+QB 10 12 15 1:3,1:4
+X
+T log-118
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 EVENT_OUT_OF_ORDER
+A 6 appended
+A 7 appended
+A 8 duplicate
+A 9 appended
+R 2 running - open admit
+R 1 completed 1:2 settled admit
+R 3 - 1:0 unadmitted admit
+C 2 running
+A 10 appended
+A 11 appended
+A 12 appended
+R 2 running 1:6 settled admit
+R 1 completed 1:2 settled admit
+R 3 - 1:0 unadmitted admit
+C 1 terminal
+A 13 duplicate
+R 2 running 1:6 settled admit
+R 1 completed 1:2 settled admit
+R 3 - 1:0 unadmitted admit
+C 1 terminal
+A 14 appended
+R 2 running 1:6 settled admit
+R 1 running - open admit
+R 3 - 1:0 unadmitted admit
+C 1 running
+A 15 duplicate
+R 2 running 1:6 settled admit
+R 1 running - open admit
+R 3 - 1:0 unadmitted admit
+C 1 running
+A 16 EVENT_OUT_OF_ORDER
+A 17 appended
+R 2 running 1:6 settled admit
+R 1 running - open admit
+R 3 - 1:0 unadmitted admit
+C 1 running
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 duplicate
+R 2 running 1:6 settled admit
+R 1 running 1:13 settled admit
+R 3 running - open admit
+C 3 running
+A 23 appended
+A 24 appended
+A 25 appended
+R 2 failed 1:6 settled admit
+R 1 admitted 1:13 settled resume
+R 3 running - open admit
+C 1 admitted
+QS appended
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 17 18 20 1:14
+QB 16 19 20 1:13,1:14,1:15
+QB 20 20 20 
+X
+T log-119
+A 0 appended
+A 1 appended
+R 1 running - open admit
+C 1 running
+A 2 duplicate
+A 3 duplicate
+A 4 EVENT_MUTATED
+R 1 running - open admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 0 2 2 0:0,0:1
+QB 2 2 2 
+QB 2 2 2 
+X
+T log-120
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 EVENT_MUTATED
+R 3 - 0:0 unadmitted admit
+R 1 paused - open admit
+C 1 paused
+A 4 appended
+A 5 appended
+A 6 EVENT_OUT_OF_ORDER
+A 7 appended
+R 3 running - open admit
+R 1 completed - terminal admit
+C 1 terminal
+A 8 EVENT_OUT_OF_ORDER
+A 9 appended
+A 10 EVENT_MUTATED
+A 11 appended
+A 12 appended
+A 13 appended
+R 3 running 1:5 settled admit
+R 1 completed - terminal admit
+R 2 failed 1:4 settled admit
+C 2 terminal
+A 14 appended
+A 15 appended
+R 3 running 1:5 settled admit
+R 1 completed - terminal admit
+R 2 failed 1:4 settled admit
+C 2 terminal
+A 16 appended
+A 17 duplicate
+A 18 appended
+R 3 running 1:5 settled admit
+R 1 completed - terminal admit
+R 2 completed 1:4 settled admit
+C 2 terminal
+QS skipped
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 14 14 14 
+QB 6 8 14 1:3,1:4
+QB 14 14 14 
+X
+T log-121
+A 0 appended
+A 1 EVENT_MUTATED
+A 2 appended
+R 1 running - open admit
+C 1 running
+A 3 EVENT_MUTATED
+A 4 appended
+A 5 appended
+A 6 duplicate
+A 7 appended
+A 8 appended
+A 9 duplicate
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+R 1 running - open resume
+R 2 paused 0:5 settled admit
+R 3 completed - terminal settled
+C 1 running
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+A 23 appended
+A 24 appended
+R 1 running 1:1 settled resume
+R 2 failed 0:5 settled admit
+R 3 completed - terminal settled
+C 2 terminal
+QS skipped
+QS skipped
+QS skipped
+QB 3 8 21 0:3,0:4,0:5,0:6,0:7
+QB 21 21 21 
+QB 2 3 21 0:2
+X
+T log-122
+A 0 appended
+A 1 EVENT_MUTATED
+A 2 appended
+R 2 admitted 0:1 settled admit
+C 2 admitted
+A 3 appended
+A 4 EVENT_OUT_OF_ORDER
+A 5 appended
+A 6 appended
+A 7 EVENT_OUT_OF_ORDER
+R 2 admitted 0:1 settled admit
+R 3 - 1:1 unadmitted admit
+R 1 completed - terminal admit
+C 1 terminal
+A 8 appended
+R 2 admitted 0:1 settled admit
+R 3 failed 1:1 settled admit
+R 1 completed - terminal admit
+C 3 terminal
+A 9 appended
+A 10 appended
+A 11 EVENT_OUT_OF_ORDER
+A 12 appended
+A 13 appended
+A 14 appended
+R 2 admitted 0:1 settled admit
+R 3 failed 1:1 settled admit
+R 1 running - open admit
+C 1 running
+A 15 appended
+R 2 admitted 0:1 settled admit
+R 3 failed 1:1 settled admit
+R 1 paused - open admit
+C 1 paused
+A 16 duplicate
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+A 23 appended
+A 24 EVENT_OUT_OF_ORDER
+A 25 appended
+A 26 EVENT_MUTATED
+A 27 EVENT_OUT_OF_ORDER
+A 28 appended
+R 2 admitted 0:1 settled admit
+R 3 failed 1:1 settled admit
+R 1 running 4:6 settled admit
+C 1 running
+A 29 EVENT_OUT_OF_ORDER
+A 30 EVENT_OUT_OF_ORDER
+R 2 admitted 0:1 settled admit
+R 3 failed 1:1 settled admit
+R 1 running 4:6 settled admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 16 18 21 4:2,4:3
+QB 11 12 21 2:6
+QB 5 11 21 2:0,2:1,2:2,2:3,2:4,2:5
+X
+T log-123
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 duplicate
+A 8 appended
+R 1 cancelled - terminal admit
+R 2 failed - terminal admit
+R 3 paused 1:1 settled resume
+C 3 paused
+A 9 EVENT_OUT_OF_ORDER
+A 10 appended
+A 11 appended
+R 1 cancelled 1:4 settled admit
+R 2 failed - terminal admit
+R 3 paused 1:1 settled resume
+C 3 paused
+A 12 appended
+R 1 cancelled 1:4 settled admit
+R 2 failed - terminal admit
+R 3 paused 1:1 settled resume
+C 3 paused
+A 13 appended
+A 14 appended
+A 15 duplicate
+A 16 appended
+A 17 EVENT_OUT_OF_ORDER
+A 18 appended
+A 19 EVENT_OUT_OF_ORDER
+A 20 duplicate
+A 21 EVENT_OUT_OF_ORDER
+A 22 appended
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+A 27 appended
+R 1 paused 1:4 settled admit
+R 2 running - open resume
+R 3 paused 1:1 settled resume
+C 2 running
+A 28 appended
+A 29 appended
+R 1 running 4:5 settled admit
+R 2 running - open resume
+R 3 paused 1:1 settled resume
+C 1 running
+QS skipped
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 9 15 23 1:5,1:6,1:7,2:0,3:0,3:1
+QB 10 14 23 1:6,1:7,2:0,3:0
+QB 3 9 23 0:3,1:0,1:1,1:2,1:3,1:4
+X
+T log-124
+A 0 appended
+R 1 paused - open admit
+C 1 paused
+A 1 appended
+A 2 duplicate
+R 1 paused - open admit
+C 1 paused
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 EVENT_MUTATED
+A 7 appended
+A 8 appended
+A 9 EVENT_MUTATED
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+R 1 completed - terminal admit
+R 2 cancelled - terminal admit
+R 3 failed - terminal settled
+C 2 terminal
+A 16 appended
+A 17 appended
+R 1 completed 2:1 settled admit
+R 2 cancelled - terminal admit
+R 3 failed - terminal settled
+C 2 terminal
+R 1 completed 2:1 settled admit
+R 2 cancelled - terminal admit
+R 3 failed - terminal settled
+C 2 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS appended
+QB 11 15 15 1:4,2:0,2:1,2:2
+QB 0 1 15 0:0
+QB 15 15 15 
+X
+T log-125
+A 0 appended
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+A 4 appended
+R 2 - 1:1 unadmitted admit
+R 3 failed - terminal admit
+C 3 terminal
+A 5 EVENT_OUT_OF_ORDER
+A 6 appended
+A 7 appended
+A 8 appended
+R 2 failed 1:1 settled admit
+R 3 failed - terminal admit
+R 1 failed - terminal admit
+C 2 terminal
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+R 2 running - open resume
+R 3 failed - terminal settled
+R 1 failed 1:7 settled admit
+C 2 running
+R 2 running - open resume
+R 3 failed - terminal settled
+R 1 failed 1:7 settled admit
+C 2 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 8 11 12 1:6,1:7,1:8
+QB 1 3 12 0:1,1:0
+QB 10 12 12 1:8,1:9
+X
+T log-126
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 duplicate
+R 1 paused - open admit
+R 3 completed - terminal admit
+C 1 paused
+A 5 appended
+R 1 paused - open admit
+R 3 completed 0:4 settled admit
+C 1 paused
+A 6 appended
+A 7 duplicate
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 duplicate
+A 12 EVENT_MUTATED
+A 13 appended
+R 1 paused 0:7 settled resume
+R 3 running - open admit
+C 3 running
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+R 1 running - open resume
+R 3 running - open admit
+C 1 running
+A 17 appended
+A 18 appended
+R 1 running - open resume
+R 3 running - open admit
+R 2 - - unadmitted admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 0 3 14 0:0,0:1,0:2
+QB 8 10 14 0:8,0:9
+QB 12 13 14 0:12
+X
+T log-127
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+R 3 failed - terminal admit
+R 2 failed 0:1 settled admit
+C 2 terminal
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 duplicate
+A 11 EVENT_MUTATED
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+A 17 appended
+R 3 running - open admit
+R 2 running - open admit
+R 1 completed 1:0 settled admit
+C 3 running
+QS appended
+QS appended
+QS skipped
+QB 7 9 15 1:0,1:1
+QB 8 13 15 1:1,1:2,1:3,1:4,1:5
+QB 15 15 15 
+X
+T log-128
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+R 3 cancelled - terminal admit
+R 1 completed - terminal admit
+R 2 paused - open admit
+C 3 terminal
+A 10 EVENT_MUTATED
+A 11 appended
+A 12 EVENT_MUTATED
+R 3 cancelled - terminal admit
+R 1 completed - terminal admit
+R 2 paused - open admit
+C 3 terminal
+A 13 appended
+A 14 EVENT_MUTATED
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 EVENT_MUTATED
+A 20 appended
+A 21 EVENT_MUTATED
+A 22 appended
+A 23 appended
+A 24 duplicate
+R 3 cancelled 2:1 settled admit
+R 1 completed - terminal admit
+R 2 failed 2:3 settled admit
+C 3 terminal
+A 25 duplicate
+A 26 appended
+A 27 appended
+A 28 duplicate
+R 3 cancelled 2:1 settled admit
+R 1 running - open admit
+R 2 failed 2:3 settled admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 0 1 21 0:0
+QB 7 10 21 0:7,0:8,0:9
+QB 7 11 21 0:7,0:8,0:9,0:10
+X
+T log-129
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 EVENT_OUT_OF_ORDER
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+A 23 appended
+A 24 appended
+R 2 running - open resume
+R 1 running - open resume
+R 3 running - open admit
+C 3 running
+QS appended
+QS appended
+QS appended
+QB 23 24 24 5:6
+QB 6 12 24 0:6,0:7,1:0,2:3,3:0,3:1
+QB 13 14 24 3:3
+X
+T log-130
+A 0 appended
+A 1 duplicate
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 EVENT_OUT_OF_ORDER
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 duplicate
+R 1 - - unadmitted admit
+R 3 running 0:7 settled resume
+R 2 running - open admit
+C 2 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 3 8 9 0:3,0:4,0:5,0:6,0:7
+QB 4 7 9 0:4,0:5,0:6
+QB 9 9 9 
+X
+T log-131
+A 0 appended
+A 1 appended
+R 2 running - open admit
+R 1 running - open admit
+C 1 running
+A 2 appended
+R 2 admitted - open admit
+R 1 running - open admit
+C 2 admitted
+A 3 appended
+R 2 admitted - open admit
+R 1 running - open admit
+R 3 failed - terminal admit
+C 3 terminal
+A 4 duplicate
+A 5 appended
+A 6 appended
+R 2 failed 0:5 settled admit
+R 1 running - open admit
+R 3 failed - terminal admit
+C 2 terminal
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+R 2 failed 0:5 settled admit
+R 1 paused 1:0 settled admit
+R 3 running 1:3 settled admit
+C 1 paused
+A 16 appended
+A 17 duplicate
+A 18 appended
+R 2 paused 0:5 settled admit
+R 1 paused 1:0 settled admit
+R 3 running - open admit
+C 2 paused
+R 2 paused 0:5 settled admit
+R 1 paused 1:0 settled admit
+R 3 running - open admit
+C 2 paused
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS appended
+QB 9 13 16 1:2,1:3,1:4,1:5
+QB 12 16 16 1:5,1:6,1:7,2:0
+QB 4 5 16 0:4
+X
+T log-132
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 duplicate
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 duplicate
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+R 1 failed 1:8 settled settled
+R 3 completed - terminal settled
+R 2 failed - terminal admit
+C 3 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 15 15 15 
+QB 7 10 15 1:5,1:6,1:7
+QB 13 15 15 1:11,1:12
+X
+T log-133
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_OUT_OF_ORDER
+A 5 appended
+R 1 completed - terminal settled
+R 3 - 0:2 unadmitted admit
+R 2 running - open admit
+C 2 running
+A 6 appended
+A 7 appended
+A 8 appended
+R 1 completed - terminal settled
+R 3 completed 0:2 settled admit
+R 2 running - open admit
+C 3 terminal
+A 9 appended
+R 1 completed - terminal settled
+R 3 completed 0:2 settled admit
+R 2 running - open admit
+C 3 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 7 9 9 2:2,2:3
+QB 9 9 9 
+QB 2 7 9 0:2,0:3,1:0,2:0,2:1
+X
+T log-134
+A 0 appended
+A 1 appended
+A 2 EVENT_MUTATED
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 3 completed - terminal admit
+R 2 - - unadmitted admit
+R 1 cancelled - terminal admit
+C 3 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 6 6 6 
+QB 6 6 6 
+QB 4 6 6 0:4,0:5
+X
+T log-135
+A 0 appended
+A 1 EVENT_OUT_OF_ORDER
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 3 failed - terminal admit
+R 2 failed - terminal admit
+C 2 terminal
+A 7 EVENT_MUTATED
+A 8 appended
+R 3 failed - terminal admit
+R 2 failed - terminal admit
+R 1 - - unadmitted admit
+C 2 terminal
+A 9 appended
+R 3 failed - terminal admit
+R 2 failed - terminal settled
+R 1 - - unadmitted admit
+C 2 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 2 5 8 0:2,0:3,0:4
+QB 5 6 8 1:0
+QB 6 7 8 1:1
+X
+T log-136
+A 0 appended
+R 1 completed - terminal admit
+C 1 terminal
+A 1 appended
+A 2 duplicate
+A 3 appended
+A 4 appended
+A 5 appended
+R 1 failed 0:5 settled admit
+R 3 failed - terminal admit
+R 2 - - unadmitted admit
+C 1 terminal
+A 6 appended
+R 1 running - open admit
+R 3 failed - terminal admit
+R 2 - - unadmitted admit
+C 1 running
+A 7 appended
+A 8 appended
+A 9 appended
+R 1 running - open admit
+R 3 running - open admit
+R 2 - 1:1 unadmitted admit
+C 3 running
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS appended
+QB 9 9 9 
+QB 1 3 9 0:4,0:5
+QB 7 9 9 1:2,1:3
+X
+T log-137
+A 0 appended
+A 1 appended
+A 2 duplicate
+A 3 EVENT_MUTATED
+R 2 failed 0:0 settled admit
+C 2 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 2 2 2 
+QB 2 2 2 
+QB 2 2 2 
+X
+T log-138
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 EVENT_OUT_OF_ORDER
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+R 2 failed 0:0 settled admit
+R 3 running - open resume
+R 1 cancelled - terminal admit
+C 1 terminal
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+R 2 failed 0:0 settled admit
+R 3 running 1:0 settled resume
+R 1 cancelled - terminal admit
+C 1 terminal
+A 12 EVENT_OUT_OF_ORDER
+A 13 appended
+A 14 appended
+R 2 running - open admit
+R 3 running 1:0 settled resume
+R 1 cancelled - terminal admit
+C 2 running
+A 15 appended
+R 2 paused - open admit
+R 3 running 1:0 settled resume
+R 1 cancelled - terminal admit
+C 2 paused
+A 16 appended
+A 17 appended
+A 18 appended
+R 2 paused - open resume
+R 3 running 1:0 settled resume
+R 1 cancelled 1:5 settled admit
+C 2 paused
+A 19 appended
+R 2 paused - open resume
+R 3 running 1:0 settled resume
+R 1 cancelled 1:5 settled admit
+C 2 paused
+A 20 EVENT_MUTATED
+A 21 appended
+A 22 appended
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 EVENT_MUTATED
+R 2 paused - open resume
+R 3 running 1:0 settled resume
+R 1 admitted - open admit
+C 1 admitted
+R 2 paused - open resume
+R 3 running 1:0 settled resume
+R 1 admitted - open admit
+C 1 admitted
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 10 12 23 1:0,1:1
+QB 4 9 23 0:4,0:5,0:6,0:7,0:8
+QB 14 19 23 1:4,1:5,1:6,1:7,2:0
+X
+T log-139
+A 0 appended
+R 3 - - unadmitted admit
+C -
+A 1 duplicate
+R 3 - - unadmitted admit
+C -
+A 2 EVENT_MUTATED
+A 3 appended
+A 4 appended
+R 3 paused - open admit
+R 2 failed - terminal admit
+C 2 terminal
+A 5 appended
+R 3 paused - open admit
+R 2 failed - terminal admit
+R 1 failed - terminal admit
+C 1 terminal
+A 6 appended
+A 7 EVENT_MUTATED
+A 8 duplicate
+A 9 appended
+A 10 EVENT_MUTATED
+R 3 paused - open admit
+R 2 failed - terminal admit
+R 1 failed - terminal admit
+C 3 paused
+QS appended
+QS appended
+QS appended
+QB 4 5 6 0:4
+QB 0 1 6 0:0
+QB 6 6 6 
+X
+T log-140
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+R 2 running - open resume
+R 3 - - unadmitted admit
+C 2 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 3 5 5 0:3,0:4
+QB 1 4 5 0:1,0:2,0:3
+QB 5 5 5 
+X
+T log-141
+A 0 appended
+A 1 appended
+R 3 running - open admit
+C 3 running
+A 2 appended
+A 3 appended
+A 4 appended
+R 3 running - open admit
+R 1 running - open admit
+R 2 - 2:0 unadmitted admit
+C 1 running
+QS appended
+QS appended
+QS appended
+QB 5 5 5 
+QB 0 2 5 0:0,1:0
+QB 5 5 5 
+X
+T log-142
+A 0 appended
+A 1 appended
+R 3 failed - terminal admit
+C 3 terminal
+A 2 appended
+R 3 failed - terminal admit
+R 2 running - open admit
+C 2 running
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+R 3 failed - terminal admit
+R 2 running - open admit
+R 1 - 1:1 unadmitted admit
+C 2 running
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 duplicate
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 EVENT_MUTATED
+A 22 appended
+R 3 cancelled 1:8 settled settled
+R 2 running 2:7 settled admit
+R 1 admitted 1:1 settled admit
+C 1 admitted
+QS SETTLEMENT_CONFLICT
+QS skipped
+QS SETTLEMENT_CONFLICT
+QB 10 14 21 1:8,1:9,2:0,2:1
+QB 12 16 21 2:0,2:1,2:2,2:3
+QB 12 16 21 2:0,2:1,2:2,2:3
+X
+T log-143
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 EVENT_OUT_OF_ORDER
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 EVENT_MUTATED
+R 2 - - unadmitted admit
+R 1 - - unadmitted resume
+R 3 running - open resume
+C 3 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 6 9 11 0:6,0:7,0:8
+QB 11 11 11 
+QB 7 8 11 0:7
+X
+T log-144
+A 0 appended
+R 2 failed - terminal admit
+C 2 terminal
+A 1 appended
+A 2 appended
+A 3 appended
+R 2 paused 1:0 settled admit
+C 2 paused
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 duplicate
+A 9 EVENT_MUTATED
+A 10 appended
+A 11 appended
+R 2 paused 1:0 settled admit
+R 3 failed - terminal admit
+R 1 completed 2:6 settled admit
+C 3 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 5 10 10 2:2,2:3,2:4,2:5,2:6
+QB 3 9 10 2:0,2:1,2:2,2:3,2:4,2:5
+QB 10 10 10 
+X
+T log-145
+A 0 appended
+R 1 completed - terminal admit
+C 1 terminal
+A 1 appended
+A 2 EVENT_MUTATED
+R 1 completed - terminal admit
+R 2 - - unadmitted admit
+C 1 terminal
+A 3 duplicate
+A 4 EVENT_MUTATED
+A 5 appended
+A 6 appended
+R 1 completed - terminal admit
+R 2 completed - terminal admit
+C 2 terminal
+A 7 EVENT_MUTATED
+A 8 appended
+A 9 appended
+A 10 EVENT_OUT_OF_ORDER
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 EVENT_OUT_OF_ORDER
+R 1 running - open resume
+R 2 running - open admit
+R 3 failed 2:1 settled admit
+C 2 running
+A 21 appended
+A 22 appended
+A 23 appended
+R 1 running - open resume
+R 2 failed - terminal admit
+R 3 running - open admit
+C 2 terminal
+A 24 appended
+R 1 running - open resume
+R 2 failed - terminal admit
+R 3 running - open admit
+C 2 terminal
+QS appended
+QS appended
+QS appended
+QB 3 4 18 1:2
+QB 3 7 18 1:2,1:3,1:4,1:5
+QB 7 9 18 1:6,1:7
+X
+T log-146
+A 0 appended
+A 1 duplicate
+R 3 - - unadmitted resume
+C -
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 EVENT_MUTATED
+A 8 appended
+A 9 appended
+A 10 appended
+R 3 - - unadmitted resume
+R 1 completed - terminal admit
+R 2 failed 0:2 settled admit
+C 2 terminal
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+R 3 - - unadmitted resume
+R 1 completed 1:7 settled admit
+R 2 failed 0:2 settled settled
+C 1 terminal
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 EVENT_OUT_OF_ORDER
+R 3 - - unadmitted resume
+R 1 failed 1:7 settled admit
+R 2 failed 0:2 settled settled
+C 1 terminal
+A 19 appended
+A 20 EVENT_OUT_OF_ORDER
+A 21 appended
+A 22 appended
+A 23 appended
+A 24 appended
+R 3 cancelled 1:12 settled settled
+R 1 failed 1:7 settled admit
+R 2 running - open resume
+C 2 running
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 4 6 21 1:0,1:1
+QB 5 7 21 1:1,1:2
+QB 19 20 21 2:0
+X
+T log-147
+A 0 appended
+A 1 appended
+A 2 duplicate
+A 3 appended
+A 4 appended
+A 5 duplicate
+A 6 duplicate
+A 7 EVENT_OUT_OF_ORDER
+A 8 EVENT_OUT_OF_ORDER
+A 9 duplicate
+R 1 running - open admit
+R 2 completed - terminal admit
+C 1 running
+A 10 appended
+A 11 appended
+A 12 duplicate
+A 13 appended
+R 1 running - open admit
+R 2 failed - terminal admit
+R 3 - - unadmitted admit
+C 2 terminal
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+R 1 running - open admit
+R 2 failed - terminal admit
+R 3 - - unadmitted admit
+C 2 terminal
+A 17 appended
+R 1 running - open admit
+R 2 failed - terminal admit
+R 3 - - unadmitted admit
+C 2 terminal
+A 18 appended
+R 1 running - open admit
+R 2 failed - terminal settled
+R 3 - - unadmitted admit
+C 2 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 6 11 11 0:6,0:7,0:8,0:9,0:10
+QB 10 11 11 0:10
+QB 8 11 11 0:8,0:9,0:10
+X
+T log-148
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 EVENT_OUT_OF_ORDER
+A 9 EVENT_MUTATED
+A 10 appended
+R 2 paused - open admit
+R 1 - 0:3 unadmitted resume
+R 3 running - open resume
+C 3 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 9 9 9 
+QB 6 9 9 2:1,2:2,2:3
+QB 9 9 9 
+X
+T log-149
+A 0 appended
+R 2 completed - terminal admit
+C 2 terminal
+A 1 appended
+R 2 completed - terminal admit
+R 3 - 0:1 unadmitted admit
+C 2 terminal
+A 2 appended
+R 2 completed - terminal admit
+R 3 - 0:1 unadmitted admit
+C 2 terminal
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+R 2 running - open admit
+R 3 failed 0:1 settled admit
+R 1 running - open admit
+C 3 terminal
+A 9 appended
+A 10 duplicate
+A 11 appended
+R 2 running - open admit
+R 3 failed 0:1 settled admit
+R 1 completed 2:0 settled admit
+C 1 terminal
+QS skipped
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 11 11 11 
+QB 0 5 11 0:0,0:1,0:2,0:3,0:4
+QB 11 11 11 
+X
+T log-150
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 3 - - unadmitted admit
+R 1 - - unadmitted admit
+R 2 paused - open admit
+C 2 paused
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 7 7 7 
+QB 0 3 7 0:0,0:1,0:2
+QB 4 6 7 0:4,0:5
+X
+T log-151
+A 0 appended
+A 1 appended
+R 1 paused - open admit
+R 3 - - unadmitted admit
+C 1 paused
+A 2 EVENT_OUT_OF_ORDER
+R 1 paused - open admit
+R 3 - - unadmitted admit
+C 1 paused
+A 3 appended
+A 4 appended
+A 5 appended
+R 1 completed - terminal admit
+R 3 running - open admit
+C 3 running
+A 6 appended
+A 7 EVENT_OUT_OF_ORDER
+R 1 completed - terminal admit
+R 3 running - open admit
+R 2 - 0:5 unadmitted admit
+C 3 running
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 0 4 6 0:0,0:1,0:2,0:3
+QB 2 3 6 0:2
+QB 2 6 6 0:2,0:3,0:4,0:5
+X
+T log-152
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 EVENT_MUTATED
+R 3 completed - terminal admit
+R 1 - 0:1 unadmitted resume
+C 3 terminal
+A 4 appended
+R 3 completed - terminal admit
+R 1 - 0:1 unadmitted resume
+C 3 terminal
+A 5 duplicate
+A 6 duplicate
+A 7 appended
+A 8 EVENT_OUT_OF_ORDER
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 duplicate
+A 23 appended
+R 3 running - open admit
+R 1 running 3:6 settled resume
+R 2 paused 1:3 settled admit
+C 3 running
+R 3 running - open admit
+R 1 running 3:6 settled resume
+R 2 paused 1:3 settled admit
+C 3 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS appended
+QB 18 19 19 3:6
+QB 1 3 19 0:1,0:2
+QB 8 10 19 1:3,1:4
+X
+T log-153
+A 0 appended
+A 1 appended
+A 2 EVENT_MUTATED
+A 3 appended
+R 2 running - open admit
+R 3 running - open admit
+C 3 running
+A 4 appended
+R 2 running - open resume
+R 3 running - open admit
+C 3 running
+A 5 appended
+A 6 EVENT_OUT_OF_ORDER
+R 2 running 0:5 settled resume
+R 3 running - open admit
+C 3 running
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 0 1 5 0:1
+QB 5 5 5 
+QB 5 5 5 
+X
+T log-154
+A 0 appended
+A 1 appended
+A 2 appended
+R 2 - - unadmitted admit
+R 3 - - unadmitted admit
+C -
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 duplicate
+A 7 EVENT_OUT_OF_ORDER
+A 8 duplicate
+R 2 failed - terminal admit
+R 3 completed - terminal admit
+C 3 terminal
+A 9 appended
+A 10 EVENT_OUT_OF_ORDER
+A 11 appended
+A 12 appended
+R 2 failed - terminal admit
+R 3 running - open admit
+R 1 - 0:6 unadmitted admit
+C 3 running
+A 13 appended
+A 14 duplicate
+A 15 appended
+A 16 duplicate
+A 17 EVENT_OUT_OF_ORDER
+A 18 appended
+A 19 appended
+R 2 failed - terminal admit
+R 3 running - open admit
+R 1 admitted - open admit
+C 1 admitted
+A 20 appended
+A 21 appended
+R 2 failed - terminal admit
+R 3 running - open admit
+R 1 admitted 2:4 settled admit
+C 1 admitted
+QS SETTLEMENT_CONFLICT
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 4 7 15 0:4,0:5,0:6
+QB 7 9 15 1:0,1:1
+QB 15 15 15 
+X
+T log-155
+A 0 appended
+R 3 - - unadmitted resume
+C -
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_MUTATED
+A 5 appended
+A 6 appended
+A 7 EVENT_MUTATED
+A 8 duplicate
+A 9 appended
+A 10 appended
+A 11 appended
+R 3 - 2:0 unadmitted resume
+R 2 running - open resume
+R 1 admitted 1:0 settled admit
+C 1 admitted
+A 12 appended
+R 3 - 2:0 unadmitted resume
+R 2 completed - terminal settled
+R 1 admitted 1:0 settled admit
+C 2 terminal
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+R 3 - 2:0 unadmitted resume
+R 2 completed 2:3 settled settled
+R 1 cancelled 1:0 settled admit
+C 1 terminal
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 EVENT_MUTATED
+A 22 appended
+A 23 EVENT_MUTATED
+A 24 appended
+A 25 appended
+R 3 - 2:0 unadmitted resume
+R 2 running - open resume
+R 1 running - open admit
+C 1 running
+A 26 EVENT_OUT_OF_ORDER
+A 27 appended
+R 3 - 2:0 unadmitted resume
+R 2 running 4:1 settled resume
+R 1 running - open admit
+C 1 running
+A 28 EVENT_OUT_OF_ORDER
+A 29 appended
+R 3 - 2:0 unadmitted resume
+R 2 running 4:1 settled resume
+R 1 running - open admit
+C 1 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 16 21 23 3:3,3:4,3:5,3:6,4:0
+QB 17 18 23 3:4
+QB 9 10 23 2:1
+X
+T log-156
+A 0 appended
+R 1 admitted - open admit
+C 1 admitted
+A 1 appended
+A 2 EVENT_OUT_OF_ORDER
+A 3 appended
+A 4 appended
+A 5 appended
+R 1 running - open admit
+R 3 - - unadmitted admit
+R 2 failed - terminal admit
+C 2 terminal
+A 6 appended
+R 1 running - open admit
+R 3 - - unadmitted admit
+R 2 failed - terminal admit
+C 2 terminal
+A 7 appended
+A 8 appended
+A 9 appended
+R 1 running - open admit
+R 3 running - open admit
+R 2 failed - terminal admit
+C 3 running
+A 10 appended
+A 11 appended
+A 12 appended
+R 1 running - open admit
+R 3 paused - open admit
+R 2 failed - terminal admit
+C 3 paused
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+R 1 admitted - open admit
+R 3 paused 1:4 settled admit
+R 2 failed - terminal settled
+C 1 admitted
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 6 9 17 0:6,0:7,0:8
+QB 17 17 17 
+QB 10 16 17 0:10,0:11,1:1,1:2,1:3,1:4
+X
+T log-157
+A 0 appended
+A 1 appended
+R 3 - - unadmitted admit
+R 2 completed - terminal admit
+C 2 terminal
+A 2 appended
+A 3 appended
+A 4 appended
+R 3 - - unadmitted admit
+R 2 completed - terminal admit
+R 1 failed - terminal admit
+C 1 terminal
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+R 3 - 0:6 unadmitted admit
+R 2 completed - terminal admit
+R 1 running 1:1 settled admit
+C 1 running
+A 9 appended
+A 10 appended
+R 3 - 0:6 unadmitted admit
+R 2 completed - terminal admit
+R 1 failed 1:1 settled admit
+C 1 terminal
+R 3 - 0:6 unadmitted admit
+R 2 completed - terminal admit
+R 1 failed 1:1 settled admit
+C 1 terminal
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 4 10 11 0:4,0:5,0:6,1:0,1:1,1:2
+QB 9 10 11 1:2
+QB 6 10 11 0:6,1:0,1:1,1:2
+X
+T log-158
+A 0 appended
+A 1 appended
+A 2 duplicate
+A 3 EVENT_OUT_OF_ORDER
+A 4 appended
+R 1 - 0:0 unadmitted admit
+R 2 running - open admit
+C 2 running
+A 5 appended
+A 6 appended
+R 1 running - open admit
+R 2 running - open admit
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS appended
+QB 5 5 5 
+QB 0 2 5 0:0,0:1
+QB 1 5 5 0:1,0:2,0:3,0:4
+X
+T log-159
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+R 1 - 0:0 unadmitted admit
+R 2 - 0:1 unadmitted admit
+R 3 completed 0:2 settled admit
+C 3 terminal
+A 5 appended
+R 1 - 0:0 unadmitted admit
+R 2 - 0:1 unadmitted admit
+R 3 completed 0:2 settled admit
+C 3 terminal
+A 6 appended
+A 7 EVENT_OUT_OF_ORDER
+A 8 appended
+A 9 duplicate
+R 1 - 0:0 unadmitted admit
+R 2 - 0:1 unadmitted admit
+R 3 completed 0:2 settled settled
+C 3 terminal
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+R 1 failed 0:0 settled admit
+R 2 failed 0:1 settled admit
+R 3 cancelled 0:2 settled settled
+C 2 terminal
+A 15 appended
+A 16 duplicate
+A 17 appended
+A 18 appended
+R 1 running - open admit
+R 2 failed 0:1 settled admit
+R 3 completed 0:2 settled settled
+C 1 running
+A 19 appended
+R 1 running - open admit
+R 2 failed 0:1 settled admit
+R 3 failed 0:2 settled settled
+C 3 terminal
+QS appended
+QS appended
+QS appended
+QB 11 17 17 0:11,0:12,0:13,0:14,0:15,0:16
+QB 15 17 17 0:15,0:16
+QB 2 3 17 0:2
+X
+T log-160
+A 0 appended
+A 1 appended
+A 2 appended
+R 2 - 0:0 unadmitted admit
+R 1 - - unadmitted admit
+R 3 - - unadmitted resume
+C -
+A 3 duplicate
+A 4 appended
+A 5 appended
+R 2 - 0:0 unadmitted admit
+R 1 - - unadmitted admit
+R 3 - 0:4 unadmitted resume
+C -
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 3 4 5 0:3
+QB 0 5 5 0:0,0:1,0:2,0:3,0:4
+QB 5 5 5 
+X
+T log-161
+A 0 appended
+A 1 appended
+R 1 admitted - open admit
+R 2 - - unadmitted admit
+C 1 admitted
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 1 admitted 0:2 settled admit
+R 2 cancelled 0:3 settled settled
+C 2 terminal
+A 7 appended
+A 8 appended
+A 9 appended
+R 1 running - open admit
+R 2 cancelled 0:3 settled settled
+C 1 running
+A 10 appended
+R 1 running - open admit
+R 2 cancelled 0:3 settled settled
+R 3 - - unadmitted resume
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 8 11 11 0:8,0:9,0:10
+QB 8 9 11 0:8
+QB 11 11 11 
+X
+T log-162
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 1 - 0:0 unadmitted admit
+R 2 paused - open admit
+R 3 running 2:1 settled admit
+C 3 running
+A 6 EVENT_OUT_OF_ORDER
+A 7 appended
+A 8 EVENT_OUT_OF_ORDER
+A 9 appended
+R 1 - 0:0 unadmitted admit
+R 2 paused - open resume
+R 3 running 2:1 settled admit
+C 2 paused
+A 10 EVENT_OUT_OF_ORDER
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 duplicate
+R 1 - 0:0 unadmitted resume
+R 2 paused 2:5 settled resume
+R 3 paused 2:1 settled admit
+C 3 paused
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+R 1 failed 0:0 settled settled
+R 2 paused 2:5 settled resume
+R 3 paused 2:1 settled admit
+C 1 terminal
+A 22 EVENT_MUTATED
+R 1 failed 0:0 settled settled
+R 2 paused 2:5 settled resume
+R 3 paused 2:1 settled admit
+C 1 terminal
+A 23 appended
+R 1 failed 0:0 settled settled
+R 2 paused 2:5 settled resume
+R 3 cancelled 2:1 settled admit
+C 3 terminal
+A 24 appended
+A 25 EVENT_MUTATED
+A 26 appended
+A 27 appended
+A 28 appended
+R 1 running - open resume
+R 2 paused 2:5 settled resume
+R 3 paused 2:1 settled admit
+C 1 running
+A 29 appended
+A 30 appended
+R 1 running - open resume
+R 2 paused 2:5 settled resume
+R 3 cancelled 2:1 settled admit
+C 3 terminal
+R 1 running - open resume
+R 2 paused 2:5 settled resume
+R 3 cancelled 2:1 settled admit
+C 3 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 23 25 25 3:3,3:4
+QB 8 12 25 2:4,2:5,2:6,2:7
+QB 18 24 25 2:14,2:15,3:0,3:1,3:2,3:3
+X
+T log-163
+A 0 appended
+A 1 appended
+R 3 running - open admit
+C 3 running
+A 2 appended
+A 3 EVENT_MUTATED
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 duplicate
+A 8 appended
+R 3 running - open admit
+R 1 running - open admit
+R 2 completed - terminal admit
+C 1 running
+A 9 EVENT_OUT_OF_ORDER
+R 3 running - open admit
+R 1 running - open admit
+R 2 completed - terminal admit
+C 1 running
+A 10 appended
+R 3 running - open admit
+R 1 completed - terminal admit
+R 2 completed - terminal admit
+C 1 terminal
+A 11 appended
+A 12 appended
+A 13 appended
+R 3 running - open admit
+R 1 completed - terminal admit
+R 2 failed 3:3 settled admit
+C 2 terminal
+A 14 duplicate
+A 15 appended
+R 3 running - open admit
+R 1 completed - terminal admit
+R 2 failed 3:3 settled admit
+C 3 running
+QS appended
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 12 12 12 
+QB 9 11 12 3:2,3:3
+QB 2 3 12 1:4
+X
+T log-164
+A 0 appended
+R 2 admitted - open admit
+C 2 admitted
+A 1 appended
+A 2 EVENT_MUTATED
+A 3 appended
+R 2 admitted 0:1 settled admit
+R 3 completed - terminal admit
+C 3 terminal
+A 4 EVENT_MUTATED
+R 2 admitted 0:1 settled admit
+R 3 completed - terminal admit
+C 3 terminal
+A 5 appended
+A 6 duplicate
+A 7 appended
+A 8 appended
+R 2 admitted 0:1 settled admit
+R 3 running - open admit
+R 1 running - open admit
+C 1 running
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+R 2 admitted 0:1 settled admit
+R 3 running - open resume
+R 1 running 1:0 settled admit
+C 3 running
+A 17 EVENT_OUT_OF_ORDER
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+R 2 admitted 0:1 settled resume
+R 3 running - open resume
+R 1 cancelled 1:0 settled admit
+C 1 terminal
+A 22 appended
+A 23 appended
+A 24 appended
+R 2 admitted 0:1 settled resume
+R 3 admitted - open resume
+R 1 failed 1:0 settled admit
+C 1 terminal
+R 2 admitted 0:1 settled resume
+R 3 admitted - open resume
+R 1 failed 1:0 settled admit
+C 1 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 14 16 21 2:5,2:6
+QB 15 19 21 2:6,2:7,2:8,2:9
+QB 6 7 21 0:6
+X
+T log-165
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_MUTATED
+R 2 cancelled 0:0 settled admit
+R 1 - 0:1 unadmitted admit
+R 3 failed - terminal admit
+C 3 terminal
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+R 2 paused 0:0 settled admit
+R 1 paused 0:1 settled admit
+R 3 failed 0:4 settled admit
+C 1 paused
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+R 2 paused 0:0 settled admit
+R 1 cancelled 0:1 settled admit
+R 3 failed 0:4 settled admit
+C 1 terminal
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 duplicate
+A 19 appended
+A 20 appended
+R 2 paused 0:0 settled admit
+R 1 admitted 0:1 settled resume
+R 3 failed 0:4 settled admit
+C 1 admitted
+A 21 appended
+A 22 appended
+A 23 appended
+A 24 appended
+R 2 paused 0:0 settled admit
+R 1 admitted 0:1 settled resume
+R 3 paused 0:4 settled admit
+C 3 paused
+R 2 paused 0:0 settled admit
+R 1 admitted 0:1 settled resume
+R 3 paused 0:4 settled admit
+C 3 paused
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS skipped
+QB 23 23 23 
+QB 23 23 23 
+QB 5 6 23 0:5
+X
+T log-166
+A 0 appended
+A 1 appended
+A 2 EVENT_MUTATED
+A 3 duplicate
+A 4 duplicate
+A 5 appended
+R 2 - 0:0 unadmitted admit
+R 3 - - unadmitted admit
+C -
+A 6 appended
+A 7 EVENT_MUTATED
+A 8 EVENT_MUTATED
+A 9 duplicate
+A 10 EVENT_OUT_OF_ORDER
+R 2 - 0:0 unadmitted admit
+R 3 - - unadmitted admit
+C -
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+R 2 - 0:0 unadmitted admit
+R 3 - - unadmitted resume
+R 1 - 1:2 unadmitted admit
+C -
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 0 6 8 0:0,0:1,1:0,1:1,1:2,2:0
+QB 4 8 8 1:2,2:0,2:1,2:2
+QB 3 4 8 1:1
+X
+T log-167
+A 0 appended
+A 1 appended
+R 3 - 0:0 unadmitted admit
+R 2 failed - terminal admit
+C 2 terminal
+A 2 appended
+A 3 appended
+R 3 - 0:0 unadmitted admit
+R 2 failed - terminal admit
+R 1 - - unadmitted admit
+C 2 terminal
+A 4 appended
+A 5 appended
+A 6 duplicate
+A 7 EVENT_MUTATED
+A 8 appended
+R 3 - 0:0 unadmitted admit
+R 2 running - open admit
+R 1 - 1:1 unadmitted admit
+C 2 running
+A 9 appended
+A 10 appended
+R 3 - 0:0 unadmitted admit
+R 2 running - open admit
+R 1 - 1:1 unadmitted admit
+C 2 running
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+R 3 running - open admit
+R 2 running 2:0 settled admit
+R 1 - 1:1 unadmitted admit
+C 3 running
+R 3 running - open admit
+R 2 running 2:0 settled admit
+R 1 - 1:1 unadmitted admit
+C 3 running
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 10 12 14 1:7,1:8
+QB 13 14 14 2:0
+QB 14 14 14 
+X
+T log-168
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 duplicate
+A 10 appended
+A 11 duplicate
+A 12 appended
+A 13 duplicate
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+R 1 failed 0:1 settled admit
+R 2 failed 2:5 settled settled
+R 3 admitted 2:4 settled admit
+C 2 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 14 16 16 3:5,3:6
+QB 0 1 16 0:0
+QB 15 16 16 3:6
+X
+T log-169
+A 0 appended
+R 3 running - open admit
+C 3 running
+A 1 duplicate
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 EVENT_MUTATED
+A 8 EVENT_OUT_OF_ORDER
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+R 3 running 0:1 settled admit
+R 2 completed - terminal admit
+R 1 paused - open resume
+C 2 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 5 8 13 0:5,0:6,0:7
+QB 13 13 13 
+QB 13 13 13 
+X
+T log-170
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+R 3 - 0:4 unadmitted resume
+R 1 completed - terminal admit
+C 1 terminal
+A 8 appended
+A 9 duplicate
+A 10 appended
+A 11 appended
+A 12 duplicate
+A 13 appended
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+R 3 failed 0:4 settled settled
+R 1 completed 1:3 settled admit
+R 2 paused - open resume
+C 2 paused
+R 3 failed 0:4 settled settled
+R 1 completed 1:3 settled admit
+R 2 paused - open resume
+C 2 paused
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 11 13 13 2:0,2:1
+QB 11 13 13 2:0,2:1
+QB 7 8 13 1:0
+X
+T log-171
+A 0 appended
+A 1 appended
+A 2 appended
+R 1 failed 0:2 settled admit
+R 3 admitted - open admit
+C 3 admitted
+A 3 EVENT_MUTATED
+R 1 failed 0:2 settled admit
+R 3 admitted - open admit
+C 3 admitted
+A 4 appended
+A 5 appended
+R 1 completed 0:2 settled admit
+R 3 admitted - open admit
+C 1 terminal
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+R 1 completed 0:2 settled admit
+R 3 admitted - open admit
+R 2 admitted - open admit
+C 2 admitted
+A 10 duplicate
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 EVENT_OUT_OF_ORDER
+A 17 appended
+A 18 appended
+R 1 failed 0:2 settled settled
+R 3 paused 0:13 settled admit
+R 2 admitted - open admit
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS appended
+QS SETTLEMENT_CONFLICT
+QB 3 4 16 0:3
+QB 2 4 16 0:2,0:3
+QB 13 16 16 0:13,1:0,1:1
+X
+T log-172
+A 0 appended
+R 1 - 0:0 unadmitted admit
+C -
+A 1 appended
+R 1 - 0:0 unadmitted admit
+R 3 failed - terminal admit
+C 3 terminal
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+R 1 - 0:0 unadmitted admit
+R 3 completed 0:4 settled admit
+R 2 cancelled - terminal admit
+C 3 terminal
+A 6 EVENT_MUTATED
+A 7 appended
+R 1 - 0:0 unadmitted admit
+R 3 completed 0:4 settled admit
+R 2 cancelled 1:0 settled admit
+C 3 terminal
+A 8 EVENT_OUT_OF_ORDER
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+R 1 - 0:0 unadmitted admit
+R 3 running - open admit
+R 2 running - open admit
+C 2 running
+A 15 EVENT_OUT_OF_ORDER
+A 16 duplicate
+R 1 - 0:0 unadmitted admit
+R 3 running - open admit
+R 2 running - open admit
+C 2 running
+A 17 appended
+A 18 appended
+A 19 EVENT_MUTATED
+A 20 duplicate
+A 21 appended
+R 1 running - open admit
+R 3 running - open admit
+R 2 running 2:1 settled admit
+C 1 running
+A 22 appended
+R 1 running - open resume
+R 3 running - open admit
+R 2 running 2:1 settled admit
+C 1 running
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+A 27 appended
+A 28 appended
+R 1 failed - terminal settled
+R 3 running 2:9 settled admit
+R 2 running 2:1 settled admit
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS appended
+QB 1 3 23 0:1,0:2
+QB 18 22 23 2:5,2:6,2:7,2:8
+QB 20 21 23 2:7
+X
+T log-173
+A 0 appended
+A 1 EVENT_MUTATED
+A 2 appended
+A 3 appended
+R 2 - 0:0 unadmitted admit
+R 1 completed - terminal admit
+C 1 terminal
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+R 2 failed 0:0 settled admit
+R 1 paused - open admit
+R 3 cancelled - terminal admit
+C 2 terminal
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 duplicate
+A 15 appended
+A 16 EVENT_OUT_OF_ORDER
+A 17 appended
+A 18 appended
+R 2 paused 0:0 settled resume
+R 1 paused 2:3 settled admit
+R 3 failed - terminal admit
+C 3 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS skipped
+QB 1 3 16 0:1,1:0
+QB 0 4 16 0:0,0:1,1:0,1:1
+QB 4 7 16 1:2,1:3,1:4
+X
+T log-174
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_MUTATED
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 EVENT_OUT_OF_ORDER
+A 12 EVENT_MUTATED
+A 13 appended
+A 14 appended
+A 15 appended
+R 1 running 2:1 settled admit
+R 2 running - open admit
+R 3 admitted 1:4 settled admit
+C 2 running
+A 16 appended
+A 17 appended
+A 18 duplicate
+A 19 appended
+A 20 appended
+R 1 failed 2:1 settled admit
+R 2 running 3:1 settled resume
+R 3 admitted 1:4 settled admit
+C 1 terminal
+A 21 appended
+A 22 appended
+A 23 EVENT_OUT_OF_ORDER
+R 1 failed 2:1 settled admit
+R 2 running 3:1 settled resume
+R 3 admitted 1:4 settled admit
+C 3 admitted
+A 24 EVENT_MUTATED
+R 1 failed 2:1 settled admit
+R 2 running 3:1 settled resume
+R 3 admitted 1:4 settled admit
+C 3 admitted
+A 25 EVENT_OUT_OF_ORDER
+R 1 failed 2:1 settled admit
+R 2 running 3:1 settled resume
+R 3 admitted 1:4 settled admit
+C 3 admitted
+A 26 appended
+A 27 appended
+A 28 EVENT_MUTATED
+R 1 cancelled - terminal admit
+R 2 running 3:1 settled resume
+R 3 admitted 1:4 settled admit
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 13 15 21 2:4,2:5
+QB 18 19 21 3:3
+QB 20 21 21 3:5
+X
+T log-175
+A 0 appended
+A 1 appended
+R 1 - - unadmitted admit
+R 2 - 0:1 unadmitted admit
+C -
+A 2 appended
+A 3 duplicate
+A 4 appended
+A 5 appended
+R 1 running - open admit
+R 2 - 0:1 unadmitted admit
+R 3 completed - terminal admit
+C 1 running
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 EVENT_OUT_OF_ORDER
+A 12 appended
+R 1 failed 2:0 settled settled
+R 2 - 0:1 unadmitted admit
+R 3 completed 1:2 settled admit
+C 1 terminal
+QS skipped
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QB 1 2 11 0:1
+QB 0 4 11 0:0,0:1,0:2,1:0
+QB 6 7 11 1:3
+X
+T log-176
+A 0 appended
+A 1 appended
+A 2 appended
+R 3 admitted - open admit
+R 1 failed - terminal admit
+C 1 terminal
+A 3 appended
+A 4 appended
+R 3 admitted - open admit
+R 1 running - open admit
+C 1 running
+A 5 appended
+R 3 failed - terminal admit
+R 1 running - open admit
+C 3 terminal
+A 6 appended
+A 7 appended
+A 8 EVENT_OUT_OF_ORDER
+R 3 failed - terminal admit
+R 1 running - open admit
+R 2 - 0:9 unadmitted admit
+C 1 running
+R 3 failed - terminal admit
+R 1 running - open admit
+R 2 - 0:9 unadmitted admit
+C 1 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 8 8 8 
+QB 4 8 8 0:6,0:7,0:8,0:9
+QB 7 8 8 0:9
+X
+T log-177
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_MUTATED
+A 5 EVENT_MUTATED
+A 6 appended
+R 3 - - unadmitted admit
+R 1 - 0:1 unadmitted admit
+R 2 running - open admit
+C 2 running
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 EVENT_OUT_OF_ORDER
+R 3 - 0:7 unadmitted admit
+R 1 running - open admit
+R 2 failed - terminal admit
+C 2 terminal
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+R 3 completed 0:7 settled admit
+R 1 running 1:0 settled admit
+R 2 failed 0:9 settled settled
+C 3 terminal
+A 16 appended
+A 17 appended
+R 3 completed 0:7 settled admit
+R 1 running 1:0 settled resume
+R 2 running - open resume
+C 2 running
+A 18 duplicate
+A 19 appended
+R 3 completed 0:7 settled admit
+R 1 running 1:0 settled resume
+R 2 running - open resume
+C 2 running
+A 20 EVENT_OUT_OF_ORDER
+A 21 appended
+A 22 appended
+R 3 completed 0:7 settled admit
+R 1 running 1:0 settled resume
+R 2 admitted - open resume
+C 2 admitted
+A 23 appended
+R 3 completed 0:7 settled admit
+R 1 running 1:0 settled resume
+R 2 admitted - open resume
+C 2 admitted
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QS appended
+QB 9 11 19 0:9,0:10
+QB 19 19 19 
+QB 19 19 19 
+X
+T log-178
+A 0 appended
+A 1 appended
+R 1 failed 0:1 settled admit
+C 1 terminal
+A 2 appended
+R 1 failed 0:1 settled admit
+R 3 - 0:2 unadmitted admit
+C 1 terminal
+A 3 appended
+A 4 appended
+A 5 appended
+R 1 paused 0:1 settled resume
+R 3 failed 0:2 settled admit
+C 1 paused
+A 6 duplicate
+R 1 paused 0:1 settled resume
+R 3 failed 0:2 settled admit
+C 1 paused
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+R 1 running - open resume
+R 3 cancelled 0:2 settled admit
+R 2 running - open admit
+C 2 running
+A 13 EVENT_MUTATED
+A 14 appended
+R 1 running - open resume
+R 3 cancelled 0:2 settled settled
+R 2 running - open admit
+C 2 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 0 6 13 0:0,0:1,0:2,0:3,0:4,0:5
+QB 13 13 13 
+QB 13 13 13 
+X
+T log-179
+A 0 appended
+R 2 cancelled - terminal admit
+C 2 terminal
+A 1 appended
+A 2 appended
+A 3 duplicate
+A 4 appended
+A 5 appended
+A 6 EVENT_OUT_OF_ORDER
+R 2 cancelled - terminal admit
+R 3 - - unadmitted resume
+R 1 paused 0:4 settled admit
+C 1 paused
+A 7 appended
+A 8 appended
+A 9 appended
+R 2 running - open admit
+R 3 completed - terminal settled
+R 1 paused 0:4 settled resume
+C 3 terminal
+A 10 appended
+A 11 appended
+A 12 appended
+R 2 running - open admit
+R 3 completed - terminal settled
+R 1 running - open resume
+C 1 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 10 11 11 2:3
+QB 9 11 11 2:2,2:3
+QB 6 7 11 1:0
+X
+T log-180
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_MUTATED
+R 1 admitted 0:2 settled admit
+R 2 failed - terminal admit
+C 2 terminal
+A 5 appended
+A 6 EVENT_OUT_OF_ORDER
+A 7 appended
+R 1 admitted 0:2 settled admit
+R 2 admitted - open admit
+C 2 admitted
+A 8 appended
+A 9 appended
+R 1 admitted 0:2 settled resume
+R 2 admitted - open admit
+C 2 admitted
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 duplicate
+R 1 admitted 0:2 settled resume
+R 2 failed 3:0 settled admit
+R 3 paused - open admit
+C 2 terminal
+A 17 appended
+A 18 appended
+R 1 admitted 0:2 settled resume
+R 2 failed 3:0 settled admit
+R 3 running - open admit
+C 3 running
+A 19 appended
+A 20 appended
+A 21 appended
+R 1 running - open resume
+R 2 failed 3:0 settled admit
+R 3 running - open admit
+C 1 running
+R 1 running - open resume
+R 2 failed 3:0 settled admit
+R 3 running - open admit
+C 1 running
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 8 9 19 3:0
+QB 0 6 19 0:0,0:1,0:2,0:3,1:0,1:1
+QB 12 14 19 3:4,3:5
+X
+T log-181
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 duplicate
+A 4 appended
+A 5 appended
+R 3 - 1:2 unadmitted resume
+R 2 running 1:1 settled admit
+C 2 running
+A 6 appended
+A 7 appended
+A 8 EVENT_MUTATED
+A 9 duplicate
+A 10 EVENT_MUTATED
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 EVENT_MUTATED
+A 19 appended
+A 20 appended
+R 3 admitted - open resume
+R 2 running 1:1 settled admit
+R 1 running - open admit
+C 3 admitted
+A 21 appended
+R 3 admitted - open resume
+R 2 running 1:1 settled admit
+R 1 running - open admit
+C 3 admitted
+R 3 admitted - open resume
+R 2 running 1:1 settled admit
+R 1 running - open admit
+C 3 admitted
+QS appended
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QB 17 17 17 
+QB 0 4 17 0:0,1:0,1:1,1:2
+QB 0 2 17 0:0,1:0
+X
+T log-182
+A 0 appended
+A 1 appended
+A 2 EVENT_MUTATED
+R 3 - - unadmitted resume
+R 2 cancelled - terminal admit
+C 2 terminal
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 duplicate
+A 8 appended
+A 9 duplicate
+A 10 appended
+A 11 appended
+R 3 - - unadmitted resume
+R 2 completed - terminal admit
+R 1 running 1:2 settled admit
+C 2 terminal
+A 12 EVENT_OUT_OF_ORDER
+R 3 - - unadmitted resume
+R 2 completed - terminal admit
+R 1 running 1:2 settled admit
+C 2 terminal
+A 13 appended
+A 14 EVENT_MUTATED
+R 3 - - unadmitted resume
+R 2 completed 2:0 settled admit
+R 1 running 1:2 settled admit
+C 2 terminal
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 1 2 10 0:1
+QB 8 10 10 1:4,2:0
+QB 0 1 10 0:0
+X
+T log-183
+A 0 appended
+R 2 completed - terminal admit
+C 2 terminal
+A 1 appended
+R 2 completed - terminal admit
+R 1 completed - terminal admit
+C 1 terminal
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 2 completed 0:5 settled admit
+R 1 completed - terminal admit
+R 3 completed - terminal admit
+C 2 terminal
+A 7 appended
+A 8 appended
+R 2 completed 0:5 settled admit
+R 1 completed - terminal settled
+R 3 completed - terminal admit
+C 2 terminal
+A 9 duplicate
+A 10 appended
+R 2 completed 0:5 settled admit
+R 1 completed - terminal settled
+R 3 completed - terminal admit
+C 2 terminal
+A 11 appended
+R 2 completed 0:5 settled admit
+R 1 completed - terminal settled
+R 3 completed - terminal admit
+C 2 terminal
+A 12 appended
+A 13 appended
+R 2 completed 0:5 settled admit
+R 1 completed - terminal settled
+R 3 running - open admit
+C 3 running
+R 2 completed 0:5 settled admit
+R 1 completed - terminal settled
+R 3 running - open admit
+C 3 running
+QS SETTLEMENT_WITHOUT_RUN
+QS skipped
+QS SETTLEMENT_CONFLICT
+QB 1 4 13 0:1,0:2,0:3
+QB 0 6 13 0:0,0:1,0:2,0:3,0:4,0:5
+QB 2 5 13 0:2,0:3,0:4
+X
+T log-184
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 duplicate
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 EVENT_OUT_OF_ORDER
+A 8 duplicate
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 EVENT_MUTATED
+A 15 EVENT_OUT_OF_ORDER
+A 16 EVENT_MUTATED
+A 17 appended
+A 18 appended
+A 19 duplicate
+A 20 appended
+A 21 duplicate
+A 22 appended
+A 23 appended
+R 2 paused 3:3 settled resume
+R 1 admitted 4:2 settled resume
+R 3 completed 4:4 settled admit
+C 2 paused
+A 24 appended
+A 25 appended
+A 26 duplicate
+R 2 admitted 3:3 settled resume
+R 1 admitted 4:2 settled resume
+R 3 completed 4:4 settled admit
+C 2 admitted
+A 27 appended
+A 28 appended
+R 2 admitted 3:3 settled resume
+R 1 completed 4:2 settled settled
+R 3 completed 4:4 settled admit
+C 1 terminal
+QS skipped
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 20 20 20 
+QB 10 12 20 4:3,4:4
+QB 20 20 20 
+X
+T log-185
+A 0 appended
+R 3 - 0:0 unadmitted admit
+C -
+A 1 appended
+A 2 appended
+R 3 - 0:0 unadmitted admit
+R 2 cancelled - terminal settled
+C 2 terminal
+A 3 appended
+A 4 appended
+R 3 - 0:0 unadmitted admit
+R 2 cancelled 0:3 settled settled
+C 2 terminal
+A 5 appended
+R 3 - 0:0 unadmitted admit
+R 2 paused 0:3 settled resume
+C 2 paused
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+R 3 admitted 0:0 settled admit
+R 2 running - open resume
+R 1 - - unadmitted admit
+C 2 running
+A 12 appended
+A 13 duplicate
+A 14 EVENT_OUT_OF_ORDER
+A 15 appended
+A 16 appended
+A 17 EVENT_OUT_OF_ORDER
+A 18 appended
+A 19 appended
+A 20 appended
+A 21 appended
+A 22 appended
+R 3 admitted 0:0 settled admit
+R 2 running 1:1 settled resume
+R 1 - - unadmitted admit
+C 3 admitted
+A 23 appended
+A 24 appended
+A 25 appended
+A 26 appended
+A 27 appended
+R 3 running - open resume
+R 2 cancelled 1:1 settled settled
+R 1 - - unadmitted admit
+C 3 running
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 3 4 25 0:3
+QB 22 25 25 1:6,1:7,1:8
+QB 4 10 25 0:4,0:5,0:6,0:7,0:8,0:9
+X
+T log-186
+A 0 appended
+R 1 paused - open admit
+C 1 paused
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+R 1 paused 0:4 settled admit
+R 3 - 0:1 unadmitted admit
+R 2 - - unadmitted resume
+C 1 paused
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 EVENT_MUTATED
+R 1 paused 0:4 settled admit
+R 3 - 0:1 unadmitted admit
+R 2 - 0:5 unadmitted resume
+C 1 paused
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QB 8 8 8 
+QB 8 8 8 
+QB 7 8 8 1:0
+X
+T log-187
+A 0 appended
+A 1 EVENT_OUT_OF_ORDER
+R 3 completed - terminal admit
+C 3 terminal
+A 2 appended
+A 3 appended
+A 4 EVENT_OUT_OF_ORDER
+A 5 EVENT_OUT_OF_ORDER
+A 6 appended
+A 7 appended
+R 3 completed - terminal settled
+R 1 completed - terminal admit
+C 1 terminal
+A 8 appended
+R 3 completed - terminal settled
+R 1 completed - terminal admit
+R 2 paused - open admit
+C 2 paused
+A 9 appended
+A 10 EVENT_OUT_OF_ORDER
+R 3 running - open resume
+R 1 completed - terminal admit
+R 2 paused - open admit
+C 3 running
+A 11 appended
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 EVENT_OUT_OF_ORDER
+A 17 appended
+A 18 EVENT_MUTATED
+R 3 running - open resume
+R 1 cancelled 1:4 settled admit
+R 2 paused - open admit
+C 1 terminal
+A 19 appended
+A 20 EVENT_OUT_OF_ORDER
+A 21 appended
+A 22 appended
+A 23 EVENT_MUTATED
+A 24 appended
+A 25 appended
+R 3 completed 1:9 settled settled
+R 1 cancelled 1:4 settled admit
+R 2 paused 1:12 settled admit
+C 3 terminal
+A 26 appended
+A 27 appended
+A 28 appended
+A 29 EVENT_OUT_OF_ORDER
+R 3 running - open resume
+R 1 cancelled 1:4 settled admit
+R 2 paused 1:12 settled admit
+C 3 running
+R 3 running - open resume
+R 1 cancelled 1:4 settled admit
+R 2 paused 1:12 settled admit
+C 3 running
+QS appended
+QS skipped
+QS SETTLEMENT_CONFLICT
+QB 4 6 21 1:0,1:1
+QB 6 9 21 1:2,1:3,1:4
+QB 6 11 21 1:2,1:3,1:4,1:5,1:6
+X
+T log-188
+A 0 appended
+A 1 appended
+R 1 cancelled - terminal admit
+R 2 - - unadmitted resume
+C 1 terminal
+A 2 appended
+A 3 EVENT_OUT_OF_ORDER
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 duplicate
+A 9 appended
+R 1 failed 2:0 settled admit
+R 2 admitted - open resume
+R 3 - 0:3 unadmitted admit
+C 1 terminal
+A 10 appended
+A 11 appended
+R 1 cancelled 2:0 settled admit
+R 2 admitted 2:4 settled resume
+R 3 - 0:3 unadmitted admit
+C 1 terminal
+A 12 appended
+A 13 EVENT_MUTATED
+A 14 appended
+R 1 cancelled 2:0 settled admit
+R 2 admitted 2:4 settled resume
+R 3 cancelled 0:3 settled admit
+C 3 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS skipped
+QB 5 10 12 2:0,2:1,2:2,2:3,2:4
+QB 0 1 12 0:0
+QB 9 12 12 2:4,3:0,3:1
+X
+T log-189
+A 0 appended
+A 1 appended
+A 2 appended
+R 3 running - open admit
+R 2 completed - terminal admit
+C 3 running
+A 3 duplicate
+A 4 appended
+A 5 appended
+A 6 appended
+R 3 running 0:4 settled admit
+R 2 completed - terminal settled
+C 3 running
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 duplicate
+R 3 running 0:4 settled admit
+R 2 failed - terminal settled
+C 2 terminal
+A 11 EVENT_MUTATED
+A 12 appended
+R 3 running 0:4 settled admit
+R 2 failed - terminal settled
+C 2 terminal
+A 13 appended
+R 3 running 0:4 settled admit
+R 2 failed - terminal settled
+R 1 running - open admit
+C 1 running
+A 14 appended
+A 15 EVENT_OUT_OF_ORDER
+A 16 appended
+R 3 running 0:4 settled admit
+R 2 failed - terminal settled
+R 1 paused - open admit
+C 1 paused
+A 17 appended
+A 18 appended
+A 19 appended
+A 20 appended
+R 3 running 0:4 settled admit
+R 2 running 2:7 settled resume
+R 1 paused - open admit
+C 2 running
+QS SETTLEMENT_CONFLICT
+QS skipped
+QS SETTLEMENT_CONFLICT
+QB 2 3 17 0:2
+QB 12 13 17 2:3
+QB 10 12 17 2:1,2:2
+X
+T log-190
+A 0 appended
+R 1 - - unadmitted admit
+C -
+A 1 duplicate
+R 1 - - unadmitted admit
+C -
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 1 paused 1:4 settled admit
+R 2 cancelled - terminal admit
+R 3 paused 1:2 settled admit
+C 3 paused
+A 7 appended
+A 8 duplicate
+A 9 appended
+A 10 EVENT_OUT_OF_ORDER
+A 11 EVENT_OUT_OF_ORDER
+A 12 appended
+A 13 appended
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 duplicate
+A 19 EVENT_OUT_OF_ORDER
+R 1 paused 1:4 settled admit
+R 2 failed 4:1 settled admit
+R 3 paused 1:2 settled admit
+C 2 terminal
+A 20 appended
+R 1 paused 1:4 settled admit
+R 2 failed 4:1 settled admit
+R 3 paused 1:2 settled admit
+C 2 terminal
+A 21 EVENT_MUTATED
+A 22 EVENT_OUT_OF_ORDER
+A 23 appended
+R 1 admitted 1:4 settled admit
+R 2 failed 4:1 settled admit
+R 3 paused 1:2 settled admit
+C 1 admitted
+A 24 EVENT_OUT_OF_ORDER
+R 1 admitted 1:4 settled admit
+R 2 failed 4:1 settled admit
+R 3 paused 1:2 settled admit
+C 1 admitted
+R 1 admitted 1:4 settled admit
+R 2 failed 4:1 settled admit
+R 3 paused 1:2 settled admit
+C 1 admitted
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 1 5 16 1:0,1:1,1:2,1:3
+QB 15 16 16 5:0
+QB 9 12 16 2:4,3:0,4:0
+X
+T log-191
+A 0 appended
+R 3 - 0:0 unadmitted admit
+C -
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+R 3 - 0:0 unadmitted admit
+R 2 - - unadmitted admit
+C -
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 duplicate
+A 13 appended
+A 14 duplicate
+R 3 running - open admit
+R 2 completed 0:7 settled admit
+R 1 failed 0:5 settled admit
+C 3 running
+A 15 appended
+A 16 duplicate
+A 17 EVENT_OUT_OF_ORDER
+A 18 appended
+R 3 running - open admit
+R 2 completed 0:7 settled admit
+R 1 failed 0:5 settled admit
+C 2 terminal
+A 19 appended
+R 3 running - open admit
+R 2 completed 0:7 settled admit
+R 1 cancelled 0:5 settled admit
+C 1 terminal
+A 20 appended
+A 21 EVENT_OUT_OF_ORDER
+A 22 appended
+R 3 running - open admit
+R 2 completed 0:7 settled admit
+R 1 cancelled 0:5 settled admit
+C 1 terminal
+A 23 appended
+R 3 running - open admit
+R 2 completed 0:7 settled admit
+R 1 cancelled 0:5 settled admit
+C 1 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_CONFLICT
+QB 9 10 19 1:0
+QB 4 7 19 0:4,0:5,0:6
+QB 16 17 19 1:7
+X
+T log-192
+A 0 appended
+A 1 EVENT_OUT_OF_ORDER
+A 2 duplicate
+A 3 appended
+A 4 appended
+R 2 - 0:0 unadmitted admit
+R 1 - - unadmitted admit
+R 3 admitted - open admit
+C 3 admitted
+A 5 appended
+A 6 appended
+R 2 - 0:0 unadmitted admit
+R 1 - 1:2 unadmitted admit
+R 3 admitted - open admit
+C 3 admitted
+A 7 appended
+R 2 - 0:0 unadmitted admit
+R 1 - 1:2 unadmitted admit
+R 3 admitted - open admit
+C 3 admitted
+A 8 EVENT_MUTATED
+R 2 - 0:0 unadmitted admit
+R 1 - 1:2 unadmitted admit
+R 3 admitted - open admit
+C 3 admitted
+A 9 appended
+A 10 appended
+A 11 appended
+A 12 appended
+R 2 completed 0:0 settled admit
+R 1 running - open admit
+R 3 admitted - open resume
+C 2 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 6 10 10 2:0,2:1,3:0,4:0
+QB 2 4 10 1:0,1:1
+QB 6 10 10 2:0,2:1,3:0,4:0
+X
+T log-193
+A 0 appended
+R 2 failed - terminal admit
+C 2 terminal
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+R 2 paused 0:3 settled admit
+R 1 - 0:2 unadmitted admit
+R 3 completed 1:1 settled admit
+C 2 paused
+A 9 EVENT_OUT_OF_ORDER
+A 10 appended
+A 11 appended
+R 2 paused 0:3 settled admit
+R 1 completed 0:2 settled admit
+R 3 completed 1:1 settled admit
+C 1 terminal
+A 12 EVENT_OUT_OF_ORDER
+A 13 EVENT_OUT_OF_ORDER
+A 14 appended
+A 15 appended
+A 16 EVENT_MUTATED
+A 17 appended
+A 18 duplicate
+A 19 appended
+A 20 appended
+R 2 paused 0:3 settled admit
+R 1 failed 0:2 settled admit
+R 3 completed - terminal admit
+C 3 terminal
+A 21 EVENT_OUT_OF_ORDER
+A 22 appended
+A 23 duplicate
+A 24 appended
+R 2 paused 0:3 settled admit
+R 1 failed 0:2 settled admit
+R 3 completed - terminal admit
+C 3 terminal
+A 25 appended
+A 26 EVENT_OUT_OF_ORDER
+A 27 appended
+A 28 appended
+A 29 EVENT_MUTATED
+A 30 appended
+R 2 paused 0:3 settled admit
+R 1 cancelled 0:2 settled admit
+R 3 completed - terminal admit
+C 1 terminal
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_CONFLICT
+QB 22 22 22 
+QB 20 22 22 1:16,1:17
+QB 12 13 22 1:8
+X
+T log-194
+A 0 appended
+A 1 appended
+A 2 appended
+R 3 cancelled - terminal admit
+R 1 admitted - open admit
+C 1 admitted
+A 3 appended
+R 3 failed - terminal admit
+R 1 admitted - open admit
+C 3 terminal
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+R 3 cancelled 1:1 settled admit
+R 1 admitted - open admit
+R 2 - 1:3 unadmitted admit
+C 3 terminal
+A 9 duplicate
+R 3 cancelled 1:1 settled admit
+R 1 admitted - open admit
+R 2 - 1:3 unadmitted admit
+C 3 terminal
+QS SETTLEMENT_CONFLICT
+QS SETTLEMENT_WITHOUT_RUN
+QS skipped
+QB 9 9 9 
+QB 9 9 9 
+QB 0 2 9 0:0,0:1
+X
+T log-195
+A 0 appended
+R 1 - - unadmitted admit
+C -
+A 1 appended
+A 2 appended
+A 3 duplicate
+A 4 EVENT_OUT_OF_ORDER
+R 1 - - unadmitted admit
+R 2 paused 0:1 settled admit
+C 2 paused
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 1 3 3 0:1,0:2
+QB 3 3 3 
+QB 3 3 3 
+X
+T log-196
+A 0 appended
+A 1 appended
+R 2 - 0:0 unadmitted admit
+C -
+A 2 appended
+R 2 - 0:0 unadmitted resume
+C -
+A 3 appended
+A 4 appended
+A 5 appended
+R 2 running 1:0 settled resume
+R 3 completed - terminal admit
+C 2 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 0 1 6 0:0
+QB 0 1 6 0:0
+QB 1 6 6 0:1,0:2,0:3,0:4,1:0
+X
+T log-197
+A 0 appended
+A 1 EVENT_MUTATED
+A 2 appended
+R 1 cancelled - terminal admit
+R 2 running - open admit
+C 2 running
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+R 1 completed - terminal admit
+R 2 cancelled - terminal settled
+R 3 - - unadmitted admit
+C 1 terminal
+A 7 EVENT_OUT_OF_ORDER
+R 1 completed - terminal admit
+R 2 cancelled - terminal settled
+R 3 - - unadmitted admit
+C 1 terminal
+A 8 appended
+A 9 appended
+A 10 appended
+A 11 appended
+R 1 completed - terminal admit
+R 2 cancelled 2:0 settled settled
+R 3 - 1:0 unadmitted admit
+C 1 terminal
+A 12 EVENT_OUT_OF_ORDER
+A 13 appended
+A 14 appended
+A 15 duplicate
+R 1 running - open admit
+R 2 completed 2:0 settled settled
+R 3 - 1:0 unadmitted admit
+C 1 running
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 appended
+R 1 running 2:4 settled admit
+R 2 failed 2:0 settled settled
+R 3 admitted 1:0 settled admit
+C 3 admitted
+QS skipped
+QS SETTLEMENT_WITHOUT_RUN
+QS SETTLEMENT_WITHOUT_RUN
+QB 0 2 16 0:0,0:1
+QB 2 5 16 0:2,0:3,0:4
+QB 0 3 16 0:0,0:1,0:2
+X
+T log-198
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 EVENT_MUTATED
+A 5 appended
+A 6 appended
+A 7 duplicate
+R 2 completed - terminal settled
+R 3 - 0:1 unadmitted resume
+C 2 terminal
+A 8 appended
+A 9 appended
+R 2 completed 1:3 settled settled
+R 3 - 0:1 unadmitted resume
+C 2 terminal
+A 10 appended
+A 11 appended
+R 2 completed 1:3 settled settled
+R 3 - 0:1 unadmitted resume
+R 1 cancelled - terminal admit
+C 1 terminal
+A 12 appended
+A 13 EVENT_OUT_OF_ORDER
+A 14 appended
+A 15 appended
+A 16 appended
+A 17 appended
+A 18 appended
+A 19 duplicate
+A 20 duplicate
+A 21 duplicate
+A 22 EVENT_MUTATED
+A 23 appended
+A 24 appended
+A 25 appended
+R 2 completed - terminal settled
+R 3 completed 0:1 settled settled
+R 1 failed - terminal admit
+C 3 terminal
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 8 10 19 1:4,1:5
+QB 9 15 19 1:5,1:6,1:7,1:8,1:9,1:10
+QB 2 4 19 0:2,0:3
+X
+T log-199
+A 0 appended
+A 1 appended
+A 2 appended
+A 3 appended
+A 4 appended
+A 5 appended
+A 6 appended
+A 7 appended
+A 8 appended
+A 9 appended
+R 3 running 0:8 settled admit
+R 2 cancelled 0:1 settled settled
+R 1 failed - terminal admit
+C 1 terminal
+A 10 appended
+A 11 appended
+R 3 running 0:8 settled admit
+R 2 cancelled 0:1 settled settled
+R 1 running 0:11 settled admit
+C 1 running
+A 12 EVENT_OUT_OF_ORDER
+A 13 appended
+A 14 appended
+A 15 duplicate
+A 16 appended
+A 17 appended
+R 3 running 0:8 settled admit
+R 2 cancelled 0:1 settled settled
+R 1 running 0:11 settled admit
+C 1 running
+A 18 EVENT_OUT_OF_ORDER
+A 19 appended
+A 20 appended
+A 21 appended
+R 3 running 0:8 settled admit
+R 2 running - open resume
+R 1 running - open admit
+C 2 running
+QS appended
+QS SETTLEMENT_WITHOUT_RUN
+QS appended
+QB 7 8 19 0:7
+QB 9 12 19 0:9,0:10,0:11
+QB 12 16 19 0:12,0:13,0:14,1:0
+X
+T merge-0
+M 1:0:1:O0:0,2:0:1:O0:0,2:1:1:O2:2,2:2:1:O2:5,3:0:1:O1:4,3:1:1:O1:5,0:0:1:O2:27,0:1:1:O2:27,0:2:1:O2:29,4:0:1:O2:53
+X
+T merge-1
+M 3:0:1:O0:0,4:0:1:O2:0,4:1:1:O0:0,5:0:1:O2:6,5:1:1:O1:8,6:0:1:O1:24,6:1:1:O1:24,6:2:1:O0:24,0:0:1:O0:50,0:1:1:O0:52,0:2:1:O1:53,1:0:1:O0:55,1:1:1:O1:57,2:0:1:O1:74,2:1:1:O1:77
+X
+T merge-2
+M 0:0:1:O1:41,1:0:1:O2:42,1:1:1:O0:42,1:2:1:O1:43,2:0:1:O0:44
+X
+T merge-3
+M 0:0:1:O2:32,3:0:1:O2:35,4:0:1:O0:54,4:1:1:O1:54,4:2:1:O0:54,1:0:1:O2:69,1:1:1:O0:71,1:2:1:O0:72,2:0:1:O2:75
+X
+T merge-4
+M 0:0:1:O0:38,0:1:1:O2:41,2:0:1:O1:52,1:0:1:O1:58
+X
+T merge-5
+M 0:0:1:O0:0,0:1:1:O0:3,1:0:1:O0:0,1:1:1:O0:0,1:2:1:O2:1,2:0:1:O0:37,2:1:1:O0:38,3:0:1:O1:45,3:1:1:O1:45,3:2:1:O0:47
+X
+T merge-6
+M 0:0:1:O2:14,1:0:1:O1:18,1:1:1:O1:21
+X
+T merge-7
+M 1:0:1:O1:14,1:1:1:O2:15,1:2:1:O0:15,0:0:1:O2:37,2:0:1:O0:60,2:1:1:O1:60,3:0:1:O0:44,4:0:1:O2:46
+X
+T merge-8
+M 4:0:1:O0:13,3:0:1:O0:41,3:1:1:O1:44,3:2:1:O2:46,0:0:1:O1:54,1:0:1:O2:65,2:0:1:O0:10
+X
+T merge-9
+M 4:0:1:O0:30,4:1:1:O0:32,4:2:1:O2:35,5:0:1:O2:57,5:1:1:O0:58,0:0:1:O2:67,0:1:1:O1:67,2:0:1:O1:70,2:1:1:O0:71,2:2:1:O0:73,1:0:1:O1:74,1:1:1:O0:76,3:0:1:O2:78
+X
+T merge-10
+M 0:0:1:O2:19,0:1:1:O1:22,0:2:1:O2:22,1:0:1:O0:41,2:0:1:O1:51,2:1:1:O1:53
+X
+T merge-11
+M 0:0:1:O1:5,0:1:1:O1:7,1:0:1:O1:20,1:1:1:O0:20
+X
+T merge-12
+M 0:0:1:O2:12,0:1:1:O2:13,1:0:1:O0:15,2:0:1:O2:0,2:1:1:O0:1,3:0:1:O2:21,3:1:1:O1:22,4:0:1:O2:24,4:1:1:O1:26,5:0:1:O0:57,5:1:1:O2:58,5:2:1:O2:58,6:0:1:O1:70,6:1:1:O2:71,6:2:1:O1:73,7:0:1:O1:79,7:1:1:O0:81,7:2:1:O1:81
+X
+T merge-13
+M 3:0:1:O1:0,4:0:1:O2:7,4:1:1:O1:8,4:2:1:O1:8,5:0:1:O0:0,5:1:1:O2:2,5:2:1:O0:2,0:0:1:O0:64,0:1:1:O1:65,0:2:1:O0:66,1:0:1:O0:85,1:1:1:O0:87,1:2:1:O0:89,2:0:1:O2:93,2:1:1:O0:96
+X
+T merge-14
+M 2:0:1:O0:28,2:1:1:O1:31,3:0:1:O0:40,3:1:1:O0:42,0:0:1:O0:64,0:1:1:O1:67,0:2:1:O0:69,4:0:1:O2:67,4:1:1:O2:68,5:0:1:O1:76,5:1:1:O0:76,1:0:1:O1:83,1:1:1:O1:85,1:2:1:O0:86
+X
+T merge-15
+M 2:0:1:O0:14,0:0:1:O0:52,1:0:1:O0:72
+X
+T merge-16
+M 0:0:1:O2:37,0:1:1:O2:37,1:0:1:O1:39,2:0:1:O1:58
+X
+T merge-17
+M 3:0:1:O2:29,4:0:1:O0:26,4:1:1:O0:29,5:0:1:O2:18,0:0:1:O0:33,0:1:1:O0:33,0:2:1:O2:33,1:0:1:O1:50,1:1:1:O1:51,2:0:1:O2:58
+X
+T merge-18
+M 3:0:1:O0:0,0:0:1:O0:34,0:1:1:O2:36,0:2:1:O0:37,1:0:1:O1:72,1:1:1:O0:75,2:0:1:O2:21
+X
+T merge-19
+M 1:0:1:O0:0,2:0:1:O0:0,0:0:1:O2:0,3:0:1:O1:7,4:0:1:O0:9,4:1:1:O1:9,4:2:1:O1:12
+X
+T merge-20
+M 0:0:1:O1:31,1:0:1:O2:17
+X
+T merge-21
+M 0:0:1:O2:0,0:1:1:O0:3,1:0:1:O0:0,1:1:1:O2:0,2:0:1:O2:5,2:1:1:O2:6
+X
+T merge-22
+M 1:0:1:O2:18,1:1:1:O0:20,1:2:1:O0:23,2:0:1:O1:25,0:0:1:O1:28,3:0:1:O1:41,3:1:1:O0:43
+X
+T merge-23
+M 0:0:1:O0:22,1:0:1:O2:34
+X
+T merge-24
+M 2:0:1:O2:52,3:0:1:O2:57,0:0:1:O1:58,1:0:1:O1:42,1:1:1:O0:44,1:2:1:O1:47
+X
+T merge-25
+M 1:0:1:O0:0,2:0:1:O0:15,2:1:1:O0:18,2:2:1:O0:18,3:0:1:O2:37,3:1:1:O1:40,3:2:1:O2:40,4:0:1:O1:0,4:1:1:O2:1,0:0:1:O0:58,0:1:1:O2:61,0:2:1:O0:64
+X
+T merge-26
+M 0:0:1:O2:27,0:1:1:O0:29,0:2:1:O0:30,1:0:1:O2:45
+X
+T merge-27
+M 0:0:1:O0:0,0:1:1:O1:2
+X
+T merge-28
+M 0:0:1:O0:48,1:0:1:O2:57,1:1:1:O2:59,1:2:1:O2:62
+X
+T merge-29
+M 0:0:1:O2:14,0:1:1:O1:17
+X
+T merge-30
+M 0:0:1:O1:0,0:1:1:O2:0,0:2:1:O1:0,5:0:1:O1:0,6:0:1:O1:0,1:0:1:O1:3,1:1:1:O0:4,2:0:1:O1:17,7:0:1:O1:19,7:1:1:O0:21,7:2:1:O0:23,3:0:1:O2:56,4:0:1:O1:56,4:1:1:O0:59,4:2:1:O2:60
+X
+T merge-31
+M 0:0:1:O2:35,1:0:1:O2:42,1:1:1:O1:44,1:2:1:O2:47,2:0:1:O0:57,2:1:1:O0:60,2:2:1:O2:62,3:0:1:O2:62
+X
+T merge-32
+M 3:0:1:O1:0,3:1:1:O2:0,4:0:1:O2:16,4:1:1:O1:19,4:2:1:O1:19,5:0:1:O0:1,5:1:1:O2:1,6:0:1:O2:18,7:0:1:O2:23,7:1:1:O0:24,7:2:1:O1:24,0:0:1:O1:41,1:0:1:O0:54,1:1:1:O2:55,1:2:1:O2:57,2:0:1:O0:17
+X
+T merge-33
+M 1:0:1:O1:22,2:0:1:O0:39,2:1:1:O1:40,2:2:1:O1:41,0:0:1:O1:46,0:1:1:O1:48
+X
+T merge-34
+M 6:0:1:O0:0,6:1:1:O1:0,0:0:1:O1:51,1:0:1:O2:56,2:0:1:O2:12,2:1:1:O2:15,2:2:1:O1:17,3:0:1:O0:58,3:1:1:O1:60,4:0:1:O0:74,4:1:1:O0:74,4:2:1:O1:75,5:0:1:O2:90
+X
+T merge-35
+M 0:0:1:O0:10,0:1:1:O1:11,0:2:1:O0:12,1:0:1:O0:44,1:1:1:O2:46,3:0:1:O1:53,3:1:1:O1:53,2:0:1:O0:54
+X
+T merge-36
+M 0:0:1:O2:8,1:0:1:O2:0,1:1:1:O1:3,1:2:1:O1:6,2:0:1:O2:13,3:0:1:O2:22,3:1:1:O0:22,3:2:1:O0:24,4:0:1:O2:68,4:1:1:O2:69
+X
+T merge-37
+M 3:0:1:O0:31,3:1:1:O2:34,0:0:1:O0:56,0:1:1:O2:58,1:0:1:O1:37,2:0:1:O1:56,2:1:1:O1:57,4:0:1:O0:57
+X
+T merge-38
+M 1:0:1:O0:0,1:1:1:O0:3,1:2:1:O2:4,2:0:1:O1:4,2:1:1:O0:4,2:2:1:O0:6,3:0:1:O2:0,3:1:1:O2:0,0:0:1:O1:30,0:1:1:O2:33,0:2:1:O2:34
+X
+T merge-39
+M 1:0:1:O1:21,1:1:1:O2:21,0:0:1:O2:33,2:0:1:O1:42
+X
+T merge-40
+M 0:0:1:O1:14,0:1:1:O0:16,1:0:1:O2:25,1:1:1:O0:28
+X
+T merge-41
+M 3:0:1:O1:41,0:0:1:O2:55,1:0:1:O1:74,2:0:1:O2:76,2:1:1:O2:76
+X
+T merge-42
+M 0:0:1:O0:9,0:1:1:O2:12
+X
+T merge-43
+M 6:0:1:O0:5,6:1:1:O0:6,6:2:1:O0:7,2:0:1:O0:13,2:1:1:O2:16,0:0:1:O0:24,7:0:1:O2:26,7:1:1:O1:27,7:2:1:O2:27,1:0:1:O1:32,1:1:1:O1:35,1:2:1:O2:38,3:0:1:O1:60,3:1:1:O2:60,3:2:1:O1:61,4:0:1:O0:64,4:1:1:O1:67,4:2:1:O1:69,5:0:1:O0:79
+X
+T merge-44
+M 2:0:1:O0:16,0:0:1:O1:31,0:1:1:O1:32,0:2:1:O0:32,1:0:1:O1:33,3:0:1:O2:36
+X
+T merge-45
+M 0:0:1:O1:0,0:1:1:O2:0,4:0:1:O0:0,4:1:1:O1:1,1:0:1:O1:11,1:1:1:O2:14,1:2:1:O1:15,3:0:1:O2:17,3:1:1:O1:18,2:0:1:O0:57,2:1:1:O2:57
+X
+T merge-46
+M 0:0:1:O2:54,0:1:1:O2:54,1:0:1:O1:58,1:1:1:O0:59,1:2:1:O2:61,2:0:1:O2:79
+X
+T merge-47
+M 0:0:1:O2:0,0:1:1:O2:2,0:2:1:O0:4,1:0:1:O1:11,1:1:1:O2:13,2:0:1:O2:23
+X
+T merge-48
+M 0:0:1:O0:15,0:1:1:O1:17,0:2:1:O2:20
+X
+T merge-49
+M 0:0:1:O2:11,0:1:1:O2:14
+X
+T merge-50
+M 0:0:1:O1:29,0:1:1:O1:29,0:2:1:O0:30
+X
+T merge-51
+M 1:0:1:O2:12,2:0:1:O1:19,3:0:1:O0:34,3:1:1:O1:37,3:2:1:O2:38,0:0:1:O2:48,0:1:1:O0:51,4:0:1:O0:54,4:1:1:O1:57
+X
+T merge-52
+M 0:0:1:O0:6,1:0:1:O0:18,1:1:1:O1:21,1:2:1:O1:21,2:0:1:O0:25
+X
+T merge-53
+M 3:0:1:O2:30,3:1:1:O2:31,3:2:1:O0:32,4:0:1:O1:0,4:1:1:O1:2,5:0:1:O0:0,0:0:1:O1:51,0:1:1:O0:54,1:0:1:O0:40,1:1:1:O1:43,2:0:1:O0:56,2:1:1:O0:57
+X
+T merge-54
+M 1:0:1:O1:45,1:1:1:O0:47,0:0:1:O1:59,0:1:1:O2:59,2:0:1:O2:62,2:1:1:O0:62,2:2:1:O0:62
+X
+T merge-55
+M 0:0:1:O0:14,0:1:1:O0:17,1:0:1:O2:13,1:1:1:O2:14,1:2:1:O2:16
+X
+T merge-56
+M 0:0:1:O2:51,1:0:1:O2:69
+X
+T merge-57
+M 0:0:1:O0:0,0:1:1:O0:3,0:2:1:O2:3,1:0:1:O2:46,1:1:1:O1:49,1:2:1:O1:49,2:0:1:O0:48,2:1:1:O0:51,3:0:1:O2:66,4:0:1:O0:52,4:1:1:O1:52
+X
+T merge-58
+M 6:0:1:O1:0,6:1:1:O2:3,6:2:1:O1:6,7:0:1:O0:22,7:1:1:O0:22,8:0:1:O2:26,8:1:1:O1:29,8:2:1:O2:30,0:0:1:O0:53,1:0:1:O1:4,2:0:1:O2:16,2:1:1:O0:17,2:2:1:O1:17,3:0:1:O0:55,3:1:1:O1:56,4:0:1:O1:65,4:1:1:O0:66,4:2:1:O1:69,5:0:1:O2:81,5:1:1:O0:81,5:2:1:O1:83
+X
+T merge-59
+M 0:0:1:O0:68
+X
+T merge-60
+M 3:0:1:O1:2,0:0:1:O2:13,0:1:1:O0:15,4:0:1:O1:14,4:1:1:O0:16,4:2:1:O2:16,1:0:1:O0:16,1:1:1:O0:18,2:0:1:O1:52,2:1:1:O2:55
+X
+T merge-61
+M 2:0:1:O2:54,2:1:1:O0:56,2:2:1:O0:57,0:0:1:O2:60,1:0:1:O1:64,3:0:1:O1:67,3:1:1:O2:67,4:0:1:O2:72
+X
+T merge-62
+M 4:0:1:O2:0,5:0:1:O1:0,5:1:1:O0:3,0:0:1:O0:14,0:1:1:O1:14,0:2:1:O1:14,1:0:1:O1:32,1:1:1:O2:35,1:2:1:O0:36,2:0:1:O1:41,2:1:1:O2:42,3:0:1:O2:0,3:1:1:O0:3,3:2:1:O0:4
+X
+T merge-63
+M 0:0:1:O1:65,0:1:1:O1:68,0:2:1:O0:70
+X
+T merge-64
+M 3:0:1:O1:29,4:0:1:O2:0,4:1:1:O1:2,5:0:1:O1:11,5:1:1:O0:11,2:0:1:O0:36,0:0:1:O2:67,1:0:1:O0:83,1:1:1:O1:83
+X
+T merge-65
+M 5:0:1:O1:0,5:1:1:O2:2,5:2:1:O1:3,0:0:1:O1:2,0:1:1:O0:5,0:2:1:O1:5,1:0:1:O0:0,2:0:1:O0:17,3:0:1:O1:28,4:0:1:O0:36,4:1:1:O2:37,4:2:1:O1:39
+X
+T merge-66
+M 2:0:1:O1:0,2:1:1:O0:3,0:0:1:O1:64,1:0:1:O2:69,1:1:1:O1:70,1:2:1:O1:72
+X
+T merge-67
+M 1:0:1:O2:0,2:0:1:O2:19,2:1:1:O0:19,2:2:1:O1:21,0:0:1:O0:40,3:0:1:O2:46,3:1:1:O1:46
+X
+T merge-68
+M 0:0:1:O1:31,0:1:1:O1:32,0:2:1:O2:33,1:0:1:O2:23,2:0:1:O2:54,3:0:1:O1:54,3:1:1:O2:55,3:2:1:O0:55
+X
+T merge-69
+M 0:0:1:O2:0,0:1:1:O0:2,2:0:1:O2:0,3:0:1:O0:5,3:1:1:O2:5,1:0:1:O0:6
+X
+T merge-70
+M 0:0:1:O2:17,0:1:1:O1:19,1:0:1:O0:43,2:0:1:O0:9,2:1:1:O1:10,2:2:1:O1:13,3:0:1:O2:25,3:1:1:O2:27
+X
+T merge-71
+M 3:0:1:O0:0,3:1:1:O0:3,3:2:1:O0:6,4:0:1:O0:13,4:1:1:O0:13,0:0:1:O2:28,0:1:1:O1:27,1:0:1:O1:39,1:1:1:O2:40,2:0:1:O2:53
+X
+T merge-72
+M 0:0:1:O0:34
+X
+T merge-73
+M 0:0:1:O2:25,0:1:1:O0:26,1:0:1:O0:29,1:1:1:O0:31,1:2:1:O1:34,2:0:1:O0:31,2:1:1:O1:31,2:2:1:O0:33
+X
+T merge-74
+M 3:0:1:O2:0,3:1:1:O0:2,4:0:1:O1:0,5:0:1:O0:9,6:0:1:O1:21,6:1:1:O0:23,6:2:1:O0:23,0:0:1:O1:40,0:1:1:O1:43,1:0:1:O0:53,1:1:1:O2:56,1:2:1:O2:58,2:0:1:O0:65,2:1:1:O1:65,2:2:1:O1:65
+X
+T merge-75
+M 3:0:1:O1:19,3:1:1:O2:19,3:2:1:O1:19,4:0:1:O0:32,4:1:1:O0:32,0:0:1:O0:45,0:1:1:O0:47,1:0:1:O1:64,1:1:1:O1:64,1:2:1:O2:64,2:0:1:O0:82
+X
+T merge-76
+M 0:0:1:O2:6,1:0:1:O1:22,1:1:1:O0:23,1:2:1:O0:25,2:0:1:O1:37
+X
+T merge-77
+M 6:0:1:O2:0,7:0:1:O0:5,7:1:1:O1:7,0:0:1:O1:25,1:0:1:O0:0,1:1:1:O2:0,1:2:1:O1:1,2:0:1:O2:18,2:1:1:O1:21,5:0:1:O1:28,5:1:1:O2:31,3:0:1:O2:56,3:1:1:O0:59,4:0:1:O0:78,4:1:1:O2:81
+X
+T merge-78
+M 0:0:1:O0:32,0:1:1:O0:35,0:2:1:O0:37
+X
+T merge-79
+M 4:0:1:O1:0,4:1:1:O1:1,4:2:1:O0:1,3:0:1:O1:12,0:0:1:O1:46,0:1:1:O2:46,0:2:1:O1:49,1:0:1:O1:66,1:1:1:O2:67,2:0:1:O1:62
+X
+T merge-80
+M 0:0:1:O1:15,0:1:1:O0:15,0:2:1:O2:17,1:0:1:O0:24,5:0:1:O1:29,5:1:1:O0:31,6:0:1:O0:0,7:0:1:O0:14,7:1:1:O0:15,7:2:1:O1:16,2:0:1:O1:37,3:0:1:O0:62,4:0:1:O2:17,4:1:1:O0:17
+X
+T merge-81
+M 4:0:1:O2:12,4:1:1:O0:12,5:0:1:O1:0,5:1:1:O0:3,5:2:1:O2:5,0:0:1:O2:31,1:0:1:O0:0,1:1:1:O0:1,1:2:1:O0:3,2:0:1:O1:68,2:1:1:O1:70,3:0:1:O1:36,3:1:1:O1:36
+X
+T merge-82
+M 2:0:1:O0:8,0:0:1:O0:10,0:1:1:O1:12,0:2:1:O1:12,1:0:1:O2:0,1:1:1:O0:0,3:0:1:O0:13,3:1:1:O1:16,4:0:1:O0:30
+X
+T merge-83
+M 5:0:1:O2:3,5:1:1:O0:6,4:0:1:O2:9,6:0:1:O2:23,6:1:1:O2:24,0:0:1:O1:48,1:0:1:O2:0,2:0:1:O2:52,2:1:1:O2:54,3:0:1:O2:55,3:1:1:O0:55
+X
+T merge-84
+M 0:0:1:O1:16,0:1:1:O0:19,0:2:1:O2:21,2:0:1:O1:27,1:0:1:O2:40,3:0:1:O2:64,3:1:1:O0:64
+X
+T merge-85
+M 0:0:1:O2:0,1:0:1:O1:5,1:1:1:O2:5,2:0:1:O1:0,2:1:1:O2:1
+X
+T merge-86
+M 1:0:1:O1:51,1:1:1:O2:52,0:0:1:O1:54,0:1:1:O2:57,2:0:1:O1:65,2:1:1:O2:66
+X
+T merge-87
+M 0:0:1:O2:15,0:1:1:O2:17
+X
+T merge-88
+M 0:0:1:O1:32,0:1:1:O1:34,1:0:1:O1:50,2:0:1:O0:53
+X
+T merge-89
+M 1:0:1:O1:35,2:0:1:O1:37,2:1:1:O2:38,0:0:1:O2:45,0:1:1:O2:48,3:0:1:O0:46
+X
+T merge-90
+M 0:0:1:O0:28,1:0:1:O1:28,2:0:1:O2:41,3:0:1:O2:33
+X
+T merge-91
+M 0:0:1:O2:25,1:0:1:O1:44,1:1:1:O0:46,2:0:1:O2:47,2:1:1:O0:50,2:2:1:O2:53
+X
+T merge-92
+M 0:0:1:O2:0,0:1:1:O2:2,1:0:1:O2:0,3:0:1:O2:31,3:1:1:O0:32,2:0:1:O0:47,4:0:1:O1:47,4:1:1:O0:50,5:0:1:O2:59,5:1:1:O0:60
+X
+T merge-93
+M 0:0:1:O0:54,0:1:1:O0:56,0:2:1:O1:59
+X
+T merge-94
+M 2:0:1:O1:0,3:0:1:O2:39,0:0:1:O0:41,1:0:1:O0:61,1:1:1:O1:63
+X
+T merge-95
+M 0:0:1:O0:12,0:1:1:O2:14,1:0:1:O2:20,1:1:1:O0:21,1:2:1:O0:21,2:0:1:O0:0,2:1:1:O0:0,2:2:1:O1:2,5:0:1:O2:45,5:1:1:O0:48,5:2:1:O1:51,6:0:1:O0:23,6:1:1:O2:24,6:2:1:O0:27,3:0:1:O1:47,3:1:1:O2:49,3:2:1:O2:52,4:0:1:O2:65,4:1:1:O0:67,4:2:1:O2:68
+X
+T merge-96
+M 4:0:1:O1:0,5:0:1:O2:9,6:0:1:O1:20,0:0:1:O2:42,0:1:1:O1:43,0:2:1:O0:45,1:0:1:O2:51,1:1:1:O0:53,1:2:1:O2:55,2:0:1:O1:17,2:1:1:O1:20,3:0:1:O1:52,3:1:1:O0:52
+X
+T merge-97
+M 0:0:1:O2:65,0:1:1:O2:66
+X
+T merge-98
+M 0:0:1:O2:44,0:1:1:O0:44,1:0:1:O2:63,1:1:1:O0:63,1:2:1:O2:63,2:0:1:O0:81,2:1:1:O0:84,2:2:1:O2:84
+X
+T merge-99
+M 0:0:1:O2:39,0:1:1:O1:41,0:2:1:O0:44,1:0:1:O1:58,1:1:1:O0:61
+X

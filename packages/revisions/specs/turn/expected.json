@@ -1,0 +1,22 @@
+{
+  "configs": {
+    "TurnProtocol.pr.cfg": { "tier": "pr", "expect": "pass", "ref": "S6" },
+    "TurnProtocol.no-unretired-lease.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "NoUnretiredLease" },
+      "kind": "defect",
+      "ref": "S6 design counterexample",
+      "fixedBy": "W5"
+    },
+    "TurnProtocol.no-mint-behind-unsettled-turn.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "NoMintBehindUnsettledTurn" },
+      "kind": "defect",
+      "ref": "S6 design counterexample",
+      "fixedBy": "W5"
+    }
+  },
+  "graphs": {
+    "TurnProtocol": { "config": "TurnProtocol.pr.cfg", "phase": "turn.phase" }
+  }
+}

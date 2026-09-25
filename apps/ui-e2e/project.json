@@ -6,6 +6,7 @@
   "tags": ["scope:ui", "type:e2e"],
   "implicitDependencies": ["ui", "host", "runtime-e2e"],
   "targets": {
+    "formal:logs": {},
     "test": {
       "executor": "nx:run-commands",
       "dependsOn": [
@@ -58,12 +59,13 @@
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "commands": [
           "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/browser-agent-host.spec.ts",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project webkit-smoke src/browser-agent-host.spec.ts"
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project webkit-smoke src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts"
         ],
         "parallel": false,
         "env": {
-          "TAU_E2E_UI_SNAPSHOT": "true"
+          "TAU_E2E_UI_SNAPSHOT": "true",
+          "TAU_E2E_HOST_TIER": "true"
         }
       }
     },
@@ -75,7 +77,10 @@
       ],
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
-        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts",
+        "env": {
+          "TAU_E2E_HOST_TIER": "true"
+        }
       }
     },
     "test:e2e:live": {

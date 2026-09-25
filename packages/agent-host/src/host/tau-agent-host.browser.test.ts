@@ -1,6 +1,9 @@
 import { expect, it } from 'vitest';
+import { commands } from 'vitest/browser';
 
 type WorkerResult = {
+  /** The chat's raw `events.jsonl`, kept for field trace validation (`agent-host:formal:logs`). */
+  readonly log?: string | undefined;
   readonly origin?: string | undefined;
   readonly eventTypes?: readonly string[] | undefined;
   readonly final?: unknown;
@@ -32,6 +35,13 @@ it('boots the complete host in a worker and persists a tool turn to OPFS', async
     worker.postMessage('run');
   });
   worker.terminate();
+  if (result.log !== undefined) {
+    /* Resolved against this file: out/test-results/chat-logs/<project>/<spec>/<chatId>.jsonl. */
+    await commands.writeFile(
+      '../../../../out/test-results/chat-logs/agent-host/tau-agent-host.browser.test.ts/host-worker-smoke.jsonl',
+      result.log,
+    );
+  }
 
   expect(result.error).toBeUndefined();
   expect(result.origin).not.toBe('null');

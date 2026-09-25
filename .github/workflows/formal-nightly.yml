@@ -1,0 +1,53 @@
+name: Formal nightly
+
+# The wide-scope and slow formal tiers (docs/policy/formal-verification-policy.md):
+# liveness and two-turn configurations, Apalache, fresh-seed differentials, mutant
+# matrices and host-test log validation. Each owner's `formal:nightly` target says
+# what it runs; a changed verdict, a surviving or stale mutant, or a fresh-seed
+# mismatch fails the run, and the seed is printed for replay.
+
+on:
+  schedule:
+    - cron: '41 3 * * *' # 03:41 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: formal-nightly
+  cancel-in-progress: false
+
+env:
+  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+
+jobs:
+  formal-nightly:
+    name: Formal nightly tiers
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: 'read'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Setup formal toolchains
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc,lean,apalache
+
+      - name: Run every formal nightly tier
+        run: pnpm nx run-many -t formal:nightly --parallel=1
+
+      - name: Upload formal reports and captured logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: formal-nightly-reports
+          path: |
+            out/reports/formal
+            out/test-results/chat-logs
+            out/test-results/formal
+          if-no-files-found: ignore
+          retention-days: 14

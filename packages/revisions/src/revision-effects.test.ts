@@ -1058,11 +1058,25 @@ for (const actorSet of actorSets) {
       expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('new local revision\n');
     }, 30_000);
 
-    it('does not advance a branch that another checkout has open', async () => {
+    /* Policy: fast-forward a clean checkout (D60 extends that to linked ones);
+     * a branch with work of its own is never moved by a fetch. */
+    it('does not advance another checkout’s branch that has work of its own', async () => {
       const context = await synchronized();
       const feature = await context.port.addCheckout?.({ branch: 'feature', from: context.base });
       expect(feature).toMatchObject({ kind: 'linked', branch: 'feature' });
       await context.port.updateRef({ name: 'refs/remotes/tau/feature', expectedHead: undefined, head: context.base });
+      const baseTree = (await context.port.readTree(revisionId(context.base))) ?? new ImmutableRevisionTree([]);
+      const own = await context.port.writeRevision({
+        parents: [revisionId(context.base)],
+        tree: baseTree,
+        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13, 4) },
+        summary: { generated: 'Work on feature' },
+      });
+      await context.port.updateRef({
+        name: 'feature',
+        expectedHead: revisionId(context.base),
+        head: revisionId(own.commitId),
+      });
       const wrappedPort: RevisionPort = {
         ...context.port,
         listRemoteRefs: async () => [
@@ -1086,7 +1100,7 @@ for (const actorSet of actorSets) {
       });
 
       await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
-      expect(await context.port.readRef('feature')).toBe(context.base);
+      expect(await context.port.readRef('feature')).toBe(own.commitId);
     }, 30_000);
   });
 }

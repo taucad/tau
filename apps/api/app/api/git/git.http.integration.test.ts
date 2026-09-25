@@ -43,6 +43,7 @@ import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
@@ -280,6 +281,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       providers: [
         GitRepositoryService,
         GitLfsService,
+        PublicationRateLimiterService,
         S3RepositoryStore,
         {
           provide: repositoryStoreKey,
@@ -289,7 +291,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         { provide: DatabaseService, useValue: databaseStub },
         {
           provide: RedisService,
-          useValue: { client: { get: async () => undefined, set: async () => 'OK' } },
+          useValue: { client: { get: async () => undefined, set: async () => 'OK', eval: async () => 1 } },
         },
         { provide: ProjectAccessService, useValue: projectAccessStub },
         {

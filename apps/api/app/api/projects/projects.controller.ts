@@ -103,8 +103,8 @@ export class ProjectsController {
    *
    * Bounded twice (review R5), because this route is what made repository
    * creation reachable without a publish: a per-account ceiling on how many
-   * projects may exist, and a daily ceiling on how often the route may be
-   * called at all.
+   * projects may exist, and a daily ceiling on how often the owner may
+   * register, spent only by a call that passed the ownership and plan checks.
    *
    * @param projectId - The project id, which is also its repository name.
    * @param body - The name to record when the row is created.
@@ -126,17 +126,6 @@ export class ProjectsController {
         code: 'PROJECT_ID_INVALID',
         message: 'Not a project id',
       });
-    }
-
-    const budget = await this.rateLimiter.consumeDailyBudget({
-      key: `project:register:${userId}`,
-      limit: projectRegistrationsPerOwnerPerDay,
-    });
-    if (!budget.allowed) {
-      throw new HttpException(
-        { code: 'PROJECT_REGISTRATION_RATE_LIMITED', message: 'Too many project registrations today' },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
     }
 
     const { database } = this.databaseService;
@@ -168,6 +157,21 @@ export class ProjectsController {
         code: 'GIT_SYNC_NOT_ENTITLED',
         message: 'Syncing files to Tau Cloud is a paid plan feature.',
       });
+    }
+
+    /* After the ownership and entitlement checks (D22, L6-F15): a refused call
+       is not a registration, so it spends nothing. The key is the caller's own
+       id, so the order only decides whether a refused caller drains its own
+       budget; both checks are cheap reads. */
+    const budget = await this.rateLimiter.consumeDailyBudget({
+      key: `project:register:${userId}`,
+      limit: projectRegistrationsPerOwnerPerDay,
+    });
+    if (!budget.allowed) {
+      throw new HttpException(
+        { code: 'PROJECT_REGISTRATION_RATE_LIMITED', message: 'Too many project registrations today' },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     if (!exists) {

@@ -45,8 +45,9 @@ export const gitCommandTimeoutMilliseconds = 10 * 60 * 1000;
 export const gitMaxBufferBytes = 64 * 1024 * 1024;
 
 /**
- * The four settings git's defaults get wrong for a lease, plus the two
- * compare-and-swap settings `git.service.ts` already spawns with today.
+ * The four settings git's defaults get wrong for a lease, the two
+ * compare-and-swap settings `git.service.ts` already spawns with today, and
+ * object checking on receive.
  *
  * `transfer.unpackLimit=1` is load-bearing rather than tuning: at git's default
  * a small push — which is the typical Tau push — lands as loose objects and no
@@ -64,6 +65,11 @@ const leaseConfiguration: Readonly<Record<string, string>> = {
   'maintenance.auto': 'false',
   'receive.denyDeletes': 'true',
   'receive.denyNonFastForwards': 'true',
+  /* Every object a push brings is checked before any hook runs: a tree with
+     duplicate or unsorted entries reads differently to different readers,
+     which is how a chat segment could be rewritten past the append-only
+     check (I9, RV-W9 M2). */
+  'receive.fsckObjects': 'true',
 };
 
 export const runGit = async (cwd: string, args: readonly string[]): Promise<string> => {

@@ -5,6 +5,8 @@ import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
+import type * as Host from '@taucad/host';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { computeControlChannels, quitChannels, servicesPortRelayTag } from '#shared/desktop-bootstrap.js';
 
@@ -168,12 +170,17 @@ vi.mock('@taucad/runtime/electron/main', () => ({
     return { connect: vi.fn(), dispose: vi.fn(), prewarm: state.runtimePrewarm };
   }),
 }));
-vi.mock('@taucad/host', () => ({
-  defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
-  discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
-  externalAgentDescriptors: vi.fn(() => []),
-  projectReleaseMilliseconds: 22_000,
-}));
+vi.mock('@taucad/host', async (importOriginal) => {
+  /* The host's real bounds, so the quit waits main derives from them are the shipped ones (rule 9). */
+  const { projectCloseMilliseconds, projectReleaseMilliseconds } = await importOriginal<typeof Host>();
+  return {
+    defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
+    discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
+    externalAgentDescriptors: vi.fn(() => []),
+    projectCloseMilliseconds,
+    projectReleaseMilliseconds,
+  };
+});
 vi.mock('#tau/kernel-host.entry?modulePath', () => ({ default: '/kernel-host.entry.js' }));
 vi.mock('#tau/services-host.entry?modulePath', () => ({ default: '/services-host.entry.js' }));
 vi.mock('#main/compute-store.worker?modulePath', () => ({
@@ -531,6 +538,21 @@ describe('desktop main compute owner', () => {
     },
     bootMilliseconds,
   );
+});
+
+describe('desktop quit bounds', () => {
+  it('nests each quit wait strictly outside the host close it awaits (rule 9, RV-W2b #1)', async () => {
+    const host = await vi.importActual<typeof Host>('@taucad/host');
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-quit-'));
+    const { quitQuiesceMilliseconds, quitRendererMilliseconds } = await import('#main/main.js');
+
+    /* The utility's launchers drain their runs before they release. */
+    expect(host.projectCloseMilliseconds).toBeGreaterThan(host.projectReleaseMilliseconds);
+    expect(quitQuiesceMilliseconds).toBeGreaterThan(host.projectCloseMilliseconds);
+    /* The page cancels runs and flushes producers (10 s each) before the host's close. */
+    expect(quitRendererMilliseconds).toBeGreaterThan(2 * 10_000 + host.projectReleaseMilliseconds);
+  }, 60_000);
 });
 
 /*

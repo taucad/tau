@@ -32,6 +32,7 @@ import {
   defaultConfigDirectory,
   discoverAcpAgents,
   externalAgentDescriptors,
+  projectCloseMilliseconds,
   projectReleaseMilliseconds,
 } from '@taucad/host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host';
@@ -171,27 +172,45 @@ if (launchDeepLink !== undefined) {
   receiveDeepLink(launchDeepLink);
 }
 
+/* How far each quit wait outlasts the bound it awaits, so the inner reason lands first (rule 9). */
+const quitMarginMilliseconds = 3000;
+
 /**
  * How long quit waits for every served project to settle (W19, D31).
  *
- * Derived from the host's own worst case for letting one project go (live
- * checkout wait, close cuts, sync quiesce), so rule 9's nesting holds whatever
- * those bounds become: the host's reason lands before this wait's. Projects
- * release in parallel, so the per-project bound is the whole bound. Short
- * enough that a wedged utility never holds the app open: after it the durable
- * queue is the guarantee (D28).
+ * Derived from the host's own worst case for closing one project — its runs
+ * drain, then the live-checkout wait, the close cuts and the sync quiesce — so
+ * rule 9's nesting holds whatever those bounds become: the host's reason
+ * lands before this wait's. Projects close in parallel, so the per-project
+ * bound is the whole bound. After it the durable queue is the guarantee (D28).
+ *
+ * @internal
  */
-const quitQuiesceMilliseconds = projectReleaseMilliseconds + 3000;
+export const quitQuiesceMilliseconds = projectCloseMilliseconds + quitMarginMilliseconds;
+
+/*
+ * The page's own close steps before its sync flush: `cancelRuns`, then
+ * `flushProducers`, each on the editor bound of `project-live-sessions.tsx`
+ * (`editorFlushTimeoutMilliseconds`, 10 s). ponytail: mirrored, not imported —
+ * desktop has no dependency on the ui app; move the page bound into a package
+ * both read if it ever changes.
+ */
+const rendererCloseStepsMilliseconds = 2 * 10_000;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
  *
- * The page runs every live project's `closing` — cancel, sync flush, lease
- * release — and answers `quiesced`. The person can cut it short with *Quit
- * anyway*. The bound reports failure to main; it never turns an incomplete
- * close into permission to quit.
+ * The page runs every live project's `closing` — cancel, producer flush, sync
+ * flush, lease release — and answers `quiesced`. A desktop project's sync
+ * flush is the host's close, so the wait is the page's own steps plus
+ * {@link projectReleaseMilliseconds} plus a margin (rule 9, RV-W2b #1). The
+ * person can cut it short with *Quit anyway*. The bound reports failure to
+ * main; it never turns an incomplete close into permission to quit.
+ *
+ * @internal
  */
-const quitRendererMilliseconds = 20_000;
+export const quitRendererMilliseconds =
+  rendererCloseStepsMilliseconds + projectReleaseMilliseconds + quitMarginMilliseconds;
 
 /**
  * Ask every window's sessions registry to close its projects, and wait.

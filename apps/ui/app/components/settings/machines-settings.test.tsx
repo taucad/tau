@@ -179,6 +179,12 @@ describe('MachinesSettings', () => {
     fireEvent.change(screen.getByLabelText('Address'), { target: { value: '10.0.0.5' } });
     const accessCode = screen.getByLabelText('Access code');
     fireEvent.change(accessCode, { target: { value: '12345678' } });
+    /* Masked by default; the toggle reveals it for checking and masks it again. */
+    expect(accessCode).toHaveAttribute('type', 'password');
+    fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(accessCode).toHaveAttribute('type', 'text');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide password' }));
+    expect(accessCode).toHaveAttribute('type', 'password');
 
     fireEvent.submit(screen.getByRole('form', { name: 'Bind a Bambu Lab X1C' }));
 
@@ -194,6 +200,44 @@ describe('MachinesSettings', () => {
       accessCode: '12345678',
     });
     expect(accessCode).toHaveValue('');
+  });
+
+  it('should find printers on the network and fill the form from the one picked, leaving the access code', async () => {
+    const facet = facetWith([]);
+    const heard = (serial: string, name: string, address: string): MachineCandidate => ({
+      ...candidate,
+      id: `bambu:${serial}`,
+      name,
+      endpoint: { address, interface: 'udp4' },
+      claimedIdentity: { model: 'X1C', serial },
+    });
+    facet.discover.mockImplementation(async function* () {
+      yield { type: 'found', candidate: heard('00M1', 'Workshop X1C', '192.168.0.112') };
+      yield { type: 'found', candidate: heard('00M2', 'Office X1C', '192.168.0.113') };
+      yield { type: 'updated', candidate: heard('00M1', 'Workshop X1C', '192.168.0.112') };
+    });
+    state.project = projectWith(facet);
+    renderSettings();
+    const find = screen.getByRole('button', { name: 'Find on network' });
+    await waitFor(() => {
+      expect(find).toBeEnabled();
+    });
+
+    fireEvent.click(find);
+
+    const office = await screen.findByRole('button', { name: 'Office X1C · 192.168.0.113' });
+    expect(screen.getAllByRole('button', { name: /X1C · 192\.168/u })).toHaveLength(2);
+    /* Broadcast discovery: no address, nothing sent to a printer. */
+    expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ providerId: 'bambu', configuration: { logicalId: 'discovery' } }),
+    );
+
+    fireEvent.click(office);
+
+    expect(screen.getByLabelText('Name')).toHaveValue('Office X1C');
+    expect(screen.getByLabelText('Address')).toHaveValue('192.168.0.113');
+    expect(screen.getByLabelText('Serial (optional)')).toHaveValue('00M2');
+    expect(screen.getByLabelText('Access code')).toHaveFocus();
   });
 
   it('should list bound machines as one line each, marking the simulator, and explain a missing project or facet', async () => {

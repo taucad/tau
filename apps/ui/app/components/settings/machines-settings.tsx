@@ -10,12 +10,13 @@
  * manifest (`MachineDetails`); the row itself stays one line.
  */
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useSelector } from '@xstate/react';
 import { ChevronDown } from 'lucide-react';
 import type {
   MachineBindingOutcome,
+  MachineCandidate,
   MachineClient,
   MachineDirectoryEntry,
   MachineDiscoverInput,
@@ -26,6 +27,7 @@ import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
+import { PasswordInput } from '@taucad/ui/components/password-input';
 import { ConfigurationFields, MachineDetails, isSimulatedProvider } from '#components/settings/machine-details.js';
 import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
@@ -52,10 +54,8 @@ const flowFilledFields: readonly string[] = ['logicalId'];
 /**
  * Bind one machine end to end: discover it, begin the host-local ceremony and,
  * when the host asks for the operator's half, complete it through the shell.
- *
- * ponytail: the first candidate the provider reports is taken; a picker over
- * several LAN candidates belongs here when discovery is broadcast rather than
- * addressed.
+ * Discovery here is addressed: "Find on network" has already picked the LAN
+ * candidate and filled its address, so the first answer is the machine.
  *
  * @param client - The project's machines facet.
  * @param input - What the person typed.
@@ -99,6 +99,27 @@ const bind = async (client: MachineClient, input: BindInput): Promise<MachineBin
     ...(input.address ? { address: input.address } : {}),
     ...(input.accessCode ? { accessCode: input.accessCode } : {}),
   });
+};
+
+/**
+ * Listen for the printers advertising on this LAN; the host bounds the pass (Bambu: 5 s on UDP 2021).
+ * Nothing is sent to a printer: discovery only hears broadcasts.
+ *
+ * @param client - The project's machines facet.
+ * @returns Every distinct candidate heard, latest advertisement winning.
+ */
+const findOnNetwork = async (client: MachineClient): Promise<readonly MachineCandidate[]> => {
+  const found = new Map<string, MachineCandidate>();
+  for await (const frame of client.discover({
+    providerId: bambuProviderId,
+    configuration: { logicalId: 'discovery' },
+    signal: AbortSignal.timeout(15_000),
+  })) {
+    if (frame.type === 'found' || frame.type === 'updated') {
+      found.set(frame.candidate.id, frame.candidate);
+    }
+  }
+  return [...found.values()];
 };
 
 const describeOutcome = (name: string, outcome: MachineBindingOutcome): string =>
@@ -151,6 +172,8 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
   const [status, setStatus] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [simulatorFields, setSimulatorFields] = useState<Record<string, unknown>>({});
+  const [candidates, setCandidates] = useState<readonly MachineCandidate[]>();
+  const bindForm = useRef<HTMLFormElement>(null);
   const entries = directory.snapshot?.entries ?? [];
   const providers = useMemo(
     () => new Map(directory.providers.map((provider) => [provider.id, provider])),
@@ -163,6 +186,46 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     try {
       setStatus(describeOutcome(name, await bind(client, input)));
       directory.refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Fill the form from one heard printer, leaving only the access code to type. */
+  const pick = (candidate: MachineCandidate): void => {
+    const field = (key: string): HTMLInputElement | undefined => {
+      const element = bindForm.current?.elements.namedItem(key);
+      return element instanceof HTMLInputElement ? element : undefined;
+    };
+    const set = (key: string, value: string): void => {
+      const input = field(key);
+      if (input) {
+        input.value = value;
+      }
+    };
+    set('name', candidate.name.slice(0, 64));
+    set('address', candidate.endpoint.address);
+    set('serial', candidate.claimedIdentity.serial ?? '');
+    field('accessCode')?.focus();
+  };
+
+  const onFind = async (): Promise<void> => {
+    setBusy(true);
+    setCandidates(undefined);
+    setStatus('Listening for printers on this network…');
+    try {
+      const heard = await findOnNetwork(client);
+      setCandidates(heard);
+      setStatus(
+        heard.length === 0
+          ? 'No printer answered. Check it is on this network with LAN mode on, or enter its address.'
+          : undefined,
+      );
+      if (heard.length === 1 && heard[0]) {
+        pick(heard[0]);
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -239,6 +302,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         </div>
       </section>
       <form
+        ref={bindForm}
         className='grid gap-3 border-t pt-4 lg:grid-cols-2'
         aria-labelledby='machines-bind-title'
         onSubmit={onBindSubmit}
@@ -246,6 +310,32 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         <h3 id='machines-bind-title' className='text-sm font-medium lg:col-span-2'>
           Bind a Bambu Lab X1C
         </h3>
+        <div className='flex flex-wrap items-center gap-2 lg:col-span-2'>
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            disabled={busy || !providers.has(bambuProviderId)}
+            onClick={onFind}
+          >
+            Find on network
+          </Button>
+          {candidates !== undefined && candidates.length > 1
+            ? candidates.map((candidate) => (
+                <Button
+                  key={candidate.id}
+                  type='button'
+                  size='sm'
+                  variant='ghost'
+                  onClick={() => {
+                    pick(candidate);
+                  }}
+                >
+                  {candidate.name} · {candidate.endpoint.address}
+                </Button>
+              ))
+            : null}
+        </div>
         <div className='grid gap-1.5'>
           <Label htmlFor='machines-bind-name'>Name</Label>
           <Input id='machines-bind-name' name='name' required maxLength={64} autoComplete='off' />
@@ -260,14 +350,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         </div>
         <div className='grid gap-1.5'>
           <Label htmlFor='machines-bind-access-code'>Access code</Label>
-          <Input
-            id='machines-bind-access-code'
-            name='accessCode'
-            type='password'
-            required
-            maxLength={64}
-            autoComplete='off'
-          />
+          <PasswordInput id='machines-bind-access-code' name='accessCode' required maxLength={64} autoComplete='off' />
         </div>
         <div className='lg:col-span-2'>
           <Button type='submit' size='sm' disabled={busy || !providers.has(bambuProviderId)}>

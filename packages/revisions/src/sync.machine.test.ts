@@ -245,6 +245,29 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /* D60: another checkout the pull moved is re-headed through the parent. */
+  it('tells the parent about every other checkout the pull advanced', async () => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: {
+        leases: { [mainRef]: 'remote-head' },
+        integration: 'upToDate',
+        advanced: [{ checkoutId: 'linked-1', revisionId: 'feature-head', treeId: 'feature-tree', branch: 'feature' }],
+      } satisfies SyncFetchActorOutput,
+    });
+
+    await vi.waitFor(() => {
+      expect(harness.parent.events).toContainEqual({
+        type: 'checkoutChanged',
+        checkoutId: 'linked-1',
+        revisionId: 'feature-head',
+        treeId: 'feature-tree',
+        branch: 'feature',
+      });
+    });
+    harness.stop();
+  });
+
   it('row 35: reopening a retained root fetches again', async () => {
     const harness = start();
     await openCleanly(harness);

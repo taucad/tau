@@ -38,6 +38,7 @@ import { createRevisionActors } from '#revision-effects.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncQueueRecord } from '#sync.types.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
+import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import type { RevisionPort } from '#revision-port.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
@@ -754,6 +755,74 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       await remote.close();
     }
   }, 180_000);
+
+  /*
+   * D60: a branch open in another checkout, moved on by someone else, used to
+   * stay behind; every push then offered it under a lease it could not
+   * integrate and the Sync row retried for ever. Observed live 2026-09-25.
+   */
+  /* The native leg here is built without a checkouts directory; the rule is the effects layer's, shared by both. */
+  it.skipIf(leg.name === 'native git')(
+    'row 12: a pull moves another checkout’s clean branch onto its remote head (D60)',
+    async () => {
+      const remoteRoot = await temporaryRoot('remote-linked');
+      const remote = await startGitHttpBackend({ root: remoteRoot });
+      const featureRef = 'refs/heads/feature';
+      try {
+        const one = await device({ leg, label: 'a-linked', remoteUrl: remote.url, files: { 'part.scad': 'a\n' } });
+        /* A checkout is clean only against a tree that carries the store's own
+         * generated files, as every real revision does. */
+        const generated = Object.fromEntries(
+          await Promise.all(
+            [generatedGitattributesPath, generatedIgnorePath].map(
+              async (path) => [path, new TextDecoder().decode(await one.filesystem.readFile(path))] as const,
+            ),
+          ),
+        );
+        const shared = await record({ device: one, files: { ...generated, 'part.scad': 'a\n' }, summary: 'Shared' });
+        await one.port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(shared) });
+        await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }, { name: featureRef }] });
+        await one.port.addCheckout!({ branch: 'feature' });
+        await run(one.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+
+        /* A second device moves `feature` on. */
+        const two = await device({ leg, label: 'b-linked', remoteUrl: remote.url });
+        await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+        const theirs = await two.port.writeRevision({
+          parents: [revisionId(shared)],
+          tree: projectTree({ ...generated, 'part.scad': 'b\n' }),
+          provenance: { source: 'user', actorId: 'actor-w13', createdAt: Date.UTC(2026, 8, 25) },
+          summary: { generated: 'Feature, elsewhere' },
+        });
+        await two.port.updateRef({
+          name: 'feature',
+          expectedHead: revisionId(shared),
+          head: revisionId(theirs.commitId),
+        });
+        await two.port.push({ remote: 'tau', atomic: true, refs: [{ name: featureRef }] });
+
+        const fetched = await run<{
+          leases: Readonly<Record<string, string>>;
+          advanced?: ReadonlyArray<{ branch: string; revisionId: string }>;
+        }>(one.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+        expect(fetched.advanced).toContainEqual(
+          expect.objectContaining({ branch: 'feature', revisionId: theirs.commitId }),
+        );
+        expect(await one.port.readRef('feature')).toBe(theirs.commitId);
+
+        const pushed = await run<{ refs: ReadonlyArray<{ name: string; status: string }> }>(one.actors.sync.push, {
+          remote: 'tau',
+          branch: 'main',
+          leases: fetched.leases,
+        });
+        expect(pushed.refs.find((entry) => entry.name === featureRef)?.status).not.toBe('rejected');
+        expect(await remote.git(['rev-parse', featureRef])).toBe(theirs.commitId);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
 
   /*
    * D54: a lease is the head this device integrated, not the head it last saw.

@@ -273,6 +273,8 @@ export type SyncFetchActorOutput = Readonly<{
   branches?: ReadonlyArray<Readonly<{ name: string; head: string }>>;
   /** Independent record projections attempted after the fetch. */
   records?: readonly SyncRefOutcome[];
+  /** Other checkouts this pull moved onto their remote heads (D60). */
+  advanced?: ReadonlyArray<NonNullable<SyncFastForwardActorOutput> & Readonly<{ branch: string }>>;
 }>;
 
 /** What applying the fetched head is asked for. @public */
@@ -597,6 +599,11 @@ const rememberFetch = (
   const projectionFailure = pending.find((entry) => entry.operation === 'projection');
   if (context.parentRef !== undefined && output.branches !== undefined) {
     enq.sendTo(context.parentRef, { type: 'branchesFetched', branches: output.branches });
+  }
+  for (const moved of output.advanced ?? []) {
+    if (context.parentRef !== undefined) {
+      enq.sendTo(context.parentRef, { type: 'checkoutChanged', ...moved });
+    }
   }
   return {
     leases: output.leases,

@@ -107,6 +107,30 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     replacement: Uint8Array<ArrayBuffer>,
   ) =>
     mutations.queueFor(path, async () => {
+      /* The queue fences this host's own tool calls only; a person's edit
+       * reaches the checkout by another route (L4 D-103). Where the view can
+       * compare and write in one step, it must, or an edit landing between
+       * the read below and the write is overwritten. */
+      if (provider.writeFileChecked !== undefined) {
+        assertNotAborted(signal);
+        const result = await provider
+          .writeFileChecked({ path, data: replacement, preconditions: [{ path, expected }] })
+          .catch((error: unknown) => {
+            // A direct `NodeFsProvider` declares the method but owns no authority to run it.
+            if (getErrno(error) === 'CHECKED_WRITE_UNSUPPORTED') {
+              return undefined;
+            }
+            throw error;
+          });
+        if (result?.status === 'conflict') {
+          // `null` is an absent file: read it so the caller sees the same ENOENT a read would give.
+          const actual = result.conflicts[0]?.actual;
+          return { status: 'conflict', currentBytes: actual ? new Uint8Array(actual) : await bytes(path) } as const;
+        }
+        if (result !== undefined) {
+          return { status: 'committed', committedBytes: new Uint8Array(result.content) } as const;
+        }
+      }
       const currentBytes = await bytes(path);
       const unchanged =
         currentBytes.byteLength === expected.byteLength &&

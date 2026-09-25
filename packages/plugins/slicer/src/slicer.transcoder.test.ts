@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,10 +11,13 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
 import type { ExportFile } from '@taucad/runtime/types';
 import { unzipSync } from 'fflate';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 
+import { writeFakeInstall } from '#bambu-studio/fake-install.test-helpers.js';
+import type { FakeInstall } from '#bambu-studio/fake-install.test-helpers.js';
 import { bambuPlateMember, readBambuContainer } from '#container.js';
+import { slicerOptionsSchema } from '#slicer-options.js';
 import { slicerTranscoder } from '#slicer.transcoder.js';
 import { parseGcode } from '#toolpath.js';
 // The Bambu provider keeps its preflight private; this white-box import proves the container it admits.
@@ -301,5 +306,142 @@ describe('slicerTranscoder', () => {
       context,
     );
     expect(result).toEqual({ success: false, issues: [expect.objectContaining({ code: 'RUNTIME' })] });
+  });
+
+  describe('bambu-studio engine', () => {
+    let root: string;
+    let fake: FakeInstall;
+    type Recorded = { args: string[]; files: Record<string, { name: string }> };
+    const recorded = async (): Promise<Recorded> => JSON.parse(await readFile(fake.record, 'utf8')) as Recorded;
+
+    beforeAll(async () => {
+      root = await mkdtemp(join(tmpdir(), 'tau-slicer-bambu-'));
+      fake = await writeFakeInstall(root, { bundledVersion: '01.00.00.01' });
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    afterAll(async () => {
+      await rm(root, { recursive: true, force: true });
+    });
+
+    // The engine hands the signal to Node's child process API, which needs a real AbortSignal, not the mock's proxy.
+    const sliceWithRealSignal = async (file: ExportFile, options: Record<string, unknown>) => {
+      const { signal } = new AbortController();
+      const runtime = new Proxy(createRuntime(), {
+        get: (target, key, receiver): unknown => (key === 'signal' ? signal : Reflect.get(target, key, receiver)),
+      });
+      return definition.transcode({ from: 'glb', to: 'gcode.3mf', files: [file], options }, runtime, context);
+    };
+
+    const useFakeInstall = (): void => {
+      vi.stubEnv('TAU_BAMBU_STUDIO_PATH', fake.app);
+      vi.stubEnv('HOME', fake.home);
+    };
+
+    it('should return Bambu Studio’s archive byte for byte, sliced with default X1 Carbon presets', async () => {
+      useFakeInstall();
+      await fake.control({ mode: 'succeed' });
+      const result = await sliceWithRealSignal(readGlb('cube.glb'), { engine: 'bambu-studio', plate: 'cool' });
+      if (!result.success) {
+        expect.fail(JSON.stringify(result.issues));
+      }
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]).toMatchObject({ name: 'model.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf' });
+      expect(new TextDecoder().decode(result.data[0]!.bytes)).toBe('demo archive bytes');
+      const { args, files } = await recorded();
+      expect(args[args.indexOf('--curr-bed-type') + 1]).toBe('Cool Plate');
+      expect(Object.values(files).map(({ name }) => name)).toEqual([
+        'Bambu Lab X1 Carbon 0.4 nozzle',
+        '0.20mm Standard @BBL X1C',
+        'Bambu PLA Basic @BBL X1C',
+      ]);
+    });
+
+    it('should slice with the chosen presets and fill the rest from the printer hints', async () => {
+      useFakeInstall();
+      await fake.control({ mode: 'succeed' });
+      const result = await sliceWithRealSignal(readGlb('cube.glb'), {
+        engine: 'bambu-studio',
+        bambuStudio: {
+          process: '0.20mm Strength @BBL X1C',
+          hints: { model: 'X1C', plate: 'high-temperature', materials: [{ slot: 0, materialId: 'PETG' }] },
+        },
+      });
+      expect(result.success).toBe(true);
+      const { args, files } = await recorded();
+      expect(args[args.indexOf('--curr-bed-type') + 1]).toBe('High Temp Plate');
+      expect(Object.values(files).map(({ name }) => name)).toEqual([
+        'Bambu Lab X1 Carbon 0.4 nozzle',
+        '0.20mm Strength @BBL X1C',
+        'Bambu PETG Basic @BBL X1C',
+      ]);
+    });
+
+    it('should default the other presets for a chosen printer', async () => {
+      useFakeInstall();
+      await fake.control({ mode: 'succeed' });
+      const result = await sliceWithRealSignal(readGlb('cube.glb'), {
+        engine: 'bambu-studio',
+        preset: 'fine',
+        bambuStudio: { printer: 'Bambu Lab X1 Carbon 0.4 nozzle' },
+      });
+      expect(result.success).toBe(true);
+      const { files } = await recorded();
+      expect(Object.values(files).map(({ name }) => name)).toEqual([
+        'Bambu Lab X1 Carbon 0.4 nozzle',
+        '0.12mm Fine @BBL X1C',
+        'Bambu PLA Basic @BBL X1C',
+      ]);
+    });
+
+    it('should report a failed Bambu Studio slice as a runtime issue carrying its code', async () => {
+      useFakeInstall();
+      await fake.control({ mode: 'fail' });
+      await expect(sliceWithRealSignal(readGlb('cube.glb'), { engine: 'bambu-studio' })).resolves.toEqual({
+        success: false,
+        issues: [
+          expect.objectContaining({
+            code: 'RUNTIME',
+            message: 'Bambu Studio could not slice: Nothing to slice here.',
+            details: { engine: 'bambu-studio', code: 'BAMBU_STUDIO_SLICE_FAILED' },
+          }),
+        ],
+      });
+    });
+
+    it('should refuse when Bambu Studio is not installed', async () => {
+      vi.stubEnv('TAU_BAMBU_STUDIO_PATH', join(root, 'missing', 'BambuStudio.app'));
+      await expect(sliceWithRealSignal(readGlb('cube.glb'), { engine: 'bambu-studio' })).resolves.toEqual({
+        success: false,
+        issues: [
+          expect.objectContaining({
+            code: 'RUNTIME',
+            message: 'Slicing with Bambu Studio needs the Tau desktop app with Bambu Studio installed.',
+            details: { engine: 'bambu-studio', code: 'BAMBU_STUDIO_UNAVAILABLE' },
+          }),
+        ],
+      });
+    });
+
+    it('should reject unknown Bambu Studio options', () => {
+      expect(
+        slicerOptionsSchema.safeParse({ engine: 'bambu-studio', bambuStudio: { printer: 'X', nope: 1 } }).success,
+      ).toBe(false);
+      expect(
+        slicerOptionsSchema.safeParse({ engine: 'bambu-studio', bambuStudio: { hints: { model: 'X1C' } } }).success,
+      ).toBe(false);
+    });
+
+    it('should accept null for a setting the printer value decides', () => {
+      expect(
+        slicerOptionsSchema.safeParse({
+          engine: 'bambu-studio',
+          bambuStudio: { settings: Object.fromEntries([['filament_retraction_length', null]]) },
+        }).success,
+      ).toBe(true);
+    });
   });
 });

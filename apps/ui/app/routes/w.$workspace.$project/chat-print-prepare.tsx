@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
+import { machineSliceOptions } from '@taucad/agent-tools/registry';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Check, Eye, LoaderCircle, Scissors, Send } from 'lucide-react';
 import type { JSONSchema7 } from '@taucad/json-schema';
@@ -290,16 +291,6 @@ export const usePrintPrepare = ({
         : undefined,
     [activeKernelId, capabilities, kernelClient],
   );
-  const optionsSchema = useMemo<ResolvedSchema | undefined>(
-    () =>
-      route && Object.keys(route.exportOptions.schema).length > 0
-        ? {
-            schema: route.exportOptions.schema,
-            defaults: isRecordObject(route.exportOptions.defaults) ? route.exportOptions.defaults : {},
-          }
-        : undefined,
-    [route],
-  );
   const submissionSchema = useMemo<ResolvedSchema | undefined>(() => {
     if (!provider) {
       return undefined;
@@ -324,11 +315,38 @@ export const usePrintPrepare = ({
     new Map<string, { readonly uploadOperationId: string; readonly startOperationId: string }>(),
   );
 
-  const effectiveSubmission = useMemo(
-    () => (provider && entry ? { ...submissionDefaults(provider, entry, manifest), ...submission } : submission),
-    [entry, manifest, provider, submission],
+  const effectiveSubmission = useMemo(() => {
+    if (!provider || !entry) {
+      return submission;
+    }
+    const effective: Record<string, unknown> = { ...submissionDefaults(provider, entry, manifest), ...submission };
+    // The plate picked here is what the person says is installed when the machine cannot report it.
+    if (entry.snapshot.setup.bedType === undefined && typeof effective['expectedBedType'] === 'string') {
+      effective['operatorConfirmedBedType'] = effective['expectedBedType'];
+    }
+    return effective;
+  }, [entry, manifest, provider, submission]);
+  const plate =
+    typeof effectiveSubmission['expectedBedType'] === 'string' ? effectiveSubmission['expectedBedType'] : undefined;
+  /* The machine's own slicer options under the person's, so the Advanced form and the slice agree. */
+  const machineOptions = useMemo(
+    () => (manifest && plate ? machineSliceOptions(manifest, plate) : {}),
+    [manifest, plate],
   );
-  const optionsKey = JSON.stringify(options);
+  const optionsSchema = useMemo<ResolvedSchema | undefined>(
+    () =>
+      route && Object.keys(route.exportOptions.schema).length > 0
+        ? {
+            schema: route.exportOptions.schema,
+            defaults: {
+              ...(isRecordObject(route.exportOptions.defaults) ? route.exportOptions.defaults : {}),
+              ...machineOptions,
+            },
+          }
+        : undefined,
+    [machineOptions, route],
+  );
+  const optionsKey = JSON.stringify({ ...machineOptions, ...options });
   const isSliceStale = slice !== undefined && slice.optionsKey !== optionsKey;
 
   const sliceNow = useCallback(async (): Promise<void> => {
@@ -338,7 +356,9 @@ export const usePrintPrepare = ({
     setIsSlicing(true);
     setSliceError(undefined);
     try {
-      const result = await exportWithRuntimeValidatedInput(kernelClient, route, { exportOptions: options });
+      const result = await exportWithRuntimeValidatedInput(kernelClient, route, {
+        exportOptions: { ...machineOptions, ...options },
+      });
       if (!result.success) {
         throw new Error(result.issues.map((issue) => issue.message).join('; ') || 'Slicing failed.');
       }
@@ -367,7 +387,7 @@ export const usePrintPrepare = ({
     } finally {
       setIsSlicing(false);
     }
-  }, [entryPath, fileManager, kernelClient, manifest, options, optionsKey, route]);
+  }, [entryPath, fileManager, kernelClient, machineOptions, manifest, options, optionsKey, route]);
 
   const openPreview = useCallback((): void => {
     if (slice) {

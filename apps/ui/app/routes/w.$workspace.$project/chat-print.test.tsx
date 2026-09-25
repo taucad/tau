@@ -67,6 +67,15 @@ const renderPane = (client: MachineClient, bridge: PrintApprovalBridge = createB
     </TooltipProvider>,
   );
 
+/** What the fixture X1C fixes under every slice: its observed plate, nozzle, filament and recommended temperatures. */
+const machineSliceOptions = {
+  plate: 'textured-pei',
+  nozzleDiameter: 0.4,
+  filamentDiameter: 1.75,
+  nozzleTemperature: 250,
+  bedTemperature: 70,
+};
+
 /** The Prepare section, whose slice and send buttons share their names with the orientation card's primary action. */
 const prepareRegion = (): HTMLElement => screen.getByRole('region', { name: 'Prepare' });
 
@@ -203,7 +212,9 @@ describe('Print pane prepare and send', () => {
     slice.focus();
     await user.keyboard('{Enter}');
     await waitFor(() => {
-      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', { exportOptions: { preset: 'fine' } });
+      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        exportOptions: { ...machineSliceOptions, preset: 'fine' },
+      });
     });
     expect(mockWriteFiles).toHaveBeenCalledExactlyOnceWith({
       'exports/main.gcode.3mf': { content: new Uint8Array([0x50, 0x4b, 0x03, 0x04]) },
@@ -344,7 +355,9 @@ describe('Print pane prepare and send', () => {
 
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
     await waitFor(() => {
-      expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', { exportOptions: { layerHeight: 0.16 } });
+      expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
+        exportOptions: { ...machineSliceOptions, layerHeight: 0.16 },
+      });
     });
     expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
   });

@@ -948,6 +948,25 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
   });
 
+  /* Canvas round 16: the strip's Details keep Head, Branch tip and This device. */
+  it.each([
+    ['web', 'Workbench (browser)'],
+    ['desktop', 'Workbench (desktop app)'],
+  ] as const)('names this device in the strip’s Details on the %s build', async (target, device) => {
+    vi.stubEnv('TAU_TARGET', target);
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+    renderPane();
+
+    const strip = await screen.findByRole('region', { name: 'Where you are' });
+    await user.click(within(strip).getByRole('button', { name: 'Details' }));
+    const details = within(strip).getByLabelText('Details of where you are');
+    expect(details).toHaveTextContent(/Headrev-4/u);
+    expect(details).toHaveTextContent(`This device${device}`);
+    vi.unstubAllEnvs();
+  });
+
   it('names the line History shows, and says why an empty one is empty', async () => {
     renderPane();
 

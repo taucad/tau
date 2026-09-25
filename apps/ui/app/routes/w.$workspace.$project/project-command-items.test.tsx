@@ -1,5 +1,8 @@
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import type { UIMatch } from 'react-router';
+import type { RevisionRow } from '@taucad/revisions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
@@ -131,6 +134,13 @@ vi.mock('#flags/use-feature.js', () => ({
   useFeature: () => isTauDebugEnabled,
 }));
 
+/* One stable array: `useSyncExternalStore` re-renders forever on a new reference per read. */
+const settlements: readonly never[] = [];
+vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
+  getHostFinalizedTurns: () => settlements,
+  subscribeHostFinalizedTurns: () => () => undefined,
+}));
+
 vi.mock('#components/layout/command-palette.js', () => ({
   useCommandPaletteItems: (_matchId: string, factory: () => CommandPaletteItem[]) => {
     registeredItems = factory();
@@ -138,6 +148,26 @@ vi.mock('#components/layout/command-palette.js', () => ({
 }));
 
 const { ProjectCommandPaletteItems } = await import('./project-command-items.js');
+
+/* The palette reads the History the strip reads (`useRevisions`), which is a query. */
+const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    {children}
+  </QueryClientProvider>
+);
+
+const revisionRow = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
+  revisionNumber: undefined,
+  changeId: `change-${over.revisionId}`,
+  actor: 'user-1',
+  source: 'user',
+  createdAt: 1_788_220_800_000,
+  summary: 'Saved changes',
+  conflicted: false,
+  turnId: undefined,
+  tags: [],
+  ...over,
+});
 
 const match: UIMatch = {
   data: undefined,
@@ -165,9 +195,42 @@ describe('ProjectCommandPaletteItems', () => {
     revisionStatusHarness.reset();
   });
 
+  /* D2, M1: Undo restore is offered where the strip offers it — on the line whose head a restore minted,
+     while nothing has landed after it — so the palette never sends an undo the machine would refuse. */
+  it('offers Undo restore only while the line’s head is the restore and nothing landed after it', async () => {
+    revisionStatusHarness.rows = [
+      revisionRow({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'restore', restoredFrom: 'rev-1' }),
+      revisionRow({ revisionId: 'rev-2', revisionNumber: 2 }),
+      revisionRow({ revisionId: 'rev-1', revisionNumber: 1 }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
+    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+
+    await waitFor(() => {
+      expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(true);
+    });
+    const undo = registeredItems.find((item) => item.id === 'undo-restore');
+    expect(undo?.group).toBe('Revisions');
+    undo?.action?.();
+    expect(revisionStatusHarness.commands.undo).toHaveBeenCalledOnce();
+
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: true };
+    rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
+
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: false, headRevisionId: 'rev-2' };
+    rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
+
+    revisionStatusHarness.role = 'read';
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
+    rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
+  });
+
   it('should defer command registration until project context exists', () => {
     hasProjectContext = false;
-    const view = render(<ProjectCommandPaletteItems match={match} />);
+    const view = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     expect(registeredItems).toEqual([]);
 
     hasProjectContext = true;
@@ -176,7 +239,7 @@ describe('ProjectCommandPaletteItems', () => {
   });
 
   it('keeps Export navigation available while geometry is pending', () => {
-    render(<ProjectCommandPaletteItems match={match} />);
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
 
     const exportItem = registeredItems.find((item) => item.id === 'export');
     expect(exportItem?.disabled).toBeUndefined();
@@ -185,13 +248,13 @@ describe('ProjectCommandPaletteItems', () => {
   });
 
   it('registers Share with the shared Workbench owner', () => {
-    render(<ProjectCommandPaletteItems match={match} />);
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     registeredItems.find((item) => item.id === 'share-project')?.action?.();
     expect(openPanel).toHaveBeenCalledWith('share');
   });
 
   it('routes every Workbench command through the shared workspace owner', () => {
-    render(<ProjectCommandPaletteItems match={match} />);
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
 
     const expectedPanels = new Map([
       ['open-parameters', 'parameters'],
@@ -208,7 +271,7 @@ describe('ProjectCommandPaletteItems', () => {
   });
 
   it('routes backup choices through Revisions and uses the shared save request', () => {
-    render(<ProjectCommandPaletteItems match={match} />);
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
 
     registeredItems.find((item) => item.id === 'connect-tau-cloud')?.action?.();
     expect(openPanel).toHaveBeenLastCalledWith('revisions');
@@ -232,7 +295,7 @@ describe('ProjectCommandPaletteItems', () => {
     };
 
     revisionStatusHarness.role = 'write';
-    const { rerender } = render(<ProjectCommandPaletteItems match={match} />);
+    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     expect(registeredItems.find((item) => item.id === 'sync-now')?.disabled).toBe(false);
 
     revisionStatusHarness.role = 'read';
@@ -251,7 +314,7 @@ describe('ProjectCommandPaletteItems', () => {
       line: { kind: 'unknown' },
       remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
     };
-    const { rerender } = render(<ProjectCommandPaletteItems match={match} />);
+    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     const revisionIds = ['change-backup', 'disconnect-remote', 'sync-now', 'save-revision', 'revision-history'];
     for (const id of revisionIds) {
       expect(registeredItems.find((item) => item.id === id)?.group).toBe('Revisions');
@@ -265,7 +328,7 @@ describe('ProjectCommandPaletteItems', () => {
   });
 
   it('keeps Kernel hidden unless tauDebug is enabled', () => {
-    const { rerender } = render(<ProjectCommandPaletteItems match={match} />);
+    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     expect(registeredItems.find((item) => item.id === 'open-kernel')?.visible).toBe(false);
 
     isTauDebugEnabled = true;
@@ -285,7 +348,7 @@ describe('ProjectCommandPaletteItems', () => {
     captureCadImages.mockResolvedValue([
       { name: 'render.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) },
     ]);
-    render(<ProjectCommandPaletteItems match={match} />);
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
 
     const download = registeredItems.find((item) => item.id === 'download-png');
     expect(download?.disabled).toBe(false);
@@ -309,7 +372,7 @@ describe('ProjectCommandPaletteItems', () => {
 
   it('should archive the file manager root, not an absolute project path', async () => {
     getZippedDirectory.mockResolvedValue(new Blob(['zip']));
-    render(<ProjectCommandPaletteItems match={match} />);
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
 
     registeredItems.find((item) => item.id === 'download-zip')?.action?.();
 
@@ -324,7 +387,7 @@ describe('ProjectCommandPaletteItems', () => {
 
   it('should name the cause when the archive cannot be built', async () => {
     getZippedDirectory.mockRejectedValue(new Error('EACCES: workspace folder is unreadable'));
-    render(<ProjectCommandPaletteItems match={match} />);
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
 
     registeredItems.find((item) => item.id === 'download-zip')?.action?.();
 
@@ -336,7 +399,7 @@ describe('ProjectCommandPaletteItems', () => {
 
   it('reacts to camera registration and unregistration for a stable graphics actor', () => {
     geometryFormat = 'gltf';
-    const view = render(<ProjectCommandPaletteItems match={match} />);
+    const view = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
     expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
 
     cameraState = { position: [1, 2, 3] };

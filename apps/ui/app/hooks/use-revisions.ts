@@ -50,6 +50,8 @@ export type RevisionCard = {
    * minted, which is how History names a *Restored* row (A9).
    */
   readonly restoredFrom?: string;
+  /** The revision this one follows, its first parent by id; absent on a branch's first revision. */
+  readonly parent?: string;
   /**
    * Paths the settling host attested, for a card whose revision is not in this
    * page's graph. Otherwise the diff is asked of the graph on demand.
@@ -161,6 +163,7 @@ const cardOf = (row: RevisionRow, session: RevisionSessionUser | undefined): Rev
   tags: row.tags,
   trigger: row.trigger,
   ...(row.restoredFrom === undefined ? {} : { restoredFrom: row.restoredFrom }),
+  ...(row.parent === undefined ? {} : { parent: row.parent }),
 });
 
 /**
@@ -413,6 +416,35 @@ export function useRevisionChanges(card: RevisionCard | undefined): readonly Rev
     staleTime: Number.POSITIVE_INFINITY,
   });
   return useMemo(() => attested?.map((path) => ({ path, kind: 'modified' }) as const) ?? data ?? [], [attested, data]);
+}
+
+/**
+ * Which paths differ between one revision and the checkout's head, for
+ * *Compare with current* (canvas round 4b): the whole revision against the
+ * files as they are now, each path then opening the same checkout comparison a
+ * file row does.
+ *
+ * Both revisions are immutable, so the answer is exact for the head it was
+ * asked at; a new head is a new question.
+ *
+ * @param card - The revision to compare, or `undefined` while nothing is asked.
+ * @returns The paths, empty until the first answer.
+ * @public
+ */
+export function useRevisionChangesSince(card: RevisionCard | undefined): Readonly<{
+  changes: readonly RevisionDiffEntry[];
+  isLoaded: boolean;
+}> {
+  const client = useRevisionClient();
+  const head = useRevisionStatus()?.headRevisionId;
+  const { data } = useQuery({
+    queryKey: ['revision-diff-since', card?.revisionId ?? '', head ?? ''],
+    enabled: client !== undefined && card !== undefined && head !== undefined,
+    queryFn: async () =>
+      card === undefined || head === undefined ? [] : ((await client?.diff(head, card.revisionId)) ?? []),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  return { changes: data ?? [], isLoaded: data !== undefined };
 }
 
 /**

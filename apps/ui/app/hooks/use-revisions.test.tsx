@@ -14,7 +14,12 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { RevisionRow } from '@taucad/revisions';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
-import { useRevisionChanges, useRevisionFileComparison, useRevisions } from '#hooks/use-revisions.js';
+import {
+  useRevisionChanges,
+  useRevisionChangesSince,
+  useRevisionFileComparison,
+  useRevisions,
+} from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
@@ -415,6 +420,35 @@ describe('useRevisions', () => {
   });
 });
 
+describe('useRevisionChangesSince', () => {
+  /* Canvas round 4b: *Compare with current* reads the whole revision against the head the checkout is at. */
+  it('asks which paths differ between a revision and the head, and nothing before the head is known', async () => {
+    const card: RevisionCard = {
+      revisionId: 'rev-1',
+      n: 1,
+      createdAt: 0,
+      summary: '',
+      actor: '',
+      turnId: undefined,
+      conflicted: false,
+      trigger: 'save',
+    };
+    revisionStatusHarness.diff = [{ path: 'main.scad', kind: 'modified' }];
+    const { result, rerender } = renderHook(() => useRevisionChangesSince(card), { wrapper });
+    expect(result.current.isLoaded).toBe(false);
+    expect(revisionStatusHarness.diffRequests).toStrictEqual([]);
+
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.isLoaded).toBe(true);
+    });
+    expect(result.current.changes).toStrictEqual([{ path: 'main.scad', kind: 'modified' }]);
+    expect(revisionStatusHarness.diffRequests).toStrictEqual(['rev-1..rev-3']);
+  });
+});
+
 describe('useRevisionChanges', () => {
   it('asks the graph which paths a revision changed', async () => {
     revisionStatusHarness.diff = [
@@ -628,5 +662,20 @@ describe('useRevisionChanges', () => {
 
     expect(result.current.revisions[0]?.restoredFrom).toBe('rev-1');
     expect(result.current.revisions[1]?.restoredFrom).toBeUndefined();
+  });
+
+  /* W1 Details: the Parent row reads the first parent the graph named. */
+  it('carries the first parent onto each card, and none onto a first revision', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-2', revisionNumber: 2, parent: 'rev-1' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1 }),
+    ];
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(2);
+    });
+
+    expect(result.current.revisions.map((card) => card.parent)).toStrictEqual(['rev-1', undefined]);
   });
 });

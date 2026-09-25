@@ -15,6 +15,7 @@ import {
   Share2,
   SlidersHorizontal,
   Terminal,
+  Undo2,
 } from 'lucide-react';
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
@@ -30,6 +31,7 @@ import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
+import { selectStripVerbs, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -74,7 +76,16 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
      alone left an enabled *Sync now* for a read collaborator, whose push the
      API refuses — one shared predicate rather than two conditions. */
   const syncReadOnly = isSyncReadOnly(revisionStatus?.remote, projectRole);
-  const { syncNow } = useRevisionCommands();
+  const { syncNow, undo } = useRevisionCommands();
+  /* D2, M1: *Undo restore* where the strip offers it and nowhere else — the head the
+     restore minted on this line, with nothing landed after it — in the strip's own words. */
+  const { where, head, status } = useRevisionFacts();
+  const canUndoRestore = selectStripVerbs({
+    status,
+    where,
+    isHeadRestore: head?.restoredFrom !== undefined,
+    canWrite: projectRole !== 'read' && projectRole !== 'revoked',
+  }).secondary.includes('Undo restore');
   const saveRevision = useSaveRevisionRequest();
   const isRemoteConnected = revisionStatus?.remote.kind !== undefined && revisionStatus.remote.kind !== 'none';
   /* HQ7: backup verbs wait until the projection has located the line; before it, they could only fail. */
@@ -234,6 +245,14 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         action: saveRevision,
       },
       {
+        id: 'undo-restore',
+        label: 'Undo restore',
+        group: 'Revisions',
+        icon: <Undo2 />,
+        action: undo,
+        visible: canUndoRestore,
+      },
+      {
         id: 'share-project',
         label: 'Share project',
         group: 'Project',
@@ -367,6 +386,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       revisionStatus?.remote.phase,
       saveRevision,
       syncNow,
+      undo,
+      canUndoRestore,
     ],
   );
 

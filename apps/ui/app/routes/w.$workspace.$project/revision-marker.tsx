@@ -16,6 +16,7 @@ import {
   Copy,
   EllipsisVertical,
   GitBranch,
+  GitCompare,
   GitMerge,
   Link2,
   RotateCcw,
@@ -61,7 +62,7 @@ import { useTickAnimation } from '#hooks/use-tick-animation.js';
 import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { useProject } from '#hooks/use-project.js';
-import { useRevisionChanges, useRevisionFileComparison } from '#hooks/use-revisions.js';
+import { useRevisionChanges, useRevisionChangesSince, useRevisionFileComparison } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -183,13 +184,35 @@ export function FileRows({
   // oxlint-disable-next-line typescript/no-restricted-types -- required by React
 }): React.JSX.Element | null {
   const changes = useRevisionChanges(revision);
+  return <FileList revision={revision} changes={changes} compareAgainst={compareAgainst} label='Changed files' />;
+}
+
+/**
+ * The file list itself, for whichever paths a row shows: what the revision
+ * changed, or what differs from it now.
+ *
+ * @param props - The revision, its paths, what they are compared with, and the list's name.
+ * @returns The list, or nothing for no paths.
+ */
+function FileList({
+  revision,
+  changes,
+  compareAgainst,
+  label,
+}: {
+  readonly revision: RevisionCard;
+  readonly changes: readonly RevisionDiffEntry[];
+  readonly compareAgainst: 'parent' | 'checkout';
+  readonly label: string;
+  // oxlint-disable-next-line typescript/no-restricted-types -- required by React
+}): React.JSX.Element | null {
   const [comparing, setComparing] = useState<string>();
   const id = useId();
   if (changes.length === 0) {
     return null;
   }
   return (
-    <ul aria-label='Changed files' className='flex flex-col divide-y overflow-hidden rounded-md border bg-background'>
+    <ul aria-label={label} className='flex flex-col divide-y overflow-hidden rounded-md border bg-background'>
       {changes.map((change, index) => (
         <Collapsible
           key={change.path}
@@ -238,6 +261,46 @@ export function FileRows({
 }
 
 /**
+ * *Compare with current* (canvas round 4b): the whole revision against the
+ * files as they are now — every path that differs from the checkout's head,
+ * each opening the same checkout comparison a file row does — until the person
+ * stops comparing.
+ *
+ * @param props - The revision, and how to go back to its own changes.
+ * @returns The comparison.
+ */
+function CurrentComparison({
+  revision,
+  onStop,
+}: {
+  readonly revision: RevisionCard;
+  readonly onStop: () => void;
+}): React.JSX.Element {
+  const { changes, isLoaded } = useRevisionChangesSince(revision);
+  const name = revisionName(revision.n) ?? 'this revision';
+  const body = isLoaded ? (
+    changes.length === 0 ? (
+      <p role='note' className='text-xs text-muted-foreground'>{`No changes since ${name}.`}</p>
+    ) : (
+      <FileList revision={revision} changes={changes} compareAgainst='checkout' label={`Changed since ${name}`} />
+    )
+  ) : (
+    <p role='status' aria-busy='true' className='flex items-center gap-2 text-xs text-muted-foreground'>
+      <Spinner className='size-3' /> Loading comparison…
+    </p>
+  );
+  return (
+    <div className='flex flex-col gap-1'>
+      <div className='flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+        <span className='min-w-0 flex-auto'>Compared with the current files</span>
+        <ActionButton verb='Stop comparing' icon={X} variant='ghost' onClick={onStop} />
+      </div>
+      {body}
+    </div>
+  );
+}
+
+/**
  * A revision's exact facts, opened by the Details toggle in the same
  * `Collapsible`. The revision's id lives here and nowhere else a person reads
  * (EQ9); copying it is More's.
@@ -252,6 +315,18 @@ export function RevisionDetails({
   readonly revision: RevisionCard;
   readonly branch: string | undefined;
 }): React.JSX.Element {
+  /* The first parent the graph named; a branch's first revision follows none. A card
+     from elsewhere (a remote settlement) has neither a parent nor a number here. */
+  const parent =
+    revision.parent === undefined ? (
+      revision.n === 1 ? (
+        'None (first revision)'
+      ) : undefined
+    ) : (
+      <code key='parent' className='font-mono break-all'>
+        {revision.parent}
+      </code>
+    );
   const rows: ReadonlyArray<readonly [string, React.ReactNode]> = [
     [
       'Revision',
@@ -259,6 +334,7 @@ export function RevisionDetails({
         {revision.revisionId}
       </code>,
     ],
+    ...(parent === undefined ? [] : ([['Parent', parent]] as const)),
     ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
     ['Trigger', revisionTriggerLabel(revision.trigger)],
     ...(revision.createdAt > 0
@@ -483,10 +559,13 @@ export function RevisionMenu({
   revision,
   isCurrent,
   branch,
+  onCompareWithCurrent,
 }: {
   readonly revision: RevisionCard;
   readonly isCurrent: boolean;
   readonly branch: string | undefined;
+  /** History's row compares the whole revision with the current files; absent where nothing would show it. */
+  readonly onCompareWithCurrent?: () => void;
 }): React.JSX.Element {
   const status = useRevisionStatus();
   const role = useProjectRole();
@@ -572,6 +651,12 @@ export function RevisionMenu({
             setIsFormOpen(true);
           }}
         >
+          {onCompareWithCurrent === undefined ? null : (
+            <DropdownMenuItem onSelect={onCompareWithCurrent}>
+              <GitCompare aria-hidden />
+              Compare with current
+            </DropdownMenuItem>
+          )}
           {canWrite ? (
             <DropdownMenuItem
               onSelect={() => {
@@ -776,6 +861,8 @@ export function RevisionRow({
   const isRevealed = useRevisionReveal(projectId) === revision.revisionId;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  /* Canvas round 4b: the row shows its own changes, or the whole revision against the current files. */
+  const [isComparingCurrent, setIsComparingCurrent] = useState(false);
   useEffect(() => {
     if (!isRevealed) {
       return;
@@ -797,7 +884,16 @@ export function RevisionRow({
   const canUndoRestore = isCurrent && revision.restoredFrom !== undefined && !isDirty && canRestore;
 
   return (
-    <Collapsible asChild open={isOpen} onOpenChange={onOpenChange}>
+    <Collapsible
+      asChild
+      open={isOpen}
+      onOpenChange={(next) => {
+        if (!next) {
+          setIsComparingCurrent(false);
+        }
+        onOpenChange(next);
+      }}
+    >
       <li className='flex flex-col rounded-md transition-colors data-[state=open]:bg-accent/50 motion-reduce:transition-none'>
         <CollapsibleTrigger asChild>
           <button
@@ -857,7 +953,16 @@ export function RevisionRow({
               className='flex flex-col gap-2 pt-0.5 pb-2'
               onOpenChange={setIsDetailsOpen}
             >
-              <FileRows revision={revision} compareAgainst={isCurrent && isDirty ? 'checkout' : 'parent'} />
+              {isComparingCurrent ? (
+                <CurrentComparison
+                  revision={revision}
+                  onStop={() => {
+                    setIsComparingCurrent(false);
+                  }}
+                />
+              ) : (
+                <FileRows revision={revision} compareAgainst={isCurrent && isDirty ? 'checkout' : 'parent'} />
+              )}
               {role === 'read' && isCurrent ? (
                 <p className='text-xs text-muted-foreground'>
                   You can view this project. Restore changes only your copy.
@@ -865,7 +970,21 @@ export function RevisionRow({
               ) : null}
               <ActionsRow
                 slot='row-actions'
-                end={<RevisionMenu revision={revision} isCurrent={isCurrent} branch={branch} />}
+                end={
+                  <RevisionMenu
+                    revision={revision}
+                    isCurrent={isCurrent}
+                    branch={branch}
+                    /* The current row already compares its files with your edits (S38), so only another revision offers it. */
+                    {...(isCurrent
+                      ? {}
+                      : {
+                          onCompareWithCurrent: () => {
+                            setIsComparingCurrent(true);
+                          },
+                        })}
+                  />
+                }
               >
                 {isCurrent ? (
                   canUndoRestore ? (

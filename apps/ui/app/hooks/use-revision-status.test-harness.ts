@@ -197,8 +197,8 @@ export const revisionStatusMock = (): Record<string, unknown> => {
         revisionStatusHarness.rows
       );
     },
-    diff: async (revisionId: string) => {
-      revisionStatusHarness.diffRequests.push(revisionId);
+    diff: async (revisionId: string, from?: string) => {
+      revisionStatusHarness.diffRequests.push(from === undefined ? revisionId : `${from}..${revisionId}`);
       return revisionStatusHarness.diff;
     },
     compare: async () => {

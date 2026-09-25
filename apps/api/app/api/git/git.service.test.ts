@@ -5,9 +5,10 @@ import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { setImmediate } from 'node:timers/promises';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { ServiceUnavailableException, VersioningType } from '@nestjs/common';
+import { Logger, ServiceUnavailableException, VersioningType } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
@@ -381,6 +382,51 @@ describe('GitRepositoryService derived state (D19)', () => {
     expect(durableEvents.appendRevision).toHaveBeenCalledOnce();
     appended.resolve({ appended: false, reason: 'not-found' });
     await service.settled();
+  }, 60_000);
+
+  it('holds shutdown until an announcement still in flight has landed', async () => {
+    const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    const appended = Promise.withResolvers<{ appended: false; reason: 'not-found' }>();
+    durableEvents.appendRevision.mockReturnValue(appended.promise);
+    const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents });
+    await service.advertiseRefs(access, 'git-upload-pack');
+    expect(durableEvents.appendRevision).toHaveBeenCalledOnce();
+
+    const stopped = vi.fn();
+    const stopping = (async (): Promise<void> => {
+      await service.onModuleDestroy();
+      stopped();
+    })();
+    await setImmediate();
+    expect(stopped, 'shutdown must not pass an announcement still in flight').not.toHaveBeenCalled();
+
+    appended.resolve({ appended: false, reason: 'not-found' });
+    await stopping;
+    expect(stopped).toHaveBeenCalledOnce();
+  }, 60_000);
+
+  it('abandons a stuck announcement inside Fly’s 30 s kill_timeout, and says so', async () => {
+    const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    durableEvents.appendRevision.mockReturnValue(Promise.withResolvers<never>().promise);
+    const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents });
+    await service.advertiseRefs(access, 'git-upload-pack');
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    try {
+      const stopping = service.onModuleDestroy();
+      await vi.advanceTimersByTimeAsync(29_999);
+      await stopping;
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ pending: 1 }),
+        expect.stringContaining('Shutdown abandoned background work'),
+      );
+    } finally {
+      vi.useRealTimers();
+      warn.mockRestore();
+    }
   }, 60_000);
 
   it('repairs the mismatch on the next request, with no job in between', async () => {

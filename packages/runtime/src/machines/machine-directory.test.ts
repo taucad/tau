@@ -177,7 +177,12 @@ describe('host-owned machine directory', () => {
         ...entry,
         snapshot: {
           ...entry.snapshot,
-          setup: { materials: [{ slot: 0, state: 'empty' }] },
+          setup: {
+            materials: [
+              { slot: 0, state: 'empty' },
+              { slot: 1, state: 'loaded', materialId: 'PETG', profileId: 'GFG00' },
+            ],
+          },
           run: {
             state: 'printing',
             currentLayer: 12,

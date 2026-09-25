@@ -44,6 +44,8 @@ export type PrintRequestSummary = Readonly<{
   estimatedDuration?: number;
   /** Millimetres of filament. */
   filamentLength?: number;
+  /** The slicer that produced the artifact, e.g. `{ name: 'Bambu Studio', version: '02.08.02.61' }`. */
+  producer?: Readonly<{ name: string; version?: string }>;
 }>;
 
 /** One durable print request. @public */

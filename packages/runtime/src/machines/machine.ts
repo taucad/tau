@@ -269,6 +269,8 @@ export type MachineObservedMaterial = Readonly<{
   slot: number;
   state: 'empty' | 'loaded' | 'unknown';
   materialId?: string;
+  /** The vendor's filament profile id for the loaded spool; Bambu `tray_info_idx`, e.g. `GFG00`. */
+  profileId?: string;
   brand?: string;
   color?: string;
   remainingPercent?: number;

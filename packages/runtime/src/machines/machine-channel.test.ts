@@ -92,7 +92,7 @@ const request: PrintRequest = {
   artifact,
   configuration: {},
   requestedBy: { kind: 'agent', id: 'agent-1', label: 'Tau agent' },
-  summary: { fileName: 'part.gcode.3mf' },
+  summary: { fileName: 'part.gcode.3mf', producer: { name: 'Bambu Studio', version: '99.0.0.0' } },
   state: 'awaiting-approval',
   createdAt: '2026-09-14T00:00:00Z',
   updatedAt: '2026-09-14T00:00:00Z',

@@ -4,8 +4,14 @@ import type { AnyEventObject, AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#checkout.machine.js';
-import { checkoutMachine, checkoutQueuedCutLimit } from '#checkout.machine.js';
+import {
+  checkoutIgnoredEvents,
+  checkoutMachine,
+  checkoutQueuedCutLimit,
+  selectCheckoutDirty,
+} from '#checkout.machine.js';
 import type { CheckoutFenceActorInput, CheckoutMachineEvent } from '#checkout.machine.js';
+import type { TurnCutOf } from '#turn.types.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import {
   createFakeCallbackActors,
@@ -15,11 +21,10 @@ import {
 } from '@taucad/xstate-testing/fakes';
 import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
 import { guardActors } from '@taucad/xstate-testing/inspect';
-import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
- * Path table — `checkout.machine` (catalogue: 24).
+ * Path table — `checkout.machine` (catalogue: 30).
  *
  *  1  rehydrates from `input` and rests `clean`
  *  2  `changed` → `dirty` and bumps the write generation
@@ -32,14 +37,16 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  *  9  `writeRevision` failure → `failed` + `cutFailed`, carrying the `close`
  *     trigger and the store's sentence a host's close flush rejects with (C74)
  * 10  `casHead` failure → `failed` + `cutFailed`
- * 11  `readHead` failure while re-reading → `failed` + `cutFailed`
+ * 11  `readHead` failure while re-reading → `failed`, answering nobody twice
  * 12  `failed` is non-terminal: `cut` retries, `changed` returns to `dirty`
  * 13  a refused fence is an event, never `onError` → `failed` + `cutFailed`
  * 14  the fence is released when the mint leaves `minting`
  * 15  a `cut` arriving during a mint is served afterwards, so both requesters
  *     are answered when the mint succeeds
- * 16  `headChanged` adopts a new head without leaving `clean`
- * 17  every outcome is both sent to the parent and emitted, with its trigger and turn id
+ * 16  `headMoved` in `clean` re-reads branch, head and tree, and rests `clean`
+ *     when nothing was written since (RM-R5)
+ * 17  every outcome is both sent to the parent and emitted, with its trigger,
+ *     request id and turn
  * 18  start and stop leak no child, the snapshot is serializable and holds no function
  * 19  a mint that fails answers the waiting requests too, instead of stranding
  *     them behind a queue nothing drains (R4)
@@ -48,43 +55,28 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  * 21  the idle window survives a failed mint: re-entering `dirty` restarts it
  * 22  a `save` on an unchanged tree mints nothing and answers `nothingToSave`
  *     (I5, AC12)
- * 23  consecutive trigger-only requests queued during a mint collapse into one,
- *     turn-bearing requests keep their order (R13)
+ * 23  consecutive trigger-only requests queued during a mint merge into one
+ *     mint that keeps every requester; turn requests keep their order (RM-R2)
  * 24  the queue is capped, and the request that does not fit is answered
- *     `cutFailed { reason: 'queue-full' }` rather than dropped (R13)
- * 25  a head fact during a mint is deferred: the mint's own compare-and-swap
- *     answers, then the head is re-read, also after a failed mint (W0.9)
+ *     `cutFailed { reason: 'queue-full' }` with its own id (R13)
+ * 25  a head move during a mint is deferred: the mint's own compare-and-swap
+ *     answers, then the head is re-read, also after a failed mint (RM-R6)
+ * 26  `cancelCut` withdraws a queued request and answers `cutCancelled`; for the
+ *     running mint or an unknown id it changes nothing (RM-R4)
+ * 27  a trigger-only cut that finds a lease after its capture writes nothing,
+ *     answers `nothingToSave` naming the lease, and stays `dirty` (RM-R16)
+ * 28  the status fact carries the branch and head tree (RM-R5)
+ * 29  `selectCheckoutDirty` reads the declared `dirty` tag (MC-R28)
  * --  `getSimplePaths` generates no state value the table above leaves unexercised
  */
 
-/**
- * Known defects (MC-S5): public events a reachable state neither takes nor
- * declares ignored. W5 (or the W0 item named on the row) answers each one or
- * moves it to an exported `checkoutIgnoredEvents` (D13, MC-R17), and deletes
- * the row as it lands.
- */
-const knownDefects: IgnoredEvents = {
-  checkout: [
-    // W5: totality — a fence answer outside `minting.acquiring`, the only state that waits for one.
-    ['clean', 'fenceGranted'],
-    ['clean', 'fenceRefused'],
-    ['dirty.quiet', 'fenceGranted'],
-    ['dirty.quiet', 'fenceRefused'],
-    ['minting.cutting', 'fenceGranted'],
-    ['minting.cutting', 'fenceRefused'],
-    ['minting.writing', 'fenceGranted'],
-    ['minting.writing', 'fenceRefused'],
-    ['minting.publishing', 'fenceGranted'],
-    ['minting.publishing', 'fenceRefused'],
-    ['rereading', 'fenceGranted'],
-    ['rereading', 'fenceRefused'],
-    ['failed', 'fenceGranted'],
-    ['failed', 'fenceRefused'],
-  ],
-};
-
 const headTreeId = 'tree-head';
 const nextTreeId = 'tree-next';
+
+const turnOf = (turnId: string, runId = `run-${turnId}`): TurnCutOf => ({
+  key: { chatId: 'chat-1', turnId, runId, attempt: 1 },
+  turnCut: 'result',
+});
 
 type Harness = Readonly<{
   actor: ReturnType<typeof createActor<typeof checkoutMachine>>;
@@ -96,7 +88,7 @@ type Harness = Readonly<{
 }>;
 
 const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWindow?: number }>): Harness => {
-  const guard = guardActors({ ignore: knownDefects });
+  const guard = guardActors({ ignore: { checkout: checkoutIgnoredEvents } });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const parent = createFakeParent();
@@ -141,11 +133,16 @@ const mintToCas = async (harness: Harness, treeId = nextTreeId): Promise<void> =
   harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
   harness.promises.settle('cut', { output: { treeId, cutId: 'cut-1' } });
   await flush();
-  harness.promises.settle('writeRevision', { output: { revisionId: 'rev-2' } });
+  harness.promises.settle('writeRevision', { output: { status: 'written', revisionId: 'rev-2' } });
   await flush();
 };
 
 const types = (events: ReadonlyArray<{ type: string }>): readonly string[] => events.map((event) => event.type);
+
+const answersOf = (events: readonly AnyEventObject[]): AnyEventObject[] =>
+  events.filter((event) =>
+    ['revisionMinted', 'nothingToSave', 'cutFailed', 'casLost', 'cutCancelled'].includes(event.type),
+  );
 
 describe('checkoutMachine', () => {
   it('rehydrates from input and rests clean', () => {
@@ -193,7 +190,7 @@ describe('checkoutMachine', () => {
     const { actor, promises, callbacks } = harness;
 
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
 
     expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
     expect(callbacks.active('fence')).toBe(1);
@@ -213,7 +210,7 @@ describe('checkoutMachine', () => {
         treeId: nextTreeId,
         parents: ['rev-1'],
         trigger: 'turn',
-        turnId: 'turn-1',
+        turn: turnOf('turn-1'),
         leaseIds: ['run-1'],
       },
     ]);
@@ -229,7 +226,7 @@ describe('checkoutMachine', () => {
     const { actor, promises, emitted, parent } = harness;
 
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
     harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
     promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
     await flush();
@@ -247,12 +244,12 @@ describe('checkoutMachine', () => {
     const { actor, promises } = harness;
 
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: [] });
     harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
     promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-1' } });
     await flush();
     actor.send({ type: 'changed', paths: ['b.ts'], generation: 2 });
-    promises.settle('writeRevision', { output: { revisionId: 'rev-2' } });
+    promises.settle('writeRevision', { output: { status: 'written', revisionId: 'rev-2' } });
     await flush();
     promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
     await flush();
@@ -267,7 +264,7 @@ describe('checkoutMachine', () => {
     const { actor, promises, emitted, parent } = harness;
 
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
-    actor.send({ type: 'cut', trigger: 'idle', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'idle', leaseIds: [] });
     await mintToCas(harness);
     promises.settle('casHead', { output: { status: 'conflicted', head: 'rev-9' } });
     await flush();
@@ -276,7 +273,7 @@ describe('checkoutMachine', () => {
     expect(types(emitted)).toContain('casLost');
     expect(types(parent.events)).toContain('casLost');
 
-    promises.settle('readHead', { output: { revisionId: 'rev-9', treeId: 'tree-9' } });
+    promises.settle('readHead', { output: { revisionId: 'rev-9', treeId: 'tree-9', branch: 'main' } });
     await flush();
 
     expect(actor.getSnapshot().matches('dirty')).toBe(true);
@@ -290,7 +287,7 @@ describe('checkoutMachine', () => {
     const harness = start();
     const { actor, promises, emitted } = harness;
 
-    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
     harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
     promises.settle('cut', { error: new Error('quota') });
     await flush();
@@ -306,18 +303,17 @@ describe('checkoutMachine', () => {
    * Under the `close` trigger, because that refusal is the one a host has to
    * carry out of the process (C74).
    *
-   * A host's close flush listens for `cutFailed` filtered on
-   * `trigger === 'close'` and rejects with `event.reason`, so the store's own
-   * sentence and that trigger are the whole propagation: drop either and the
-   * close cut stops rejecting — it waits out the flush bound and reports a
-   * deadline instead of the refusal, which is the data-loss class C70 pins at
-   * the daemon. Asserting only the event *type* here left that unguarded.
+   * A host's close flush listens for `cutFailed` for its request and rejects
+   * with `event.reason`, so the store's own sentence is the whole propagation:
+   * drop it and the close cut stops rejecting — it waits out the flush bound and
+   * reports a deadline instead of the refusal, which is the data-loss class C70
+   * pins at the daemon.
    */
   it('fails with cutFailed when writeRevision rejects, carrying the trigger and the store’s sentence', async () => {
     const harness = start();
     const { actor, promises, emitted, parent } = harness;
 
-    actor.send({ type: 'cut', trigger: 'close', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'close-1', trigger: 'close', leaseIds: [] });
     harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
     promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-1' } });
     await flush();
@@ -329,6 +325,7 @@ describe('checkoutMachine', () => {
     expect(refusal).toMatchObject({
       checkoutId: 'checkout-1',
       trigger: 'close',
+      requestId: 'close-1',
       reason: expect.stringContaining('out of space') as unknown as string,
     });
     expect(parent.events.find((event) => event.type === 'cutFailed')).toEqual(refusal);
@@ -340,7 +337,7 @@ describe('checkoutMachine', () => {
     const harness = start();
     const { actor, promises, emitted } = harness;
 
-    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
     await mintToCas(harness);
     promises.settle('casHead', { error: new Error('ref locked') });
     await flush();
@@ -351,11 +348,11 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
-  it('fails when the head re-read rejects', async () => {
+  it('fails when the head re-read rejects, answering its requester once', async () => {
     const harness = start();
-    const { actor, promises } = harness;
+    const { actor, promises, parent } = harness;
 
-    actor.send({ type: 'cut', trigger: 'idle', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'idle', leaseIds: [] });
     await mintToCas(harness);
     promises.settle('casHead', { output: { status: 'conflicted', head: 'rev-9' } });
     await flush();
@@ -363,6 +360,7 @@ describe('checkoutMachine', () => {
     await flush();
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
+    expect(answersOf(parent.events).map((event) => event.type)).toEqual(['casLost']);
 
     actor.stop();
   });
@@ -371,7 +369,7 @@ describe('checkoutMachine', () => {
     const harness = start();
     const { actor, promises, callbacks } = harness;
 
-    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
     callbacks.sendBack('fence', { type: 'fenceGranted' });
     promises.settle('cut', { error: new Error('quota') });
     await flush();
@@ -380,7 +378,7 @@ describe('checkoutMachine', () => {
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 3 });
     expect(actor.getSnapshot().matches('dirty')).toBe(true);
 
-    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-2', trigger: 'save', leaseIds: [] });
     expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
 
     actor.stop();
@@ -390,7 +388,7 @@ describe('checkoutMachine', () => {
     const harness = start();
     const { actor, callbacks, emitted } = harness;
 
-    actor.send({ type: 'cut', trigger: 'close', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'close', leaseIds: [] });
     callbacks.sendBack('fence', { type: 'fenceRefused', reason: 'held elsewhere' });
     await flush();
 
@@ -406,7 +404,7 @@ describe('checkoutMachine', () => {
     const harness = start();
     const { actor, promises, callbacks } = harness;
 
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: [] });
     await mintToCas(harness);
     expect(callbacks.active('fence')).toBe(1);
 
@@ -423,9 +421,9 @@ describe('checkoutMachine', () => {
     const harness = start();
     const { actor, promises, parent } = harness;
 
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: [] });
     await mintToCas(harness);
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-2', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-2', trigger: 'turn', turn: turnOf('turn-2'), leaseIds: [] });
     promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
     await flush();
 
@@ -434,11 +432,7 @@ describe('checkoutMachine', () => {
     promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-2' } });
     await flush();
 
-    const answered = parent.events.filter(
-      (event): event is AnyEventObject & { turnId?: string } =>
-        event.type === 'revisionMinted' || event.type === 'nothingToSave',
-    );
-    expect(answered.map((event) => event.turnId)).toEqual(['turn-1', 'turn-2']);
+    expect(answersOf(parent.events).map((event): unknown => event['requestId'])).toEqual(['r-1', 'r-2']);
 
     actor.stop();
   });
@@ -447,83 +441,103 @@ describe('checkoutMachine', () => {
     const harness = start();
     const { actor, promises, parent } = harness;
 
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: [] });
     harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-2', leaseIds: [] });
-    actor.send({ type: 'cut', trigger: 'restore', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-2', trigger: 'turn', turn: turnOf('turn-2'), leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-3', trigger: 'restore', leaseIds: [] });
     promises.settle('cut', { error: new Error('disk full') });
     await flush();
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
-    /* AC9: a turn waits on its answer with a bound; an unanswered request
-     * strands it until the timeout, and the queue never drains. */
-    const answered = parent.events.filter(
-      (event): event is AnyEventObject & { turnId?: string; trigger?: string } => event.type === 'cutFailed',
-    );
-    expect(answered.map((event) => event.turnId)).toEqual(['turn-1', 'turn-2', undefined]);
-    expect(answered.map((event) => event.trigger)).toEqual(['turn', 'turn', 'restore']);
+    const answered = parent.events.filter((event) => event.type === 'cutFailed');
+    expect(answered.map((event): unknown => event['requestId'])).toEqual(['r-1', 'r-2', 'r-3']);
+    expect(answered.map((event): unknown => event['trigger'])).toEqual(['turn', 'turn', 'restore']);
     expect(actor.getSnapshot().context.queued).toEqual([]);
 
     actor.stop();
   });
 
-  it('adopts a new head without leaving clean', () => {
-    const { actor } = start();
+  /* RM-R5: a producer's fact is a hint; the actor re-reads branch, head and tree from the store. */
+  it('should reread the head instead of adopting a finalized hint', async () => {
+    const { actor, promises, parent } = start();
 
-    actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
+    actor.send({ type: 'headMoved' });
+
+    expect(actor.getSnapshot().matches('rereading')).toBe(true);
+    promises.settle('readHead', { output: { revisionId: 'rev-7', treeId: 'tree-7', branch: 'feature' } });
+    await flush();
 
     expect(actor.getSnapshot().matches('clean')).toBe(true);
-    expect(actor.getSnapshot().context.headRevisionId).toBe('rev-7');
-    expect(actor.getSnapshot().context.headTreeId).toBe('tree-7');
+    expect(actor.getSnapshot().context).toMatchObject({
+      headRevisionId: 'rev-7',
+      headTreeId: 'tree-7',
+      branch: 'feature',
+    });
+    expect(parent.events.findLast((event) => event.type === 'checkoutStatusChanged')).toEqual({
+      type: 'checkoutStatusChanged',
+      checkoutId: 'checkout-1',
+      status: 'clean',
+      branch: 'feature',
+      headRevisionId: 'rev-7',
+      headTreeId: 'tree-7',
+    });
 
     actor.stop();
   });
 
-  it('adopts an applied head as clean', () => {
-    const { actor } = start();
+  it('re-reads into dirty when the tree was written since it was clean', async () => {
+    const { actor, promises } = start();
 
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
-    actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
+    actor.send({ type: 'headMoved' });
+    promises.settle('readHead', { output: { revisionId: 'rev-7', treeId: 'tree-7', branch: 'main' } });
+    await flush();
 
-    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    expect(actor.getSnapshot().matches('dirty')).toBe(true);
     expect(actor.getSnapshot().context.headRevisionId).toBe('rev-7');
 
     actor.stop();
   });
 
-  /* W0.9, L7 D-L7-3: a head fact used to exit `minting` and answer nobody, so
+  /* W0.9, L7 D-L7-3, RM-R6: a head fact used to exit `minting` and answer nobody, so
    * the turn waited out its 30 s bound while the abandoned `casHead` still
    * published. The mint's own compare-and-swap answers; the head is re-read after. */
   it('should defer a head move during a mint and re-read after it settles', async () => {
     const harness = start();
     const { actor, promises, parent } = harness;
-    const answers = () =>
-      parent.events.filter((event) => ['revisionMinted', 'nothingToSave', 'cutFailed', 'casLost'].includes(event.type));
 
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
     await mintToCas(harness);
-    actor.send({ type: 'headChanged', revisionId: 'rev-0', treeId: 'tree-0' });
+    actor.send({ type: 'headMoved' });
     await flush();
 
     expect(actor.getSnapshot().matches({ minting: 'publishing' })).toBe(true);
-    expect(answers()).toEqual([]);
+    expect(answersOf(parent.events)).toEqual([]);
 
     promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
     await flush();
 
-    expect(answers()).toEqual([
-      { type: 'revisionMinted', checkoutId: 'checkout-1', trigger: 'turn', turnId: 'turn-1', revisionId: 'rev-2' },
+    expect(answersOf(parent.events)).toEqual([
+      {
+        type: 'revisionMinted',
+        checkoutId: 'checkout-1',
+        trigger: 'turn',
+        requestId: 'r-1',
+        turn: turnOf('turn-1'),
+        revisionId: 'rev-2',
+        branch: 'main',
+      },
     ]);
     expect(promises.inputsFor('casHead')).toEqual([
       { checkoutId: 'checkout-1', branch: 'main', expectedHead: 'rev-1', head: 'rev-2' },
     ]);
     expect(actor.getSnapshot().matches('rereading')).toBe(true);
 
-    promises.settle('readHead', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
+    promises.settle('readHead', { output: { revisionId: 'rev-3', treeId: 'tree-3', branch: 'main' } });
     await flush();
 
     expect(actor.getSnapshot().context.headRevisionId).toBe('rev-3');
-    expect(answers()).toHaveLength(1);
+    expect(answersOf(parent.events)).toHaveLength(1);
 
     actor.stop();
   });
@@ -532,28 +546,46 @@ describe('checkoutMachine', () => {
     const harness = start();
     const { actor, promises, callbacks, parent } = harness;
 
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
     callbacks.sendBack('fence', { type: 'fenceGranted' });
-    actor.send({ type: 'headChanged', revisionId: 'rev-0', treeId: 'tree-0', branch: 'feature' });
+    actor.send({ type: 'headMoved' });
     promises.settle('cut', { error: new Error('EIO') });
     await flush();
 
     expect(actor.getSnapshot().matches('rereading')).toBe(true);
-    expect(actor.getSnapshot().context.branch).toBe('feature');
 
-    promises.settle('readHead', { error: new Error('ESTALE') });
+    promises.settle('readHead', { output: { revisionId: 'rev-0', treeId: 'tree-0', branch: 'feature' } });
     await flush();
 
+    expect(actor.getSnapshot().context.branch).toBe('feature');
     expect(parent.events.filter((event) => event.type === 'cutFailed')).toHaveLength(1);
 
     actor.stop();
   });
 
-  it('sends and emits the same minted outcome with its trigger and turn id', async () => {
+  it('re-reads again when the head moves during a re-read', async () => {
+    const { actor, promises } = start();
+
+    actor.send({ type: 'headMoved' });
+    actor.send({ type: 'headMoved' });
+    promises.settle('readHead', { output: { revisionId: 'rev-7', treeId: 'tree-7', branch: 'main' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches('rereading')).toBe(true);
+    promises.settle('readHead', { output: { revisionId: 'rev-8', treeId: 'tree-8', branch: 'main' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    expect(actor.getSnapshot().context.headRevisionId).toBe('rev-8');
+
+    actor.stop();
+  });
+
+  it('sends and emits the same minted outcome with its trigger, request id and turn', async () => {
     const harness = start();
     const { actor, promises, emitted, parent } = harness;
 
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
     await mintToCas(harness);
     promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
     await flush();
@@ -562,8 +594,10 @@ describe('checkoutMachine', () => {
       type: 'revisionMinted',
       checkoutId: 'checkout-1',
       trigger: 'turn',
-      turnId: 'turn-1',
+      requestId: 'r-1',
+      turn: turnOf('turn-1'),
       revisionId: 'rev-2',
+      branch: 'main',
     };
     expect(emitted.find((event) => event.type === 'revisionMinted')).toEqual(expected);
     expect(parent.events.find((event) => event.type === 'revisionMinted')).toEqual(expected);
@@ -574,7 +608,7 @@ describe('checkoutMachine', () => {
   it('starts and stops with no leaked child, a serializable snapshot and no function in context', () => {
     const { actor, callbacks } = start();
 
-    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
     const persisted = actor.getPersistedSnapshot();
 
     expect(() => JSON.stringify(persisted)).not.toThrow();
@@ -621,7 +655,11 @@ describe('checkoutMachine', () => {
     clock.advance(1000);
 
     expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
-    expect(actor.getSnapshot().context.pending).toEqual({ trigger: 'idle', leaseIds: [] });
+    expect((actor.getSnapshot().context as Record<string, unknown>)['pending']).toEqual({
+      trigger: 'idle',
+      requesters: [],
+      leaseIds: [],
+    });
 
     await mintToCas(harness);
     promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
@@ -633,6 +671,7 @@ describe('checkoutMachine', () => {
         checkoutId: 'checkout-1',
         trigger: 'idle',
         revisionId: 'rev-2',
+        branch: 'main',
       },
     ]);
 
@@ -643,7 +682,7 @@ describe('checkoutMachine', () => {
     const harness = start({ idleWindow: 1000 });
     const { actor, clock, callbacks } = harness;
 
-    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
     callbacks.sendBack('fence', { type: 'fenceRefused', reason: 'held' });
     await flush();
     expect(actor.getSnapshot().matches('failed')).toBe(true);
@@ -654,7 +693,7 @@ describe('checkoutMachine', () => {
     clock.advance(1000);
 
     expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
-    expect(actor.getSnapshot().context.pending?.trigger).toBe('idle');
+    expect((actor.getSnapshot().context as Record<string, { trigger?: string }>)['pending']?.trigger).toBe('idle');
 
     actor.stop();
   });
@@ -664,37 +703,81 @@ describe('checkoutMachine', () => {
     const { actor, promises, emitted } = harness;
 
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
-    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'save-1', trigger: 'save', leaseIds: [] });
     harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
     promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
     await flush();
 
     expect(promises.inputsFor('writeRevision')).toEqual([]);
     expect(emitted.filter((event) => event.type === 'nothingToSave')).toEqual([
-      { type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'save' },
+      { type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'save', requestId: 'save-1' },
     ]);
 
     actor.stop();
   });
 
-  it('collapses consecutive trigger-only requests queued behind a mint', async () => {
+  it('merges consecutive trigger-only requests queued behind a mint, keeping every requester', () => {
     const harness = start();
     const { actor } = harness;
 
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
-    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
-    actor.send({ type: 'cut', trigger: 'idle', leaseIds: [] });
-    actor.send({ type: 'cut', trigger: 'close', leaseIds: [] });
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-2', leaseIds: ['run-2'] });
-    actor.send({ type: 'cut', trigger: 'hidden', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 't-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', requestId: 's-1', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'i-1', trigger: 'idle', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'c-1', trigger: 'close', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 't-2', trigger: 'turn', turn: turnOf('turn-2'), leaseIds: ['run-2'] });
+    actor.send({ type: 'cut', requestId: 'h-1', trigger: 'hidden', leaseIds: [] });
 
-    /* Three trigger-only wishes are one cut, and the later trigger wins; the
-     * two turns keep their own places because each is waiting for an answer. */
+    /* Three trigger-only wishes are one mint recording the later trigger; the
+     * two turns keep their own places because each names its attempt. */
     expect(actor.getSnapshot().context.queued).toEqual([
-      { trigger: 'close', leaseIds: [] },
-      { trigger: 'turn', turnId: 'turn-2', leaseIds: ['run-2'] },
-      { trigger: 'hidden', leaseIds: [] },
+      {
+        trigger: 'close',
+        requesters: [
+          { requestId: 's-1', trigger: 'save' },
+          { requestId: 'i-1', trigger: 'idle' },
+          { requestId: 'c-1', trigger: 'close' },
+        ],
+        leaseIds: [],
+      },
+      {
+        trigger: 'turn',
+        requesters: [{ requestId: 't-2', trigger: 'turn' }],
+        turn: turnOf('turn-2'),
+        leaseIds: ['run-2'],
+      },
+      { trigger: 'hidden', requesters: [{ requestId: 'h-1', trigger: 'hidden' }], leaseIds: [] },
     ]);
+
+    actor.stop();
+  });
+
+  /* L7 D-L7-2, RM-R2: R13 replaced a queued trigger-only request, and the replaced requester was never answered. */
+  it('should answer every coalesced requester with its own request id', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'cut', requestId: 't-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', requestId: 'branch-1/cut', trigger: 'switch', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'save-1', trigger: 'save', leaseIds: [] });
+    await mintToCas(harness);
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
+    await flush();
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-3', cutId: 'cut-2' } });
+    await flush();
+    promises.settle('writeRevision', { output: { status: 'written', revisionId: 'rev-3' } });
+    await flush();
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-3' } });
+    await flush();
+
+    expect(
+      answersOf(parent.events).map((event): unknown[] => [event['requestId'], event['trigger'], event['revisionId']]),
+    ).toEqual([
+      ['t-1', 'turn', 'rev-2'],
+      ['branch-1/cut', 'switch', 'rev-3'],
+      ['save-1', 'save', 'rev-3'],
+    ]);
+    expect(promises.inputsFor('writeRevision').at(-1)).toMatchObject({ trigger: 'save' });
 
     actor.stop();
   });
@@ -703,18 +786,25 @@ describe('checkoutMachine', () => {
     const harness = start();
     const { actor, emitted, parent } = harness;
 
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-0', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-0', trigger: 'turn', turn: turnOf('turn-0'), leaseIds: [] });
     for (let index = 0; index < checkoutQueuedCutLimit; index += 1) {
-      actor.send({ type: 'cut', trigger: 'turn', turnId: `turn-${index + 1}`, leaseIds: [] });
+      actor.send({
+        type: 'cut',
+        requestId: `r-${index + 1}`,
+        trigger: 'turn',
+        turn: turnOf(`turn-${index + 1}`),
+        leaseIds: [],
+      });
     }
-    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-over', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-over', trigger: 'turn', turn: turnOf('turn-over'), leaseIds: [] });
 
     expect(actor.getSnapshot().context.queued).toHaveLength(checkoutQueuedCutLimit);
     const refusal = {
       type: 'cutFailed',
       checkoutId: 'checkout-1',
       trigger: 'turn',
-      turnId: 'turn-over',
+      requestId: 'r-over',
+      turn: turnOf('turn-over'),
       reason: 'queue-full',
     };
     expect(emitted.find((event) => event.type === 'cutFailed')).toEqual(refusal);
@@ -723,12 +813,113 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
+  /* RM-R4: a released turn withdraws its queued cut, and the checkout says so. */
+  it('should cancel a queued cut and answer cutCancelled with its id', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'cut', requestId: 'save-1', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 't-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
+    actor.send({ type: 'cancelCut', requestId: 't-1' });
+
+    expect(answersOf(parent.events)).toEqual([
+      { type: 'cutCancelled', checkoutId: 'checkout-1', requestId: 't-1', turn: turnOf('turn-1') },
+    ]);
+    expect(actor.getSnapshot().context.queued).toEqual([]);
+
+    /* The running mint answers for itself; cancelling it changes nothing. */
+    actor.send({ type: 'cancelCut', requestId: 'save-1' });
+    actor.send({ type: 'cancelCut', requestId: 'unknown' });
+    await mintToCas(harness);
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
+    await flush();
+
+    expect(answersOf(parent.events).map((event): unknown[] => [event.type, event['requestId']])).toEqual([
+      ['cutCancelled', 't-1'],
+      ['revisionMinted', 'save-1'],
+    ]);
+
+    actor.stop();
+  });
+
+  it('keeps a merged entry for its other requesters when one of them cancels', () => {
+    const harness = start();
+    const { actor } = harness;
+
+    actor.send({ type: 'cut', requestId: 'r-0', trigger: 'turn', turn: turnOf('turn-0'), leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 's-1', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 's-2', trigger: 'close', leaseIds: [] });
+    actor.send({ type: 'cancelCut', requestId: 's-1' });
+
+    expect(actor.getSnapshot().context.queued).toEqual([
+      { trigger: 'close', requesters: [{ requestId: 's-2', trigger: 'close' }], leaseIds: [] },
+    ]);
+
+    actor.stop();
+  });
+
+  /* RM-R16: the fresh fence — a lease written by another tab after the capture holds the checkout. */
+  it('writes nothing, names the lease and stays dirty when a save finds a lease', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    const heldBy = { chatId: 'chat-2', turnId: 'turn-9', runId: 'run-9', attempt: 1 };
+
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    actor.send({ type: 'cut', requestId: 'save-1', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-1' } });
+    await flush();
+    promises.settle('writeRevision', { output: { status: 'held', heldBy } });
+    await flush();
+
+    expect(answersOf(parent.events)).toEqual([
+      { type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'save', requestId: 'save-1', heldBy },
+    ]);
+    expect(promises.inputsFor('casHead')).toEqual([]);
+    expect(actor.getSnapshot().matches('dirty')).toBe(true);
+
+    actor.stop();
+  });
+
+  it('reports its branch and head tree with every status (RM-R5)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
+    await mintToCas(harness);
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
+    await flush();
+
+    expect(parent.events.findLast((event) => event.type === 'checkoutStatusChanged')).toEqual({
+      type: 'checkoutStatusChanged',
+      checkoutId: 'checkout-1',
+      status: 'clean',
+      branch: 'main',
+      headRevisionId: 'rev-2',
+      headTreeId: nextTreeId,
+    });
+
+    actor.stop();
+  });
+
+  it('selects dirtiness from the declared tag (MC-R28)', () => {
+    const { actor } = start();
+
+    expect(selectCheckoutDirty(actor.getSnapshot())).toBe(false);
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    expect(selectCheckoutDirty(actor.getSnapshot())).toBe(true);
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
+    expect(selectCheckoutDirty(actor.getSnapshot())).toBe(true);
+
+    actor.stop();
+  });
+
   it('exercises every state value xstate/graph can generate', () => {
     const paths = getSimplePaths(checkoutMachine, {
       events: [
         { type: 'changed', paths: ['a.ts'], generation: 1 },
-        { type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: [] },
-        { type: 'headChanged', revisionId: 'rev-2', treeId: 'tree-2' },
+        { type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: [] },
+        { type: 'headMoved' },
         { type: 'fenceGranted' },
         { type: 'fenceRefused', reason: 'held' },
       ],
@@ -763,8 +954,9 @@ describe('checkoutMachine', () => {
     const readHeadInvoke = invokeId('rereading');
     const publicEvents: readonly CheckoutMachineEvent[] = [
       { type: 'changed', paths: ['a.ts'], generation: 1 },
-      { type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] },
-      { type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' },
+      { type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] },
+      { type: 'cancelCut', requestId: 'r-1' },
+      { type: 'headMoved' },
       { type: 'fenceGranted' },
       { type: 'fenceRefused', reason: 'held elsewhere' },
     ];
@@ -781,19 +973,28 @@ describe('checkoutMachine', () => {
         ...publicEvents,
         { type: `xstate.done.actor.${cutInvoke}`, output: { treeId: nextTreeId, cutId: 'cut-1' } },
         { type: `xstate.error.actor.${cutInvoke}`, error: new Error('quota') },
-        { type: `xstate.done.actor.${writeInvoke}`, output: { revisionId: 'rev-2' } },
+        { type: `xstate.done.actor.${writeInvoke}`, output: { status: 'written', revisionId: 'rev-2' } },
+        {
+          type: `xstate.done.actor.${writeInvoke}`,
+          output: { status: 'held', heldBy: { chatId: 'c', turnId: 't', runId: 'r', attempt: 1 } },
+        },
         { type: `xstate.error.actor.${writeInvoke}`, error: new Error('the store is out of space') },
         { type: `xstate.done.actor.${casInvoke}`, output: { status: 'updated', head: 'rev-2' } },
         { type: `xstate.done.actor.${casInvoke}`, output: { status: 'conflicted', head: 'rev-9' } },
         { type: `xstate.error.actor.${casInvoke}`, error: new Error('ref locked') },
-        { type: `xstate.done.actor.${readHeadInvoke}`, output: { revisionId: 'rev-9', treeId: 'tree-9' } },
+        {
+          type: `xstate.done.actor.${readHeadInvoke}`,
+          output: { revisionId: 'rev-9', treeId: 'tree-9', branch: 'main' },
+        },
         { type: `xstate.error.actor.${readHeadInvoke}`, error: new Error('ESTALE') },
       ],
       limit: 20_000,
       serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
     };
 
-    expect(unansweredEvents(checkoutMachine, { ...options, ignore: knownDefects['checkout'] })).toEqual([]);
-    expect(unreachedStates(checkoutMachine, options)).toEqual([]);
+    expect(unansweredEvents(checkoutMachine, { ...options, ignore: checkoutIgnoredEvents })).toEqual([]);
+    /* Routing states — `stale` and the finals `MintExit` routes through — are left in the macrostep that enters them. */
+    const transient = new Set(['checkout.dirty.elapsed', 'checkout.minting.done', 'checkout.stale']);
+    expect(unreachedStates(checkoutMachine, options).filter((id) => !transient.has(id))).toEqual([]);
   });
 });

@@ -8,59 +8,59 @@
     "replace": "export const turnCasRetryLimit = 2;"
   },
   {
-    "id": "no-preparing-completion-buffer",
-    "drift": "R6: a turnCompleted during preparing is dropped again (the defect the header describes)",
+    "id": "no-resolving-completion-buffer",
+    "drift": "R6: a turnCompleted while the attempt resolves its checkout is dropped",
     "file": "src/turn.machine.ts",
     "test": "src/turn.machine.conformance.test.ts",
-    "find": "         */\n        turnCompleted: { context: { completionRequested: true } },\n      },\n      states: {\n        resolving: {",
-    "replace": "         */\n      },\n      states: {\n        resolving: {"
+    "find": "      on: {\n        turnCompleted: { context: { completionRequested: true } },\n        turnAbandoned: { context: { releasing: true } },\n      },\n    },\n\n    /* RM-R12:",
+    "replace": "      on: {\n        turnAbandoned: { context: { releasing: true } },\n      },\n    },\n\n    /* RM-R12:"
   },
   {
     "id": "no-held-replay",
-    "drift": "R6: leased.held no longer replays a buffered completion",
+    "drift": "R6: placing the attempt no longer starts a buffered completion",
     "file": "src/turn.machine.ts",
     "test": "src/turn.machine.conformance.test.ts",
-    "find": "          always: ({ context }) => (context.completionRequested ? { target: '#turn.finalizing' } : undefined),\n",
+    "find": "const target = context.completionRequested ? 'capturing' : 'held';",
+    "replace": "const target = 'held';"
+  },
+  {
+    "id": "lease-refusal-ignored",
+    "drift": "F6: a refused lease goes unanswered while acquiring",
+    "file": "src/turn.machine.ts",
+    "test": "src/turn.machine.conformance.test.ts",
+    "find": "        leaseRefused: ({ context, event }) => refuseLeased(context.lease, 'LEASE_UNAVAILABLE', event.reason),\n",
     "replace": ""
   },
   {
-    "id": "refusal-only-while-acquiring",
-    "drift": "F6: a lease refused after it was granted is ignored (the handler moved down to acquiring)",
+    "id": "capturing-ignores-abandon",
+    "drift": "R12: turnAbandoned while capturing is no longer handled",
     "file": "src/turn.machine.ts",
     "test": "src/turn.machine.conformance.test.ts",
-    "find": "        leaseRefused: { target: 'retiring', context: ({ event }) => failedWith(event, 'LEASE_UNAVAILABLE') },\n        turnAbandoned: { target: 'retiring', context: { outcome: 'released' } },\n        release: { target: 'retiring', context: { outcome: 'released' } },\n      },\n      initial: 'acquiring',\n      states: {\n        /* R6: the lease file exists but the callback has not confirmed it, so\n         * the turn may not capture yet; a completion that lands here waits. */\n        acquiring: {\n          on: {\n            leaseGranted: { target: 'held' },",
-    "replace": "        turnAbandoned: { target: 'retiring', context: { outcome: 'released' } },\n        release: { target: 'retiring', context: { outcome: 'released' } },\n      },\n      initial: 'acquiring',\n      states: {\n        acquiring: {\n          on: {\n            leaseRefused: { target: '#turn.retiring', context: ({ event }) => failedWith(event, 'LEASE_UNAVAILABLE') },\n            leaseGranted: { target: 'held' },"
+    "find": "      on: {\n        turnAbandoned: { context: { releasing: true } },\n      },\n    },\n\n    merging: {",
+    "replace": "    },\n\n    merging: {"
   },
   {
-    "id": "finalizing-ignores-abandon",
-    "drift": "R12: turnAbandoned while finalizing is no longer handled",
+    "id": "base-refusal-code",
+    "drift": "RM-S7: a refused base cut reports the result cut's code",
     "file": "src/turn.machine.ts",
     "test": "src/turn.machine.conformance.test.ts",
-    "find": "      initial: 'capturing',\n      on: {\n        release: { target: 'retiring', context: { outcome: 'released' } },\n        turnAbandoned: { target: 'retiring', context: { outcome: 'released' } },\n      },",
-    "replace": "      initial: 'capturing',\n      on: {\n        release: { target: 'retiring', context: { outcome: 'released' } },\n      },"
+    "find": "            : refuseLeased(context.lease, 'BASE_CUT_FAILED', event.reason);",
+    "replace": "            : refuseLeased(context.lease, 'CAS_LOST', event.reason);"
   },
   {
-    "id": "base-timeout-code",
-    "drift": "P4: the base-cut bound reports the turn-cut code",
+    "id": "retire-error-retires",
+    "drift": "RM-R10: a failed retirement retires the attempt anyway, orphaning its record",
     "file": "src/turn.machine.ts",
     "test": "src/turn.machine.conformance.test.ts",
-    "find": "                code: 'BASE_CUT_TIMED_OUT',",
-    "replace": "                code: 'CUT_TIMED_OUT',"
+    "find": "          return { target: 'settled', context: { lease: context.lease } };\n        },\n      },\n    },\n\n    /* TS-R1:",
+    "replace": "          return { target: 'retired' };\n        },\n      },\n    },\n\n    /* TS-R1:"
   },
   {
-    "id": "retire-error-retracts",
-    "drift": "R7: a failed lease cleanup retracts the settlement",
+    "id": "settle-without-announcement",
+    "drift": "RM-R10: an attempt settles without telling the parent",
     "file": "src/turn.machine.ts",
     "test": "src/turn.machine.conformance.test.ts",
-    "find": "        onError: ({ context }) => settledOutcomeTarget(context),",
-    "replace": "        onError: { target: 'failed' },"
-  },
-  {
-    "id": "failed-without-announcement",
-    "drift": "R12: a failed turn no longer tells the parent",
-    "file": "src/turn.machine.ts",
-    "test": "src/turn.machine.conformance.test.ts",
-    "find": "    failed: {\n      type: 'final',\n      entry: ({ context }, enq) => {\n        announceRelease(context, enq);\n      },\n    },",
-    "replace": "    failed: {\n      type: 'final',\n    },"
+    "find": "  announce({ ...context, ...fields }, enq);\n  return { target: 'settled', context: fields } as const;",
+    "replace": "  return { target: 'settled', context: fields } as const;"
   }
 ]

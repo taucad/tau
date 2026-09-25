@@ -12,8 +12,14 @@
  * Two of the five verbs are **not** its own effects. *New branch* and *Discard*
  * are the checkout registry's `addCheckout`/`removeCheckout` — one writer of the
  * registry, not two — so this machine sends them to the parent and waits for the
- * registry's own answer (`branchesChanged` / `operationFailed`) under a bound.
- * That is the A38 sibling rule: children address siblings through the parent.
+ * registry's own answer (`checkoutAdded`, `checkoutRemoved` or `operationFailed`)
+ * by request id. That is the A38 sibling rule: children address siblings through
+ * the parent.
+ *
+ * Every verb that starts work names its request, and every answer echoes it
+ * (RM-R1). A verb that arrives while another runs or waits for a person is
+ * refused `REVISIONS_BUSY`, never dropped (RM-R11); no bound waits for a peer
+ * (RM-R3).
  *
  * The selection itself is the **root's**: the root holds the lease set, so the
  * root resolves D10 (`switchResolved { mode }`) and re-roots the workbench. What
@@ -31,7 +37,14 @@ import type { MachineActors } from '#machine-schemas.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 import type { BranchOperation } from '#branch.types.js';
 
-/** How long a delegated registry verb waits for the registry's answer. @public */
+/**
+ * How long a delegated registry verb used to wait for the registry's answer.
+ *
+ * No machine reads it since the registry answers by request id (RM-S8); it
+ * stays exported while outside waiters import it, and goes with them (W8 TS-S5).
+ *
+ * @public
+ */
 export const branchRegistryMilliseconds = 30_000;
 
 /**
@@ -45,7 +58,7 @@ export const branchRegistryMilliseconds = 30_000;
  *
  * @public
  */
-export type BranchFailureCode = RevisionPortErrorCode | 'CAS_LOST' | 'CHECKOUT_UNKNOWN';
+export type BranchFailureCode = RevisionPortErrorCode | 'CAS_LOST' | 'CHECKOUT_UNKNOWN' | 'REVISIONS_BUSY';
 
 /** Input accepted when creating the branchMachine actor. @public */
 export type BranchMachineInput = Readonly<{
@@ -61,6 +74,8 @@ export type BranchMachineContext = Readonly<{
   currentBranch: string | undefined;
   /** The verb in flight, or `undefined` while idle. */
   operation: BranchOperation | undefined;
+  /** The id the verb in flight was asked under; its answer echoes it (RM-R1). */
+  requestId: string | undefined;
   /** The branch the verb acts on; for `create` it is the name being created. */
   branch: string | undefined;
   /** The new name a `rename` writes. */
@@ -96,63 +111,66 @@ export type BranchMachineContext = Readonly<{
 /** Events accepted by branchMachine. @public */
 export type BranchMachineEvent =
   /** Apply `head(branch)` to the live checkout — the root already resolved D10. */
-  | Readonly<{ type: 'switch'; branch: string; mode?: 'reroot' | 'applyToLive'; checkoutId?: string }>
-  | Readonly<{ type: 'merge'; branch: string }>
-  | Readonly<{ type: 'discard'; branch: string; checkoutId?: string }>
+  | Readonly<{
+      type: 'switch';
+      requestId: string;
+      branch: string;
+      mode?: 'reroot' | 'applyToLive';
+      checkoutId?: string;
+    }>
+  | Readonly<{ type: 'merge'; requestId: string; branch: string }>
+  | Readonly<{ type: 'discard'; requestId: string; branch: string; checkoutId?: string }>
   /* `checkoutId` and `head` are the root's: only it knows where the person is
    * standing, and P3 makes a branch start from what they see. */
-  | Readonly<{ type: 'create'; name: string; from?: string; checkoutId?: string; head?: string }>
-  | Readonly<{ type: 'rename'; branch: string; name: string }>
+  | Readonly<{ type: 'create'; requestId: string; name: string; from?: string; checkoutId?: string; head?: string }>
+  | Readonly<{ type: 'rename'; requestId: string; branch: string; name: string }>
+  /* `confirm` and `cancel` continue the pending verb and carry no id of their own. */
   | Readonly<{ type: 'confirm' }>
   | Readonly<{ type: 'cancel' }>
   /** The workbench moved; *Merge into `<current>`* follows it. */
   | Readonly<{ type: 'selectBranch'; branch: string | undefined }>
-  /** The registry answered a delegated verb: the branch set as it now stands. */
-  | Readonly<{
-      type: 'branchesChanged';
-      branches: readonly string[];
-      /** The same set as records, so a settled `create` knows what it made. */
-      checkouts?: readonly BranchCheckoutRecord[];
-    }>
+  /** The registry made the checkout a `create` asked for. */
+  | Readonly<{ type: 'checkoutAdded'; requestId: string; checkoutId: string; checkoutRoot: string }>
+  /** The registry dropped the checkout a `discard` asked it to. */
+  | Readonly<{ type: 'checkoutRemoved'; requestId: string }>
   /** The registry refused a delegated verb. */
-  | Readonly<{ type: 'operationFailed'; reason: string; code?: RevisionPortErrorCode }>
-  /* The root's answers to the cut a `create` asks for. Only the trigger-only
-   * ones reach here — a turn's cut is that turn's (a2 R1). */
+  | Readonly<{ type: 'operationFailed'; requestId?: string; reason: string; code?: RevisionPortErrorCode }>
+  /* The root's answers to cuts no turn asked for; the one a `create` asked for echoes its id (RM-R1). */
   | Readonly<{
       type: 'revisionMinted';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
-      turnId?: string;
+      requestId?: string;
       revisionId: string;
     }>
-  | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; requestId?: string }>
   | Readonly<{
       type: 'cutFailed';
       /** Undefined when the cut named a checkout this project does not have. */
       checkoutId: string | undefined;
       trigger: CheckoutCutTrigger;
-      turnId?: string;
+      requestId?: string;
       reason: string;
       code?: BranchFailureCode;
     }>
-  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>;
-
-/** One checkout as the registry names it, beside the branch it tracks. @public */
-export type BranchCheckoutRecord = Readonly<{ branch: string; checkoutId: string; checkoutRoot: string }>;
+  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; requestId?: string }>;
 
 /** Facts branchMachine emits, and sends to its parent when they move a checkout. @public */
 export type BranchMachineEmitted =
+  /* A hint that this checkout moved: the root has the checkout re-read (RM-R5). A rename names no head. */
   | Readonly<{
       type: 'checkoutChanged';
       checkoutId: string;
-      revisionId: string;
-      treeId: string;
-      branch: string | undefined;
+      revisionId?: string;
+      treeId?: string;
+      branch?: string | undefined;
     }>
   | Readonly<{ type: 'branchMerged'; branch: string; into: string; revisionId: string }>
   | Readonly<{ type: 'mergeConflicted'; branch: string; into: string; paths: readonly string[] }>
   | Readonly<{
       type: 'toast.branch';
+      /** The id the verb was asked under (RM-R1). */
+      requestId: string;
       operation: BranchOperation;
       branch: string;
       /** What a `create` made, so a correlated caller needs no projection scrape. */
@@ -164,6 +182,8 @@ export type BranchMachineEmitted =
    * take an unrelated verb's refusal for its own (review finding 1). */
   | Readonly<{
       type: 'toast.error';
+      /** The id the refused verb was asked under; a busy refusal names the verb it refused (RM-R11). */
+      requestId: string;
       operation?: BranchOperation;
       branch?: string;
       message: string;
@@ -219,8 +239,8 @@ export type BranchMergeActorOutput =
   | Readonly<{ status: 'merged'; revisionId: string }>
   | Readonly<{ status: 'conflicted'; paths: readonly string[] }>;
 
-/** Output of the injected `rename` actor. @public */
-export type BranchRenameActorOutput = Readonly<{ branch: string }>;
+/** Output of the injected `rename` actor: the new name, and the checkout whose HEAD it moved, if any (RM-R5). @public */
+export type BranchRenameActorOutput = Readonly<{ branch: string; checkoutId?: string }>;
 
 const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : 'That branch change failed.';
@@ -246,6 +266,7 @@ type BranchEnqueue = EnqueueObject<BranchMachineEvent, BranchMachineEmitted>;
 
 const clearTransient = {
   operation: undefined,
+  requestId: undefined,
   branch: undefined,
   name: undefined,
   from: undefined,
@@ -272,14 +293,51 @@ const delegate = (
   /* `cut` is the same delegation one level over: the checkout is the sole
    * minter (F2), so a *New branch* asks the root to record rather than
    * minting a revision of its own (P3). */
-  enq.sendTo(
-    context.parentRef,
-    type === 'addCheckout'
-      ? { type: 'addCheckout', branch: context.branch ?? '', from: context.from ?? '' }
-      : type === 'removeCheckout'
-        ? { type: 'removeCheckout', id: context.checkoutId ?? '' }
-        : { type: 'cut', trigger: 'switch', checkoutId: context.checkoutId, leaseIds: [] },
-  );
+  enq.sendTo(context.parentRef, delegation(context, type));
+};
+
+/* The ids a delegated request is asked under, derived from the verb's own (RM-R1). */
+const delegatedId = (context: BranchMachineContext, type: 'add' | 'remove' | 'cut'): string =>
+  `${context.requestId ?? ''}/${type}`;
+
+const delegation = (context: BranchMachineContext, type: 'addCheckout' | 'removeCheckout' | 'cut') =>
+  type === 'addCheckout'
+    ? {
+        type: 'addCheckout',
+        requestId: delegatedId(context, 'add'),
+        branch: context.branch ?? '',
+        from: context.from ?? '',
+      }
+    : type === 'removeCheckout'
+      ? { type: 'removeCheckout', requestId: delegatedId(context, 'remove'), id: context.checkoutId ?? '' }
+      : {
+          type: 'cut',
+          requestId: delegatedId(context, 'cut'),
+          trigger: 'switch',
+          checkoutId: context.checkoutId,
+          leaseIds: [],
+        };
+
+type StartVerb = Extract<BranchMachineEvent, { type: 'switch' | 'merge' | 'discard' | 'create' | 'rename' }>;
+
+/* RM-R11: a verb that cannot start now is answered, never dropped; the page phrases the code. */
+const refuseBusy = (enq: BranchEnqueue, event: StartVerb): void => {
+  enq.emit({
+    type: 'toast.error',
+    requestId: event.requestId,
+    operation: event.type,
+    branch: event.type === 'create' ? event.name : event.branch,
+    message: 'Another branch change is still running.',
+    code: 'REVISIONS_BUSY',
+  });
+};
+
+/* A change of HEAD the root has the checkout re-read (RM-R5). */
+const reportMove = (context: BranchMachineContext, enq: BranchEnqueue, fact: BranchMachineEmitted): void => {
+  enq.emit(fact);
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, fact);
+  }
 };
 
 const failFromRegistry = (event: Extract<BranchMachineEvent, { type: 'operationFailed' }>) => ({
@@ -294,14 +352,14 @@ const failFromError = (error: unknown) => ({
   reasonCode: describeFailureCode(error),
 });
 
-const registryTimeout = { target: '#branch.failed', context: failWith('This project did not answer in time.') };
-
 const branchMachineDefinition = setup({
   schemas: {
     context: types<BranchMachineContext>(),
     events: eventSchemas<BranchMachineEvent>(),
     emitted: eventSchemas<BranchMachineEmitted>(),
     input: types<BranchMachineInput>(),
+    /* MC-R28: `busy` while a verb runs, `asking` while it waits for a person. */
+    tags: types<'busy' | 'asking'>(),
   },
   actors: {
     /*
@@ -338,18 +396,9 @@ const branchMachineDefinition = setup({
   guards: {
     hasBase: (context: BranchMachineContext) => context.from !== undefined && context.from !== '',
     hasHead: (context: BranchMachineContext) => context.head !== undefined,
-    /* This verb's own cut: a turn's belongs to that turn (a2 R1), another
-     * checkout's to nobody here, and an ambient `save`/`idle`/`hidden`/`close`
-     * on this same checkout carries no turn id either — so the trigger is what
-     * separates the answer asked for from the one that merely arrived. */
-    answersOurCut: (context: BranchMachineContext, event: BranchMachineEvent) =>
-      (event.type === 'revisionMinted' ||
-        event.type === 'nothingToSave' ||
-        event.type === 'cutFailed' ||
-        event.type === 'casLost') &&
-      event.turnId === undefined &&
-      event.trigger === 'switch' &&
-      event.checkoutId === context.checkoutId,
+    /* An answer is this verb's when it echoes the id this verb delegated under (RM-R1). */
+    answersUs: (context: BranchMachineContext, requestId: string | undefined, type: 'add' | 'remove' | 'cut') =>
+      requestId !== undefined && requestId === delegatedId(context, type),
   },
 }).createMachine({
   id: 'branch',
@@ -357,6 +406,7 @@ const branchMachineDefinition = setup({
     projectId: input.projectId,
     currentBranch: input.currentBranch,
     operation: undefined,
+    requestId: undefined,
     branch: undefined,
     name: undefined,
     from: undefined,
@@ -373,6 +423,37 @@ const branchMachineDefinition = setup({
   }),
   on: {
     selectBranch: { context: ({ event }) => ({ currentBranch: event.branch }) },
+    /* RM-R11: every state but `idle` refuses a verb it cannot start. */
+    switch: ({ event }, enq) => {
+      refuseBusy(enq, event);
+      return {};
+    },
+    merge: ({ event }, enq) => {
+      refuseBusy(enq, event);
+      return {};
+    },
+    discard: ({ event }, enq) => {
+      refuseBusy(enq, event);
+      return {};
+    },
+    create: ({ event }, enq) => {
+      refuseBusy(enq, event);
+      return {};
+    },
+    rename: ({ event }, enq) => {
+      refuseBusy(enq, event);
+      return {};
+    },
+    /* A continuation with no verb pending, and answers to requests no longer outstanding, are stale (MC-R18). */
+    confirm: () => ({}),
+    cancel: () => ({}),
+    checkoutAdded: () => ({}),
+    checkoutRemoved: () => ({}),
+    operationFailed: () => ({}),
+    revisionMinted: () => ({}),
+    nothingToSave: () => ({}),
+    cutFailed: () => ({}),
+    casLost: () => ({}),
   },
   initial: 'idle',
   states: {
@@ -382,6 +463,7 @@ const branchMachineDefinition = setup({
           target: 'checking',
           context: ({ event }) => ({
             operation: 'switch',
+            requestId: event.requestId,
             branch: event.branch,
             mode: event.mode,
             checkoutId: event.checkoutId,
@@ -393,6 +475,7 @@ const branchMachineDefinition = setup({
           target: 'checking',
           context: ({ event }) => ({
             operation: 'merge',
+            requestId: event.requestId,
             branch: event.branch,
             reason: undefined,
             reasonCode: undefined,
@@ -402,6 +485,7 @@ const branchMachineDefinition = setup({
           target: 'checking',
           context: ({ event }) => ({
             operation: 'discard',
+            requestId: event.requestId,
             branch: event.branch,
             checkoutId: event.checkoutId,
             reason: undefined,
@@ -412,6 +496,7 @@ const branchMachineDefinition = setup({
           target: 'checking',
           context: ({ event }) => ({
             operation: 'create',
+            requestId: event.requestId,
             branch: event.name,
             from: event.from,
             checkoutId: event.checkoutId,
@@ -424,6 +509,7 @@ const branchMachineDefinition = setup({
           target: 'checking',
           context: ({ event }) => ({
             operation: 'rename',
+            requestId: event.requestId,
             branch: event.branch,
             name: event.name,
             reason: undefined,
@@ -433,6 +519,7 @@ const branchMachineDefinition = setup({
       },
     },
     checking: {
+      tags: ['busy'],
       invoke: {
         src: 'checkBranch',
         input: ({ context }) => ({
@@ -457,15 +544,18 @@ const branchMachineDefinition = setup({
       },
     },
     checked: {
+      tags: ['busy'],
       always: ({ context }) => (context.needsConfirmation ? { target: 'confirming' } : { target: 'applying' }),
     },
     confirming: {
+      tags: ['asking'],
       on: {
         confirm: { target: 'applying' },
         cancel: { target: 'idle', context: clearTransient },
       },
     },
     applying: {
+      tags: ['busy'],
       initial: 'routing',
       states: {
         routing: {
@@ -498,17 +588,13 @@ const branchMachineDefinition = setup({
               checkoutId: context.checkoutId,
             }),
             onDone: ({ context, event }, enq) => {
-              const fact: BranchMachineEmitted = {
+              reportMove(context, enq, {
                 type: 'checkoutChanged',
                 checkoutId: event.output.checkoutId,
                 revisionId: event.output.revisionId,
                 treeId: event.output.treeId,
                 branch: event.output.branch,
-              };
-              enq.emit(fact);
-              if (context.parentRef !== undefined) {
-                enq.sendTo(context.parentRef, fact);
-              }
+              });
               return { target: '#branch.applied' };
             },
             onError: {
@@ -549,9 +635,8 @@ const branchMachineDefinition = setup({
             },
           },
         },
-        /* The registry's own verbs, asked through the parent. The bound is the
-         * failure edge every invoked effect has — a registry that never answers
-         * must not leave the pane's verbs disabled forever. */
+        /* The registry's own verbs, asked through the parent and answered by id:
+         * the registry answers in every state, so no bound waits on it (RM-R3). */
         /*
          * P3: a branch starts from what the person sees.
          *
@@ -571,17 +656,14 @@ const branchMachineDefinition = setup({
               entry: ({ context }, enq) => {
                 delegate(context, enq, 'cut');
               },
-              after: {
-                [branchRegistryMilliseconds]: registryTimeout,
-              },
               on: {
                 revisionMinted: ({ context, event, guards }) =>
-                  guards.answersOurCut(context, event)
+                  guards.answersUs(context, event.requestId, 'cut')
                     ? { target: 'adding', context: { from: event.revisionId } }
-                    : undefined,
+                    : {},
                 nothingToSave: ({ context, event, guards }) => {
-                  if (!guards.answersOurCut(context, event)) {
-                    return undefined;
+                  if (!guards.answersUs(context, event.requestId, 'cut')) {
+                    return {};
                   }
                   /* Nothing to record, but a head to stand on — which is also
                    * the answer a checkout an agent holds gives (a2 R1). */
@@ -594,7 +676,7 @@ const branchMachineDefinition = setup({
                   };
                 },
                 cutFailed: ({ context, event, guards }) =>
-                  guards.answersOurCut(context, event)
+                  guards.answersUs(context, event.requestId, 'cut')
                     ? {
                         target: '#branch.failed',
                         context: {
@@ -604,47 +686,33 @@ const branchMachineDefinition = setup({
                           reasonCode: event.code,
                         },
                       }
-                    : undefined,
+                    : {},
                 casLost: ({ context, event, guards }) =>
-                  guards.answersOurCut(context, event)
+                  guards.answersUs(context, event.requestId, 'cut')
                     ? {
                         target: '#branch.failed',
                         context: failWith('Something else changed this project first. Try again.', 'CAS_LOST'),
                       }
-                    : undefined,
-                operationFailed: {
-                  target: '#branch.failed',
-                  context: ({ event }) => failFromRegistry(event),
-                },
+                    : {},
               },
             },
             adding: {
               entry: ({ context }, enq) => {
                 delegate(context, enq, 'addCheckout');
               },
-              after: {
-                [branchRegistryMilliseconds]: registryTimeout,
-              },
               on: {
-                branchesChanged: ({ context, event }) => {
-                  if (!event.branches.includes(context.branch ?? '')) {
-                    return undefined;
-                  }
-                  /* The registry named the checkout it made; for a `create`
-                   * that is what `toast.branch` carries out (P4). */
-                  const record = event.checkouts?.find((entry) => entry.branch === context.branch);
-                  return {
-                    target: '#branch.applied',
-                    context: {
-                      checkoutId: record?.checkoutId ?? context.checkoutId,
-                      checkoutRoot: record?.checkoutRoot,
-                    },
-                  };
-                },
-                operationFailed: {
-                  target: '#branch.failed',
-                  context: ({ event }) => failFromRegistry(event),
-                },
+                /* The registry named the checkout it made; for a `create` that is what `toast.branch` carries out (P4). */
+                checkoutAdded: ({ context, event, guards }) =>
+                  guards.answersUs(context, event.requestId, 'add')
+                    ? {
+                        target: '#branch.applied',
+                        context: { checkoutId: event.checkoutId, checkoutRoot: event.checkoutRoot },
+                      }
+                    : {},
+                operationFailed: ({ context, event, guards }) =>
+                  guards.answersUs(context, event.requestId, 'add')
+                    ? { target: '#branch.failed', context: failFromRegistry(event) }
+                    : {},
               },
             },
           },
@@ -653,16 +721,13 @@ const branchMachineDefinition = setup({
           entry: ({ context }, enq) => {
             delegate(context, enq, 'removeCheckout');
           },
-          after: {
-            [branchRegistryMilliseconds]: registryTimeout,
-          },
           on: {
-            branchesChanged: ({ context, event }) =>
-              event.branches.includes(context.branch ?? '') ? undefined : { target: '#branch.applied' },
-            operationFailed: {
-              target: '#branch.failed',
-              context: ({ event }) => failFromRegistry(event),
-            },
+            checkoutRemoved: ({ context, event, guards }) =>
+              guards.answersUs(context, event.requestId, 'remove') ? { target: '#branch.applied' } : {},
+            operationFailed: ({ context, event, guards }) =>
+              guards.answersUs(context, event.requestId, 'remove')
+                ? { target: '#branch.failed', context: failFromRegistry(event) }
+                : {},
           },
         },
         renaming: {
@@ -673,9 +738,12 @@ const branchMachineDefinition = setup({
               branch: context.branch ?? '',
               name: context.name ?? '',
             }),
-            onDone: {
-              target: '#branch.applied',
-              context: ({ event }) => ({ branch: event.output.branch }),
+            /* RM-R5: a rename that moved a checkout's HEAD says which, so that checkout re-reads its branch. */
+            onDone: ({ context, event }, enq) => {
+              if (event.output.checkoutId !== undefined) {
+                reportMove(context, enq, { type: 'checkoutChanged', checkoutId: event.output.checkoutId });
+              }
+              return { target: '#branch.applied', context: { branch: event.output.branch } };
             },
             onError: {
               target: '#branch.failed',
@@ -689,6 +757,7 @@ const branchMachineDefinition = setup({
       entry: ({ context }, enq) => {
         enq.emit({
           type: 'toast.branch',
+          requestId: context.requestId ?? '',
           operation: context.operation ?? 'switch',
           branch: context.branch ?? '',
           ...(context.checkoutRoot === undefined
@@ -722,6 +791,7 @@ const branchMachineDefinition = setup({
       entry: ({ context }, enq) => {
         enq.emit({
           type: 'toast.error',
+          requestId: context.requestId ?? '',
           ...(context.operation === undefined ? {} : { operation: context.operation }),
           ...(context.branch === undefined ? {} : { branch: context.branch }),
           message: context.reason ?? 'That branch change failed.',
@@ -754,21 +824,20 @@ export const branchMachine: BranchMachine = branchMachineDefinition;
  * Selects whether a branch verb is waiting for the user to confirm it.
  *
  * @param snapshot - Current machine snapshot.
- * @returns True while the machine is confirming.
+ * @returns True while the machine carries the declared `asking` tag (MC-R28).
  * @public
  */
 export const selectBranchNeedsConfirmation = (snapshot: SnapshotFrom<typeof branchMachine>): boolean =>
-  snapshot.matches('confirming');
+  snapshot.hasTag('asking');
 
 /**
  * Selects whether a branch verb is running right now.
  *
  * @param snapshot - Current machine snapshot.
- * @returns True while the machine is checking or applying.
+ * @returns True while the machine carries the declared `busy` tag (MC-R28).
  * @public
  */
-export const selectBranchBusy = (snapshot: SnapshotFrom<typeof branchMachine>): boolean =>
-  snapshot.matches('checking') || snapshot.matches('applying');
+export const selectBranchBusy = (snapshot: SnapshotFrom<typeof branchMachine>): boolean => snapshot.hasTag('busy');
 
 /**
  * The facet the Revisions pane reads about the verb in flight.

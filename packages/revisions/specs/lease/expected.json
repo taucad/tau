@@ -1,0 +1,11 @@
+{
+  "configs": {
+    "LeaseSweep.today.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "SweptOnlyGone" },
+      "kind": "defect",
+      "ref": "L4 D-102: a second tab's epoch sweep retires a live tab's lease",
+      "fixedBy": "W8 TS-S7"
+    }
+  }
+}

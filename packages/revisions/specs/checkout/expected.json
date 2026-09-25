@@ -1,0 +1,85 @@
+{
+  "configs": {
+    "CheckoutRequests.today-ghost.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "L7 D-L7-3: the aborted casHead lands after the answer; fixed by W0.9, W5 RM-S6"
+    },
+    "CheckoutRequests.today-regress.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "L7 D-L7-1: fast-forward, fact, announcement; fixed by W0.10, W5 RM-S6"
+    },
+    "CheckoutRequests.today-branch.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W5 F7: switch, a turn cut, compare-and-swap on main; fixed by W0.10, W5 RM-S6"
+    },
+    "CheckoutRequests.today-answered.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "L7 D-L7-2, D-L7-3: a switch applied, a turn cut starts, a fact aborts it; fixed by W5 RM-S5"
+    },
+    "CheckoutRequests.today-view.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W5: a switch fact, then the announcement resets the branch; fixed by W5 RM-S6"
+    },
+    "CheckoutRequests.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W5 blueprint: I24; 103,703 states with the step label and the next mint started in the step that ends the last"
+    },
+    "CheckoutRequests.conformance.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W5 RM-A24: the code's knobs, bounded for the conformance graph"
+    },
+    "CheckoutRequests.witness-replace.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryRequesterAnswered"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R2: Coalesce replace"
+    },
+    "CheckoutRequests.witness-adopt-registry.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "HeadNeverRegresses"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R5: RegistryHeads adopt"
+    },
+    "CheckoutRequests.witness-abort-answer.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoPublishAfterAnswer"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R6: W0.9 as first written"
+    },
+    "CheckoutRequests.witness-no-cas-branch.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "MintsOnOwnBranch"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R6: CasChecksBranch FALSE"
+    },
+    "CheckoutRequests.witness-adopt-head.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ViewAgreesAtRest"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R5: HeadFacts adoptHead"
+    }
+  },
+  "graphs": {
+    "CheckoutRequests": {
+      "config": "CheckoutRequests.conformance.cfg",
+      "phase": "mint.phase"
+    }
+  }
+}

@@ -14,6 +14,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
+import type { RevisionPort } from '@taucad/revisions';
+import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
@@ -58,7 +60,7 @@ const settle = async (turns = 12): Promise<void> => {
   }
 };
 
-const harness = (projectIds: readonly string[]): Harness => {
+const harness = (projectIds: readonly string[], wrapPort = (port: RevisionPort): RevisionPort => port): Harness => {
   const providers = projectIds.map(() => new MemoryProvider());
   const mountTable = new MountTable();
   const eventBus = new ChangeEventBus();
@@ -80,12 +82,14 @@ const harness = (projectIds: readonly string[]): Harness => {
   const observers = new Map<string, (paths: readonly string[]) => void>();
   const registry = createWorkerRevisionRegistry({
     createPort: (projectId) =>
-      createIsomorphicGitRevisionPort({
-        filesystem: service.createRootedFileSystem(`/projects/${projectId}`),
-        /* Exactly what `file-manager.worker.ts` gives the real port, so a branch
-         * created here is created the way the browser creates one (P24). */
-        checkouts: checkoutRoutes(projectId),
-      }),
+      wrapPort(
+        createIsomorphicGitRevisionPort({
+          filesystem: service.createRootedFileSystem(`/projects/${projectId}`),
+          /* Exactly what `file-manager.worker.ts` gives the real port, so a branch
+           * created here is created the way the browser creates one (P24). */
+          checkouts: checkoutRoutes(projectId),
+        }),
+      ),
     filesystem: (root) => service.createRootedFileSystem(root),
     observe: (projectId, onChanged) => {
       observers.set(projectId, onChanged);
@@ -389,84 +393,80 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
   });
 
   /*
-   * The `branch` child takes `create` in `idle` only, so a second one while the
-   * first is in flight is dropped — and the correlated wait had no bound, so
-   * the chat's send path waited on a promise nothing would ever settle (review
-   * finding 1).
+   * A second `create` while the first is in flight used to be dropped, and the
+   * correlated wait had no bound (review finding 1). A busy verb is now refused
+   * at once with `REVISIONS_BUSY`, under its own request id (RM-R11, RM-S5).
    */
-  it('should refuse a createBranch the tree never answers, on the bound', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const fixture = harness(['alpha']);
-      await fixture.service.createRootedFileSystem('/projects/alpha').writeFile('main.scad', 'cube(10);');
-      const alpha = await fixture.open('alpha');
+  it('should refuse a createBranch that arrives while another runs, at once and by its own id', async () => {
+    const fixture = harness(['alpha']);
+    await fixture.service.createRootedFileSystem('/projects/alpha').writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
 
-      alpha.send({ command: 'createBranch', name: 'main' });
-      alpha.send({ command: 'createBranch', name: 'isolated-run', id: 93 });
-      await settle(20);
-      await vi.advanceTimersByTimeAsync(60_000);
-      await settle(8);
+    alpha.send({ command: 'createBranch', name: 'main' });
+    alpha.send({ command: 'createBranch', name: 'isolated-run', id: 93 });
+    await settle(20);
 
-      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 93)).toMatchObject({
-        type: 'error',
-        id: 93,
-        code: 'BRANCH_UNANSWERED',
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 93)).toMatchObject({
+      type: 'error',
+      id: 93,
+      code: 'REVISIONS_BUSY',
+    });
   });
 
   it('should not attribute another verb’s refusal to a pending createBranch', async () => {
-    /* The dropped verb's own bound is a real 60 s timer, and a case that left
-       it pending kept this suite's teardown waiting on it. */
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const fixture = harness(['alpha']);
-      const project = fixture.service.createRootedFileSystem('/projects/alpha');
-      await project.writeFile('main.scad', 'cube(10);');
-      const alpha = await fixture.open('alpha');
-      alpha.send({ command: 'saveRevision' });
-      await alpha.settle();
-
-      /* `main` is refused; `isolated-run` is dropped while that one runs. The
-         refusal the person sees belongs to the branch they already have. */
-      alpha.send({ command: 'createBranch', name: 'main' });
-      alpha.send({ command: 'createBranch', name: 'isolated-run', id: 94 });
-      await settle(40);
-
-      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toBeUndefined();
-      /* And the drop is still what the bound answers, once it comes due. */
-      await vi.advanceTimersByTimeAsync(60_000);
-      await settle(8);
-      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toMatchObject({
-        type: 'error',
-        code: 'BRANCH_UNANSWERED',
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('should adopt a daemon revision into the worker projection', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
+    alpha.send({ command: 'saveRevision' });
+    await alpha.settle();
+
+    /* `main` is refused as a conflict; `isolated-run` arrives while that one runs.
+       The answer id 94 hears is its own, never the branch the person already has. */
+    alpha.send({ command: 'createBranch', name: 'main' });
+    alpha.send({ command: 'createBranch', name: 'isolated-run', id: 94 });
+    await settle(40);
+
+    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toMatchObject({
+      type: 'error',
+      code: 'REVISIONS_BUSY',
+    });
+  });
+
+  /* RM-R5: the daemon's revision is a hint to re-read, never a head to adopt, so the projection shows the store's own. */
+  it('should re-read the head a daemon revision moved into the worker projection', async () => {
+    const ports: RevisionPort[] = [];
+    const fixture = harness(['alpha'], (port) => {
+      ports.push(port);
+      return port;
+    });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    await settle(20);
+    const port = ports[0]!;
+    const before = await port.readRef('main');
+    const receipt = await port.writeRevision({
+      parents: before === undefined ? [] : [before],
+      tree: new ImmutableRevisionTree([['main.scad', new TextEncoder().encode('cube(10);')]]),
+      provenance: { source: 'agent', actorId: 'daemon', createdAt: 1 },
+      summary: { generated: 'Daemon turn' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: before, head: revisionId(receipt.commitId) });
 
     alpha.send({
       command: 'adoptHostFinalized',
       checkoutId: 'live',
-      revisionId: 'rev-daemon',
+      revisionId: 'rev-not-the-store-head',
       treeId: 'tree-daemon',
       branch: 'main',
     });
-    await alpha.settle();
+    await settle(40);
 
     const root = await fixture.root('alpha');
     expect(root.status()).toMatchObject({
       checkoutId: 'live',
-      headRevisionId: 'rev-daemon',
+      headRevisionId: receipt.commitId,
       branch: 'main',
     });
   });
@@ -598,6 +598,46 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(rowsWhenAnswered).toBeGreaterThan(before);
   });
 
+  /* A save whose compare-and-swap lost is settled, not left to the deadline: the next open mints the same bytes. */
+  it('should answer a saveRevision whose cut lost its compare-and-swap without waiting out the deadline', async () => {
+    let conflictNext = false;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      updateRef: async (input) => {
+        if (!conflictNext) {
+          return port.updateRef(input);
+        }
+        conflictNext = false;
+        return {
+          status: 'conflicted',
+          name: input.name,
+          expectedHead: input.expectedHead,
+          actualHead: input.expectedHead,
+          proposedHead: input.head,
+        };
+      },
+    }));
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    await settle(20);
+
+    await project.writeFile('main.scad', 'cube(20);');
+    fixture.announce('alpha', ['main.scad']);
+    conflictNext = true;
+    alpha.send({ command: 'saveRevision', id: 78, trigger: 'save' });
+
+    let answer: WorkerRevisionResponse | undefined;
+    for (let attempt = 0; attempt < 60 && answer === undefined; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await settle(4);
+      answer = alpha.frames.find((frame) => (frame.type === 'result' || frame.type === 'error') && frame.id === 78);
+    }
+
+    expect(conflictNext).toBe(false);
+    expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved' } });
+  });
+
   it('should mint one strictly increasing generation per content-change event (F9, F4)', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
@@ -652,6 +692,25 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
    * session — every manual save on it answered `nothingToSave` and recorded
    * nothing.
    */
+  it('should admit a second run of a turn id only once the first attempt settles', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const placed = await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    expect(placed.type).toBe('result');
+
+    alpha.send({ command: 'admitTurn', id: 77, turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
+    await settle(40);
+    expect(alpha.frames.find((frame) => frame.id === 77)).toBeUndefined();
+    await expect(project.readdir('.tau/runs')).resolves.toEqual(['run-1.json']);
+
+    alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
+    await settle(80);
+    expect(alpha.frames.find((frame) => frame.id === 77)?.type).toBe('result');
+    await expect(project.readdir('.tau/runs')).resolves.toEqual(['run-2.json']);
+  });
+
   it('should abandon an admission whose wait expired, leaving the checkout free to record a save', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

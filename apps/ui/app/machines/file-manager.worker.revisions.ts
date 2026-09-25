@@ -44,6 +44,7 @@ import type {
   RevisionStatusProjection,
   RevisionTag,
   RevisionUserActor,
+  TurnAttemptKey,
 } from '@taucad/revisions';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
@@ -61,6 +62,7 @@ import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { randomUuid } from '@taucad/utils/id';
 
 /**
  * The versioned paths one content-change event touches inside this project.
@@ -495,6 +497,25 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const admissions = new Map<string, PromiseWithResolvers<WorkerTurnPlacement>>();
   /** Where each placed run landed, filled at `placed` and answered at `leased`. */
   const placements = new Map<string, WorkerTurnPlacement>();
+  /*
+   * Legacy shim, deleted by W8 with the key-carrying port (TS-S*).
+   *
+   * Today's page names a turn by its id alone, so at most one attempt per turn
+   * id is live here (RM-S9): `turnKeys` maps the id to that attempt, and a later
+   * run of the same id waits in `waitingTurns` until the live attempt retires,
+   * is refused or is abandoned. The root itself runs attempts side by side
+   * (TS-R2); only a bare-turn-id verb needs this serialization.
+   */
+  const turnKeys = new Map<string, TurnAttemptKey>();
+  const waitingTurns = new Map<string, Array<Readonly<{ key: TurnAttemptKey; checkoutId?: string }>>>();
+  const keyOf = (input: Readonly<{ turnId: string; chatId: string; runId: string }>): TurnAttemptKey => ({
+    chatId: input.chatId,
+    turnId: input.turnId,
+    runId: input.runId,
+    attempt: 0,
+  });
+  const sameAttempt = (left: TurnAttemptKey | undefined, right: TurnAttemptKey): boolean =>
+    left?.runId === right.runId && left.attempt === right.attempt;
   /**
    * Refuse one waiting admission, with the reason it was refused for.
    *
@@ -633,6 +654,34 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     published = next;
     listeners.emit(next);
   });
+  /* Legacy shim (W8 deletes it, TS-S*): the root hears a run only once no other attempt of its turn id is live. */
+  const admitLegacy = (key: TurnAttemptKey, checkoutId?: string): void => {
+    if (turnKeys.has(key.turnId)) {
+      waitingTurns.set(key.turnId, [
+        ...(waitingTurns.get(key.turnId) ?? []),
+        { key, ...(checkoutId === undefined ? {} : { checkoutId }) },
+      ]);
+      return;
+    }
+    turnKeys.set(key.turnId, key);
+    actor.send({ type: 'admitTurn', key, legacy: true, ...(checkoutId === undefined ? {} : { checkoutId }) });
+  };
+  /* The live attempt of a turn id left; the next waiting run of that id is admitted. */
+  const releaseTurn = (key: TurnAttemptKey): void => {
+    if (!sameAttempt(turnKeys.get(key.turnId), key)) {
+      return;
+    }
+    turnKeys.delete(key.turnId);
+    const [next, ...rest] = waitingTurns.get(key.turnId) ?? [];
+    if (rest.length === 0) {
+      waitingTurns.delete(key.turnId);
+    } else {
+      waitingTurns.set(key.turnId, rest);
+    }
+    if (next !== undefined) {
+      admitLegacy(next.key, next.checkoutId);
+    }
+  };
   /* The three host revision facts, from the machines that emit them — the same
    * three `packages/host/src/revisions.ts` writes into a chat's durable log, in
    * the same schema (S9). */
@@ -683,6 +732,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * answer a chat gets when its previous turn actor is still retiring. */
   actor.on('turnRefused', (event) => {
     refuseAdmission(event.runId, event.reason, event.code);
+    releaseTurn(event.key);
+  });
+  actor.on('turnRetired', (event) => {
+    releaseTurn(event.key);
   });
   actor.start();
   published = selectRevisionStatus(actor.getSnapshot());
@@ -713,7 +766,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * for the ambient ones nobody is watching a spinner for.
    */
   actor.on('cutFailed', (failure) => {
-    if (failure.turnId !== undefined) {
+    if (failure.turn !== undefined) {
       return;
     }
     toasts.emit({ type: 'error', subject: 'save', message: failure.reason });
@@ -777,6 +830,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     });
   });
   branchChild?.on('toast.error', (toast) => {
+    /* The page phrases the busy refusal from its code like any other (RM-R11). */
     toasts.emit({
       type: 'error',
       subject: 'branch',
@@ -790,9 +844,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   /**
    * Cut the live checkout and wait for the tree's own answer (C16).
    *
-   * One implementation for the close path and for an explicit save: the three
+   * One implementation for the close path and for an explicit save: the four
    * settled outcomes are the machine's own emissions — minted, refused by the
-   * I5 gate, or failed — and the deadline is the same `syncQuiesceMilliseconds`
+   * I5 gate or the fresh fence, lost to a compare-and-swap, or failed — and the deadline is the same `syncQuiesceMilliseconds`
    * everything else on the close path is bounded by.
    *
    * @param trigger - What asked for the cut (S30).
@@ -804,8 +858,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       throw new Error('The project checkout was not ready before close.');
     }
     const cut = Promise.withResolvers<void>();
-    const matches = (event: Readonly<{ checkoutId: string; trigger: string }>): boolean =>
-      event.checkoutId === checkoutId && event.trigger === trigger;
+    /* The answer names this request, so an idle mint or another tab's save never settles it (RM-R1). */
+    const requestId = `${trigger}:${randomUuid()}`;
+    const matches = (event: Readonly<{ requestId?: string }>): boolean => event.requestId === requestId;
     const subscriptions = [
       actor.on('revisionMinted', (event) => {
         if (matches(event)) {
@@ -813,6 +868,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
       }),
       actor.on('nothingToSave', (event) => {
+        if (matches(event)) {
+          cut.resolve();
+        }
+      }),
+      /* A lost compare-and-swap settles too: the checkout re-reads, and the next open mints the same bytes. */
+      actor.on('casLost', (event) => {
         if (matches(event)) {
           cut.resolve();
         }
@@ -827,7 +888,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       cut.reject(new Error(`The ${trigger} revision was not recorded before the deadline.`));
     }, syncQuiesceMilliseconds);
     try {
-      actor.send({ type: 'cut', trigger, checkoutId, leaseIds: [] });
+      actor.send({ type: 'cut', requestId, trigger, checkoutId, leaseIds: [] });
       await cut.promise;
     } finally {
       globalThis.clearTimeout(bound);
@@ -867,9 +928,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    */
   const createBranch = async (name: string, from?: string): Promise<BranchCreated> => {
     const created = Promise.withResolvers<BranchCreated>();
+    const requestId = randomUuid();
     const subscriptions = [
       branchChild?.on('toast.branch', (toast) => {
-        if (toast.operation !== 'create' || toast.branch !== name) {
+        if (toast.requestId !== requestId) {
           return;
         }
         if (toast.checkoutId === undefined || toast.checkoutRoot === undefined) {
@@ -886,7 +948,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         created.resolve({ branch: name, checkoutId: toast.checkoutId, checkoutRoot: toast.checkoutRoot });
       }),
       branchChild?.on('toast.error', (toast) => {
-        if (toast.operation !== 'create' || toast.branch !== name) {
+        if (toast.requestId !== requestId) {
           return;
         }
         created.reject(
@@ -900,7 +962,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     try {
       actor.send({
         type: 'branch',
-        event: { type: 'create', name, ...(from === undefined ? {} : { from }) },
+        event: { type: 'create', requestId, name, ...(from === undefined ? {} : { from }) },
       });
       return await created.promise;
     } finally {
@@ -924,8 +986,19 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     admitTurn: async (input) => {
       const pending = Promise.withResolvers<WorkerTurnPlacement>();
       admissions.set(input.runId, pending);
+      const key = keyOf(input);
       const bound = globalThis.setTimeout(() => {
         if (!admissions.has(input.runId)) {
+          return;
+        }
+        const waiting = waitingTurns.get(key.turnId) ?? [];
+        if (waiting.some((entry) => sameAttempt(entry.key, key))) {
+          /* Never reached the root, so there is nothing there to abandon. */
+          waitingTurns.set(
+            key.turnId,
+            waiting.filter((entry) => !sameAttempt(entry.key, key)),
+          );
+          refuseAdmission(input.runId, 'it was never leased.');
           return;
         }
         /*
@@ -939,19 +1012,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
          * has no heartbeat by policy (§8), so this host giving up is the only
          * liveness signal it has.
          */
-        actor.send({ type: 'turnAbandoned', turnId: input.turnId, runId: input.runId });
+        actor.send({ type: 'turnAbandoned', key, legacy: true });
+        releaseTurn(key);
         refuseAdmission(input.runId, 'it was never leased.');
       }, admissionMilliseconds);
       /* No wait for the registry: the root holds an admission that arrives
        * before it and replays it, so there is nothing here to compensate
        * for (A38, W3c §7.1). */
-      actor.send({
-        type: 'admitTurn',
-        turnId: input.turnId,
-        chatId: input.chatId,
-        runId: input.runId,
-        ...(input.checkoutId === undefined ? {} : { checkoutId: input.checkoutId }),
-      });
+      admitLegacy(key, input.checkoutId);
       try {
         return await pending.promise;
       } finally {
@@ -961,8 +1029,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     send: (command) => {
       switch (command.command) {
         case 'admitTurn': {
-          const { command: _verb, ...input } = command;
-          actor.send({ type: 'admitTurn', ...input });
+          admitLegacy(keyOf(command), command.checkoutId);
           return;
         }
         case 'adoptHostFinalized': {
@@ -1059,7 +1126,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'publishProject': {
           actor.send({
             type: 'publish',
-            event: { type: 'publish', ...(command.tag === undefined ? {} : { tag: command.tag }) },
+            event: {
+              type: 'publish',
+              requestId: randomUuid(),
+              ...(command.tag === undefined ? {} : { tag: command.tag }),
+            },
           });
           return;
         }
@@ -1083,6 +1154,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
             type: 'branch',
             event: {
               type: 'discard',
+              requestId: randomUuid(),
               branch: command.branch,
               ...(command.checkoutId === undefined ? {} : { checkoutId: command.checkoutId }),
             },
@@ -1090,11 +1162,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         case 'mergeBranch': {
-          actor.send({ type: 'branch', event: { type: 'merge', branch: command.branch } });
+          actor.send({ type: 'branch', event: { type: 'merge', requestId: randomUuid(), branch: command.branch } });
           return;
         }
         case 'renameBranch': {
-          actor.send({ type: 'branch', event: { type: 'rename', branch: command.branch, name: command.name } });
+          actor.send({
+            type: 'branch',
+            event: { type: 'rename', requestId: randomUuid(), branch: command.branch, name: command.name },
+          });
           return;
         }
         case 'confirmBranch': {
@@ -1108,9 +1183,19 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'turnCompleted':
         case 'turnAbandoned': {
           /* Sent straight through: `turn.machine` buffers a completion that
-           * arrives while it is still `preparing` and replays it on
-           * `leased.held`, so the worker holds nothing (W6). */
-          actor.send({ type: command.command, turnId: command.turnId });
+           * arrives before placement and replays it once held (W6). */
+          const key = turnKeys.get(command.turnId);
+          if (key !== undefined) {
+            actor.send({ type: command.command, key, legacy: true });
+            if (command.command === 'turnAbandoned') {
+              /* An admission the root still queued leaves no retirement to wait for. */
+              releaseTurn(key);
+            }
+          }
+          return;
+        }
+        case 'switch': {
+          actor.send({ type: 'switch', requestId: randomUuid(), branch: command.branch });
           return;
         }
         case 'returnToLatest':

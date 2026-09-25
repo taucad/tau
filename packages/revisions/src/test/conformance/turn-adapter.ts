@@ -2,6 +2,9 @@
  * The conformance adapter between `turn.machine` and `specs/turn/TurnProtocol.tla` (promoted from
  * S6 by W1; W5 owns it). One table serves both bridges: forward replay maps each protocol action to
  * one harness operation, and the backward walk labels each machine event with the action it stands for.
+ *
+ * The code's knobs are the interim (`TurnProtocol.pr.cfg`): the target machine driven by today's
+ * page and daemon commands, so a release is `turnAbandoned` and a completion is `turnCompleted`.
  */
 
 import { createActor } from 'xstate';
@@ -9,22 +12,31 @@ import type { AnyEventObject, AnyMachineSnapshot } from 'xstate';
 import type { ConformanceAdapter } from '@taucad/formal/replay';
 import type { SpecView } from '@taucad/formal/graph';
 
-import { selectTurnHoldsLease, turnCutSettlementMilliseconds } from '#turn.machine.js';
-import type { TurnMachine, TurnMachineEvent } from '#turn.machine.js';
-import { StepClock } from '@taucad/xstate-testing/clock';
+import { selectTurnHoldsLease, turnIgnoredEvents } from '#turn.machine.js';
+import type { TurnMachine, TurnMachineEvent, TurnMachineInput } from '#turn.machine.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
   createFakePromiseActors,
   recordEmitted,
 } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
 
 /** A protocol action label, as `TurnProtocol.tla` writes `act`. */
 export type ActionLabel = readonly [string, ...Array<string | boolean>];
 
 export const portCodes = ['NONE', 'ENGINE_UNAVAILABLE'] as const;
 
-export const turnInput = { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' } as const;
+const key = { chatId: 'chat-1', turnId: 'turn-1', runId: 'run-1', attempt: 0 } as const;
+
+/** A fresh attempt's input. */
+export const turnInput: TurnMachineInput = { key };
+
+/** An attempt adopted from a lease record (the spec's `Adopted`). */
+export const adoptedTurnInput: TurnMachineInput = {
+  key,
+  adopt: { checkoutId: 'checkout-1', headRevisionId: 'rev-1' },
+};
 
 export const preparedOutput = (dirty: boolean, stale: boolean): Record<string, unknown> => ({
   checkoutId: 'checkout-1',
@@ -34,15 +46,21 @@ export const preparedOutput = (dirty: boolean, stale: boolean): Record<string, u
   staleRunIds: stale ? ['run-old'] : [],
 });
 
+const lease = { key, checkoutId: 'checkout-1', headRevisionId: 'rev-1' };
+const writtenOutput = { lease, leaseIds: ['run-1'], held: [] };
+
 /** The value a rejected effect throws for a port code; `NONE` is an unclassified failure. */
 export const failure = (code: string): Error =>
   code === 'NONE' ? new Error('refused') : Object.assign(new Error('refused'), { code });
 
-/** A cut answer as the parent routes it; the revision id names which cut it answers. */
-export const answer = (kind: string, revisionId: string): AnyEventObject => ({
+/* The id of the cut the attempt waits on, in the wire format (RM-R1). */
+const pendingCutId = (context: Record<string, unknown>, phase: string): string =>
+  `run-1/0/${phase === 'basing' ? 'base' : 'result'}/${String(Number(context['cutSequence']) - 1)}`;
+
+/** A cut answer as the parent routes it, naming the cut it answers. */
+export const answer = (kind: string, requestId: string, revisionId: string): AnyEventObject => ({
   type: kind,
-  trigger: 'turn',
-  turnId: 'turn-1',
+  requestId,
   ...(kind === 'revisionMinted' ? { revisionId } : {}),
   ...(kind === 'cutFailed' ? { reason: 'disk full' } : {}),
 });
@@ -55,13 +73,17 @@ const doneOutputs: Readonly<Record<string, ReadonlyArray<readonly [ActionLabel, 
       preparedOutput(dirty, stale),
     ]),
   ),
-  writeLease: [[['WriteLeaseOk'], { leaseIds: ['run-1'] }]],
+  writeLease: [[['WriteLeaseOk'], writtenOutput]],
   capture: [[['CaptureOk'], { captureId: 'capture-1' }]],
   merge: [
     [['MergeOk', 'recorded'], { status: 'recorded' }],
     [['MergeOk', 'conflicted'], { status: 'conflicted', conflictRevisionId: 'rev-conflict' }],
   ],
   retireLease: [[['RetireDone', true], undefined]],
+  find: [
+    [['FindDone', true], { result: 'rev-found' }],
+    [['FindDone', false], {}],
+  ],
 };
 
 const errorLabels: Readonly<Record<string, (code: string) => ActionLabel>> = {
@@ -71,10 +93,7 @@ const errorLabels: Readonly<Record<string, (code: string) => ActionLabel>> = {
   merge: (code) => ['MergeErr', code],
 };
 
-const phaseOf = (snapshot: AnyMachineSnapshot): string => {
-  const value: unknown = snapshot.value;
-  return typeof value === 'string' ? value : String(Object.values(value as Record<string, unknown>)[0]);
-};
+const phaseOf = (snapshot: AnyMachineSnapshot): string => String(snapshot.value);
 
 /** A sampled machine event and the protocol action it stands for (JSON of the label). */
 export type LabelledEvent = Readonly<{ label: string; event: AnyEventObject }>;
@@ -84,11 +103,17 @@ const labelled = (label: ActionLabel, event: AnyEventObject): LabelledEvent => (
   event: { ...event, label: JSON.stringify(label) },
 });
 
+const answerKinds = new Set(['revisionMinted', 'nothingToSave', 'cutFailed', 'casLost', 'cutCancelled']);
+
 /**
  * Concrete events for one candidate transition of `turn.machine`.
  *
+ * Events the root answers without a step of the protocol (a stale answer, a repeated signal, an
+ * acknowledgement before settlement) sample to `[]`, as does a failed search, which the spec
+ * does not model.
+ *
  * @param eventType - The candidate's event type.
- * @param matches - The candidate's event pattern (`actorId`, `delay`, `stateId`).
+ * @param matches - The candidate's event pattern (`actorId`, `stateId`).
  * @param snapshot - The snapshot the candidate is enabled in.
  * @returns Labelled events; `[]` for an event type the protocol has no action for.
  */
@@ -98,10 +123,25 @@ export const sampleTurnEvents = (
   snapshot: AnyMachineSnapshot,
 ): LabelledEvent[] => {
   const phase = phaseOf(snapshot);
+  const context = snapshot.context as Record<string, unknown>;
   const actorId = typeof matches['actorId'] === 'string' ? matches['actorId'] : '';
   const child = (snapshot.children as Record<string, { src?: unknown; sessionId?: unknown } | undefined>)[actorId];
   const source = typeof child?.src === 'string' ? child.src : '';
   const session = child?.sessionId === undefined ? {} : { sessionId: child.sessionId };
+  if (answerKinds.has(eventType)) {
+    if (phase !== 'basing' && phase !== 'requesting') {
+      return [];
+    }
+    if (eventType === 'cutCancelled' && context['releasing'] !== true) {
+      return [];
+    }
+    return [
+      labelled(
+        [phase === 'basing' ? 'BaseAnswer' : 'CutAnswer', eventType],
+        answer(eventType, pendingCutId(context, phase), phase === 'basing' ? 'rev-base' : 'rev-turn'),
+      ),
+    ];
+  }
   switch (eventType) {
     case 'xstate.done.actor': {
       return (doneOutputs[source] ?? []).map(([label, output]) =>
@@ -109,46 +149,28 @@ export const sampleTurnEvents = (
       );
     }
     case 'xstate.error.actor': {
-      return source === 'retireLease'
-        ? [
-            labelled(['RetireDone', false], {
-              type: eventType,
-              actorId,
-              ...session,
-              error: new Error('lease file gone'),
-            }),
-          ]
-        : portCodes.flatMap((code) => {
-            const label = errorLabels[source];
-            return label ? [labelled(label(code), { type: eventType, actorId, ...session, error: failure(code) })] : [];
-          });
-    }
-    case 'xstate.after': {
-      return [labelled([phase === 'basing' ? 'BaseTimeout' : 'CutTimeout'], { type: eventType, ...matches })];
-    }
-    case 'revisionMinted':
-    case 'nothingToSave':
-    case 'cutFailed':
-    case 'casLost': {
-      return [
-        labelled(
-          [phase === 'basing' ? 'BaseAnswer' : 'CutAnswer', eventType],
-          answer(eventType, phase === 'basing' ? 'rev-base' : 'rev-turn'),
-        ),
-      ];
+      if (source === 'retireLease') {
+        return [labelled(['RetireDone', false], { type: eventType, actorId, ...session, error: new Error('gone') })];
+      }
+      const label = errorLabels[source];
+      return label
+        ? portCodes.map((code) => labelled(label(code), { type: eventType, actorId, ...session, error: failure(code) }))
+        : [];
     }
     case 'leaseGranted': {
-      return [labelled(['LeaseGranted'], { type: eventType })];
+      return phase === 'acquiring' || phase === 'held' ? [labelled(['LeaseGranted'], { type: eventType })] : [];
     }
     case 'leaseRefused': {
-      return [labelled(['LeaseRefused'], { type: eventType, reason: 'held elsewhere' })];
+      return phase === 'acquiring' ? [labelled(['LeaseRefused'], { type: eventType, reason: 'held elsewhere' })] : [];
     }
     case 'turnCompleted': {
-      return [labelled(['TurnCompleted'], { type: eventType })];
+      return [labelled(['TurnCompleted'], { type: eventType, key })];
     }
-    case 'release':
     case 'turnAbandoned': {
-      return [labelled(['Release', eventType], { type: eventType })];
+      return [labelled(['Release', eventType], { type: eventType, key })];
+    }
+    case 'acknowledge': {
+      return phase === 'settled' ? [labelled(['Acknowledge'], { type: eventType, key })] : [];
     }
     default: {
       return [];
@@ -159,14 +181,22 @@ export const sampleTurnEvents = (
 /** The protocol's `turn` for a machine snapshot: the refinement mapping. */
 export const abstractTurn = (snapshot: AnyMachineSnapshot): Record<string, unknown> => {
   const context = snapshot.context as Record<string, unknown>;
+  const phase = phaseOf(snapshot);
+  const refused = phase === 'refusing' || phase === 'refused';
   return {
-    phase: phaseOf(snapshot),
+    phase,
     retries: context['casRetries'],
     completion: context['completionRequested'],
-    outcome: context['outcome'] ?? 'none',
+    outcome: refused ? 'refused' : (context['outcome'] ?? 'none'),
     code: context['code'] ?? 'NONE',
     base: context['baseRevisionId'] ?? 'none',
     revision: context['revisionId'] ?? 'none',
+    releasing: context['releasing'],
+    dirty: context['dirtyBase'],
+    placed: context['placed'],
+    found: context['foundRevisionId'] !== undefined,
+    leased: context['lease'] !== undefined,
+    cutRefused: Number(context['cutFailures']) > 0,
   };
 };
 
@@ -179,6 +209,9 @@ const invoked: Readonly<Record<string, readonly string[]>> = {
   capturing: ['capture'],
   merging: ['merge'],
   retiring: ['retireLease'],
+  refusing: ['retireLease'],
+  adopting: ['find'],
+  finding: ['find'],
 };
 
 export const invokedIn = (phase: string): string[] => [...(invoked[phase] ?? [])];
@@ -193,6 +226,12 @@ export const messageOf = (event: AnyEventObject): string => {
     case 'turnConflicted': {
       return `${event.type}:${String(event['revisionId'] ?? 'none')}`;
     }
+    case 'turnRefused': {
+      return `turnRefused:${String(event['code'] ?? 'NONE')}`;
+    }
+    case 'turnCutRefused': {
+      return 'cutRefused';
+    }
     default: {
       return event.type;
     }
@@ -201,10 +240,11 @@ export const messageOf = (event: AnyEventObject): string => {
 
 const orphanOutputs: Readonly<Record<string, unknown>> = {
   prepare: preparedOutput(false, false),
-  writeLease: { leaseIds: ['run-1'] },
+  writeLease: writtenOutput,
   capture: { captureId: 'capture-1' },
   merge: { status: 'recorded' },
   retireLease: undefined,
+  find: {},
 };
 
 /* Protocol action → the effect it fails. */
@@ -215,11 +255,10 @@ const errorEffects = new Map([
   ['MergeErr', 'merge'],
 ]);
 
-const startHarness = (machine: TurnMachine) => {
+const startHarness = (machine: TurnMachine, input: TurnMachineInput) => {
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const parent = createFakeParent();
-  const clock = new StepClock();
   const actor = createActor(
     machine.provide({
       actors: {
@@ -228,14 +267,19 @@ const startHarness = (machine: TurnMachine) => {
         retireLease: promises.actor('retireLease'),
         capture: promises.actor('capture'),
         merge: promises.actor('merge'),
+        find: promises.actor('find'),
         lease: callbacks.actor('lease'),
       },
     }),
-    { clock, input: { ...turnInput, parentRef: parent.ref } },
+    /* RM-A15: the zero-microstep inspector over the covering suite; a dropped event fails the test. */
+    {
+      input: { ...input, parentRef: parent.ref },
+      inspect: guardActors({ ignore: { turn: turnIgnoredEvents } }).inspect,
+    },
   );
   const emitted = recordEmitted(actor);
   actor.start();
-  return { actor, promises, callbacks, parent, emitted, clock, seen: { sent: 0, emitted: 0 } };
+  return { actor, promises, callbacks, parent, emitted, seen: { sent: 0, emitted: 0 } };
 };
 
 export type TurnHarness = ReturnType<typeof startHarness>;
@@ -247,10 +291,20 @@ const flush = async (): Promise<void> => {
   });
 };
 
+const send = (harness: TurnHarness, event: AnyEventObject): void => {
+  harness.actor.send(event as unknown as TurnMachineEvent);
+};
+
+/* The answer to the cut the attempt waits on now. */
+const answerNow = (harness: TurnHarness, kind: string, revisionId: string): AnyEventObject => {
+  const snapshot = harness.actor.getSnapshot() as AnyMachineSnapshot;
+  return answer(kind, pendingCutId(snapshot.context as Record<string, unknown>, phaseOf(snapshot)), revisionId);
+};
+
 /* One protocol action, performed on the harness. */
 const perform = (harness: TurnHarness, action: readonly unknown[]): void => {
   const [name, first, second] = action as [string, unknown, unknown];
-  const { actor, promises, callbacks, clock } = harness;
+  const { actor, promises, callbacks } = harness;
   switch (name) {
     case 'PrepareOk': {
       promises.settle('prepare', { output: preparedOutput(first === true, second === true) });
@@ -264,27 +318,22 @@ const perform = (harness: TurnHarness, action: readonly unknown[]): void => {
       return;
     }
     case 'BaseAnswer': {
-      actor.send(answer(String(first), 'rev-base') as unknown as TurnMachineEvent);
+      send(harness, answerNow(harness, String(first), 'rev-base'));
       return;
     }
     case 'CutAnswer': {
-      actor.send(answer(String(first), 'rev-turn') as unknown as TurnMachineEvent);
+      send(harness, answerNow(harness, String(first), 'rev-turn'));
       return;
     }
     case 'LateAnswer': {
-      /* A settled turn's ref is already dropped by the root (R12), so the answer never reaches it. */
+      /* The cut the attempt stopped waiting on: its id is no longer pending, so the answer is ignored (RM-R1). */
       if (actor.getSnapshot().status === 'active') {
-        actor.send(answer(String(first), 'rev-late') as unknown as TurnMachineEvent);
+        send(harness, answer(String(first), 'run-1/0/late/0', 'rev-late'));
       }
       return;
     }
-    case 'BaseTimeout':
-    case 'CutTimeout': {
-      clock.advance(turnCutSettlementMilliseconds);
-      return;
-    }
     case 'WriteLeaseOk': {
-      promises.settle('writeLease', { output: { leaseIds: ['run-1'] } });
+      promises.settle('writeLease', { output: writtenOutput });
       return;
     }
     case 'LeaseGranted': {
@@ -296,11 +345,16 @@ const perform = (harness: TurnHarness, action: readonly unknown[]): void => {
       return;
     }
     case 'TurnCompleted': {
-      actor.send({ type: 'turnCompleted' });
+      send(harness, { type: 'turnCompleted', key });
       return;
     }
     case 'Release': {
-      actor.send({ type: String(first) } as unknown as TurnMachineEvent);
+      /* Today's `release` and `turnAbandoned` reach the attempt as `turnAbandoned` (the root deletes `release`). */
+      send(harness, { type: 'turnAbandoned', key });
+      return;
+    }
+    case 'Acknowledge': {
+      send(harness, { type: 'acknowledge', key });
       return;
     }
     case 'CaptureOk': {
@@ -314,8 +368,12 @@ const perform = (harness: TurnHarness, action: readonly unknown[]): void => {
       });
       return;
     }
+    case 'FindDone': {
+      promises.settle('find', { output: first === true ? { result: 'rev-found' } : {} });
+      return;
+    }
     case 'RetireDone': {
-      promises.settle('retireLease', first === true ? { output: undefined } : { error: new Error('lease file gone') });
+      promises.settle('retireLease', first === true ? { output: undefined } : { error: new Error('gone') });
       return;
     }
     case 'OrphanDone': {
@@ -339,11 +397,15 @@ const runningOf = (snapshot: AnyMachineSnapshot): string[] =>
 /**
  * The forward-replay adapter. `view` reports the messages sent and emitted since the previous view,
  * which is one step's `out` and `emits`; `project` adds the facts the spec implies per phase.
+ *
+ * @param machine - The machine under test.
+ * @param input - The attempt's input: {@link turnInput} for `Fresh`, {@link adoptedTurnInput} for `Adopted`.
  */
 export const turnAdapter = (
   machine: TurnMachine,
+  input: TurnMachineInput = turnInput,
 ): ConformanceAdapter<TurnHarness> & { readonly project: (state: SpecView) => SpecView } => ({
-  start: () => startHarness(machine),
+  start: () => startHarness(machine, input),
   apply: async (harness, action) => {
     perform(harness, action);
     await flush();

@@ -152,3 +152,5 @@ export type {
 export type { RevisionBranchFacet, RevisionConflictFacet, RevisionStatusProjection } from '#project-revisions.types.js';
 export type { BranchOperation } from '#branch.types.js';
 export type { ResolutionSide } from '#resolution.types.js';
+/* W5 RM-S9: the attempt key every turn verb and answer carries (D14); plain data, so the barrel stays free of `xstate`. */
+export type { TurnAttemptKey } from '#turn.types.js';

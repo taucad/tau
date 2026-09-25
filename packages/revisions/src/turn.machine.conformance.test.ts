@@ -17,8 +17,14 @@ import { replaySuite } from '@taucad/formal/replay';
 import { readFileSync } from 'node:fs';
 
 import { turnMachine } from '#turn.machine.js';
-import type { TurnMachineEvent } from '#turn.machine.js';
-import { abstractTurn, sampleTurnEvents, turnAdapter, turnInput } from '#test/conformance/turn-adapter.js';
+import type { TurnMachineEvent, TurnMachineInput } from '#turn.machine.js';
+import {
+  abstractTurn,
+  adoptedTurnInput,
+  sampleTurnEvents,
+  turnAdapter,
+  turnInput,
+} from '#test/conformance/turn-adapter.js';
 
 const specs = path.resolve(import.meta.dirname, '../specs/turn');
 const graph = readSpecGraph(path.join(specs, 'TurnProtocol/graph.json'));
@@ -49,14 +55,15 @@ const rebind = (snapshot: AnyMachineSnapshot, event: AnyEventObject): AnyEventOb
 };
 
 /* Each shortest path (W2's `pathTable`), with the snapshots its events fold to from the initial one. */
-const shortestPaths = (): Path[] =>
+const pathsFrom = (input: TurnMachineInput): Path[] =>
   pathTable(turnMachine, {
-    input: turnInput,
+    input,
     events,
     limit: 100_000,
-    serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify([snapshot.value, snapshot.context as unknown]),
+    /* The abstract state: the cut sequence and refusal count grow without bound, and the spec reads neither. */
+    serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(abstractTurn(snapshot)),
   }).map((row) => {
-    const [initial] = initialTransition(turnMachine, turnInput);
+    const [initial] = initialTransition(turnMachine, input);
     const snapshots = [initial];
     for (const event of row.events) {
       const previous = snapshots.at(-1)!;
@@ -64,6 +71,26 @@ const shortestPaths = (): Path[] =>
     }
     return { events: row.events, snapshots };
   });
+
+/* The spec's two initial states: a fresh attempt and one adopted from a lease record (RM-R14). */
+const shortestPaths = (): Path[] => [...pathsFrom(turnInput), ...pathsFrom(adoptedTurnInput)];
+
+/* The behaviours that start adopted replay on an adopted actor. */
+const adopted = (behaviour: readonly SpecView[]): boolean =>
+  (behaviour[0]?.['turn'] as Record<string, unknown> | undefined)?.['phase'] === 'adopting';
+
+const replay = async (behaviours: ReadonlyArray<readonly SpecView[]>) => [
+  ...(await replaySuite(
+    behaviours.filter((behaviour) => !adopted(behaviour)),
+    turnAdapter(turnMachine),
+    (state) => state['act'] as unknown[],
+  )),
+  ...(await replaySuite(
+    behaviours.filter((behaviour) => adopted(behaviour)),
+    turnAdapter(turnMachine, adoptedTurnInput),
+    (state) => state['act'] as unknown[],
+  )),
+];
 
 /* An implementation path in the spec's vocabulary. */
 const asWalk = (path: Path): WalkPath => ({
@@ -78,8 +105,8 @@ describe('turn.machine conforms to TurnProtocol.tla', () => {
   it('should replay the covering suite without divergence', async () => {
     const behaviours = suiteBehaviours(graph, suite);
 
-    expect(behaviours).toHaveLength(83);
-    expect(await replaySuite(behaviours, turnAdapter(turnMachine), (state) => state['act'] as unknown[])).toEqual([]);
+    expect(behaviours).toHaveLength(77);
+    expect(await replay(behaviours)).toEqual([]);
   });
 
   it.runIf(simulated !== undefined)(
@@ -90,7 +117,7 @@ describe('turn.machine conforms to TurnProtocol.tla', () => {
         .filter((line) => line.trim() !== '')
         .map((line) => JSON.parse(line) as SpecView[]);
 
-      const divergences = await replaySuite(behaviours, turnAdapter(turnMachine), (state) => state['act'] as unknown[]);
+      const divergences = await replay(behaviours);
 
       expect(behaviours.length).toBeGreaterThan(0);
       expect(divergences.slice(0, 3)).toEqual([]);
@@ -101,7 +128,7 @@ describe('turn.machine conforms to TurnProtocol.tla', () => {
   it('should walk every shortest implementation path through the spec graph without rejection', () => {
     const paths = shortestPaths();
 
-    expect(paths).toHaveLength(294);
+    expect(paths).toHaveLength(1290);
     expect(
       walkPaths(
         graph,
@@ -110,12 +137,12 @@ describe('turn.machine conforms to TurnProtocol.tla', () => {
     ).toEqual([]);
   });
 
-  it('should reach all 196 abstract states', () => {
+  it('should reach all 1,290 abstract states', () => {
     const states = new Set(
       shortestPaths().flatMap((path) => path.snapshots.map((snapshot) => JSON.stringify(abstractTurn(snapshot)))),
     );
 
-    expect(states.size).toBe(196);
+    expect(states.size).toBe(1290);
   });
 
   it('should match the committed drift manifest', () => {

@@ -7,6 +7,11 @@
  * from a persisted snapshot. It enforces one checkout per branch, retires
  * leases without removing their checkouts (D17), and never removes a checkout a
  * lease still holds (A25, I9).
+ *
+ * Every add and remove names its request, is queued in any state, and is
+ * answered by that id — `checkoutAdded`, `checkoutRemoved` or `checkoutFailed`
+ * (RM-R1, RM-R11). A settled turn's lease leaves through one typed `turnEnded`
+ * (RM-R10).
  */
 
 import { createAsyncLogic, setup, types } from 'xstate';
@@ -15,7 +20,7 @@ import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
 import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
-import type { TurnSettlement } from '#turn.machine.js';
+import type { TurnAttemptKey } from '#turn.types.js';
 
 /** What a registry operation was doing when it failed or was refused. @public */
 export type CheckoutOperation = 'open' | 'add' | 'remove' | 'retire';
@@ -32,10 +37,15 @@ export type CheckoutsMachineContext = Readonly<{
   checkouts: readonly CheckoutRecord[];
   /** Run ids awaiting retirement, served one at a time in arrival order. */
   pendingRetirements: readonly string[];
+  /** The attempt a turn's retirement names, by run id; the effect retires only that attempt's record (TS-R5). */
+  retirementKeys: Readonly<Record<string, TurnAttemptKey>>;
+  /** Adds and removes in arrival order; the first is the one `adding` or `removing` serves (RM-R11). */
+  pendingOperations: ReadonlyArray<
+    | Readonly<{ kind: 'add'; requestId: string; branch: string; from: string }>
+    | Readonly<{ kind: 'remove'; requestId: string; id: string }>
+  >;
   /** Leases reported before the registry had records to put them on (R22). */
   pendingLeases: ReadonlyArray<Readonly<{ checkoutId: string | undefined; runId: string }>>;
-  /** The checkout `removing` is dropping. */
-  removingId: string | undefined;
   reason: string | undefined;
   /** The refusal's stable category, when the port named one (P4). */
   reasonCode: RevisionPortErrorCode | undefined;
@@ -45,32 +55,30 @@ export type CheckoutsMachineContext = Readonly<{
 /** Events accepted by checkoutsMachine. @public */
 export type CheckoutsMachineEvent =
   | Readonly<{ type: 'open' }>
-  | Readonly<{ type: 'addCheckout'; branch: string; from: string }>
-  | Readonly<{ type: 'removeCheckout'; id: string }>
+  /* `requestId` is the asker's; every answer to the request echoes it (RM-R1). */
+  | Readonly<{ type: 'addCheckout'; requestId: string; branch: string; from: string }>
+  | Readonly<{ type: 'removeCheckout'; requestId: string; id: string }>
   | Readonly<{ type: 'leaseStale'; runId: string }>
   | Readonly<{ type: 'leaseWritten'; checkoutId: string | undefined; runId: string }>
-  | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement)
-  /* A conflicted turn settled too, and its lease is retired the same way (L7 P-1). */
-  | (Readonly<{ type: 'turnConflicted' }> & TurnSettlement)
-  /* A turn that ended without a settlement still had a lease (R12). */
-  | Readonly<{ type: 'turnReleased'; turnId: string; checkoutId: string | undefined; runId: string }>;
+  /* An attempt retired, or was refused after writing its record: whatever its outcome, its lease leaves (RM-R10, L7 P-1). */
+  | Readonly<{ type: 'turnEnded'; key: TurnAttemptKey; checkoutId: string | undefined }>;
 
 /** Facts checkoutsMachine emits, and sends to its parent when they change the registry. @public */
 export type CheckoutsMachineEmitted =
-  | Readonly<{
-      type: 'checkoutsChanged';
-      checkouts: readonly CheckoutRecord[];
-      /**
-       * Set when a record's head, head tree and branch are the ones read at the
-       * last `loading`, republished with a lease or membership change. The root
-       * keeps its own for a checkout it already has (W0.10, L7 D-L7-1).
-       */
-      headsCached?: true;
-    }>
+  /* A record's branch, head and head tree are the registry's read at `loading`; the root takes those from each checkout actor (RM-R5). */
+  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
-  /* P4: a refusal crosses as a code; the page that shows it owns the words. */
-  | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string; code?: RevisionPortErrorCode }>;
+  /* P4: a refusal crosses as a code; the page that shows it owns the words. `requestId` names the add or remove it answers. */
+  | Readonly<{
+      type: 'checkoutFailed';
+      operation: CheckoutOperation;
+      reason: string;
+      code?: RevisionPortErrorCode;
+      requestId?: string;
+    }>
+  | Readonly<{ type: 'checkoutAdded'; requestId: string; checkout: CheckoutRecord }>
+  | Readonly<{ type: 'checkoutRemoved'; requestId: string; checkoutId: string }>;
 
 /** Output of the injected `sweepLeases` actor: the epoch comparison (F13). @public */
 export type SweepLeasesActorOutput = Readonly<{ retiredRunIds: readonly string[] }>;
@@ -111,13 +119,9 @@ const publish = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue, fact: 
   }
 };
 
-/* Records are read only at `loading`; every other announcement republishes their heads as cached. */
-const announceRegistry = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue, loaded = false): void => {
-  publish(context, enq, {
-    type: 'checkoutsChanged',
-    checkouts: context.checkouts,
-    ...(loaded ? {} : { headsCached: true }),
-  });
+/* Records are read only at `loading`; their heads are spawn input only, so republishing them is harmless (RM-R5). */
+const announceRegistry = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue): void => {
+  publish(context, enq, { type: 'checkoutsChanged', checkouts: context.checkouts });
   for (const checkout of context.checkouts) {
     if (checkout.removable === true) {
       publish(context, enq, { type: 'removalOffered', checkoutId: checkout.id });
@@ -128,14 +132,20 @@ const announceRegistry = (context: CheckoutsMachineContext, enq: CheckoutsEnqueu
 const announceFailure = (
   context: CheckoutsMachineContext,
   enq: CheckoutsEnqueue,
-  failure: Readonly<{ operation: CheckoutOperation; reason?: string; code?: RevisionPortErrorCode }>,
+  failure: Readonly<{
+    operation: CheckoutOperation;
+    reason?: string;
+    code?: RevisionPortErrorCode;
+    requestId?: string;
+  }>,
 ): void => {
-  const { operation, reason, code } = failure;
+  const { operation, reason, code, requestId } = failure;
   /* R11: the root routes this to the workbench; an emit alone never
    * leaves this actor. */
   publish(context, enq, {
     type: 'checkoutFailed',
     operation,
+    ...(requestId === undefined ? {} : { requestId }),
     reason: reason ?? context.reason ?? 'The checkout operation failed.',
     /* A reason this call authored is the guard's own sentence, not the
        port's, so it never carries the last port code (P4) — it names its
@@ -154,12 +164,42 @@ const announceFailure = (
 const failOperation = (
   context: CheckoutsMachineContext,
   enq: CheckoutsEnqueue,
-  failure: Readonly<{ error: unknown; operation: CheckoutOperation }>,
+  failure: Readonly<{ error: unknown; operation: CheckoutOperation; requestId?: string }>,
 ): Partial<CheckoutsMachineContext> => {
-  const { error, operation } = failure;
+  const { error, operation, requestId } = failure;
   const patch = { reason: describeFailure(error), reasonCode: describeFailureCode(error) };
-  announceFailure({ ...context, ...patch }, enq, { operation });
+  announceFailure({ ...context, ...patch }, enq, { operation, ...(requestId === undefined ? {} : { requestId }) });
   return patch;
+};
+
+type PendingOperation = CheckoutsMachineContext['pendingOperations'][number];
+
+const operationOf = (
+  event: Extract<CheckoutsMachineEvent, { type: 'addCheckout' | 'removeCheckout' }>,
+): PendingOperation =>
+  event.type === 'addCheckout'
+    ? { kind: 'add', requestId: event.requestId, branch: event.branch, from: event.from }
+    : { kind: 'remove', requestId: event.requestId, id: event.id };
+
+const queueOperation = (
+  context: CheckoutsMachineContext,
+  event: Extract<CheckoutsMachineEvent, { type: 'addCheckout' | 'removeCheckout' }>,
+): Partial<CheckoutsMachineContext> => ({ pendingOperations: [...context.pendingOperations, operationOf(event)] });
+
+/* A registry that could not open answers every operation it holds, so no asker waits on it (RM-R11). */
+const refuseOperations = (
+  context: CheckoutsMachineContext,
+  enq: CheckoutsEnqueue,
+  operations: readonly PendingOperation[],
+): void => {
+  for (const operation of operations) {
+    announceFailure(context, enq, {
+      operation: operation.kind,
+      requestId: operation.requestId,
+      reason: context.reason ?? 'This project could not read its checkouts.',
+      ...(context.reasonCode === undefined ? {} : { code: context.reasonCode }),
+    });
+  }
 };
 
 const queueRetirements = (
@@ -169,15 +209,14 @@ const queueRetirements = (
   /* R2: `runIds` is the provenance set — every lease the writer saw on
    * the checkout. Retiring all of them takes the other chat's lease
    * (AC9), so a settlement retires only its own `runId`. */
-  const runIds =
-    event.type === 'leaseStale' ||
-    event.type === 'turnFinalized' ||
-    event.type === 'turnConflicted' ||
-    event.type === 'turnReleased'
-      ? [event.runId]
-      : [];
+  const runIds = event.type === 'leaseStale' ? [event.runId] : event.type === 'turnEnded' ? [event.key.runId] : [];
   const added = runIds.filter((runId) => !context.pendingRetirements.includes(runId));
-  return { pendingRetirements: [...context.pendingRetirements, ...added] };
+  /* A stale sweep names only the run, so no earlier attempt's key may narrow it. */
+  const { [runIds[0] ?? '']: _replaced, ...keys } = context.retirementKeys;
+  return {
+    pendingRetirements: [...context.pendingRetirements, ...added],
+    retirementKeys: event.type === 'turnEnded' ? { ...keys, [event.key.runId]: event.key } : keys,
+  };
 };
 
 /*
@@ -218,6 +257,12 @@ const dropRetiredLease = (context: CheckoutsMachineContext): Partial<CheckoutsMa
   };
 };
 
+const withoutKey = (
+  context: CheckoutsMachineContext,
+  runId: string | undefined,
+): CheckoutsMachineContext['retirementKeys'] =>
+  Object.fromEntries(Object.entries(context.retirementKeys).filter(([held]) => held !== runId));
+
 const completeRetirement = (
   context: CheckoutsMachineContext,
   enq: CheckoutsEnqueue,
@@ -226,7 +271,7 @@ const completeRetirement = (
   if (runId !== undefined) {
     publish(context, enq, { type: 'leaseRetired', runId });
   }
-  return { pendingRetirements: context.pendingRetirements.slice(1) };
+  return { pendingRetirements: context.pendingRetirements.slice(1), retirementKeys: withoutKey(context, runId) };
 };
 
 const checkoutsMachineDefinition = setup({
@@ -260,7 +305,7 @@ const checkoutsMachineDefinition = setup({
         throw new Error('checkoutsMachine: the sweepLeases actor was not provided.');
       },
     }),
-    retireLease: createAsyncLogic<void, Readonly<{ projectId: string; runId: string }>>({
+    retireLease: createAsyncLogic<void, Readonly<{ projectId: string; runId: string; key?: TurnAttemptKey }>>({
       run: async () => {
         throw new Error('checkoutsMachine: the retireLease actor was not provided.');
       },
@@ -275,6 +320,7 @@ const checkoutsMachineDefinition = setup({
       context.checkouts.some((checkout) => checkout.id === id && checkout.leaseRunIds.length === 0),
     hasPendingRetirement: (context: CheckoutsMachineContext) => context.pendingRetirements.length > 0,
     hasPendingLease: (context: CheckoutsMachineContext) => context.pendingLeases.length > 0,
+    hasPendingOperation: (context: CheckoutsMachineContext) => context.pendingOperations.length > 0,
     /* A lease naming no known record — or one whose turn has already ended —
      * changes nothing, so it must not churn the host with a re-announcement. */
     hasApplicableLease: (context: CheckoutsMachineContext) =>
@@ -302,8 +348,9 @@ const checkoutsMachineDefinition = setup({
     projectId: input.projectId,
     checkouts: [],
     pendingRetirements: [],
+    retirementKeys: {},
     pendingLeases: [],
-    removingId: undefined,
+    pendingOperations: [],
     reason: undefined,
     reasonCode: undefined,
     parentRef: input.parentRef,
@@ -327,15 +374,18 @@ const checkoutsMachineDefinition = setup({
       }),
     },
     leaseStale: { context: ({ context, event }) => queueRetirements(context, event) },
-    turnFinalized: { context: ({ context, event }) => queueRetirements(context, event) },
-    turnConflicted: { context: ({ context, event }) => queueRetirements(context, event) },
-    turnReleased: { context: ({ context, event }) => queueRetirements(context, event) },
+    turnEnded: { context: ({ context, event }) => queueRetirements(context, event) },
+    /* Queued in every state and served from `ready.idle`, answered by id either way (RM-R11). */
+    addCheckout: { context: ({ context, event }) => queueOperation(context, event) },
+    removeCheckout: { context: ({ context, event }) => queueOperation(context, event) },
   },
   states: {
     idle: {
       on: { open: { target: 'recovering' } },
     },
     recovering: {
+      /* The load that follows the sweep reads the records fresh, so a reopen here is already served. */
+      on: { open: () => ({}) },
       invoke: {
         src: 'sweepLeases',
         input: ({ context }) => ({ projectId: context.projectId }),
@@ -352,12 +402,14 @@ const checkoutsMachineDefinition = setup({
       },
     },
     loading: {
+      /* A reopen asks for records written after this read began: read again. */
+      on: { open: { target: 'loading', reenter: true } },
       invoke: {
         src: 'listCheckouts',
         input: ({ context }) => ({ projectId: context.projectId }),
         onDone: ({ context, event }, enq) => {
           const patch = { checkouts: event.output.checkouts };
-          announceRegistry({ ...context, ...patch }, enq, true);
+          announceRegistry({ ...context, ...patch }, enq);
           return { target: 'ready', context: patch };
         },
         /* R2/W6: a registry that could not load used to rest here silently, so
@@ -371,7 +423,21 @@ const checkoutsMachineDefinition = setup({
       },
     },
     failed: {
-      on: { open: { target: 'recovering' } },
+      entry: ({ context }, enq) => {
+        refuseOperations(context, enq, context.pendingOperations);
+        return { context: { pendingOperations: [] } };
+      },
+      on: {
+        open: { target: 'recovering' },
+        addCheckout: ({ context, event }, enq) => {
+          refuseOperations(context, enq, [operationOf(event)]);
+          return {};
+        },
+        removeCheckout: ({ context, event }, enq) => {
+          refuseOperations(context, enq, [operationOf(event)]);
+          return {};
+        },
+      },
     },
     ready: {
       initial: 'idle',
@@ -404,88 +470,130 @@ const checkoutsMachineDefinition = setup({
             if (guards.hasPendingRetirement(context)) {
               return { target: 'retiring' };
             }
-            return undefined;
-          },
-          on: {
-            addCheckout: ({ context, event, guards }, enq) => {
-              if (guards.branchIsFree(context, event.branch)) {
+            if (!guards.hasPendingOperation(context)) {
+              return undefined;
+            }
+            const [operation, ...rest] = context.pendingOperations;
+            if (operation?.kind === 'add') {
+              if (guards.branchIsFree(context, operation.branch)) {
                 return { target: 'adding' };
               }
               announceFailure(context, enq, {
                 operation: 'add',
+                requestId: operation.requestId,
                 reason: 'That branch already has a checkout.',
                 code: 'CHECKOUT_CONFLICT',
               });
-              return {};
-            },
-            removeCheckout: ({ context, event, guards }, enq) => {
-              if (guards.checkoutIsFree(context, event.id)) {
-                return { target: 'removing', context: { removingId: event.id } };
-              }
-              /* Policy Rule 1: *lease* and *checkout* are engineering terms
-               * and this sentence reaches a toast and the CLI. What the
-               * person can act on is which branch is busy. */
-              announceFailure(context, enq, {
-                operation: 'remove',
-                reason: `An agent is working in ${
-                  context.checkouts.find((checkout) => checkout.id === event.id)?.branch ?? 'this branch'
-                }.`,
-              });
-              return {};
-            },
+              return { context: { pendingOperations: rest } };
+            }
+            if (operation !== undefined && guards.checkoutIsFree(context, operation.id)) {
+              return { target: 'removing' };
+            }
+            /* Policy Rule 1: *lease* and *checkout* are engineering terms
+             * and this sentence reaches a toast and the CLI. What the
+             * person can act on is which branch is busy. */
+            announceFailure(context, enq, {
+              operation: 'remove',
+              ...(operation === undefined ? {} : { requestId: operation.requestId }),
+              reason: `An agent is working in ${
+                context.checkouts.find((checkout) => checkout.id === (operation?.kind === 'remove' ? operation.id : ''))
+                  ?.branch ?? 'this branch'
+              }.`,
+            });
+            return { context: { pendingOperations: rest } };
           },
         },
         adding: {
           invoke: {
             src: 'addCheckout',
-            input: ({ context, event }) => ({
-              projectId: context.projectId,
-              branch: event.type === 'addCheckout' ? event.branch : '',
-              from: event.type === 'addCheckout' ? event.from : '',
-            }),
+            input: ({ context }) => {
+              const operation = context.pendingOperations[0];
+              return {
+                projectId: context.projectId,
+                branch: operation?.kind === 'add' ? operation.branch : '',
+                from: operation?.kind === 'add' ? operation.from : '',
+              };
+            },
             onDone: ({ context, event }, enq) => {
-              const patch = { checkouts: [...context.checkouts, event.output.checkout] };
+              const patch = {
+                checkouts: [...context.checkouts, event.output.checkout],
+                pendingOperations: context.pendingOperations.slice(1),
+              };
               announceRegistry({ ...context, ...patch }, enq);
+              publish(context, enq, {
+                type: 'checkoutAdded',
+                requestId: context.pendingOperations[0]?.requestId ?? '',
+                checkout: event.output.checkout,
+              });
               return { target: 'idle', context: patch };
             },
             onError: ({ context, event }, enq) => ({
               target: 'idle',
-              context: failOperation(context, enq, { error: event.error, operation: 'add' }),
+              context: {
+                ...failOperation(context, enq, {
+                  error: event.error,
+                  operation: 'add',
+                  requestId: context.pendingOperations[0]?.requestId ?? '',
+                }),
+                pendingOperations: context.pendingOperations.slice(1),
+              },
             }),
           },
         },
         removing: {
           invoke: {
             src: 'removeCheckout',
-            input: ({ context }) => ({ projectId: context.projectId, id: context.removingId ?? '' }),
+            input: ({ context }) => {
+              const operation = context.pendingOperations[0];
+              return { projectId: context.projectId, id: operation?.kind === 'remove' ? operation.id : '' };
+            },
             onDone: ({ context }, enq) => {
+              const operation = context.pendingOperations[0];
+              const removed = operation?.kind === 'remove' ? operation.id : '';
               const patch = {
-                checkouts: context.checkouts.filter((checkout) => checkout.id !== context.removingId),
-                removingId: undefined,
+                checkouts: context.checkouts.filter((checkout) => checkout.id !== removed),
+                pendingOperations: context.pendingOperations.slice(1),
               };
               announceRegistry({ ...context, ...patch }, enq);
+              publish(context, enq, {
+                type: 'checkoutRemoved',
+                requestId: operation?.requestId ?? '',
+                checkoutId: removed,
+              });
               return { target: 'idle', context: patch };
             },
             onError: ({ context, event }, enq) => ({
               target: 'idle',
-              context: failOperation(context, enq, { error: event.error, operation: 'remove' }),
+              context: {
+                ...failOperation(context, enq, {
+                  error: event.error,
+                  operation: 'remove',
+                  requestId: context.pendingOperations[0]?.requestId ?? '',
+                }),
+                pendingOperations: context.pendingOperations.slice(1),
+              },
             }),
           },
         },
         retiring: {
           invoke: {
             src: 'retireLease',
-            input: ({ context }) => ({
-              projectId: context.projectId,
-              runId: context.pendingRetirements[0] ?? '',
-            }),
+            input: ({ context }) => {
+              const runId = context.pendingRetirements[0] ?? '';
+              const key = context.retirementKeys[runId];
+              return { projectId: context.projectId, runId, ...(key === undefined ? {} : { key }) };
+            },
             onDone: ({ context }, enq) => {
               const dropped = { ...context, ...dropRetiredLease(context) };
               const completed = { ...dropped, ...completeRetirement(dropped, enq) };
               announceRegistry(completed, enq);
               return {
                 target: 'idle',
-                context: { checkouts: completed.checkouts, pendingRetirements: completed.pendingRetirements },
+                context: {
+                  checkouts: completed.checkouts,
+                  pendingRetirements: completed.pendingRetirements,
+                  retirementKeys: completed.retirementKeys,
+                },
               };
             },
             onError: ({ context, event }, enq) => {
@@ -493,6 +601,7 @@ const checkoutsMachineDefinition = setup({
                 reason: describeFailure(event.error),
                 reasonCode: describeFailureCode(event.error),
                 pendingRetirements: context.pendingRetirements.slice(1),
+                retirementKeys: withoutKey(context, context.pendingRetirements[0]),
               };
               announceFailure({ ...context, ...patch }, enq, { operation: 'retire' });
               return { target: 'idle', context: patch };

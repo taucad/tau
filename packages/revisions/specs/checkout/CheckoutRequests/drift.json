@@ -1,0 +1,7 @@
+{
+  "alphabet": ["cancelCut", "changed", "cut", "fenceGranted", "fenceRefused", "headMoved"],
+  "specs": {
+    "CheckoutRequests.tla": "7a7b27c2cd99cee4cb655ec878b3f053f76fc19973ec0d8da33de0756d7d13e4"
+  },
+  "tables": {}
+}

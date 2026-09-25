@@ -741,7 +741,12 @@ describe('createTauAgentHost', () => {
       SESSION_LOG_INTEGRITY: true,
       CIRCUIT_BREAKER_OPEN: true,
       LEADERSHIP_LOST: false,
-    } as const satisfies Record<GatewayModelErrorCode | HostCompactionError['code'] | 'LEADERSHIP_LOST', boolean>;
+      // An attempt the lookup cannot resolve is never sent again: retry class `never` until W7 (EQ1, D21).
+      MODEL_ATTEMPT_IN_DOUBT: false,
+    } as const satisfies Record<
+      GatewayModelErrorCode | HostCompactionError['code'] | 'LEADERSHIP_LOST' | 'MODEL_ATTEMPT_IN_DOUBT',
+      boolean
+    >;
     /* eslint-enable @typescript-eslint/naming-convention -- ends the wire-code key exception. */
     const ruled = Object.entries(resumability);
 
@@ -2658,5 +2663,544 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     await closedHost.resume('chat-closed');
     expect(await readLog(closedFile)).toHaveLength(before.length);
     await closedHost.close();
+  });
+});
+
+describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
+  const okTransport: ModelTransport = {
+    async *stream(): AsyncGenerator<ModelStreamEvent> {
+      yield { type: 'text-delta', text: 'ok' };
+      yield { type: 'completed', stopReason: 'stop' };
+    },
+  };
+
+  const lastLifecycle = async (file: ReturnType<typeof createMemoryLogFile>) => {
+    const events = await readLog(file);
+    return events.findLast((event) => event.type === 'run.lifecycle');
+  };
+
+  /** A log whose reads carry a row the reducer refuses, as a corrupt history reads. */
+  const invalidHistoryLog = (file: ReturnType<typeof createMemoryLogFile>) => async () => {
+    const log = await file.open();
+    const invalid: AgentLogEvent = {
+      version: 1,
+      leaderEpoch: 'epoch-seed',
+      sequence: 0,
+      recordedAt: '2026-09-01T00:00:00.000Z',
+      runId: 'run-0',
+      type: 'message.envelope-replaced',
+      messageId: 'missing-message',
+      replacement: { id: 'missing-message', role: 'user', content: 'replacement' },
+    };
+    return { ...log, read: async () => [invalid, ...(await log.read())] };
+  };
+
+  /** Settle a command to `'admitted'` or the error it was refused with. */
+  const outcomeOf = async (command: Promise<unknown>): Promise<unknown> => {
+    try {
+      await command;
+      return 'admitted';
+    } catch (error) {
+      return error;
+    }
+  };
+
+  const secondAdmission = async (host: TauAgentHost, chatId: string): Promise<unknown> =>
+    outcomeOf(
+      host.admit({
+        chatId,
+        runId: 'run-second',
+        trigger: 'submit',
+        message: { id: 'turn-second', role: 'user', content: 'Again.' },
+        config: {
+          systemPrompt: 'You are the deterministic G2 host fixture.',
+          toolChoice: 'none',
+          model: { id: 'scripted-g2-model', contextWindow: 200_000 },
+        },
+      }),
+    );
+
+  it.each([
+    ['HOST_MODEL_UNAVAILABLE', 'start'],
+    ['CLIENT_CONTEXT_FAILED', 'start'],
+    ['HISTORY_INVALID', 'start'],
+    ['HOST_MODEL_UNAVAILABLE', 'resume'],
+    ['CLIENT_CONTEXT_FAILED', 'resume'],
+  ] as const)(
+    'should leave the chat admittable with a coded last row when %s fails session construction on %s',
+    async (code, command) => {
+      const file = createMemoryLogFile();
+      const chatId = `chat-${code}-${command}`;
+      if (command === 'resume') {
+        await seedLog(file, [
+          { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+          { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+          { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+        ]);
+      }
+      let clientContextCalls = 0;
+      const base = hostOptions({
+        openEventLog: code === 'HISTORY_INVALID' ? invalidHistoryLog(file) : file.open,
+        transport: okTransport,
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: `leak-${code}-${command}`,
+      });
+      const host = createTauAgentHost({
+        ...base,
+        model: code === 'HOST_MODEL_UNAVAILABLE' ? undefined : base.model,
+        clientContext: async () => {
+          clientContextCalls++;
+          if (code === 'CLIENT_CONTEXT_FAILED' && clientContextCalls === 1) {
+            throw Object.assign(new Error('The client context is unavailable.'), { code });
+          }
+          return {};
+        },
+      });
+
+      const failing =
+        command === 'start'
+          ? host.admit({
+              chatId,
+              runId: 'run-1',
+              trigger: 'submit',
+              message: { id: 'turn-1', role: 'user', content: 'First.' },
+            })
+          : host.resume(chatId);
+      await expect(failing).rejects.toMatchObject({ code });
+
+      expect(await lastLifecycle(file)).toMatchObject({
+        type: 'run.lifecycle',
+        runId: 'run-1',
+        state: 'failed',
+        detail: { code },
+      });
+      const second = await secondAdmission(host, chatId);
+      expect((second as { readonly code?: unknown } | undefined)?.code).not.toBe('CHAT_RUN_LIVE');
+      await host.close();
+    },
+  );
+
+  it('should release the reservation when leadership is lost before the session is built', async () => {
+    const file = createMemoryLogFile();
+    const host = silentLeakHost(file);
+    await host.relinquish('chat-fenced');
+
+    await expect(
+      host.admit({
+        chatId: 'chat-fenced',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'turn-1', role: 'user', content: 'First.' },
+      }),
+    ).rejects.toMatchObject({ code: 'LEADERSHIP_LOST' });
+
+    // A fenced generation writes nothing; the next leader takes the chat and admits.
+    expect(await readLog(file)).toEqual([]);
+    expect(() => {
+      host.assumeLeadership('chat-fenced', 'generation-2');
+    }).not.toThrow();
+    await host.admit({
+      chatId: 'chat-fenced',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+    });
+    expect(await host.snapshot('chat-fenced')).toMatchObject({ runId: 'run-2', state: 'completed' });
+    await host.close();
+  });
+
+  function silentLeakHost(file: ReturnType<typeof createMemoryLogFile>) {
+    return createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: okTransport,
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'fenced',
+      }),
+    );
+  }
+
+  const externalAgent = { kind: 'acp', id: 'stub-agent' } as const;
+
+  it.each([
+    ['external', 'tau'],
+    ['external', 'external'],
+    ['tau', 'external'],
+  ] as const)(
+    'should admit one run and refuse the other CHAT_RUN_LIVE when a %s and a %s start race',
+    async (first, second) => {
+      const file = createMemoryLogFile();
+      const release = Promise.withResolvers<void>();
+      /* Holds the first admission's rows short of storage: the window in which an
+       * external turn used to have released its reservation without a run
+       * registered (L2a D2). */
+      const gate = Promise.withResolvers<void>();
+      const reached = Promise.withResolvers<void>();
+      let reads = 0;
+      let gated = false;
+      const externalPort: ExternalAgentPort = {
+        list: () => ['stub-agent'],
+        run: async () => {
+          await release.promise;
+        },
+      };
+      const host = createTauAgentHost({
+        ...hostOptions({
+          openEventLog: async () => {
+            const log = await file.open();
+            return {
+              ...log,
+              read: async () => {
+                reads++;
+                return log.read();
+              },
+              append: async (event) => {
+                if (event.runId === 'run-a' && !gated) {
+                  gated = true;
+                  reached.resolve();
+                  await gate.promise;
+                }
+                return log.append(event);
+              },
+            };
+          },
+          transport: {
+            async *stream(): AsyncGenerator<ModelStreamEvent> {
+              await release.promise;
+              yield { type: 'text-delta', text: 'ok' };
+              yield { type: 'completed', stopReason: 'stop' };
+            },
+          },
+          toolRegistry: tools(async () => ({ content: null, isError: false })),
+          idPrefix: `race-${first}-${second}`,
+        }),
+        externalRunners: { acp: externalPort },
+      });
+      const start = async (kind: 'external' | 'tau', runId: string) =>
+        host.admit({
+          chatId: 'chat-race',
+          runId,
+          trigger: 'submit',
+          message: { id: `turn-${runId}`, role: 'user', content: 'Go.' },
+          ...(kind === 'external'
+            ? { config: { systemPrompt: 'unused', toolChoice: 'none', agent: externalAgent } }
+            : {}),
+        });
+
+      const a = outcomeOf(start(first, 'run-a'));
+      await reached.promise;
+      const readsAtGate = reads;
+      let secondSettled = false;
+      const settleSecond = async (): Promise<unknown> => {
+        try {
+          return await outcomeOf(start(second, 'run-b'));
+        } finally {
+          secondSettled = true;
+        }
+      };
+      const b = settleSecond();
+      // The second start either is refused outright or reads the log inside the window.
+      await vi.waitFor(() => {
+        expect(secondSettled || reads > readsAtGate).toBe(true);
+      });
+      gate.resolve();
+      release.resolve();
+
+      expect(await a).toBe('admitted');
+      expect(await b).toMatchObject({ code: 'CHAT_RUN_LIVE' });
+      await host.close();
+      const logged = await readLog(file);
+      const lifecycles = logged.filter((event) => event.type === 'run.lifecycle');
+      expect(lifecycles.filter((event) => event.state === 'admitted').map((event) => event.runId)).toEqual(['run-a']);
+      // A refused start leaves no record, so it cannot become the chat's current run.
+      expect(lifecycles.filter((event) => event.runId === 'run-b')).toEqual([]);
+    },
+  );
+
+  it('should log a double append failure of an external run and not reject unhandled', async () => {
+    const file = createMemoryLogFile();
+    let failAppends = false;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async () => {
+        failAppends = true;
+        throw new Error('The runner failed.');
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            append: async (event) => {
+              if (failAppends) {
+                throw new Error('injected append failure');
+              }
+              return log.append(event);
+            },
+          };
+        },
+        transport: okTransport,
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'untrack',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    try {
+      await host.admit({
+        chatId: 'chat-untrack',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'turn-1', role: 'user', content: 'Go.' },
+        config: { systemPrompt: 'unused', toolChoice: 'none', agent: externalAgent },
+      });
+      await host.close();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+
+      expect(unhandled).toEqual([]);
+      expect(errors).toHaveBeenCalledWith(expect.stringContaining('run-1'), expect.any(Error));
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      errors.mockRestore();
+    }
+  });
+});
+
+describe('early-started tools on cancel (W0.15)', () => {
+  it('should record the result of a tool started early when the run is cancelled mid-stream', async () => {
+    const file = createMemoryLogFile();
+    const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));
+    const streaming = Promise.withResolvers<void>();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            yield {
+              type: 'tool-input',
+              toolCallId: 'cancel-call-read',
+              toolName: 'read_file',
+              input: { targetFile: 'main.ts' },
+            };
+            streaming.resolve();
+            await new Promise<void>((resolve) => {
+              request.signal.addEventListener(
+                'abort',
+                () => {
+                  resolve();
+                },
+                { once: true },
+              );
+            });
+            yield { type: 'completed', stopReason: 'aborted' };
+          },
+        },
+        toolRegistry: tools(invoke),
+        idPrefix: 'cancel-prestart',
+      }),
+    );
+
+    const run = host.admit({
+      chatId: 'chat-cancel-prestart',
+      runId: 'run-cancel-prestart',
+      trigger: 'submit',
+      message: { id: 'turn-cancel-prestart', role: 'user', content: 'Read main.ts.' },
+    });
+    await streaming.promise;
+    await host.cancel({ runId: 'run-cancel-prestart' });
+    await run;
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    const history = reduceEventLog(await readLog(file));
+    // The tool ran; its real result is durable, so Resume has no open tool part to fabricate a disconnect for.
+    expect(history.filter((message) => message.role === 'tool-output')).toMatchObject([
+      { toolCallId: 'cancel-call-read', content: 'fixture-main', isError: false },
+    ]);
+    expect(await host.snapshot('chat-cancel-prestart')).toMatchObject({ state: 'cancelled' });
+    await host.close();
+  });
+});
+
+describe('attempts in doubt (W0.16, W0.19)', () => {
+  type Lookup = NonNullable<ModelTransport['lookupAttempt']>;
+
+  /**
+   * A funded transport whose first call binds, streams its reply, and then either
+   * drops (the supplier finished; the relay did not) or never returns (the host dies).
+   */
+  const fundedTransport = (input: { readonly first: 'drop' | 'hang'; readonly lookup: Lookup }) => {
+    const attempts: string[] = [];
+    const lookupAttempt = vi.fn(input.lookup);
+    const transport: ModelTransport = {
+      usesBillingAttempt: () => true,
+      lookupAttempt,
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        attempts.push(request.attemptId);
+        await request.onInvocationBound?.({ operationId: `operation-${request.attemptId}`, status: 'pending' });
+        if (attempts.length === 1) {
+          yield { type: 'text-delta', text: 'The whole reply, charged.' };
+          if (input.first === 'hang') {
+            await new Promise<never>(() => {
+              /* The host dies mid-call: this call never returns. */
+            });
+          }
+          throw new GatewayModelTransportError({ code: 'NETWORK_ERROR', status: 200, message: 'fixture drop' });
+        }
+        yield { type: 'text-delta', text: 'Continued under a new key.' };
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    };
+    return { attempts, lookupAttempt, transport };
+  };
+
+  const hostOn = (file: ReturnType<typeof createMemoryLogFile>, transport: ModelTransport, idPrefix: string) =>
+    createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport,
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix,
+      }),
+    );
+
+  const start = async (host: TauAgentHost, chatId: string) =>
+    host.admit({
+      chatId,
+      runId: 'run-1',
+      trigger: 'submit',
+      message: { id: 'turn-1', role: 'user', content: 'Answer.' },
+    });
+
+  it.each([
+    ['pending', { operationId: 'operation-a', status: 'pending' }],
+    ['unavailable', { operationId: 'operation-a', status: 'unavailable' }],
+  ] as const)(
+    'should end Resume with MODEL_ATTEMPT_IN_DOUBT when the lookup answers %s for an attempt whose only record is a failure message',
+    async (_state, receipt) => {
+      const file = createMemoryLogFile();
+      const funded = fundedTransport({ first: 'drop', lookup: async () => receipt });
+      const host = hostOn(file, funded.transport, 'doubt-failure');
+      await start(host, 'chat-doubt');
+      expect(await host.snapshot('chat-doubt')).toMatchObject({ state: 'failed', failure: { code: 'NETWORK_ERROR' } });
+
+      await host.resume('chat-doubt');
+
+      // No second attempt before the lookup answers terminal (W11 Current System 8).
+      expect(funded.lookupAttempt).toHaveBeenCalledWith(funded.attempts[0], expect.any(AbortSignal));
+      expect(funded.attempts).toHaveLength(1);
+      const failed = await host.snapshot('chat-doubt');
+      expect(failed).toMatchObject({ state: 'failed', failure: { code: 'MODEL_ATTEMPT_IN_DOUBT' } });
+      expect(isResumableRunFailure(failed.failure)).toBe(false);
+      await host.close();
+    },
+  );
+
+  it('should continue the step under a new key once the lookup answers terminal for a failure-message attempt', async () => {
+    const file = createMemoryLogFile();
+    const funded = fundedTransport({
+      first: 'drop',
+      lookup: async (attemptId) => ({ operationId: `operation-${attemptId}`, status: 'terminal' }),
+    });
+    const host = hostOn(file, funded.transport, 'doubt-terminal');
+    await start(host, 'chat-terminal');
+
+    await host.resume('chat-terminal');
+
+    expect(funded.lookupAttempt).toHaveBeenCalledTimes(1);
+    expect(funded.lookupAttempt).toHaveBeenCalledWith(funded.attempts[0], expect.any(AbortSignal));
+    expect(funded.attempts).toHaveLength(2);
+    expect(funded.attempts[1]).not.toBe(funded.attempts[0]);
+    expect(await host.snapshot('chat-terminal')).toMatchObject({ state: 'completed' });
+    await host.close();
+  });
+
+  /** Drive a first host into a bound call it never finishes, then hand the log to a second host. */
+  const diedMidCall = async (lookup: Lookup, chatId: string) => {
+    const file = createMemoryLogFile();
+    const dying = fundedTransport({ first: 'hang', lookup });
+    const dead = hostOn(file, dying.transport, 'dead');
+    // async-iife: the host dies mid-call, so its admission never settles.
+    void start(dead, chatId);
+    await vi.waitFor(async () => {
+      const logged = await readLog(file);
+      expect(logged.some((event) => event.type === 'model.invocation-bound')).toBe(true);
+    });
+    return { file, dying };
+  };
+
+  it('should resume a run that died mid-call to MODEL_ATTEMPT_IN_DOUBT while its attempt is pending', async () => {
+    const { file, dying } = await diedMidCall(
+      async () => ({ operationId: 'operation-a', status: 'pending' }),
+      'chat-died',
+    );
+    const survivor = hostOn(file, dying.transport, 'survivor');
+    await survivor.markAbandoned('chat-died');
+
+    await survivor.resume('chat-died');
+
+    expect(dying.attempts).toHaveLength(1);
+    expect(await survivor.snapshot('chat-died')).toMatchObject({
+      state: 'failed',
+      failure: { code: 'MODEL_ATTEMPT_IN_DOUBT' },
+    });
+    await survivor.close();
+  });
+
+  it('should resume a crash between a billed summary and history.compacted to MODEL_ATTEMPT_IN_DOUBT', async () => {
+    const { file: died } = await diedMidCall(
+      async () => ({ operationId: 'operation-a', status: 'pending' }),
+      'chat-summary',
+    );
+    const events = await readLog(died);
+    const cut = events.findIndex((event) => event.type === 'model.invocation-prepared');
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      ...events
+        .slice(0, cut)
+        .map(
+          ({ version: _version, leaderEpoch: _leaderEpoch, sequence: _sequence, recordedAt: _recordedAt, ...event }) =>
+            event as SeededLogEvent,
+        ),
+      {
+        type: 'model.invocation-prepared',
+        runId: 'run-1',
+        attemptId: 'attempt-summary',
+        purpose: 'compaction',
+        modelId: 'scripted-g2-model',
+      },
+      {
+        type: 'model.invocation-bound',
+        runId: 'run-1',
+        attemptId: 'attempt-summary',
+        operationId: 'operation-summary',
+        status: 'pending',
+      },
+    ]);
+    const funded = fundedTransport({
+      first: 'drop',
+      lookup: async () => ({ operationId: 'operation-summary', status: 'pending' }),
+    });
+    const host = hostOn(file, funded.transport, 'summary');
+    await host.markAbandoned('chat-summary');
+
+    await host.resume('chat-summary');
+
+    expect(funded.lookupAttempt).toHaveBeenCalledWith('attempt-summary', expect.any(AbortSignal));
+    expect(funded.attempts).toEqual([]);
+    expect(await host.snapshot('chat-summary')).toMatchObject({
+      state: 'failed',
+      failure: { code: 'MODEL_ATTEMPT_IN_DOUBT' },
+    });
+    await host.close();
   });
 });

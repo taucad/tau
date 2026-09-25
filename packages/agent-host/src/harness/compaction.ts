@@ -868,7 +868,10 @@ export const installCompaction = (
       }
       const first = await base(model, context, streamOptions);
       const message = await first.result();
-      if (!isContextOverflow(message, options.contextWindow)) {
+      /* Only a refused call is sent again. Without the window, pi checks only its
+       * provider-error case: a completed reply whose input exceeds Tau's capped
+       * window was charged, and is the step's reply (RV5-F1). */
+      if (!isContextOverflow(message)) {
         return first;
       }
       const discardedOverflowError = message.errorMessage;

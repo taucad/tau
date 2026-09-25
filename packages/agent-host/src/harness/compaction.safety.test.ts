@@ -26,19 +26,26 @@ const usage = (totalTokens: number): Usage => ({
 class ScriptedTransport implements ModelTransport {
   public readonly requests: ModelStreamRequest[] = [];
   // oxlint-disable-next-line typescript/parameter-properties -- TypeScript's erasableSyntaxOnly forbids parameter properties.
-  private readonly eventsFor: (call: number, request: ModelStreamRequest) => readonly ModelStreamEvent[];
+  private readonly eventsFor: (call: number, request: ModelStreamRequest) => readonly ModelStreamEvent[] | Error;
 
-  public constructor(eventsFor: (call: number, request: ModelStreamRequest) => readonly ModelStreamEvent[]) {
+  public constructor(eventsFor: (call: number, request: ModelStreamRequest) => readonly ModelStreamEvent[] | Error) {
     this.eventsFor = eventsFor;
   }
 
   public async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
     this.requests.push(request);
-    for (const event of this.eventsFor(this.requests.length, request)) {
+    const events = this.eventsFor(this.requests.length, request);
+    if (events instanceof Error) {
+      throw events;
+    }
+    for (const event of events) {
       yield event;
     }
   }
 }
+
+/** A provider's context-overflow refusal: the only overflow the retry sends again (RV5-F1). */
+const overflowRefusal = (): Error => new Error('prompt is too long: the request exceeds the context window');
 
 const toolRegistry = (name: string, result: (call: number) => JsonValue = (call) => ({ call })): ToolRegistry => {
   let calls = 0;
@@ -363,10 +370,7 @@ describe('compaction safety regressions', () => {
         ];
       }
       if (call === 3) {
-        return [
-          { type: 'usage', usage: usage(contextWindow) },
-          { type: 'completed', stopReason: 'length' },
-        ];
+        return overflowRefusal();
       }
       return [
         { type: 'text-delta', text: 'recovered' },
@@ -698,10 +702,7 @@ describe('compaction safety regressions', () => {
     const tiers: string[] = [];
     const transport = new ScriptedTransport((call) =>
       call === 1
-        ? [
-            { type: 'usage', usage: usage(contextWindow) },
-            { type: 'completed', stopReason: 'length' },
-          ]
+        ? overflowRefusal()
         : [
             { type: 'text-delta', text: 'recovered once' },
             { type: 'completed', stopReason: 'stop' },
@@ -988,7 +989,8 @@ describe('compaction safety regressions', () => {
     let generationCalls = 0;
     const transport: ModelTransport = {
       usesBillingAttempt: () => true,
-      lookupAttempt: async () => undefined,
+      // The refused attempt was bound, so the retry resolves it first; a refusal settles uncharged (W0.19).
+      lookupAttempt: async (attemptId) => ({ operationId: `operation-${attemptId}`, status: 'terminal' }),
       async *stream(request): AsyncGenerator<ModelStreamEvent> {
         requests.push(request);
         await request.onInvocationBound?.({
@@ -1008,9 +1010,7 @@ describe('compaction safety regressions', () => {
             toolName: 'inspect',
             input: { targetFile: 'overflow.ts' },
           };
-          yield { type: 'usage', usage: usage(contextWindow) };
-          yield { type: 'completed', stopReason: 'length' };
-          return;
+          throw overflowRefusal();
         }
         yield { type: 'text-delta', text: 'Recovered after compaction.' };
         yield { type: 'completed', stopReason: 'stop' };

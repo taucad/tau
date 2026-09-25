@@ -1512,6 +1512,36 @@ for (const actorSet of actorSets) {
       ).resolves.toMatchObject({ paths: [{ path: 'a.txt' }] });
     }, 30_000);
 
+    /* D55: from `conflicted`, Sync now and a reconnect pull again. */
+    it('answers a repeated sync pull with the conflict that is already waiting', async () => {
+      const { port, actors, theirs } = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+      await port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: revisionId(theirs) });
+      const merge = async (): Promise<{ status: string; paths?: readonly string[] }> =>
+        run(actors.sync.merge, { projectId: 'project-1', remote: 'tau', branch: 'main' });
+
+      await expect(merge()).resolves.toMatchObject({ status: 'conflicted', paths: ['a.txt'] });
+      const waiting = await port.readRef('sync/tau/main');
+      await expect(merge()).resolves.toMatchObject({ status: 'conflicted', paths: ['a.txt'] });
+      /* The same revision, so the sides already chosen for it still apply. */
+      expect(await port.readRef('sync/tau/main')).toBe(waiting);
+
+      /* The remote moved on: a new conflict, in the checkout the first one opened. */
+      const again = await port.writeRevision({
+        parents: [revisionId(theirs)],
+        tree: (await port.readTree(revisionId(theirs))) ?? new ImmutableRevisionTree([]),
+        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 14) },
+        summary: { generated: 'Theirs again' },
+      });
+      await port.updateRef({
+        name: 'refs/remotes/tau/main',
+        expectedHead: revisionId(theirs),
+        head: revisionId(again.commitId),
+      });
+      await expect(merge()).resolves.toMatchObject({ status: 'conflicted', paths: ['a.txt'] });
+      const moved = await port.readRevision(revisionId((await port.readRef('sync/tau/main')) ?? ''));
+      expect(moved?.parents[0]).toBe(again.commitId);
+    }, 30_000);
+
     it('records a merge revision and rewrites the target when the two lines settle', async () => {
       const { port, actors, filesystem, ours, theirs } = await twoLines({
         ours: 'base\n',

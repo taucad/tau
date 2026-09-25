@@ -3,8 +3,9 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-23'
+updated: '2026-09-25'
 related:
+  - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
   - docs/architecture/revisions-cloud-handbook.md
   - docs/research/revisions-sync-closeout-blueprint.md
@@ -81,7 +82,7 @@ Implement **Switch** as one verb:
 | Target branch has no linked checkout and no lease holds the live checkout | Apply the branch to the live checkout        |
 | Target has a linked checkout, or the live checkout is leased              | Re-root the workbench at the linked checkout |
 
-Never re-base a running turn. Apply **Restore** to the selected checkout; track the restored branch only when no other checkout tracks it, otherwise detach. Keep undo inside unsaved checkout state and revisions across it.
+Never re-base a running turn. Refuse a **Restore**, with **Switch**'s sentence and before any cut, while a turn holds the checkout; a turn admitted during a restore waits until the restore revision lands. Apply **Restore** to the selected checkout it was planned against and keep that checkout on its line, never moving its branch: cut a dirty checkout first, then apply the target tree and cut a revision with trigger `restore` and provenance `restoredFrom`, so the line fast-forwards and no working-tree byte becomes unreachable. Re-check the head's tree and the lease inside the checkout fence before applying, and apply nothing when either moved. A restore to the current tree mints nothing. A checkout is on a branch or unborn and is never detached; viewing an older revision read-only is a separate verb (a compare view or a linked checkout), never a state of the selected checkout. Offer **Undo restore** as another restore whose target is the restored revision's first parent. Implement **Undo** as the scoped inverse of one operation recorded under rule 10's operation log: mint the reverse of that operation's own tree delta as a new revision, apply it as a three-way merge when the line has moved since, and refuse with a named reason when it cannot apply cleanly; never undo by restoring a whole earlier tree over other work. The editor's undo stack stays inside unsaved checkout state.
 
 ### 4. Classify the project layout once
 
@@ -147,17 +148,19 @@ Apply these composition constraints:
 
 Apply one tree-hash gate: mint only when the checkout's versioned `treeId` differs from its head. A no-change turn or save mints nothing. If concurrent cuts pass the gate, the compare-and-swap loser drops its candidate and re-reads.
 
-| Trigger                              | When                                      | Display                              |
-| ------------------------------------ | ----------------------------------------- | ------------------------------------ |
-| `save`                               | `Mod+S` after editor buffers flush        | normal row                           |
-| `idle`                               | 5 minutes after the last checkout write   | fold with consecutive automatic rows |
-| `hidden`                             | browser becomes hidden after a write      | fold with automatic rows             |
-| `turn`                               | turn finalizes                            | normal row and chat card             |
-| `merge`, `restore`, `switch`, `sync` | before or after the operation as required | normal row                           |
-| `close`                              | page unload or desktop quit after a write | fold with automatic rows             |
-| `import`                             | project import                            | normal row                           |
+| Trigger          | When                                                                                           | Display                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `save`           | `Mod+S` after editor buffers flush                                                             | normal row                              |
+| `idle`           | 5 minutes after the last checkout write                                                        | fold with consecutive automatic rows    |
+| `hidden`         | browser becomes hidden after a write                                                           | fold with automatic rows                |
+| `turn`           | turn finalizes                                                                                 | normal row and chat card                |
+| `restore`        | before a restore, a dirty checkout; after it, the restored tree with provenance `restoredFrom` | normal row naming the restored revision |
+| `merge`          | before a fetch or branch merge touches a dirty checkout; after it, the merge revision          | normal row                              |
+| `switch`, `sync` | before or after the operation as required                                                      | normal row                              |
+| `close`          | page unload or desktop quit after a write                                                      | fold with automatic rows                |
+| `import`         | project import                                                                                 | normal row                              |
 
-Keep the idle window configurable per workspace, never per project. Keep every automatic revision immutable and append-only; fold only in display. `Mod+S` means **Save revision** everywhere in the workbench.
+Keep the idle window configurable per workspace, never per project. Keep every automatic revision immutable and append-only; fold only in display. "Always committed" means the working copy is always within one trigger of a revision; never amend, squash, or rebase a revision to get there. `Mod+S` means **Save revision** everywhere in the workbench.
 
 ### 8. Keep turn, branch, and conflict state explicit
 
@@ -165,7 +168,7 @@ Write leases and run records under `.tau/runs/<runId>.json` through the host rec
 
 Mint a turn revision from the entire checkout's versioned tree and identify all active leases in provenance. A turn produces at most one revision. Do not let turn completion delete a checkout.
 
-Create conflicts only from branch merge or sync divergence. Record a conflicted revision on the source branch, never on `main` and never as unowned loose files. Refuse to push conflicted revisions. Offer explicit per-file **Keep mine**, **Keep theirs**, **Open in editor**, and **Ask chat to resolve** for text; offer choose-one only for binary and parametric files. Let **Ask chat to resolve** seed a turn on that branch. Mint a normal revision after resolution and require an explicit merge or sync retry.
+Create conflicts only from a branch merge or sync divergence whose changes overlap; rule 9 merges the rest. Record a conflicted revision on its conflict line `refs/heads/conflicts/<branch>/<deviceId>`, where `<branch>` is the line the decision lands on, and parent it on the two diverged heads and on the conflict line's current tip so that line always fast-forwards. Never record a conflicted revision on `main` or a named branch, and never as unowned loose files. Reserve the `conflicts/` prefix: refuse it as a user branch name. Push conflict lines like any history ref; the Hosted Remote admits a conflicted commit on a conflict line and refuses it on every other line. Render the same resolution surface for a fetched conflict as for a local one, under the one sentence **Needs your decision** naming `<branch>`. Offer explicit per-file **Keep mine**, **Keep theirs**, **Open in editor**, and **Ask chat to resolve** for text; offer choose-one only for binary and parametric files. Let **Ask chat to resolve** seed a turn on that line. Resolve by minting a merge revision on `<branch>` with the conflicted revision among its parents; that lands the decision with no further merge or sync retry. Derive "resolved" from that ancestry and hide resolved conflict lines from listings. Remove an abandoned foreign conflict line only through the audited removal verb of rule 14.
 
 ### 9. Synchronize continuously and bound lifecycle work
 
@@ -180,7 +183,11 @@ Open a project by fetching before its first tree render under these bounds:
 | Still pending after 3 seconds  | Render local state and continue in background           |
 | Still pending after 10 seconds | Abort that request, queue retry, and render local state |
 
-Never re-base a leased live checkout. Fast-forward a clean checkout; route dirty divergence through the conflict path.
+Nest every lifecycle bound strictly inside the wait that awaits it, so the person hears the inner operation's own reason rather than the outer wait's generic one: the sync pull deadline is shorter than the close-path sync quiesce, and a turn's base-cut settlement is shorter than the host's turn admission. Declare each constant beside its owner — the pull deadline in `packages/revisions/src/sync.machine.ts` or `sync.types.ts`, the cut settlement in `turn.machine.ts`, the quiesce and admission waits in `revision-effects.ts` — and pin the ordering with a unit assertion there.
+
+While a project is open, learn that the remote moved from the project's `revision` entry on the existing durable-events long poll, which carries only the manifest generation and the moved ref names and is authorized by project `read` access; fetch the bytes over Git. Never add a head-only Git route, a socket namespace, or another transport for this.
+
+Integrate on every fetch, not only on open. Fast-forward a clean checkout. Auto-merge a diverged clean checkout when no path changed on both sides and land the merge revision. Cut a dirty checkout first through its checkout child (trigger `merge`), then treat it as clean. Merge `.tau/parameters/**` per key and let a binary choose one side. Route only overlapping changes to the conflict path (rule 8). Never re-base a leased live checkout: the merge waits for the lease to retire, then applies.
 
 Treat `visibilitychange: hidden` as browser close preparation: flush editors and chats, mint the gated `close` revision, precompute the push, then start zero-debounce sync while awaits still work. On `pagehide`, send only an already serialized history-set POST of at most 64 KiB with `keepalive`; never begin smart-HTTP negotiation, chat upload, object reads, or LFS transfer there.
 
@@ -188,11 +195,13 @@ On desktop, hold `before-quit` while all live project sessions flush and the reg
 
 ### 10. Separate history refs, record refs, and host-local refs
 
-| Ref set    | Members                                                                                                                   | Push contract                                                                                              |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| History    | Project-owned `refs/heads/*`, `refs/tags/*`                                                                               | Atomic on native Git; ref-by-ref in browser with the active live branch last and the set retried as a unit |
-| Records    | `refs/tau/{chats,evidence,artifacts}/*`                                                                                   | Per ref, append-only; rejection never blocks history                                                       |
-| Host-local | `refs/remotes/*`, `refs/heads/sync/*`, `refs/tau/{owners,workspaces,revisions,transactions,retention}/*`, `refs/tau/head` | Never push; server rejects                                                                                 |
+| Ref set    | Members                                                                                                              | Push contract                                                                                              |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| History    | Project-owned `refs/heads/*`, including conflict lines `refs/heads/conflicts/<branch>/<deviceId>`, and `refs/tags/*` | Atomic on native Git; ref-by-ref in browser with the active live branch last and the set retried as a unit |
+| Records    | `refs/tau/{chats,evidence,artifacts,ops}/*`                                                                          | Per ref, append-only; rejection never blocks history                                                       |
+| Host-local | `refs/remotes/*`, `refs/tau/{owners,workspaces,revisions,transactions,retention}/*`, `refs/tau/head`                 | Never push; server rejects                                                                                 |
+
+Append every settled operation that moves a head (mint, restore, switch, merge, branch, resolve, sync-apply) to this device's operation log `refs/tau/ops/<deviceId>` before the projection reports it. Give the log the chat segment's shape — per device, append-only — and give each entry the actor in the same form its revision carries, never an account id and a pseudonym under one device id. Replay the durable push queue from the log after a crash.
 
 Make `RevisionPort.push()` return per-ref results. Carry the expected old value on every pushed ref: native uses `--force-with-lease=<ref>:<expected>` and browser checks the advertisement before returning `rejected: leaseLost`. Never use plain force. Upload every referenced LFS object before moving its ref.
 
@@ -202,13 +211,13 @@ Use Git smart HTTP plus Git LFS for every remote. Disk hosts use native Git; bro
 
 Use a dedicated GitHub App user connection for first-class GitHub repository discovery and transport. Keep Tau sign-in and Gist authorization separate; never broaden Better Auth account linking or request `public_repo`/`repo` for this capability. Store App access and refresh tokens only in the encrypted user connection store. Bind every in-memory Git credential to one normalized GitHub repository URL, stable repository id, connection generation, and expiry. Refuse authenticated redirects; resolve repository moves through authenticated catalog selection. Permit GitHub LFS only through the repository batch endpoint and server-issued, short-lived action handles that cannot name an arbitrary target or inherit the batch credential.
 
-Expose one remote per project for now—**No remote**, **Tau Cloud**, or **Git remote**—while retaining Git's remotes list as the data model. Never model blob stores as client-side remotes.
+Expose one remote per project for now—**No remote**, **Tau Cloud**, or **Git remote**—while retaining Git's remotes list as the data model. Never model blob stores as client-side remotes. For a signed-in, entitled account, back a project up to Tau Cloud from its first revision with a one-line notice and a per-project opt-out, with no Connect step; keep the chooser for GitHub, any Git address, and reconnection.
 
 Give a Tau Cloud project one owner and any number of collaborators holding `read` or `write`. Authorize every git request and every project route through one access service rather than an owner comparison, answer 404 for a non-member and a role refusal for a member below the need, and reserve registering, publishing and managing collaborators to the owner. A collaborator's bytes land in the owner's storage and count against the owner's plan; the server attributes every repository write to the authenticated pusher, while the commit author stays the person the client recorded. Revocation takes effect within the authorization cache window (5 s per API process; hits only are cached, so a revoked collaborator is refused by the first request after that window on each worker). A lease already in flight finishes.
 
-Implement the Tau Hosted Remote as a standard Git server in the API whose durable state is object storage and never a host disk. A repository is immutable packfiles plus one manifest under the owner's tenant prefix; a request hydrates a disposable lease from them, runs stock `upload-pack` or `receive-pack --stateless-rpc` over it, and acknowledges a push only after the manifest commit succeeds by conditional write. Any number of stateless workers may serve one repository, so a lost commit race is a refusal the client retries rather than a lock. Keep exactly one hook, `pre-receive`, carrying the allow-list, the fast-forward rule for every ref family, the owner's quota backstop and the per-repository byte ceiling. Speak git smart HTTP only: there is no dumb-HTTP read layout, no `update-server-info` and no `post-receive`. Keep LFS objects in the owner's tenant prefix, materialize publications server-side from a lease, keep the proxy Git-endpoint-only, and send Tau LFS objects directly from the browser to R2 using the batch API's authorized URLs.
+Implement the Tau Hosted Remote as a standard Git server in the API whose durable state is object storage and never a host disk. A repository is immutable packfiles plus one manifest under the owner's tenant prefix; a request hydrates a disposable lease from them, runs stock `upload-pack` or `receive-pack --stateless-rpc` over it, and acknowledges a push only after the manifest commit succeeds by conditional write. Any number of stateless workers may serve one repository, so a lost commit race is a refusal the client retries rather than a lock. Keep exactly one hook, `pre-receive`, carrying the allow-list, the fast-forward rule for every ref family, the conflict-line admission rule of rule 8, the owner's quota backstop and the per-repository byte ceiling. Speak git smart HTTP only: there is no dumb-HTTP read layout, no `update-server-info` and no `post-receive`. Keep LFS objects in the owner's tenant prefix, materialize publications server-side from a lease, keep the proxy Git-endpoint-only, and send Tau LFS objects directly from the browser to R2 using the batch API's authorized URLs.
 
-Make durable state copy-ready instead of snapshotted. Write objects once under keys unique to their upload, retain retired packs through the reconstruction window, and keep every manifest addressable, so a second store is a destination a copier adds and never a mechanism it invents. Take no bundle and no nightly snapshot. Restore reads a manifest and the packs it names from any store the port can reach and rolls the primary forward with a fresh incarnation and a higher generation; it never rewrites a manifest in place. Until an independent second copy exists, retired-pack retention is the only recovery window, prefix deletion has exactly one tombstone-gated caller, and sync does not open to users.
+Make durable state copy-ready instead of snapshotted. Write objects once under keys unique to their upload, retain retired packs through the reconstruction window, and keep every manifest addressable, so a second store is a destination a copier adds and never a mechanism it invents. Take no bundle and no nightly snapshot. Restore reads a manifest and the packs it names from any store the port can reach and rolls the primary forward with a fresh incarnation and a higher generation; it never rewrites a manifest in place. Until an independent second copy exists, retired-pack retention is the only recovery window, prefix deletion has exactly one tombstone-gated caller, and sync does not open to users. Open sync to every account only when all four deployment gates of the git storage substrate charter hold: DG1's second copy exists (or, for a bounded beta only, the operator has accepted its risk in writing), DG2's regional figures exist, DG3's staging proof has run, and DG4's production apply is done. Ship the free-tier entitlement of rule 19 undeployable behind that gate.
 
 ### 12. Carry chats on record refs
 
@@ -230,11 +239,11 @@ When `tau.json.syncLargeExports` is `true`, record the allowed generated paths u
 
 Represent a named version as an annotated tag. Publish only a named version whose graph and large objects are synced to the Tau Hosted Remote. Have the API materialize its tagged tree into the existing publication blob store; preserve public CDN and private grant-checking proxy behavior. Never upload a second project snapshot.
 
-Push the tag through the leased ref path before creating or re-pointing the publication. Keep names unique per project and allow rename or deletion without changing the revision. Do not retain the multipart upload path or an upload-era compatibility reader.
+Push the tag through the leased ref path before creating or re-pointing the publication. Keep names unique per project and allow rename without changing the revision. Remove a name only through the audited server-side removal verb, which shows the publication the name serves before it removes the tag and never changes the revision. That verb is also the only way to remove an abandoned foreign conflict line (rule 8), at the owner's request; the push hook keeps refusing every deletion (rule 19). Do not retain the multipart upload path or an upload-era compatibility reader.
 
 ### 15. Preserve attribution and retention
 
-Use the signed-in user's stable identity when available. For anonymous work, use a stable per-workspace pseudonym with no email. For agents, record model, run id, and the user on whose behalf the agent acted. Map Git author to the user, committer to `Tau <noreply@tau.new>`, and never write the account email: the author address is `<user-id>@users.noreply.tau.new`, or the linked forge's no-reply address for a project linked to one (GitHub refuses pushes that expose a private address), and preserve Tau actor, trigger, and metadata trailers. Never rewrite history when anonymity settings change.
+Use the signed-in user's stable identity when available. For anonymous work, use a stable per-workspace pseudonym with no email; for a signed-in account, derive it from the per-`(workspace, account)` salt the API serves the authenticated user, cache that salt in host state, and never write it to the tree. For agents, record model, run id, and the user on whose behalf the agent acted. Map Git author to the user, committer to `Tau <noreply@tau.new>`, and never write the account email: the author address is `<user-id>@users.noreply.tau.new`, or the linked forge's no-reply address for a project linked to one (GitHub refuses pushes that expose a private address), and preserve Tau actor, trigger, and metadata trailers. Never rewrite history when anonymity settings change.
 
 Keep revisions and tags immutable while any ref reaches them. Do no local object garbage collection in this program; chat cards, run records, restore-by-id, and conflict evidence may retain revisions outside branches. Remove a linked checkout only through **Discard** after proving its tree equals its head. Offer merged checkouts for later removal; never remove them silently.
 
@@ -282,7 +291,7 @@ Render liveness, run progress, attention, failures, branches, and sync only as s
 | cancelled or stopping                   | **Stopped**                                                      |
 | branch checkout                         | branch chip; add a ring when dirty                               |
 | project sync pending or queued          | **Backing up _n_** or **Not backed up · _n_** on the project row |
-| sync or merge conflict                  | **Needs resolution**                                             |
+| sync or merge conflict                  | **Needs your decision**                                          |
 
 Use glyph plus accessible text, never hue alone. Aggregate project rows from their chat children. Apply progressive disclosure: keep older History groups and autosaves collapsed, hide Branches and the composer picker until a user branch exists, remove merged branches from the active list, and hide Sync until a remote exists.
 
@@ -336,11 +345,13 @@ Treat `REMOTE_UNAUTHORIZED`, `REMOTE_NOT_ENTITLED`, `REMOTE_NOT_FOUND`, `REMOTE_
 
 Render the reason on every surface showing **Not backed up**, `failed`, `reconnectRequired`, or a connect error, with exactly one action matching the class — _Sign in_, _Upgrade_, _Reconnect GitHub_, _Sync now_, _Open Revisions_, or _Retry_.
 
-Consult `canSyncFiles` and `canConnectGitHub` before offering Tau Cloud or a Git remote. Show an unentitled account the existing upgrade affordance and never issue a connect on its behalf. Register nothing on the server before the plan admits it: a failed connect must leave no remote in Git config, no durable-queue mutation, and no server row.
+Render a storage refusal with its largest-files list and choose its one action by the caller's relationship to the project: the owner on Free gets _Upgrade_; the owner on the top tier gets the file-list action only; a collaborator gets the owner-directed sentence with the file list and no plan action. The per-repository ceiling is a hydration guard that no plan raises. Render a revoked collaborator's refusal as the calm **Access removed** state with the same owner-directed sentence, never as a backup failure.
+
+Consult `canSyncFiles` and `canConnectGitHub` before offering Tau Cloud or a Git remote or creating one by default (rule 11). Every plan carries both, Free included, together with an account storage allowance — 1 GiB on Free, 10 GiB on Pro, 100 GiB on Enterprise — and the upgrade affordance answers that allowance, never the tier. Show the existing upgrade affordance to an account the entitlement does not admit, and never issue a connect on its behalf. Register nothing on the server before the plan admits it: a failed connect must leave no remote in Git config, no durable-queue mutation, and no server row.
 
 Answer git-facing refusals as `text/plain` when the request carries no `Origin`, so stock Git prints the sentence; keep the JSON envelope for browsers and carry CORS headers on every 401.
 
-Enforce the lease invariant server-side as well as in the client. Refuse every ref deletion and every non-fast-forward update in the Hosted Remote's `pre-receive` hook, for every ref family. Git's `receive.denyDeletes` and `receive.denyNonFastForwards` are a backstop for `refs/heads/*` only and never a substitute: Git applies neither outside that namespace, so record refs stay rewindable under both flags alone.
+Enforce the lease invariant server-side as well as in the client. Refuse every ref deletion and every non-fast-forward update in the Hosted Remote's `pre-receive` hook, for every ref family. A ref leaves the Hosted Remote only through rule 14's audited removal verb, never through a push. Git's `receive.denyDeletes` and `receive.denyNonFastForwards` are a backstop for `refs/heads/*` only and never a substitute: Git applies neither outside that namespace, so record refs stay rewindable under both flags alone.
 
 ### 20. Hold revision work to a latency budget
 

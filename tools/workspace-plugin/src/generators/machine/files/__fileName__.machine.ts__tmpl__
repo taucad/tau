@@ -1,13 +1,21 @@
-import { createCallbackLogic, setup, types } from 'xstate';
+import { createActor, createCallbackLogic, setup, types } from 'xstate';
+import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 
 /** Input accepted when creating the <%= machineName %> actor. @public */
 export type <%= className %>MachineInput = Readonly<Record<string, never>>;
 
 /** Serializable state owned by <%= machineName %>. @public */
-export type <%= className %>MachineContext = Readonly<Record<string, never>>;
+export type <%= className %>MachineContext = Readonly<Record<never, never>>;
 
 /** Events accepted by <%= machineName %>. @public */
 export type <%= className %>MachineEvent = { readonly type: 'reset' };
+
+/**
+ * The `[state, eventType]` pairs <%= machineName %> declares it ignores (MC-R17).
+ *
+ * @public
+ */
+export const <%= propertyName %>IgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [];
 
 const <%= propertyName %>Driver = createCallbackLogic(() => {
   return () => undefined;
@@ -25,19 +33,44 @@ export const <%= machineName %> = setup({
     events: { reset: types<Readonly<Record<never, never>>>() },
     input: types<<%= className %>MachineInput>(),
   },
+  states: {
+    idle: {},
+    failed: { schemas: { context: types<Readonly<{ error: string }>>() } },
+  },
   actors: {
     <%= propertyName %>Driver,
   },
 }).createMachine({
   id: '<%= fileName %>',
+  version: '1',
   context: {},
   initial: 'idle',
+  // Effect, child and send failures land in a modelled state that still answers every event (MC-R12).
+  onError: ({ context, event }) => ({ target: '.failed', context: { ...context, error: String(event.error) } }),
   states: {
     idle: {
       invoke: {
         id: '<%= propertyName %>-driver',
         src: '<%= propertyName %>Driver',
       },
+      on: { reset: { target: 'idle', reenter: true } },
+    },
+    failed: {
+      on: { reset: { target: 'idle' } },
     },
   },
 });
+
+/**
+ * Create an unstarted <%= machineName %> actor (MC-R4). Production passes no options;
+ * tests pass a `StepClock` and the harness inspector.
+ *
+ * @param input - The machine input.
+ * @param options - `clock`, `inspect` and `onRejectedEvent`, forwarded to `createActor`.
+ * @returns The unstarted actor.
+ * @public
+ */
+export const create<%= className %>Actor = (
+  input: <%= className %>MachineInput,
+  options: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> = {},
+): Actor<typeof <%= machineName %>> => createActor(<%= machineName %>, { ...options, input });

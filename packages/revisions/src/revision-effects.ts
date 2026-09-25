@@ -55,7 +55,7 @@ import type {
 } from '#resolution.machine.js';
 import type { ResolutionSide } from '#resolution.types.js';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
-import type { AnyEventObject, AsyncActorLogic, AsyncLogicFunction } from 'xstate';
+import type { ActorOptions, AnyActorLogic, AnyEventObject, AsyncActorLogic, AsyncLogicFunction } from 'xstate';
 
 import { checkoutMachine } from '#checkout.machine.js';
 import type {
@@ -403,8 +403,12 @@ export type RevisionActorsOptions = Readonly<{
    * the value under `project-session`; until then a host mints one per process.
    */
   authorityEpoch: string;
-  /** Milliseconds since the Unix epoch. Defaults to `Date.now`. */
-  clock?: () => number;
+  /**
+   * Timers and time for the whole tree (MC-R4): the actors' timers run on it, and
+   * its `now()` (milliseconds since the Unix epoch) stamps what this host mints,
+   * falling back to `Date.now`. Each root takes its own clock.
+   */
+  clock?: ActorOptions<AnyActorLogic>['clock'];
   /** Actor recorded on every revision this host mints. */
   actorId?: string;
   /**
@@ -641,7 +645,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const actorId = options.actorId ?? 'tau-host';
   /* A host that cannot re-send a push remembers none: the identity function. */
   const recordHistoryPush = options.recordHistoryPush ?? (async <Result>(run: () => Promise<Result>) => run());
-  const clock = options.clock ?? Date.now;
+  const clock = (): number => options.clock?.now?.() ?? Date.now();
   let lastReading = 0;
   /* Monotonic per process: a bounded `log` walk stops on committer time, so a
    * clock that went backwards would truncate a history (W3a review R39). */
@@ -1566,6 +1570,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * the revision is recorded and reachable by id (A2). */
         if (input.branch === undefined) {
           return { status: 'updated', head: input.head };
+        }
+        /* W0.10 (W5 F7): the mint runs inside the checkout fence, which every
+         * move of this checkout also takes. A checkout that has left the mint's
+         * branch refuses here, or a fresh branch's equal head would let its
+         * save land on the branch it left. */
+        const place = await placeOf(input.checkoutId);
+        if (place.branch !== input.branch) {
+          return { status: 'conflicted', head: await headOf(place) };
         }
         const result = await port.updateRef({
           name: input.branch,
@@ -2946,6 +2958,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
 /** Options for one project's running revision actor tree. @public */
 export type ProjectRevisionActorOptions = RevisionActorsOptions &
+  Pick<ActorOptions<AnyActorLogic>, 'inspect' | 'onRejectedEvent'> &
   Readonly<{
     /**
      * The checkout that is the project directory itself.
@@ -2966,7 +2979,9 @@ export type ProjectRevisionActorOptions = RevisionActorsOptions &
  * checkout filesystems they pass. The actor is returned **unstarted**, so a
  * caller can subscribe before the registry opens.
  *
- * @param options - The same dependencies {@link createRevisionActors} takes.
+ * @param options - The same dependencies {@link createRevisionActors} takes, plus the
+ *   tree's `inspect` and `onRejectedEvent`. Production passes neither; tests pass the
+ *   harness (MC-R4).
  * @returns The root actor, ready to `start()`, and the `settled` wait a caller
  *   owes the project after it stops that actor.
  * @public
@@ -3011,6 +3026,9 @@ export const createProjectRevisionsActor = (
         ...(options.liveCheckoutId === undefined ? {} : { liveCheckoutId: options.liveCheckoutId }),
         ...(options.selectedCheckoutId === undefined ? {} : { selectedCheckoutId: options.selectedCheckoutId }),
       },
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
+      ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+      ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
     },
   );
   return { actor, settled: actors.settled };

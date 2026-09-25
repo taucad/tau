@@ -71,6 +71,7 @@ import {
 } from '#chat-clients/_internal/shared-chat-transport.js';
 import {
   awaitSettlement,
+  cancelBrowserAgentHostRun,
   getBrowserAgentHostRun,
   getHostTurnSettlement,
   isBrowserAgentHostPlaced,
@@ -1933,6 +1934,11 @@ export class ChatSessionStore {
     });
 
     const stopSubscription = persistenceActorRef.on('dispatchStop', () => {
+      /* The host's `cancel`, not only the SDK's abort: a reattached stream
+       * carries no abort signal, so the abort alone detached nothing and the
+       * run went on (W0.3, D17). A stream this page admitted is cancelled by
+       * its abort too; the host answers the second cancel with nothing. */
+      void cancelBrowserAgentHostRun(chatId);
       void chat.stop();
     });
 

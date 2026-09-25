@@ -130,7 +130,8 @@ class DeterministicToolCallingTransport implements ModelTransport {
 }
 
 describe('pi full-turn parity fixture', () => {
-  it('never redispatches a bound invocation whose durable assistant result was lost', async () => {
+  // EQ1: a terminal receipt continues the step under a new key (tau-agent-host.test.ts, W0.19); a pending one never does.
+  it('never redispatches a bound invocation whose durable assistant result was lost while its lookup is pending', async () => {
     const log = await createMemoryEventLog([
       {
         version: 1,
@@ -159,9 +160,9 @@ describe('pi full-turn parity fixture', () => {
       yield { type: 'completed', stopReason: 'stop' } as const;
     });
     const lookupAttempt = vi.fn(
-      async (): Promise<{ operationId: string; status: 'terminal' }> => ({
+      async (): Promise<{ operationId: string; status: 'pending' }> => ({
         operationId: 'operation-lost-result',
-        status: 'terminal',
+        status: 'pending',
       }),
     );
     const resume = async (resumedLog: typeof log, suffix: string): Promise<void> => {

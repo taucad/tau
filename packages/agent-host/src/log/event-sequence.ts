@@ -9,8 +9,10 @@ const canonicalJson = (value: JsonValue): string => {
     const items = value as readonly JsonValue[];
     return `[${items.map((item) => canonicalJson(item)).join(',')}]`;
   }
-  const object = value as Readonly<Record<string, JsonValue>>;
+  // Skip undefined-valued keys, as `JSON.stringify` (and so the bytes on disk) does (S5 D1).
+  const object = value as Readonly<Record<string, JsonValue | undefined>>;
   return `{${Object.keys(object)
+    .filter((key) => object[key] !== undefined)
     .sort()
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key]!)}`)
     .join(',')}}`;

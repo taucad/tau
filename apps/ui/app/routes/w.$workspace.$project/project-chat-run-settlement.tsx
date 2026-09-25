@@ -22,6 +22,8 @@
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { useProject } from '#hooks/use-project.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import { useChatWorkspaceAuthority, usePreparedChatWorkspace } from '#providers/chat-workspace-authority-provider.js';
 import { publishChatTurnSettlement } from '#chat-clients/_internal/chat-host-binding.js';
@@ -199,6 +201,8 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
   );
   const workspace = usePreparedChatWorkspace(chatId);
   const workspaceAuthority = useChatWorkspaceAuthority();
+  const { projectId } = useProject();
+  const { getChat } = useProjectManager();
   useEffect(() => {
     /* Mount-time `reclaimAll` owns recovery. A workspace created by this page
      * appears one microtask before its explicit send changes `ready` to
@@ -231,6 +235,15 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
   const settle = useCallback(
     async ({ runId, outcome }: ChatTurnSettlementInput): Promise<void> => {
       if (!runId) {
+        return;
+      }
+      /* The store holds every project's chats and this route publishes a
+       * settler for each, all on this project's authority. Another project's
+       * chat is not this root's to lease, publish or fail: read the owner from
+       * the chat's record, never from focus (W0.4, L3 D2(a)). It settles when
+       * its own project is open. */
+      const record = await getChat(chatId);
+      if (record?.resourceId !== projectId) {
         return;
       }
       const localRun = getBrowserAgentHostRun(chatId);
@@ -320,7 +333,7 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
       store.releaseDurableRun({ chatId, runId });
       retireBrowserAgentHostRun(chatId, runId);
     },
-    [chatId, store, workspaceAuthority],
+    [chatId, getChat, projectId, store, workspaceAuthority],
   );
   useEffect(() => publishChatTurnSettlement(chatId, settle), [chatId, settle]);
   return null;

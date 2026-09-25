@@ -148,6 +148,7 @@
   "devDependencies": {
     "@taucad/formal": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/xstate-testing": "workspace:*",
     "xstate": "catalog:"
   },
   "peerDependenciesMeta": {

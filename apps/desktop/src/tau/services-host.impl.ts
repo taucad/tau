@@ -315,6 +315,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * point of the portable host. */
   const launchers = new Map<string, NodeAgentLauncher>();
   const launcherGenerations = new Map<string, number>();
+  /* A launcher's close in flight, by root. A connect for that root waits it out
+   * before it reads any root state, so a launcher whose close has begun is
+   * never adopted (L6 N2, L2b HD-7). */
+  const launcherClosures = new Map<string, Promise<void>>();
   const launcherProjectIds = new Map<string, string>();
   const revisionRoots = new Map<string, ProjectRevisions>();
   type DesktopRuntime = ReturnType<typeof createDesktopRuntime>;
@@ -494,7 +498,21 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     }
     const launcher = launchers.get(workspaceRoot);
     if (launcher !== undefined) {
-      await launcher.close();
+      const closing = launcher.close();
+      launcherClosures.set(workspaceRoot, closing);
+      try {
+        await closing;
+      } catch (error) {
+        // Its close has begun, so no deferred connect may adopt it, whatever state it failed in.
+        if (launchers.get(workspaceRoot) === launcher) {
+          launchers.delete(workspaceRoot);
+        }
+        throw error;
+      } finally {
+        if (launcherClosures.get(workspaceRoot) === closing) {
+          launcherClosures.delete(workspaceRoot);
+        }
+      }
     }
     if (attachmentGeneration !== undefined && launcherGenerations.get(workspaceRoot) !== attachmentGeneration) {
       return;
@@ -662,6 +680,18 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * MCP routes, runtime clients through the checkouts beneath it) shares the
      * one key. */
     const workspaceRoot = canonicalPath(requested);
+    /* Awaited only while a close is in flight, so an ordinary connect stays
+     * synchronous. The release finishes first and, with its generation still
+     * current, drops the whole root; this connect then builds afresh. */
+    for (let closing = launcherClosures.get(workspaceRoot); closing; closing = launcherClosures.get(workspaceRoot)) {
+      // The release reports its own close failure to main.
+      // oxlint-disable-next-line no-await-in-loop -- Sequential by design: a later close is read only after this one ends.
+      await closing.catch(() => undefined);
+    }
+    if (quiescing || disposed) {
+      port.close();
+      return;
+    }
     launcherProjectIds.set(workspaceRoot, projectId);
     const requestedGeneration = Number(context?.['attachmentGeneration']);
     if (Number.isSafeInteger(requestedGeneration) && requestedGeneration >= 0) {

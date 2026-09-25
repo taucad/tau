@@ -1,5 +1,7 @@
 /**
- * Fake actors, a fake parent and a manual clock for the revision machine suites.
+ * Audience: owner-machine tests and W1's seam adapters. Fake actors and a fake
+ * parent for scripted effects (MC-R23), moved from the revisions suites. Timers
+ * use `StepClock` from `./clock`.
  *
  * Every effect in a revision machine is an injected actor, so a suite replaces
  * the whole effect surface with scripted stubs, drives the machine in plain
@@ -10,15 +12,15 @@
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { AnyActorRef, AnyEventObject, AsyncActorLogic, CallbackActorLogic } from 'xstate';
 
-/** One recorded invocation of a scripted promise actor. */
+/** One recorded invocation of a scripted promise actor. @public */
 export type RecordedCall = Readonly<{ name: string; input: unknown }>;
 
-/** A scripted promise-actor outcome. */
+/** A scripted promise-actor outcome. @public */
 export type ScriptedOutcome = Readonly<{ output: unknown }> | Readonly<{ error: unknown }>;
 
 type Settler = Readonly<{ resolve: (outcome: ScriptedOutcome) => void }>;
 
-/** Scripted promise actors plus the record of what each was called with. */
+/** Scripted promise actors plus the record of what each was called with. @public */
 export type FakePromiseActors = Readonly<{
   /** Every invocation in order, across every actor name. */
   calls: readonly RecordedCall[];
@@ -39,6 +41,7 @@ export type FakePromiseActors = Readonly<{
  * Create the scripted promise-actor set one suite shares.
  *
  * @returns The scripted actors plus the record of every invocation.
+ * @public
  */
 export const createFakePromiseActors = (): FakePromiseActors => {
   const calls: RecordedCall[] = [];
@@ -90,7 +93,7 @@ export const createFakePromiseActors = (): FakePromiseActors => {
   };
 };
 
-/** One event a stubbed callback actor received, with the input it was started on. */
+/** One event a stubbed callback actor received, with the input it was started on. @public */
 export type RecordedDelivery = Readonly<{
   name: string;
   input: unknown;
@@ -101,6 +104,8 @@ export type RecordedDelivery = Readonly<{
  * Callback-actor stubs, used both for held resources (the turn lease, the
  * checkout fence) and as stand-ins for spawned child machines, where what
  * matters is the input each child was started on and what it was sent.
+ *
+ * @public
  */
 export type FakeCallbackActors = Readonly<{
   /** Callback actor logic for `name`; holds until the machine stops it. */
@@ -121,8 +126,10 @@ export type FakeCallbackActors = Readonly<{
  * Create the callback-actor stubs one suite shares.
  *
  * @returns The stubs plus their hold, release and delivery records.
+ * @public
  */
 export const createFakeCallbackActors = (): FakeCallbackActors => {
+  // eslint-disable-next-line tau-lint/no-handrolled-fanout -- test fake: the live stubs a suite scripts, not a production event bus.
   const holders = new Map<string, Array<(event: AnyEventObject) => void>>();
   const releases = new Map<string, number>();
   const inputs = new Map<string, unknown[]>();
@@ -165,7 +172,7 @@ export const createFakeCallbackActors = (): FakeCallbackActors => {
   };
 };
 
-/** A parent stand-in that records every event a child sends to it. */
+/** A parent stand-in that records every event a child sends to it. @public */
 export type FakeParent = Readonly<{
   ref: AnyActorRef;
   events: readonly AnyEventObject[];
@@ -176,6 +183,7 @@ export type FakeParent = Readonly<{
  * Create a running actor usable as `parentRef`, recording what it receives.
  *
  * @returns The parent ref, the events it received and its stop function.
+ * @public
  */
 export const createFakeParent = (): FakeParent => {
   const events: AnyEventObject[] = [];
@@ -195,6 +203,7 @@ export const createFakeParent = (): FakeParent => {
  *
  * @param actor - The actor to observe.
  * @returns The growing list of emitted events.
+ * @public
  */
 export const recordEmitted = (actor: AnyActorRef): AnyEventObject[] => {
   const emitted: AnyEventObject[] = [];
@@ -202,44 +211,4 @@ export const recordEmitted = (actor: AnyActorRef): AnyEventObject[] => {
     emitted.push(event);
   });
   return emitted;
-};
-
-/** A clock the suite advances by hand, so no test waits on real time. */
-export type ManualClock = Readonly<{
-  setTimeout: (callback: () => void, expiryTimeoutMilliseconds: number) => number;
-  clearTimeout: (id: number) => void;
-  /** Advance virtual time and run every timeout that comes due. */
-  advance: (milliseconds: number) => void;
-}>;
-
-/**
- * Create the manual clock passed as `createActor(logic, { clock })`.
- *
- * @returns A clock whose virtual time only moves when the suite advances it.
- */
-export const createManualClock = (): ManualClock => {
-  const timeouts = new Map<number, Readonly<{ at: number; callback: () => void }>>();
-  let now = 0;
-  let nextId = 0;
-
-  return {
-    setTimeout(callback, expiryTimeoutMilliseconds) {
-      nextId += 1;
-      timeouts.set(nextId, { at: now + expiryTimeoutMilliseconds, callback });
-      return nextId;
-    },
-    clearTimeout(id) {
-      timeouts.delete(id);
-    },
-    advance(milliseconds) {
-      now += milliseconds;
-      const due = [...timeouts.entries()]
-        .filter(([, entry]) => entry.at <= now)
-        .sort(([, left], [, right]) => left.at - right.at);
-      for (const [id, entry] of due) {
-        timeouts.delete(id);
-        entry.callback();
-      }
-    },
-  };
 };

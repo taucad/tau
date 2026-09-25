@@ -1,6 +1,6 @@
 {
   "name": "@taucad/revisions",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "description": "Host-neutral revision port, isomorphic-git and native-Git backends, and the revision lifecycle machines for Tau",
   "type": "module",
   "sideEffects": false,

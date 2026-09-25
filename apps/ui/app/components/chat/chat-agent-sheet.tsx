@@ -4,10 +4,12 @@
  *
  * The trigger reads as the configuration — the model's glyph (an external
  * agent's own), the model, the level a step lighter, Fast mode, a 12 px
- * chevron. It opens a settings sheet: the chosen model as a row, then
- * Reasoning, the agent's switches and where it runs. The model row drills
- * into the list in the same card; choosing a model returns to the sheet with
- * that model's settings, so a level is only ever set on the model in use.
+ * chevron. It opens a settings sheet: the agent as a row when there is a
+ * choice (Q18), the chosen model as a row, then Reasoning, the agent's
+ * switches and where it runs. The agent row drills into the agents, grouped
+ * by host; the model row into that agent's models, in the same card. Choosing
+ * a model returns to the sheet with that model's settings, so a level is only
+ * ever set on the model in use.
  *
  * Tau's level is `TauAgentExecution.effort`; an external agent's is its own
  * `thought_level` option, written verbatim and never translated (VI3).
@@ -31,12 +33,13 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } 
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Switch } from '@taucad/ui/components/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { IconId } from '#components/icons/svg-icon.js';
+import { Tau } from '#components/icons/tau.js';
 import { ThoughtBubble } from '#components/icons/thought-bubble.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
@@ -220,7 +223,10 @@ type SheetAgent =
   | {
       readonly kind: 'acp';
       readonly key: string;
+      /** The agent's own name, with its host once more than one host offers agents. */
       readonly name: string;
+      /** The agent's own name alone: the agent list's headings already say the host. */
+      readonly displayName: string;
       readonly hostId: TauAgentHostId;
       readonly agentId: string;
       readonly where: string;
@@ -251,6 +257,21 @@ function AgentGlyph({
   );
 }
 
+/** An agent's mark where agents are chosen: Tau's own, or the external agent's. */
+function SheetAgentGlyph({
+  agent,
+  className,
+}: {
+  readonly agent: SheetAgent;
+  readonly className?: string;
+}): React.JSX.Element {
+  return agent.kind === 'tau' ? (
+    <Tau className={className} aria-hidden='true' />
+  ) : (
+    <AgentGlyph agentId={agent.agentId} className={cn(className, agent.refusal && 'opacity-50')} />
+  );
+}
+
 const hostWhere = (placement: AgentHostPlacementTarget): string =>
   placement.hostId === 'desktop' ? 'this computer' : placement.label;
 
@@ -277,6 +298,7 @@ const acpAgent = (
     kind: 'acp',
     key: acpKey(placement.hostId, descriptor.id),
     name: isNamedByHost ? `${descriptor.displayName} · ${placement.label}` : descriptor.displayName,
+    displayName: descriptor.displayName,
     hostId: placement.hostId,
     agentId: descriptor.id,
     where,
@@ -337,7 +359,7 @@ type SelectOption = Extract<AgentConfigOption, { readonly type: 'select' }>;
 type SheetModel = {
   readonly glyph: React.ReactNode;
   readonly name: string;
-  /** One line under the name: who runs it when there is a choice, and its provider. */
+  /** One line under the name: its provider, or the id the agent sent. The agent row names the agent. */
   readonly facts: string;
   readonly levels: readonly Option[];
   readonly level: Option | undefined;
@@ -358,7 +380,7 @@ const isDefaultValue = (option: Option): boolean => option.id === 'default' || /
  * The trigger's and the sheet's reading of the chat's model, from one place so
  * the two can never disagree.
  */
-const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig, hasChoice: boolean): SheetModel => {
+const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetModel => {
   const {
     model: { model, effort, setActiveEffort },
     execution: { execution },
@@ -372,7 +394,7 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig, hasChoice:
     return {
       glyph: <SvgIcon id={model.family} className={glyphClass} aria-hidden='true' />,
       name: model.name,
-      facts: [hasChoice ? 'Tau' : undefined, model.provider.name].filter(Boolean).join(' · '),
+      facts: model.provider.name,
       levels,
       level,
       isLevelShown: level !== undefined,
@@ -402,7 +424,7 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig, hasChoice:
   return {
     glyph: <AgentGlyph agentId={current.agentId} className={glyphClass} />,
     name: current.models.find((entry) => entry.id === modelId)?.name ?? modelId ?? 'Default',
-    facts: [current.name, modelId].filter(Boolean).join(' · '),
+    facts: modelId ?? '',
     levels,
     level,
     isLevelShown: level !== undefined && !isDefaultValue(level),
@@ -698,20 +720,29 @@ function ModelRow({
   );
 }
 
+/** Backspace in an empty search goes back one step. */
+const backOnEmpty =
+  (query: string, onBack: () => void) =>
+  (event: React.KeyboardEvent): void => {
+    if (event.key === 'Backspace' && query === '') {
+      event.preventDefault();
+      onBack();
+    }
+  };
+
 /**
- * The drilled-in list: agent tabs when there is a choice, search, and the
- * browsed agent's models. Browsing a tab changes nothing until a model is
- * chosen; choosing one on another agent's tab moves the chat to that agent at
+ * One agent's models: Tau's catalog by tier, or an external agent's own list.
+ * Choosing one on an agent the chat isn't on moves the chat to that agent at
  * its own defaults.
  */
 function ModelList({
-  agents,
+  agent,
   current,
   sheetModel,
   onChoose,
   onBack,
 }: {
-  readonly agents: readonly SheetAgent[];
+  readonly agent: SheetAgent;
   readonly current: SheetAgent;
   readonly sheetModel: SheetModel;
   /** `modelId` is absent only for an external agent that runs on its own default. */
@@ -723,170 +754,188 @@ function ModelList({
     execution: { execution },
   } = useChatComposer();
   const { open: openSettings } = useSettingsDialog();
-  const [viewKey, setViewKey] = useState(current.key);
   const [query, setQuery] = useState('');
-  const view = agents.find((agent) => agent.key === viewKey) ?? current;
   const tauGroups = useTauModelGroups(modelId);
   const selectedAcpModel = execution.kind === 'acp' ? execution.model : undefined;
-  const onKeyDown = (event: React.KeyboardEvent): void => {
-    if (event.key === 'Backspace' && query === '') {
-      event.preventDefault();
-      onBack();
-    }
-  };
 
-  const list =
-    view.kind === 'acp' && view.refusal !== undefined ? (
-      <Unavailable agent={{ ...view, refusal: view.refusal }} />
-    ) : (
-      <Command className='min-h-0 flex-1 bg-transparent' onKeyDown={onKeyDown}>
-        <CommandInput
-          autoFocus
-          placeholder={view.kind === 'tau' ? 'Search models...' : `Search ${view.name} models...`}
-          value={query}
-          onValueChange={setQuery}
-        />
-        <CommandList className='max-h-none min-h-0 flex-1'>
-          <CommandEmpty className='mx-2'>No models match “{query}”.</CommandEmpty>
-          {view.kind === 'tau' ? (
-            tauGroups.map((group) => (
-              <CommandGroup key={group.name} heading={group.name}>
-                {group.items.map((entry) => {
-                  const isInUse = current.kind === 'tau' && entry.id === modelId;
-                  return (
-                    <CommandItem
-                      key={entry.id}
-                      value={entry.id}
-                      keywords={[entry.name, entry.provider.name, group.name]}
-                      onSelect={() => {
-                        onChoose(view, entry.id);
-                      }}
-                    >
-                      <ModelRow
-                        glyph={<SvgIcon id={entry.details.family} aria-hidden='true' />}
-                        name={entry.name}
-                        isInUse={isInUse}
-                        level={isInUse ? sheetModel.level?.name : undefined}
-                      />
-                    </CommandItem>
-                  );
-                })}
-              </CommandGroup>
-            ))
-          ) : view.models.length === 0 ? (
-            /* A failed model probe never drops the agent (EQ1 fallback B): it still runs, on its own default. */
-            <CommandGroup heading={view.name}>
-              <CommandItem
-                value='default'
-                keywords={[view.name]}
-                onSelect={() => {
-                  onChoose(view, undefined);
-                }}
-              >
-                <ModelRow
-                  glyph={<AgentGlyph agentId={view.agentId} className='size-4' />}
-                  name='Default model'
-                  isInUse={current.key === view.key}
-                  level={undefined}
-                />
-              </CommandItem>
-            </CommandGroup>
-          ) : (
-            <CommandGroup heading={view.name}>
-              {view.models.map((entry) => {
-                const isInUse = current.key === view.key && entry.id === (selectedAcpModel ?? view.defaultModel);
+  if (agent.kind === 'acp' && agent.refusal !== undefined) {
+    return <Unavailable agent={{ ...agent, refusal: agent.refusal }} />;
+  }
+  return (
+    <Command className='min-h-0 flex-1 bg-transparent' onKeyDown={backOnEmpty(query, onBack)}>
+      <CommandInput
+        autoFocus
+        placeholder={agent.kind === 'tau' ? 'Search models...' : `Search ${agent.displayName} models...`}
+        value={query}
+        onValueChange={setQuery}
+      />
+      <CommandList className='max-h-none min-h-0 flex-1'>
+        <CommandEmpty className='mx-2'>No models match “{query}”.</CommandEmpty>
+        {agent.kind === 'tau' ? (
+          tauGroups.map((group) => (
+            <CommandGroup key={group.name} heading={group.name}>
+              {group.items.map((entry) => {
+                const isInUse = current.kind === 'tau' && entry.id === modelId;
                 return (
                   <CommandItem
                     key={entry.id}
                     value={entry.id}
-                    keywords={[entry.name, view.name]}
+                    keywords={[entry.name, entry.provider.name, group.name]}
                     onSelect={() => {
-                      onChoose(view, entry.id);
+                      onChoose(agent, entry.id);
                     }}
                   >
-                    {/* Agent-authored text: rendered as text, never resolved against Tau's catalog (VI3). */}
                     <ModelRow
-                      glyph={<AgentGlyph agentId={view.agentId} className='size-4' />}
+                      glyph={<SvgIcon id={entry.details.family} aria-hidden='true' />}
                       name={entry.name}
                       isInUse={isInUse}
-                      level={isInUse && sheetModel.isLevelShown ? sheetModel.level?.name : undefined}
+                      level={isInUse ? sheetModel.level?.name : undefined}
                     />
                   </CommandItem>
                 );
               })}
             </CommandGroup>
-          )}
-        </CommandList>
-        {view.kind === 'tau' ? (
-          <div className='border-t p-1'>
-            <button
-              type='button'
-              className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}
-              onClick={() => {
-                openSettings('models');
+          ))
+        ) : agent.models.length === 0 ? (
+          /* A failed model probe never drops the agent (EQ1 fallback B): it still runs, on its own default. */
+          <CommandGroup heading={agent.name}>
+            <CommandItem
+              value='default'
+              keywords={[agent.name]}
+              onSelect={() => {
+                onChoose(agent, undefined);
               }}
             >
-              <Plus />
-              Add models
-            </button>
-          </div>
-        ) : null}
-      </Command>
-    );
+              <ModelRow
+                glyph={<AgentGlyph agentId={agent.agentId} className='size-4' />}
+                name='Default model'
+                isInUse={current.key === agent.key}
+                level={undefined}
+              />
+            </CommandItem>
+          </CommandGroup>
+        ) : (
+          <CommandGroup heading={agent.name}>
+            {agent.models.map((entry) => {
+              const isInUse = current.key === agent.key && entry.id === (selectedAcpModel ?? agent.defaultModel);
+              return (
+                <CommandItem
+                  key={entry.id}
+                  value={entry.id}
+                  keywords={[entry.name, agent.name]}
+                  onSelect={() => {
+                    onChoose(agent, entry.id);
+                  }}
+                >
+                  {/* Agent-authored text: rendered as text, never resolved against Tau's catalog (VI3). */}
+                  <ModelRow
+                    glyph={<AgentGlyph agentId={agent.agentId} className='size-4' />}
+                    name={entry.name}
+                    isInUse={isInUse}
+                    level={isInUse && sheetModel.isLevelShown ? sheetModel.level?.name : undefined}
+                  />
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+        )}
+      </CommandList>
+      {agent.kind === 'tau' ? (
+        <div className='border-t p-1'>
+          <button
+            type='button'
+            className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}
+            onClick={() => {
+              openSettings('models');
+            }}
+          >
+            <Plus />
+            Add models
+          </button>
+        </div>
+      ) : null}
+    </Command>
+  );
+}
 
-  return agents.length > 1 ? (
-    <Tabs
-      value={view.key}
-      className='min-h-0 flex-1 gap-0'
-      onValueChange={(key) => {
-        setViewKey(key);
-        setQuery('');
-      }}
+/**
+ * The agents the Agent row opens (Q18): Tau, then each host's agents under
+ * that host, so a second host is a heading rather than a suffix on every
+ * name. The agent in use shows its model; one its host can't start says so.
+ * Choosing an agent shows its models and changes nothing until one is chosen.
+ */
+function AgentList({
+  agents,
+  current,
+  sheetModel,
+  onBrowse,
+  onBack,
+}: {
+  readonly agents: readonly SheetAgent[];
+  readonly current: SheetAgent;
+  readonly sheetModel: SheetModel;
+  readonly onBrowse: (agent: SheetAgent) => void;
+  readonly onBack: () => void;
+}): React.JSX.Element {
+  const [query, setQuery] = useState('');
+  const hosts = [
+    ...new Map(
+      agents.flatMap((agent) => (agent.kind === 'acp' ? [[agent.hostId, agent.where] as const] : [])),
+    ).entries(),
+  ];
+  const row = (agent: SheetAgent): React.JSX.Element => {
+    const isInUse = agent.key === current.key;
+    const isRefused = agent.kind === 'acp' && agent.refusal !== undefined;
+    return (
+      <CommandItem
+        key={agent.key}
+        value={agent.key}
+        keywords={[agent.name]}
+        aria-label={[agent.name, isInUse ? 'in use' : undefined, isRefused ? 'unavailable' : undefined]
+          .filter(Boolean)
+          .join(', ')}
+        onSelect={() => {
+          onBrowse(agent);
+        }}
+      >
+        <span className='flex w-full min-w-0 items-center justify-between gap-2'>
+          <span className='flex min-w-0 items-center gap-2'>
+            <SheetAgentGlyph agent={agent} className='size-4 shrink-0' />
+            <span className='truncate'>{agent.kind === 'tau' ? agent.name : agent.displayName}</span>
+          </span>
+          {isRefused ? (
+            <span className='flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground'>
+              Can&apos;t start
+              <CircleAlert aria-hidden='true' />
+            </span>
+          ) : isInUse ? (
+            <span className='flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
+              <span className='truncate'>{sheetModel.name}</span>
+              <Check aria-hidden='true' className='text-foreground' />
+            </span>
+          ) : null}
+        </span>
+      </CommandItem>
+    );
+  };
+  return (
+    <Command
+      data-slot='agent-list'
+      className='min-h-0 flex-1 bg-transparent'
+      defaultValue={current.key}
+      onKeyDown={backOnEmpty(query, onBack)}
     >
-      <div className='px-1 pt-1'>
-        <TabsList
-          aria-label='Agent'
-          activeClassName='hidden'
-          className='w-full gap-0.5 p-0.5 data-[orientation=horizontal]:flex data-[orientation=horizontal]:min-h-7'
-        >
-          {agents.map((agent) => {
-            const isInUse = agent.key === current.key;
-            const isRefused = agent.kind === 'acp' && agent.refusal !== undefined;
-            return (
-              <TabsTrigger
-                key={agent.key}
-                value={agent.key}
-                aria-label={[agent.name, isInUse ? 'in use' : undefined, isRefused ? 'unavailable' : undefined]
-                  .filter(Boolean)
-                  .join(', ')}
-                className={cn(
-                  'h-full w-auto min-w-0 flex-auto gap-1.5 rounded-sm border border-transparent px-2 text-xs font-normal text-muted-foreground dark:text-muted-foreground',
-                  'hover:bg-menu-highlight hover:text-foreground',
-                  'data-[state=active]:border-border data-[state=active]:bg-accent data-[state=active]:text-foreground dark:data-[state=active]:text-foreground',
-                )}
-              >
-                {agent.kind === 'tau' ? (
-                  <Bot aria-hidden='true' className='size-3.5 shrink-0' />
-                ) : (
-                  <AgentGlyph agentId={agent.agentId} className={cn('size-3.5 shrink-0', isRefused && 'opacity-50')} />
-                )}
-                <span className='truncate'>{agent.name}</span>
-                {isRefused ? (
-                  <CircleAlert className='size-3 shrink-0' aria-hidden='true' />
-                ) : isInUse ? (
-                  <Check className='size-3 shrink-0' aria-hidden='true' />
-                ) : null}
-              </TabsTrigger>
-            );
-          })}
-        </TabsList>
-      </div>
-      <TabsContent value={view.key} className='flex min-h-0 flex-col'>
-        {list}
-      </TabsContent>
-    </Tabs>
-  ) : (
-    <div className='flex min-h-0 flex-1 flex-col'>{list}</div>
+      <CommandInput autoFocus placeholder='Search agents...' value={query} onValueChange={setQuery} />
+      <CommandList className='max-h-none min-h-0 flex-1'>
+        <CommandEmpty className='mx-2'>No agents match “{query}”.</CommandEmpty>
+        <CommandGroup>{agents.filter((agent) => agent.kind === 'tau').map((agent) => row(agent))}</CommandGroup>
+        {hosts.map(([hostId, where]) => (
+          <CommandGroup key={hostId} heading={`On ${where}`}>
+            {agents.filter((agent) => agent.kind === 'acp' && agent.hostId === hostId).map((agent) => row(agent))}
+          </CommandGroup>
+        ))}
+      </CommandList>
+    </Command>
   );
 }
 
@@ -901,6 +950,8 @@ const focusOnOpen = (surface: HTMLElement | undefined): void => {
   );
   (level ?? surface?.querySelector<HTMLElement>('[data-slot=sheet-model]'))?.focus();
 };
+
+type SheetView = 'settings' | 'agents' | 'models';
 
 function Sheet({
   agents,
@@ -920,17 +971,39 @@ function Sheet({
     execution: { execution, setActiveExecution },
   } = useChatComposer();
   const { defaultExecution } = useModels();
-  const [view, setView] = useState<'settings' | 'models'>('settings');
+  const [view, setView] = useState<SheetView>('settings');
+  /* The agent whose models the list shows: the chat's own, or one browsed from the agents. */
+  const [browseKey, setBrowseKey] = useState(current.key);
+  const [isFromAgents, setIsFromAgents] = useState(false);
   const hasNavigated = useRef(false);
+  /* Back returns focus to the row the person left from; a choice, to the chosen level. */
+  const returnTo = useRef<'agent' | 'model' | 'level'>('level');
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const agentRowRef = useRef<HTMLButtonElement>(null);
+  const modelRowRef = useRef<HTMLButtonElement>(null);
+  const hasChoice = agents.length > 1;
+  const browsed = agents.find((agent) => agent.key === browseKey) ?? current;
   useEffect(() => {
-    if (hasNavigated.current && view === 'settings') {
+    if (!hasNavigated.current || view !== 'settings') {
+      return;
+    }
+    if (returnTo.current === 'level') {
       focusOnOpen(surfaceRef.current ?? undefined);
+    } else {
+      (returnTo.current === 'agent' ? agentRowRef : modelRowRef).current?.focus();
     }
   }, [view]);
-  const go = (next: 'settings' | 'models'): void => {
+  const go = (next: SheetView): void => {
     hasNavigated.current = true;
     setView(next);
+  };
+  const back = (): void => {
+    if (view === 'models' && isFromAgents) {
+      setIsFromAgents(false);
+      go('agents');
+      return;
+    }
+    go('settings');
   };
 
   const choose = (agent: SheetAgent, modelId: string | undefined): void => {
@@ -957,10 +1030,13 @@ function Sheet({
         : { kind: 'acp', hostId: agent.hostId, agentId: agent.agentId };
       setActiveExecution(modelId === undefined ? base : { ...base, model: modelId });
     }
+    returnTo.current = 'level';
+    setIsFromAgents(false);
     go('settings');
   };
 
   const reasoningLabel = `Reasoning for ${current.kind === 'acp' ? `${current.name} ` : ''}${sheetModel.name}`;
+  const rowClass = cn(menuItemVariants({ highlight: 'focus' }), 'w-[calc(100%-0.5rem)] hover:bg-menu-highlight');
   return (
     <div ref={surfaceRef} data-slot='agent-sheet' className='w-full overflow-hidden'>
       {view === 'settings' ? (
@@ -968,15 +1044,36 @@ function Sheet({
           data-slot='sheet-settings'
           className='flex flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2'
         >
+          {hasChoice ? (
+            <button
+              ref={agentRowRef}
+              type='button'
+              data-slot='sheet-agent'
+              aria-label={`Agent: ${current.name}. Change`}
+              className={cn(rowClass, 'mx-1 mt-1 h-8 gap-2 px-2.5')}
+              onClick={() => {
+                returnTo.current = 'agent';
+                go('agents');
+              }}
+            >
+              <span className='shrink-0 text-xs text-muted-foreground'>Agent</span>
+              <span className='ml-auto flex min-w-0 items-center gap-1.5 text-xs'>
+                <SheetAgentGlyph agent={current} className='size-3.5 shrink-0' />
+                <span className='truncate'>{current.name}</span>
+              </span>
+              <ChevronRight aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
+            </button>
+          ) : null}
           <button
+            ref={modelRowRef}
             type='button'
             data-slot='sheet-model'
             aria-label={`Model: ${current.kind === 'acp' ? `${current.name}, ` : ''}${sheetModel.name}. Change`}
-            className={cn(
-              menuItemVariants({ highlight: 'focus' }),
-              'm-1 h-auto w-[calc(100%-0.5rem)] gap-2.5 px-2.5 py-2 hover:bg-menu-highlight',
-            )}
+            className={cn(rowClass, 'm-1 h-auto gap-2.5 px-2.5 py-2')}
             onClick={() => {
+              returnTo.current = 'model';
+              setBrowseKey(current.key);
+              setIsFromAgents(false);
               go('models');
             }}
           >
@@ -1000,32 +1097,47 @@ function Sheet({
         </div>
       ) : (
         <div
-          data-slot='sheet-models'
-          className='flex h-[25rem] max-h-[70vh] flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2'
+          data-slot={view === 'agents' ? 'sheet-agents' : 'sheet-models'}
+          /* The agents are as tall as they are; a model list keeps its fixed height. */
+          className={cn(
+            'flex flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2',
+            view === 'agents' ? 'max-h-[min(25rem,70vh)]' : 'h-[25rem] max-h-[70vh]',
+          )}
         >
           <div className='flex h-9 shrink-0 items-center gap-1 border-b px-1'>
             <Button
               variant='ghost'
               size='sm'
-              aria-label='Back to settings'
+              aria-label={view === 'models' && isFromAgents ? 'Back to agents' : 'Back to settings'}
               className='h-7 gap-1 px-1.5 text-xs font-normal text-muted-foreground hover:text-foreground'
-              onClick={() => {
-                go('settings');
-              }}
+              onClick={back}
             >
               <ChevronLeft aria-hidden='true' className='size-4' />
-              {sheetModel.name}
+              {view === 'models' && isFromAgents ? 'Agents' : sheetModel.name}
             </Button>
           </div>
-          <ModelList
-            agents={agents}
-            current={current}
-            sheetModel={sheetModel}
-            onChoose={choose}
-            onBack={() => {
-              go('settings');
-            }}
-          />
+          {view === 'agents' ? (
+            <AgentList
+              agents={agents}
+              current={current}
+              sheetModel={sheetModel}
+              onBrowse={(agent) => {
+                setBrowseKey(agent.key);
+                setIsFromAgents(true);
+                go('models');
+              }}
+              onBack={back}
+            />
+          ) : (
+            <ModelList
+              key={browsed.key}
+              agent={browsed}
+              current={current}
+              sheetModel={sheetModel}
+              onChoose={choose}
+              onBack={back}
+            />
+          )}
         </div>
       )}
     </div>
@@ -1053,7 +1165,7 @@ export function ChatAgentSheet({
   const isMobile = useIsMobile();
   const { targets: placements } = useAgentHostPlacements();
   const { agents, current } = useSheetAgents(placements);
-  const sheetModel = useSheetModel(current, agentConfig, agents.length > 1);
+  const sheetModel = useSheetModel(current, agentConfig);
   const name = triggerName(current, sheetModel);
   const closedOutside = useRef(false);
 

@@ -15,7 +15,7 @@ import type { TurnRevisionBase, TurnRevisionState } from '#routes/w.$workspace.$
 import { useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
+import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useChatActions, useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
@@ -62,7 +62,9 @@ const turnSave = (card: RevisionCard | undefined, baseRevisionId: string | undef
 function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): TurnRevisionState {
   const { projectId } = useProject();
   const { activeChatId } = useChatContext();
-  const { byTurnId, revisions } = useRevisions();
+  /* B2: the turn's own revision, looked up by the id its settlement names — not found by scanning a page. */
+  const turnRevision = useTurnRevision(userMessageId);
+  const { revisions } = useRevisions();
   const outcome = useTurnOutcomes(projectId).find((notice) => notice.turnId === userMessageId)?.kind;
   /* Stable closures: a fresh `subscribe` every render makes React unsubscribe
      and resubscribe both stores on every render of every turn marker (C47). */
@@ -82,15 +84,20 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
   const [held, setHeld] = useState<TurnRevisionState>();
 
   const baseRevisionId = workspace?.execution.baseRevisionId;
+  const loadedBase = revisions.find((revision) => revision.revisionId === baseRevisionId);
+  const baseCard =
+    useRevisionCards(
+      isLatestTurn && loadedBase === undefined && baseRevisionId !== undefined ? [baseRevisionId] : [],
+    ).get(baseRevisionId ?? '') ?? loadedBase;
   const base: TurnRevisionBase | undefined =
     workspace === undefined
       ? undefined
       : baseRevisionId === undefined
         ? { kind: 'first' }
-        : { kind: 'revision', n: revisions.find((revision) => revision.revisionId === baseRevisionId)?.n };
+        : { kind: 'revision', n: baseCard?.n };
 
   const state = deriveTurnRevisionState({
-    revision: turnSave(byTurnId.get(userMessageId), baseRevisionId),
+    revision: turnSave(turnRevision, baseRevisionId),
     outcome,
     isSettledWithoutChange:
       settlement?.type === 'turn.finalized' &&

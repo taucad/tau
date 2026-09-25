@@ -43,6 +43,7 @@ import type {
   KeepalivePushOutcome,
   PublishDraft,
   RevisionDiffEntry,
+  RevisionDivergence,
   RevisionLogRequest,
   RevisionPort,
   RevisionRow,
@@ -160,6 +161,8 @@ export type WorkerRevisionCommand =
   | Readonly<{
       command: 'publishProject';
       tag?: string;
+      /** An older revision to publish (a History row's *Publish*); the branch head when absent. */
+      revisionId?: string;
       /* The API origin Publish reaches, on the command rather than in a
        * credential frame: a frame carrying no credential *clears* the one a
        * third-party remote was connected with, and publishing must not sign
@@ -228,7 +231,8 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'flushKeepalive' }>
   | Readonly<{ command: 'tag'; name: string; revisionId: string; note?: string }>
   | Readonly<{ command: 'deleteTag'; name: string }>
-  | Readonly<{ command: 'log'; branch?: string; limit?: number }>
+  | Readonly<{ command: 'log'; branch?: string; limit?: number; from?: string }>
+  | Readonly<{ command: 'divergence'; head: string; base: string }>
   | Readonly<{ command: 'diff'; revisionId: string; from?: string }>
   | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>;
 
@@ -418,6 +422,8 @@ export type WorkerProjectRevisions = Readonly<{
   deleteTag: (name: string) => Promise<void>;
   /** One branch's history, newest first, with its first-parent `Rev N` (I3). */
   log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]>;
+  /** How far two heads have gone apart, counted by the port rather than by listing both histories. */
+  divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
   diff: (revision: string, from?: string) => Promise<readonly RevisionDiffEntry[]>;
   /** One file's text before and after a revision, for *Compare* (S38). */
@@ -481,6 +487,12 @@ export type WorkerProjectRevisionsOptions = Readonly<{
    * `changed` feeds the tree.
    */
   observe?: (root: string, onChanged: (paths: readonly string[]) => void) => () => void;
+  /**
+   * Whether `observe` reports every write to a checkout before the write
+   * resolves, and a change it lost track of as the root `''` (E1). The change
+   * bus does; a stand-in that raises only what it is told to does not.
+   */
+  completeChanges?: boolean;
   authorityEpoch: string;
   clock?: () => number;
   /**
@@ -544,6 +556,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     authorityEpoch: options.authorityEpoch,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     actorId: projectId,
+    /* Only a feed that sees every write lets a cut skip the files it did not name (E1). */
+    completeChanges: options.completeChanges === true && options.observe !== undefined,
     deviceId: () => device,
     ...(options.recordHistoryPush === undefined ? {} : { recordHistoryPush: options.recordHistoryPush }),
     /*
@@ -1164,7 +1178,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'publishProject': {
           actor.send({
             type: 'publish',
-            event: { type: 'publish', ...(command.tag === undefined ? {} : { tag: command.tag }) },
+            event: {
+              type: 'publish',
+              ...(command.tag === undefined ? {} : { tag: command.tag }),
+              ...(command.revisionId === undefined ? {} : { revisionId: command.revisionId }),
+            },
           });
           return;
         }
@@ -1267,6 +1285,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'tag':
         case 'deleteTag':
         case 'log':
+        case 'divergence':
         case 'diff':
         case 'compare': {
           break;
@@ -1287,6 +1306,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }),
     deleteTag: async (name) => options.port.deleteTag(name),
     log: async (request) => readRevisionLog(options.port, request),
+    divergence: async (head, base) => options.port.divergence({ head: revisionId(head), base: revisionId(base) }),
     diff: async (revision, from) => {
       /* Against the revision's own first parent by default, which the store
        * knows: a caller that remembered a base would diff the wrong tree when a
@@ -1436,6 +1456,7 @@ export type WorkerRevisionRequest =
 export type WorkerRevisionResult =
   | Readonly<{ kind: 'placement'; placement: WorkerTurnPlacement }>
   | Readonly<{ kind: 'log'; rows: readonly RevisionRow[] }>
+  | Readonly<{ kind: 'divergence'; divergence: RevisionDivergence }>
   | Readonly<{ kind: 'diff'; entries: readonly RevisionDiffEntry[] }>
   | Readonly<{ kind: 'comparison'; comparison: RevisionFileComparison }>
   /** `tag` answers with the named version; `deleteTag` answers with nothing. */
@@ -1522,6 +1543,8 @@ export type WorkerRevisionRegistryOptions = Readonly<{
    * checkout (F9 — debounce is the machine's, W6; L2-F4).
    */
   observe: (root: string, onChanged: (paths: readonly string[]) => void) => () => void;
+  /** Whether `observe` is the change bus itself, so a cut re-reads only what it reports (E1). */
+  completeChanges?: boolean;
   /**
    * The identity of the session that owns this project's revisions (W19).
    *
@@ -1582,10 +1605,19 @@ const answerOf = (
       return tree.admitTurn(input).then((placement) => ({ kind: 'placement', placement }) as const);
     }
     case 'log': {
-      const { branch, limit } = request;
+      const { branch, limit, from } = request;
       return tree
-        .log({ ...(branch === undefined ? {} : { branch }), ...(limit === undefined ? {} : { limit }) })
+        .log({
+          ...(branch === undefined ? {} : { branch }),
+          ...(limit === undefined ? {} : { limit }),
+          ...(from === undefined ? {} : { from }),
+        })
         .then((rows) => ({ kind: 'log', rows }) as const);
+    }
+    case 'divergence': {
+      return tree
+        .divergence(request.head, request.base)
+        .then((divergence) => ({ kind: 'divergence', divergence }) as const);
     }
     case 'diff': {
       return tree.diff(request.revisionId, request.from).then((entries) => ({ kind: 'diff', entries }) as const);
@@ -1655,6 +1687,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         port: await options.createPort(projectId, () => credential),
         filesystem: options.filesystem,
         observe: options.observe,
+        ...(options.completeChanges === undefined ? {} : { completeChanges: options.completeChanges }),
         authorityEpoch:
           typeof options.authorityEpoch === 'string' ? options.authorityEpoch : options.authorityEpoch(projectId),
         ...(options.clock === undefined ? {} : { clock: options.clock }),

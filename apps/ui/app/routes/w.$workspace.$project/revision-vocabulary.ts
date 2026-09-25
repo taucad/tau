@@ -374,19 +374,22 @@ export type StripVerb = 'Save revision' | 'Undo restore' | 'Back up' | 'Sync now
 export const selectStripVerbs = ({
   status,
   where,
-  isHeadRestore,
+  undoable,
   canWrite,
 }: Readonly<{
   status: RevisionStatusProjection | undefined;
   where: RevisionWhere;
-  /** The head is the row a restore minted, so *Undo restore* still applies (D2). */
-  isHeadRestore: boolean;
+  /**
+   * *Undo restore* would succeed: the selected head is the row a restore this
+   * session made, so a reload or another device's restore never offers it (D2).
+   */
+  undoable: boolean;
   canWrite: boolean;
 }>): Readonly<{ primary: StripVerb | undefined; secondary: readonly StripVerb[] }> => {
   if (status === undefined || !canWrite || status.conflicts.length > 0 || status.sync.state === 'conflicted') {
     return { primary: undefined, secondary: [] };
   }
-  const secondary: StripVerb[] = isHeadRestore && !where.isDirty ? ['Undo restore'] : [];
+  const secondary: StripVerb[] = undoable && !where.isDirty ? ['Undo restore'] : [];
   if (where.isDirty) {
     return { primary: 'Save revision', secondary };
   }

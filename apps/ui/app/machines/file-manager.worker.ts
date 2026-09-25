@@ -388,6 +388,9 @@ const revisionRegistry = createWorkerRevisionRegistry({
     pushRecorders.delete(projectId);
   },
   filesystem: (root) => fileService.createRootedFileSystem(root),
+  /* Every write in this worker raises its change event inside the write, so a
+   * cut can capture only the paths the bus named (E1). */
+  completeChanges: true,
   observe: (root, onChanged) =>
     eventBus.subscribe((event) => {
       const paths = versionedChangePaths(event, root);

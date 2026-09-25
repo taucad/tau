@@ -63,7 +63,13 @@ const settle = async (turns = 12): Promise<void> => {
   }
 };
 
-const harness = (projectIds: readonly string[]): Harness => {
+type RevisionPort = ReturnType<typeof createIsomorphicGitRevisionPort>;
+
+const harness = (
+  projectIds: readonly string[],
+  /* Wraps each project's port, so a row can hold one of its calls. */
+  wrapPort: (port: RevisionPort) => RevisionPort = (port) => port,
+): Harness => {
   const providers = projectIds.map(() => new MemoryProvider());
   const mountTable = new MountTable();
   const eventBus = new ChangeEventBus();
@@ -85,12 +91,14 @@ const harness = (projectIds: readonly string[]): Harness => {
   const observers = new Map<string, (paths: readonly string[]) => void>();
   const registry = createWorkerRevisionRegistry({
     createPort: (projectId) =>
-      createIsomorphicGitRevisionPort({
-        filesystem: service.createRootedFileSystem(`/projects/${projectId}`),
-        /* Exactly what `file-manager.worker.ts` gives the real port, so a branch
-         * created here is created the way the browser creates one (P24). */
-        checkouts: checkoutRoutes(projectId),
-      }),
+      wrapPort(
+        createIsomorphicGitRevisionPort({
+          filesystem: service.createRootedFileSystem(`/projects/${projectId}`),
+          /* Exactly what `file-manager.worker.ts` gives the real port, so a branch
+           * created here is created the way the browser creates one (P24). */
+          checkouts: checkoutRoutes(projectId),
+        }),
+      ),
     filesystem: (root) => service.createRootedFileSystem(root),
     observe: (root, onChanged) => {
       observers.set(root, onChanged);
@@ -473,7 +481,21 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
        it pending kept this suite's teardown waiting on it. */
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const fixture = harness(['alpha']);
+      /* The first verb's cut finds its checkout through `listCheckouts`; held
+         there, it is still running when the second arrives, however fast the
+         capture behind it is. */
+      let hold: Promise<void> | undefined;
+      let held = 0;
+      const fixture = harness(['alpha'], (port) => ({
+        ...port,
+        listCheckouts: async () => {
+          if (hold !== undefined) {
+            held += 1;
+            await hold;
+          }
+          return port.listCheckouts!();
+        },
+      }));
       const project = fixture.service.createRootedFileSystem('/projects/alpha');
       await project.writeFile('main.scad', 'cube(10);');
       const alpha = await fixture.open('alpha');
@@ -482,11 +504,16 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
 
       /* `main` is refused; `isolated-run` is dropped while that one runs. The
          refusal the person sees belongs to the branch they already have. */
+      const gate = Promise.withResolvers<void>();
+      hold = gate.promise;
       alpha.send({ command: 'createBranch', name: 'main' });
       alpha.send({ command: 'createBranch', name: 'isolated-run', id: 94 });
       await settle(40);
 
+      expect(held).toBeGreaterThan(0);
       expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toBeUndefined();
+      hold = undefined;
+      gate.resolve();
       /* And the drop is still what the bound answers, once it comes due. */
       await vi.advanceTimersByTimeAsync(60_000);
       await settle(8);
@@ -946,6 +973,75 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       globalThis.fetch = original;
     }
   });
+
+  /* W4c: History holds one page, so an older row, a turn's card and ahead/behind are asked of the port by id. */
+  it('should answer one older revision by id and how far two heads have gone apart', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    await project.writeFile('main.scad', 'cube(20);');
+    alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
+    await turnFinalized(alpha, 'turn-1');
+    const root = await fixture.root('alpha');
+    const [head, older] = await root.log();
+
+    alpha.send({ command: 'log', id: 31, from: older!.revisionId, limit: 1 });
+    alpha.send({ command: 'divergence', id: 32, head: head!.revisionId, base: older!.revisionId });
+    await vi.waitFor(() => {
+      expect(alpha.frames.filter((frame) => frame.type === 'result' && frame.id >= 31)).toHaveLength(2);
+    });
+
+    expect(alpha.frames.find((frame) => frame.type === 'result' && frame.id === 31)).toMatchObject({
+      result: {
+        kind: 'log',
+        rows: [{ revisionId: older!.revisionId, revisionNumber: older!.revisionNumber, treeId: older!.treeId }],
+      },
+    });
+    expect(alpha.frames.find((frame) => frame.type === 'result' && frame.id === 32)).toMatchObject({
+      result: { kind: 'divergence', divergence: { ahead: 1, behind: 0 } },
+    });
+  });
+
+  /* W1b: a History row's Publish names the revision it was opened on, not the head. */
+  it('should name the revision a Publish was opened on, not the branch head', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    await project.writeFile('main.scad', 'cube(20);');
+    alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
+    await turnFinalized(alpha, 'turn-1');
+    const root = await fixture.root('alpha');
+    const [, older] = await root.log();
+    const original = globalThis.fetch;
+    /* No cloud here: the push is refused, after the name is already on the revision. */
+    globalThis.fetch = vi.fn(async () => new Response('', { status: 503 })) as unknown as typeof globalThis.fetch;
+
+    try {
+      alpha.send({
+        command: 'publishProject',
+        tag: 'v1',
+        revisionId: older!.revisionId,
+        apiBaseUrl: 'https://api.test',
+      });
+      alpha.send({
+        command: 'confirmPublish',
+        draft: { tag: 'v1', projectName: 'alpha', entryPath: 'main.scad', visibility: 'public', title: 'Alpha' },
+      });
+      await vi.waitFor(
+        async () => {
+          const rows = await root.log();
+          expect(rows.map((row) => row.tags)).toEqual([[], ['v1']]);
+        },
+        { timeout: 10_000 },
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
+  }, 20_000);
 
   it('should answer an admission whose turn ended before its lease, with the turn’s own reason (W19-b)', async () => {
     const fixture = harness(['alpha']);

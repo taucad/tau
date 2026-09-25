@@ -17,6 +17,7 @@ import type {
   GitRemoteCredential,
   PublishDraft,
   RevisionDiffEntry,
+  RevisionDivergence,
   RevisionLogRequest,
   RevisionRow,
   RevisionStatusProjection,
@@ -73,6 +74,8 @@ export type RevisionClient = Readonly<{
   subscribeToasts: (listener: (toast: RevisionToast) => void) => () => void;
   /** One branch's history, newest first, each row carrying its `Rev N` (I3). */
   log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]>;
+  /** How far `head` and `base` have gone apart, counted by the port without listing either history. */
+  divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
   diff: (revisionId: string, from?: string) => Promise<readonly RevisionDiffEntry[]>;
   /** Name one revision, or re-point an existing name (S31). */
@@ -424,7 +427,10 @@ export const createHostRevisionClient = (input: {
         command: 'log',
         ...(request?.branch === undefined ? {} : { branch: request.branch }),
         ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        ...(request?.from === undefined ? {} : { from: request.from }),
       })) as unknown as readonly RevisionRow[],
+    divergence: async (head, base) =>
+      (await ask({ command: 'divergence', head, base })) as unknown as RevisionDivergence,
     diff: async (revisionId, from) =>
       (await ask({
         command: 'diff',
@@ -878,8 +884,18 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
         command: 'log',
         ...(request?.branch === undefined ? {} : { branch: request.branch }),
         ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        ...(request?.from === undefined ? {} : { from: request.from }),
       });
       return result.kind === 'log' ? result.rows : [];
+    },
+    divergence: async (head, base) => {
+      const result = await ask({ command: 'divergence', head, base });
+      if (result.kind !== 'divergence') {
+        throw Object.assign(new Error('The revision root answered a divergence with something else.'), {
+          code: 'INVALID_REVISION_RESPONSE',
+        });
+      }
+      return result.divergence;
     },
     diff: async (revisionId, from) => {
       const result = await ask({
@@ -1324,8 +1340,9 @@ export type RevisionCommands = Readonly<{
    * The API origin goes with it for the same reason it goes with `connectRemote`:
    * publishing pushes to this project's Tau Cloud repository and records the
    * publication there, and only the page knows which API it is signed in to.
+   * `revisionId` opens it on an older revision (a History row's *Publish*).
    */
-  publishProject: (tag?: string) => void;
+  publishProject: (tag?: string, revisionId?: string) => void;
   /** Publish the chosen name, with everything only a person decides. */
   confirmPublish: (draft: PublishDraft) => void;
   cancelPublish: () => void;
@@ -1500,7 +1517,7 @@ export const useRevisionCommands = (): RevisionCommands => {
       saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => client?.saveRevision(trigger),
       tag: async (input) => client?.tag(input),
       deleteTag: async (name) => client?.deleteTag(name),
-      publishProject: (tag?: string) => {
+      publishProject: (tag?: string, revisionId?: string) => {
         /* The origin rides the command itself: it is how the worker names this
          * project's Tau Cloud repository and reaches the publications route
          * (I8 — no credential travels, the session is a cookie the worker's own
@@ -1511,6 +1528,7 @@ export const useRevisionCommands = (): RevisionCommands => {
           command: 'publishProject',
           apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
           ...(tag === undefined ? {} : { tag }),
+          ...(revisionId === undefined ? {} : { revisionId }),
         });
       },
       confirmPublish: (draft) => client?.send({ command: 'confirmPublish', draft }),

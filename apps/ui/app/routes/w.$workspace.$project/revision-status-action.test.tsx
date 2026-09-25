@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History } from 'lucide-react';
@@ -272,6 +272,26 @@ describe('RevisionStatusAction', () => {
     const card = document.querySelector('[data-slot="revision-card"]');
     expect(card?.firstElementChild).toHaveTextContent(/^main\s*Rev 13$/u);
     expect(card).toHaveTextContent('Restored Rev 3');
+  });
+
+  it('names a restore by its target when that target is older than the loaded page (B2)', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-60', revisionNumber: 60, summary: 'Restore', source: 'restore', restoredFrom: 'rev-3' }),
+      ...Array.from({ length: 59 }, (_, index) => row({ revisionId: `rev-${59 - index}`, revisionNumber: 59 - index })),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-60' };
+
+    render(<RevisionStatusAction />, { wrapper });
+    await screen.findByRole('button', { name: /^Open Revisions\. You are on main, Rev 60\./u });
+    await user.tab();
+    await screen.findByRole('list', { name: 'Recent revisions' });
+
+    const card = document.querySelector('[data-slot="revision-card"]');
+    await waitFor(() => {
+      expect(card).toHaveTextContent('Restored Rev 3');
+    });
+    expect(revisionStatusHarness.rowRequests).toEqual(['rev-3']);
   });
 
   it('opens Revisions when it is clicked', async () => {

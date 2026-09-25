@@ -34,6 +34,7 @@ import {
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { Spinner } from '#components/ui/spinner.js';
 import { ActionButton, DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
 import { NamePopover } from '#components/revisions/name-popover.js';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
@@ -59,7 +60,7 @@ import {
   useRevisionFacts,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { StripVerb } from '#routes/w.$workspace.$project/revision-vocabulary.js';
-import { useRevisions } from '#hooks/use-revisions.js';
+import { useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import {
@@ -148,7 +149,8 @@ function OrientationStrip({
   const canWrite = role !== 'read' && role !== 'revoked';
   /* No head, no branch point; and nothing is offered over a line nobody has located yet (HQ7). */
   const canBranch = head !== undefined && canWrite && !isUnknown;
-  const verbs = selectStripVerbs({ status, where, isHeadRestore: head?.restoredFrom !== undefined, canWrite });
+  /* M1: the restore machine's own undo target, never a restore row this device did not mint. */
+  const verbs = selectStripVerbs({ status, where, undoable: status?.restore.undoable === true, canWrite });
   /* A29: the chooser is already open below, so Back up would repeat it. */
   const primary = verbs.primary === 'Back up' && isSyncOpen ? undefined : verbs.primary;
   const headName = revisionName(head?.n);
@@ -480,11 +482,17 @@ const onHistoryKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
  * opened for you and any conflicted row never behind it; consecutive autosaves
  * fold; days divide. The list is one Tab stop (A1 item 14).
  *
+ * The hook holds one page (B2): once the loaded rows are all shown, Show more
+ * reads the next page. A row that must stay in view but sits below the page —
+ * one opened for you from a chat — is read on its own and kept at the end of
+ * the timeline, below Show more, until a page reaches it.
+ *
  * @returns The list.
  */
 function HistoryList(): React.JSX.Element {
   const { projectId } = useProject();
-  const { revisions, headRevisionId, line, isDirty } = useRevisions();
+  const status = useRevisionStatus();
+  const { revisions, headRevisionId, line, isDirty, hasOlder, loadOlder } = useRevisions();
   const { restore, undo, isBusy } = useRestoreToPoint();
   const revealed = useRevisionReveal(projectId);
   const branch = line.kind === 'unknown' ? undefined : line.name;
@@ -492,20 +500,39 @@ function HistoryList(): React.JSX.Element {
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set());
   const [openFolds, setOpenFolds] = useState<ReadonlySet<string>>(() => new Set());
   const [isAllShown, setIsAllShown] = useState(false);
-  /* *View revision* reaches its row wherever it is: behind Show more, inside a fold, and opened (DESIGN: a reveal expands to its target). */
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  /* *View revision* reaches its row wherever it is: behind Show more, inside a fold, below the loaded page, and opened (DESIGN: a reveal expands to its target). */
   if (revealed !== undefined) {
     const holder = groups.find((group) => holds(group, revealed));
     if (holder?.kind === 'autosaves' && !openFolds.has(keyOf(holder))) {
       setOpenFolds((current) => new Set(current).add(keyOf(holder)));
     }
-    if (holder !== undefined && !openRows.has(revealed)) {
+    if (!openRows.has(revealed)) {
       setOpenRows((current) => new Set(current).add(revealed));
     }
   }
+  /* B2: what must stay in view but the page does not hold — the head, a row opened for you, a conflict on this
+     line — read on its own and kept only if this line's head holds it; and the revisions restore rows name. */
+  const loaded = useMemo(() => new Set(revisions.map((revision) => revision.revisionId)), [revisions]);
+  const unloaded = (ids: ReadonlyArray<string | undefined>): string[] => [
+    ...new Set(ids.filter((id): id is string => id !== undefined && !loaded.has(id))),
+  ];
+  const older = useRevisionsOnLine(
+    unloaded([
+      headRevisionId,
+      ...openRows,
+      ...(status?.conflicts ?? [])
+        .filter((conflict) => conflict.branch === branch)
+        .map((conflict) => conflict.revisionId),
+    ]),
+  ).toSorted((left, right) => right.createdAt - left.createdAt);
+  const named = useWithRestoreTargets(revisions);
+  /* A revealed row stays in `openRows` once its reveal is consumed, so it stays in view too. */
   const pinned = groups.findLastIndex(
     (group) =>
       holds(group, headRevisionId) ||
       holds(group, revealed) ||
+      [...openRows].some((id) => holds(group, id)) ||
       (group.kind === 'revision' && group.revision.conflicted),
   );
   const shown = isAllShown ? groups : groups.slice(0, Math.max(rowLimit, pinned + 1));
@@ -517,6 +544,8 @@ function HistoryList(): React.JSX.Element {
   const [active, setActive] = useState<string | undefined>(headRevisionId);
   /* Show more unmounts under focus, so the first row it reveals takes focus. */
   const revealFocus = useRef<string>(undefined);
+  /* A page read by Show more lands a render later: the first row after the last one shown takes focus then. */
+  const focusAfter = useRef<string>(undefined);
   const listRef = useRef<HTMLDivElement>(null);
   // ponytail: tab stops set on the DOM after each render, so rows, folds and Show more need no tabIndex plumbing.
   useLayoutEffect(() => {
@@ -529,7 +558,22 @@ function HistoryList(): React.JSX.Element {
       rows.find((row) => row.dataset['revisionRow'] === revealFocus.current)?.focus();
       revealFocus.current = undefined;
     }
+    const firstNew = groups[groups.findIndex((group) => keyOf(group) === focusAfter.current) + 1];
+    if (focusAfter.current !== undefined && firstNew !== undefined) {
+      focusAfter.current = undefined;
+      rows.find((row) => row.dataset['revisionRow'] === keyOf(firstNew))?.focus();
+    }
   });
+  const showOlder = async (): Promise<void> => {
+    const last = groups.at(-1);
+    focusAfter.current = last === undefined ? undefined : keyOf(last);
+    setIsLoadingOlder(true);
+    try {
+      await loadOlder();
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  };
   const toggle =
     (setter: typeof setOpenRows, key: string) =>
     (isOpen: boolean): void => {
@@ -600,7 +644,7 @@ function HistoryList(): React.JSX.Element {
       <RevisionRow
         key={revision.revisionId}
         revision={revision}
-        title={revisionTitle(revision, revisions)}
+        title={revisionTitle(revision, named)}
         isCurrent={revision.revisionId === headRevisionId}
         isDirty={isDirty}
         branch={branch}
@@ -622,9 +666,25 @@ function HistoryList(): React.JSX.Element {
     if (previous === undefined || dayOf(firstOf(previous)) !== day) {
       items.push(<DayDivider key={`day-${day}`} label={day} hasLine={index > 0} />);
     }
-    items.push(renderGroup(group, index === 0, index === shown.length - 1 && hidden.length === 0));
+    items.push(
+      renderGroup(
+        group,
+        index === 0,
+        index === shown.length - 1 && hidden.length === 0 && !hasOlder && older.length === 0,
+      ),
+    );
   }
   const firstHidden = hidden[0];
+  const canShowOlder = firstHidden === undefined && hasOlder;
+  /* Below Show more: kept rows older than the page, each under its own day. */
+  const kept: React.JSX.Element[] = [];
+  for (const [index, revision] of older.entries()) {
+    const day = dayOf(revision);
+    if (index === 0 || dayOf(older[index - 1]!) !== day) {
+      kept.push(<DayDivider key={`kept-day-${revision.revisionId}`} label={day} hasLine />);
+    }
+    kept.push(renderGroup({ kind: 'revision', revision }, false, index === older.length - 1));
+  }
   return (
     <div
       ref={listRef}
@@ -660,6 +720,32 @@ function HistoryList(): React.JSX.Element {
             </span>
           </li>
         )}
+        {canShowOlder ? (
+          <li className={timelineRow}>
+            <span aria-hidden className={timelineMoreGutter} />
+            <span className='py-0.5'>
+              <Button
+                variant='ghost'
+                size='xs'
+                data-revision-row='more'
+                className='-ml-1 text-muted-foreground'
+                disabled={isLoadingOlder}
+                aria-busy={isLoadingOlder}
+                onClick={() => {
+                  void showOlder();
+                }}
+              >
+                {isLoadingOlder ? (
+                  <Spinner aria-hidden className='size-3' />
+                ) : (
+                  <ChevronDown aria-hidden className='size-3' />
+                )}
+                Show more
+              </Button>
+            </span>
+          </li>
+        ) : null}
+        {kept}
       </ol>
     </div>
   );

@@ -7,7 +7,7 @@
  * asserted — no worker, no actor, no network.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -20,6 +20,7 @@ import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-sta
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
+import { consumeRevisionReveal, requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
@@ -644,6 +645,8 @@ describe('Revisions pane', () => {
       ...revisionStatusHarness.status,
       line: { kind: 'branch', name: 'main' },
       headRevisionId: 'rev-5',
+      /* This device's restore minted the head, so the machine holds its undo target. */
+      restore: { ...revisionStatusHarness.status.restore, undoable: true },
     };
 
     renderPane();
@@ -885,6 +888,137 @@ describe('Revisions pane closeout', () => {
 });
 
 /** RA11, M2, HQ3, HQ7 and the round 4–20 History geometry, on the shipped pane. */
+describe('History over a long line (B2)', () => {
+  /* 120 revisions on main, newest first, one minute apart on one day. */
+  const long = Array.from({ length: 120 }, (_, index) => {
+    const n = 120 - index;
+    return row({
+      revisionId: `rev-${String(n)}`,
+      revisionNumber: n,
+      createdAt: 1_788_220_800_000 + n * 60_000,
+      summary: `Change ${String(n)}`,
+      ...(n === 1 ? {} : { parent: `rev-${String(n - 1)}` }),
+    });
+  });
+  const onLongLine = (over: Partial<typeof revisionStatusHarness.status> = {}): void => {
+    revisionStatusHarness.rows = long;
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-120',
+      branches: [{ name: 'main', head: 'rev-120', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+      ...over,
+    };
+  };
+  /* One cache for the whole render, as the app has: Show more lands its page in the cache it read. */
+  const renderStablePane = (): void => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <RevisionsPanelBody />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  };
+  const rowButtons = (): HTMLElement[] => screen.getAllByRole('button', { name: /^Rev \d+ · /u });
+
+  it('reads one page, shows its rows, then reads the next page when Show more reaches the end', async () => {
+    const user = userEvent.setup();
+    onLongLine();
+    renderStablePane();
+
+    expect(await screen.findByRole('button', { name: 'Show 38 more' })).toBeInTheDocument();
+    expect(revisionStatusHarness.logRequests).toEqual(['main']);
+    await user.click(screen.getByRole('button', { name: 'Show 38 more' }));
+    expect(rowButtons()).toHaveLength(50);
+
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => {
+      expect(rowButtons()).toHaveLength(100);
+    });
+    /* The first row the page added takes focus, as the canvas's Show more does. */
+    expect(screen.getByRole('button', { name: 'Rev 70 · Change 70' })).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => {
+      expect(rowButtons()).toHaveLength(120);
+    });
+    expect(screen.queryByRole('button', { name: /^Show / })).not.toBeInTheDocument();
+  });
+
+  it('keeps a revision opened for you in view below the page, read by its id, and not one from another line', async () => {
+    /* The test DOM lays nothing out; the revealed row scrolls itself into view. */
+    Element.prototype.scrollIntoView = vi.fn();
+    onTestFinished(() => {
+      consumeRevisionReveal('p', 'fillet-2');
+    });
+    onLongLine();
+    revisionStatusHarness.rowsByBranch.set('fillet', [
+      row({ revisionId: 'fillet-2', revisionNumber: 2, summary: 'Fillet work', parent: 'fillet-1' }),
+      row({ revisionId: 'fillet-1', revisionNumber: 1, summary: 'Fillet start' }),
+    ]);
+    act(() => {
+      requestRevisionReveal('p', 'rev-7');
+    });
+    renderStablePane();
+
+    expect(await screen.findByRole('button', { name: 'Rev 7 · Change 7' })).toBeInTheDocument();
+    expect(revisionStatusHarness.rowRequests).toContain('rev-7');
+    /* The page itself is still one page: twelve rows, Show more, then the kept row. */
+    const list = screen.getByRole('list', { name: 'Revision history' });
+    const names = within(list)
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label') ?? button.textContent);
+    expect(names.indexOf('Rev 7 · Change 7')).toBeGreaterThan(names.findIndex((name) => /^Show \d+ more/u.test(name)));
+
+    act(() => {
+      requestRevisionReveal('p', 'fillet-2');
+    });
+    await waitFor(() => {
+      expect(revisionStatusHarness.rowRequests).toContain('fillet-2');
+    });
+    expect(screen.queryByRole('button', { name: /Fillet work/u })).not.toBeInTheDocument();
+  });
+
+  it('names what a restore brought back even when that revision is older than the page', async () => {
+    onLongLine({ headRevisionId: 'rev-121' });
+    revisionStatusHarness.rows = [
+      row({
+        revisionId: 'rev-121',
+        revisionNumber: 121,
+        source: 'restore',
+        trigger: 'restore',
+        restoredFrom: 'rev-3',
+        parent: 'rev-120',
+      }),
+      ...long,
+    ];
+    renderStablePane();
+
+    expect(await screen.findByRole('button', { name: 'Rev 121 · Restored Rev 3' })).toBeInTheDocument();
+  });
+
+  it('offers no Undo restore on a restore head the restore machine did not mint (a reload, another device)', async () => {
+    onLongLine({ headRevisionId: 'rev-121' });
+    revisionStatusHarness.rows = [
+      row({
+        revisionId: 'rev-121',
+        revisionNumber: 121,
+        source: 'restore',
+        trigger: 'restore',
+        restoredFrom: 'rev-3',
+        parent: 'rev-120',
+      }),
+      ...long,
+    ];
+    renderStablePane();
+
+    expect(await screen.findByRole('button', { name: 'Rev 121 · Restored Rev 3' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo restore' })).not.toBeInTheDocument();
+  });
+});
+
 describe('Revisions pane vocabulary and History', () => {
   const conflicted = {
     revisionId: 'rev-c',

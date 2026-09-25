@@ -3,7 +3,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
-import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
+import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
 import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
@@ -34,6 +34,8 @@ vi.mock('#hooks/use-chat.js', () => ({
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
 vi.mock('#hooks/use-revisions.js', () => ({
   useRevisions: vi.fn(),
+  useRevisionCards: vi.fn(),
+  useTurnRevision: vi.fn(),
   useRevisionChanges: vi.fn(),
   useRevisionFileComparison: vi.fn(),
 }));
@@ -76,14 +78,19 @@ const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
 });
 
 const setRevisions = (view: Partial<RevisionsView>): void => {
+  const byTurnId = view.byTurnId ?? new Map<string, RevisionCard>();
   vi.mocked(useRevisions).mockReturnValue({
     revisions: view.revisions ?? [],
-    byTurnId: view.byTurnId ?? new Map<string, RevisionCard>(),
+    hasOlder: false,
+    loadOlder: async () => undefined,
+    byTurnId,
     headRevisionId: view.headRevisionId,
     line: view.line ?? { kind: 'branch', name: 'main' },
     isDirty: false,
     isLoading: false,
   });
+  /* The turn's own lookup, which the real hook answers from the page or by the settled id (B2). */
+  vi.mocked(useTurnRevision).mockImplementation((turnId) => byTurnId.get(turnId));
 };
 
 const setRun = (state: ChatSidebarStatus['state'] | undefined): void => {
@@ -103,6 +110,7 @@ beforeEach(() => {
   host.workspace = undefined;
   setRun(undefined);
   setRevisions({});
+  vi.mocked(useRevisionCards).mockReturnValue(new Map());
   vi.mocked(useRevisionChanges).mockReturnValue([
     { path: 'bracket.scad', kind: 'modified' },
     { path: '.tau/parameters/bracket.scad.json', kind: 'modified' },
@@ -218,6 +226,22 @@ describe('ChatRevisionMarker', () => {
     const status = screen.getByRole('status');
     expect(status.textContent).toBe('Starting from Rev 4');
     expect(status.getAttribute('aria-busy')).toBe('true');
+  });
+
+  /* B2: the base a turn started from can sit below History's loaded page; it is read on its own. */
+  it('should name a starting revision older than the loaded page, read by its id', () => {
+    host.workspace = { execution: { baseRevisionId: 'rev-4' } };
+    setRevisions({ revisions: [revision({ revisionId: 'rev-60', n: 60, turnId: undefined })] });
+    vi.mocked(useRevisionCards).mockImplementation((ids) =>
+      ids.includes('rev-4')
+        ? new Map([['rev-4', revision({ revisionId: 'rev-4', n: 4, turnId: undefined })]])
+        : new Map(),
+    );
+    setRun('working');
+    chatState.status = 'streaming';
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4');
+    expect(vi.mocked(useRevisionCards)).toHaveBeenCalledWith(['rev-4']);
   });
 
   it('should not read the turn base as a save while work runs', () => {

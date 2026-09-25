@@ -197,15 +197,26 @@ describe('ProjectCommandPaletteItems', () => {
 
   /* D2, M1: Undo restore is offered where the strip offers it — on the line whose head a restore minted,
      while nothing has landed after it — so the palette never sends an undo the machine would refuse. */
-  it('offers Undo restore only while the line’s head is the restore and nothing landed after it', async () => {
+  it('offers Undo restore only where the restore machine holds an undo target and nothing landed after it', async () => {
     revisionStatusHarness.rows = [
       revisionRow({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'restore', restoredFrom: 'rev-1' }),
       revisionRow({ revisionId: 'rev-2', revisionNumber: 2 }),
       revisionRow({ revisionId: 'rev-1', revisionNumber: 1 }),
     ];
+    /* A reload, or a restore another device made: the head is a restore row, but the machine holds no undo target. */
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
     const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    await waitFor(() => {
+      expect(registeredItems.find((item) => item.id === 'undo-restore')).toBeDefined();
+    });
+    expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
 
+    /* This device's restore minted the head: the machine's own undo target. */
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      restore: { ...revisionStatusHarness.status.restore, undoable: true },
+    };
+    rerender(<ProjectCommandPaletteItems match={match} />);
     await waitFor(() => {
       expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(true);
     });
@@ -218,12 +229,20 @@ describe('ProjectCommandPaletteItems', () => {
     rerender(<ProjectCommandPaletteItems match={match} />);
     expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
 
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: false, headRevisionId: 'rev-2' };
+    /* A save landed on top: the projection says the restore row is no longer undoable. */
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      dirty: false,
+      restore: { ...revisionStatusHarness.status.restore, undoable: false },
+    };
     rerender(<ProjectCommandPaletteItems match={match} />);
     expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
 
     revisionStatusHarness.role = 'read';
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      restore: { ...revisionStatusHarness.status.restore, undoable: true },
+    };
     rerender(<ProjectCommandPaletteItems match={match} />);
     expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
   });

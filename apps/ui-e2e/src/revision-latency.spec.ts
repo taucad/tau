@@ -30,11 +30,17 @@
 
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
+import {
+  awaitSaved,
+  editSource,
+  focusSource,
+  openFixture,
+  openSourceFile,
+  revisionChip,
+  saveShortcut,
+  visibleRevisionsPanel,
+} from '#support/revision-session.js';
 import * as target from '#support/external-target.js';
-
-const visibleRevisionsPanel = '[data-slot="revisions-panel-body"]:visible';
-const revisionChip = (): ReturnType<typeof selectors.getByRole> =>
-  selectors.getByRole('button', { name: /^Open Revisions\./u });
 
 /*
  * The baseline OQ5 asks the first run to record, measured 2026-09-16 on an Apple
@@ -79,108 +85,49 @@ const revisionChip = (): ReturnType<typeof selectors.getByRole> =>
  * 100 ms still needs a capture that does not re-read unchanged files, not a
  * faster digest — `crypto.subtle` (C53) was measured and declined on this evidence.
  */
-/** B1's stated budget, and the regression ceiling actually asserted. */
+/*
+ * The gates (revisions charter EQ12, D11, I13).
+ *
+ * Each gate asserts one ceiling, 1.5× its *loaded* baseline, and names the
+ * fixture that baseline was read at. The budgets stay the stated numbers and
+ * never loosen; a ceiling only ratchets down, and after W4 lands it is
+ * re-measured and tightened. To (re)set a gate, run this spec on the loaded
+ * machine, read the reading from its artifact, and write it into the one
+ * baseline constant below with the run it came from.
+ *
+ * `Number.NaN` is a baseline not yet measured at the gate's current fixture:
+ * the assertion fails until it is filled, loudly, rather than passing on a
+ * number read at another fixture.
+ */
+const ceilingOverLoadedBaseline = 1.5;
+
+/** B1's stated budget (rule 20). */
 const savedBudgetMilliseconds = 100;
-const savedCeilingMilliseconds = 3000;
-/** B4's stated budget, and the regression ceiling actually asserted. */
+/**
+ * B1's fixture (D11): 1 000 source files and one 5 MiB export, warm save.
+ * Loaded baseline: `revision-latency-b1.json` `warmDuration` from coordinator
+ * run 2026-09-25-execution (to fill). The 100-file reading above is superseded.
+ */
+const savedLoadedBaselineMilliseconds = Number.NaN;
+const savedFixtureQuery = '?files=1000&binaryMib=5';
+
+/** B4's stated budget (rule 20). */
 const historyBudgetMilliseconds = 50;
-const historyCeilingMilliseconds = 800;
+/**
+ * B4's fixture: the default seed on one branch, at whatever depth
+ * `depthBudgetMilliseconds` of saves reaches (recorded as `depth`). D11's
+ * 500 revisions × 8 branches needs a bulk-seed verb on the revision port.
+ * Loaded baseline: `revision-latency-b4.json` `openDuration` from coordinator
+ * run 2026-09-25-execution (to fill).
+ */
+const historyLoadedBaselineMilliseconds = Number.NaN;
 
 /** How long B4 may spend building depth before it takes its reading. */
 const depthBudgetMilliseconds = 90_000;
 const depthTarget = 500;
 
-const declineCookies = async (): Promise<void> => {
-  const decline = selectors.getByRole('button', { name: 'Decline' }).last();
-  await target.expectVisible(decline, 15_000);
-  await target.click(decline);
-};
-
-const openFixture = async (query: string): Promise<void> => {
-  await target.setViewport({ width: 1440, height: 900 });
-  await target.navigate(`/__e2e/project-file-tree${query}`);
-  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 180_000);
-  await declineCookies();
-};
-
-const saveShortcut = async (): Promise<string> =>
-  target.evaluate(() => (/mac/i.test(navigator.userAgent) ? 'Meta+s' : 'Control+s'));
-
-const filesPane = (): ReturnType<typeof selectors.getByRole> =>
-  selectors.getByRole('region', { name: /^Files for /u }).first();
-const treeItem = (path: string): ReturnType<typeof selectors.getByCss> =>
-  filesPane().getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
-
-/**
- * Open the seed's source file the way a person opens it, through the tree.
- *
- * A fresh project opens with no editor tab, and the Files pane is reached from
- * the command palette when the workbench is showing something else.
- */
-const openSourceFile = async (): Promise<void> => {
-  if (!(await target.isVisible(filesPane()))) {
-    await target.click(selectors.getByRole('button', { name: /Search/u }));
-    const search = selectors.getByPlaceholder('Search projects, chats, and actions...');
-    await target.expectVisible(search, 15_000);
-    await target.fill(search, 'Open files');
-    await target.click(selectors.getByText('Open files', { exact: true }));
-  }
-  await target.expectVisible(filesPane(), 60_000);
-  for (const path of ['public', 'public/models']) {
-    const folder = treeItem(path);
-    await target.expectVisible(folder, 30_000);
-    if ((await target.getAttribute(folder, 'aria-expanded')) !== 'true') {
-      await target.click(folder, { position: { x: 8, y: 14 } });
-    }
-  }
-  const entry = treeItem('public/models/honeycomb.js');
-  await target.expectVisible(entry, 30_000);
-  await target.click(entry);
-};
-
-/** Put the caret in the source editor. Once: a save does not move focus. */
-const focusSource = async (): Promise<void> => {
-  const lines = selectors.getByCss('.monaco-editor .view-lines').last();
-  await target.expectVisible(lines, 60_000);
-  await target.click(lines);
-};
-
-/**
- * One character into the open file, then wait for the chip to say *Modified*.
- *
- * `Escape` closes Monaco's suggest widget, which otherwise covers the editor
- * and swallows the next gesture — the second reading of this file's first
- * chip-based run died on exactly that, a click retried until it timed out.
- */
-const editSource = async (): Promise<void> => {
-  await target.keyboardPress('a');
-  await target.keyboardPress('Escape');
-  await target.waitFor(
-    () =>
-      [...document.querySelectorAll('button')].some((button) =>
-        /^Open Revisions\..*Modified/u.test(button.getAttribute('aria-label') ?? ''),
-      ),
-    undefined,
-    { timeout: 60_000 },
-  );
-};
-
-/** Wait for the checkout to stop being dirty — the chip's own *Saved* signal. */
-const awaitSaved = async (timeout = 60_000): Promise<void> => {
-  await target.waitFor(
-    () =>
-      [...document.querySelectorAll('button')].some((button) => {
-        const label = button.getAttribute('aria-label') ?? '';
-        return label.startsWith('Open Revisions.') && !label.includes('Modified');
-      }),
-    undefined,
-    { timeout },
-  );
-};
-
 test('records how long *Saved* takes after Mod+S in a project with bulk in it (B1)', async () => {
-  /* 100 source files and one 5 MiB export: W6's stated condition. */
-  await openFixture('?files=100&binaryMib=5');
+  await openFixture(savedFixtureQuery);
   const shortcut = await saveShortcut();
   await target.expectVisible(revisionChip(), 120_000);
   await openSourceFile();
@@ -206,12 +153,18 @@ test('records how long *Saved* takes after Mod+S in a project with bulk in it (B
   await target.writeArtifact(
     'revision-latency-b1.json',
     JSON.stringify(
-      { fileCount: 100, binaryMib: 5, coldDuration, warmDuration, budgetMilliseconds: savedBudgetMilliseconds },
+      {
+        fixture: savedFixtureQuery,
+        coldDuration,
+        warmDuration,
+        budgetMilliseconds: savedBudgetMilliseconds,
+        loadedBaselineMilliseconds: savedLoadedBaselineMilliseconds,
+      },
       undefined,
       2,
     ),
   );
-  expect(warmDuration).toBeLessThan(savedCeilingMilliseconds);
+  expect(warmDuration).toBeLessThan(savedLoadedBaselineMilliseconds * ceilingOverLoadedBaseline);
 });
 
 test('records how long the History region takes to open at depth (B4)', async () => {
@@ -241,8 +194,18 @@ test('records how long the History region takes to open at depth (B4)', async ()
 
   await target.writeArtifact(
     'revision-latency-b4.json',
-    JSON.stringify({ depth, depthTarget, openDuration, budgetMilliseconds: historyBudgetMilliseconds }, undefined, 2),
+    JSON.stringify(
+      {
+        depth,
+        depthTarget,
+        openDuration,
+        budgetMilliseconds: historyBudgetMilliseconds,
+        loadedBaselineMilliseconds: historyLoadedBaselineMilliseconds,
+      },
+      undefined,
+      2,
+    ),
   );
   expect(depth).toBeGreaterThan(0);
-  expect(openDuration).toBeLessThan(historyCeilingMilliseconds);
+  expect(openDuration).toBeLessThan(historyLoadedBaselineMilliseconds * ceilingOverLoadedBaseline);
 });

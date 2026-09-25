@@ -81,7 +81,10 @@ const expectGeoSpecContract = (source: string, volume: RegExp): void => {
 
 /** Wait until the revision graph lists at least `minimumCount` published revisions. */
 const expectRevisionsPublished = async (minimumCount: number): Promise<number> => {
-  const revisions = selectors.getByCss('[aria-label="Recent revision history"] > li');
+  /* One History row per revision, each a button named `Rev N · <title>`; day dividers and folds are not revisions. */
+  const revisions = selectors
+    .getByRole('list', { name: 'Revision history' })
+    .getByRole('button', { name: /^Rev \d+ · /u });
   let published = 0;
   await expect
     .poll(

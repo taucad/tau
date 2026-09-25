@@ -5,6 +5,15 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "formal": {},
+    "formal:lean": {},
+    "formal:logs": {},
+    "formal:nightly": {
+      "options": {
+        "command": "vitest run --root packages/agent-host src/log/chat-ledger.differential.test.ts && node tools/formal/src/cli.ts nightly packages/agent-host",
+        "env": { "FORMAL_FRESH_TRACES": "20000" }
+      }
+    },
     "build": {
       "executor": "nx:run-commands",
       "dependsOn": ["^build"],
@@ -20,7 +29,7 @@
       },
       "cache": false
     },
-    "test:browser": {
+    "test:e2e": {
       "command": "vitest run --config vitest.browser.config.ts",
       "options": {
         "cwd": "{projectRoot}"

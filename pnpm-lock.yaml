@@ -1555,6 +1555,9 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:packages/filesystem
+      '@taucad/formal':
+        specifier: workspace:*
+        version: link:tools/formal
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:packages/core/geometry
@@ -3533,6 +3536,9 @@ importers:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
+      '@taucad/formal':
+        specifier: workspace:*
+        version: link:../../tools/formal
       '@taucad/geospec-engine':
         specifier: workspace:*
         version: link:../geospec-engine
@@ -4232,6 +4238,9 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
+      '@taucad/formal':
+        specifier: workspace:*
+        version: link:../../tools/formal
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils
@@ -4553,6 +4562,18 @@ importers:
       netlify-cli:
         specifier: 'catalog:'
         version: 25.6.2(@swc/core@1.15.8(@swc/helpers@0.5.23))(@swc/wasm@1.15.47)(@types/node@24.0.15)(encoding@0.1.13)(ioredis@5.11.1)(picomatch@4.0.7)(rollup@4.62.2)(supports-color@10.2.2)
+
+  tools/formal:
+    dependencies:
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../libs/xstate-testing
+      fast-check:
+        specifier: 'catalog:'
+        version: 4.10.1
+      xstate:
+        specifier: 'catalog:'
+        version: 6.0.0-alpha.59
 
   tools/nx:
     dependencies:

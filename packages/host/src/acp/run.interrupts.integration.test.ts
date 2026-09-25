@@ -16,6 +16,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
+
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { AgentLogEvent, ToolRegistry } from '@taucad/agent-host';
@@ -45,6 +47,9 @@ afterEach(async () => {
     // oxlint-disable-next-line no-await-in-loop -- teardown order is the invariant under test.
     await close();
   }
+  /* Field trace validation: keep each chat log before its root goes (formal:nightly). */
+  const chatLogs = chatLogDestination('host', expect.getState().testPath);
+  await Promise.all(roots.map(async (root) => captureChatLogs(root, chatLogs)));
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 

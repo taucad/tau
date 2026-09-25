@@ -1,15 +1,21 @@
-import { existsSync } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const defaultWorkspaceRoot = path.resolve(import.meta.dirname, '../../..');
 
-/** One chat's log text, as read from a place Node cannot walk (OPFS through a page). */
+/**
+ * One chat's log text, as read from a place Node cannot walk (OPFS through a page).
+ *
+ * @public
+ */
 export type CapturedChatLog = { readonly chatId: string; readonly text: string };
 
 /**
  * Where a project's captured logs go: `out/test-results/chat-logs/<project>/<spec>/` (FM-R14),
  * with `spec` the test file's name so that each spec's chats stay together.
+ *
+ * @public
  */
 export const chatLogDestination = (
   project: string,
@@ -33,9 +39,34 @@ const chatDirectories = async (directory: string, depth: number): Promise<string
 };
 
 /**
+ * Writes one log as `<destination>/<chatId>.<n>.jsonl` with the first free `n`: tests of one spec
+ * reuse chat ids, and each capture must keep its own copy. The exclusive create makes concurrent
+ * captures into one destination take distinct indexes.
+ */
+const writeIndexed = async (
+  destination: string,
+  chatId: string,
+  write: (file: string) => Promise<void>,
+): Promise<void> => {
+  for (let index = 0; ; index += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- the next index is tried only when this one is taken.
+      await write(path.join(destination, `${path.basename(chatId)}.${index}.jsonl`));
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+    }
+  }
+};
+
+/**
  * Copies every `.tau/chats/<chatId>/events.jsonl` under `root` (the root itself and project
- * directories up to three levels below it) verbatim to `<destination>/<chatId>.jsonl`.
+ * directories up to three levels below it) verbatim to `<destination>/<chatId>.<n>.jsonl`.
  * Call it at teardown, before the root is removed. Returns the chat ids copied.
+ *
+ * @public
  */
 export const captureChatLogs = async (root: string, destination: string): Promise<string[]> => {
   const directories = await chatDirectories(root, 3);
@@ -49,17 +80,27 @@ export const captureChatLogs = async (root: string, destination: string): Promis
   if (logs.length > 0) {
     await mkdir(destination, { recursive: true });
   }
-  await Promise.all(logs.map(async ({ chatId, log }) => copyFile(log, path.join(destination, `${chatId}.jsonl`))));
+  await Promise.all(
+    logs.map(async ({ chatId, log }) =>
+      writeIndexed(destination, chatId, async (file) => copyFile(log, file, constants.COPYFILE_EXCL)),
+    ),
+  );
   return logs.map(({ chatId }) => chatId).sort();
 };
 
-/** Writes logs read elsewhere (OPFS) to `<destination>/<chatId>.jsonl`. */
+/**
+ * Writes logs read elsewhere (OPFS) to `<destination>/<chatId>.<n>.jsonl`.
+ *
+ * @public
+ */
 export const writeChatLogs = async (destination: string, logs: readonly CapturedChatLog[]): Promise<void> => {
   if (logs.length === 0) {
     return;
   }
   await mkdir(destination, { recursive: true });
   await Promise.all(
-    logs.map(async ({ chatId, text }) => writeFile(path.join(destination, `${path.basename(chatId)}.jsonl`), text)),
+    logs.map(async ({ chatId, text }) =>
+      writeIndexed(destination, chatId, async (file) => writeFile(file, text, { flag: 'wx' })),
+    ),
   );
 };

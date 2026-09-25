@@ -182,7 +182,8 @@ jobs:
           tools: tlc,lean
 
       - name: Run affected formal tiers
-        run: pnpm nx affected -t formal formal:lean
+        # FM-R15: at most two JVMs at once. The runner caps them per process, so one project at a time.
+        run: pnpm nx affected -t formal formal:lean --parallel=1
 
       - name: Check workspace root hygiene
         if: always()

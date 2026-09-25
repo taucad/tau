@@ -8,10 +8,20 @@ import { describeOutcome, findExpectedFiles, knownFailures, specProjectRoots } f
 import type { SetupTool } from '#setup.js';
 import { validateCapturedLogs } from '#logs.js';
 import { setup } from '#setup.js';
+import type { FormalContext } from '#toolchain.js';
 import { defaultContext, locateTools, toolchainId } from '#toolchain.js';
 
 const out = (line: string): void => {
   process.stdout.write(`${line}\n`);
+};
+
+/** The commands that take one project root. */
+const projectCommands: Readonly<
+  Record<string, (context: FormalContext, projectRoot: string) => number | Promise<number>>
+> = {
+  update: updateProject,
+  mutants: mutantsProject,
+  nightly: nightlyProject,
 };
 
 const main = async (argv: readonly string[]): Promise<number> => {
@@ -26,6 +36,15 @@ const main = async (argv: readonly string[]): Promise<number> => {
     },
   });
   const context = defaultContext();
+  const projectCommand = command === undefined ? undefined : projectCommands[command];
+  if (projectCommand) {
+    const [projectRoot] = positionals;
+    if (!projectRoot) {
+      out(`usage: formal ${command} <projectRoot>`);
+      return 2;
+    }
+    return projectCommand(context, path.resolve(context.root, projectRoot));
+  }
   switch (command) {
     case 'setup': {
       const tools = (values.tools ?? 'tlc,lean').split(',').filter(Boolean) as SetupTool[];
@@ -42,30 +61,6 @@ const main = async (argv: readonly string[]): Promise<number> => {
         tier: (values.tier ?? 'pr') as Tier | 'lean',
         projectRoot: path.resolve(context.root, projectRoot),
       });
-    }
-    case 'update': {
-      const [projectRoot] = positionals;
-      if (!projectRoot) {
-        out('usage: formal update <projectRoot>');
-        return 2;
-      }
-      return updateProject(context, path.resolve(context.root, projectRoot));
-    }
-    case 'mutants': {
-      const [projectRoot] = positionals;
-      if (!projectRoot) {
-        out('usage: formal mutants <projectRoot>');
-        return 2;
-      }
-      return mutantsProject(context, path.resolve(context.root, projectRoot));
-    }
-    case 'nightly': {
-      const [projectRoot] = positionals;
-      if (!projectRoot) {
-        out('usage: formal nightly <projectRoot>');
-        return 2;
-      }
-      return nightlyProject(context, path.resolve(context.root, projectRoot));
     }
     case 'known': {
       const roots =

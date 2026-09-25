@@ -17,6 +17,11 @@
 (* Devices are numbers so that ties order; a term is <<device, number>>,   *)
 (* which also stands in for the random leader-epoch id's tie-break.        *)
 (* Nightly only (S4's two-key leadership model reached 48 M states).       *)
+(*                                                                         *)
+(* Bounds: MaxRows = 3 and MaxSyncs = 2 for safety (MaxRows = 2 and        *)
+(* MaxSyncs = 4 for liveness), against the blueprint's 6 rows and 3 syncs: *)
+(* the fixed-merge safety run at 3 rows and 2 syncs already takes 218 s    *)
+(* (590,815 states) of the nightly's 5-minute CrossDevice budget.          *)
 (***************************************************************************)
 EXTENDS Integers, Sequences, SequencesExt, FiniteSets, FiniteSetsExt, TLC
 

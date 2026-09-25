@@ -56,6 +56,14 @@ export const validateCapturedLogs = async (context: FormalContext, options: Logs
         .filter((entry) => entry.endsWith('.jsonl'))
         .sort()
     : [];
+  // Under CI the suites ran just before this step, so an empty capture means the hook broke,
+  // and a gate that passes on nothing would hide it.
+  if (files.length === 0 && context.env['CI']) {
+    log(
+      `FAIL ${options.project}:formal:logs: captured no chat log under ${path.relative(context.root, directory)}; check the suites' capture hook`,
+    );
+    return 1;
+  }
   const tools = options.tools ?? locateTools(context);
   const skipped =
     options.validate !== undefined || files.length === 0

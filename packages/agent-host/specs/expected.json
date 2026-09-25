@@ -19,7 +19,7 @@
     "CrossDevice.liveness.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "EQ3: EventuallyConverged under weak fairness on Sync, W3's merge"
+      "ref": "EQ3: EventuallyConverged under weak fairness on Sync, W3's merge, at MaxRows 2 and MaxSyncs 4 (27 s)"
     },
     "CrossDevice.merge-MergedPrefixStable.cfg": {
       "tier": "nightly",
@@ -32,7 +32,7 @@
     "CrossDevice.merge.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "EQ3: ViewsConverge and OwnFileOrder under W3's merge"
+      "ref": "EQ3: ViewsConverge and OwnFileOrder under W3's merge, at MaxRows 3 and MaxSyncs 2 against the blueprint's 6 and 3: this run takes 218 s (590,815 states) of the 5-minute budget"
     },
     "CrossDevice.repair.cfg": {
       "tier": "nightly",

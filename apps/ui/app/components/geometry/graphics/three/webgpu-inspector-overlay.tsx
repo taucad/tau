@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { lazy } from 'react';
+import { lazy, Suspense } from 'react';
 import { useThree } from '@react-three/fiber';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
@@ -26,9 +26,13 @@ export function WebGpuInspectorOverlay(): ReactNode {
     return undefined;
   }
 
+  // R3F hands a suspension inside the canvas to the page's nearest boundary, which would hide the whole
+  // workspace while this debug chunk loads, so the chunk suspends here instead.
   return (
     <ClientOnly>
-      <ThreeWebGpuInspectorBootstrapLazy />
+      <Suspense fallback={null}>
+        <ThreeWebGpuInspectorBootstrapLazy />
+      </Suspense>
     </ClientOnly>
   );
 }

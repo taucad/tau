@@ -80,10 +80,22 @@ export type LfsClientOptions = Readonly<{
   remote?: string;
 }>;
 
+/** What one upload offers the remote. @public */
+export type LfsUploadInput = Readonly<{
+  /** Every object the pushed refs reference, whether or not its bytes are on this device. */
+  pointers: readonly LfsPointer[];
+  /**
+   * Read one object's bytes. Called only for an object the remote asks for:
+   * an object that came *from* the remote is never downloaded just to learn it
+   * is already there.
+   */
+  read: (oid: string) => Promise<Uint8Array<ArrayBuffer>>;
+}>;
+
 /** One project's LFS transport. @public */
 export type LfsClient = Readonly<{
   /** Upload every object the remote does not already hold. Resolves to the oids sent. */
-  upload: (objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>>) => Promise<readonly string[]>;
+  upload: (input: LfsUploadInput) => Promise<readonly string[]>;
   /** Fetch one object's bytes by its pointer. */
   download: (pointer: LfsPointer) => Promise<Uint8Array<ArrayBuffer>>;
 }>;
@@ -205,7 +217,8 @@ export const withQuotaPaths = (refusal: LfsQuotaRefusal, paths: ReadonlyMap<stri
  *
  * declare const client: RevisionHttpClient;
  * const lfs = createLfsClient({ url: 'https://api.tau.new/v1/git/p1.git', http: client });
- * await lfs.upload(new Map([['a'.repeat(64), new Uint8Array(new ArrayBuffer(8))]]));
+ * const bytes = new Uint8Array(new ArrayBuffer(8));
+ * await lfs.upload({ pointers: [{ oid: 'a'.repeat(64), size: 8 }], read: async () => bytes });
  * ```
  */
 export const createLfsClient = (options: LfsClientOptions): LfsClient => {
@@ -296,8 +309,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
   };
 
   return Object.freeze({
-    upload: async (objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>>): Promise<readonly string[]> => {
-      const pointers = [...objects].map(([oid, content]) => Object.freeze({ oid, size: content.byteLength }));
+    upload: async ({ pointers, read }: LfsUploadInput): Promise<readonly string[]> => {
       if (pointers.length === 0) {
         return Object.freeze([]);
       }
@@ -313,16 +325,12 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         if (action === undefined) {
           continue;
         }
-        const content = objects.get(answer.oid);
-        if (content === undefined) {
-          throw new Error(`The remote asked for large object ${answer.oid}, which is not in this push.`);
-        }
+        /* The batch has already checked the answer is one of `pointers`. */
+        // oxlint-disable-next-line no-await-in-loop -- one object resident at a time.
+        const content = await read(answer.oid);
         /* oxlint-disable-next-line no-await-in-loop -- one transfer at a time:
-         * it bounds concurrent sockets and makes a 413 deterministic (the first
-         * object over the plan is the one the refusal names). It does *not*
-         * bound memory: the caller hands this map in already resident, so the
-         * ceiling is one directory read earlier, in the adapter — W13 scopes the
-         * upload to the refs being pushed and streams each object from disk. */
+         * it bounds concurrent sockets and memory, and makes a 413 deterministic
+         * (the first object over the plan is the one the refusal names). */
         const response = await transfer(action.href, {
           method: 'PUT',
           /* The presigned URL signs `application/octet-stream`, and otherwise

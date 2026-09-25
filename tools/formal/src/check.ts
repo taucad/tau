@@ -375,9 +375,10 @@ export const updateProject = async (
   };
   const tests = spawnSync('pnpm', ['nx', 'test', name, '--skip-nx-cache'], {
     cwd: context.root,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable
     env: { ...context.env, FORMAL_UPDATE: '1' },
     stdio: 'inherit',
-  }); // eslint-disable-line @typescript-eslint/naming-convention -- environment variable
+  });
   for (const { directory, file } of locations) {
     if (file.lean) {
       if (!tools.lean) {

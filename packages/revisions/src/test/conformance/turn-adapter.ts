@@ -11,13 +11,13 @@ import type { SpecView } from '@taucad/formal/graph';
 
 import { selectTurnHoldsLease, turnCutSettlementMilliseconds } from '#turn.machine.js';
 import type { TurnMachine, TurnMachineEvent } from '#turn.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import {
   createFakeCallbackActors,
   createFakeParent,
   createFakePromiseActors,
-  createManualClock,
   recordEmitted,
-} from '#test/fake-actors.js';
+} from '@taucad/xstate-testing/fakes';
 
 /** A protocol action label, as `TurnProtocol.tla` writes `act`. */
 export type ActionLabel = readonly [string, ...Array<string | boolean>];
@@ -219,7 +219,7 @@ const startHarness = (machine: TurnMachine) => {
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const parent = createFakeParent();
-  const clock = createManualClock();
+  const clock = new StepClock();
   const actor = createActor(
     machine.provide({
       actors: {

@@ -54,5 +54,13 @@
     "file": "specs/lean/ChatLedger.lean",
     "find": "  | some f => if f = e then .ok true else .error .mutated\n  | none =>",
     "replace": "  | some f => if f = e ∧ L.last = some e.seq then .ok true else .error .mutated\n  | none =>"
+  },
+  {
+    "id": "undefined-key-skip",
+    "drift": "S5 D1 (RV6-F2): the appender's canonical JSON keeps undefined-valued keys again (W0.1 reverted)",
+    "file": "src/log/event-sequence.ts",
+    "test": "src/log/chat-ledger.differential.test.ts",
+    "find": "    .filter((key) => object[key] !== undefined)\n",
+    "replace": ""
   }
 ]

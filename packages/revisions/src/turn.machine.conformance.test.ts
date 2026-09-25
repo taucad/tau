@@ -6,9 +6,9 @@
 
 import path from 'node:path';
 
-import { getNextTransitions } from 'xstate';
+import { getNextTransitions, initialTransition, transition } from 'xstate';
 import type { AnyEventObject, AnyMachineSnapshot } from 'xstate';
-import { getShortestPaths } from 'xstate/graph';
+import { pathTable } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
 import { driftManifestProblems, hashFiles, machineAlphabet } from '@taucad/formal/drift';
 import { readSpecGraph, suiteBehaviours, walkPaths } from '@taucad/formal/graph';
@@ -17,6 +17,7 @@ import { replaySuite } from '@taucad/formal/replay';
 import { readFileSync } from 'node:fs';
 
 import { turnMachine } from '#turn.machine.js';
+import type { TurnMachineEvent } from '#turn.machine.js';
 import { abstractTurn, sampleTurnEvents, turnAdapter, turnInput } from '#test/conformance/turn-adapter.js';
 
 const specs = path.resolve(import.meta.dirname, '../specs/turn');
@@ -32,20 +33,45 @@ const events = (snapshot: AnyMachineSnapshot): AnyEventObject[] =>
       sampleTurnEvents(transition.eventType, transition.matches ?? {}, snapshot).map((sample) => sample.event),
     );
 
-type Path = Readonly<{ steps: ReadonlyArray<Readonly<{ state: AnyMachineSnapshot; event: AnyEventObject }>> }>;
+type Path = Readonly<{ events: readonly AnyEventObject[]; snapshots: readonly AnyMachineSnapshot[] }>;
 
-/* Stand-in for W2's `pathTable` (@taucad/xstate-testing/paths, MC-S1): shortest paths with full events and snapshots. */
+/*
+ * A child's done or error event names the session of the actor system the graph enumerated; the fold
+ * starts its own system, so the event is re-addressed to the folded snapshot's child of that id.
+ */
+const rebind = (snapshot: AnyMachineSnapshot, event: AnyEventObject): AnyEventObject => {
+  const { actorId, sessionId } = event as { actorId?: unknown; sessionId?: unknown };
+  const child =
+    typeof actorId === 'string'
+      ? (snapshot.children as Record<string, { sessionId: string } | undefined>)[actorId]
+      : undefined;
+  return typeof sessionId === 'string' && child ? { ...event, sessionId: child.sessionId } : event;
+};
+
+/* Each shortest path (W2's `pathTable`), with the snapshots its events fold to from the initial one. */
 const shortestPaths = (): Path[] =>
-  getShortestPaths(turnMachine, { input: turnInput, events } as unknown as Parameters<
-    typeof getShortestPaths
-  >[1]) as unknown as Path[];
+  pathTable(turnMachine, {
+    input: turnInput,
+    events,
+    limit: 100_000,
+    serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify([snapshot.value, snapshot.context as unknown]),
+  }).map((row) => {
+    const [initial] = initialTransition(turnMachine, turnInput);
+    const snapshots = [initial];
+    for (const event of row.events) {
+      const previous = snapshots.at(-1)!;
+      snapshots.push(transition(turnMachine, previous, rebind(previous, event) as TurnMachineEvent)[0]);
+    }
+    return { events: row.events, snapshots };
+  });
 
-/* An implementation path in the spec's vocabulary: steps[0] is `@xstate.init` (T17). */
+/* An implementation path in the spec's vocabulary. */
 const asWalk = (path: Path): WalkPath => ({
-  initial: { turn: abstractTurn(path.steps[0]!.state) },
-  steps: path.steps
-    .slice(1)
-    .map((step) => ({ action: String(step.event['label']), view: { turn: abstractTurn(step.state) } })),
+  initial: { turn: abstractTurn(path.snapshots[0]!) },
+  steps: path.events.map((event, index) => ({
+    action: String(event['label']),
+    view: { turn: abstractTurn(path.snapshots[index + 1]!) },
+  })),
 });
 
 describe('turn.machine conforms to TurnProtocol.tla', () => {
@@ -86,7 +112,7 @@ describe('turn.machine conforms to TurnProtocol.tla', () => {
 
   it('should reach all 196 abstract states', () => {
     const states = new Set(
-      shortestPaths().flatMap((path) => path.steps.map((step) => JSON.stringify(abstractTurn(step.state)))),
+      shortestPaths().flatMap((path) => path.snapshots.map((snapshot) => JSON.stringify(abstractTurn(snapshot)))),
     );
 
     expect(states.size).toBe(196);

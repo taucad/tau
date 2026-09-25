@@ -39,7 +39,8 @@ export const findMutantFiles = (projectRoot: string): string[] => {
 export const applyMutant = (source: string, mutant: Mutant): string | undefined =>
   source.split(mutant.find).length === 2 ? source.replace(mutant.find, mutant.replace) : undefined;
 
-const moduleName = (file: string): string => path.basename(file).replace(/\.ts$/, '');
+/** The `#…` specifier a module is imported by: its path under `src/`, e.g. `log/event-sequence`. */
+const moduleName = (file: string): string => path.relative('src', file).replace(/\.ts$/, '');
 
 /**
  * Runs one machine mutant: the mutated copy lives in the cache with its package-internal `#…`

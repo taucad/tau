@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { openProjectRevisions } from '@taucad/host';
+import { openProjectRevisions, requireRevisionToolchain } from '@taucad/host';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -25,12 +25,14 @@ const execute = promisify(execFile);
 const seedEnvironment: NodeJS.ProcessEnv = { ...process.env };
 seedEnvironment['GIT_CONFIG_GLOBAL'] = '/dev/null';
 seedEnvironment['GIT_CONFIG_SYSTEM'] = '/dev/null';
-const gitOnPath = await execute('git', ['--version']).then(
+/* The same `git` + `git lfs` probe the command refuses on, so a machine without
+ * `git-lfs` skips these rows instead of failing them with that refusal. */
+const gitToolchainOnPath = await requireRevisionToolchain().then(
   () => true,
   () => false,
 );
 
-describe.runIf(gitOnPath)('revisionsCommand', () => {
+describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
   let project: string;
   let stdout: string[];
 

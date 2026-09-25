@@ -72,6 +72,7 @@ const revisionRoot = vi.hoisted(() => ({
   statusListeners: new Set<() => void>(),
   /** Set by a test while the root has not yet answered its first projection. */
   unanswered: false,
+  absent: false,
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
@@ -105,8 +106,8 @@ const revisionClient = vi.hoisted(() => {
     },
   };
 });
-vi.mock('#hooks/use-revision-status.js', () => ({
-  useRevisionClient: () =>
+vi.mock('#hooks/use-revision-status.js', () => {
+  const stableClient = (): unknown =>
     revisionClient.stable({
       status: () =>
         revisionRoot.unanswered
@@ -137,8 +138,13 @@ vi.mock('#hooks/use-revision-status.js', () => ({
       },
       send: (command: WorkerRevisionCommand) => revisionRoot.commands.push(command),
       close: () => undefined,
-    }),
-}));
+    });
+  return {
+    /* `absent`: the file manager has no worker yet, so the hook has no client (D41). */
+    useRevisionClient: () => (revisionRoot.absent ? undefined : stableClient()),
+    getRevisionClient: () => stableClient(),
+  };
+});
 
 const client = (exists: ReturnType<typeof vi.fn>): FileSystemClientFacade =>
   ({ exists }) as unknown as FileSystemClientFacade;
@@ -274,6 +280,7 @@ beforeEach(() => {
   revisionRoot.refuse = undefined;
   revisionRoot.placement = undefined;
   revisionRoot.unanswered = false;
+  revisionRoot.absent = false;
   revisionRoot.branches = [
     {
       name: 'main',
@@ -389,6 +396,17 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     });
 
     const attached = await attaching;
+    expect(attached?.execution.workspaceId).toBe('checkout-durable');
+  });
+
+  it('should attach through the worker-backed client when the hook has none yet (D41)', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    revisionRoot.absent = true;
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const attached = await act(async () => result.current.attachment('chat_1'));
+
     expect(attached?.execution.workspaceId).toBe('checkout-durable');
   });
 

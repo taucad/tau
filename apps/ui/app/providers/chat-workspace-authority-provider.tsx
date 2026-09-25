@@ -18,7 +18,7 @@ import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { useProject } from '#hooks/use-project.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
-import { useRevisionClient } from '#hooks/use-revision-status.js';
+import { getRevisionClient, useRevisionClient } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
@@ -983,7 +983,14 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
        * resolves it — minus the `admitTurn` that would lease it. The root's own
        * checkout is the last resort: a chat with no turn yet has no checkout of
        * its own, and a project with no checkout at all has no log to attach to. */
-      const status = revisions === undefined ? undefined : await firstStatus(revisions);
+      /* A slow first load reaches here before the file manager has its worker,
+       * and answering "no checkout" then failed the chat for good (D41); the
+       * attach waits for the worker, bounded like the bridge it rides on. */
+      const started = revisions === undefined ? await waitForRootedBridgeOpener(fileManager.fileManagerRef) : undefined;
+      const client =
+        revisions ??
+        (started?.worker === undefined ? undefined : getRevisionClient({ projectId, worker: started.worker }));
+      const status = client === undefined ? undefined : await firstStatus(client);
       const checkoutId = placed ?? state.conflicts.get(chatId)?.checkoutId ?? chat?.checkoutId ?? status?.checkoutId;
       if (checkoutId === undefined) {
         return undefined;
@@ -1011,7 +1018,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       const { prepared } = await composeWorkspace(chatId, { checkoutId, root });
       return prepared;
     },
-    [composeWorkspace, getChat, revisions, state],
+    [composeWorkspace, fileManager.fileManagerRef, getChat, projectId, revisions, state],
   );
 
   const update = useCallback(

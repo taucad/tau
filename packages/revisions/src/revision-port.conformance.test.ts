@@ -738,6 +738,19 @@ const conformance = (adapter: Adapter): void => {
       await expect(port.addCheckout!({ branch })).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
     }, 180_000);
 
+    /* D58: native reads the worktree's HEAD, which follows its branch; the
+     * browser leg reported the head the checkout was created at, forever. */
+    it('reports a linked checkout at its branch’s current head after the branch moves', async () => {
+      const branch = 'checkout/moving';
+      await port.updateRef({ name: branch, expectedHead: undefined, head: base });
+      const added = await port.addCheckout!({ branch });
+      await port.updateRef({ name: branch, expectedHead: base, head: child });
+
+      const listed = await port.listCheckouts!();
+      expect(listed.find((checkout) => checkout.id === added.id)).toMatchObject({ branch, baseRevisionId: child });
+      await port.removeCheckout!(added.id);
+    }, 180_000);
+
     it('removes a linked checkout and refuses to remove the live one', async () => {
       const branch = 'checkout/removable';
       await port.updateRef({ name: branch, expectedHead: undefined, head: base });

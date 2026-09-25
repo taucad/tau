@@ -492,13 +492,18 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     }
     const stored: unknown = JSON.parse(await filesystem.readFile(path, 'utf8'));
     const record = stored as Readonly<{ id: string; branch: string; baseRevisionId: string }>;
+    /* D58: the head is the branch's, as a native worktree's HEAD is. The
+     * record's own value is only where the checkout started; reported as the
+     * head it froze every linked checkout here at its first revision, so a
+     * conflict that moved on kept its card bound to one no branch names. */
+    const head = await port.readRef(record.branch);
     return Object.freeze({
       id: record.id,
       projectId: checkouts.projectId,
       root: `/checkouts/${record.id}`,
       kind: 'linked',
       branch: record.branch,
-      baseRevisionId: revisionId(record.baseRevisionId),
+      baseRevisionId: head ?? revisionId(record.baseRevisionId),
     });
   };
 

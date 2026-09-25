@@ -2114,6 +2114,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
         }
 
+        /* D58: a conflict no branch names any more was superseded — resolving
+         * it would move nothing, and answering success left *Merge into* inert. */
+        const branch = await branchNaming(input.revisionId);
+        if (branch === undefined) {
+          throw new RevisionPortError(
+            'UNKNOWN_REVISION',
+            'This conflict changed since it was opened. Reload the project to see the current one.',
+          );
+        }
         const receipt = await port.writeRevision({
           parents: [revisionId(input.revisionId)],
           tree: new ImmutableRevisionTree(entries.values()),
@@ -2122,21 +2131,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             generated: `Resolved ${String(terms.conflicts.length)} ${terms.conflicts.length === 1 ? 'file' : 'files'} between ${terms.labels.ours} and ${terms.labels.theirs}`,
           }),
         });
-        const branch = await branchNaming(input.revisionId);
-        if (branch !== undefined) {
-          const places = await listPlaces();
-          const place = places.find((candidate) => candidate.branch === branch);
-          if (place === undefined) {
-            await publishMerge(branch, input.revisionId, receipt.commitId);
-          } else {
-            const tree = await port.readTree(revisionId(receipt.commitId));
-            if (tree === undefined) {
-              throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${receipt.commitId}.`);
-            }
-            await materializeTree(place, tree, {
-              publish: async () => publishMerge(branch, input.revisionId, receipt.commitId),
-            });
+        const places = await listPlaces();
+        const place = places.find((candidate) => candidate.branch === branch);
+        if (place === undefined) {
+          await publishMerge(branch, input.revisionId, receipt.commitId);
+        } else {
+          const tree = await port.readTree(revisionId(receipt.commitId));
+          if (tree === undefined) {
+            throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${receipt.commitId}.`);
           }
+          await materializeTree(place, tree, {
+            publish: async () => publishMerge(branch, input.revisionId, receipt.commitId),
+          });
         }
         resolutions.delete(input.revisionId);
         return { revisionId: receipt.commitId, branch };

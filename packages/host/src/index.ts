@@ -43,6 +43,7 @@ export {
   createProjectRevisionPort,
   createProjectRevisions,
   openProjectRevisions,
+  projectReleaseMilliseconds,
   requireRevisionToolchain,
 } from '#revisions.js';
 export type {

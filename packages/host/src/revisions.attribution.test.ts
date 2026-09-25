@@ -21,17 +21,15 @@ import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 
-import { createProjectRevisions } from '#revisions.js';
+import { createProjectRevisions, requireRevisionToolchain } from '#revisions.js';
 import { hostRevisionActor } from '#revision-actor.js';
 
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+/* The same `git` + `git lfs` probe the host refuses on (OQ-B8), so a machine
+ * without `git-lfs` skips these rows instead of failing them. */
+const gitToolchainOnPath = await requireRevisionToolchain().then(
+  () => true,
+  () => false,
+);
 
 const roots: string[] = [];
 
@@ -47,7 +45,7 @@ const workspace = async (): Promise<string> => {
   return project;
 };
 
-describe.runIf(gitOnPath)('attribution on a clone of a Tau project', () => {
+describe.runIf(gitToolchainOnPath)('attribution on a clone of a Tau project', () => {
   it('shows the person as the author and Tau as the committer', async () => {
     const workspaceRoot = await workspace();
     const port = createNativeGitRevisionPort({
@@ -126,7 +124,7 @@ describe.runIf(gitOnPath)('attribution on a clone of a Tau project', () => {
  * This is the wiring both Node call sites use — `apps/desktop/src/tau/
  * services-host.impl.ts` and `packages/host/src/host-daemon.ts`.
  */
-describe.runIf(gitOnPath)('a Node host records the person it runs for', () => {
+describe.runIf(gitToolchainOnPath)('a Node host records the person it runs for', () => {
   it('authors what it mints as this machine\u2019s user, with Tau as the committer', async () => {
     const workspaceRoot = await workspace();
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-host-config-'));

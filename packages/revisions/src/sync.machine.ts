@@ -182,7 +182,14 @@ export type SyncMachineEvent =
    * machine then offers the remote under its lease (P44). Absent `ref` means
    * "whatever you were conflicted about".
    */
-  | Readonly<{ type: 'conflictResolved'; ref?: string; revisionId?: string }>;
+  | Readonly<{ type: 'conflictResolved'; ref?: string; revisionId?: string }>
+  /**
+   * The live checkout moved to another branch (D50).
+   *
+   * `branch` is read once when the project opens, so without this a switch
+   * left the pull integrating the branch the project was opened on.
+   */
+  | Readonly<{ type: 'branchChanged'; branch: string }>;
 
 /** Facts syncMachine emits for a host that holds only the root. @public */
 export type SyncMachineEmitted =
@@ -311,6 +318,8 @@ const terminalFailureCodes: ReadonlySet<string> = new Set([
   'REMOTE_NOT_FOUND',
   'REMOTE_QUOTA_EXCEEDED',
   'REMOTE_MOVED',
+  /* D49: refused before any network call; retrying cannot change the tree. */
+  'LFS_REMOTE_UNSUPPORTED',
 ]);
 
 const codeOf = (error: unknown): string | undefined => {
@@ -718,6 +727,15 @@ const syncMachineDefinition = setup({
      * `recording` — so the state that finishes acts on it. */
     close: { context: { pendingMint: true, pendingFlush: true } },
     open: ({ context, guards }) => (guards.hasRemote(context) ? { target: '.opening', reenter: true } : undefined),
+    /* D50: pull the branch the person is now on, as a reopen would. */
+    branchChanged: ({ context, event, guards }) => {
+      if (event.branch === context.branch) {
+        return undefined;
+      }
+      return guards.hasRemote(context)
+        ? { target: '.opening', reenter: true, context: { branch: event.branch } }
+        : { context: { branch: event.branch } };
+    },
     remoteDisconnected: {
       target: '.noRemote',
       /* The queue is *paused*, not dropped (policy Rule 9, C12): its entries

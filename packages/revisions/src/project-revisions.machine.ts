@@ -1003,6 +1003,10 @@ const projectRevisionsMachineDefinition = setup({
               treeId: event.treeId,
             });
           }
+          /* D50: the scheduler pulls the live checkout's branch. */
+          if (event.checkoutId === context.liveCheckoutId && event.branch !== undefined) {
+            enq.sendTo('sync', { type: 'branchChanged', branch: event.branch });
+          }
           return {
             context: {
               checkouts: context.checkouts.map((checkout) =>

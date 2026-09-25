@@ -1544,6 +1544,33 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  it('D50: pulls the branch the live checkout switched to, not the one the project opened on', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'origin', branch: 'main' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'upToDate' } });
+    await flush();
+    expect(harness.promises.inputsFor('syncFetch').at(-1)).toMatchObject({ branch: 'main' });
+
+    harness.actor.send({
+      type: 'checkoutChanged',
+      checkoutId: live.id,
+      revisionId: 'rev-feature',
+      treeId: 'tree-feature',
+      branch: 'feature',
+    });
+    await flush();
+
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+    expect(harness.promises.inputsFor('syncFetch').at(-1)).toMatchObject({ branch: 'feature' });
+
+    harness.actor.stop();
+  });
+
   it('tells the scheduler a conflict was composed, so `Needs resolution` is not sticky (W13 review 2 R6/P37)', async () => {
     const harness = start();
     const conflictedLive: CheckoutRecord = { ...live, headRevisionId: 'rev-conflict', conflicted: true };

@@ -248,8 +248,12 @@ const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectF
 /**
  * The workspace bridge as a `FileSystemProvider`: the one rooted provider this
  * worker hands to the GeoSpec bridge port and to the shared tool filesystem.
+ *
+ * @param proxy - The worker's end of the workspace filesystem bridge.
+ * @returns The provider every tool call and the GeoSpec bridge read through.
+ * @internal
  */
-const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSystemProvider => {
+export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSystemProvider => {
   const { payload } = proxy.hello;
   if (payload.state !== 'ready') {
     throw Object.assign(new Error(`Workspace filesystem bridge is ${payload.state}.`), {
@@ -268,6 +272,27 @@ const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSy
     capabilities: payload.capabilities,
     readFile,
     writeFile: proxy.writeFile.bind(proxy),
+    /* The agent's conditional write compares and writes in one step only where
+     * the provider can; without this the browser leg fell back to a separate
+     * read and write, and a person's edit between them was overwritten (W0.18).
+     * A bridge served over a bare provider has no such method and its server
+     * answers `Unknown method`, which ran nothing: that is
+     * `CHECKED_WRITE_UNSUPPORTED`, the refusal the tool falls back on.
+     * ponytail: matched on the rpc server's message, which carries no code; the
+     * bridge hello advertising checked writes would remove the match. */
+    writeFileChecked: async (input) => {
+      try {
+        return await proxy.writeFileChecked(input);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Unknown method: writeFileChecked') {
+          throw Object.assign(new Error('This workspace bridge cannot compare and write in one step.'), {
+            code: 'CHECKED_WRITE_UNSUPPORTED',
+            applicationState: 'known-not-applied',
+          });
+        }
+        throw error;
+      }
+    },
     appendFile: proxy.appendFile.bind(proxy),
     readdir: proxy.readdir.bind(proxy),
     stat: proxy.stat.bind(proxy),
@@ -430,26 +455,44 @@ const responseBelongsToChat = (response: ForwardedResponse, chatId: string): boo
   return response.type === 'result' ? response.snapshot.chatId === chatId : true;
 };
 
+/** What every build's frame keeps, whatever its protocol version (I32). */
+const frameEnvelopeSchema = z.object({ version: z.number(), projectId: z.string(), chatId: z.string() });
+
+/** A refusal addressed to a follower, readable by a peer of any protocol version. */
+const refusalFrameSchema = z.object({
+  type: z.literal('response'),
+  targetId: z.string().min(1),
+  response: z.strictObject({
+    type: z.literal('error'),
+    requestId: z.string().min(1),
+    code: z.string().min(1),
+    message: z.string(),
+  }),
+});
+
 const validatedBroadcast = (
   value: unknown,
   active: WorkerSession,
   chatId: string,
-): LeaderBroadcast | 'unreadable' | undefined => {
+): LeaderBroadcast | 'foreign' | 'unreadable' | undefined => {
   const parsed = leaderBroadcastSchema.safeParse(value);
   if (!parsed.success) {
-    /* This channel is keyed on `agentHostProtocolVersion`, so a frame that
-     * reaches here was posted by a peer claiming *this* protocol and failing
-     * its schema — a real defect, not a deploy skew. Dropping it in silence
-     * burned the forwarding wait instead, and the page saw a bare timeout. */
+    /* The channel is the chat's lock identity, shared by every build: a frame
+     * of another protocol version is answered, not dropped (W0.17, I32). */
+    const envelope = frameEnvelopeSchema.safeParse(value).data;
+    if (envelope !== undefined && envelope.version !== agentHostProtocolVersion) {
+      return envelope.projectId === active.projectId && envelope.chatId === chatId ? 'foreign' : undefined;
+    }
+    /* A frame claiming *this* protocol and failing its schema is a real
+     * defect, not a deploy skew. Dropping it in silence burned the forwarding
+     * wait instead, and the page saw a bare timeout. */
     console.error('[agentHost] dropped a leader frame this protocol cannot read', chatId, parsed.error.issues);
     return 'unreadable';
   }
   const message = parsed.data as LeaderBroadcast;
-  if (
-    message.projectId !== active.projectId ||
-    message.workspaceId !== active.workspaceId ||
-    message.chatId !== chatId
-  ) {
+  /* Not the checkout: the channel and the lock are the chat's, whichever
+   * checkout a tab's turn is on (W0.17). */
+  if (message.projectId !== active.projectId || message.chatId !== chatId) {
     return undefined;
   }
   switch (message.type) {
@@ -990,6 +1033,49 @@ const refuseCommand = (options: {
   } satisfies LeaderBroadcast);
 };
 
+/**
+ * Answer a frame of another protocol version (W0.17, I32).
+ *
+ * A refusal addressed to this tab settles the command it answers; a command
+ * this tab leads for is refused with `LEADER_VERSION_MISMATCH`, so a follower
+ * on another build learns it within one round trip instead of timing out.
+ */
+const answerForeignFrame = (options: {
+  readonly channel: BroadcastChannel;
+  readonly active: WorkerSession;
+  readonly chatId: string;
+  readonly frame: unknown;
+}): void => {
+  const refusal = refusalFrameSchema.safeParse(options.frame).data;
+  if (refusal !== undefined) {
+    const pending = refusal.targetId === options.active.tabId ? forwarded.get(refusal.response.requestId) : undefined;
+    if (pending) {
+      forwarded.delete(refusal.response.requestId);
+      pending.resolve(refusal.response);
+    }
+    return;
+  }
+  const state = leadership.get(options.chatId);
+  const address = readCommandReturnAddress(options.frame);
+  if (!state || !address) {
+    return;
+  }
+  refuseCommand({
+    channel: options.channel,
+    active: options.active,
+    chatId: options.chatId,
+    generation: state.lease.generation,
+    targetId: address.senderId,
+    requestId: address.requestId,
+    error: Object.assign(
+      new Error(
+        `Chat ${options.chatId} is led by a tab running another version of Tau (protocol ${String(agentHostProtocolVersion)}). Reload this tab.`,
+      ),
+      { code: 'LEADER_VERSION_MISMATCH' },
+    ),
+  });
+};
+
 /** Refuse a `command` frame the strict broadcast schema rejected, when its envelope survives. */
 const refuseUnreadableCommand = (options: {
   readonly channel: BroadcastChannel;
@@ -1097,13 +1183,17 @@ function channelFor(chatId: string): BroadcastChannel {
   if (!active) {
     throw new Error('Agent host worker is not initialized.');
   }
-  const channel = new BroadcastChannel(agentHostAuthorityName({ ...active, chatId }));
+  const channel = new BroadcastChannel(agentHostAuthorityName({ projectId: active.projectId, chatId }));
   channel.addEventListener('message', (event: MessageEvent<unknown>) => {
     const current = session;
     if (!current) {
       return;
     }
     const message = validatedBroadcast(event.data, current, chatId);
+    if (message === 'foreign') {
+      answerForeignFrame({ channel, active: current, chatId, frame: event.data });
+      return;
+    }
     if (message === 'unreadable') {
       refuseUnreadableCommand({ channel, active: current, chatId, frame: event.data });
       return;
@@ -1234,6 +1324,26 @@ function channelFor(chatId: string): BroadcastChannel {
       });
       return;
     }
+    if (
+      message.workspaceId !== current.workspaceId &&
+      (message.command.type === 'start' || message.command.type === 'resume')
+    ) {
+      /* One chat log, but this worker's files are its own checkout's: a turn
+       * placed on another checkout cannot run here (W0.17). */
+      refuseCommand({
+        channel,
+        active: current,
+        chatId,
+        generation: state.lease.generation,
+        targetId: message.senderId,
+        requestId: message.command.requestId,
+        error: Object.assign(
+          new Error(`Chat ${chatId} is running on another checkout in another tab. Finish or stop it there first.`),
+          { code: 'LEADER_WORKSPACE_MISMATCH' },
+        ),
+      });
+      return;
+    }
     const commandMessage = message;
     trackTask(
       async () =>
@@ -1277,7 +1387,6 @@ const ensureLeadership = async (chatId: string): Promise<boolean> => {
     }
     const lease = await acquireChatLeaderLease({
       projectId: active.projectId,
-      workspaceId: active.workspaceId,
       chatId,
       requestLock,
       createGeneration: randomUuid,
@@ -1338,19 +1447,22 @@ const waitForForwardedResponse = async (
 ): Promise<ForwardedResponse | undefined> => {
   const pending = Promise.withResolvers<ForwardedResponse>();
   forwarded.set(command.requestId, pending);
+  const targetGeneration = leaderGenerations.get(command.chatId);
   channelFor(command.chatId).postMessage({
     ...broadcastBinding(active, command.chatId),
     type: 'command',
     senderId: active.tabId,
-    targetGeneration: leaderGenerations.get(command.chatId),
+    targetGeneration,
     command,
   } satisfies LeaderBroadcast);
   /* Liveness, not a work bound: a `start` is answered at admission time, which
    * includes preparing the turn, so a constant deadline re-broadcast a command
-   * the leader was still working on — and the leader then executed it twice. */
+   * the leader was still working on — and the leader then executed it twice.
+   * Only the addressed generation's liveness counts (W0.14). */
   const response = await awaitWhileLeaderLives({
     response: pending.promise,
-    lastSeenAt: () => followerMonitors.get(command.chatId)?.lastSeenAt(),
+    generation: targetGeneration,
+    lastSeen: () => followerMonitors.get(command.chatId)?.lastSeen(),
     heartbeatTimeout: followerHeartbeatTimeout,
   });
   if (forwarded.get(command.requestId) === pending) {
@@ -1370,10 +1482,11 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
   /* A stale-generation refusal takes the same recovery as no answer at all: the
    * leader ran nothing, and the re-broadcast below carries no target generation
    * (or the one just learned), which the current leader accepts. */
+  /* A window the page asked for is a plain read: it never moves this
+   * follower's replication cursor, which only replication advances (W0.13,
+   * L2b HD-1). A re-attach at cursor 0 pulled it back into a full re-tail; a
+   * window past it skipped rows this worker's listeners never received. */
   if (first && !(first.type === 'error' && first.code === leaderGenerationStaleCode)) {
-    if (first.type === 'tail' || first.type === 'attach') {
-      followerCursors.set(command.chatId, first.batch.nextCursor);
-    }
     return first.type === 'attach'
       ? {
           ...first,
@@ -1394,9 +1507,6 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
     throw Object.assign(new Error(`No chat leader answered command ${command.requestId} before its deadline.`), {
       code: 'LEADER_RESPONSE_TIMEOUT',
     });
-  }
-  if (replay.type === 'tail' || replay.type === 'attach') {
-    followerCursors.set(command.chatId, replay.batch.nextCursor);
   }
   return replay.type === 'attach'
     ? {

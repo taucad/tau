@@ -583,26 +583,32 @@ export const browserWorkspaceAuthorityTestApi = {
 
 /** Places this project's browser turns on the worker's revision root. */
 /**
- * The root's projection, waiting for its first one when none has arrived.
+ * The root's projection once its checkout registry has answered.
  *
  * The route opens the root only once its GitHub credential is minted (D36), so an
- * attach composed at chat open can come before the checkout it must name.
+ * attach composed at chat open can come before the checkout it must name; and the
+ * root's first projections name a checkout before the registry has said where
+ * its files are, which read as a checkout that is gone (D41).
  *
  * @param client - The project's revision client.
  * @returns The projection.
  */
-const firstStatus = async (client: RevisionClient): Promise<RevisionStatusProjection> =>
-  client.status() ??
-  new Promise((resolve) => {
+const settledStatus = async (client: RevisionClient): Promise<RevisionStatusProjection> => {
+  const current = client.status();
+  if (current?.registrySettled === true) {
+    return current;
+  }
+  return new Promise((resolve) => {
     // ponytail: never settles if the root closes first; the attach is dropped with its chat.
     const stop = client.subscribe(() => {
       const status = client.status();
-      if (status !== undefined) {
+      if (status?.registrySettled === true) {
         stop();
         resolve(status);
       }
     });
   });
+};
 
 export function ChatWorkspaceAuthorityProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const { projectId } = useProject();
@@ -990,7 +996,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       const client =
         revisions ??
         (started?.worker === undefined ? undefined : getRevisionClient({ projectId, worker: started.worker }));
-      const status = client === undefined ? undefined : await firstStatus(client);
+      const status = client === undefined ? undefined : await settledStatus(client);
       const checkoutId = placed ?? state.conflicts.get(chatId)?.checkoutId ?? chat?.checkoutId ?? status?.checkoutId;
       if (checkoutId === undefined) {
         return undefined;

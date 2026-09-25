@@ -25,6 +25,7 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
     checkoutId: 'checkout-1',
     checkoutRoot: '/projects/proj_1',
     branch: 'main',
+    registrySettled: true,
     projectDirty: false,
     dirty: false,
     minting: false,

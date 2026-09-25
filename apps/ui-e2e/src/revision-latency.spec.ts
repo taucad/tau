@@ -122,12 +122,12 @@ const savedBudgetMilliseconds = 100;
 /**
  * B1's fixture (D11): 1 000 source files and one 5 MiB export, warm save.
  * Loaded baseline: `revision-latency-b1.json` `warmDuration` — the median of
- * `warmSaves` page-clock samples — from the coordinator's quiet-window run
- * after W5b and W13 land (to fill). r11's 70.5 ms was wall time around the
- * harness, and W4c a3's 193.1 ms was one sample over uncommitted save-path
- * edits; neither is a baseline.
+ * `warmSaves` page-clock samples — read at 8ed6eb2b6 (after W5b and W13) in
+ * the quiet-window run E2E-D u1 at a 1-minute load of 9–12; its repeat u2 read
+ * 57.9 ms. A run under load reads several times higher (r23: 284 ms at ~25),
+ * so this spec is read only below a load of 15.
  */
-const savedLoadedBaselineMilliseconds = Number.NaN;
+const savedLoadedBaselineMilliseconds = 61.5;
 /** Warm saves B1 reads; `warmDuration` is their median (a4 ruling). */
 const warmSaves = 5;
 const savedFixtureQuery = '?files=1000&binaryMib=5';
@@ -139,10 +139,10 @@ const historyBudgetMilliseconds = 50;
  * forked along it by *New branch*; read on the page's clock, after a reload so
  * the open is the session's first.
  * Loaded baseline: `revision-latency-b4.json` `openDuration` — the median of
- * `reopens` page-clock samples — from the coordinator's quiet-window run after
- * W5b and W13 land (to fill).
+ * `reopens` page-clock samples — read at 8ed6eb2b6 in the quiet-window run
+ * E2E-D u1 (500 revisions, 8 branches, fixture built in 98 s).
  */
-const historyLoadedBaselineMilliseconds = Number.NaN;
+const historyLoadedBaselineMilliseconds = 31.6;
 /** Times B4 closes and reopens History; `openDuration` is their median (a4 ruling). */
 const reopens = 3;
 

@@ -362,6 +362,25 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /* D59: a new branch mints nothing; *Backed up* must not stand over it. */
+  it('pushes from backed up when the refs change without a mint', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+
+    harness.actor.send({ type: 'recordsChanged' });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('pending')).toBe(true);
+    });
+    harness.clock.advance(2000);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.stop();
+  });
+
   it('pushes a durable record written while the current push is in flight', async () => {
     const harness = start();
     await openCleanly(harness);

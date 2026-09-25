@@ -438,6 +438,8 @@ describe('branchMachine', () => {
         checkoutRoot: '/checkouts/checkout-c',
       },
     ]);
+    /* D59: a branch mints nothing, so the scheduler hears that the refs changed. */
+    expect(parent.events).toContainEqual({ type: 'sync', event: { type: 'recordsChanged' } });
     actor.stop();
     parent.stop();
   });

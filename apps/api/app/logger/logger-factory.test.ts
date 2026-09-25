@@ -2,6 +2,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ConfigService } from '@nestjs/config';
 import type { PinoLoggerOptions } from 'fastify/types/logger.js';
+import { pinoHttp } from 'pino-http';
 import type { Options } from 'pino-http';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -51,6 +52,43 @@ describe('request log URL redaction', () => {
     expect(message).toContain('/v1/github/callback');
     expect(message).not.toContain('oauth-code');
     expect(message).not.toContain('oauth-state');
+  });
+
+  it.each([true, false])(
+    'should drop the callback query from the received message when middleware rewrote the URL (DEV %s)',
+    async (development) => {
+      vi.stubEnv('DEV', development);
+      const options = await requestLogOptions();
+      const message = options.customReceivedMessage?.(
+        mock<IncomingMessage>({
+          id: 'request-2',
+          method: 'GET',
+          url: '/?code=oauth-code&state=oauth-state',
+          originalUrl: '/v1/auth/callback/github?code=oauth-code&state=oauth-state',
+        } as Partial<IncomingMessage>),
+        mock<ServerResponse>(),
+      );
+
+      vi.unstubAllEnvs();
+      expect(message).toContain('/v1/auth/callback/github');
+      expect(message).not.toContain('oauth-code');
+      expect(message).not.toContain('oauth-state');
+    },
+  );
+
+  it('should redact the session token a sign-in response sets', async () => {
+    const options = await requestLogOptions();
+    const lines: string[] = [];
+    const { logger } = pinoHttp({ redact: options.redact }, { write: (line: string) => lines.push(line) });
+
+    logger.info({
+      res: {
+        statusCode: 302,
+        getHeaders: () => ({ 'set-cookie': ['tau.session_token=session-secret'], 'set-auth-token': 'session-secret' }),
+      },
+    });
+
+    expect(lines.join('')).not.toContain('session-secret');
   });
 
   it('should keep the query of other requests in the serialized request', async () => {

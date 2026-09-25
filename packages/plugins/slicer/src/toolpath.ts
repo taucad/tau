@@ -100,6 +100,12 @@ export type ToolpathProgram = Readonly<{
   /** Net millimetres of filament fed, retractions included. */
   filamentLength: number;
   coverage: ToolpathCoverage;
+  /**
+   * The slicer's own print-time estimate, when the source states one: the Bambu Studio header's
+   * `total estimated time`, else the first `M73` remaining-minutes word. Absent otherwise; `duration`
+   * stays this parser's simulation clock.
+   */
+  headerEstimate?: Readonly<{ seconds: number; source: 'bambu-header' | 'm73' }>;
 }>;
 
 /**
@@ -191,14 +197,27 @@ const kindIndex = Object.fromEntries(toolpathSegmentKinds.map((kind, index) => [
 >;
 
 const commandPattern = /^([GMT])(\d+(?:\.\d+)?)(?=\s|$)/u;
-const wordPattern = /^([A-Z])([-+]?(?:\d+\.?\d*|\.\d+)(?:[Ee][-+]?\d+)?)$/u;
+// A letter alone is a flag word (`G28 X`, `M221 S`); it is present but carries no value.
+const wordPattern = /^([A-Z])([-+]?(?:\d+\.?\d*|\.\d+)(?:[Ee][-+]?\d+)?)?$/u;
 // Bambu vendor families: stepper power, motion sync, AMS and calibration, timelapse, flow and chamber records.
-const vendorPattern = /^M(?:1[78]|142|400|412|6\d\d(?:\.\d+)?|9\d\d|1\d{3}|201\.2)$/u;
+const vendorPattern = /^M(?:1[78]|142|400|412|(?:6\d\d|9\d\d|1\d{3})(?:\.\d+)?|201\.2)$/u;
 // Orca/Prusa spell `;LAYER_CHANGE`, `;Z:` and `;TYPE:`; Bambu Studio spells `; CHANGE_LAYER`, `; Z_HEIGHT:` and `; FEATURE:`.
 const layerChangePattern = /^\s*(?:LAYER_CHANGE|CHANGE_LAYER)\s*$/u;
 const layerHeightPattern = /^\s*(?:Z|Z_HEIGHT):\s*([-+]?\d*\.?\d+)/u;
 const inlineLayerPattern = /^\s*LAYER\s+\d+\s+Z\s*([-+]?\d*\.?\d+)/u;
 const typePattern = /^\s*(?:TYPE|FEATURE):\s*(.+?)\s*$/u;
+// Bambu Studio states its own estimate inside `; HEADER_BLOCK_START … ; HEADER_BLOCK_END`, e.g. `total estimated time: 1h 2m 3s`.
+const headerEstimatePattern = /total estimated time:\s*((?:\d+[dhms]\s*)+)/u;
+const durationUnitSeconds: Readonly<Record<string, number>> = { d: 86_400, h: 3600, m: 60, s: 1 };
+const secondsPerMinute = 60;
+
+const readHeaderDuration = (text: string): number => {
+  let seconds = 0;
+  for (const [, amount, unit] of text.matchAll(/(\d+)([dhms])/gu)) {
+    seconds += Number(amount) * durationUnitSeconds[unit!]!;
+  }
+  return seconds;
+};
 
 const typeKind = (label: string): ToolpathSegmentKind => {
   const value = label.toLowerCase();
@@ -276,7 +295,8 @@ type MutableLayer = {
   implicit: boolean;
 };
 
-type Words = ReadonlyMap<string, number>;
+/** Word letter to value; a flag word maps to `undefined`, so `has` sees it and `get` treats it as absent. */
+type Words = ReadonlyMap<string, number | undefined>;
 
 type SegmentInput = Readonly<{
   from: readonly number[];
@@ -287,14 +307,14 @@ type SegmentInput = Readonly<{
 }>;
 
 const readWords = (tail: string, record: number): Words => {
-  const words = new Map<string, number>();
+  const words = new Map<string, number | undefined>();
   for (const token of tail.trim().split(/\s+/u)) {
     if (token === '') {
       continue;
     }
     const match = wordPattern.exec(token);
-    const value = match ? Number(match[2]) : Number.NaN;
-    if (!match || !Number.isFinite(value)) {
+    const value = match?.[2] === undefined ? undefined : Number(match[2]);
+    if (!match || (value !== undefined && !Number.isFinite(value))) {
       throw new ToolpathParseError(
         'TOOLPATH_INVALID_RECORD',
         `Record ${record} carries the unsupported word "${token}".`,
@@ -326,12 +346,13 @@ const inert = (): void => {
  *
  * Closed subset: `G0`–`G4`, `G17`, `G21`, `G28`, `G29`, `G90`–`G92`, `M82`–`M84`,
  * `M104`, `M106`, `M107`, `M109`, `M140`, `M141`, `M190`, `M191`, `M201`,
- * `M203`–`M205`, `M220`, `M221`, `M73` and `T<n>`. Bambu vendor families are
+ * `M203`–`M205`, `M220`, `M221`, `M500`, `M73` and `T<n>`. Bambu vendor families are
  * retained as `vendor` events; every other executable record counts as
- * `unknown` and never as a comment. Arcs are linearised. Undeclared positioning
- * and extrusion modes take the firmware defaults (absolute, absolute); extruder
- * motion before any nozzle temperature was commanded is refused, as the
- * firmware's cold-extrusion lockout would. Times come from a trapezoidal model
+ * `unknown` and never as a comment. A valueless word is a flag: `G28 X` homes only
+ * X, and a flag where a value belongs (`G1 X`) carries no target. Arcs are
+ * linearised. Undeclared positioning and extrusion modes take the firmware
+ * defaults (absolute, absolute); extruder motion before any nozzle temperature
+ * was commanded is refused, as the firmware's cold-extrusion lockout would. Times come from a trapezoidal model
  * that starts and stops every segment at rest.
  *
  * @param source - G-code bytes or text.
@@ -388,6 +409,8 @@ export const parseGcode = (
   let filamentLength = 0;
   let currentKind: ToolpathSegmentKind = 'unknown';
   let wiping = false;
+  let inHeader = false;
+  let headerEstimate: ToolpathProgram['headerEstimate'];
 
   const startLayer = (z: number | undefined): void => {
     const last = layerTable.at(-1);
@@ -435,6 +458,15 @@ export const parseGcode = (
       return;
     }
     const trimmed = comment.trim();
+    if (trimmed === 'HEADER_BLOCK_START' || trimmed === 'HEADER_BLOCK_END') {
+      inHeader = trimmed === 'HEADER_BLOCK_START';
+      return;
+    }
+    const estimate = inHeader ? headerEstimatePattern.exec(comment) : null;
+    if (estimate) {
+      headerEstimate = { seconds: readHeaderDuration(estimate[1]!), source: 'bambu-header' };
+      return;
+    }
     if (trimmed === 'WIPE_START') {
       wiping = true;
     } else if (trimmed === 'WIPE_END') {
@@ -507,7 +539,7 @@ export const parseGcode = (
 
   const requireModes = (words: Words, record: number): void => {
     // Firmware refuses extruder motion while the nozzle is cold; a program that never asked for heat is uninitialised.
-    if (words.has('E') && !nozzleTemperatureCommanded) {
+    if (words.get('E') !== undefined && !nozzleTemperatureCommanded) {
       throw new ToolpathParseError(
         'TOOLPATH_UNINITIALIZED_MOTION',
         `Record ${record} moves the extruder before any nozzle temperature was commanded.`,
@@ -767,7 +799,17 @@ export const parseGcode = (
       },
     ],
     ['M84', inert],
-    ['M73', inert],
+    ['M500', inert],
+    [
+      'M73',
+      (words) => {
+        // The first remaining-minutes report is the slicer's whole-print estimate; the header outranks it.
+        const minutes = words.get('R');
+        if (minutes !== undefined && headerEstimate === undefined) {
+          headerEstimate = { seconds: minutes * secondsPerMinute, source: 'm73' };
+        }
+      },
+    ],
     ['M73.2', inert],
     ['M104', temperature('nozzle-temperature')],
     ['M109', temperature('nozzle-temperature')],
@@ -904,5 +946,6 @@ export const parseGcode = (
     duration: clock,
     filamentLength,
     coverage: { ...coverage, complete: coverage.unknown === 0 },
+    ...(headerEstimate === undefined ? {} : { headerEstimate }),
   };
 };

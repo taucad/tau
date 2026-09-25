@@ -171,6 +171,10 @@ describe('parseGcode', () => {
       expect(program.initialPosition).toBe('homed');
     });
 
+    it('should expose the opening M73 remaining time as the slicer estimate', () => {
+      expect(program.headerEstimate).toEqual({ seconds: 720, source: 'm73' });
+    });
+
     it('should retain vendor records, count the unknown one and never treat comments as executables', () => {
       // 61 executable lines: 24 vendor-family records, one unknown (M9999), the rest known.
       expect(program.coverage).toEqual({ records: 61, known: 36, vendor: 24, unknown: 1, complete: false });
@@ -318,6 +322,78 @@ describe('parseGcode', () => {
       expect(program.filamentLength).toBeCloseTo(3.25, 6);
       expect([...program.positions.subarray(18, 24)]).toEqual([30, 0, 0, 35, 0, 0]);
       expect(program.initialPosition).toBe('homed');
+    });
+
+    it('should accept valueless flag words and home only the axes a G28 names', () => {
+      const program = parseGcode(
+        [
+          'G90',
+          'M83',
+          'M104 S220',
+          'G28',
+          'G1 X50 Y40 Z5 F6000',
+          'G28 X',
+          'G1 Y60',
+          'G28 Z P0 T300',
+          'G1 X10',
+          'M221 S',
+          'M221 Z0',
+          'M221 R',
+          'G29 A X118 Y118 I20 J20',
+          'M17 S',
+          'G1 X20 Y',
+          '',
+        ].join('\n'),
+      );
+      expect(segmentEnds(program)).toEqual([
+        [50, 40, 5],
+        [0, 60, 5],
+        [10, 60, 0],
+        [20, 60, 0],
+      ]);
+      // `G28 X` keeps Y and Z; `G28 Z P0 T300` keeps X and Y; a valueless axis word on a move carries no target.
+      expect([...program.positions.subarray(6, 9)]).toEqual([0, 40, 5]);
+      expect([...program.positions.subarray(12, 15)]).toEqual([0, 60, 0]);
+      expect(program.coverage).toEqual({ records: 15, known: 14, vendor: 1, unknown: 0, complete: true });
+      expect(program.events.filter((event) => event.kind === 'vendor').map((event) => event.record)).toEqual(['M17 S']);
+    });
+
+    it('should retain dotted vendor subcommands and accept a settings save with a flag', () => {
+      const program = parseGcode('M970.3 Q1 A7 B30 H15\nM980.3 A70 J0.02\nM1002.1 S1\nM500 R\nM500\n');
+      expect(program.coverage).toEqual({ records: 5, known: 2, vendor: 3, unknown: 0, complete: true });
+    });
+
+    it('should neither extrude nor refuse a cold nozzle for a valueless E word', () => {
+      const program = parseGcode('G28\nG1 X10 E F600\n');
+      expect([...program.extrusion]).toEqual([0]);
+      expect(program.filamentLength).toBe(0);
+    });
+
+    it('should read the Bambu header estimate in preference to the first M73 remaining time', () => {
+      const header = parseGcode(
+        [
+          '; HEADER_BLOCK_START',
+          '; model printing time: 50m 1s; total estimated time: 1h 2m 3s',
+          '; HEADER_BLOCK_END',
+          '; CONFIG_BLOCK_START',
+          '; note = total estimated time: 9m 9s',
+          '; CONFIG_BLOCK_END',
+          'M73 P0 R61',
+          'G28',
+          'G1 X10 F600',
+          '',
+        ].join('\n'),
+      );
+      expect(header.headerEstimate).toEqual({ seconds: 3723, source: 'bambu-header' });
+      expect(
+        parseGcode('; HEADER_BLOCK_START\n; total estimated time: 1d 0h 0m 2s\n; HEADER_BLOCK_END\n'),
+      ).toHaveProperty('headerEstimate', { seconds: 86_402, source: 'bambu-header' });
+      // A comment outside the header block is configuration text, not an estimate.
+      expect(parseGcode('; total estimated time: 9m 9s\nM73 P0 R12\nM73 P50 R6\n').headerEstimate).toEqual({
+        seconds: 720,
+        source: 'm73',
+      });
+      expect(parseGcode('M73 P0\nG28\n').headerEstimate).toBeUndefined();
     });
 
     it('should return an empty program for comments only', () => {

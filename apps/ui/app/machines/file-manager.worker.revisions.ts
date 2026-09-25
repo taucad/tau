@@ -48,6 +48,7 @@ import type {
   RevisionPort,
   RevisionRow,
   RevisionStatusProjection,
+  RevisionStreamHandlers,
   RevisionTag,
   RevisionUserActor,
 } from '@taucad/revisions';
@@ -60,7 +61,9 @@ import {
   registerProjectFailureMessage,
   registerProjectOverHttp,
   tauRemoteUrl,
+  watchRevisionStream,
 } from '@taucad/revisions';
+import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { revisionId } from '@taucad/revisions/algorithms';
 import type { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
 import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
@@ -505,7 +508,105 @@ export type WorkerProjectRevisionsOptions = Readonly<{
    * publishing is refused rather than guessed.
    */
   apiBaseUrl?: () => string | undefined;
+  /** Whether this project may hold its `revision` long poll now (RV-W5b F12); every project may without it. */
+  attention?: RemoteAttention;
 }>;
+
+/**
+ * Which of this document's live projects holds its `revision` long poll (RV-W5b F12).
+ *
+ * Every live project watching at once is up to eight 25 s polls on one origin,
+ * past HTTP/1.1's six sockets, and every other API request then waits behind
+ * them. So only the focused project streams; the others still push and pull as
+ * they always did, they just are not woken by another device. A project that
+ * gains focus opens its stream and, once the stream's tail is read, pulls once
+ * — tail first, so a push between the two reads is in one of them (a1b). One
+ * that loses focus closes its stream. A refused stream stays off (F5) until the
+ * remote is watched afresh.
+ *
+ * @public
+ */
+export type RemoteAttention = Readonly<{
+  /** The page's word on whether this project is the focused one. */
+  setFocused: (focused: boolean) => void;
+  /**
+   * Hold one `watch` of the scheduler's until this project is focused.
+   *
+   * @param open - Starts the real stream with the handlers it is given.
+   * @param handlers - The scheduler's handlers.
+   * @returns Ends the watch.
+   */
+  gate: (open: (handlers: RevisionStreamHandlers) => () => void, handlers: RevisionStreamHandlers) => () => void;
+}>;
+
+/**
+ * Start unfocused: the page says which project is focused as it binds it.
+ *
+ * @returns One project's attention.
+ * @public
+ */
+export const createRemoteAttention = (): RemoteAttention => {
+  type Watch = {
+    readonly open: (handlers: RevisionStreamHandlers) => () => void;
+    readonly handlers: RevisionStreamHandlers;
+    stop: (() => void) | undefined;
+    refused: boolean;
+  };
+  let focused = false;
+  let held: Watch | undefined;
+  const begin = (watch: Watch, pullOnTail: boolean): void => {
+    watch.stop = watch.open({
+      moved: watch.handlers.moved,
+      refused: (error) => {
+        watch.refused = true;
+        watch.stop = undefined;
+        watch.handlers.refused(error);
+      },
+      watching: () => {
+        watch.handlers.watching?.();
+        if (pullOnTail) {
+          /* A wake-up with nothing named: the scheduler pulls, as for any move. */
+          watch.handlers.moved({ generation: 0, refs: [] });
+        }
+      },
+    });
+  };
+  return {
+    setFocused: (next) => {
+      if (next === focused) {
+        return;
+      }
+      focused = next;
+      const watch = held;
+      if (watch === undefined || watch.refused) {
+        return;
+      }
+      if (next) {
+        begin(watch, true);
+        return;
+      }
+      watch.stop?.();
+      watch.stop = undefined;
+    },
+    gate: (open, handlers) => {
+      const watch: Watch = { open, handlers, stop: undefined, refused: false };
+      held = watch;
+      if (focused) {
+        begin(watch, false);
+      } else {
+        /* No stream, so no tail for the open pull to wait on. */
+        handlers.watching?.();
+      }
+      return () => {
+        watch.stop?.();
+        watch.stop = undefined;
+        if (held === watch) {
+          held = undefined;
+        }
+      };
+    },
+  };
+};
 
 /**
  * Start one project's revision tree in this worker.
@@ -566,6 +667,25 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
      * `WorkerGlobalScope` and fires `online`/`offline` — so nothing is injected
      * from the page for this one.
      */
+    /* D12: the same `.tau/parameters/**` codec the desktop host injects, at every merge. */
+    parameters: { read: requireParameterRecord, serialize: serializeParameterRecord },
+    /*
+     * D13: another device's push wakes this open project over the API's long
+     * poll, with this document's session — the same cookie the git routes take.
+     * The origin is read per request, so a page that names it later is heard.
+     */
+    remoteMoves: (input, handlers) => {
+      const open = (streamHandlers: RevisionStreamHandlers): (() => void) =>
+        watchRevisionStream(
+          {
+            projectId: input.projectId,
+            apiBaseUrl: () => options.apiBaseUrl?.(),
+            auth: () => ({ kind: 'cookie' }),
+          },
+          streamHandlers,
+        );
+      return options.attention === undefined ? open(handlers) : options.attention.gate(open, handlers);
+    },
     connectivity: (report) => {
       const online = (): void => {
         report(true);
@@ -1442,7 +1562,10 @@ export type WorkerRevisionRequest =
    * only the page has `authClient` and `window.ENV`; the worker keeps it in
    * memory for as long as the project is open and never writes it anywhere.
    */
-  | (GitRemoteCredential & Readonly<{ command: 'remoteCredential'; id?: number }>);
+  | (GitRemoteCredential & Readonly<{ command: 'remoteCredential'; id?: number }>)
+  /* Whether this project is the page's focused one (RV-W5b F12): a port frame,
+   * because focus is the page's fact about its projects, not the tree's. */
+  | Readonly<{ command: 'focus'; focused: boolean; id?: number }>;
 
 /**
  * What one correlated command answered.
@@ -1580,6 +1703,8 @@ type ProjectEntry = {
   readonly setCredential: (credential: GitRemoteCredential) => void;
   /** Record the API origin alone, which Publish carries and a credential also names. */
   readonly setApiBaseUrl: (apiBaseUrl: string) => void;
+  /** Whether this project is the page's focused one, which alone holds the long poll (F12). */
+  readonly setFocused: (focused: boolean) => void;
   readonly revisions: Promise<WorkerProjectRevisions>;
   readonly unsubscribe: () => void;
 };
@@ -1681,9 +1806,11 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     /* Held apart from the credential: the origin outlives any one remote, and
      * Publish names it without minting anything (review R4). */
     let apiBaseUrl: string | undefined;
+    const attention = createRemoteAttention();
     const revisions = (async (): Promise<WorkerProjectRevisions> =>
       createWorkerProjectRevisions({
         projectId,
+        attention,
         port: await options.createPort(projectId, () => credential),
         filesystem: options.filesystem,
         observe: options.observe,
@@ -1743,6 +1870,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       setApiBaseUrl: (url) => {
         apiBaseUrl = url;
       },
+      setFocused: attention.setFocused,
       revisions,
       unsubscribe: () => {
         unsubscribe();
@@ -1817,6 +1945,10 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           if (data.command === 'remoteCredential') {
             const { command: _verb, id: _id, ...held } = data;
             entry.setCredential(held);
+            return;
+          }
+          if (data.command === 'focus') {
+            entry.setFocused(data.focused);
             return;
           }
           const answer = answerOf(tree, data);

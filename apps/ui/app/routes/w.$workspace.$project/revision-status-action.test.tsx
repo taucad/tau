@@ -12,12 +12,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History } from 'lucide-react';
+import { ArrowDownToLine, CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History } from 'lucide-react';
 import type { RevisionRow, RevisionStatusProjection } from '@taucad/revisions';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
 import { revisionAccessibleName, selectRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 let focusedChatId: string | undefined = 'chat-1';
@@ -213,6 +214,42 @@ describe('selectRevisionFacts', () => {
     );
 
     expect(facts).toMatchObject({ icon: History, mark: 'none', sentence: 'Saved · Not backed up · 3 revisions' });
+  });
+
+  describe('a revision that arrived while a turn holds the files (W5b, D12)', () => {
+    const arrivedStatus = status({ remote: tauRemote, sync: sync({ state: 'backedUp', arrived: 'rev-14' }) });
+    const card = (actor: string): RevisionCard => ({
+      revisionId: 'rev-14',
+      n: 14,
+      createdAt: 0,
+      summary: 'Remote work',
+      actor,
+      turnId: undefined,
+      conflicted: false,
+      trigger: 'turn',
+    });
+
+    it.each([
+      ['the agent on Tau Cloud', card('Tau agent'), 'Rev 14 arrived from Tau agent on Tau Cloud'],
+      [
+        'the viewer’s own other session, claiming no device (RV-W5b F11)',
+        card('You'),
+        'Rev 14 arrived from another session',
+      ],
+      ['a card History has not read yet', undefined, 'A new revision arrived'],
+    ] as const)('says it arrived from %s, calmly', (_, arrived, sentence) => {
+      expect(selectRevisionFacts(arrivedStatus, onMain, arrived)).toMatchObject({
+        icon: ArrowDownToLine,
+        mark: 'none',
+        sentence,
+      });
+    });
+
+    it('lets work in progress speak first', () => {
+      expect(
+        selectRevisionFacts({ ...arrivedStatus, minting: true }, { ...onMain, isDirty: true }, card('Tau agent')),
+      ).toMatchObject({ mark: 'running', sentence: 'Saving…' });
+    });
   });
 });
 

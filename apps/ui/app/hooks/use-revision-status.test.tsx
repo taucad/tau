@@ -495,6 +495,26 @@ describe('the page client of the worker revision root', () => {
     revisionClient.close();
   });
 
+  it('should say which project is focused on every port it opens, so a reopened root streams again (RV-W5b2 N4)', () => {
+    const { worker, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    const focusFrames = (): unknown[] =>
+      messages.filter((message) => (message as { command?: string }).command === 'focus');
+    revisionClient.focus?.(true);
+    expect(focusFrames()).toEqual([]);
+
+    revisionClient.open();
+    expect(focusFrames()).toEqual([{ command: 'focus', focused: true }]);
+
+    revisionClient.close();
+    revisionClient.open();
+    expect(focusFrames()).toEqual([
+      { command: 'focus', focused: true },
+      { command: 'focus', focused: true },
+    ]);
+    revisionClient.close();
+  });
+
   it('should replay a completed chat projection to a later route subscriber', () => {
     const { worker, ports } = controlledWorker();
     const revisionClient = getRevisionClient({ projectId, worker });

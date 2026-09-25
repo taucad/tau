@@ -52,10 +52,10 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 /**
  * The exact tool grant a host capability carries.
  *
- * The four CAD tools, plus the print request tools (blueprint D5): an external
- * agent may open, read, list and stop a print request through the same ledger
- * a Tau turn uses, and is told to wait for the person — nothing here starts a
- * print. Every name is dispatched into the daemon's own registry by tool name.
+ * The four CAD tools, plus the print tools (blueprint D5, Bambu Studio D13): an
+ * external agent may read the slicing profiles a machine offers, and open,
+ * read, list and stop a print request through the same ledger a Tau turn
+ * uses, and is told to wait for the person — nothing here starts a print. Every name is dispatched into the daemon's own registry by tool name.
  *
  * @public
  */
@@ -64,6 +64,7 @@ export const hostMcpAllowedTools = [
   toolName.testModel,
   toolName.screenshot,
   toolName.exportGeometry,
+  toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
   toolName.listPrintRequests,
@@ -80,10 +81,18 @@ export type HostMcpAllowedTool = (typeof hostMcpAllowedTools)[number];
  * calls and this endpoint answers from the registry's own content.
  */
 const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAllowedTool>([
+  toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
   toolName.listPrintRequests,
   toolName.cancelPrint,
+]);
+
+/** The registry tools that change nothing, here or on a machine. */
+const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
+  toolName.getPrintProfiles,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
 ]);
 
 const isJsonObject = (value: JsonValue): value is JsonObject =>
@@ -96,7 +105,7 @@ const isJsonObject = (value: JsonValue): value is JsonObject =>
  * @returns The host tool `@taucad/mcp` registers.
  */
 const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMcpHostTool => {
-  const reads = definition.name === toolName.getPrintRequest || definition.name === toolName.listPrintRequests;
+  const reads = readOnlyRegistryTools.has(definition.name);
   return {
     name: definition.name,
     description: definition.description,

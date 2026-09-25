@@ -61,6 +61,7 @@ export const tauToolKinds = new Map<string, string>([
   ['get_machine', 'read'],
   ['request_print', 'other'],
   ['get_print_request', 'read'],
+  ['get_print_profiles', 'read'],
   ['list_print_requests', 'read'],
   ['cancel_print', 'other'],
 ]);

@@ -15,6 +15,7 @@ import type {
 import {
   cancelPrintInputSchema,
   getMachineInputSchema,
+  getPrintProfilesInputSchema,
   getPrintRequestInputSchema,
   listPrintRequestsInputSchema,
   requestPrintInputSchema,
@@ -26,6 +27,8 @@ import type { SlicerOptionsInput } from '@taucad/slicer';
 import { z } from 'zod';
 
 import { captureFilesToDataUrls } from '#capture/capture-data-urls.js';
+import { defaultBambuStudioEngine, describePrintProfiles } from '#registry/print-profiles.js';
+import type { BambuStudioEngine } from '#registry/print-profiles.js';
 
 const identity = z.string().min(1).max(256);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
@@ -83,6 +86,7 @@ const inputs = {
   begin_machine_binding: z.strictObject({ candidate, name: identity }),
   list_machines: z.strictObject({}),
   [toolName.getMachine]: getMachineInputSchema,
+  [toolName.getPrintProfiles]: getPrintProfilesInputSchema,
   [toolName.requestPrint]: requestPrintInputSchema.superRefine(({ options = {} }, context) => {
     const refused = Object.keys(options).filter((key) => !printOptionKeys.has(key));
     if (refused.length > 0) {
@@ -135,6 +139,7 @@ const descriptions: Readonly<Record<MachineToolName, string>> = {
     'Begin the trusted host-local binding ceremony for one discovered candidate. Credentials remain outside this tool.',
   list_machines: 'List the current workspace machine directory, including freshness and observed run state.',
   [toolName.getMachine]: toolDescriptions[toolName.getMachine],
+  [toolName.getPrintProfiles]: toolDescriptions[toolName.getPrintProfiles],
   [toolName.requestPrint]: toolDescriptions[toolName.requestPrint],
   [toolName.getPrintRequest]: toolDescriptions[toolName.getPrintRequest],
   [toolName.listPrintRequests]: toolDescriptions[toolName.listPrintRequests],
@@ -184,6 +189,10 @@ export type MachinePrintPlanner = (
     plate?: string | undefined;
     /** Slicer options, keys from `requestPrintOptionKeys` only; the slicer's own schema validates the values. */
     options?: JsonObject | undefined;
+    /** Bambu Studio presets the agent chose; the machine's defaults fill the rest. */
+    profiles?: z.infer<typeof requestPrintInputSchema>['profiles'];
+    /** Bambu Studio setting keys and values applied over the presets. */
+    settings?: z.infer<typeof requestPrintInputSchema>['settings'];
     signal: AbortSignal;
   }>,
 ) => Promise<
@@ -199,6 +208,8 @@ export type MachinePrintPlanner = (
 export type MachineToolRegistryOptions = {
   /** Backs `request_print`; without it the tool is not offered rather than offered-and-failing. */
   readonly planPrint?: MachinePrintPlanner | undefined;
+  /** Backs `get_print_profiles`; defaults to this host's `@taucad/slicer/bambu-studio`. */
+  readonly bambuStudio?: BambuStudioEngine | undefined;
 };
 
 /** Request states in which there is nothing left to stop. */
@@ -328,6 +339,8 @@ const requestPrint = async (
     plate: parsed.plate,
     // SAFETY: a zod record of JSON values is a JSON object.
     options: parsed.options as JsonObject | undefined,
+    profiles: parsed.profiles,
+    settings: parsed.settings,
     signal,
   });
   signal.throwIfAborted();
@@ -429,6 +442,31 @@ const cancelPrint = async (
   });
 };
 
+/**
+ * `get_print_profiles`: resolve the machine and its provider, then describe
+ * what Bambu Studio would slice with.
+ *
+ * @param client - The negotiated machines facet.
+ * @param options - Where Bambu Studio comes from.
+ * @param invocation - The tool call.
+ * @returns The profiles, or the reference engine and why.
+ */
+const getPrintProfiles = async (
+  client: MachineClient,
+  options: MachineToolRegistryOptions,
+  invocation: HostToolInvocation,
+): Promise<JsonValue> => {
+  const { signal } = invocation;
+  const { machineId, ...rest } = inputs.get_print_profiles.parse(invocation.input);
+  const { entry } = await resolveMachine(client, machineId, signal);
+  const providers = await client.listProviders({ signal });
+  const provider = providers.find(({ id }) => id === entry.providerId);
+  if (provider === undefined) {
+    throw new Error(`No provider ${entry.providerId} backs ${entry.descriptor.name}.`);
+  }
+  return describePrintProfiles(options.bambuStudio ?? defaultBambuStudioEngine, { provider, machine: entry, ...rest });
+};
+
 const invokeMachine = async (
   client: MachineClient,
   options: MachineToolRegistryOptions,
@@ -466,6 +504,9 @@ const invokeMachine = async (
       const { machineId } = inputs.get_machine.parse(input);
       const { entry } = await resolveMachine(client, machineId, signal);
       return asJson(entry);
+    }
+    case 'get_print_profiles': {
+      return getPrintProfiles(client, options, invocation);
     }
     case 'request_print': {
       const parsed = inputs.request_print.parse(input);

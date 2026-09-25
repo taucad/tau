@@ -21,6 +21,8 @@ import type {
   CancelPrintOutput,
   GetMachineInput,
   GetMachineOutput,
+  GetPrintProfilesInput,
+  GetPrintProfilesOutput,
   GetPrintRequestInput,
   GetPrintRequestOutput,
   ListPrintRequestsInput,
@@ -227,6 +229,7 @@ export type MyTools = InferUITools<{
   [toolName.applyParameterOperation]: AiTool<ApplyParameterOperationInput, ApplyParameterOperationOutput>;
   [toolName.updateTodos]: AiTool<UpdateTodosInput, UpdateTodosOutput>;
   [toolName.getMachine]: AiTool<GetMachineInput, GetMachineOutput>;
+  [toolName.getPrintProfiles]: AiTool<GetPrintProfilesInput, GetPrintProfilesOutput>;
   [toolName.requestPrint]: AiTool<RequestPrintInput, RequestPrintOutput>;
   [toolName.getPrintRequest]: AiTool<GetPrintRequestInput, GetPrintRequestOutput>;
   [toolName.listPrintRequests]: AiTool<ListPrintRequestsInput, ListPrintRequestsOutput>;

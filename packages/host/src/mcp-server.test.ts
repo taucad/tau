@@ -20,7 +20,7 @@ import { z } from 'zod';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
 import { createMachineToolRegistry } from '@taucad/agent-tools/registry';
-import type { MachinePrintPlanner } from '@taucad/agent-tools/registry';
+import type { BambuStudioEngine, MachinePrintPlanner } from '@taucad/agent-tools/registry';
 import type { MachineArtifactReference, MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
 
 import { startAgentServer } from '#agent-server.js';
@@ -39,6 +39,18 @@ const jsonRpcReplySchema = z.object({
 const toolsListSchema = z.object({
   tools: z.array(z.object({ name: z.string(), inputSchema: z.record(z.string(), z.unknown()) })),
 });
+/** Bambu Studio functions a test that never reaches them passes. */
+const unusedBambuStudio: BambuStudioEngine = {
+  findBambuStudio: async () => {
+    throw new Error('not used');
+  },
+  loadBambuStudioCatalog: async () => {
+    throw new Error('not used');
+  },
+  describeBambuStudioSettings: async () => {
+    throw new Error('not used');
+  },
+};
 const toolResultSchema = z.object({ isError: z.boolean().optional(), structuredContent: z.unknown().optional() });
 
 /**
@@ -199,6 +211,7 @@ describe('createHostMcpEndpoint capability', () => {
       'test_model',
       'screenshot',
       'export_geometry',
+      'get_print_profiles',
       'request_print',
       'get_print_request',
       'list_print_requests',
@@ -427,6 +440,7 @@ describe('the mounted /mcp route', () => {
         entries: [machine],
       }),
       requestPrint,
+      listProviders: async () => [{ id: 'bambu', vendor: 'Bambu Lab' }],
     } as unknown as MachineClient;
     const planPrint = vi.fn<MachinePrintPlanner>(async () => ({
       artifact: {
@@ -436,7 +450,11 @@ describe('the mounted /mcp route', () => {
       configuration: { expectedBedType: 'textured-pei' },
       summary: { layers: 125 },
     }));
-    const machineRegistry = createMachineToolRegistry(client, { planPrint });
+    /* A host without Bambu Studio: the profiles tool names the reference engine and why. */
+    const machineRegistry = createMachineToolRegistry(client, {
+      planPrint,
+      bambuStudio: { ...unusedBambuStudio, findBambuStudio: async () => undefined },
+    });
     endpoint = createHostMcpEndpoint({
       secret,
       registry: {
@@ -467,6 +485,7 @@ describe('the mounted /mcp route', () => {
       'test_model',
       'screenshot',
       'export_geometry',
+      'get_print_profiles',
       'request_print',
       'get_print_request',
       'list_print_requests',
@@ -519,6 +538,11 @@ describe('the mounted /mcp route', () => {
       isError: true,
     });
     expect(requestPrint).toHaveBeenCalledTimes(1);
+
+    /* Codex reads the same slicing profiles a Tau turn does. */
+    await expect(call('get_print_profiles', {})).resolves.toMatchObject({
+      structuredContent: { machineId: 'machine-1', engine: 'reference' },
+    });
     await release();
   }, 30_000);
 

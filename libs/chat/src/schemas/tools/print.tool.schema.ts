@@ -21,6 +21,36 @@ const slicerOptionsSchema = z
   .describe('Slicer options: a JSON object mapping option names to JSON values.')
   .pipe(z.record(z.string().min(1).max(64), z.json()));
 
+/*
+ * Bambu Studio setting overrides, bounded like `@taucad/slicer`'s own
+ * `bambuStudio.settings`. The same typeless wire side as the slicer options:
+ * a bounded record key would serialize as `propertyNames`.
+ */
+const bambuSettingsSchema = z
+  .any()
+  .describe('Bambu Studio settings: a JSON object mapping setting keys from get_print_profiles to values.')
+  .pipe(
+    z.record(
+      z.string().min(1).max(128),
+      z.union([
+        z.string().max(65_536),
+        z.number(),
+        z.boolean(),
+        z.null().describe('The printer value (Bambu Studio nil)'),
+        z.array(z.union([z.string().max(4096), z.number()])).max(64),
+      ]),
+    ),
+  );
+
+const presetNameSchema = z.string().min(1).max(256);
+
+/** Bambu Studio presets by name, as get_print_profiles lists them; the machine's defaults fill any omitted. */
+const printProfilesSchema = z.strictObject({
+  printer: presetNameSchema.optional(),
+  process: presetNameSchema.optional(),
+  filaments: z.array(presetNameSchema).min(1).max(16).optional().describe('One per loaded slot used, in slot order.'),
+});
+
 /**
  * The slicer options `request_print` accepts: print quality only. Slicing runs
  * before anyone approves the print, so the slicer engine and its service
@@ -62,6 +92,19 @@ export const requestPrintInputSchema = z.strictObject({
       'Build plate installed, by its manifest plate id. Required when the machine does not report its plate; ask the person which plate is on it rather than guess.',
     ),
   options: slicerOptionsSchema.optional(),
+  profiles: printProfilesSchema.optional(),
+  settings: bambuSettingsSchema.optional(),
+});
+
+/** @public */
+export const getPrintProfilesInputSchema = z.strictObject({
+  machineId: machineIdentitySchema.optional().describe('Omit when exactly one machine is bound.'),
+  profiles: printProfilesSchema.optional(),
+  keys: z
+    .array(z.string().min(1).max(128))
+    .max(64)
+    .optional()
+    .describe('Setting keys to describe in full: title, description, type, unit, range and choices.'),
 });
 
 /** @public */
@@ -134,6 +177,17 @@ export const requestPrintOutputSchema = z.looseObject({
 });
 
 /** @public */
+export const getPrintProfilesOutputSchema = z.looseObject({
+  engine: z.enum(['bambu-studio', 'reference']),
+  reason: z.string().optional().describe('Why the reference engine slices for this machine.'),
+  version: z.string().optional().describe('Bambu Studio version.'),
+  defaults: z
+    .looseObject({ printer: z.string(), process: z.string(), filaments: z.array(z.string()) })
+    .optional()
+    .describe('Presets request_print uses when profiles are omitted.'),
+});
+
+/** @public */
 export const getPrintRequestOutputSchema = z.looseObject({ request: printRequestRecordSchema });
 
 /** @public */
@@ -153,6 +207,10 @@ export type GetMachineOutput = z.infer<typeof getMachineOutputSchema>;
 export type RequestPrintInput = z.infer<typeof requestPrintInputSchema>;
 /** @public */
 export type RequestPrintOutput = z.infer<typeof requestPrintOutputSchema>;
+/** @public */
+export type GetPrintProfilesInput = z.infer<typeof getPrintProfilesInputSchema>;
+/** @public */
+export type GetPrintProfilesOutput = z.infer<typeof getPrintProfilesOutputSchema>;
 /** @public */
 export type GetPrintRequestInput = z.infer<typeof getPrintRequestInputSchema>;
 /** @public */

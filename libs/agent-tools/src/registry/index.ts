@@ -9,6 +9,7 @@ export {
   machineSliceOptions,
   type MachinePrintPlannerDependencies,
 } from '#registry/machine-print-planner.js';
+export type { BambuStudioEngine } from '#registry/print-profiles.js';
 export { createProviderRpcFileSystem, type ProviderRpcFileSystemOptions } from '#registry/provider-file-system.js';
 export { createSkillBundleOverlay, createSkillBundleRegistry } from '#registry/skill-overlay.js';
 export type {

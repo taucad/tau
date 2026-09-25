@@ -444,6 +444,9 @@ describe('createHostToolRegistry', () => {
           nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],
         },
         bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+        slicing: {
+          recommended: { nozzleTemperature: { value: 220, unit: 'Cel' }, bedTemperature: { value: 55, unit: 'Cel' } },
+        },
       },
     } as unknown as MachineProvider;
     const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
@@ -493,11 +496,19 @@ describe('createHostToolRegistry', () => {
       isError: false,
       content: { request: { requestId: 'call-1', machineId: 'machine-1', state: 'awaiting-approval' } },
     });
-    /* The quality the agent asked for is what the slicer receives. */
+    /* The quality the agent asked for is what the slicer receives, over the machine's own options. */
     expect(slice).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
       source: { path: 'main.ts' },
       signal: expect.any(AbortSignal) as AbortSignal,
-      exportOptions: { walls: 3, preset: 'fine' },
+      exportOptions: {
+        plate: 'textured-pei',
+        nozzleDiameter: 0.4,
+        filamentDiameter: 1.75,
+        nozzleTemperature: 220,
+        bedTemperature: 55,
+        walls: 3,
+        preset: 'fine',
+      },
     });
     const request = requestPrint.mock.calls[0]![0];
     expect(request.artifact).toMatchObject({

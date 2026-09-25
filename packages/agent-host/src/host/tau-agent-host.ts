@@ -1434,7 +1434,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
      * quietly re-stamped with whoever leads now. */
     const leaderEpoch = input.leaderEpoch ?? leaderEpochFor(input.chatId);
     const existing = await input.log.read();
-    const entry = runLedgerOf(existing).runs.get(input.runId);
+    const ledger = runLedgerOf(existing);
+    const entry = ledger.runs.get(input.runId);
     let lifecycle = entry?.lifecycle;
     let settlement = entry?.settlement;
     /* A run this host is *executing* counts as admitted: its first lifecycle
@@ -1462,6 +1463,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         if (!executing && !isHostSettlementLegal(state)) {
           throw settlementRefusal({ chatId: input.chatId, runId: input.runId, state });
         }
+      } else if (
+        body.type === 'run.lifecycle' &&
+        body.state === 'admitted' &&
+        ledger.chat !== undefined &&
+        ledger.chat.runId !== input.runId &&
+        !isHostRunOperationLegal('admit', ledger.chat.state)
+      ) {
+        /* One run per chat is a fact of the ledger, not of the command that
+         * asked: checked here, a writer that raced past command entry cannot
+         * admit a second run (L2a D3). */
+        throw chatRunLiveRefusal({ chatId: input.chatId, runId: ledger.chat.runId, state: ledger.chat.state });
       } else if (
         body.type === 'run.lifecycle' &&
         !isHostLifecycleLegal({
@@ -1645,6 +1657,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     } catch (error) {
       input.reservation.resolveReady(undefined);
       input.reservation.resolveAdmitted(undefined);
+      /* `admit` and `resume` handed this reservation over, so it is released
+       * here or never, and `resume` has already written its reopening rows: the
+       * coded row lands first, then the chat is admittable (L2a D1). A fenced
+       * generation's append is refused, and it writes nothing. */
+      await append({
+        chatId: input.chatId,
+        log: input.log,
+        runId: input.runId,
+        events: [{ type: 'run.lifecycle', state: 'failed', detail: codedFailureDetail(error) }],
+      }).catch(() => undefined);
+      releaseReservation(input.reservation);
       throw error;
     }
     activeByChat.set(input.chatId, active);
@@ -1968,6 +1991,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const untrack = async (): Promise<void> => {
       try {
         await completion;
+      } catch (error) {
+        /* Both the terminal and the failure append failed. Nothing awaits a
+         * detached run, and a re-throw here is an unhandled rejection that
+         * exits a Node host (L2a D13). */
+        console.error(`External run ${input.runId} of chat ${input.chatId} ended without a terminal record.`, error);
       } finally {
         detached.delete(completion);
       }
@@ -2206,11 +2234,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         if (external) {
           /* Routed before `execute`, so an external turn never composes a Tau
            * admission: it carries no Tau model, prompt or tool grant. */
-          executing = true;
-          releaseReservation(reservation);
-          reservation.resolveReady(undefined);
-          reservation.resolveAdmitted(undefined);
-          /* The chat's own session (VSC3), read on every trigger. A rewind keeps
+          /* The reservation is held until `runExternal` registers the run, and
+           * `finally` releases it: releasing it first let a second start be
+           * admitted before this one's `admitted` row landed (L2a D2).
+           *
+           * The chat's own session (VSC3), read on every trigger. A rewind keeps
            * the selection and drops the session: the vendor thread holds a turn
            * Tau has just retracted, so it is closed and a new one is opened. */
           const remembered = externalSessionOf(events, external.id);
@@ -2298,10 +2326,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
         if (externalTurnOf(events)) {
           /* An external run has no `AgentSession` to continue — its runner
-           * reconnects to the agent's own session from the remembered state. */
-          releaseReservation(reservation);
-          reservation.resolveReady(undefined);
-          reservation.resolveAdmitted(undefined);
+           * reconnects to the agent's own session from the remembered state.
+           * The reservation is held until that run registers (L2a D2). */
           if (!externalByChat.has(chatId)) {
             await resumeExternal(chatId);
           }

@@ -90,6 +90,7 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
       workspaceFs,
       contentService,
       markerService,
+      projectId,
     });
     const workspaceContentBinding = createWorkspaceContentBinding(modelService);
     workspaceFs.bindModelService(workspaceContentBinding);
@@ -159,7 +160,7 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
 
       setServices(defaultContextValue);
     };
-  }, [monaco, contentService, treeService, fileManagerApi, fileManagerRef, editorRef]);
+  }, [monaco, contentService, treeService, fileManagerApi, fileManagerRef, editorRef, projectId]);
 
   useEffect(() => {
     const ms = services.modelService;

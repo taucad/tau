@@ -6,7 +6,7 @@
  * the chunk a page that only lists projects evaluates. `project-route.tsx` loads it lazily the moment
  * a project is live, and the project route imports its own entry point from here directly.
  */
-import { useEffect } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -52,6 +52,7 @@ import { selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
+import { hasPendingEditorDecision, refuseCloseWhileDeciding, subscribeEditorDecisions } from '#lib/editor-decisions.js';
 
 export type ProjectSessionFlushRegistration = {
   projectId: string;
@@ -69,16 +70,22 @@ const editorFlushTimeoutMilliseconds = 10_000;
  * on disk before the cut rather than beside it.
  */
 export async function flushProjectSessionPersistence({
+  projectId,
   parameterService,
   projectRef,
   editorRef,
   closeFlushMilliseconds,
 }: Readonly<{
+  /** The project closing: refused, before anything is torn down, while an editor decision is open. */
+  projectId?: string;
   parameterService: ParameterSetService;
   projectRef: ActorRefFrom<typeof projectMachine>;
   editorRef: ActorRefFrom<typeof editorMachine>;
   closeFlushMilliseconds: number;
 }>): Promise<void> {
+  if (projectId !== undefined) {
+    refuseCloseWhileDeciding(projectId);
+  }
   await parameterService.close();
   projectRef.send({ type: 'flushNow' });
   editorRef.send({ type: 'flushNow' });
@@ -131,6 +138,11 @@ function ProjectSessionBinding({
   /* R4: why this project has no kernel, from the machine that owns its units. */
   const kernelRefusal = useSelector(projectRef, selectProjectKernelRefusal);
   const status = useRevisionClientStatus(client);
+  /* RV-W5b2 R2-1: text only an editor holds keeps the project open, like a dirty tree. */
+  const deciding = useSyncExternalStore(
+    subscribeEditorDecisions,
+    useCallback(() => hasPendingEditorDecision(projectId), [projectId]),
+  );
   /* W7 tier 3: the `cloudOpen` marker is read and cleared by the host, through
    * the router, so React sees the change. This half only acts on it. */
   useEffect(() => {
@@ -178,6 +190,7 @@ function ProjectSessionBinding({
     session.send({
       type: 'revisionState',
       dirty: status.projectDirty,
+      deciding,
       pushed: sync.state === 'noRemote' || sync.state === 'backedUp',
       sync: syncState,
       /* R11: the branch the checkout is on gives `revision.line` its producer,
@@ -185,12 +198,13 @@ function ProjectSessionBinding({
       pendingCount: sync.pendingCount,
       ...(status.line.kind === 'unknown' ? {} : { branch: status.line.name }),
     });
-  }, [session, status]);
+  }, [deciding, session, status]);
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {
       flushProducers: async () =>
         flushProjectSessionPersistence({
+          projectId,
           parameterService,
           projectRef,
           editorRef,
@@ -257,6 +271,12 @@ function ProjectSessionBinding({
       document.removeEventListener('visibilitychange', reportVisibility);
     };
   }, [isFocused, session]);
+
+  /* RV-W5b F12: only the focused project holds its revision long poll; one
+   * that gains focus pulls once its stream is open. */
+  useEffect(() => {
+    client?.focus?.(isFocused);
+  }, [client, isFocused]);
 
   /* R3: the session owns "hidden and idle", the project machine owns the cad
    * units, and no actor ref joins them — the session's `project` child is the

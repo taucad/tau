@@ -165,6 +165,42 @@ describe('sessionsMachine', async () => {
     actor.stop();
   });
 
+  it('never evicts a project whose editor holds a decision, and refuses when every one does (RV-W5b2 R2-1)', async () => {
+    const { actor, emitted, stopped } = harness();
+    for (let index = 0; index < browserLiveProjectBudget; index += 1) {
+      await openIdle(actor, `proj${index}`);
+    }
+    for (let index = 1; index < browserLiveProjectBudget; index += 1) {
+      actor.send({ type: 'touch', projectId: `proj${index}` });
+    }
+    const deciding = (projectId: string): void => {
+      actor.getSnapshot().context.refs[projectId]?.send({
+        type: 'revisionState',
+        dirty: false,
+        pushed: true,
+        deciding: true,
+      });
+    };
+    /* The least recently touched project is the one holding a decision. */
+    deciding('proj0');
+
+    actor.send({ type: 'open', projectId: 'projNinth' });
+    await settle();
+
+    expect(stopped).toEqual(['proj1']);
+    expect(actor.getSnapshot().context.refs['proj0']).toBeDefined();
+
+    for (const projectId of Object.keys(actor.getSnapshot().context.refs)) {
+      deciding(projectId);
+    }
+    actor.send({ type: 'open', projectId: 'projTenth' });
+    await settle();
+
+    expect(emitted.find((event) => event.type === 'budgetRefused')?.projectId).toBe('projTenth');
+    expect(stopped).toEqual(['proj1']);
+    actor.stop();
+  });
+
   it('refuses a ninth open when nothing is idle, naming the candidates (pin b2, I28)', async () => {
     const { actor, emitted, started } = harness();
     for (let index = 0; index < browserLiveProjectBudget; index += 1) {

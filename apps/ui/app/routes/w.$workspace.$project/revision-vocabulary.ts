@@ -17,7 +17,7 @@ import { isGithubRemoteUrl } from '@taucad/revisions';
 import type { RemoteFacet, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
 import type { SidebarMark } from '#hooks/use-sidebar-status.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
-import { useRevisions } from '#hooks/use-revisions.js';
+import { useRevisionCards, useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
 import type { TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
@@ -278,6 +278,37 @@ const restingFacts = (status: RevisionStatusProjection, where: RevisionWhere): R
   };
 };
 
+/**
+ * Work another device pushed that these files have not taken yet (RA4, D12).
+ *
+ * The canvas's arrival line (RS28, RS29): `Rev N arrived from <who>`. It shows
+ * while a turn holds the files, because a checkout a turn holds is never
+ * re-based (rule 9); the revision applies when the turn settles. Who is
+ * History's attribution (HQ4) on its remote (`Tau agent on Tau Cloud`), except
+ * for the viewer's own work, which is said as `another session`: attribution
+ * here is the revision's own provenance, which its author asserts, and this
+ * client can read neither the server's per-push attribution (EQ11's
+ * `committedBy`/`viaDevice`) nor a device id on the revision — so it claims no
+ * other *device* it cannot prove (RV-W5b F11). A second tab is a session too.
+ *
+ * @param card - The arrived revision's card, once History has read it.
+ * @param remote - The remote it arrived from.
+ * @returns The sentence; before the card is read it still says something arrived (I6).
+ * @public
+ */
+export const arrivedSentence = (card: RevisionCard | undefined, remote?: RemoteFacet): string => {
+  const name = revisionName(card?.n) ?? 'A new revision';
+  if (card === undefined) {
+    return `${name} arrived`;
+  }
+  if (card.actor === 'You') {
+    return `${name} arrived from another session`;
+  }
+  return remote?.kind === 'tau'
+    ? `${name} arrived from ${card.actor} on Tau Cloud`
+    : `${name} arrived from ${card.actor}`;
+};
+
 /** Before the projection or the graph answers: loading, never empty (I6, S20). */
 const loadingFacts: RevisionFacts = { icon: CircleDashed, tone: '', mark: 'none', sentence: 'Loading history…' };
 
@@ -292,12 +323,14 @@ const loadingFacts: RevisionFacts = { icon: CircleDashed, tone: '', mark: 'none'
  *
  * @param status - The revision status projection, `undefined` before the root answers.
  * @param where - Where the checkout is.
+ * @param arrived - The card of the revision `status.sync.arrived` names, once read.
  * @returns The glyph, its tone, the mark it stands for and the sentence.
  * @public
  */
 export const selectRevisionFacts = (
   status: RevisionStatusProjection | undefined,
   where: RevisionWhere,
+  arrived?: RevisionCard,
 ): RevisionFacts => {
   if (status === undefined) {
     return loadingFacts;
@@ -309,6 +342,10 @@ export const selectRevisionFacts = (
   const running = runningSentence(status, where);
   if (running !== undefined) {
     return { icon: CircleDashed, tone: '', mark: 'running', sentence: running };
+  }
+  /* Calm: nothing is asked of the person, and the arrival applies on its own. */
+  if (status.sync.arrived !== undefined) {
+    return { icon: arrivedGlyph, tone: '', mark: 'none', sentence: arrivedSentence(arrived, status.remote) };
   }
   return where.isLoading === true && where.head === undefined && !where.isDirty
     ? loadingFacts
@@ -332,6 +369,8 @@ export const useRevisionFacts = (): Readonly<{
   const status = useRevisionStatus();
   const role = useProjectRole();
   const head = revisions.find((revision) => revision.revisionId === headRevisionId);
+  const arrivedId = status?.sync.arrived;
+  const arrived = useRevisionCards(arrivedId === undefined ? [] : [arrivedId]).get(arrivedId ?? '');
   const where: RevisionWhere = {
     branch: line.kind === 'unknown' ? undefined : line.name,
     head: head?.n,
@@ -339,7 +378,7 @@ export const useRevisionFacts = (): Readonly<{
     isLoading,
     role,
   };
-  return { where, facts: selectRevisionFacts(status, where), head, status };
+  return { where, facts: selectRevisionFacts(status, where, arrived), head, status };
 };
 
 /**

@@ -67,6 +67,12 @@ export type RevisionClient = Readonly<{
    * credential. Memory only, on both sides (I8).
    */
   remoteCredential: (credential: GitRemoteCredential) => void;
+  /**
+   * Say whether this project is the page's focused one (RV-W5b F12): only the
+   * focused project holds the `revision` long poll. A port frame, kept across
+   * reconnects. Absent on a host-served client, whose polls have no socket cap.
+   */
+  focus?: (focused: boolean) => void;
   subscribe: (listener: () => void) => () => void;
   /** Every settled revision signal this project's root published. */
   subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => () => void;
@@ -750,6 +756,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
    * lifecycle calls once the GitHub credential is minted and queued first. */
   let admitted = false;
   const queued: WorkerRevisionRequest[] = [];
+  /* The page's last word on focus, re-said on every new port: a reopened root starts unfocused. */
+  let focused: boolean | undefined;
   const receive = (generation: number, { data }: MessageEvent<WorkerRevisionResponse>): void => {
     if (generation !== connectionGeneration) {
       return;
@@ -848,6 +856,13 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     remoteCredential: (credential) => {
       post({ command: 'remoteCredential', ...credential });
     },
+    focus: (next) => {
+      focused = next;
+      /* Not queued: `open` says it once on every new port, including the first. */
+      if (admitted) {
+        open().postMessage({ command: 'focus', focused: next } satisfies WorkerRevisionRequest);
+      }
+    },
     subscribe: (listener) => listeners.subscribe(listener),
     subscribeEvents: (listener) => {
       const unsubscribe = events.subscribe(listener);
@@ -941,6 +956,9 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       const port = open();
       for (const request of queued.splice(0)) {
         port.postMessage(request);
+      }
+      if (focused !== undefined) {
+        port.postMessage({ command: 'focus', focused } satisfies WorkerRevisionRequest);
       }
     },
     close: () => {

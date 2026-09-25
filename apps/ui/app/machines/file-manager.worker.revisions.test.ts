@@ -18,7 +18,11 @@ import { revisionId } from '@taucad/revisions/algorithms';
 import { admissionMilliseconds } from '@taucad/revisions/revision-effects';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
+import {
+  createCheckoutRoutes,
+  createRemoteAttention,
+  createWorkerRevisionRegistry,
+} from '#machines/file-manager.worker.revisions.js';
 import type {
   WorkerProjectRevisions,
   WorkerRevisionRequest,
@@ -1075,5 +1079,131 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(answer.message).toBe(
       'This project could not open a revision for the turn: The turn ended before it recorded a revision.',
     );
+  });
+});
+
+/*
+ * RV-W5b2 N4: the wiring, not the gate alone. The registry's `focus` frame
+ * reaches the project's attention and the real stream opens exactly once; a
+ * project reopened on a new port streams again once the page re-sends focus
+ * (the client does, per port).
+ */
+describe('the focus frame through the worker registry (RV-W5b2 N4)', () => {
+  it('opens exactly one long poll for a focused project, and again after a reconnect re-sends focus', async () => {
+    const fixture = harness(['alpha']);
+    const files = fixture.service.createRootedFileSystem('/projects/alpha');
+    await files.writeFile('tau.json', JSON.stringify({ name: 'Alpha project' }));
+    /* A project already connected to Tau Cloud: its store names the `tau` remote. */
+    const first = await fixture.open('alpha');
+    first.send({ command: 'close', id: 1 });
+    await first.settle();
+    await createIsomorphicGitRevisionPort({ filesystem: files }).setRemote({
+      name: 'tau',
+      url: 'https://api.test/v1/git/alpha.git',
+    });
+    const polls = new Set<number>();
+    let pollCount = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (!url.pathname.startsWith('/v1/streams/')) {
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.searchParams.get('longPollDuration') === '0') {
+        return new Response(JSON.stringify({ nextSequence: 0, events: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      pollCount += 1;
+      const id = pollCount;
+      polls.add(id);
+      /* A long poll the server holds until the reader lets go. */
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          polls.delete(id);
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        });
+      });
+    }) as unknown as typeof globalThis.fetch;
+
+    try {
+      const alpha = await fixture.open('alpha');
+      alpha.send({ command: 'remoteCredential', apiBaseUrl: 'https://api.test' });
+      await alpha.settle();
+      expect(polls.size, 'an unfocused project holds no long poll').toBe(0);
+
+      alpha.send({ command: 'focus', focused: true });
+      await vi.waitFor(() => {
+        expect(polls.size).toBe(1);
+      });
+      alpha.send({ command: 'focus', focused: true });
+      await alpha.settle();
+      expect(pollCount, 'one stream, not one per frame').toBe(1);
+
+      alpha.send({ command: 'close', id: 7 });
+      await vi.waitFor(() => {
+        expect(polls.size, 'closing the project closes its stream').toBe(0);
+      });
+
+      const reopened = await fixture.open('alpha');
+      reopened.send({ command: 'remoteCredential', apiBaseUrl: 'https://api.test' });
+      reopened.send({ command: 'focus', focused: true });
+      await vi.waitFor(() => {
+        expect(polls.size).toBe(1);
+      });
+      expect(pollCount).toBe(2);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+/*
+ * RV-W5b F12: up to eight live projects on one HTTP/1.1 origin would each hold
+ * a 25 s long poll, past the six sockets a browser gives a host. Only the
+ * focused project streams; a project that gains focus pulls once its stream's
+ * tail is read, and the one that loses it closes its stream.
+ */
+describe('the revision long poll follows focus (RV-W5b F12)', () => {
+  it('holds exactly one stream across N live projects, and a focus change pulls the new project and closes the old stream', () => {
+    const projects = ['prj_a', 'prj_b', 'prj_c'];
+    const streams = new Map<string, { readonly tail: () => void }>();
+    const pulls: string[] = [];
+    const attention = new Map(projects.map((projectId) => [projectId, createRemoteAttention()]));
+    for (const projectId of projects) {
+      /* The scheduler watches once its open pull starts; the stream is the stand-in for the long poll. */
+      attention.get(projectId)!.gate(
+        (handlers) => {
+          streams.set(projectId, { tail: () => handlers.watching?.() });
+          return () => {
+            streams.delete(projectId);
+          };
+        },
+        {
+          moved: () => {
+            pulls.push(projectId);
+          },
+          refused: () => undefined,
+        },
+      );
+    }
+    expect([...streams.keys()], 'no project is focused yet').toEqual([]);
+
+    /* The page binds every live project and says which one is focused. */
+    for (const projectId of projects) {
+      attention.get(projectId)!.setFocused(projectId === 'prj_a');
+    }
+    expect([...streams.keys()]).toEqual(['prj_a']);
+    streams.get('prj_a')!.tail();
+    expect(pulls, 'a focused project pulls once its tail is read').toEqual(['prj_a']);
+
+    /* The person switches to prj_c. */
+    attention.get('prj_a')!.setFocused(false);
+    attention.get('prj_c')!.setFocused(true);
+    expect([...streams.keys()], 'the old stream closed; the new one opened').toEqual(['prj_c']);
+    expect(pulls, 'no pull before the new stream reads its tail').toEqual(['prj_a']);
+    streams.get('prj_c')!.tail();
+    expect(pulls).toEqual(['prj_a', 'prj_c']);
   });
 });

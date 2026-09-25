@@ -7,9 +7,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { toast } from 'sonner';
+import { serializeParameterRecord } from '@taucad/parameters';
 import { mock } from 'vitest-mock-extended';
 import type * as Monaco from 'monaco-editor';
 import { createWorkspaceContentBinding, MonacoModelService } from '#lib/monaco-model-service.js';
+import { hasPendingEditorDecision } from '#lib/editor-decisions.js';
 import type { ModelServiceConfig } from '#lib/monaco-model-service.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '@taucad/fs-client/file-content-service';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -48,6 +51,8 @@ vi.mock('#lib/monaco.constants.js', () => ({
     return undefined;
   },
 }));
+
+vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { dismiss: vi.fn() }) }));
 
 vi.mock('#utils/filesystem.utils.js', () => ({
   decodeTextFile: (data: Uint8Array<ArrayBuffer>) => new TextDecoder().decode(data),
@@ -717,10 +722,28 @@ describe('MonacoModelService', () => {
       await service.acquireModel('main.ts');
       const model = models.get('file:///main.ts');
 
-      contentService._outcomeHandler?.({ path: 'main.ts', result: { kind: 'orphaned' } });
+      contentService._outcomeHandler?.({
+        path: 'main.ts',
+        result: { kind: 'binary', size: 4, head: new Uint8Array([0, 1, 2, 3]), revision: 1 },
+      });
 
       expect(model?.dispose).toHaveBeenCalledOnce();
       expect(markerService.removeUri).toHaveBeenCalledWith('file:///main.ts');
+    });
+
+    it('should keep an editor-held model through an orphaned outcome and dispose an unheld one (RV-W5b2 N2)', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('held')).mockResolvedValueOnce(textResult('loose'));
+      await service.acquireModel('held.ts');
+      await service.getOrEnsureModel('loose.ts');
+      const held = models.get('file:///held.ts');
+      const loose = models.get('file:///loose.ts');
+
+      /* An apply moves a file aside before it renames the new bytes in: the held model survives the gap. */
+      contentService._outcomeHandler?.({ path: 'held.ts', result: { kind: 'orphaned' } });
+      contentService._outcomeHandler?.({ path: 'loose.ts', result: { kind: 'orphaned' } });
+
+      expect(held?.dispose).not.toHaveBeenCalled();
+      expect(loose?.dispose).toHaveBeenCalledOnce();
     });
 
     it('should preserve an empty open model across rename', async () => {
@@ -824,6 +847,507 @@ describe('Monaco external-content production wiring', () => {
       workspaceFs.dispose();
       contentService.dispose();
       channel.dispose();
+    }
+  });
+});
+
+/*
+ * RV-W5b F4 / RV-W5b2 N1–N3: an auto-applied revision (D12) writes a file the
+ * editor has open. An editor save is a checked write against the bytes the
+ * model was made from; a refused save merges the model's edit onto the file as
+ * it now is — never as conflict markers (I7) — or asks the person to choose.
+ * The apply's own events are the real pair the mutation pipeline emits: the
+ * file moved aside to its backup, then the staged copy renamed onto it.
+ */
+describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)', () => {
+  const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
+  const decode = (bytes: Uint8Array<ArrayBuffer> | undefined): string | undefined =>
+    bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+  const base = 'a\nb\nc\n';
+  const typed = 'A\nb\nc\n';
+  const arrived = 'a\nb\nC\n';
+  const both = 'A\nb\nC\n';
+  const backup = '.part.scad.tau-backup.00000000-0000-4000-8000-000000000001.tmp';
+  const staged = '.part.scad.tau-staged.00000000-0000-4000-8000-000000000002.tmp';
+
+  const createRace = (path = 'part.scad', initial = base, projectId = 'project') => {
+    const file = `/project/${path}`;
+    const disk = new Map<string, Uint8Array<ArrayBuffer>>([[file, encode(initial)]]);
+    /* Holds the editor's next write in flight, as the worker round trip does. */
+    let gate: PromiseWithResolvers<void> | undefined;
+    let checkedWrites = 0;
+    let failure: { readonly error: Error; readonly from: number } | undefined;
+    const inFlight = async (): Promise<void> => {
+      const held = gate;
+      if (held !== undefined) {
+        await held.promise;
+      }
+    };
+    function readFile(filepath: string, options: 'utf8' | { encoding: 'utf8' }): Promise<string>;
+    function readFile(filepath: string, options?: { encoding?: undefined }): Promise<Uint8Array<ArrayBuffer>>;
+    async function readFile(
+      filepath: string,
+      options?: 'utf8' | { encoding?: 'utf8' },
+    ): Promise<string | Uint8Array<ArrayBuffer>> {
+      const data = disk.get(filepath);
+      if (data === undefined) {
+        throw Object.assign(new Error(`ENOENT: ${filepath}`), { code: 'ENOENT' });
+      }
+      return options === 'utf8' || options?.encoding === 'utf8' ? new TextDecoder().decode(data) : new Uint8Array(data);
+    }
+    const proxy = mock<ComposedViewClient>({ readFile });
+    proxy.writeFile.mockImplementation(async (filepath, data) => {
+      await inFlight();
+      disk.set(filepath, typeof data === 'string' ? encode(data) : new Uint8Array(data));
+    });
+    proxy.writeFileChecked.mockImplementation(async ({ path: target, data, preconditions }) => {
+      const index = checkedWrites;
+      checkedWrites += 1;
+      await inFlight();
+      if (failure !== undefined && index >= failure.from) {
+        const { error } = failure;
+        failure = undefined;
+        throw error;
+      }
+      const actual = disk.get(target) ?? null;
+      const expected = preconditions[0]?.expected;
+      const wanted = typeof expected === 'string' ? encode(expected) : expected;
+      const matches =
+        actual === null || wanted === null || wanted === undefined
+          ? actual === wanted
+          : decode(actual) === decode(wanted);
+      if (!matches) {
+        return { status: 'conflict', conflicts: [{ path: target, actual }] };
+      }
+      const content = typeof data === 'string' ? encode(data) : new Uint8Array(data);
+      disk.set(target, content);
+      return { status: 'applied', content };
+    });
+    let emitWorkerChange: ((event: unknown) => void) | undefined;
+    const channel = new WorkerChangeChannel({
+      transport: {
+        listen: (_event, handler) => {
+          emitWorkerChange = handler;
+          return vi.fn();
+        },
+      },
+    });
+    const contentService = new FileContentService({
+      proxy,
+      paths: new WorkspacePathResolver('/project'),
+      channel,
+      refreshGuard: new RefreshGenerationGuard(),
+    });
+    const { monaco, models } = createMockMonaco();
+    const workspaceFs = createMonacoWorkspaceFs(monaco);
+    workspaceFs.registerFileSystemProvider(createWorkspaceFileSystemProvider({ monaco, contentService }));
+    const modelService = new MonacoModelService();
+    modelService.initialize({
+      monaco,
+      workspaceFs,
+      contentService,
+      markerService: createMockMarkerService() as unknown as ModelServiceConfig['markerService'],
+      projectId,
+    });
+    const binding = createWorkspaceContentBinding(modelService);
+    const subscription = subscribeWorkspaceContentDispatch(
+      contentService,
+      binding.applyContentChange,
+      binding.applyOutcomeChange,
+    );
+    const rename = (oldPath: string, newPath: string): void => {
+      emitWorkerChange?.({ type: 'fileRenamed', oldPath, newPath, backend: 'indexeddb' });
+    };
+    return {
+      disk,
+      file,
+      modelService,
+      model: () => models.get(`file:///${path}`),
+      /** The user types: the model changes, and the change is saved (`handleCodeChange`). */
+      type: async (text: string): Promise<void> => {
+        models.get(`file:///${path}`)?.setValue(text);
+        await modelService.saveEditor(path, encode(text));
+      },
+      holdWrites: (): PromiseWithResolvers<void> => {
+        gate = Promise.withResolvers<void>();
+        return gate;
+      },
+      releaseWrites: (held: PromiseWithResolvers<void>): void => {
+        gate = undefined;
+        held.resolve();
+      },
+      /** Fail the next checked write that starts from now on. */
+      failNextCheckedWrite: (error: Error): void => {
+        failure = { error, from: checkedWrites };
+      },
+      /** An apply that wrote the file in place, as a merge landing does. */
+      applied: (text: string): void => {
+        disk.set(file, encode(text));
+        emitWorkerChange?.({ type: 'fileWritten', path, backend: 'indexeddb' });
+      },
+      /** `applyTree` moves the file aside before it publishes the staged copy. */
+      moveAside: (): void => {
+        const held = disk.get(file);
+        disk.delete(file);
+        if (held !== undefined) {
+          disk.set(`/project/${backup}`, held);
+        }
+        rename(path, backup);
+      },
+      /** …then renames the staged bytes onto the path. */
+      publish: (text: string): void => {
+        disk.set(file, encode(text));
+        disk.delete(`/project/${backup}`);
+        rename(staged, path);
+      },
+      /** …or, refused, puts the moved bytes back. */
+      rollBack: (): void => {
+        const held = disk.get(`/project/${backup}`);
+        disk.delete(`/project/${backup}`);
+        if (held !== undefined) {
+          disk.set(file, held);
+        }
+        rename(backup, path);
+      },
+      /** A worker rename event, for a swap whose events arrive after the save's answer. */
+      rename,
+      /** The choose-one the person was shown, if any. */
+      decision: () => vi.mocked(toast).mock.calls.at(-1),
+      /** Press *Keep mine* or *Keep theirs* on this project's newest decision toast. */
+      keep: (choice: 'Keep mine' | 'Keep theirs'): void => {
+        const options = vi
+          .mocked(toast)
+          .mock.calls.findLast(([, candidate]) =>
+            (candidate as { id?: string } | undefined)?.id?.includes(`:${projectId}:`),
+          )?.[1] as
+          | {
+              action: { label: string; onClick: (event: { preventDefault: () => void }) => void };
+              cancel: { props: { children: string; onClick: () => void } };
+            }
+          | undefined;
+        if (choice === 'Keep mine') {
+          expect(options?.action.label).toBe(choice);
+          options?.action.onClick({ preventDefault: vi.fn() });
+          return;
+        }
+        expect(options?.cancel.props.children).toBe(choice);
+        options?.cancel.props.onClick();
+      },
+      dispose: (): void => {
+        subscription.dispose();
+        modelService.dispose();
+        workspaceFs.dispose();
+        contentService.dispose();
+        channel.dispose();
+      },
+    };
+  };
+
+  /** Let the worker round trips and outcome events settle. */
+  const drain = async (): Promise<void> => {
+    for (let turn = 0; turn < 10; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- draining is sequential by definition.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
+  };
+
+  beforeEach(() => {
+    vi.mocked(toast).mockClear();
+  });
+
+  it('scenario A: a keystroke save in flight does not revert the hunk the apply just wrote', async () => {
+    const race = createRace();
+    try {
+      await race.modelService.acquireModel('part.scad');
+      expect(race.model()?.getValue()).toBe(base);
+
+      const held = race.holdWrites();
+      const save = race.type(typed);
+      /* The file was clean at the dirty check, so the apply writes the other side's hunk. */
+      race.applied(arrived);
+      race.releaseWrites(held);
+      await save;
+
+      await vi.waitFor(() => {
+        expect(decode(race.disk.get(race.file))).toBe(both);
+      });
+      expect(race.model()?.getValue()).toBe(both);
+    } finally {
+      race.dispose();
+    }
+  });
+
+  it('scenario B: a keystroke that lands while the apply swaps the file is kept, and the model survives the swap (N2)', async () => {
+    const race = createRace();
+    try {
+      await race.modelService.acquireModel('part.scad');
+
+      const held = race.holdWrites();
+      const save = race.type(typed);
+      race.moveAside();
+      race.releaseWrites(held);
+      await drain();
+      race.publish(arrived);
+      await save;
+
+      await vi.waitFor(() => {
+        expect(decode(race.disk.get(race.file))).toBe(both);
+      });
+      expect(race.model()?.getValue()).toBe(both);
+      expect(race.model()?.dispose).not.toHaveBeenCalled();
+    } finally {
+      race.dispose();
+    }
+  });
+
+  it('keeps a keystroke refused by a swap whose rename pair arrives after the refusal (RV-W5b2 test gap)', async () => {
+    const race = createRace();
+    try {
+      await race.modelService.acquireModel('part.scad');
+
+      const held = race.holdWrites();
+      const save = race.type(typed);
+      /* The apply swapped the file on disk; its renames are still in the coalescer. */
+      race.disk.set(race.file, encode(arrived));
+      race.releaseWrites(held);
+      await drain();
+      /* The worker's batch, about 50 ms after the refusal answered the save. */
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      race.rename('part.scad', backup);
+      race.rename(staged, 'part.scad');
+      await save;
+
+      await vi.waitFor(() => {
+        expect(decode(race.disk.get(race.file))).toBe(both);
+      });
+      expect(race.model()?.getValue()).toBe(both);
+      expect(race.model()?.dispose).not.toHaveBeenCalled();
+    } finally {
+      race.dispose();
+    }
+  });
+
+  it('keeps the model and its undo history when an apply swaps an open file nobody is typing in (N2)', async () => {
+    const race = createRace();
+    try {
+      await race.modelService.acquireModel('part.scad');
+      const model = race.model();
+
+      race.moveAside();
+      await drain();
+      race.publish(arrived);
+
+      await vi.waitFor(() => {
+        expect(model?.getValue()).toBe(arrived);
+      });
+      expect(model?.dispose).not.toHaveBeenCalled();
+      /* An edit operation, not `setValue`: the arrived text is one undoable step. */
+      expect(model?.pushEditOperations).toHaveBeenCalledWith(
+        [],
+        [expect.objectContaining({ text: arrived })],
+        expect.any(Function),
+      );
+      expect(race.model()).toBe(model);
+    } finally {
+      race.dispose();
+    }
+  });
+
+  it.each([
+    ['Keep mine', 'A\nb\nmine\n'],
+    ['Keep theirs', arrived],
+  ])(
+    'never writes conflict markers when both sides changed a line: it asks, and %s settles it (N1, I7)',
+    async (choice, settled) => {
+      const race = createRace();
+      const mine = 'A\nb\nmine\n';
+      try {
+        await race.modelService.acquireModel('part.scad');
+        const held = race.holdWrites();
+        const save = race.type(mine);
+        race.applied(arrived);
+        race.releaseWrites(held);
+        await drain();
+
+        /* Nothing is written: the arrived bytes stay, the typed text stays in the model. */
+        expect(decode(race.disk.get(race.file))).toBe(arrived);
+        expect(race.model()?.getValue()).toBe(mine);
+        const [title, options] = race.decision() ?? [];
+        expect(title).toBe('Needs your decision');
+        /* Not dismissible: no close control, no swipe, no timeout (RV-W5b2 R2-1). */
+        expect(options).toMatchObject({ dismissible: false, duration: Number.POSITIVE_INFINITY });
+        race.keep(choice as 'Keep mine' | 'Keep theirs');
+        await save;
+
+        await vi.waitFor(() => {
+          expect(decode(race.disk.get(race.file))).toBe(settled);
+        });
+        expect(race.model()?.getValue()).toBe(settled);
+        for (const bytes of race.disk.values()) {
+          expect(decode(bytes)).not.toContain('<<<<<<<');
+        }
+      } finally {
+        race.dispose();
+      }
+    },
+  );
+
+  it('gives each live project its own decision toast, even for the same file (RV-W5b2 R2-1)', async () => {
+    const alpha = createRace('part.scad', base, 'alpha');
+    const beta = createRace('part.scad', base, 'beta');
+    try {
+      const overlap = async (race: typeof alpha): Promise<void> => {
+        await race.modelService.acquireModel('part.scad');
+        const held = race.holdWrites();
+        void race.type('A\nb\nmine\n');
+        race.applied(arrived);
+        race.releaseWrites(held);
+        await drain();
+      };
+      await overlap(alpha);
+      await overlap(beta);
+
+      const ids = [
+        ...new Set(vi.mocked(toast).mock.calls.map(([, options]) => (options as { id?: string } | undefined)?.id)),
+      ];
+      expect(ids).toHaveLength(2);
+      expect(ids[0]).toContain(':alpha:');
+      expect(ids[1]).toContain(':beta:');
+      expect(hasPendingEditorDecision('alpha')).toBe(true);
+      expect(hasPendingEditorDecision('beta')).toBe(true);
+
+      beta.keep('Keep theirs');
+      expect(hasPendingEditorDecision('beta')).toBe(false);
+      expect(hasPendingEditorDecision('alpha')).toBe(true);
+      alpha.keep('Keep theirs');
+      expect(hasPendingEditorDecision('alpha')).toBe(false);
+    } finally {
+      alpha.dispose();
+      beta.dispose();
+    }
+  });
+
+  it('keeps an open decision when its editor service goes away, and Keep mine still writes the text (RV-W5b2 R2-1)', async () => {
+    const race = createRace('part.scad', base, 'gamma');
+    const mine = 'A\nb\nmine\n';
+    try {
+      await race.modelService.acquireModel('part.scad');
+      const held = race.holdWrites();
+      void race.type(mine);
+      race.applied(arrived);
+      race.releaseWrites(held);
+      await drain();
+      expect(hasPendingEditorDecision('gamma')).toBe(true);
+
+      /* Switching project disposes the focused project's model service. */
+      race.modelService.dispose();
+      expect(hasPendingEditorDecision('gamma')).toBe(true);
+      expect(decode(race.disk.get(race.file))).toBe(arrived);
+
+      race.keep('Keep mine');
+      await vi.waitFor(() => {
+        expect(decode(race.disk.get(race.file))).toBe(mine);
+      });
+      expect(hasPendingEditorDecision('gamma')).toBe(false);
+    } finally {
+      race.dispose();
+    }
+  });
+
+  it('merges a parameter record per key through its codec, never as text (N1)', async () => {
+    const record = (values: Record<string, number>): string =>
+      new TextDecoder().decode(
+        serializeParameterRecord({ activeGroup: 'default', groups: { default: { values } } } as Parameters<
+          typeof serializeParameterRecord
+        >[0]),
+      );
+    const path = '.tau/parameters/main.json';
+    const race = createRace(path, record({ height: 10, width: 10 }));
+    try {
+      await race.modelService.acquireModel(path);
+      const held = race.holdWrites();
+      const save = race.type(record({ height: 20, width: 10 }));
+      race.applied(record({ height: 10, width: 30 }));
+      race.releaseWrites(held);
+      await save;
+
+      await vi.waitFor(() => {
+        expect(JSON.parse(decode(race.disk.get(race.file)) ?? '{}')).toMatchObject({
+          groups: { default: { values: { height: 20, width: 30 } } },
+        });
+      });
+      expect(race.decision()).toBeUndefined();
+    } finally {
+      race.dispose();
+    }
+  });
+
+  it('asks rather than marking a parameter both sides changed (N1)', async () => {
+    const record = (values: Record<string, number>): string =>
+      new TextDecoder().decode(
+        serializeParameterRecord({ activeGroup: 'default', groups: { default: { values } } } as Parameters<
+          typeof serializeParameterRecord
+        >[0]),
+      );
+    const path = '.tau/parameters/main.json';
+    const race = createRace(path, record({ height: 10 }));
+    try {
+      await race.modelService.acquireModel(path);
+      const held = race.holdWrites();
+      void race.type(record({ height: 20 }));
+      race.applied(record({ height: 30 }));
+      race.releaseWrites(held);
+      await drain();
+
+      expect(decode(race.disk.get(race.file))).toBe(record({ height: 30 }));
+      expect(race.model()?.getValue()).toBe(record({ height: 20 }));
+      expect(race.decision()?.[0]).toBe('Needs your decision');
+    } finally {
+      race.dispose();
+    }
+  });
+
+  it('saves the typed text once an apply that refused it rolls back (N3)', async () => {
+    const race = createRace();
+    try {
+      await race.modelService.acquireModel('part.scad');
+      const held = race.holdWrites();
+      const save = race.type(typed);
+      race.moveAside();
+      race.releaseWrites(held);
+      await drain();
+      race.rollBack();
+      await save;
+
+      await vi.waitFor(() => {
+        expect(decode(race.disk.get(race.file))).toBe(typed);
+      });
+      expect(race.model()?.getValue()).toBe(typed);
+    } finally {
+      race.dispose();
+    }
+  });
+
+  it('reports a failed save of the merged text through the keystroke save it answers (N3)', async () => {
+    const race = createRace();
+    try {
+      await race.modelService.acquireModel('part.scad');
+      const held = race.holdWrites();
+      const save = race.type(typed);
+      race.applied(arrived);
+      /* The keystroke's checked write is refused; the merged text's save then fails. */
+      race.failNextCheckedWrite(new Error('disk full'));
+      race.releaseWrites(held);
+
+      await expect(save).rejects.toThrow('disk full');
+      expect(decode(race.disk.get(race.file))).toBe(arrived);
+      expect(race.model()?.getValue()).toBe(both);
+    } finally {
+      race.dispose();
     }
   });
 });

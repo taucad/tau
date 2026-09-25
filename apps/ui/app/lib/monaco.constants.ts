@@ -25,6 +25,7 @@ export const monacoLanguages = {
   stl: 'stl',
   usd: 'usd',
   sysml: 'sysml',
+  yaml: 'yaml',
 } as const;
 
 export type MonacoLanguage = (typeof monacoLanguages)[keyof typeof monacoLanguages];
@@ -47,6 +48,7 @@ export const codeLanguageToMonacoLanguage = {
   tsx: monacoLanguages.typescriptreact,
   typescript: monacoLanguages.typescript,
   usd: monacoLanguages.usd,
+  yaml: monacoLanguages.yaml,
 } as const satisfies Record<CodeLanguage, MonacoLanguage>;
 
 const uiOnlyExtensionToCodeLanguage = {

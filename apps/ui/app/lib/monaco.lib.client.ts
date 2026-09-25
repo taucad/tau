@@ -260,6 +260,8 @@ const initializeMonaco = async (): Promise<typeof Monaco> => {
   // JSONL is deliberately metadata-only: Shiki owns tokenization, and there is
   // no JSON language service validation for multi-root newline-delimited JSON.
   monaco.languages.register({ id: monacoLanguages.jsonl, aliases: ['JSON Lines', 'jsonl'], extensions: ['.jsonl'] });
+  // YAML is metadata-only too: Shiki owns tokenization.
+  monaco.languages.register({ id: monacoLanguages.yaml, aliases: ['YAML', 'yaml'], extensions: ['.yaml', '.yml'] });
 
   const highlighter = await getHighlighter();
 

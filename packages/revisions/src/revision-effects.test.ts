@@ -11,7 +11,7 @@
  * cut against an engine-recorded head, so the two have to be the same id.
  */
 
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,7 +20,7 @@ import { createActor, createMachine } from 'xstate';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import type { RootedFileSystem } from '@taucad/filesystem';
+import type { FileStatEntry, RootedFileSystem } from '@taucad/filesystem';
 import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
@@ -170,6 +170,42 @@ describe('lifecycle bounds', () => {
     expect(syncPullDeadlineMilliseconds).toBeLessThan(syncQuiesceMilliseconds);
     expect(turnCutSettlementMilliseconds).toBeLessThan(admissionMilliseconds);
   });
+});
+
+describe('the capture memo', () => {
+  it('reads a same-size rewrite after the clock steps back, instead of trusting the high-water mark (RV-W4W5a #5)', async () => {
+    const realNow = Date.now();
+    /* The wall clock ran a minute ahead for the first capture, then was corrected. */
+    let reading = realNow + 60_000;
+    const { port, actors, root } = await fixture(
+      { 'part.ts': 'zzzz\n' },
+      (real) =>
+        /* The memo engages only where the tree can be stat'ed in one call, as
+         * the workspace views can and the bare provider cannot. */
+        Object.assign(Object.create(real) as RootedFileSystem, {
+          statTree: async (): Promise<FileStatEntry[]> => {
+            const stat = await real.stat('part.ts');
+            return [{ ...stat, path: 'part.ts', name: 'part.ts' }];
+          },
+        }),
+      { clock: () => reading },
+    );
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await run(actors.checkout.captureTree, { checkoutId: 'live' });
+
+    reading = realNow;
+    /* Written moments ago by the corrected clock: too recent to trust. */
+    const writtenAt = new Date(realNow - 500);
+    await writeFile(join(root, 'part.ts'), 'aaaa\n');
+    await utimes(join(root, 'part.ts'), writtenAt, writtenAt);
+    const before = await run<{ treeId: string }>(actors.checkout.captureTree, { checkoutId: 'live' });
+    /* Same size, same timestamp: only the racy-time guard can tell. */
+    await writeFile(join(root, 'part.ts'), 'bbbb\n');
+    await utimes(join(root, 'part.ts'), writtenAt, writtenAt);
+    const after = await run<{ treeId: string }>(actors.checkout.captureTree, { checkoutId: 'live' });
+
+    expect(after.treeId).not.toBe(before.treeId);
+  }, 30_000);
 });
 
 describe('the tree a cut hashes', () => {

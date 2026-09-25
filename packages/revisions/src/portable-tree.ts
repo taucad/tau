@@ -1,5 +1,6 @@
 import type { PathPolicy } from '@taucad/filesystem';
 import type { ImmutableRevisionTree } from '#algorithms/index.js';
+import { revisionTreeFiles } from '#algorithms/revision-tree.js';
 import { portableCollisions } from '#case-collisions.js';
 import { tauRevisionPolicy } from '#workspace-config.js';
 
@@ -17,7 +18,8 @@ export const assertMaterializableRevisionTree = (
   tree: ImmutableRevisionTree,
   policy: PathPolicy = tauRevisionPolicy.policy,
 ): void => {
-  for (const { path } of tree.entries()) {
+  /* Paths only: `entries()` copies every file's bytes (RV-W4W5a #6). */
+  for (const path of [...revisionTreeFiles(tree).keys()].toSorted()) {
     if (!policy.classify(path).versioned) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', `Tracked path is reserved by Tau: ${path}`);
     }

@@ -4,7 +4,7 @@ import type { AnyEventObject } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#checkout.machine.js';
-import { checkoutMachine, checkoutQueuedCutLimit } from '#checkout.machine.js';
+import { checkoutMachine, checkoutQueuedCutLimit, satisfiesCut } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import {
   createFakeCallbackActors,
@@ -35,7 +35,7 @@ import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/f
  * 14  the fence is released when the mint leaves `minting`
  * 15  a `cut` arriving during a mint is served afterwards, so both requesters
  *     are answered when the mint succeeds
- * 16  `headChanged` adopts a new head without leaving `clean`
+ * 16  `headChanged` adopts a new head and compares the files with it (I6)
  * 17  every outcome is both sent to the parent and emitted, with its trigger and turn id
  * 18  start and stop leak no child, the snapshot is serializable and holds no function
  * 19  a mint that fails answers the waiting requests too, instead of stranding
@@ -452,15 +452,84 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
-  it('adopts an applied head as clean', () => {
-    const { actor } = start();
-
+  it('reads clean after a head move only once the files are shown to be that head (I6)', async () => {
+    const { actor, promises, parent } = start();
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+
     actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
 
-    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    /* Unrecorded bytes are not declared clean because a head moved (I6). */
+    expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
     expect(actor.getSnapshot().context.headRevisionId).toBe('rev-7');
+    expect(parent.events.findLast((event) => event.type === 'checkoutStatusChanged')).toMatchObject({
+      status: 'dirty',
+      headRevisionId: 'rev-7',
+    });
+    promises.settle('captureTree', { output: { treeId: 'tree-7' } });
+    await flush();
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
 
+    actor.stop();
+  });
+
+  it('stays dirty after a head move when the files are not that head (I6)', async () => {
+    const { actor, promises } = start();
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+
+    actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
+    actor.stop();
+  });
+
+  it('ignores a headChanged naming the head it already has, mid-mint or at rest (RV-W2b #3)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    actor.send({ type: 'headChanged', revisionId: 'rev-1', treeId: headTreeId });
+    await flush();
+
+    expect(parent.events.filter((event) => event.type === 'casLost')).toEqual([]);
+    expect(actor.getSnapshot().matches({ minting: 'cutting' })).toBe(true);
+    actor.stop();
+  });
+
+  it('collapses queued ambient requests into the stronger trigger, never a weaker one (RV-W2b #4)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', trigger: 'hidden', leaseIds: [] });
+    actor.send({ type: 'cut', trigger: 'close', leaseIds: [] });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
+    await flush();
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    await flush();
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-2' } });
+    await flush();
+
+    const answered = parent.events.filter((event) => event.type === 'nothingToSave');
+    expect(answered.map((event) => (event as AnyEventObject & { trigger: string }).trigger)).toEqual(['save', 'close']);
+    /* The absorbed `hidden` and `save` waiters settle on the `close` answer. */
+    expect(satisfiesCut('close', 'hidden')).toBe(true);
+    expect(satisfiesCut('close', 'save')).toBe(true);
+    expect(satisfiesCut('hidden', 'close')).toBe(false);
+    expect(satisfiesCut('close', 'restore')).toBe(false);
+    expect(satisfiesCut('switch', 'switch')).toBe(true);
     actor.stop();
   });
 
@@ -827,6 +896,7 @@ describe('checkoutMachine', () => {
       '{"clean":"rested"}',
       '{"clean":"comparing"}',
       '{"dirty":"quiet"}',
+      '{"dirty":"comparing"}',
       '"failed"',
       '"stale"',
       '"rereading"',

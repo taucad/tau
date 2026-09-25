@@ -14,9 +14,16 @@ import { RevisionMenu, RevisionRow } from '#routes/w.$workspace.$project/revisio
 import { revisionTitle } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionRowProps } from '#routes/w.$workspace.$project/revision-marker.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
+/* The project actor as `useSelector` reads it: Publish names the version after the project. */
+const projectSnapshot = { context: { project: { name: 'Bracket', assets: { main: { entryPath: 'main.scad' } } } } };
+const projectRef = {
+  subscribe: () => ({ unsubscribe: () => undefined }),
+  getSnapshot: () => projectSnapshot,
+};
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef }) }));
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
   return harness.revisionStatusMock();
@@ -184,6 +191,10 @@ describe('RevisionRow', () => {
   it('offers Undo restore on the restore row you are on while nothing landed after it (D2)', async () => {
     const user = userEvent.setup();
     onUndoRestore.mockClear();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      restore: { ...revisionStatusHarness.status.restore, undoable: true },
+    };
     renderRow({
       revision: card({ restoredFrom: 'rev-1', trigger: 'restore' }),
       title: 'Restored Rev 1',
@@ -192,6 +203,18 @@ describe('RevisionRow', () => {
     await openRow(user, 'Rev 2 · Restored Rev 1');
     await user.click(screen.getByRole('button', { name: 'Undo restore' }));
     expect(onUndoRestore).toHaveBeenCalledOnce();
+  });
+
+  /* M1: after a reload, or a restore from another device, the machine holds no undo target. */
+  it('offers no Undo restore on a restore row this device’s restore did not mint', async () => {
+    const user = userEvent.setup();
+    renderRow({
+      revision: card({ restoredFrom: 'rev-1', trigger: 'restore' }),
+      title: 'Restored Rev 1',
+      isCurrent: true,
+    });
+    await openRow(user, 'Rev 2 · Restored Rev 1');
+    expect(screen.queryByRole('button', { name: 'Undo restore' })).not.toBeInTheDocument();
   });
 
   it('ends its actions with More and Details, which wrap as one pair (rounds 14–18)', async () => {
@@ -215,6 +238,17 @@ describe('RevisionRow', () => {
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'Details' }));
     expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Parent\s*rev-1/u);
+  });
+
+  /* Canvas DetailsList: the tree the revision carries, from the log row itself. */
+  it('names the tree it carries in Details', async () => {
+    const user = userEvent.setup();
+    renderRow({ revision: card({ treeId: 'a'.repeat(40) }) });
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
+      new RegExp(`Tree\\s*${'a'.repeat(40)}`, 'u'),
+    );
   });
 
   it('says a branch’s first revision follows none', async () => {
@@ -395,6 +429,52 @@ describe('RevisionMenu', () => {
     expect(String(fetch.mock.calls[1]?.[0])).toBe(
       'https://api.test/v1/git/p/refs?name=refs%2Ftags%2Fv1&publication=pub-1',
     );
+  });
+
+  /* W1b: the canvas offers Publish in every row's More; an older revision is named and published by id. */
+  it('publishes an older revision by its id, and shows the link it got', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.role = 'owner';
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    };
+    /* The app's root TooltipProvider, which the link's CopyButton needs. */
+    const queryClient = new QueryClient();
+    const menu = (): React.JSX.Element => (
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <RevisionMenu revision={card()} isCurrent={false} branch='main' />
+        </QueryClientProvider>
+      </TooltipProvider>
+    );
+    const { rerender } = render(menu());
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Publish as a named version…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Publish Rev 2' });
+    await user.type(within(dialog).getByLabelText('Version name'), 'first print');
+    await user.click(within(dialog).getByRole('button', { name: 'Publish' }));
+
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('first print', 'rev-2');
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledWith({
+      tag: 'first print',
+      projectName: 'Bracket',
+      entryPath: 'main.scad',
+      visibility: 'public',
+      title: 'Bracket',
+    });
+
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      publish: { ...revisionStatusHarness.status.publish, phase: 'success', shareUrl: 'https://tau.new/p/pub-1' },
+    };
+    rerender(menu());
+    expect(await within(dialog).findByLabelText('Published link')).toHaveValue('https://tau.new/p/pub-1');
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+    expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'More actions for Rev 2' })).toHaveFocus();
+    });
   });
 
   it('says why Tau Cloud refused a removal, and removes nothing (I12)', async () => {

@@ -77,13 +77,14 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
      API refuses — one shared predicate rather than two conditions. */
   const syncReadOnly = isSyncReadOnly(revisionStatus?.remote, projectRole);
   const { syncNow, undo } = useRevisionCommands();
-  /* D2, M1: *Undo restore* where the strip offers it and nowhere else — the head the
-     restore minted on this line, with nothing landed after it — in the strip's own words. */
-  const { where, head, status } = useRevisionFacts();
+  /* D2, M1: *Undo restore* where the strip offers it and nowhere else — the restore row this
+     device's restore machine minted, still the head — in the strip's own words. Never after a
+     reload or another device's restore, which the machine would answer UNDO_UNAVAILABLE. */
+  const { where, status } = useRevisionFacts();
   const canUndoRestore = selectStripVerbs({
     status,
     where,
-    isHeadRestore: head?.restoredFrom !== undefined,
+    undoable: status?.restore.undoable === true,
     canWrite: projectRole !== 'read' && projectRole !== 'revoked',
   }).secondary.includes('Undo restore');
   const saveRevision = useSaveRevisionRequest();

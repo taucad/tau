@@ -9,6 +9,7 @@
  * reaches the same verbs from either place.
  */
 import { useEffect, useId, useRef, useState } from 'react';
+import { useSelector } from '@xstate/react';
 import {
   Bot,
   Check,
@@ -36,6 +37,16 @@ import {
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@taucad/ui/components/dialog';
+import { Input } from '@taucad/ui/components/input';
+import { Label } from '@taucad/ui/components/label';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -45,6 +56,7 @@ import {
 import { cn } from '@taucad/ui/utils/cn';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import { Spinner } from '#components/ui/spinner.js';
+import { CopyButton } from '#components/copy-button.js';
 import { DiffViewer } from '#components/code/diff-viewer.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { ActionButton, ActionsRow, disclosureMotion } from '#components/revisions/revision-actions.js';
@@ -334,6 +346,17 @@ export function RevisionDetails({
         {revision.revisionId}
       </code>,
     ],
+    /* The tree the revision carries: two revisions with the same bytes name the same one. */
+    ...(revision.treeId === undefined
+      ? []
+      : ([
+          [
+            'Tree',
+            <code key='tree' className='font-mono break-all'>
+              {revision.treeId}
+            </code>,
+          ],
+        ] as const)),
     ...(parent === undefined ? [] : ([['Parent', parent]] as const)),
     ...(branch === undefined ? [] : ([['Branch', branch]] as const)),
     ['Trigger', revisionTriggerLabel(revision.trigger)],
@@ -547,6 +570,140 @@ function CopyRevisionId({ revisionId }: { readonly revisionId: string }): React.
 }
 
 /**
+ * *Publish* for a revision older than the one you are on (canvas: a row's More).
+ *
+ * The head publishes from the Share panel; an older revision is named and
+ * published here, through the same `publish.machine` with its id, so the link
+ * points at exactly this revision (W1b). The link is public: private links and
+ * invitations stay in the Share panel.
+ *
+ * @param props - The revision, how to close, and where focus returns.
+ * @returns The dialog.
+ */
+function PublishRevisionDialog({
+  revision,
+  onClose,
+  restoreFocus,
+}: {
+  readonly revision: RevisionCard;
+  readonly onClose: () => void;
+  /** Puts focus back on the More that opened it. */
+  readonly restoreFocus: () => void;
+}): React.JSX.Element {
+  const status = useRevisionStatus();
+  const commands = useRevisionCommands();
+  const { projectRef } = useProject();
+  const project = useSelector(projectRef, (state) => state.context.project);
+  const inputId = useId();
+  const [name, setName] = useState(revision.tags?.[0] ?? '');
+  /* The facet is the project's one publish machine; this dialog reads it only for the publish it sent. */
+  const [isSent, setIsSent] = useState(false);
+  const facet = isSent ? status?.publish : undefined;
+  const link = facet?.phase === 'success' ? facet.shareUrl : undefined;
+  const error = facet?.phase === 'error' ? facet.error : undefined;
+  const isBusy = facet?.phase === 'choosingVersion' || facet?.phase === 'working';
+  const title = `Publish ${revisionName(revision.n) ?? 'this revision'}`;
+  const close = (): void => {
+    if (isSent) {
+      commands.resetPublish();
+    }
+    onClose();
+  };
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) {
+          close();
+        }
+      }}
+    >
+      <DialogContent
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          restoreFocus();
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            A published link always points at a named version that is backed up on Tau Cloud.
+          </DialogDescription>
+        </DialogHeader>
+        {link === undefined ? (
+          <form
+            className='flex flex-col gap-3'
+            onSubmit={(event) => {
+              event.preventDefault();
+              const tag = name.trim();
+              const projectName = project?.name ?? 'Untitled';
+              commands.publishProject(tag, revision.revisionId);
+              commands.confirmPublish({
+                tag,
+                projectName,
+                entryPath: project?.assets.main.entryPath ?? '',
+                visibility: 'public',
+                title: projectName,
+              });
+              setIsSent(true);
+            }}
+          >
+            <Label htmlFor={inputId} className='text-xs font-normal'>
+              Version name
+            </Label>
+            <Input
+              autoFocus
+              id={inputId}
+              value={name}
+              placeholder='e.g. Ready for print v2'
+              onChange={(event) => {
+                setName(event.target.value);
+              }}
+            />
+            {error === undefined ? null : (
+              <p role='alert' className='text-sm'>
+                {error}
+              </p>
+            )}
+            <DialogFooter>
+              <Button type='button' variant='outline' size='sm' onClick={close}>
+                Cancel
+              </Button>
+              <Button type='submit' size='sm' disabled={name.trim() === '' || isBusy}>
+                {isBusy ? <Spinner aria-hidden /> : <Link2 aria-hidden />}
+                Publish
+              </Button>
+            </DialogFooter>
+          </form>
+        ) : (
+          <div className='flex flex-col gap-3'>
+            <p role='status' className='text-sm'>
+              {`${name.trim()} is published. Anyone with the link can open it.`}
+            </p>
+            <div className='flex items-center gap-2'>
+              <Input
+                readOnly
+                value={link}
+                aria-label='Published link'
+                onFocus={(event) => {
+                  event.target.select();
+                }}
+              />
+              <CopyButton size='icon' tooltip='Copy link' getText={() => link} />
+            </div>
+            <DialogFooter>
+              <Button variant='outline' size='sm' onClick={close}>
+                Done
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
  * A revision's More, one menu on its History row and in the chat marker, so the
  * chat reaches what History does: naming it, publishing it, a new branch from
  * it, copying its id, and removing its name. Naming and a new branch open the one
@@ -575,9 +732,10 @@ export function RevisionMenu({
   const moreRef = useRef<HTMLButtonElement>(null);
   /* A menu item that opens a form or a dialog opens it once the menu has closed,
      so the menu's focus trap neither keeps focus from it nor takes it back. */
-  const opens = useRef<'name' | 'branch' | 'remove'>(undefined);
+  const opens = useRef<'name' | 'branch' | 'remove' | 'publish'>(undefined);
   const [form, setForm] = useState<'name' | 'branch'>('name');
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isPublishOpen, setIsPublishOpen] = useState(false);
   const name = revisionName(revision.n) ?? 'this revision';
   const named = revision.tags?.[0];
   const canWrite = role !== 'read' && role !== 'revoked';
@@ -647,6 +805,10 @@ export function RevisionMenu({
               }
               return;
             }
+            if (next === 'publish') {
+              setIsPublishOpen(true);
+              return;
+            }
             setForm(next);
             setIsFormOpen(true);
           }}
@@ -667,15 +829,19 @@ export function RevisionMenu({
               {named === undefined ? 'Name version…' : 'Rename version…'}
             </DropdownMenuItem>
           ) : null}
-          {/* Publishing names the files as they are now, so it is offered on the revision you are on. */}
-          {isCurrent && canWrite && isTauCloud && workspace !== undefined ? (
+          {/* The revision you are on publishes from the Share panel; an older one names and publishes itself here. */}
+          {canWrite && isTauCloud && (!isCurrent || workspace !== undefined) ? (
             <DropdownMenuItem
               onSelect={() => {
-                workspace.openPanel('share');
+                if (isCurrent) {
+                  workspace?.openPanel('share');
+                  return;
+                }
+                opens.current = 'publish';
               }}
             >
               <Link2 aria-hidden />
-              Publish…
+              {isCurrent ? 'Publish…' : named === undefined ? 'Publish as a named version…' : `Publish ${named}…`}
             </DropdownMenuItem>
           ) : null}
           {canWrite ? (
@@ -705,6 +871,19 @@ export function RevisionMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      {isPublishOpen ? (
+        <PublishRevisionDialog
+          revision={revision}
+          restoreFocus={() => {
+            moreRef.current?.focus();
+          }}
+          onClose={() => {
+            setIsPublishOpen(false);
+            /* Mounted only while open: focus goes back to More before the dialog unmounts. */
+            moreRef.current?.focus();
+          }}
+        />
+      ) : null}
       <AlertDialog
         open={removal !== undefined}
         onOpenChange={(open) => {
@@ -880,8 +1059,10 @@ export function RevisionRow({
   /* Your own revisions need no attribution; everyone else's say who (HQ4). */
   const actor = revision.actor === 'You' || revision.actor === '' ? undefined : revision.actor;
   const canRestore = role !== 'revoked';
-  /* D2: Undo restore lives on the restore row while nothing has landed after it. */
-  const canUndoRestore = isCurrent && revision.restoredFrom !== undefined && !isDirty && canRestore;
+  /* D2, M1: Undo restore lives on the restore row while nothing has landed after it, and only where this
+     device's restore machine holds its undo target — never after a reload or another device's restore. */
+  const isUndoable = useRevisionStatus()?.restore.undoable === true;
+  const canUndoRestore = isCurrent && isUndoable && !isDirty && canRestore;
 
   return (
     <Collapsible

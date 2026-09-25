@@ -23,7 +23,7 @@ export type TurnRevisionState =
 
 /** Every fact the summary is derived from; each already has an owner. @public */
 export type TurnRevisionFacts = Readonly<{
-  /** The revision the host attested for this turn (`useRevisions().byTurnId`). */
+  /** The revision the host attested for this turn (`useTurnRevision`). */
   revision: RevisionCard | undefined;
   /** A `turn.conflicted` or `turn.failed` outcome for this turn. */
   outcome: 'conflicted' | 'failed' | undefined;

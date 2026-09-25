@@ -15,10 +15,13 @@ import type { ReactNode } from 'react';
 import type { RevisionLogRequest, RevisionRow } from '@taucad/revisions';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import {
+  revisionPageSize,
+  useRevisionCards,
   useRevisionChanges,
   useRevisionChangesSince,
   useRevisionFileComparison,
   useRevisions,
+  useTurnRevision,
 } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
@@ -192,6 +195,45 @@ describe('useRevisions', () => {
       expect(result.current.branchFacts?.get('feature')).toEqual({ revisionNumber: 2, ahead: 1, behind: 1 });
     });
     expect(result.current.branchFacts?.get('main')).toEqual({ revisionNumber: 2, ahead: 0, behind: 0 });
+    /* B2: the other branch costs its head's row and one count, never a walk of its history. */
+    expect(revisionStatusHarness.logRequests).toEqual(['main']);
+    expect(revisionStatusHarness.rowRequests).toEqual(['feature-2']);
+  });
+
+  it('opens History on its page while another branch is still being counted (B2)', async () => {
+    const base = row({ revisionId: 'base', revisionNumber: 1 });
+    revisionStatusHarness.rows = [row({ revisionId: 'main-2', revisionNumber: 2 }), base];
+    revisionStatusHarness.rowsByBranch.set('feature', [row({ revisionId: 'feature-2', revisionNumber: 2 }), base]);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'main-2',
+      branches: [
+        { name: 'main', head: 'main-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        { name: 'feature', head: 'feature-2', checkoutId: 'co-2', checkoutRoot: '/checkouts/co-2', leaseChatIds: [] },
+      ],
+    };
+    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
+    const client = (useRevisionClient as () => { divergence: (head: string, base: string) => Promise<unknown> })();
+    /* A count over a long line that has not answered yet. */
+    const divergence = vi.spyOn(client, 'divergence').mockReturnValue(
+      new Promise(() => {
+        /* Never answers. */
+      }),
+    );
+    onTestFinished(() => {
+      divergence.mockRestore();
+    });
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.revisions.map((card) => card.revisionId)).toEqual(['main-2', 'base']);
+    expect(divergence).toHaveBeenCalledWith('feature-2', 'main-2');
+    /* No count shown rather than a wrong one. */
+    expect(result.current.branchFacts?.get('feature')).toMatchObject({ ahead: 0, behind: 0 });
   });
 
   it('carries a card for a turn a remote host settled, which this graph does not hold', async () => {
@@ -342,10 +384,10 @@ describe('useRevisions', () => {
       ],
     };
 
-    const { result } = renderHook(() => useRevisions(), { wrapper });
+    const { result } = renderHook(() => useTurnRevision('u3'), { wrapper });
 
     await waitFor(() => {
-      expect(result.current.byTurnId.get('u3')).toMatchObject({
+      expect(result.current).toMatchObject({
         revisionId: 'rev-3',
         n: 3,
         createdAt: 1_788_307_200_000,
@@ -392,10 +434,10 @@ describe('useRevisions', () => {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
 
-    const { result } = renderHook(() => useRevisions(), { wrapper: cachedWrapper });
+    const { result } = renderHook(() => useTurnRevision('u3'), { wrapper: cachedWrapper });
 
     await waitFor(() => {
-      expect(result.current.byTurnId.get('u3')?.n).toBe(3);
+      expect(result.current?.n).toBe(3);
     });
   });
 
@@ -417,6 +459,18 @@ describe('useRevisions', () => {
     expect(result.current.line).toEqual({ kind: 'unborn', name: 'main' });
     expect(result.current.isLoading).toBe(false);
     expect(revisionStatusHarness.logRequests).toEqual([]);
+  });
+
+  it('takes dirty from the checkout on an unborn line too, so the first edit reads Not saved yet', () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'unborn', name: 'main' },
+      dirty: true,
+    };
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    expect(result.current.line).toEqual({ kind: 'unborn', name: 'main' });
+    expect(result.current.isDirty).toBe(true);
   });
 });
 
@@ -485,7 +539,116 @@ describe('useRevisions after a mint (E6)', () => {
     await waitFor(() => {
       expect(result.current.revisions.map((card) => card.revisionId)).toEqual(['merge-3', 'rev-2', 'side-1', 'rev-1']);
     });
-    expect(log.mock.calls.map(([request]) => request)).toEqual([{ branch: 'main', limit: 1 }, { branch: 'main' }]);
+    expect(log.mock.calls.map(([request]) => request)).toEqual([
+      { branch: 'main', limit: 1 },
+      { branch: 'main', limit: revisionPageSize },
+    ]);
+  });
+});
+
+describe('useRevisions over a long history (B2)', () => {
+  /* 500 revisions on one line, newest first; every tenth one a turn. */
+  const long = Array.from({ length: 500 }, (_, index) => {
+    const n = 500 - index;
+    return row({
+      revisionId: `rev-${String(n)}`,
+      revisionNumber: n,
+      turnId: n % 10 === 0 ? `u${String(n)}` : undefined,
+      ...(n === 1 ? {} : { parent: `rev-${String(n - 1)}` }),
+    });
+  });
+  const onLongLine = (): void => {
+    revisionStatusHarness.rows = long;
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-500',
+      branches: [{ name: 'main', head: 'rev-500', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+    };
+  };
+
+  it('reads one page first, then the next page under it on Show more, and says when nothing older is left', async () => {
+    onLongLine();
+    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
+    const client = (
+      useRevisionClient as () => { log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]> }
+    )();
+    const log = vi.spyOn(client, 'log');
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    /* One cache across renders, as the app has: a page lands in the cache it was read from. */
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useRevisions(), {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
+
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(50);
+    });
+    expect(log.mock.calls.map(([request]) => request)).toEqual([{ branch: 'main', limit: 50 }]);
+    expect(result.current.revisions.at(-1)?.n).toBe(451);
+    expect(result.current.hasOlder).toBe(true);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(100);
+    });
+    expect(result.current.revisions.at(-1)?.n).toBe(401);
+    expect(log.mock.calls.at(-1)?.[0]).toEqual({ branch: 'main', limit: 100 });
+
+    for (let page = 3; page <= 10; page += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- each page is read under the one before it.
+      await act(async () => {
+        await result.current.loadOlder();
+      });
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      await waitFor(() => {
+        expect(result.current.revisions).toHaveLength(page * 50);
+      });
+    }
+    expect(result.current.revisions.at(-1)?.n).toBe(1);
+    expect(result.current.hasOlder).toBe(false);
+  });
+
+  it('keeps the Rev N card of a turn recorded 450 revisions ago after a reload, read by the id its settlement names', async () => {
+    onLongLine();
+    /* After a reload the chat's durable log replays its `turn.finalized` records; the page holds Rev 500…451. */
+    settlements.push({
+      type: 'turn.finalized',
+      turnId: 'u50',
+      runId: 'run-50',
+      chatId: 'chat-1',
+      projectId: 'p',
+      checkoutId: 'live',
+      revisionId: 'rev-50',
+      branch: 'main',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run-50'],
+    });
+
+    const { result } = renderHook(() => useTurnRevision('u50'), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current).toMatchObject({ revisionId: 'rev-50', n: 50 });
+    });
+    expect(revisionStatusHarness.rowRequests).toEqual(['rev-50']);
+    expect(revisionStatusHarness.logRequests).toEqual(['main']);
+  });
+
+  it('reads a card by id only for a revision the page does not hold', async () => {
+    onLongLine();
+    const { result } = renderHook(() => useRevisionCards(['rev-7']), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.get('rev-7')).toMatchObject({ n: 7, parent: 'rev-6' });
+    });
+    expect(revisionStatusHarness.rowRequests).toEqual(['rev-7']);
   });
 });
 
@@ -594,8 +757,14 @@ describe('useRevisionChanges', () => {
   it('returns the same view across renders while the store has not moved', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1' })];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+    /* The app's one root client (apps/ui AGENTS): a fresh client per render is a store that moved. */
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-    const { result, rerender } = renderHook(() => useRevisions(), { wrapper });
+    const { result, rerender } = renderHook(() => useRevisions(), {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
     await waitFor(() => {
       expect(result.current.revisions).toHaveLength(1);
     });

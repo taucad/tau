@@ -4,7 +4,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { StatusMark } from '#components/nav/status-mark.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { useProject } from '#hooks/use-project.js';
-import { useRevisions } from '#hooks/use-revisions.js';
+import { useRevisions, useWithRestoreTargets } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRevisionCommands } from '#hooks/use-revision-status.js';
 import { useChats } from '#hooks/use-chats.js';
@@ -41,6 +41,7 @@ function RevisionHoverCard({
 }): React.JSX.Element {
   const head = revisionName(where.head);
   const recent = revisions.slice(0, 3);
+  const named = useWithRestoreTargets(revisions);
   return (
     <div data-slot='revision-card' className='flex flex-col text-xs'>
       <div className='flex items-start gap-2 px-3 pt-3'>
@@ -75,7 +76,7 @@ function RevisionHoverCard({
               <span className='w-12 shrink-0 font-mono text-muted-foreground tabular-nums'>
                 {revisionName(revision.n)}
               </span>
-              <span className='min-w-0 flex-1 truncate'>{revisionTitle(revision, revisions)}</span>
+              <span className='min-w-0 flex-1 truncate'>{revisionTitle(revision, named)}</span>
               <span className='shrink-0 text-muted-foreground'>
                 {formatRelativeTime(revision.createdAt, { short: true })}
               </span>

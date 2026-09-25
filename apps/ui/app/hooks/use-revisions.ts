@@ -7,20 +7,23 @@
  * never counted over chat membership. Deleting a chat therefore renumbers
  * nothing, because no number was ever a position in a transcript.
  *
- * Cards attach to turns by the settlement the host attested: the revision
- * carries the turn it recorded (`provenance.turnId`), so a card is recovered
- * from `log(branch)` alone after a reload, and a turn a *remote* host placed —
- * whose graph this page cannot read — is carried by its `turn.finalized`
- * record in the chat's own durable log. One schema, two transports.
+ * History holds a page, not the whole line (B2): the first read is
+ * {@link revisionPageSize} rows and *Show more* reads the next page. A turn's
+ * card is looked up by the revision its settlement names — the `turn.finalized`
+ * record in the chat's own durable log, replayed on open — so a turn recorded
+ * five hundred revisions ago keeps its `Rev N` without the page holding it, and
+ * a turn a *remote* host placed, whose graph this page cannot read, keeps the
+ * settlement's own card. One schema, two transports.
  */
 
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
+import type { RevisionClient } from '#hooks/use-revision-status.js';
 import {
   getHostFinalizedTurns,
   subscribeHostFinalizedTurns,
@@ -40,6 +43,8 @@ export type RevisionCard = {
   readonly createdAt: number;
   readonly summary: string;
   readonly actor: string;
+  /** Object id of the tree it carries; absent on a remote settlement's card. */
+  readonly treeId?: string;
   /** The turn this revision recorded, when a turn did. */
   readonly turnId: string | undefined;
   readonly conflicted: boolean;
@@ -61,9 +66,17 @@ export type RevisionCard = {
 
 /** What every revision surface reads. @public */
 export type RevisionsView = {
-  /** The selected branch's history, newest first. */
+  /** The loaded part of the selected branch's history, newest first. */
   readonly revisions: readonly RevisionCard[];
-  /** Cards by the turn they recorded, for the chat bubble that anchors one. */
+  /** Older revisions exist below the loaded ones (B2). */
+  readonly hasOlder: boolean;
+  /** Read the next page of older revisions onto `revisions`. */
+  readonly loadOlder: () => Promise<void>;
+  /**
+   * Cards by the turn they recorded, from the loaded page and this tab's
+   * settlements. A chat turn reads {@link useTurnRevision}, which also finds
+   * a turn older than the page.
+   */
   readonly byTurnId: ReadonlyMap<string, RevisionCard>;
   /** The revision the selected checkout reflects — the one that reads "Current". */
   readonly headRevisionId: string | undefined;
@@ -78,12 +91,34 @@ export type RevisionsView = {
   >;
 };
 
-const emptyRows: readonly RevisionRow[] = Object.freeze([]);
+/**
+ * Whether revisions older than the loaded ones exist. The port's order puts
+ * parents after children, so the oldest loaded row names a parent only while
+ * something older is unread.
+ *
+ * @param log - The loaded rows and how many were asked for.
+ * @returns Whether Show more has a page to read.
+ */
+const hasOlderThan = (log: HeadLog | undefined): boolean => {
+  const oldest = log?.rows.at(-1);
+  return (
+    log !== undefined &&
+    log.rows.length >= log.wanted &&
+    (oldest?.parent !== undefined || oldest?.otherParents !== undefined)
+  );
+};
+
+/** History's first read, and each *Show more* after it (B2, E6). @public */
+export const revisionPageSize = 50;
 
 const unknownLine: RevisionLine = { kind: 'unknown' };
 
+const noOlder = async (): Promise<void> => undefined;
+
 const emptyView: RevisionsView = {
   revisions: [],
+  hasOlder: false,
+  loadOlder: noOlder,
   byTurnId: new Map(),
   headRevisionId: undefined,
   line: unknownLine,
@@ -95,8 +130,8 @@ const emptyView: RevisionsView = {
 /* An unknown line is a history still on its way, never an empty one (I6, D3). */
 const loadingView: RevisionsView = { ...emptyView, isLoading: true };
 
-/** One branch's log, and the head it was read at. */
-type HeadLog = Readonly<{ head: string | undefined; rows: readonly RevisionRow[] }>;
+/** One branch's loaded rows, the head they were read at, and how many rows the reader asked for. */
+type HeadLog = Readonly<{ head: string | undefined; rows: readonly RevisionRow[]; wanted: number }>;
 
 /**
  * The title a person reads, never the generator's own string (C37).
@@ -158,6 +193,7 @@ const cardOf = (row: RevisionRow, session: RevisionSessionUser | undefined): Rev
   createdAt: row.createdAt,
   summary: titleOf(row),
   actor: actorOf(row, session),
+  treeId: row.treeId,
   turnId: row.turnId,
   conflicted: row.conflicted,
   tags: row.tags,
@@ -227,6 +263,7 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
                   tags: [],
                   trigger: 'turn',
                   changedPaths: settlement.changedPaths,
+                  ...(settlement.treeId === undefined ? {} : { treeId: settlement.treeId }),
                 },
               },
             ]
@@ -234,6 +271,37 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
       ),
     [projectId, settlements],
   );
+};
+
+/**
+ * Rows for revisions a surface names by id, read one by one (B2).
+ *
+ * A revision is immutable and so is its first-parent ordinal, so each answer
+ * is cached for the session. `Rev N` is the ordinal on the revision's own line,
+ * which is its line's number whenever it lies on that line.
+ *
+ * @param client - The page's revision client.
+ * @param projectId - The project the ids belong to.
+ * @param ids - The revisions to read.
+ * @returns Each row found, by id; a revision this graph does not hold is absent.
+ */
+const useRevisionRows = (
+  client: RevisionClient | undefined,
+  projectId: string,
+  ids: readonly string[],
+): ReadonlyMap<string, RevisionRow> => {
+  /* An array, not a Map: `combine`'s structural sharing keeps it the same reference until a row arrives (B9). */
+  const rows = useQueries({
+    queries: ids.map((id) => ({
+      queryKey: ['revision-row', projectId, id],
+      enabled: client !== undefined,
+      /* The one-row log itself: empty for a revision this graph does not hold. */
+      queryFn: async (): Promise<readonly RevisionRow[]> => client?.log({ from: id, limit: 1 }) ?? [],
+      staleTime: Number.POSITIVE_INFINITY,
+    })),
+    combine: (results) => results.flatMap((result) => result.data ?? []),
+  });
+  return useMemo(() => new Map(rows.map((row) => [row.revisionId, row] as const)), [rows]);
 };
 
 /**
@@ -245,8 +313,11 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
  * read at (D3), and no head — earlier or later — is ever answered from a log
  * read at another. A head that moved by one ordinary revision on top of the
  * one the log was read at is *appended* from a one-row read (E6); anything
- * else — a restore, a merge, a switch, two mints at once — re-reads the log
- * with the rows still on screen.
+ * else — a restore, a merge, a switch, two mints at once — re-reads as many
+ * rows as were loaded, with the rows still on screen.
+ *
+ * The first read is one page (B2); every other branch costs one row and one
+ * `divergence` count, never its whole history.
  *
  * @returns The view every revision surface reads.
  * @public
@@ -262,33 +333,29 @@ export function useRevisions(): RevisionsView {
   /* Subscribed, not read once: a sign-in mid-session relabels every card. */
   const session = useRevisionSessionUser();
   const finalized = useHostFinalizedTurns(projectId);
-  const finalizedBranchHeads = useMemo(
-    () => [
-      ...new Map(
-        finalized.flatMap((entry) =>
-          entry.branch && entry.branch !== branch ? [[entry.branch, entry.card.revisionId] as const] : [],
-        ),
-      ),
-    ],
-    [branch, finalized],
-  );
+  const queryClient = useQueryClient();
+  const logKey = useMemo(() => ['revision-log', projectId, branch ?? ''] as const, [branch, projectId]);
 
   const {
     data: log,
     isPending,
     refetch,
   } = useQuery({
-    queryKey: ['revision-log', projectId, branch ?? ''],
+    queryKey: logKey,
     enabled: client !== undefined && branch !== undefined,
-    queryFn: async (): Promise<HeadLog> => ({
-      head: headRevisionId,
-      rows: (await client?.log(branch === undefined ? {} : { branch })) ?? [],
-    }),
+    queryFn: async (): Promise<HeadLog> => {
+      /* A re-read keeps what the reader loaded with Show more, and never less than a page. */
+      const wanted = queryClient.getQueryData<HeadLog>(logKey)?.wanted ?? revisionPageSize;
+      return {
+        head: headRevisionId,
+        rows: (await client?.log(branch === undefined ? { limit: wanted } : { branch, limit: wanted })) ?? [],
+        wanted,
+      };
+    },
     /* Exact for the head it was read at; the effect below re-reads it for any other. */
     staleTime: Number.POSITIVE_INFINITY,
   });
   const readAt = log?.head;
-  const queryClient = useQueryClient();
   useEffect(() => {
     if (readAt === headRevisionId || log === undefined) {
       return;
@@ -321,19 +388,49 @@ export function useRevisions(): RevisionsView {
           return;
         }
         /* Only onto the log it was asked against: another reader may have appended it already. */
-        queryClient.setQueryData<HeadLog>(['revision-log', projectId, branch], (current) =>
+        queryClient.setQueryData<HeadLog>(logKey, (current) =>
           current !== undefined && current.head === readAt
-            ? { head: headRevisionId, rows: [minted, ...current.rows] }
+            ? { head: headRevisionId, rows: [minted, ...current.rows], wanted: current.wanted + 1 }
             : current,
         );
       } catch {
-        /* A failed one-row read is a history not yet known: read it whole. */
+        /* A failed one-row read is a history not yet known: read it again. */
         reread();
       }
     };
     void appendMinted();
-  }, [branch, client, headRevisionId, log, projectId, queryClient, readAt, refetch]);
+  }, [branch, client, headRevisionId, log, logKey, projectId, queryClient, readAt, refetch]);
+  /*
+   * ponytail: Show more re-reads the loaded rows with the next page under them,
+   * so page k walks k pages of commits, once per click — `limit` already crosses
+   * every hop. A cursor on the wire if deep paging ever shows up hot.
+   */
+  const loadOlder = useCallback(async (): Promise<void> => {
+    const current = queryClient.getQueryData<HeadLog>(logKey);
+    if (client === undefined || branch === undefined || current === undefined) {
+      return;
+    }
+    const wanted = current.rows.length + revisionPageSize;
+    const rows = await client.log({ branch, limit: wanted });
+    /* Only onto the log it was read against: a head that moved meanwhile re-reads on its own. */
+    queryClient.setQueryData<HeadLog>(logKey, (latest) =>
+      latest?.head === current.head ? { head: current.head, rows, wanted } : latest,
+    );
+  }, [branch, client, logKey, queryClient]);
   const rows = log?.rows;
+  /* Every other branch: its head's row for `Rev N`, and one count against the selected head. */
+  const others = useMemo(
+    () =>
+      (status?.branches ?? []).flatMap((entry) =>
+        entry.head === undefined || entry.name === branch ? [] : [{ name: entry.name, head: entry.head }],
+      ),
+    [branch, status?.branches],
+  );
+  const otherHeads = useRevisionRows(
+    client,
+    projectId,
+    useMemo(() => others.map((entry) => entry.head), [others]),
+  );
   /*
    * `combine` is not an optimisation here, it is the difference between this
    * hook having a memo and not (B9, C51).
@@ -341,36 +438,20 @@ export function useRevisions(): RevisionsView {
    * Without it, `QueriesObserver.getOptimisticResult` hands back a **fresh
    * array** on every render, so the `useMemo` below never hits and every
    * consumer — the always-on header chip, the palette, the pane, and one per
-   * chat turn — rebuilt `revisions`, `byTurnId`, `selectedIds` and
-   * `branchFacts` per render. With it, query-core caches the combined value
-   * through `replaceEqualDeep`, so nothing moves until the graph does.
+   * chat turn — rebuilt `revisions`, `byTurnId` and `branchFacts` per render.
+   * With it, query-core caches the combined value through `replaceEqualDeep`,
+   * so nothing moves until the graph does.
    */
-  const settledBranchRows = useQueries({
-    queries: finalizedBranchHeads.map(([settledBranch, finalizedRevisionId]) => ({
-      queryKey: ['revision-log', projectId, settledBranch, finalizedRevisionId],
-      enabled: client !== undefined,
-      queryFn: async () => client?.log({ branch: settledBranch }) ?? [],
+  const divergences = useQueries({
+    queries: others.map((entry) => ({
+      /* Two immutable ids: the count between them never changes. */
+      queryKey: ['revision-divergence', projectId, entry.head, headRevisionId ?? ''],
+      enabled: client !== undefined && headRevisionId !== undefined,
+      queryFn: async () => client?.divergence(entry.head, headRevisionId ?? '') ?? { ahead: 0, behind: 0 },
       staleTime: Number.POSITIVE_INFINITY,
     })),
-    combine: (results) => ({
-      rows: results.flatMap((result) => result.data ?? []),
-      isPending: results.some((result) => result.isPending),
-    }),
-  });
-  const branchRows = useQueries({
-    queries: (status?.branches ?? []).map((entry) => ({
-      queryKey: ['revision-log', projectId, entry.name, entry.head ?? ''],
-      /* The selected line's facts come from its own log above, which a mint
-       * appends to; reading it again here was a whole walk per mint (E6). */
-      enabled: client !== undefined && entry.head !== undefined && entry.name !== branch,
-      queryFn: async () => client?.log({ branch: entry.name }) ?? [],
-      staleTime: Number.POSITIVE_INFINITY,
-    })),
-    combine: (results) => ({
-      /* Positional, because `branchFacts` pairs each log with its own branch. */
-      logs: results.map((result) => result.data ?? emptyRows),
-      pending: results.map((result) => result.isPending),
-    }),
+    /* Positional, because `branchFacts` pairs each count with its own branch. */
+    combine: (results) => results.map((result) => result.data),
   });
 
   return useMemo(() => {
@@ -381,7 +462,7 @@ export function useRevisions(): RevisionsView {
       if (line.kind === 'unknown') {
         return line === unknownLine ? loadingView : { ...loadingView, line };
       }
-      return { ...emptyView, line, isLoading: line.kind === 'branch' };
+      return { ...emptyView, line, isDirty: status?.dirty ?? false, isLoading: line.kind === 'branch' };
     }
     const revisions = (rows ?? []).map((row) => cardOf(row, session));
     const byTurnId = new Map<string, RevisionCard>();
@@ -397,48 +478,143 @@ export function useRevisions(): RevisionsView {
     for (const card of revisions) {
       attachTurnCard(byTurnId, settledIdByTurn, card);
     }
-    for (const row of settledBranchRows.rows) {
-      attachTurnCard(byTurnId, settledIdByTurn, cardOf(row, session));
-    }
-    const selectedIds = new Set((rows ?? []).map((row) => row.revisionId));
     const branchFacts = new Map<string, { revisionNumber: number | undefined; ahead: number; behind: number }>();
-    for (const [index, entry] of (status?.branches ?? []).entries()) {
-      const branchLog = entry.name === branch ? (rows ?? emptyRows) : (branchRows.logs[index] ?? emptyRows);
-      const branchIds = new Set(branchLog.map((row) => row.revisionId));
-      branchFacts.set(entry.name, {
-        revisionNumber: branchLog[0]?.revisionNumber,
-        ahead: branchLog.filter((row) => !selectedIds.has(row.revisionId)).length,
-        behind: (rows ?? []).filter((row) => !branchIds.has(row.revisionId)).length,
-      });
+    for (const entry of status?.branches ?? []) {
+      /* Unknown until its walk answers, and read as no counts: History never waits on a branch it is not on (B2). */
+      const count = divergences[others.findIndex((other) => other.name === entry.name)];
+      branchFacts.set(
+        entry.name,
+        entry.name === branch
+          ? { revisionNumber: rows?.[0]?.revisionNumber, ahead: 0, behind: 0 }
+          : {
+              revisionNumber: entry.head === undefined ? undefined : otherHeads.get(entry.head)?.revisionNumber,
+              ahead: count?.ahead ?? 0,
+              behind: count?.behind ?? 0,
+            },
+      );
     }
     return {
       revisions,
+      hasOlder: hasOlderThan(log),
+      loadOlder,
       byTurnId,
       headRevisionId,
       line,
       isDirty: status?.dirty ?? false,
-      isLoading:
-        isPending ||
-        settledBranchRows.isPending ||
-        branchRows.pending.some((pending, index) => {
-          const entry = status?.branches[index];
-          return entry?.head !== undefined && entry.name !== branch && pending;
-        }),
+      isLoading: isPending,
       branchFacts,
     };
   }, [
     branch,
-    branchRows,
     client,
+    divergences,
     finalized,
     headRevisionId,
     isPending,
     line,
+    loadOlder,
+    log,
+    otherHeads,
+    others,
     rows,
     session,
-    settledBranchRows,
     status,
   ]);
+}
+
+/**
+ * Cards for revisions a surface names by id, wherever they sit in the history:
+ * the pinned rows History keeps visible below its loaded page, and the
+ * revision a restore row brought back (B2).
+ *
+ * @param ids - The revisions to read; leave out the ids the caller already holds.
+ * @returns Each card found, by id.
+ * @public
+ */
+export function useRevisionCards(ids: readonly string[]): ReadonlyMap<string, RevisionCard> {
+  const { projectId } = useProject();
+  const client = useRevisionClient();
+  const session = useRevisionSessionUser();
+  const rows = useRevisionRows(client, projectId, ids);
+  return useMemo(() => new Map([...rows].map(([id, row]) => [id, cardOf(row, session)] as const)), [rows, session]);
+}
+
+/**
+ * The revisions among `ids` that belong to the selected line's history, read
+ * one by one: History's pinned rows below its loaded page (B2). A revision
+ * belongs when the head holds it — the port counts nothing in it the head
+ * lacks — so a *View revision* from a chat on another branch pins nothing here.
+ *
+ * ponytail: the count is asked again at each new head, while a row stays
+ * pinned; one walk to the pinned row per save in the browser leg, a cursor on
+ * the port if a deep pin ever shows up hot.
+ *
+ * @param ids - Revisions to keep in view that the loaded page does not hold.
+ * @returns Their cards, in the order asked, for those on this line.
+ * @public
+ */
+export function useRevisionsOnLine(ids: readonly string[]): readonly RevisionCard[] {
+  const { projectId } = useProject();
+  const client = useRevisionClient();
+  const head = useRevisionStatus()?.headRevisionId;
+  const cards = useRevisionCards(ids);
+  const isOnLine = useQueries({
+    queries: ids.map((id) => ({
+      queryKey: ['revision-divergence', projectId, id, head ?? ''],
+      enabled: client !== undefined && head !== undefined,
+      queryFn: async () => client?.divergence(id, head ?? '') ?? { ahead: 1, behind: 0 },
+      staleTime: Number.POSITIVE_INFINITY,
+    })),
+    combine: (results) => results.map((result) => result.data?.ahead === 0),
+  });
+  return useMemo(
+    () =>
+      ids.flatMap((id, index) => {
+        const card = cards.get(id);
+        return card !== undefined && isOnLine[index] === true ? [card] : [];
+      }),
+    [cards, ids, isOnLine],
+  );
+}
+
+/**
+ * The cards, plus each revision a restore among them brought back that they do
+ * not hold, so `revisionTitle` names a restore by its target however far back
+ * that target is (B2).
+ *
+ * @param cards - The loaded cards a surface titles.
+ * @returns The cards, then the looked-up restore targets.
+ * @public
+ */
+export function useWithRestoreTargets(cards: readonly RevisionCard[]): readonly RevisionCard[] {
+  const missing = useMemo(() => {
+    const held = new Set(cards.map((card) => card.revisionId));
+    return [...new Set(cards.flatMap((card) => (card.restoredFrom === undefined ? [] : [card.restoredFrom])))].filter(
+      (id) => !held.has(id),
+    );
+  }, [cards]);
+  const targets = useRevisionCards(missing);
+  return useMemo(() => [...cards, ...targets.values()], [cards, targets]);
+}
+
+/**
+ * The revision one chat turn saved, found by the revision its settlement names.
+ *
+ * The loaded page answers a recent turn; an older one is read on its own by the
+ * id the `turn.finalized` record attested, so a turn recorded five hundred
+ * revisions ago keeps its `Rev N` after a reload (B2). A turn a remote host
+ * recorded, which this graph does not hold, keeps the settlement's own card.
+ *
+ * @param turnId - The user message that anchors the turn.
+ * @returns The turn's card, or `undefined` while nothing names one.
+ * @public
+ */
+export function useTurnRevision(turnId: string): RevisionCard | undefined {
+  const { byTurnId, revisions } = useRevisions();
+  const held = byTurnId.get(turnId);
+  const isLoaded = held === undefined || revisions.some((card) => card.revisionId === held.revisionId);
+  const lookedUp = useRevisionCards(isLoaded ? [] : [held.revisionId]).get(held?.revisionId ?? '');
+  return lookedUp ?? held;
 }
 
 /**

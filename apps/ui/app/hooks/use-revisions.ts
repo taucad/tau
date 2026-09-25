@@ -387,10 +387,11 @@ export function useRevisions(): RevisionsView {
           reread();
           return;
         }
-        /* Only onto the log it was asked against: another reader may have appended it already. */
+        /* Only onto the log it was asked against: another reader may have appended it already. Still one
+           page (B4): the oldest row moves behind Show more rather than a long session growing the log a row a save. */
         queryClient.setQueryData<HeadLog>(logKey, (current) =>
           current !== undefined && current.head === readAt
-            ? { head: headRevisionId, rows: [minted, ...current.rows], wanted: current.wanted + 1 }
+            ? { head: headRevisionId, rows: [minted, ...current.rows].slice(0, current.wanted), wanted: current.wanted }
             : current,
         );
       } catch {

@@ -2967,14 +2967,47 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
       merge: fromAuthorityPromise<SyncMergeActorOutput, SyncIntegrateActorInput>(async ({ input }) => {
         const conflictBranch = `sync/${input.remote}/${input.branch}`;
+        const tracking = remoteTrackingRef(input.remote, `refs/heads/${input.branch}`);
+        /*
+         * D57: a sync conflict is resolved on its own branch (AC14 leaves the
+         * branch merged into untouched), and nothing else carries that
+         * resolution home — merging the remote again only re-conflicts, so a
+         * resolved sync conflict could never finish. When the sync branch holds
+         * a resolution that already contains both heads, that resolution *is*
+         * this pull's merge: the branch fast-forwards to it, and the sync
+         * branch and its checkout are retired.
+         */
+        const resolved = await port.readRef(conflictBranch);
+        const [theirs, ours] = await Promise.all([port.readRef(tracking), port.readRef(input.branch)]);
+        if (resolved !== undefined && theirs !== undefined && resolved !== ours) {
+          const walk = await port.log({ heads: [resolved], limit: divergenceWalkLimit });
+          const reached = new Set<string>(walk.map((entry) => entry.id));
+          const settled = walk.find((entry) => entry.id === resolved)?.conflicted === false;
+          if (settled && reached.has(theirs) && (ours === undefined || reached.has(ours))) {
+            const landed = await mergeBranches({
+              branch: conflictBranch,
+              into: input.branch,
+              sourceLabel: `${input.remote}/${input.branch}`,
+            });
+            if (landed.status === 'merged') {
+              const places = await listPlaces();
+              const place = places.find((candidate) => candidate.branch === conflictBranch);
+              if (place !== undefined && port.removeCheckout !== undefined) {
+                await port.removeCheckout(place.id);
+              }
+              await port.updateRef({ name: conflictBranch, expectedHead: resolved, head: undefined });
+              return { status: 'merged', revisionId: landed.revisionId };
+            }
+          }
+        }
         const outcome = await mergeBranches({
-          branch: remoteTrackingRef(input.remote, `refs/heads/${input.branch}`),
+          branch: tracking,
           into: input.branch,
           conflictBranch,
           sourceLabel: `${input.remote}/${input.branch}`,
         });
         return outcome.status === 'merged'
-          ? { status: 'merged' }
+          ? { status: 'merged', revisionId: outcome.revisionId }
           : { status: 'conflicted', branch: conflictBranch, into: input.branch, paths: outcome.paths };
       }),
 

@@ -226,6 +226,25 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /* D57: a merge the pull composed moved the branch its checkout shows. */
+  it('tells the parent which revision a merged pull landed on', async () => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', { output: { status: 'merged', revisionId: 'merged-head' } });
+
+    await vi.waitFor(() => {
+      expect(harness.parent.events).toContainEqual({
+        type: 'branchMerged',
+        branch: 'tau/main',
+        into: 'main',
+        revisionId: 'merged-head',
+      });
+    });
+    harness.stop();
+  });
+
   it('row 35: reopening a retained root fetches again', async () => {
     const harness = start();
     await openCleanly(harness);

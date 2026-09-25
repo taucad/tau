@@ -352,17 +352,21 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
-  it('stays ready when retiring a lease rejects', async () => {
+  it('stays ready when retiring a lease rejects, and still drops that lease (L2-F11)', async () => {
     const harness = start();
     const { actor, promises, emitted } = harness;
 
-    await toReady(harness);
+    await toReady(harness, { checkouts: [live, { ...linked, leaseRunIds: ['run-7'] }] });
     actor.send({ type: 'leaseStale', runId: 'run-7' });
     promises.settle('retireLease', { error: new Error('lease file gone') });
     await flush();
 
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
     expect(types(emitted)).toContain('checkoutFailed');
+    /* Not pinned as leased for the rest of the session: Discard and the switch
+     * guard read this set. */
+    expect(selectLeaseSet(actor.getSnapshot())[linked.id]).toEqual([]);
+    expect(emitted.find((event) => event.type === 'leaseRetired')).toEqual({ type: 'leaseRetired', runId: 'run-7' });
 
     actor.stop();
   });

@@ -14,7 +14,6 @@
  * observable rather than inferred.
  */
 
-import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,15 +26,7 @@ import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { revisionTreeId } from '#revision-effects.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import type { RevisionPort } from '#revision-port.js';
-
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const roots: string[] = [];
@@ -89,7 +80,7 @@ const countedProject = async (
 const treeOf = (entries: readonly RevisionTreeInput[]): ImmutableRevisionTree => new ImmutableRevisionTree(entries);
 const encoder = new TextEncoder();
 
-describe.runIf(gitOnPath)('native-leg latency budgets', () => {
+describe.runIf(gitToolchainOnPath)('native-leg latency budgets', () => {
   it('B5: a 50-row history page over 200 revisions costs a handful of processes', async () => {
     const { port, spawns } = await countedProject('b5');
     await port.init({ author });

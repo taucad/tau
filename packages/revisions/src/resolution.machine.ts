@@ -31,6 +31,7 @@ import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
+import type { RevisionChildToast } from '#remote.types.js';
 import type { ResolutionSide } from '#resolution.types.js';
 
 /** One conflicted path, and whether it can be opened as text. @public */
@@ -177,6 +178,21 @@ const announceChange = (context: ResolutionMachineContext, enq: ResolutionEnqueu
   }
 };
 
+/* Emitted for a host that holds this child, and sent to the root for every
+ * host that holds only the root: a failed resolution step has no other surface
+ * (L2-F8). */
+const toastError = (context: ResolutionMachineContext, enq: ResolutionEnqueue, message: string): void => {
+  enq.emit({ type: 'toast.error', message });
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, {
+      type: 'childToast',
+      subject: 'resolution',
+      tone: 'error',
+      message,
+    } satisfies RevisionChildToast);
+  }
+};
+
 const announce = (context: ResolutionMachineContext, enq: ResolutionEnqueue): void => {
   const fact: ResolutionMachineEmitted = {
     type: 'conflictResolved',
@@ -291,7 +307,7 @@ const resolutionMachineDefinition = setup({
            event. The failure edge every invoked effect has (I29). */
         failed: {
           entry: ({ context }, enq) => {
-            enq.emit({ type: 'toast.error', message: context.reason ?? 'This conflict could not be read.' });
+            toastError(context, enq, context.reason ?? 'This conflict could not be read.');
             announceChange(context, enq);
           },
           on: { reload: { target: 'loading' } },
@@ -374,7 +390,7 @@ const resolutionMachineDefinition = setup({
                       theirs: event.output.theirs,
                     };
               if (event.output.text === undefined) {
-                enq.emit({ type: 'toast.error', message: unopenableMessage });
+                toastError(context, enq, unopenableMessage);
               }
               enq.emit(fact);
               /* Through the parent as well: the editor that shows this is on
@@ -429,7 +445,7 @@ const resolutionMachineDefinition = setup({
            carries on from here rather than starting over. */
         failed: {
           entry: ({ context }, enq) => {
-            enq.emit({ type: 'toast.error', message: context.reason ?? 'That resolution step failed.' });
+            toastError(context, enq, context.reason ?? 'That resolution step failed.');
             announceChange(context, enq);
           },
           always: { target: 'idle' },

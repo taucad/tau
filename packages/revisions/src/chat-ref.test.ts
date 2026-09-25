@@ -10,7 +10,6 @@
  * all.
  */
 
-import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,21 +33,13 @@ import { isHostLocalRef, refPatternIsHostLocal } from '#remotes.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { RevisionId } from '#algorithms/index.js';
 import type { RevisionPort } from '#revision-port.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 const decoder = new TextDecoder();
 const projectId = 'project-chat-refs';
 const chatId = 'chat_one';
 const actorId = 'actor-w17';
 const now = Date.UTC(2026, 8, 13, 6, 0, 0);
-
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 type Harness = Readonly<{
   port: RevisionPort;
@@ -164,7 +155,7 @@ describe('chat ref naming', () => {
 
 describe.each([
   ['isomorphic-git', isomorphicHarness, true],
-  ['native-git', nativeHarness, gitOnPath],
+  ['native-git', nativeHarness, gitToolchainOnPath],
 ] as const)('%s chat refs', (_engine, createHarness, enabled) => {
   let harness: Harness;
 
@@ -665,7 +656,7 @@ describe.each([
   });
 });
 
-describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
+describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => {
   const sharedChatId = 'chat_two_devices';
   let root: string;
   let remote: Awaited<ReturnType<typeof startGitHttpBackend>>;
@@ -862,4 +853,56 @@ describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
     expect(onB?.get(documentPath)).toEqual(documentBytes);
     await expect(stat(join(root, 'device-b-store', '.git', 'lfs'))).rejects.toMatchObject({ code: 'ENOENT' });
   }, 180_000);
+});
+
+/*
+ * L4-F10 (R34): a second device's first open can fetch every chat the project
+ * has, and each projection reads up to three trees. The fan-out is bounded, and
+ * every chat is still projected.
+ */
+describe('projectChats fan-out', () => {
+  it('projects 20 chats with at most 16 tree reads in flight', async () => {
+    const store = await createMemoryProvider();
+    const inner = createIsomorphicGitRevisionPort({ filesystem: store });
+    await inner.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const ids = Array.from({ length: 20 }, (_, index) => `chat_${String(index)}`);
+    const fetched = await Promise.all(
+      ids.map(async (id) => {
+        const receipt = await inner.writeRevision({
+          parents: [],
+          tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n']]),
+          provenance: { source: 'user', actorId, createdAt: now },
+          summary: { generated: `Chat ${id}` },
+        });
+        return { name: `refs/remotes/tau/tau/chats/${id}`, head: revisionId(receipt.commitId) };
+      }),
+    );
+    let inFlight = 0;
+    let peak = 0;
+    const port: RevisionPort = {
+      ...inner,
+      readTree: async (id) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        try {
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 5);
+          });
+          return await inner.readTree(id);
+        } finally {
+          inFlight -= 1;
+        }
+      },
+    };
+
+    const projected = await projectChats({
+      port,
+      filesystem: await createMemoryProvider(),
+      deviceId: 'device-b',
+      refs: fetched,
+    });
+
+    expect(projected.toSorted()).toEqual(ids.toSorted());
+    expect(peak).toBeLessThanOrEqual(16);
+  });
 });

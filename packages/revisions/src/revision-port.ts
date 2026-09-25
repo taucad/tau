@@ -588,6 +588,14 @@ export type RevisionPortErrorCode =
    * the new address. Terminal: retrying the old address reproduces it.
    */
   | 'REMOTE_MOVED'
+  /**
+   * HTTP 500 `GIT_REPOSITORY_INCOMPLETE`: the hosted repository is damaged.
+   *
+   * Its manifest names a pack the store does not hold. Terminal: every retry
+   * reproduces it until an operator restores the repository, so it is never
+   * filed as `REMOTE_UNAVAILABLE`.
+   */
+  | 'REMOTE_DAMAGED'
   /** HTTP 413 with no LFS file list; a batch refusal keeps raising `LfsQuotaError`. */
   | 'REMOTE_QUOTA_EXCEEDED'
   /**

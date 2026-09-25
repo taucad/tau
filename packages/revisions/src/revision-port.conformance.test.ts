@@ -31,7 +31,7 @@ import type { Checkout, RevisionPort } from '#revision-port.js';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
-import { gitOnPath, nativeHarness } from '#test/native-git-harness.js';
+import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedIgnorePath } from '#workspace-config.js';
 
 const encoder = new TextEncoder();
@@ -165,18 +165,24 @@ type Adapter = Readonly<{
 
 const adapters: readonly Adapter[] = [
   { name: 'isomorphic-git', create: isomorphicHarness, enabled: true },
-  { name: 'native-git', create: createNativeHarness, enabled: gitOnPath },
+  { name: 'native-git', create: createNativeHarness, enabled: gitToolchainOnPath },
 ];
 
 /* AC23's pin on the table itself: two rows, both live, nothing skipped. `git`
- * on `PATH` is a prerequisite of this suite — the transport rows already spawn
- * `git http-backend` — so a red here means the comparison stopped being one. */
+ * and `git-lfs` on `PATH` are a prerequisite of this suite — the transport rows
+ * already spawn `git http-backend`, and the native port records large objects
+ * through `git lfs` — so a red here means the comparison stopped being one. On
+ * a machine without the toolchain this is the one row that fails, and it says
+ * why, instead of every native row failing product-shaped. */
 describe('the conformance table', () => {
   it('runs at least two enabled adapters', () => {
     /* AC23 says "at least two", and `toHaveLength(2)` said "exactly two"
      * (review R11) — a third adapter row would have failed the pin that exists
      * to keep rows from going dark. */
-    expect(adapters.filter((adapter) => adapter.enabled).length).toBeGreaterThanOrEqual(2);
+    expect(
+      adapters.filter((adapter) => adapter.enabled).length,
+      'the native-git row needs `git` and `git lfs` on PATH (gitToolchainOnPath)',
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it('skips no row', async () => {
@@ -778,7 +784,7 @@ for (const adapter of adapters) {
  * this wave is `isomorphic-git` diverging from native Git on identity, and the
  * only thing that can observe it is running the same edits through both.
  */
-describe.runIf(gitOnPath)('cross-adapter identity (I4)', () => {
+describe.runIf(gitToolchainOnPath)('cross-adapter identity (I4)', () => {
   it('names the same tree — and the same revision — from the same scripted edits', async () => {
     const harnesses = await Promise.all([isomorphicHarness(), createNativeHarness()]);
     try {
@@ -979,7 +985,7 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
     expect(reads).toBeGreaterThan(0);
   }, 180_000);
 
-  it.runIf(gitOnPath)(
+  it.runIf(gitToolchainOnPath)(
     'spawns a handful of object reads for a limited log on disk',
     async () => {
       const root = await mkdtemp(join(tmpdir(), 'tau-revisions-bound-'));
@@ -1138,7 +1144,7 @@ describe('browser ref publication under a Web Lock (8-review S4)', () => {
  * allowed to adopt it. The port owns the store at its own path or it creates
  * one; it never writes a project's revisions into an enclosing repository.
  */
-describe.runIf(gitOnPath)('native-git store isolation (review 4 R2)', () => {
+describe.runIf(gitToolchainOnPath)('native-git store isolation (review 4 R2)', () => {
   it('creates its own repository inside an enclosing one and writes nothing into it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-nested-'));
     try {
@@ -1237,7 +1243,7 @@ describe.runIf(gitOnPath)('native-git store isolation (review 4 R2)', () => {
  * that matters most is the refusal: a server that turns down one ref must not
  * be able to stop the branch beside it (A39).
  */
-describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => {
+describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture', () => {
   for (const adapter of adapters) {
     describe.runIf(adapter.enabled)(adapter.name, () => {
       let harness: Harness;
@@ -1375,7 +1381,7 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
   }
 });
 
-describe.runIf(gitOnPath)('native remote credential transport', () => {
+describe.runIf(gitToolchainOnPath)('native remote credential transport', () => {
   it('passes the credential only through the child environment', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-credential-'));
     const fixture = await startGitHttpBackend({ root });
@@ -1429,7 +1435,7 @@ describe.runIf(gitOnPath)('native remote credential transport', () => {
  * leg. These rows are the browser leg's `isomorphic-git-adapter.test.ts` table,
  * asked of the binary.
  */
-describe.runIf(gitOnPath)('native remote refusals (N1)', () => {
+describe.runIf(gitToolchainOnPath)('native remote refusals (N1)', () => {
   it.each([
     { status: 401, code: 'REMOTE_UNAUTHORIZED' },
     { status: 403, code: 'REMOTE_FORBIDDEN' },
@@ -1537,7 +1543,7 @@ describe.runIf(gitOnPath)('native remote refusals (N1)', () => {
  * goes up *before* the ref that names it, it goes up *once*, and a second store
  * that only fetched pointers reads the bytes back.
  */
-describe.runIf(gitOnPath)('LFS clients over the batch API', () => {
+describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
   const large = ((): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(new ArrayBuffer(5 * 1024 * 1024));
     for (let index = 0; index < bytes.length; index += 1) {

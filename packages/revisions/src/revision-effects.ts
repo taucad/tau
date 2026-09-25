@@ -60,6 +60,8 @@ import type { AnyEventObject, AsyncActorLogic, AsyncLogicFunction } from 'xstate
 import { checkoutMachine } from '#checkout.machine.js';
 import type {
   CheckoutActors,
+  CheckoutCaptureTreeActorInput,
+  CheckoutCaptureTreeActorOutput,
   CheckoutCasHeadActorInput,
   CheckoutCasHeadActorOutput,
   CheckoutCutActorInput,
@@ -111,10 +113,12 @@ import type {
   RemoteWriteActorInput,
   RemoteWriteActorOutput,
 } from '#remote.machine.js';
+import type { RemoteStorageSupplier } from '#remote.types.js';
 import { isHostLocalRef, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
 import { createSyncQueue } from '#sync-queue.js';
-import { latestRevisionTarget, restoreMachine } from '#restore.machine.js';
-import { syncMachine } from '#sync.machine.js';
+import { restoreMachine } from '#restore.machine.js';
+import { readRevisionLog } from '#revision-verbs.js';
+import { syncMachine, syncPullDeadlineMilliseconds } from '#sync.machine.js';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
@@ -141,6 +145,7 @@ import type {
   RestoreApplyPlanActorOutput,
   RestoreComputePlanActorInput,
   RestoreComputePlanActorOutput,
+  RestoreFailureCode,
 } from '#restore.machine.js';
 import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -152,7 +157,7 @@ import type {
   RevisionPort,
   RevisionTag,
 } from '#revision-port.js';
-import { turnMachine } from '#turn.machine.js';
+import { turnCutSettlementMilliseconds, turnMachine } from '#turn.machine.js';
 import type {
   TurnActors,
   TurnCaptureActorInput,
@@ -467,7 +472,7 @@ export type RevisionActorsOptions = Readonly<{
    * remote does not, so the Sync region shows the storage row only when a host
    * can fill it in. W11a/W13 wire the reader.
    */
-  remoteStorage?: (remote: string) => Promise<Readonly<{ used: number; quota: number }> | undefined>;
+  remoteStorage?: RemoteStorageSupplier;
   /**
    * Registers this project on Tau Cloud, at *Connect* (P51, W18 DEF-1).
    *
@@ -955,7 +960,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (collisions.length > 0) {
       throw new RevisionPortError(
         'ENGINE_FAILED',
-        `These paths differ only by case and cannot be checked out together: ${collisions.join(', ')}`,
+        `These paths cannot be checked out together on every computer (they differ only by letter case or accents, or one names a file another needs as a folder): ${collisions.join(', ')}`,
       );
     }
     return tree;
@@ -1098,7 +1103,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const receipt = await port.writeRevision({
         parents: parents.map((head) => revisionId(head)),
         tree,
-        provenance: provenanceOf('save', [], undefined),
+        provenance: provenanceOf('save', []),
         summary: Object.freeze({ generated: 'Backed up generated exports' }),
       });
       const head = revisionId(receipt.commitId);
@@ -1374,15 +1379,49 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
+  /**
+   * One revision's first-parent ordinal on a checkout's line (D5).
+   *
+   * @param place - The checkout whose branch numbers it.
+   * @param revision - The revision to number.
+   * @returns `Rev N`'s `N`, or `undefined` when the revision is not on that line (A9).
+   */
+  const ordinalOnLine = async (place: Checkout, revision: string): Promise<number | undefined> => {
+    const rows = await readRevisionLog(port, { branch: place.branch });
+    return rows.find((row) => row.revisionId === revision)?.revisionNumber;
+  };
+
+  /* A cut's generated title; a restore row reads `Restored Rev N`, never an invented number (A9). */
+  const summaryOf = async (input: CheckoutWriteRevisionActorInput): Promise<string> => {
+    if (input.turnId !== undefined) {
+      return `Agent turn ${input.turnId}`;
+    }
+    if (input.restoredFrom === undefined) {
+      return `Saved changes (${input.trigger})`;
+    }
+    const number = await ordinalOnLine(await placeOf(input.checkoutId), input.restoredFrom);
+    return number === undefined ? 'Restored an earlier revision' : `Restored Rev ${String(number)}`;
+  };
+
   const provenanceOf = (
     trigger: CheckoutCutTrigger,
     leaseIds: readonly string[],
-    turnId: string | undefined,
+    about: Readonly<{ turnId?: string | undefined; restoredFrom?: string | undefined }> = {},
   ): RevisionProvenance => {
+    const { turnId, restoredFrom } = about;
     const [only] = leaseIds;
     const actor = options.actor?.({ runId: only, trigger });
     return Object.freeze({
-      source: trigger === 'turn' ? 'agent' : trigger === 'restore' ? 'restore' : trigger === 'merge' ? 'merge' : 'user',
+      /* Only the restore row is the restore's: the cut before it records the
+       * person's own bytes under the same trigger (D1, A9). */
+      source:
+        trigger === 'turn'
+          ? 'agent'
+          : restoredFrom === undefined
+            ? trigger === 'merge'
+              ? 'merge'
+              : 'user'
+            : 'restore',
       /* One id, not two: `actorId` *is* the actor's id whenever the host could
        * resolve one, so nothing has to decide which of the pair to believe. */
       actorId: actor?.id ?? actorId,
@@ -1397,6 +1436,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* S37: who, in the shape stock `git log` renders, and what asked (S30). */
       ...(actor === undefined ? {} : { actor }),
       trigger,
+      ...(restoredFrom === undefined ? {} : { restoredFrom }),
       createdAt: now(),
     });
   };
@@ -1480,7 +1520,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const receipt = await port.writeRevision({
         parents: [theirs, ours],
         tree: theirsTree,
-        provenance: provenanceOf('merge', [], undefined),
+        provenance: provenanceOf('merge', []),
         summary: Object.freeze({ generated: `Merging ${sourceLabel} into ${input.into} needs resolution` }),
         conflict: {
           trees: [oursTreeId ?? '', baseTreeId ?? '', theirsTreeId ?? ''],
@@ -1501,7 +1541,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const receipt = await port.writeRevision({
       parents: [ours, theirs],
       tree: merged.tree,
-      provenance: provenanceOf('merge', [], undefined),
+      provenance: provenanceOf('merge', []),
       summary: Object.freeze({ generated: `Merged ${sourceLabel} into ${input.into}` }),
     });
     await materializeTree(target, merged.tree, {
@@ -1520,6 +1560,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const treeId = revisionTreeId(await recordedTree(tree), await formatOf());
         return { treeId, cutId: cuts.put(input.checkoutId, { tree, treeId }) };
       }),
+
+      /* D4's spawn-time comparison: the same memoised capture the first cut
+       * reads, so that cut re-reads only what changed after it. */
+      captureTree: fromAuthorityPromise<CheckoutCaptureTreeActorOutput, CheckoutCaptureTreeActorInput>(
+        async ({ input }) => {
+          const tree = await capture(await placeOf(input.checkoutId));
+          return { treeId: revisionTreeId(await recordedTree(tree), await formatOf()) };
+        },
+      ),
 
       writeRevision: fromAuthorityPromise<Readonly<{ revisionId: string }>, CheckoutWriteRevisionActorInput>(
         async ({ input }) => {
@@ -1541,9 +1590,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const receipt = await port.writeRevision({
             parents: input.parents.map((parent) => revisionId(parent)),
             tree: held.tree,
-            provenance: provenanceOf(input.trigger, leaseIds, input.turnId),
+            provenance: provenanceOf(input.trigger, leaseIds, {
+              turnId: input.turnId,
+              restoredFrom: input.restoredFrom,
+            }),
             summary: Object.freeze({
-              generated: input.turnId === undefined ? `Saved changes (${input.trigger})` : `Agent turn ${input.turnId}`,
+              generated: await summaryOf(input),
             }),
           });
           /* The claim {@link revisionTreeId} makes, checked where it is cheap:
@@ -1562,10 +1614,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       ),
 
       casHead: fromAuthorityPromise<CheckoutCasHeadActorOutput, CheckoutCasHeadActorInput>(async ({ input }) => {
-        /* A detached checkout names no branch, so there is nothing to publish:
-         * the revision is recorded and reachable by id (A2). */
+        /* No detached checkout exists (D1): a revision no ref reaches would be
+         * a written tree nobody can find, so it is refused rather than orphaned (I1). */
         if (input.branch === undefined) {
-          return { status: 'updated', head: input.head };
+          throw new RevisionPortError(
+            'UNSUPPORTED_OPERATION',
+            'These files are not on a branch, so nothing can record them.',
+          );
         }
         const result = await port.updateRef({
           name: input.branch,
@@ -1740,7 +1795,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           await ensureStore();
           const place = await placeOf(input.checkoutId);
           const head = await headOf(place);
-          const target = input.target === latestRevisionTarget ? head : input.target;
+          /* *Undo restore* is a restore of the restore row's first parent (D2). */
+          const restored = input.firstParent === true ? await port.readRevision(revisionId(input.target)) : undefined;
+          const target = input.firstParent === true ? restored?.parents[0] : input.target;
           if (target === undefined) {
             throw new RevisionPortError('UNKNOWN_REVISION', 'There is no revision to return these files to.');
           }
@@ -1749,38 +1806,56 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             throw new RevisionPortError('UNKNOWN_REVISION', `No recorded revision to restore: ${target}`);
           }
           const live = await captureFresh(place);
-          const headTree = head === undefined ? undefined : await port.readTree(revisionId(head));
           const removed = live.entries().filter(({ path }) => !tree.has(path));
-          const graph = await port.log();
-          const position = graph.findIndex((entry) => entry.id === target);
           const headTreeId = await treeIdOf(head);
           return {
             planId: plans.put(input.checkoutId, { checkoutId: input.checkoutId, revisionId: target, tree }),
             revisionId: target,
-            /* `Rev N` is the ordinal in the recorded order, oldest first (I3). */
-            revisionNumber: position === -1 ? graph.length : graph.length - position,
+            revisionNumber: await ordinalOnLine(place, target),
             removedPathCount: removed.length,
             dirty: headTreeId !== revisionTreeId(await recordedTree(live), await formatOf()),
-            /* A path this restore deletes that no revision on the way here holds
-             * cannot be brought back by another restore. */
-            unrecoverable: removed.filter(({ path }) => headTree?.has(path) !== true).map(({ path }) => path),
           };
         },
       ),
 
+      /*
+       * Writes the target tree and nothing else: no ref and no HEAD move here
+       * (A4, A5). The checkout's own `restore` cut is what fast-forwards the
+       * line, so a restore never leaves its branch.
+       */
       applyPlan: fromAuthorityPromise<RestoreApplyPlanActorOutput, Readonly<{ checkoutId: string; planId: string }>>(
         async ({ input }) => {
           const plan = plans.take(input.planId);
           const place = await placeOf(plan.checkoutId);
-          /* The checkout tracks the restored revision's branch, or nothing when
-           * no branch names it — detached (A2). */
-          const references = await port.listRefs();
-          const branch = references.find((reference) => reference.head === plan.revisionId)?.name;
           await materializeTree(place, plan.tree, {
-            publish: branch !== undefined && place.kind === 'live' ? async () => port.setHead(branch) : undefined,
+            /*
+             * A3: the pre-restore cut and this write are two fenced sections, so
+             * the head is proven again inside this one — the files equal the
+             * line's head and no turn holds them — or nothing is written.
+             */
+            validate: async (before) => {
+              const head = await headOf(await placeOf(place.id));
+              const headTreeId = await treeIdOf(head);
+              if (headTreeId !== revisionTreeId(await recordedTree(before), await formatOf())) {
+                throw new RevisionPortError(
+                  'CHECKOUT_CONFLICT',
+                  'These files changed while the restore was being prepared. Try again.',
+                );
+              }
+              /* A turn another window or host started while the question was open:
+               * refused in Switch's words, as A1's is, and before a byte is written
+               * — the restore cut could not land on a leased checkout (M4). No port
+               * names this refusal, so the code rides a plain error, read the
+               * structural way the machine reads every code. */
+              const leases = await readLeases();
+              if (leases.some((lease) => lease.checkoutId === place.id)) {
+                const code: RestoreFailureCode = 'LEASE_UNAVAILABLE';
+                throw Object.assign(new Error('An agent is working in this project’s files.'), { code });
+              }
+            },
           });
           const treeId = await treeIdOf(plan.revisionId);
-          return { revisionId: plan.revisionId, treeId: treeId ?? '', branch };
+          return { revisionId: plan.revisionId, treeId: treeId ?? '' };
         },
       ),
     },
@@ -1885,9 +1960,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
       /* Apply-to-live: the *other* half of one verb a person never
        * distinguishes (D10). The tree the branch names replaces the working
-       * copy and the live head follows the branch — the same two writes
-       * `restore` makes, through the same `applyTree`, so one checkout has one
-       * way of being rewritten (I20). */
+       * copy and the live head follows the branch. The tree write goes through
+       * the same `materializeTree` a restore's does, so one checkout has one
+       * way of being rewritten (I20); unlike a restore, which moves no head of
+       * its own and lets its restore cut fast-forward the line (D1), a switch
+       * also moves the live head to the branch. */
       applySwitch: fromAuthorityPromise<
         BranchApplySwitchActorOutput,
         Readonly<{ projectId: string; branch: string; checkoutId: string | undefined }>
@@ -2099,7 +2176,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const receipt = await port.writeRevision({
           parents: [revisionId(input.revisionId)],
           tree: new ImmutableRevisionTree(entries.values()),
-          provenance: provenanceOf('merge', [], undefined),
+          provenance: provenanceOf('merge', []),
           summary: Object.freeze({
             generated: `Resolved ${String(terms.conflicts.length)} ${terms.conflicts.length === 1 ? 'file' : 'files'} between ${terms.labels.ours} and ${terms.labels.theirs}`,
           }),
@@ -3016,29 +3093,36 @@ export const createProjectRevisionsActor = (
   return { actor, settled: actors.settled };
 };
 
+/* How far each wait outlasts the bound it awaits, so the inner reason always lands first (rule 9). */
+const nestedBoundMarginMilliseconds = 2000;
+
 /**
  * How long an admission waits for its turn to take its lease.
  *
- * The same bound the turn machine gives its own cut (`turnCutSettlementMilliseconds`),
- * spelled here rather than imported because it is the *host's* patience: a turn
- * whose base mint never settles must refuse the run rather than hold the client
- * open for the life of the process. Both compositions read this one value
- * (W10.5) — they had a copy each, and a bound kept in two places is a bound.
+ * The host's patience: a turn whose base mint never settles must refuse the
+ * run rather than hold the client open for the life of the process. Rule 9
+ * nests it strictly outside the turn's own cut settlement
+ * (`turnCutSettlementMilliseconds`), so a base cut that times out answers with
+ * its own reason before this wait's generic one. Both compositions read this
+ * one value (W10.5): a bound kept in two places is two bounds.
  *
  * @public
  */
-export const admissionMilliseconds = 30_000;
+export const admissionMilliseconds = turnCutSettlementMilliseconds + nestedBoundMarginMilliseconds;
 
 /**
  * How long a host waits for the scheduler before it lets a project go.
  *
- * The same 5 s the close flush itself is given: a quit must not hang on a remote
- * that stopped answering, and a revision this host could not push is a record in
+ * Rule 9 nests it strictly outside the open pull's deadline
+ * (`syncPullDeadlineMilliseconds`): a close that lands while the pull is still
+ * running waits for the pull to settle or be abandoned, and then hears the
+ * scheduler's own outcome. A quit still cannot hang on a remote that stopped
+ * answering, and a revision this host could not push is a record in
  * `.git/sync-pending` that the next open retries (D28).
  *
  * @public
  */
-export const syncQuiesceMilliseconds = 5000;
+export const syncQuiesceMilliseconds = syncPullDeadlineMilliseconds + nestedBoundMarginMilliseconds;
 
 /* What the scheduler looks like when it owes this host nothing more. */
 const settledSyncStates = new Set<SyncFacet['state']>(['noRemote', 'backedUp', 'queued', 'conflicted']);
@@ -3100,5 +3184,94 @@ export const awaitSyncSettled = async (
   } finally {
     clearTimeout(bound);
     subscription.unsubscribe();
+  }
+};
+
+/**
+ * Record every checkout no turn holds, and wait for each one's answer.
+ *
+ * The close ruling (D6, rule 7): closing or quitting saves every dirty
+ * checkout, live and linked, not only the one the workbench shows. A linked
+ * checkout a person edited and never saved would otherwise be recorded only by
+ * whichever host next opened it, if any does. Every checkout is asked rather
+ * than only those reading `dirty`, because a write the watcher has not yet
+ * delivered is still on disk; each checkout's I5 gate decides whether anything
+ * is minted, so a clean one costs one memoized capture.
+ *
+ * A checkout a turn holds is skipped: that turn is already recording its bytes,
+ * and minting here would credit the turn's work to `close` (W6-a3). A turn not
+ * yet placed holds every checkout, because it could land on any of them.
+ *
+ * Both hosts use this one seam, like {@link awaitSyncSettled}.
+ *
+ * @param actor - The project's running revision root.
+ * @param trigger - `close`, or the browser's `hidden` close preparation.
+ * @param timeoutMilliseconds - One bound for all the cuts. Defaults to {@link syncQuiesceMilliseconds}.
+ * @returns Once every cut has answered. Rejects with the first refusal (a failed cut, a
+ *   lost compare-and-swap) once all have answered, or at the bound.
+ * @public
+ */
+export const awaitCheckoutCuts = async (
+  actor: ProjectRevisionsActor,
+  trigger: 'hidden' | 'close',
+  timeoutMilliseconds: number = syncQuiesceMilliseconds,
+): Promise<void> => {
+  const { checkouts, checkoutRefs, turnRefs } = actor.getSnapshot().context;
+  const turnCheckouts = Object.values(turnRefs).map((ref) => ref.getSnapshot().context.checkoutId);
+  const ids = checkouts
+    .filter(
+      (checkout) =>
+        checkoutRefs[checkout.id] !== undefined &&
+        checkout.leaseRunIds.length === 0 &&
+        !turnCheckouts.some((id) => id === undefined || id === checkout.id),
+    )
+    .map((checkout) => checkout.id);
+  /* Each answer settles to its refusal, or `undefined` when the checkout recorded or had nothing to record. */
+  const answers = new Map(ids.map((id) => [id, Promise.withResolvers<string | undefined>()]));
+  const answer = (
+    event: Readonly<{ checkoutId: string; trigger: string; turnId?: string }>,
+    refusal?: string,
+  ): void => {
+    if (event.trigger === trigger && event.turnId === undefined) {
+      answers.get(event.checkoutId)?.resolve(refusal);
+    }
+  };
+  const subscriptions = [
+    actor.on('revisionMinted', (event) => {
+      answer(event);
+    }),
+    actor.on('nothingToSave', (event) => {
+      answer(event);
+    }),
+    actor.on('cutFailed', (event) => {
+      answer(event, event.reason);
+    }),
+    /* Terminal for this request: the checkout re-reads and rests dirty, so the
+     * next host to open the project records these bytes (M3). */
+    actor.on('casLost', (event) => {
+      answer(event, 'Another writer moved this branch first; the files stay unrecorded.');
+    }),
+  ];
+  const deadline = Promise.withResolvers<never>();
+  const bound = setTimeout(() => {
+    deadline.reject(new Error(`The ${trigger} revision was not recorded before the deadline.`));
+  }, timeoutMilliseconds);
+  try {
+    for (const id of ids) {
+      actor.send({ type: 'cut', trigger, checkoutId: id, leaseIds: [] });
+    }
+    const refusals = await Promise.race([
+      Promise.all([...answers.values()].map(async (pending) => pending.promise)),
+      deadline.promise,
+    ]);
+    const refused = refusals.find((refusal) => refusal !== undefined);
+    if (refused !== undefined) {
+      throw new Error(refused);
+    }
+  } finally {
+    clearTimeout(bound);
+    for (const subscription of subscriptions) {
+      subscription.unsubscribe();
+    }
   }
 };

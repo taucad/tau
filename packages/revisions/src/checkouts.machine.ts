@@ -26,8 +26,8 @@ export type CheckoutsMachineInput = Readonly<{
   parentRef?: AnyActorRef;
 }>;
 
-/** Serializable state owned by checkoutsMachine. @public */
-export type CheckoutsMachineContext = Readonly<{
+/* The fields of {@link CheckoutsMachineContext}, named by the interface below. */
+type CheckoutsMachineContextFields = Readonly<{
   projectId: string;
   checkouts: readonly CheckoutRecord[];
   /** Run ids awaiting retirement, served one at a time in arrival order. */
@@ -41,6 +41,10 @@ export type CheckoutsMachineContext = Readonly<{
   reasonCode: RevisionPortErrorCode | undefined;
   parentRef: AnyActorRef | undefined;
 }>;
+
+/** Serializable state owned by checkoutsMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface CheckoutsMachineContext extends CheckoutsMachineContextFields {}
 
 /** Events accepted by checkoutsMachine. @public */
 export type CheckoutsMachineEvent =
@@ -206,6 +210,14 @@ const completeRetirement = (
     publish(context, enq, { type: 'leaseRetired', runId });
   }
   return { pendingRetirements: context.pendingRetirements.slice(1) };
+};
+
+/* Drop the head retirement's lease from the record, say so, and re-announce the registry. */
+const retire = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue): Partial<CheckoutsMachineContext> => {
+  const dropped = { ...context, ...dropRetiredLease(context) };
+  const completed = { ...dropped, ...completeRetirement(dropped, enq) };
+  announceRegistry(completed, enq);
+  return { checkouts: completed.checkouts, pendingRetirements: completed.pendingRetirements };
 };
 
 const checkoutsMachineDefinition = setup({
@@ -457,23 +469,16 @@ const checkoutsMachineDefinition = setup({
               projectId: context.projectId,
               runId: context.pendingRetirements[0] ?? '',
             }),
-            onDone: ({ context }, enq) => {
-              const dropped = { ...context, ...dropRetiredLease(context) };
-              const completed = { ...dropped, ...completeRetirement(dropped, enq) };
-              announceRegistry(completed, enq);
-              return {
-                target: 'idle',
-                context: { checkouts: completed.checkouts, pendingRetirements: completed.pendingRetirements },
-              };
-            },
+            onDone: ({ context }, enq) => ({ target: 'idle', context: retire(context, enq) }),
+            /* A lease whose file this host could not delete is still not a lease
+             * this host holds, and `sweepLeases` owns the file: keeping the run
+             * id on the record pinned the checkout as leased — Discard and the
+             * switch guard refusing it — until the project was reopened
+             * (L2-F11). The failure is still said. */
             onError: ({ context, event }, enq) => {
-              const patch = {
-                reason: describeFailure(event.error),
-                reasonCode: describeFailureCode(event.error),
-                pendingRetirements: context.pendingRetirements.slice(1),
-              };
-              announceFailure({ ...context, ...patch }, enq, { operation: 'retire' });
-              return { target: 'idle', context: patch };
+              const failure = { reason: describeFailure(event.error), reasonCode: describeFailureCode(event.error) };
+              announceFailure({ ...context, ...failure }, enq, { operation: 'retire' });
+              return { target: 'idle', context: { ...failure, ...retire(context, enq) } };
             },
           },
         },

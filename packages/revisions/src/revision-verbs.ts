@@ -58,6 +58,14 @@ export type RevisionRow = Readonly<{
    * also why the field is optional: a fixture that predates it is still a row.
    */
   trigger?: RevisionProvenance['trigger'];
+  /**
+   * The revision a restore brought back (D1), by id.
+   *
+   * Present only on the revision a restore minted: the cut that recorded the
+   * checkout before the restore carries the same `restore` trigger and none, so
+   * this, never the trigger, is what names a *Restored* row (A9).
+   */
+  restoredFrom?: string;
 }>;
 
 /** Where the reader is, and what else this project holds. @public */
@@ -146,6 +154,7 @@ const rowOf = (
     turnId: entry.provenance.turnId,
     tags,
     trigger: entry.provenance.trigger,
+    ...(entry.provenance.restoredFrom === undefined ? {} : { restoredFrom: entry.provenance.restoredFrom }),
   });
 
 /**

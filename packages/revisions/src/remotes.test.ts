@@ -38,6 +38,7 @@ import type { PublishPublicationActorInput } from '#publish.types.js';
 /* The two W4 rows assert the *consequence* of the code, not only the code: a
    terminal class is what stops `sync.machine` retrying, and that classifier is
    the machine's, not this module's. */
+import { incompleteRepositoryMarker } from '#refusal-markers.js';
 import { syncFailureReason } from '#sync.machine.js';
 import { RevisionPortError } from '#revision-port.js';
 
@@ -204,8 +205,12 @@ describe('remotes', () => {
   });
 
   it('lets only Tau Cloud carry a project’s large objects (P20)', () => {
-    expect(remoteCarriesLargeObjects('tau')).toBe(true);
-    expect(remoteCarriesLargeObjects('origin')).toBe(false);
+    expect(remoteCarriesLargeObjects(remoteOf('tau', 'https://api.tau.new/v1/git/p1.git'))).toBe(true);
+    expect(remoteCarriesLargeObjects(remoteOf('origin', 'https://git.example/o/r.git'))).toBe(false);
+    /* C34: the provider decides, so a GitHub remote answers the same wherever it is asked. */
+    expect(remoteCarriesLargeObjects(remoteOf('origin', 'https://github.com/o/r.git', { provider: 'github' }))).toBe(
+      true,
+    );
     // The refusal names files, never a count (D16, AC16).
     expect(lfsRemoteUnsupportedMessage(['models/housing.step', 'models/bracket.step'])).toBe(
       'Large files cannot be backed up to a Git remote: models/bracket.step, models/housing.step. Connect Tau Cloud instead, or remove them from the project.',
@@ -275,6 +280,55 @@ describe('remoteTransportError', () => {
     const refusal = new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(['huge.step']));
 
     expect(syncFailureReason(refusal)).toBe('largeFiles');
+  });
+
+  /* D22, L6-F8: a manifest naming a pack the store does not hold is repaired
+   * only by an operator, so it is terminal on both legs — and the 503s that
+   * clear on their own keep their retry. */
+  it.each([
+    [
+      'the browser leg’s JSON envelope',
+      Object.assign(new Error('HTTP Error: 500 Internal Server Error'), {
+        data: {
+          statusCode: 500,
+          response: JSON.stringify({
+            code: 'GIT_REPOSITORY_INCOMPLETE',
+            error: `${incompleteRepositoryMarker}; Tau is repairing it.`,
+          }),
+        },
+      }),
+      undefined,
+    ],
+    [
+      'the native leg’s text/plain sentence',
+      new Error('git push failed'),
+      [
+        `remote: ${incompleteRepositoryMarker}; Tau is repairing it.`,
+        "fatal: unable to access 'https://api.tau.build/v1/git/p1.git/': The requested URL returned error: 500",
+      ].join('\n'),
+    ],
+  ])('files an incomplete repository from %s as damaged, never as unavailable', (_, thrown, stderr) => {
+    const refusal = remoteTransportError(thrown, {
+      remote: tauRemoteName,
+      ...(stderr === undefined ? {} : { stderr }),
+    });
+
+    expect(refusal.code).toBe('REMOTE_DAMAGED');
+    expect(syncFailureReason(refusal)).toBe('damaged');
+    expect(refusal.message).toContain(incompleteRepositoryMarker);
+  });
+
+  it('keeps a 503 race-lost and an unmarked 500 retryable', () => {
+    for (const [statusCode, code] of [
+      [503, 'GIT_PUSH_RACE_LOST'],
+      [500, 'INTERNAL_SERVER_ERROR'],
+    ] as const) {
+      const thrown = Object.assign(new Error(`HTTP Error: ${String(statusCode)}`), {
+        data: { statusCode, response: JSON.stringify({ code, error: 'Try again shortly.' }) },
+      });
+
+      expect(remoteTransportError(thrown, { remote: tauRemoteName }).code).toBe('REMOTE_UNAVAILABLE');
+    }
   });
 
   it('leaves a sideband refusal without the ceiling marker a plain rejection', () => {

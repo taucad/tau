@@ -14,7 +14,7 @@
  * kind's UI; the data model already holds it.
  */
 
-import { isCeilingRefusal } from '#refusal-markers.js';
+import { isCeilingRefusal, isIncompleteRepositoryRefusal } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
@@ -360,6 +360,7 @@ type RemoteRefusal = Readonly<{ status?: number; code?: string; message?: string
 
 /** The `code` values this classifier will hand back untouched when it finds one. */
 const remoteErrorCodes: ReadonlySet<string> = new Set<RevisionPortErrorCode>([
+  'REMOTE_DAMAGED',
   'REMOTE_FORBIDDEN',
   'REMOTE_MOVED',
   'REMOTE_NOT_ENTITLED',
@@ -496,6 +497,9 @@ const refusalSentence = (code: RevisionPortErrorCode): string => {
     case 'REMOTE_REJECTED': {
       return 'The remote refused this update; this project will catch up and try again.';
     }
+    case 'REMOTE_DAMAGED': {
+      return 'This project’s cloud copy is damaged and needs repair before it can be backed up.';
+    }
     default: {
       return 'This remote is busy; this project will try again.';
     }
@@ -573,7 +577,11 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
          scheduler's. The remote's own words, list of files and all, are still
          what is shown. */
       return new RevisionPortError(
-        isCeilingRefusal(answered.message) ? 'REMOTE_QUOTA_EXCEEDED' : 'REMOTE_REJECTED',
+        isCeilingRefusal(answered.message)
+          ? 'REMOTE_QUOTA_EXCEEDED'
+          : isIncompleteRepositoryRefusal(answered.message)
+            ? 'REMOTE_DAMAGED'
+            : 'REMOTE_REJECTED',
         answered.message,
         { cause: error },
       );
@@ -625,7 +633,14 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
                      so in its own words and a blind re-push reproduces it, so
                      this is a rejection carrying that sentence, not a retry. */
                   'REMOTE_REJECTED'
-                : 'REMOTE_UNAVAILABLE';
+                : status === 500 &&
+                    (answered.code === 'GIT_REPOSITORY_INCOMPLETE' || isIncompleteRepositoryRefusal(answered.message))
+                  ? /* The manifest names a pack the store does not hold (D22):
+                       no retry repairs it, so it must not ride the 5xx
+                       backoff forever. Every other 5xx and 429 stays
+                       retryable, 503 race-lost included. */
+                    'REMOTE_DAMAGED'
+                  : 'REMOTE_UNAVAILABLE';
   return new RevisionPortError(code, answered.message ?? refusalSentence(code), { cause: error });
 };
 
@@ -813,20 +828,24 @@ export const registerProjectFailureMessage = (status: number, code?: string, mes
 };
 
 /**
- * Whether a remote of this name can carry a project's large objects (P20).
+ * Whether this remote can carry a project's large objects (P20).
  *
- * Only Tau Cloud can. A third-party remote's LFS endpoints are not reachable:
- * the proxy carries git's three smart-HTTP endpoints and nothing else (P17), and
- * the disk leg would reach the remote's own LFS server with a credential Tau
- * never asked for — so the two legs would disagree about what a push means,
- * which is the one thing A15 exists to prevent.
+ * Tau Cloud can, and so can a GitHub remote, whose LFS batch requests the API
+ * relays under the same repository-bound credential. Any other Git remote
+ * cannot: the proxy carries its smart-HTTP endpoints and nothing else (P17), and
+ * the disk leg would reach its LFS server with a credential Tau never asked for,
+ * so the two legs would disagree about what a push means (A15).
  *
- * @param remote - The remote's name in git's config.
+ * One input type (C34, L2-F12): the answer depends on the recorded provider,
+ * which a bare name cannot carry, so a GitHub remote used to be refused or
+ * allowed depending on whether its config row happened to be found.
+ *
+ * @param remote - The remote as git's config records it.
  * @returns `true` when large objects may be offered to it.
  * @public
  */
-export const remoteCarriesLargeObjects = (remote: string | Remote): boolean =>
-  typeof remote === 'string' ? remoteKindOf(remote) === 'tau' : remote.kind === 'tau' || remote.provider === 'github';
+export const remoteCarriesLargeObjects = (remote: Remote): boolean =>
+  remote.kind === 'tau' || remote.provider === 'github';
 
 /**
  * What to tell a person whose project cannot be backed up to this remote (P20).

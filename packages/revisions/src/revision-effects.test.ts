@@ -28,11 +28,20 @@ import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
-import { gitOnPath, nativeHarness } from '#test/native-git-harness.js';
+import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
-import { restoreMachine } from '#restore.machine.js';
-import { createRevisionActors, describeTurnRelease, revisionTreeId } from '#revision-effects.js';
+import { selectRevisionStatus } from '#project-revisions.machine.js';
+import {
+  createProjectRevisionsActor,
+  createRevisionActors,
+  describeTurnRelease,
+  revisionTreeId,
+  admissionMilliseconds,
+  syncQuiesceMilliseconds,
+} from '#revision-effects.js';
 import type { RevisionActors, RevisionActorsOptions } from '#revision-effects.js';
+import { syncPullDeadlineMilliseconds } from '#sync.machine.js';
+import { turnCutSettlementMilliseconds } from '#turn.machine.js';
 
 const roots: string[] = [];
 
@@ -56,7 +65,7 @@ type FixtureOptions = Partial<RevisionActorsOptions> & Readonly<{ actorSet?: Act
 
 const actorSets: readonly ActorSet[] = [
   { name: 'isomorphic-git', enabled: true },
-  { name: 'native-git', enabled: gitOnPath },
+  { name: 'native-git', enabled: gitToolchainOnPath },
 ];
 
 const captureMainAndLiveTrees = async (port: RevisionPort, filesystem: RootedFileSystem) => {
@@ -156,6 +165,13 @@ const run = async <Output>(actor: unknown, input: unknown): Promise<Output> =>
     running.start();
   });
 
+describe('lifecycle bounds', () => {
+  it('nests every inner bound strictly inside the wait that awaits it (rule 9)', () => {
+    expect(syncPullDeadlineMilliseconds).toBeLessThan(syncQuiesceMilliseconds);
+    expect(turnCutSettlementMilliseconds).toBeLessThan(admissionMilliseconds);
+  });
+});
+
 describe('the tree a cut hashes', () => {
   it('computes the object id the engine itself records', async () => {
     const { port, actors } = await fixture({
@@ -243,7 +259,24 @@ describe('the tree a cut hashes', () => {
       return;
     }
     await expect(run(actors.checkout.cut, { checkoutId: 'live', trigger: 'save' })).rejects.toThrow(
-      /differ only by case/u,
+      /cannot be checked out together on every computer.*Main\.ts/u,
+    );
+  }, 30_000);
+
+  it('refuses a capture holding one name in two Unicode spellings (L2-F7)', async () => {
+    const composed = 'caf\u00E9.ts';
+    const decomposed = 'cafe\u0301.ts';
+    const { port, actors, filesystem } = await fixture({ [composed]: 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await filesystem.writeFile(decomposed, 'export const size = 2;\n');
+    const entries = await filesystem.readdir('');
+
+    if (!entries.includes(composed) || !entries.includes(decomposed)) {
+      /* A normalizing filesystem (APFS, HFS+): both spellings name one file, so there is nothing to refuse. */
+      return;
+    }
+    await expect(run(actors.checkout.cut, { checkoutId: 'live', trigger: 'save' })).rejects.toThrow(
+      /cannot be checked out together on every computer/u,
     );
   }, 30_000);
 });
@@ -515,6 +548,59 @@ describe('settling a turn', () => {
   }, 30_000);
 });
 
+type TreeFact = Readonly<{ type: string; trigger?: string; revisionId?: string; checkoutId?: string }>;
+
+/**
+ * The composed project tree over a fixture's port, as a host runs it.
+ *
+ * A restore is three steps the root routes between its children — the
+ * pre-restore cut, the apply, the `restore` cut — so its claims are made
+ * through the tree, not by driving one child's actors by hand.
+ */
+const startTree = async (
+  port: RevisionPort,
+  filesystem: RootedFileSystem,
+  extra: Partial<RevisionActorsOptions> = {},
+) => {
+  const { actor } = createProjectRevisionsActor({
+    port,
+    projectId: 'project-1',
+    authorityEpoch: 'epoch-1',
+    filesystem: async () => filesystem,
+    ...extra,
+  });
+  const facts: TreeFact[] = [];
+  actor.on('*', (event) => {
+    facts.push(event as TreeFact);
+  });
+  actor.start();
+  await expect.poll(() => actor.getSnapshot().context.registrySettled, { timeout: 10_000 }).toBe(true);
+  const mintedIds = (): readonly string[] =>
+    facts.flatMap((fact) => (fact.type === 'revisionMinted' && fact.revisionId !== undefined ? [fact.revisionId] : []));
+  /** The `count`th revision a cut with this trigger minted, once it has. */
+  const minted = async (trigger: string, count = 1): Promise<string> => {
+    const answers = () => facts.filter((fact) => fact.trigger === trigger && fact.type !== 'checkoutStatusChanged');
+    await expect.poll(() => answers().length, { timeout: 20_000 }).toBeGreaterThanOrEqual(count);
+    const answer = answers()[count - 1];
+    if (answer?.type !== 'revisionMinted' || answer.revisionId === undefined) {
+      throw new Error(`The ${trigger} cut answered ${String(answer?.type)}.`);
+    }
+    return answer.revisionId;
+  };
+  let saves = 0;
+  const save = async (): Promise<string> => {
+    saves += 1;
+    actor.send({
+      type: 'cut',
+      trigger: 'save',
+      checkoutId: selectRevisionStatus(actor.getSnapshot()).checkoutId,
+      leaseIds: [],
+    });
+    return minted('save', saves);
+  };
+  return { actor, facts, minted, mintedIds, save };
+};
+
 describe('restore, through the machine that owns it', () => {
   it('should materialize original bytes from a pointerised revision tree', async () => {
     const original = 'solid bracket\nendsolid bracket\n';
@@ -535,7 +621,25 @@ describe('restore, through the machine that owns it', () => {
     const { pointer } = lfsPointerFor(new TextEncoder().encode(original));
     expect(await filesystem.readFile(`.git/${lfsObjectPath(pointer.oid)}`, 'utf8')).toBe(original);
 
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(written.revisionId) });
     await filesystem.writeFile('models/bracket.step', 'solid changed\nendsolid changed\n');
+    const changed = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    const second = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: changed.cutId,
+      treeId: changed.treeId,
+      parents: [written.revisionId],
+      trigger: 'save',
+      leaseIds: [],
+    });
+    await port.updateRef({
+      name: 'main',
+      expectedHead: revisionId(written.revisionId),
+      head: revisionId(second.revisionId),
+    });
     const plan = await run<{ planId: string }>(actors.restore.computePlan, {
       checkoutId: 'live',
       target: written.revisionId,
@@ -545,78 +649,237 @@ describe('restore, through the machine that owns it', () => {
     expect(await filesystem.readFile('models/bracket.step', 'utf8')).toBe(original);
   }, 30_000);
 
-  it('plans a restore, applies it under confirmation, and puts the tree back', async () => {
+  it('restores by minting a restore revision on main, never a detached head (T3)', async () => {
     const release = vi.fn();
     const onApplyingTree = vi.fn(() => release);
-    const { port, actors, filesystem } = await fixture(
-      { 'main.ts': 'export const size = 1;\n' },
-      (filesystem) => filesystem,
-      { onApplyingTree },
-    );
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-    const first = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+    const tree = await startTree(port, filesystem, { onApplyingTree });
+    const first = await tree.save();
+    /* A second revision that adds a file, so restoring the first is a deletion
+     * — the risky plan that needs confirmation. */
+    await filesystem.writeFile('extra.txt', 'added later\n');
+    const second = await tree.save();
+
+    const restoreRef = tree.actor.getSnapshot().children.restore;
+    restoreRef?.send({ type: 'restore', revisionId: first });
+    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('confirming');
+    /* The plan is the real one: restoring the first revision removes the file
+     * the second added, and nothing else; the line numbers it `Rev 1`. */
+    expect(restoreRef?.getSnapshot().context.removedPathCount).toBe(1);
+    expect(restoreRef?.getSnapshot().context.revisionNumber).toBe(1);
+
+    restoreRef?.send({ type: 'confirm' });
+    /* The first `restore` answer is the pre-restore cut's: a clean tree mints nothing. */
+    const restored = await tree.minted('restore', 2);
+
+    /* `main` fast-forwarded to a new revision whose tree is the restored one. */
+    await expect(port.readRef('main')).resolves.toBe(restored);
+    const record = await port.readRevision(revisionId(restored));
+    expect(record?.parents).toEqual([second]);
+    const firstRecord = await port.readRevision(revisionId(first));
+    expect(record?.treeId).toBe(firstRecord?.treeId);
+    expect(record?.provenance).toMatchObject({ source: 'restore', trigger: 'restore', restoredFrom: first });
+    expect(record?.summary.generated).toBe('Restored Rev 1');
+    expect(selectRevisionStatus(tree.actor.getSnapshot())).toMatchObject({
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: restored,
+    });
+    expect(tree.facts.filter((fact) => fact.type === 'checkoutChanged')).toEqual([]);
+    expect(await filesystem.exists('extra.txt')).toBe(false);
+    expect(onApplyingTree).toHaveBeenCalledWith(expect.objectContaining({ id: 'live' }), ['extra.txt']);
+    expect(release).toHaveBeenCalledOnce();
+    tree.actor.stop();
+  }, 30_000);
+
+  it('mints a dirty checkout before restoring it, and leaves no revision unreachable (I1, L1 probe)', async () => {
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const tree = await startTree(port, filesystem);
+    const first = await tree.save();
+    await filesystem.writeFile('late.ts', 'export const late = true;\n');
+    const second = await tree.save();
+    /* Unsaved work: the bytes a restore must never discard without minting. */
+    await filesystem.writeFile('main.ts', 'export const size = 3;\n');
+
+    const restoreRef = tree.actor.getSnapshot().children.restore;
+    restoreRef?.send({ type: 'restore', revisionId: first });
+    const before = await tree.minted('restore');
+    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('confirming');
+    restoreRef?.send({ type: 'confirm' });
+    const restored = await tree.minted('restore', 2);
+
+    /* Two rows: the pre-restore cut (the person's own bytes) and the restore. */
+    const beforeRecord = await port.readRevision(revisionId(before));
+    expect(beforeRecord?.parents).toEqual([second]);
+    expect(beforeRecord?.provenance).toMatchObject({ source: 'user', trigger: 'restore' });
+    expect(beforeRecord?.provenance.restoredFrom).toBeUndefined();
+    const beforeTree = await port.readTree(revisionId(before));
+    expect(beforeTree?.has('late.ts')).toBe(true);
+    const restoredRecord = await port.readRevision(revisionId(restored));
+    expect(restoredRecord?.parents).toEqual([before]);
+
+    /* L1's probe, re-run: a save after the restore moves `main` forward and
+     * every revision this tree minted is reachable from a ref — no orphan. */
+    await filesystem.writeFile('main.ts', 'export const size = 4;\n');
+    const after = await tree.save();
+    const afterRecord = await port.readRevision(revisionId(after));
+    expect(afterRecord?.parents).toEqual([restored]);
+    await expect(port.readRef('main')).resolves.toBe(after);
+    const history = await port.log({ heads: [revisionId(after)] });
+    const reachable = new Set(history.map((entry) => entry.id));
+    expect(tree.mintedIds().filter((id) => !reachable.has(revisionId(id)))).toEqual([]);
+    expect(tree.facts.map((fact) => fact.type)).not.toContain('casLost');
+
+    /* *Undo restore* restores the restore row's first parent (D2): the dirty work comes back. */
+    restoreRef?.send({ type: 'undo' });
+    const undone = await tree.minted('restore', 4);
+    const undoneRecord = await port.readRevision(revisionId(undone));
+    expect(undoneRecord?.provenance.restoredFrom).toBe(before);
+    expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 3;\n');
+    tree.actor.stop();
+  }, 60_000);
+
+  it('stays on its line when the target is another branch’s tip (A5)', async () => {
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const tree = await startTree(port, filesystem);
+    const first = await tree.save();
+    await filesystem.writeFile('main.ts', 'export const size = 2;\n');
+    const second = await tree.save();
+    /* `other` names the first revision, so the old apply would have moved HEAD onto it. */
+    await port.updateRef({ name: 'other', expectedHead: undefined, head: revisionId(first) });
+
+    tree.actor.getSnapshot().children.restore?.send({ type: 'restore', revisionId: first });
+    const restored = await tree.minted('restore', 2);
+
+    const head = await port.readHead();
+    expect(head).toMatchObject({ branch: 'main', head: restored });
+    await expect(port.readRef('other')).resolves.toBe(first);
+    const restoredRecord = await port.readRevision(revisionId(restored));
+    expect(restoredRecord?.parents).toEqual([second]);
+    tree.actor.stop();
+  }, 30_000);
+
+  it('reads a checkout spawned over a stale tree as dirty, after a first render that waited for nothing (D4)', async () => {
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const first = await startTree(port, filesystem);
+    await first.save();
+    first.actor.stop();
+    /* Bytes that changed while no actor watched: a reload over an edited tree. */
+    await filesystem.writeFile('main.ts', 'export const size = 5;\n');
+
+    const reopened = await startTree(port, filesystem);
+
+    await expect.poll(() => selectRevisionStatus(reopened.actor.getSnapshot()).dirty, { timeout: 10_000 }).toBe(true);
+    reopened.actor.stop();
+  }, 30_000);
+
+  it('numbers a restore by the line’s first-parent ordinal and invents none off the line (D5, A9)', async () => {
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const write = async (parents: readonly string[]): Promise<string> => {
+      const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+        checkoutId: 'live',
+        trigger: 'save',
+      });
+      const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+        checkoutId: 'live',
+        cutId: cut.cutId,
+        treeId: cut.treeId,
+        parents,
+        trigger: 'save',
+        leaseIds: [],
+      });
+      return written.revisionId;
+    };
+    const first = await write([]);
+    await filesystem.writeFile('other.ts', 'export const other = 1;\n');
+    /* Another line's revision, recorded between main's two: a whole-graph index
+     * would count it and name main's second revision `Rev 3`. */
+    const aside = await write([first]);
+    await port.updateRef({ name: 'other', expectedHead: undefined, head: revisionId(aside) });
+    await filesystem.unlink('other.ts');
+    await filesystem.writeFile('main.ts', 'export const size = 2;\n');
+    const second = await write([first]);
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(second) });
+
+    const onLine = await run<{ revisionNumber: number | undefined }>(actors.restore.computePlan, {
+      checkoutId: 'live',
+      target: second,
+    });
+    const offLine = await run<{ revisionNumber: number | undefined }>(actors.restore.computePlan, {
+      checkoutId: 'live',
+      target: aside,
+    });
+
+    expect(onLine.revisionNumber).toBe(2);
+    expect(offLine.revisionNumber).toBeUndefined();
+  }, 30_000);
+
+  it('applies nothing when the files changed after the plan (A3)', async () => {
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
       checkoutId: 'live',
       trigger: 'save',
     });
-    const firstRevision = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+    const first = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
       checkoutId: 'live',
-      cutId: first.cutId,
-      treeId: first.treeId,
+      cutId: cut.cutId,
+      treeId: cut.treeId,
       parents: [],
       trigger: 'save',
       leaseIds: [],
     });
-    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(firstRevision.revisionId) });
-    /* A second revision that adds a file, so restoring the first is a deletion
-     * — the risky plan that needs confirmation. */
-    await filesystem.writeFile('extra.txt', 'added later\n');
-    const second = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.revisionId) });
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+      checkoutId: 'live',
+      target: first.revisionId,
+    });
+    /* A write that lands after the pre-restore cut and the plan. */
+    await filesystem.writeFile('main.ts', 'export const size = 9;\n');
+
+    await expect(run(actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId })).rejects.toMatchObject({
+      code: 'CHECKOUT_CONFLICT',
+    });
+    expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 9;\n');
+  }, 30_000);
+
+  it('applies nothing, in the agent sentence, when a turn took the files while the question was open (A3, M4)', async () => {
+    const { port, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
       checkoutId: 'live',
       trigger: 'save',
     });
-    const secondRevision = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+    const first = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
       checkoutId: 'live',
-      cutId: second.cutId,
-      treeId: second.treeId,
-      parents: [firstRevision.revisionId],
+      cutId: cut.cutId,
+      treeId: cut.treeId,
+      parents: [],
       trigger: 'save',
       leaseIds: [],
     });
-    await port.updateRef({
-      name: 'main',
-      expectedHead: revisionId(firstRevision.revisionId),
-      head: revisionId(secondRevision.revisionId),
-    });
-
-    const restore = createActor(restoreMachine.provide({ actors: actors.restore }), {
-      input: { projectId: 'project-1', checkoutId: 'live', headRevisionId: secondRevision.revisionId },
-    });
-    const changes: unknown[] = [];
-    restore.on('checkoutChanged', (event) => changes.push(event));
-    restore.start();
-    restore.send({ type: 'restore', revisionId: firstRevision.revisionId });
-    await expect.poll(() => restore.getSnapshot().value, { timeout: 10_000 }).toBe('confirming');
-    /* The plan is the real one: restoring the first revision removes the file
-     * the second added, and nothing else. */
-    expect(restore.getSnapshot().context.removedPathCount).toBe(1);
-    expect(restore.getSnapshot().context.revisionNumber).toBe(1);
-    expect(restore.getSnapshot().context.unrecoverable).toEqual([]);
-
-    restore.send({ type: 'confirm' });
-    await expect.poll(() => changes.length, { timeout: 10_000 }).toBe(1);
-    /* Detached, and correctly so (A2): `main` names the second revision, so no
-     * branch names the one this restore put back. */
-    expect(changes[0]).toMatchObject({
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.revisionId) });
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
       checkoutId: 'live',
-      revisionId: firstRevision.revisionId,
-      treeId: first.treeId,
-      branch: undefined,
+      target: first.revisionId,
     });
-    await expect(port.readRef('main')).resolves.toBe(secondRevision.revisionId);
-    expect(await filesystem.exists('extra.txt')).toBe(false);
-    expect(onApplyingTree).toHaveBeenCalledWith(expect.objectContaining({ id: 'live' }), ['extra.txt']);
-    expect(release).toHaveBeenCalledOnce();
-    restore.stop();
+    /* Another window's turn leases the checkout before the person confirms. */
+    await run(actors.turn.writeLease, {
+      runId: 'run-1',
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      checkoutId: 'live',
+      baseRevisionId: first.revisionId,
+    });
+
+    await expect(run(actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId })).rejects.toMatchObject({
+      code: 'LEASE_UNAVAILABLE',
+      message: 'An agent is working in this project’s files.',
+    });
   }, 30_000);
 });
 

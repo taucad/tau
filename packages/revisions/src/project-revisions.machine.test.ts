@@ -72,8 +72,15 @@ import type { FakeCallbackActors, FakePromiseActors } from '#test/fake-actors.js
  * 30  a turn-ending verb that names a run reaches the queue as well as the ref,
  *     and a run id another turn already holds is refused whatever turn id
  *     carries it (T4-02, T4-hyp1)
- * --  `checkoutChanged` re-heads the checkout; the checkouts' own statuses feed
- *     the `RevisionStatus` projection; serializable snapshot; one machine value
+ * 31  a restore mints on its line through the checkout child — pre-restore cut,
+ *     apply, `restore` cut with `restoredFrom` — and never detaches (D1, T2); a
+ *     restore on a held checkout is refused before any cut (A1); an admission to
+ *     the restoring checkout waits for it, the open question included (A2, M4);
+ *     `restore` hears the selection's line, again when a live switch moves it (M1)
+ * 32  the projection names its line: `unknown`, `unborn`, `branch` (D3)
+ * --  `checkoutChanged` re-heads the checkout and keeps its branch; the checkouts'
+ *     own statuses feed the `RevisionStatus` projection; serializable snapshot;
+ *     one machine value
  */
 
 /** Let every queued microtask and the actors' promise handlers run. */
@@ -646,7 +653,7 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
-  it('re-heads a checkout that a restore moved', () => {
+  it('re-heads a checkout another verb moved and keeps its branch when the fact names none (T2)', () => {
     const harness = start();
 
     registerCheckouts(harness);
@@ -661,12 +668,238 @@ describe('projectRevisionsMachine', () => {
     const ref = harness.actor.getSnapshot().context.checkoutRefs['checkout-b'];
     expect(ref?.getSnapshot().context.headRevisionId).toBe('rev-4');
     expect(ref?.getSnapshot().context.headTreeId).toBe('tree-4');
+    /* A head moved; the line did not. `branch` is never `undefined` as a state (D3). */
     expect(harness.actor.getSnapshot().context.checkouts[1]).toMatchObject({
       headRevisionId: 'rev-4',
-      branch: undefined,
+      branch: 'agent/b',
     });
 
     harness.actor.stop();
+  });
+
+  it('publishes to the line a live Switch moved the same checkout onto (N9)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks } = harness;
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+
+    actor.send({
+      type: 'checkoutChanged',
+      checkoutId: 'checkout-live',
+      revisionId: 'rev-5',
+      treeId: 'tree-5',
+      branch: 'feature',
+    });
+    actor.send({ type: 'cut', checkoutId: 'checkout-live', trigger: 'save', leaseIds: [] });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-6', cutId: 'cut-1' } });
+    await flush();
+    promises.settle('writeRevision', { output: { revisionId: 'rev-6' } });
+    await flush();
+
+    expect(promises.inputsFor('casHead')).toEqual([
+      { checkoutId: 'checkout-live', branch: 'feature', expectedHead: 'rev-5', head: 'rev-6' },
+    ]);
+
+    actor.stop();
+  });
+
+  it('follows a rename of the branch a dirty checkout tracks without calling it clean (N9)', () => {
+    const harness = start();
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    harness.actor.send({ type: 'changed', checkoutId: 'checkout-live', paths: ['main.ts'], generation: 1 });
+
+    registerCheckouts(harness, [{ ...live, branch: 'renamed', headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+
+    const child = harness.actor.getSnapshot().context.checkoutRefs['checkout-live']?.getSnapshot();
+    expect(child?.context.branch).toBe('renamed');
+    expect(child?.matches('dirty')).toBe(true);
+
+    harness.actor.stop();
+  });
+
+  it('names the line explicitly: unknown before the registry, unborn without a revision, then the branch (D3)', () => {
+    const harness = start();
+
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).line).toEqual({ kind: 'unknown' });
+
+    registerCheckouts(harness);
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).line).toEqual({ kind: 'unborn', name: 'main' });
+
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }, linked]);
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).line).toEqual({ kind: 'branch', name: 'main' });
+
+    harness.actor.stop();
+  });
+
+  it('restores by minting on the line: pre-restore cut, apply, restore cut — never a detached head (D1, T2)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks, emitted } = harness;
+    const bornLive = { ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' };
+    registerCheckouts(harness, [bornLive, linked]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+
+    restoreRef?.send({ type: 'restore', revisionId: 'rev-3' });
+    /* The pre-restore cut reaches the live checkout, and a clean tree mints nothing. */
+    expect(promises.inputsFor('cut')).toEqual([]);
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    expect(promises.inputsFor('cut')).toEqual([{ checkoutId: 'checkout-live', trigger: 'restore' }]);
+    promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
+    await flush();
+
+    expect(promises.inputsFor('computePlan')).toEqual([{ checkoutId: 'checkout-live', target: 'rev-3' }]);
+    promises.settle('computePlan', {
+      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3, removedPathCount: 0, dirty: false },
+    });
+    await flush();
+    promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
+    await flush();
+
+    /* The applied tree is minted by the checkout itself, on top of the head it had. */
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-3', cutId: 'cut-2' } });
+    await flush();
+    expect(promises.inputsFor('writeRevision')).toEqual([
+      {
+        checkoutId: 'checkout-live',
+        cutId: 'cut-2',
+        treeId: 'tree-3',
+        parents: ['rev-5'],
+        trigger: 'restore',
+        leaseIds: [],
+        restoredFrom: 'rev-3',
+      },
+    ]);
+    promises.settle('writeRevision', { output: { revisionId: 'rev-6' } });
+    await flush();
+    expect(promises.inputsFor('casHead')).toEqual([
+      { checkoutId: 'checkout-live', branch: 'main', expectedHead: 'rev-5', head: 'rev-6' },
+    ]);
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-6' } });
+    await flush();
+
+    const status = selectRevisionStatus(actor.getSnapshot());
+    expect(status.line).toEqual({ kind: 'branch', name: 'main' });
+    expect(status.headRevisionId).toBe('rev-6');
+    expect(status.restore.busy).toBe(false);
+    expect(actor.getSnapshot().context.checkouts[0]).toMatchObject({ branch: 'main' });
+    expect(emitted.find((event) => event.type === 'revisionMinted')).toMatchObject({
+      trigger: 'restore',
+      revisionId: 'rev-6',
+    });
+    expect(restoreRef?.getSnapshot().context.restoredRevisionId).toBe('rev-6');
+
+    actor.stop();
+  });
+
+  it('refuses a restore on a checkout a turn holds before any cut, in Switch’s words (A1)', () => {
+    const harness = start();
+    const { actor, promises } = harness;
+    registerCheckouts(harness, [
+      { ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5', leaseRunIds: ['run-1'] },
+      linked,
+    ]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+    const toasts: unknown[] = [];
+    restoreRef?.on('toast.error', (toast) => toasts.push(toast));
+
+    restoreRef?.send({ type: 'restore', revisionId: 'rev-3' });
+
+    expect(restoreRef?.getSnapshot().matches('idle')).toBe(true);
+    expect(harness.callbacks.active('fence')).toBe(0);
+    expect(promises.inputsFor('computePlan')).toEqual([]);
+    expect(toasts).toEqual([
+      { type: 'toast.error', message: 'An agent is working in this project’s files.', code: 'LEASE_UNAVAILABLE' },
+    ]);
+
+    actor.stop();
+  });
+
+  it('holds an admission to the restoring checkout until the restore settles (A2)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks } = harness;
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+
+    restoreRef?.send({ type: 'restore', revisionId: 'rev-3' });
+    actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeUndefined();
+    expect(actor.getSnapshot().context.pendingAdmissions).toEqual([
+      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' },
+    ]);
+
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
+    await flush();
+    promises.settle('computePlan', { error: new Error('unknown revision') });
+    await flush();
+
+    expect(restoreRef?.getSnapshot().matches('idle')).toBe(true);
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeDefined();
+    expect(actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+
+    actor.stop();
+  });
+
+  it('holds an admission made while the restore question is open until the restore row lands (A2, M4)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks } = harness;
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+
+    restoreRef?.send({ type: 'restore', revisionId: 'rev-3' });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
+    await flush();
+    promises.settle('computePlan', {
+      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3, removedPathCount: 2, dirty: false },
+    });
+    await flush();
+    expect(restoreRef?.getSnapshot().matches('confirming')).toBe(true);
+
+    /* The person has not answered yet; a chat turn arrives for the same files. */
+    actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeUndefined();
+
+    restoreRef?.send({ type: 'confirm' });
+    promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
+    await flush();
+    /* The turn still waits: the files are the target's, and the restore row is not minted yet. */
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeUndefined();
+
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-3', cutId: 'cut-2' } });
+    await flush();
+    promises.settle('writeRevision', { output: { revisionId: 'rev-6' } });
+    await flush();
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-6' } });
+    await flush();
+
+    expect(restoreRef?.getSnapshot().context.restoredRevisionId).toBe('rev-6');
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeDefined();
+    expect(actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+
+    actor.stop();
+  });
+
+  it('tells restore the selection’s line, and again when a live switch moves it under the same id (M1)', () => {
+    const harness = start();
+    const { actor } = harness;
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+    expect(restoreRef?.getSnapshot().context).toMatchObject({ checkoutId: 'checkout-live', branch: 'main' });
+
+    actor.send({
+      type: 'checkoutChanged',
+      checkoutId: 'checkout-live',
+      revisionId: 'rev-9',
+      treeId: 'tree-9',
+      branch: 'feature',
+    });
+
+    expect(restoreRef?.getSnapshot().context).toMatchObject({ checkoutId: 'checkout-live', branch: 'feature' });
+
+    actor.stop();
   });
 
   it('projects a RevisionStatus from the statuses its checkouts report', () => {
@@ -680,7 +913,7 @@ describe('projectRevisionsMachine', () => {
       projectId: 'project-1',
       checkoutId: 'checkout-b',
       checkoutRoot: '/checkouts/checkout-b',
-      branch: 'agent/b',
+      line: { kind: 'unborn', name: 'agent/b' },
       registrySettled: true,
       projectDirty: true,
       dirty: true,
@@ -974,7 +1207,7 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
-  it('tells restore which checkout the registry resolved, and its head', async () => {
+  it('tells restore which checkout the registry resolved', async () => {
     const harness = start();
 
     harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
@@ -985,10 +1218,9 @@ describe('projectRevisionsMachine', () => {
     await flush();
 
     /* `restore`'s invoke input was evaluated before any record existed, so the
-     * head it plans an undo against has to arrive as an announcement (R8). */
+     * checkout it restores has to arrive as an announcement (R8). */
     const restoreRef = harness.actor.getSnapshot().children['restore'];
     expect(restoreRef?.getSnapshot().context.checkoutId).toBe('checkout-live');
-    expect(restoreRef?.getSnapshot().context.headRevisionId).toBe('rev-9');
 
     harness.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
     expect(restoreRef?.getSnapshot().context.checkoutId).toBe('checkout-b');
@@ -1208,7 +1440,13 @@ describe('projectRevisionsMachine', () => {
     const liveCheckout: ActorRefFrom<typeof checkoutMachine> | undefined = children['checkout:checkout-live'];
     expect(liveCheckout?.getSnapshot().matches('minting')).toBe(true);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'branch-1',
+      revisionId: 'rev-1',
+    });
     await flush();
 
     expect(harness.promises.inputsFor('addCheckout')).toEqual([
@@ -1229,7 +1467,12 @@ describe('projectRevisionsMachine', () => {
       checkoutId: 'checkout-live',
       head: 'rev-1',
     });
-    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    harness.actor.send({
+      type: 'nothingToSave',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'branch-1',
+    });
     await flush();
 
     expect(harness.promises.inputsFor('addCheckout')).toEqual([
@@ -1304,7 +1547,12 @@ describe('projectRevisionsMachine', () => {
     await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }, linked]);
     harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2' } });
     await flush();
-    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    harness.actor.send({
+      type: 'nothingToSave',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'branch-1',
+    });
     await flush();
     harness.promises.settle('addCheckout', {
       error: new RevisionPortError('CHECKOUT_CONFLICT', 'That branch already has a checkout.'),
@@ -1519,6 +1767,42 @@ describe('projectRevisionsMachine', () => {
     });
     /* The registry is re-read, which is what retires the card (one writer). */
     expect(harness.promises.inputsFor('listCheckouts')).toHaveLength(2);
+
+    harness.actor.stop();
+  });
+
+  it('re-emits a child toast, so a refused finish reaches the host with its reason (L2-F8)', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live, conflictedLinked]);
+    harness.promises.settle('loadConflict', {
+      output: {
+        branch: 'agent/b',
+        labels: { ours: 'main', theirs: 'agent/b' },
+        paths: [{ path: 'enclosure.ts', openable: true }],
+        checkoutId: 'checkout-b',
+      },
+    });
+    await flush();
+    harness.actor.send({
+      type: 'resolution',
+      revisionId: 'rev-conflict',
+      event: { type: 'keepMine', path: 'enclosure.ts' },
+    });
+    harness.promises.settle('applyResolution', { output: undefined });
+    await flush();
+    harness.actor.send({ type: 'resolution', revisionId: 'rev-conflict', event: { type: 'finish' } });
+    harness.promises.settle('finishMerge', { error: new Error('The disk is full.') });
+    await flush();
+
+    expect(harness.emitted.filter((event) => event.type === 'childToast')).toEqual([
+      {
+        type: 'childToast',
+        subject: 'resolution',
+        tone: 'error',
+        message: expect.stringContaining('The disk is full.') as unknown as string,
+      },
+    ]);
 
     harness.actor.stop();
   });

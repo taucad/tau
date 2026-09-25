@@ -12,7 +12,6 @@
  * @see docs/research/workspace-filesystem-north-star-blueprint.md S48
  */
 
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -46,6 +45,7 @@ import {
   recordEmitted,
 } from '#test/fake-actors.js';
 import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 /** Let every queued microtask and the actors' promise handlers run. */
 const flush = async (): Promise<void> => {
@@ -549,15 +549,6 @@ describe('revision machine composition (S48 Node set)', () => {
  * divergence in the substrate, not in the script.
  * ------------------------------------------------------------------------ */
 
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
 const temporaryRoots: string[] = [];
 
 afterAll(async () => {
@@ -772,68 +763,71 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
   };
 };
 
-describe.runIf(gitOnPath)('S48(8) — identical sequences over the browser and native actor sets (AC28, I4)', () => {
-  /* Both runs are done once and shared: the native leg spawns a `git` process
-   * per command, so running the script twice to ask two questions about it
-   * would double the slowest thing in this file. */
-  let browser: Dump;
-  let native: Dump;
+describe.runIf(gitToolchainOnPath)(
+  'S48(8) — identical sequences over the browser and native actor sets (AC28, I4)',
+  () => {
+    /* Both runs are done once and shared: the native leg spawns a `git` process
+     * per command, so running the script twice to ask two questions about it
+     * would double the slowest thing in this file. */
+    let browser: Dump;
+    let native: Dump;
 
-  beforeAll(async () => {
-    browser = await runScriptedTurn('browser');
-    native = await runScriptedTurn('native');
-  }, 600_000);
+    beforeAll(async () => {
+      browser = await runScriptedTurn('browser');
+      native = await runScriptedTurn('native');
+    }, 600_000);
 
-  it('runs the same scripted turn to the same ordered facts and the same projection (AC28)', () => {
-    expect(native.facts).toStrictEqual(browser.facts);
-    expect(native.emitted).toStrictEqual(browser.emitted);
-    expect(native.status).toStrictEqual(browser.status);
-  });
+    it('runs the same scripted turn to the same ordered facts and the same projection (AC28)', () => {
+      expect(native.facts).toStrictEqual(browser.facts);
+      expect(native.emitted).toStrictEqual(browser.emitted);
+      expect(native.status).toStrictEqual(browser.status);
+    });
 
-  it.each<ActorSet>(['browser', 'native'])(
-    'rehydrates the whole tree from records alone, with no persisted XState snapshot (%s)',
-    (set) => {
-      const dump = set === 'browser' ? browser : native;
-      const { branches: beforeBranches, ...before } = dump.status;
-      const { branches: afterBranches, ...after } = dump.rehydratedStatus;
-      expect(after).toStrictEqual(before);
-      expect(beforeBranches).toHaveLength(1);
-      expect(afterBranches).toEqual([
-        {
-          name: 'main',
-          head: dump.head.revisionId,
-          checkoutId: dump.status.checkoutId,
-          checkoutRoot: dump.status.checkoutRoot,
-          leaseChatIds: [],
-        },
-      ]);
-      expect(
-        dump.storedJson.filter(
-          ({ path, text }) =>
-            /snapshot/iu.test(path) ||
-            (/"value"\s*:/u.test(text) && /"context"\s*:/u.test(text) && /"children"\s*:/u.test(text)),
-        ),
-      ).toEqual([]);
-    },
-  );
+    it.each<ActorSet>(['browser', 'native'])(
+      'rehydrates the whole tree from records alone, with no persisted XState snapshot (%s)',
+      (set) => {
+        const dump = set === 'browser' ? browser : native;
+        const { branches: beforeBranches, ...before } = dump.status;
+        const { branches: afterBranches, ...after } = dump.rehydratedStatus;
+        expect(after).toStrictEqual(before);
+        expect(beforeBranches).toHaveLength(1);
+        expect(afterBranches).toEqual([
+          {
+            name: 'main',
+            head: dump.head.revisionId,
+            checkoutId: dump.status.checkoutId,
+            checkoutRoot: dump.status.checkoutRoot,
+            leaseChatIds: [],
+          },
+        ]);
+        expect(
+          dump.storedJson.filter(
+            ({ path, text }) =>
+              /snapshot/iu.test(path) ||
+              (/"value"\s*:/u.test(text) && /"context"\s*:/u.test(text) && /"children"\s*:/u.test(text)),
+          ),
+        ).toEqual([]);
+      },
+    );
 
-  /* W11b-a3 closed the former I4 divergence by making both initializers write
-   * the same generated attributes. Raw revision identity stays in this dump. */
-  it('names the same revision for the same edits on both actor sets (I4)', () => {
-    expect(native.head).toStrictEqual(browser.head);
-  });
+    /* W11b-a3 closed the former I4 divergence by making both initializers write
+     * the same generated attributes. Raw revision identity stays in this dump. */
+    it('names the same revision for the same edits on both actor sets (I4)', () => {
+      expect(native.head).toStrictEqual(browser.head);
+    });
 
-  it.each<[ActorSet]>([['browser'], ['native']])(
-    'records the edit buffered after the last turn inside the close revision (%s)',
-    async (set) => {
-      const dump = await runScriptedTurn(set);
+    it.each<[ActorSet]>([['browser'], ['native']])(
+      'records the edit buffered after the last turn inside the close revision (%s)',
+      async (set) => {
+        const dump = await runScriptedTurn(set);
 
-      /* The generated workspace config (`.gitignore`, `.gitattributes`) is in
-       * the tree too — S16's files are versioned; the two the row is about are
-       * the turn's edit and the one buffered after it. */
-      expect(dump.closeRevisionFiles).toContain('main.ts=export const size = 2;\n');
-      expect(dump.closeRevisionFiles).toContain('late.ts=export const late = true;\n');
-    },
-    300_000,
-  );
-});
+        /* The generated workspace config (`.gitignore`, `.gitattributes`) is in
+         * the tree too — S16's files are versioned; the two the row is about are
+         * the turn's edit and the one buffered after it. */
+        expect(dump.closeRevisionFiles).toContain('main.ts=export const size = 2;\n');
+        expect(dump.closeRevisionFiles).toContain('late.ts=export const late = true;\n');
+      },
+      300_000,
+    );
+  },
+);

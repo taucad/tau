@@ -110,6 +110,10 @@ export type SyncFailureReason =
   /* The repository was renamed or transferred (D11): the surface looks it up by
      its stable id and asks before re-pointing the remote. */
   | 'moved'
+  /* The hosted repository is damaged (`GIT_REPOSITORY_INCOMPLETE`): only an
+     operator restore repairs it, so no action a person has — *Sync now*
+     included — can clear it. */
+  | 'damaged'
   | 'rejected'
   | 'offline'
   | 'unknown';

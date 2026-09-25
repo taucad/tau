@@ -29,7 +29,7 @@ import { publishMachine, selectPublishFacet } from '#publish.machine.js';
 import type { PublishMachineEvent } from '#publish.machine.js';
 import type { PublishFacet } from '#publish.types.js';
 import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
-import type { RemoteFacet, RemoteMachineEvent } from '#remote.types.js';
+import type { RemoteFacet, RemoteMachineEvent, RevisionChildToast } from '#remote.types.js';
 import type { RemoteKind } from '#remotes.js';
 import { resolutionMachine, selectResolutionFacet } from '#resolution.machine.js';
 import type { ResolutionMachineEvent } from '#resolution.machine.js';
@@ -40,7 +40,12 @@ import type { SyncFacet, SyncPushOutcome } from '#sync.types.js';
 import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnFailureCode, TurnOutcome, TurnSettlement } from '#turn.machine.js';
-import type { RevisionStatusProjection, RevisionBranchFacet, RevisionConflictFacet } from '#project-revisions.types.js';
+import type {
+  RevisionStatusProjection,
+  RevisionBranchFacet,
+  RevisionConflictFacet,
+  RevisionLine,
+} from '#project-revisions.types.js';
 
 /** What one checkout last reported about itself. @public */
 export type CheckoutStatusEntry = Readonly<{ status: CheckoutStatus; headRevisionId: string | undefined }>;
@@ -53,8 +58,8 @@ export type ProjectRevisionsMachineInput = Readonly<{
   selectedCheckoutId?: string;
 }>;
 
-/** Serializable state owned by projectRevisionsMachine. @public */
-export type ProjectRevisionsMachineContext = Readonly<{
+/* The fields of {@link ProjectRevisionsMachineContext}, named by the interface below. */
+type ProjectRevisionsMachineContextFields = Readonly<{
   projectId: string;
   checkouts: readonly CheckoutRecord[];
   /** Local branch refs learned from fetch that do not need a checkout yet. */
@@ -94,6 +99,10 @@ export type ProjectRevisionsMachineContext = Readonly<{
   registrySettled: boolean;
 }>;
 
+/** Serializable state owned by projectRevisionsMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface ProjectRevisionsMachineContext extends ProjectRevisionsMachineContextFields {}
+
 /** Events accepted by projectRevisionsMachine. @public */
 export type ProjectRevisionsMachineEvent =
   | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
@@ -122,23 +131,37 @@ export type ProjectRevisionsMachineEvent =
       turnId?: string;
       checkoutId: string | undefined;
       leaseIds: readonly string[];
+      /** The revision a restore applied, on the cut that mints that restore (D1). */
+      restoredFrom?: string;
+      /** The requester's own id for this cut, echoed on every answer to it (N2). */
+      requestId?: string;
     }>
+  /** The `restore` child finished a verb, so the admissions it held can run (A2). */
+  | Readonly<{ type: 'restoreSettled'; checkoutId: string }>
   | Readonly<{
       type: 'revisionMinted';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       revisionId: string;
     }>
-  | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{
+      type: 'nothingToSave';
+      checkoutId: string;
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      requestId?: string;
+    }>
   | Readonly<{
       type: 'cutFailed';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       reason: string;
     }>
-  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string; requestId?: string }>
   | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement)
   | (Readonly<{ type: 'turnConflicted' }> & TurnSettlement)
   | Readonly<{ type: 'leaseStale'; runId: string }>
@@ -172,6 +195,7 @@ export type ProjectRevisionsMachineEvent =
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
   | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string; code?: RevisionPortErrorCode }>
+  | RevisionChildToast
   | Readonly<{ type: 'addCheckout'; branch: string; from: string }>
   | Readonly<{ type: 'removeCheckout'; id: string }>
   | Readonly<{ type: 'switch'; branch: string }>
@@ -231,17 +255,25 @@ export type ProjectRevisionsMachineEmitted =
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       revisionId: string;
     }>
-  | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{
+      type: 'nothingToSave';
+      checkoutId: string;
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      requestId?: string;
+    }>
   | Readonly<{
       type: 'cutFailed';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       reason: string;
     }>
-  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string; requestId?: string }>
   | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement)
   | (Readonly<{ type: 'turnConflicted' }> & TurnSettlement)
   /*
@@ -291,6 +323,8 @@ export type ProjectRevisionsMachineEmitted =
     }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
+  /** A remote or resolution child's toast, re-emitted because a host holds the root and nothing else (L2-F8, A38). */
+  | RevisionChildToast
   /* P4: a refusal crosses as a code; the page that shows it owns the words. */
   | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string; code?: RevisionPortErrorCode }>
   /**
@@ -320,6 +354,9 @@ export type ProjectRevisionsMachineEmitted =
       checkoutId: string | undefined;
       paths: readonly string[];
     }>;
+
+/** The refusal a verb that would rewrite a checkout reads while a turn holds it (D10, A1). */
+const turnHoldsFilesMessage = 'An agent is working in this project’s files.';
 
 const selectedRecord = (context: ProjectRevisionsMachineContext): CheckoutRecord | undefined =>
   context.checkouts.find((checkout) => checkout.id === context.selectedCheckoutId);
@@ -445,8 +482,8 @@ const syncResolutions = (
 
 /*
  * A cut's answer goes to the turn that asked for it, or — when no turn
- * did — to the `branch` child, which may be recording the selected tree
- * before it makes a branch (P3). The child ignores what it did not ask for.
+ * did — to the `branch` and `restore` children, which record the selected tree
+ * before they branch (P3) or restore (D1, A7). Each ignores what it did not ask for.
  */
 const answerCut = (
   context: ProjectRevisionsMachineContext,
@@ -455,6 +492,7 @@ const answerCut = (
 ): void => {
   if (event.turnId === undefined) {
     enq.sendTo('branch', event);
+    enq.sendTo('restore', event);
     return;
   }
   /* A turn whose ref has already gone is not the `branch` child's answer:
@@ -465,15 +503,16 @@ const answerCut = (
   }
 };
 
-/* Tell `restore` which checkout the workbench is rooted at now, and
- * `branch` which branch *Merge into `<current>`* means. */
+/* Tell `restore` which checkout the workbench is rooted at now and on which
+ * line (M1), and `branch` which branch *Merge into `<current>`* means. */
 const announceSelection = (context: ProjectRevisionsMachineContext, enq: ProjectRevisionsEnqueue): void => {
+  const branch = selectedRecord(context)?.branch;
   enq.sendTo('restore', {
     type: 'selectCheckout',
     checkoutId: context.selectedCheckoutId ?? '',
-    headRevisionId: selectedRecord(context)?.headRevisionId,
+    ...(branch === undefined ? {} : { branch }),
   });
-  enq.sendTo('branch', { type: 'selectBranch', branch: selectedRecord(context)?.branch });
+  enq.sendTo('branch', { type: 'selectBranch', branch });
 };
 
 /* The admissions a registry answer releases: raised in arrival order, and the buffer emptied. */
@@ -505,6 +544,45 @@ const settleTurn = (
   enq.sendTo(registry, event);
   enq.emit(event);
   return { context: dropTurn(context, enq, event.turnId) };
+};
+
+/*
+ * A2: a turn admitted to a checkout a restore is working on waits for it.
+ *
+ * From the pre-restore cut until the verb settles, the question included: a
+ * turn admitted while the person decides would write its lease between the
+ * plan and the apply, and the restore they confirmed would then be refused or,
+ * worse, write files it cannot cut (M4). The pinned checkout is set exactly
+ * that long.
+ *
+ * An admission that names no checkout lands on the chat's, which this root
+ * only learns in the turn's own `prepare` — so it waits too, which costs at
+ * most one restore and never a byte.
+ */
+const restoreHolds = (
+  restore: SnapshotFrom<typeof restoreMachine> | undefined,
+  checkoutId: string | undefined,
+): boolean => {
+  const pinned = restore?.context.restoringCheckoutId;
+  return pinned !== undefined && (checkoutId === undefined || checkoutId === pinned);
+};
+
+/* What the registry moved under one running checkout: its line (a rename, N9), then its head. */
+const tellCheckoutMoved = (
+  enq: ProjectRevisionsEnqueue,
+  ref: ActorRefFrom<typeof checkoutMachine>,
+  [previous, next]: readonly [CheckoutRecord | undefined, CheckoutRecord | undefined],
+): void => {
+  if (next?.branch !== undefined && previous?.branch !== next.branch) {
+    enq.sendTo(ref, { type: 'lineChanged', branch: next.branch });
+  }
+  if (
+    previous?.headRevisionId !== next?.headRevisionId &&
+    next?.headRevisionId !== undefined &&
+    next.headTreeId !== undefined
+  ) {
+    enq.sendTo(ref, { type: 'headChanged', revisionId: next.headRevisionId, treeId: next.headTreeId });
+  }
 };
 
 const bufferAdmission = (
@@ -658,19 +736,10 @@ const projectRevisionsMachineDefinition = setup({
               enq.stop(ref);
               continue;
             }
-            const previous = context.checkouts.find((checkout) => checkout.id === id);
-            const next = event.checkouts.find((checkout) => checkout.id === id);
-            if (
-              previous?.headRevisionId !== next?.headRevisionId &&
-              next?.headRevisionId !== undefined &&
-              next.headTreeId !== undefined
-            ) {
-              enq.sendTo(ref, {
-                type: 'headChanged',
-                revisionId: next.headRevisionId,
-                treeId: next.headTreeId,
-              });
-            }
+            tellCheckoutMoved(enq, ref, [
+              context.checkouts.find((checkout) => checkout.id === id),
+              event.checkouts.find((checkout) => checkout.id === id),
+            ]);
           }
           /* W3b's own correction, unexecuted until a consumer needed it: the
            * registry's `kind === 'live'` record *is* the live checkout, so a
@@ -713,13 +782,14 @@ const projectRevisionsMachineDefinition = setup({
           /* R8: `restore`'s invoke input was evaluated before any record
            * existed, so the first registry it ever sees has to be announced,
            * and so does a head that moved under the selection. */
-          const previousHead = context.checkouts.find(
-            (checkout) => checkout.id === context.selectedCheckoutId,
-          )?.headRevisionId;
-          const nextHead = event.checkouts.find((checkout) => checkout.id === selected)?.headRevisionId;
+          const previous = context.checkouts.find((checkout) => checkout.id === context.selectedCheckoutId);
+          const nextSelected = event.checkouts.find((checkout) => checkout.id === selected);
           if (
             selected !== undefined &&
-            (context.checkouts.length === 0 || selected !== context.selectedCheckoutId || nextHead !== previousHead)
+            (context.checkouts.length === 0 ||
+              selected !== context.selectedCheckoutId ||
+              nextSelected?.headRevisionId !== previous?.headRevisionId ||
+              nextSelected?.branch !== previous?.branch)
           ) {
             announceSelection(next, enq);
           }
@@ -765,8 +835,8 @@ const projectRevisionsMachineDefinition = setup({
             },
           }),
         },
-        admitTurn: ({ context, event, guards, self }, enq) => {
-          if (guards.registryUnanswered(context)) {
+        admitTurn: ({ children, context, event, guards, self }, enq) => {
+          if (guards.registryUnanswered(context) || restoreHolds(children.restore?.getSnapshot(), event.checkoutId)) {
             return { context: bufferAdmission(context, event) };
           }
           if (guards.runIsAlreadyHeld(context, event.runId)) {
@@ -824,8 +894,16 @@ const projectRevisionsMachineDefinition = setup({
                 type: 'cutFailed',
                 checkoutId: event.checkoutId,
                 trigger: event.trigger,
+                ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
                 reason,
                 code: 'CHECKOUT_UNKNOWN',
+              });
+              enq.sendTo('restore', {
+                type: 'cutFailed',
+                checkoutId: event.checkoutId,
+                trigger: event.trigger,
+                ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+                reason,
               });
               return {};
             }
@@ -852,10 +930,24 @@ const projectRevisionsMachineDefinition = setup({
            * unchanged tree gets — settled, never a silent drop.
            */
           if (event.turnId === undefined && heldByTurn(context, event.checkoutId ?? '')) {
+            /* A1: a restore would write over what the turn is recording, so it
+             * is refused before anything is cut — in Switch's own words. */
+            if (event.trigger === 'restore') {
+              enq.sendTo('restore', {
+                type: 'cutFailed',
+                checkoutId: event.checkoutId,
+                trigger: event.trigger,
+                ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+                reason: turnHoldsFilesMessage,
+                code: 'LEASE_UNAVAILABLE',
+              });
+              return {};
+            }
             enq.raise({
               type: 'nothingToSave',
               checkoutId: event.checkoutId ?? '',
               trigger: event.trigger,
+              ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
             });
             return {};
           }
@@ -864,9 +956,14 @@ const projectRevisionsMachineDefinition = setup({
             trigger: event.trigger,
             ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
             leaseIds: event.leaseIds,
+            ...(event.restoredFrom === undefined ? {} : { restoredFrom: event.restoredFrom }),
+            ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
           });
           return {};
         },
+        /* The admissions A2 held are raised again; any still held re-buffer. */
+        restoreSettled: ({ context }, enq) =>
+          context.pendingAdmissions.length === 0 ? {} : { context: releaseAdmissions(context, enq) },
         revisionMinted: ({ children, context, event }, enq) => {
           answerCut(context, enq, event);
           /* The scheduler hears about every revision this project mints, and
@@ -977,6 +1074,10 @@ const projectRevisionsMachineDefinition = setup({
           enq.emit(event);
           return {};
         },
+        childToast: ({ event }, enq) => {
+          enq.emit(event);
+          return {};
+        },
         checkoutFailed: ({ context, event }, enq) => {
           enq.emit(event);
           enq.sendTo('branch', {
@@ -997,21 +1098,31 @@ const projectRevisionsMachineDefinition = setup({
         checkoutChanged: ({ context, event }, enq) => {
           const ref = context.checkoutRefs[event.checkoutId];
           if (ref !== undefined) {
+            /* A live Switch keeps the checkout id and moves its line (N9). */
+            if (event.branch !== undefined) {
+              enq.sendTo(ref, { type: 'lineChanged', branch: event.branch });
+            }
             enq.sendTo(ref, {
               type: 'headChanged',
               revisionId: event.revisionId,
               treeId: event.treeId,
             });
           }
-          return {
-            context: {
-              checkouts: context.checkouts.map((checkout) =>
-                checkout.id === event.checkoutId
-                  ? { ...checkout, headRevisionId: event.revisionId, branch: event.branch }
-                  : checkout,
-              ),
-            },
-          };
+          /* A fact that names no branch moved a head, not a line: the record
+           * keeps its branch, so `line` never goes `undefined` under it (D3). */
+          const checkouts = context.checkouts.map((checkout) =>
+            checkout.id === event.checkoutId
+              ? { ...checkout, headRevisionId: event.revisionId, branch: event.branch ?? checkout.branch }
+              : checkout,
+          );
+          /* A live *Switch* moves the selection's line under the same id (M1). */
+          if (
+            event.checkoutId === context.selectedCheckoutId &&
+            selectedRecord({ ...context, checkouts })?.branch !== selectedRecord(context)?.branch
+          ) {
+            announceSelection({ ...context, checkouts }, enq);
+          }
+          return { context: { checkouts } };
         },
         pinTo: ({ context, event }, enq) => {
           const patch = {
@@ -1200,10 +1311,7 @@ const projectRevisionsMachineDefinition = setup({
             enq.emit({
               type: 'switchRefused',
               branch: event.branch,
-              reason:
-                liveRecord === undefined
-                  ? 'This project has no files open to move.'
-                  : 'An agent is working in this project’s files.',
+              reason: liveRecord === undefined ? 'This project has no files open to move.' : turnHoldsFilesMessage,
             });
             return {};
           }
@@ -1255,6 +1363,20 @@ export interface ProjectRevisionsMachine extends ProjectRevisionsMachineDefiniti
 export const projectRevisionsMachine: ProjectRevisionsMachine = projectRevisionsMachineDefinition;
 
 /**
+ * The line the selected checkout is on, as {@link RevisionLine} names it.
+ *
+ * @param branch - The branch its record tracks, if any.
+ * @param head - Its head revision, if any.
+ * @returns `unknown` with no branch to name, `unborn` before the first revision, else `branch`.
+ */
+const lineOf = (branch: string | undefined, head: string | undefined): RevisionLine =>
+  branch === undefined
+    ? { kind: 'unknown' }
+    : head === undefined
+      ? { kind: 'unborn', name: branch }
+      : { kind: 'branch', name: branch };
+
+/**
  * Selects the coalesced status W3d publishes for this project.
  *
  * @param snapshot - Current machine snapshot.
@@ -1268,16 +1390,17 @@ export const selectRevisionStatus = (
   const selected = context.checkouts.find((checkout) => checkout.id === context.selectedCheckoutId);
   const status =
     context.selectedCheckoutId === undefined ? undefined : context.checkoutStatus[context.selectedCheckoutId];
+  const headRevisionId = status?.headRevisionId ?? selected?.headRevisionId;
   return {
     projectId: context.projectId,
     checkoutId: context.selectedCheckoutId,
     checkoutRoot: selected?.root,
-    branch: selected?.branch,
+    line: lineOf(selected?.branch, headRevisionId),
     registrySettled: context.registrySettled,
     projectDirty: Object.values(context.checkoutStatus).some((entry) => entry.status !== 'clean'),
     dirty: status !== undefined && status.status !== 'clean',
     minting: status?.status === 'minting',
-    headRevisionId: status?.headRevisionId ?? selected?.headRevisionId,
+    headRevisionId,
     follow: context.follow,
     /* A conflicted branch needs a person as much as a failed cut does (A22,
      * the agent-state row `revision.conflicted`), so it counts here too. */

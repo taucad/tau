@@ -64,8 +64,8 @@ export type SyncMachineInput = Readonly<{
   online?: boolean;
 }>;
 
-/** Serializable state owned by syncMachine. @public */
-export type SyncMachineContext = Readonly<{
+/* The fields of {@link SyncMachineContext}, named by the interface below. */
+type SyncMachineContextFields = Readonly<{
   projectId: string;
   branch: string;
   parentRef: AnyActorRef | undefined;
@@ -130,6 +130,10 @@ export type SyncMachineContext = Readonly<{
   pullRenderMilliseconds: number;
   pullDeadlineMilliseconds: number;
 }>;
+
+/** Serializable state owned by syncMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface SyncMachineContext extends SyncMachineContextFields {}
 
 /** Events accepted by syncMachine. @public */
 export type SyncMachineEvent =
@@ -286,7 +290,19 @@ const defaultDebounceMilliseconds = 2000;
 const defaultRetryMilliseconds = 5000;
 const defaultMaxRetryMilliseconds = 300_000;
 const defaultPullRenderMilliseconds = 3000;
-const defaultPullDeadlineMilliseconds = 10_000;
+
+/**
+ * When the open pull is abandoned outright: policy rule 9's 10 s.
+ *
+ * The innermost bound of the close path. Rule 9 nests every lifecycle bound
+ * strictly inside the wait that awaits it, so the close-path sync quiesce in
+ * `revision-effects.ts` is derived from this value and exceeds it; otherwise a
+ * pull outlives the wait above it and the person reads that wait's generic
+ * sentence instead of the pull's own (L2-F9).
+ *
+ * @public
+ */
+export const syncPullDeadlineMilliseconds = 10_000;
 
 /*
  * The refusals no amount of waiting will satisfy (N2).
@@ -311,6 +327,8 @@ const terminalFailureCodes: ReadonlySet<string> = new Set([
   'REMOTE_NOT_FOUND',
   'REMOTE_QUOTA_EXCEEDED',
   'REMOTE_MOVED',
+  /* A damaged hosted repository answers the same 500 to every retry. */
+  'REMOTE_DAMAGED',
 ]);
 
 const codeOf = (error: unknown): string | undefined => {
@@ -362,6 +380,9 @@ export const syncFailureReason = (error: unknown): SyncFailureReason => {
     }
     case 'REMOTE_MOVED': {
       return 'moved';
+    }
+    case 'REMOTE_DAMAGED': {
+      return 'damaged';
     }
     /* The server refused the refs, not the device (contract §4): a fetch and a
      * replay clear it, so the action beside it is *Sync now*, not *Sign in*. */
@@ -611,7 +632,10 @@ const pullFailed = (context: SyncMachineContext, enq: SyncEnqueue, error: unknow
       context: { ...failure, ...settlePush({ ...context, ...failure }, enq, 'failed') },
     };
   }
-  return { target: '#sync.queued', context: failure };
+  return {
+    target: '#sync.queued',
+    context: { ...failure, ...settlePush({ ...context, ...failure }, enq, 'queued') },
+  };
 };
 
 /**
@@ -699,7 +723,7 @@ const syncMachineDefinition = setup({
     retryMilliseconds: input.retryMilliseconds ?? defaultRetryMilliseconds,
     maxRetryMilliseconds: input.maxRetryMilliseconds ?? defaultMaxRetryMilliseconds,
     pullRenderMilliseconds: input.pullRenderMilliseconds ?? defaultPullRenderMilliseconds,
-    pullDeadlineMilliseconds: input.pullDeadlineMilliseconds ?? defaultPullDeadlineMilliseconds,
+    pullDeadlineMilliseconds: input.pullDeadlineMilliseconds ?? syncPullDeadlineMilliseconds,
   }),
   invoke: { id: 'connectivity', src: 'connectivity' },
   /* Connectivity and the remote are facts about the host, not about which state
@@ -717,6 +741,14 @@ const syncMachineDefinition = setup({
      * where it can push, and remembered where it cannot — `reading`, `opening`,
      * `recording` — so the state that finishes acts on it. */
     close: { context: { pendingMint: true, pendingFlush: true } },
+    /* The same fallback once more (L2-F3): `reading`, `opening`, `pushing` and
+     * `recording` are effects with no push edge of their own, and dropping a
+     * correlated request there left `publish.machine` waiting out its 60 s and
+     * then blaming the cloud. The request is remembered, and every way out of
+     * those states answers it: `recording` with the push it records,
+     * `opening` by pushing (or by the settle its failure edges make),
+     * `noRemote` at once. */
+    syncNow: { context: ({ context, event }) => ({ pushId: event.pushId ?? context.pushId }) },
     open: ({ context, guards }) => (guards.hasRemote(context) ? { target: '.opening', reenter: true } : undefined),
     remoteDisconnected: {
       target: '.noRemote',
@@ -828,10 +860,14 @@ const syncMachineDefinition = setup({
 
     /** No remote is not a failure, and nothing is queued against one. */
     noRemote: {
+      /* A request remembered while this machine was still reading, or cut off
+       * by a disconnect, has nowhere to go: say so rather than leave it
+       * waiting (L2-F3). */
+      entry: ({ context }, enq) => ({ context: settlePush(context, enq, 'failed') }),
       on: {
-        syncNow: ({ event }) =>
+        syncNow: ({ context, event }, enq) =>
           event.remote === undefined
-            ? undefined
+            ? { context: settlePush({ ...context, pushId: event.pushId }, enq, 'failed') }
             : { target: 'pushing', context: { pushId: event.pushId, remote: event.remote } },
         remoteConnected: { target: 'opening', context: ({ event }) => ({ remote: event.remote }) },
       },
@@ -871,12 +907,12 @@ const syncMachineDefinition = setup({
       exit: () => ({ context: { withinPullWindow: false } }),
       after: {
         pullRenderWindow: { context: { withinPullWindow: false } },
-        pullDeadline: {
-          target: 'queued',
-          context: {
+        pullDeadline: ({ context }, enq) => {
+          const late = {
             error: 'The remote did not answer in time; this project will try again.',
             reason: 'offline',
-          },
+          } satisfies SyncContextPatch;
+          return { target: 'queued', context: { ...late, ...settlePush({ ...context, ...late }, enq, 'queued') } };
         },
       },
       initial: 'fetching',
@@ -954,8 +990,10 @@ const syncMachineDefinition = setup({
           return { target: 'pushing' };
         }
         /* Then anything minted while the pull was running — including a `close`
-         * cut on a project opened and shut inside one window. */
-        if (context.pendingMint) {
+         * cut on a project opened and shut inside one window — and a correlated
+         * request, which is a push by definition: settling in `backedUp` would
+         * answer it never (L2-F3). */
+        if (context.pendingMint || context.pushId !== undefined) {
           return { target: 'pushing' };
         }
         /* Then the case an empty queue cannot express: the pull found this
@@ -1170,12 +1208,15 @@ const syncMachineDefinition = setup({
 
     /** `Not backed up · n`, and this host will try again on its own. */
     queued: {
-      /* A revision minted while the pull was running, or while this machine was
-       * still reading its record, is pushed as soon as there is a state that can
-       * push. Every entry into `queued` passes through here, including the
-       * pull's own failure edges — which is what stops an offline close from
-       * being dropped by the open that preceded it. */
-      always: ({ context }) => (context.pendingMint ? { target: 'pushing' } : undefined),
+      /* A `close` or `hidden` cut remembered while the pull or the push was
+       * running flushes as soon as there is a state that can push: the document
+       * is unloading and a backoff is time it does not have. Every entry into
+       * `queued` passes through here, including the pull's own failure edges —
+       * which is what stops an offline close from being dropped by the open that
+       * preceded it. Any other remembered mint waits out the backoff like the
+       * work already queued (policy rule 19, L2-F6): the backoff's `opening`
+       * pushes it once the pull lands. */
+      always: ({ context }) => (context.pendingFlush ? { target: 'pushing' } : undefined),
       after: {
         syncBackoff: ({ context, guards }) => (guards.isOnline(context) ? { target: 'opening' } : undefined),
       },
@@ -1184,10 +1225,10 @@ const syncMachineDefinition = setup({
          * handler is the one that runs: without it `opening` would read the
          * stale `online` and bounce straight back. */
         online: { target: 'opening', context: { online: true } },
-        revisionMinted: ({ context, event }) => ({
-          target: flushesNow(event.trigger) ? 'pushing' : 'pending',
-          context: rememberHead(context, event),
-        }),
+        /* Only the unloading triggers pre-empt the backoff; the root remembers
+         * every other mint for the retry that is already scheduled. */
+        revisionMinted: ({ context, event }) =>
+          flushesNow(event.trigger) ? { target: 'pushing', context: rememberHead(context, event) } : undefined,
         syncNow: { target: 'opening', context: ({ event }) => ({ pushId: event.pushId }) },
         close: { target: 'pushing' },
         remoteConnected: { target: 'opening', context: ({ event }) => ({ remote: event.remote }) },
@@ -1235,12 +1276,17 @@ const syncMachineDefinition = setup({
       },
     },
 
-    /** Something a person has to act on — a credential, or a queue that will not write. */
+    /**
+     * Something a person has to act on — a credential, or a queue that will not write.
+     *
+     * A mint here is remembered by the root and pushed by the pull that *Sync
+     * now* or a remote change starts; it never re-enters the push on its own,
+     * or a refused project would retry on every save (policy rule 19, L2-F6).
+     */
     failed: {
       on: {
         syncNow: { target: 'opening', context: ({ event }) => ({ pushId: event.pushId }) },
         remoteConnected: { target: 'opening', context: ({ event }) => ({ remote: event.remote }) },
-        revisionMinted: { target: 'pending', context: ({ context, event }) => rememberHead(context, event) },
       },
     },
   },

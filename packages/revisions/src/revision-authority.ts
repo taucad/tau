@@ -88,6 +88,14 @@ export type RevisionProvenance = Readonly<{
   actor?: RevisionActor;
   /** What asked for this revision (S30). Absent in a store written before S30. */
   trigger?: RevisionTrigger;
+  /**
+   * The revision a restore brought back (D1).
+   *
+   * Present only on the revision a restore minted; the cut that recorded the
+   * checkout *before* the restore carries the same `restore` trigger and no
+   * `restoredFrom`, so this — never the trigger — is what names a *Restored* row.
+   */
+  restoredFrom?: string;
   /** Milliseconds since the Unix epoch. */
   createdAt: number;
 }>;

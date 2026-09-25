@@ -17,6 +17,8 @@ import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
 import { liveOwnerIds, purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
 import { restoreRepository } from '#api/git/maintenance/restore.js';
 import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
+import { readMaintenanceLiveness, recordMaintenancePass } from '#api/git/maintenance/liveness.js';
+import type { ScheduledMaintenanceCommand } from '#api/git/maintenance/liveness.js';
 
 /**
  * `revisions-maintenance`: the singleton entry for everything that must happen
@@ -52,6 +54,18 @@ const usage = `Usage: revisions-maintenance <command>
 
   mark-erasure --owner <id>
       Record a verified erasure request: the owner's tombstone becomes due now.
+
+  status
+      Read-only liveness check of the nightly loop. Prints one
+      revisions_maintenance.liveness JSON line and exits 1 unless purge,
+      retire-lfs and collect-blobs each completed within 30 hours or are
+      inside a 6-hour pass. Runs in any process group, so it answers from an
+      app Machine when the maintenance Machine is down.
+
+Run bare, purge, retire-lfs and collect-blobs are the scheduled pass: each
+records its start, completion or failure for status and logs one
+revisions_maintenance.pass line. Any flag makes it an operator run, which
+records nothing.
 
 Environment: the API's own configuration, plus TAU_S3_RESTORE_ENDPOINT,
 TAU_S3_RESTORE_BUCKET, TAU_S3_RESTORE_ACCESS_KEY_ID,
@@ -107,28 +121,46 @@ async function main(): Promise<void> {
     return;
   }
 
-  assertSingletonProcessGroup();
-
   const environment = getEnvironment();
   const configService = new ConfigService<Environment, true>(environment);
   const driver = new ObjectStorageService(configService);
+
+  if (command === 'status') {
+    // Read-only, so exempt from the singleton guard: it must answer from an
+    // `app` Machine precisely when the maintenance Machine is gone.
+    const liveness = await readMaintenanceLiveness(driver, new Date());
+    console.log(JSON.stringify({ event: 'revisions_maintenance.liveness', ...liveness }));
+    if (!liveness.ok) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  assertSingletonProcessGroup();
+
   const client = postgres(environment.DATABASE_URL, { max: 1, prepare: false });
   const database = drizzle(client, { schema });
   const report = (line: string): void => {
     console.log(line);
   };
+  /* The loop runs each subcommand bare; that form alone is the scheduled pass
+     `status` judges. A flagged run is an operator's and leaves no record. */
+  const pass = async <T>(scheduled: ScheduledMaintenanceCommand, run: () => Promise<T>): Promise<T> =>
+    args.length === 1 ? recordMaintenancePass({ store: driver, command: scheduled, run, report }) : run();
 
   try {
     switch (command) {
       case 'purge': {
-        const outcomes = await purgeTombstonedTenants({
-          database,
-          driver,
-          report,
-          dryRun: args.includes('--dry-run'),
-          ...(option(args, 'owner') === undefined ? {} : { ownerIds: [required(args, 'owner')] }),
-          ...(option(args, 'confirm') === undefined ? {} : { confirmOwnerId: required(args, 'confirm') }),
-        });
+        const outcomes = await pass('purge', async () =>
+          purgeTombstonedTenants({
+            database,
+            driver,
+            report,
+            dryRun: args.includes('--dry-run'),
+            ...(option(args, 'owner') === undefined ? {} : { ownerIds: [required(args, 'owner')] }),
+            ...(option(args, 'confirm') === undefined ? {} : { confirmOwnerId: required(args, 'confirm') }),
+          }),
+        );
         console.log(JSON.stringify(outcomes));
         break;
       }
@@ -157,15 +189,16 @@ async function main(): Promise<void> {
           console.log(JSON.stringify(due));
           break;
         }
-        const outcomes = await retireDueLfsObjects(
-          { database, store: new S3RepositoryStore(driver), storage: driver },
-          { now },
+        const outcomes = await pass('retire-lfs', async () =>
+          retireDueLfsObjects({ database, store: new S3RepositoryStore(driver), storage: driver }, { now }),
         );
         console.log(JSON.stringify(outcomes));
         break;
       }
       case 'collect-blobs': {
-        const result = await collectZeroCountBlobs({ database, driver, report, dryRun: args.includes('--dry-run') });
+        const result = await pass('collect-blobs', async () =>
+          collectZeroCountBlobs({ database, driver, report, dryRun: args.includes('--dry-run') }),
+        );
         console.log(JSON.stringify(result));
         break;
       }

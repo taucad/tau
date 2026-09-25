@@ -21,6 +21,11 @@ import { cn } from '@taucad/ui/utils/cn';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { randomUuid } from '@taucad/utils/id';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
+import { BambuSettingsForm } from '#components/print/bambu-settings-form.js';
+import { BambuStudioPresets } from '#components/print/bambu-studio-presets.js';
+import type { BambuTray } from '#components/print/bambu-studio-presets.js';
+import { isRealBambuPrinter, useBambuStudio } from '#components/print/use-bambu-studio.js';
+import type { BambuQualityPreset, BambuStudioMode } from '#components/print/use-bambu-studio.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
@@ -33,13 +38,16 @@ import {
 } from '#routes/w.$workspace.$project/chat-print-section.js';
 import {
   StartConfirmationCard,
+  bambuStudioRequired,
   describeStartConfirmations,
+  describePrintError,
   startBlocker,
 } from '#routes/w.$workspace.$project/chat-print-send.js';
 import {
   fitsBuildVolume,
   formatDuration,
   formatFilament,
+  formatProducer,
   formatQuantity,
   formatSize,
   materialSlotLabel,
@@ -226,6 +234,12 @@ export type PrintPrepare = Readonly<{
   setEntryPath: (entryPath: string) => void;
   hasGeometry: boolean;
   route: ReturnType<typeof bestRouteForActiveKernel>;
+  /** Bambu Studio's presets and settings when the machine is a Bambu printer. */
+  studio: BambuStudioMode;
+  /** Whether Bambu Studio slices, rather than the slicer route's own engine. */
+  isBambuStudio: boolean;
+  /** Why the slice button waits, when it does. */
+  sliceBlocker: string | undefined;
   optionsSchema: ResolvedSchema | undefined;
   options: Record<string, unknown>;
   setOptions: (options: Record<string, unknown>) => void;
@@ -313,7 +327,7 @@ export const usePrintPrepare = ({
   const [isSlicing, setIsSlicing] = useState(false);
   /* Kept with the geometry it described, so a new render retires it (a failure on an empty model must not outlive it). */
   const [failedSlice, setFailedSlice] = useState<Readonly<{ message: string; geometry: unknown }>>();
-  const sliceError = failedSlice?.geometry === geometry ? failedSlice.message : undefined;
+  const sliceError = failedSlice !== undefined && failedSlice.geometry === geometry ? failedSlice.message : undefined;
   const [isSending, setIsSending] = useState(false);
   const [isConfirmingSend, setIsConfirmingSend] = useState(false);
   const [sendError, setSendError] = useState<string>();
@@ -335,6 +349,11 @@ export const usePrintPrepare = ({
   }, [entry, manifest, provider, submission]);
   const plate =
     typeof effectiveSubmission['expectedBedType'] === 'string' ? effectiveSubmission['expectedBedType'] : undefined;
+  const mapping = effectiveSubmission['amsMapping'];
+  const slotsKey = Array.isArray(mapping) ? mapping.filter((slot) => typeof slot === 'number').join(',') : '';
+  const slots = useMemo(() => (slotsKey === '' ? [] : slotsKey.split(',').map(Number)), [slotsKey]);
+  const studio = useBambuStudio({ provider, entry, manifest, plate, slots });
+  const isBambuStudio = studio.status === 'ready' || studio.status === 'checking';
   /* The machine's own slicer options under the person's, so the Advanced form and the slice agree. */
   const machineOptions = useMemo(
     () => (manifest && plate ? machineSliceOptions(manifest, plate) : {}),
@@ -353,7 +372,22 @@ export const usePrintPrepare = ({
         : undefined,
     [machineOptions, route],
   );
-  const optionsKey = JSON.stringify({ ...machineOptions, ...options });
+  /* Bambu Studio slices with its own presets; the reference options apply only to the slicer route's own engine. */
+  const bambuExportOptions = studio.exportOptions;
+  const sliceOptions = useMemo(
+    () => (isBambuStudio ? bambuExportOptions : { ...machineOptions, ...options }),
+    [bambuExportOptions, isBambuStudio, machineOptions, options],
+  );
+  const optionsKey = JSON.stringify(sliceOptions ?? null);
+  const sliceBlocker = ((): string | undefined => {
+    if (!isBambuStudio || sliceOptions !== undefined) {
+      return undefined;
+    }
+    if (studio.error !== undefined) {
+      return studio.error;
+    }
+    return studio.status === 'checking' ? 'Checking for Bambu Studio…' : 'Loading Bambu Studio presets…';
+  })();
   const changed = ((): 'model' | 'options' | undefined => {
     if (slice === undefined) {
       return undefined;
@@ -372,15 +406,13 @@ export const usePrintPrepare = ({
         : undefined;
 
   const sliceNow = useCallback(async (): Promise<void> => {
-    if (!kernelClient || !route) {
+    if (!kernelClient || !route || sliceOptions === undefined) {
       return;
     }
     setIsSlicing(true);
     setFailedSlice(undefined);
     try {
-      const result = await exportWithRuntimeValidatedInput(kernelClient, route, {
-        exportOptions: { ...machineOptions, ...options },
-      });
+      const result = await exportWithRuntimeValidatedInput(kernelClient, route, { exportOptions: sliceOptions });
       if (!result.success) {
         throw new Error(result.issues.map((issue) => issue.message).join('; ') || 'Slicing failed.');
       }
@@ -410,7 +442,7 @@ export const usePrintPrepare = ({
     } finally {
       setIsSlicing(false);
     }
-  }, [entryPath, fileManager, geometry, kernelClient, machineOptions, manifest, options, optionsKey, route]);
+  }, [entryPath, fileManager, geometry, kernelClient, manifest, optionsKey, route, sliceOptions]);
 
   const openPreview = useCallback((): void => {
     if (slice) {
@@ -430,6 +462,10 @@ export const usePrintPrepare = ({
     }
     if (slice.fit && !slice.fit.fits) {
       return `The toolpath does not fit the plate: ${slice.fit.reason}.`;
+    }
+    // The real printer refuses anything Bambu Studio did not slice (blueprint P3); the simulator takes both.
+    if (isRealBambuPrinter(provider) && slice.summary.producer?.name !== 'Bambu Studio') {
+      return bambuStudioRequired;
     }
     return startBlocker(effectiveSubmission, entry, manifest);
   })();
@@ -483,6 +519,7 @@ export const usePrintPrepare = ({
           layers: slice.summary.layers,
           estimatedDuration: slice.summary.estimatedDuration,
           filamentLength: slice.summary.filamentLength,
+          ...(slice.summary.producer === undefined ? {} : { producer: slice.summary.producer }),
         },
         requestId: requestIdRef.current.requestId,
       });
@@ -501,7 +538,7 @@ export const usePrintPrepare = ({
       }
       setIsConfirmingSend(false);
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : String(error));
+      setSendError(describePrintError(error));
     } finally {
       setIsSending(false);
     }
@@ -521,6 +558,9 @@ export const usePrintPrepare = ({
     setEntryPath,
     hasGeometry,
     route,
+    studio,
+    isBambuStudio,
+    sliceBlocker,
     optionsSchema,
     options,
     setOptions,
@@ -667,6 +707,9 @@ function SliceResult({
   const { summary, fit } = slice;
   return (
     <div className='flex min-w-0 flex-col gap-2' aria-label='Slice result'>
+      {summary.producer ? (
+        <p className='text-xs text-muted-foreground'>Sliced by {formatProducer(summary.producer)}</p>
+      ) : null}
       <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs'>
         <dt className='text-muted-foreground'>File</dt>
         <dd className='truncate font-mono'>{slice.fileName}</dd>
@@ -675,7 +718,11 @@ function SliceResult({
         <dt className='text-muted-foreground'>Time</dt>
         <dd className='tabular-nums'>
           {formatDuration(summary.estimatedDuration)}
-          {summary.coverageComplete ? '' : ' (known motion only)'}
+          {summary.isSlicerEstimate
+            ? ` (${summary.producer?.name ?? 'slicer'} estimate)`
+            : summary.coverageComplete
+              ? ''
+              : ' (known motion only)'}
         </dd>
         <dt className='text-muted-foreground'>Filament</dt>
         <dd className='tabular-nums'>{formatFilament(summary.filamentLength)}</dd>
@@ -810,6 +857,139 @@ function PlateSelect({
   );
 }
 
+/** Bambu Studio's presets for the used trays, and what a preset change did to the person's settings. */
+function BambuStudioChoices({
+  studio,
+  entry,
+  manifest,
+}: {
+  readonly studio: BambuStudioMode;
+  readonly entry: MachineDirectoryEntry;
+  readonly manifest: MachineManifest | undefined;
+}): React.JSX.Element {
+  const trays = studio.slots.map((slot): BambuTray => {
+    const tray = entry.snapshot.setup.materials.find((material) => material.slot === slot);
+    return {
+      slot,
+      label: materialSlotLabel(slot, manifest),
+      ...(tray?.materialId === undefined ? {} : { materialId: tray.materialId }),
+      ...(tray?.color === undefined ? {} : { color: tray.color }),
+    };
+  });
+  return (
+    <>
+      <BambuStudioPresets studio={studio} trays={trays} />
+      {studio.dropped > 0 ? (
+        <PrintNotice tone='neutral' role='status'>
+          {studio.dropped === 1
+            ? '1 changed setting does not exist in these presets and was dropped.'
+            : `${String(studio.dropped)} changed settings do not exist in these presets and were dropped.`}
+        </PrintNotice>
+      ) : null}
+      {studio.error === undefined ? null : <PrintNotice tone='destructive'>{studio.error}</PrintNotice>}
+    </>
+  );
+}
+
+/** The slice button, why it waits and why the last slice failed. */
+function SliceControls({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element {
+  const { route, hasGeometry, isSlicing, slice, sliceNow, sliceError, studio } = prepare;
+  // A Bambu Studio failure is already shown with the presets; the wait is stated only while loading.
+  const waiting = studio.error === undefined ? prepare.sliceBlocker : undefined;
+  if (route === undefined) {
+    return (
+      <PrintNotice tone='neutral' role='status'>
+        {hasGeometry ? 'Slicing is not available for this kernel yet.' : 'Render the model to enable slicing.'}
+      </PrintNotice>
+    );
+  }
+  return (
+    <>
+      <Button
+        type='button'
+        size='sm'
+        className='self-start'
+        disabled={isSlicing || !hasGeometry || prepare.sliceBlocker !== undefined}
+        aria-describedby={waiting === undefined ? undefined : 'print-slice-blocker'}
+        onClick={sliceNow}
+      >
+        {isSlicing ? (
+          <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
+        ) : (
+          <Scissors aria-hidden />
+        )}
+        {isSlicing ? 'Slicing…' : slice ? 'Slice again' : 'Slice and preview'}
+      </Button>
+      {waiting === undefined ? null : (
+        <p id='print-slice-blocker' role='status' aria-busy='true' className='text-xs text-muted-foreground'>
+          {waiting}
+        </p>
+      )}
+      {sliceError ? <PrintNotice tone='destructive'>{sliceError}</PrintNotice> : null}
+    </>
+  );
+}
+
+/** Bambu Studio's settings for the selected presets, once they have loaded. */
+function BambuStudioSettings({ studio }: { readonly studio: BambuStudioMode }): React.JSX.Element {
+  return studio.settings ? (
+    <div className='rounded-lg border border-border/70 bg-card p-2'>
+      <BambuSettingsForm
+        settings={studio.settings}
+        defaults={studio.defaults}
+        overrides={studio.overrides}
+        onChange={studio.setOverrides}
+      />
+    </div>
+  ) : (
+    <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
+      Loading Bambu Studio settings…
+    </p>
+  );
+}
+
+const qualityPresets: ReadonlySet<string> = new Set<BambuQualityPreset>(['fast', 'standard', 'fine']);
+
+function EngineStatus({
+  studio,
+  provider,
+}: {
+  readonly studio: BambuStudioMode;
+  readonly provider: MachineProvider | undefined;
+}): React.JSX.Element | undefined {
+  switch (studio.status) {
+    case 'off': {
+      return undefined;
+    }
+    case 'checking': {
+      return (
+        <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
+          Checking for Bambu Studio…
+        </p>
+      );
+    }
+    case 'ready': {
+      return (
+        <p role='status' className='flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
+          <Check aria-hidden className='size-3.5 shrink-0 text-success' />
+          {studio.version === undefined ? 'Slicing with Bambu Studio' : `Slicing with Bambu Studio ${studio.version}`}
+        </p>
+      );
+    }
+    default: {
+      return isRealBambuPrinter(provider) ? (
+        <PrintNotice tone='warning' role='status'>
+          {bambuStudioRequired}
+        </PrintNotice>
+      ) : (
+        <p role='status' className='text-xs text-muted-foreground'>
+          Slicing with Tau&apos;s reference slicer: Bambu Studio is not available here.
+        </p>
+      );
+    }
+  }
+}
+
 /**
  * Prepare: choose a preset, material and plate, slice, read the result, open
  * the preview or send. Advanced holds the full slicer and submission forms.
@@ -833,8 +1013,9 @@ export function PrepareSection({
     entryPath,
     entryPaths,
     setEntryPath,
-    hasGeometry,
     route,
+    studio,
+    isBambuStudio,
     optionsSchema,
     options,
     setOptions,
@@ -842,10 +1023,6 @@ export function PrepareSection({
     submission,
     setSubmission,
     effectiveSubmission,
-    isSlicing,
-    sliceError,
-    sliceNow,
-    slice,
   } = prepare;
   const providerKey = route
     ? route.transcoderId === undefined
@@ -854,11 +1031,16 @@ export function PrepareSection({
     : undefined;
   const optionsManifest = useCompiledConfigurationManifest(providerKey, 'print/options', optionsSchema);
   const submissionManifest = useCompiledConfigurationManifest(provider?.id, 'print/submission', submissionSchema);
+  const { choosePreset } = studio;
   const selectPreset = useCallback(
     (preset: MachineManifest['slicing']['presets'][number]) => {
-      setOptions(applyPreset(options, preset, optionsSchema?.schema));
+      if (!isBambuStudio) {
+        setOptions(applyPreset(options, preset, optionsSchema?.schema));
+      } else if (qualityPresets.has(preset.id)) {
+        choosePreset(preset.id as BambuQualityPreset);
+      }
     },
-    [options, optionsSchema, setOptions],
+    [choosePreset, isBambuStudio, options, optionsSchema, setOptions],
   );
   const selectMaterial = useCallback(
     (slot: number, materialId: string) => {
@@ -874,32 +1056,27 @@ export function PrepareSection({
   );
   const plates = manifest?.bed.plates ?? [];
   const selectedPlate = effectiveSubmission['expectedBedType'];
-  const modifiedCount = Object.keys(options).length + Object.keys(submission).length;
+  const modifiedCount = Object.keys(isBambuStudio ? studio.overrides : options).length + Object.keys(submission).length;
+  /* In Bambu Studio mode a chip is active when the selected process has its layer height. */
+  const selectedProcess = studio.processes.find((preset) => preset.name === studio.selection?.process);
+  const presetState = isBambuStudio ? { layerHeight: selectedProcess?.layerHeight } : options;
 
   return (
     <PrintSection title='Prepare'>
       <ModelSelect entryPath={entryPath} entryPaths={entryPaths} onChange={setEntryPath} />
-      {manifest ? <PresetChips presets={manifest.slicing.presets} options={options} onSelect={selectPreset} /> : null}
+      <EngineStatus studio={studio} provider={provider} />
+      {manifest ? (
+        <PresetChips presets={manifest.slicing.presets} options={presetState} onSelect={selectPreset} />
+      ) : null}
       <MaterialChips entry={entry} manifest={manifest} submission={effectiveSubmission} onSelect={selectMaterial} />
       <PlateSelect plates={plates} selected={selectedPlate} onChange={selectPlate} />
-      {route === undefined ? (
-        <PrintNotice tone='neutral' role='status'>
-          {hasGeometry ? 'Slicing is not available for this kernel yet.' : 'Render the model to enable slicing.'}
-        </PrintNotice>
-      ) : (
-        <Button type='button' size='sm' className='self-start' disabled={isSlicing || !hasGeometry} onClick={sliceNow}>
-          {isSlicing ? (
-            <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-          ) : (
-            <Scissors aria-hidden />
-          )}
-          {isSlicing ? 'Slicing…' : slice ? 'Slice again' : 'Slice and preview'}
-        </Button>
-      )}
-      {sliceError ? <PrintNotice tone='destructive'>{sliceError}</PrintNotice> : null}
+      {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
+      <SliceControls prepare={prepare} />
       <SliceResult prepare={prepare} entry={entry} manifest={manifest} />
       <PrintDisclosure title='Advanced' summary={modifiedCount > 0 ? `${String(modifiedCount)} changed` : 'Defaults'}>
-        {optionsSchema ? (
+        {isBambuStudio ? (
+          <BambuStudioSettings studio={studio} />
+        ) : optionsSchema ? (
           <div className='overflow-hidden rounded-lg border border-border/70 bg-card' aria-label='Slicer options'>
             {optionsManifest ? (
               <Parameters

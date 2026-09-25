@@ -25,6 +25,20 @@ describe('canvas Vite config', () => {
     );
   });
 
+  it('should give each canvas its own dependency cache', () => {
+    const artifacts = mkdtempSync(resolve(tmpdir(), 'tau-canvas-artifacts-'));
+    temporaryPaths.push(artifacts);
+    const cacheDirectories = ['first', 'second'].map((name) => {
+      const canvas = resolve(artifacts, name);
+      mkdirSync(canvas);
+      writeFileSync(resolve(canvas, 'index.html'), '');
+      writeFileSync(resolve(canvas, 'main.tsx'), '');
+      return createCanvasConfig(resolveCanvasRoot(canvas, artifacts), artifacts, artifacts).cacheDir;
+    });
+
+    expect(cacheDirectories[0]).not.toBe(cacheDirectories[1]);
+  });
+
   it('should compile React, Tau components, tokens, Tailwind, and Geist fonts', { timeout: 30_000 }, async () => {
     const artifacts = mkdtempSync(resolve(tmpdir(), 'tau-canvas-artifacts-'));
     const canvas = resolve(artifacts, 'canvas');

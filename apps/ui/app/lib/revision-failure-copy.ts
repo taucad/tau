@@ -15,10 +15,10 @@
  */
 
 /**
- * The three verbs whose refusals reach the tree's one error channel, and the
+ * The four verbs whose refusals reach the tree's one error channel, and the
  * turn, which announces its own (`turn.failed`).
  */
-export type RevisionFailureSubject = 'restore' | 'branch' | 'save' | 'turn';
+export type RevisionFailureSubject = 'restore' | 'branch' | 'save' | 'resolution' | 'turn';
 
 /** Whatever the engine itself could not do, said the same way for every verb. */
 const engineCopy: ReadonlyArray<readonly [string, string]> = [
@@ -68,6 +68,11 @@ export const revisionFailureCopy: Readonly<
       ...engineCopy,
       ['UNKNOWN_REVISION', 'The revision this change builds on is not in this project any more.'],
     ]),
+  },
+  resolution: {
+    title: 'That conflict could not be resolved',
+    fallback: 'Tau could not finish that merge. Reload the page and try again.',
+    codes: new Map(engineCopy),
   },
   turn: {
     title: 'Nothing was saved for that change',

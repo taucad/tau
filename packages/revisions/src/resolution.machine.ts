@@ -105,6 +105,14 @@ export type ResolutionMachineEmitted =
    * only a page or a CLI can, and both hold the root that routes this (A38).
    */
   | Readonly<{ type: 'turnRequested'; revisionId: string; checkoutId: string | undefined; paths: readonly string[] }>
+  /**
+   * A step of this resolution failed, and why (D56).
+   *
+   * Routed through the parent like the facts above: a child spawned per
+   * conflict is not one a host can subscribe to, so its own `toast.error`
+   * reached nobody and *Merge into* read as a button that did nothing.
+   */
+  | Readonly<{ type: 'resolutionFailed'; revisionId: string; reason: string }>
   /** The marker text one file was opened with. */
   | Readonly<{ type: 'conflictMaterialized'; path: string; text: string; ours: string; theirs: string }>
   /**
@@ -168,6 +176,15 @@ const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : 'That resolution step failed.';
 
 type ResolutionEnqueue = EnqueueObject<ResolutionMachineEvent, ResolutionMachineEmitted>;
+
+/* The toast, and the same sentence to the parent that a host can hear (D56). */
+const announceFailure = (context: ResolutionMachineContext, enq: ResolutionEnqueue, fallback: string): void => {
+  const reason = context.reason ?? fallback;
+  enq.emit({ type: 'toast.error', message: reason });
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, { type: 'resolutionFailed', revisionId: context.revisionId, reason });
+  }
+};
 
 const announceChange = (context: ResolutionMachineContext, enq: ResolutionEnqueue): void => {
   const fact: ResolutionMachineEmitted = { type: 'resolutionChanged', revisionId: context.revisionId };
@@ -291,7 +308,7 @@ const resolutionMachineDefinition = setup({
            event. The failure edge every invoked effect has (I29). */
         failed: {
           entry: ({ context }, enq) => {
-            enq.emit({ type: 'toast.error', message: context.reason ?? 'This conflict could not be read.' });
+            announceFailure(context, enq, 'This conflict could not be read.');
             announceChange(context, enq);
           },
           on: { reload: { target: 'loading' } },
@@ -429,7 +446,7 @@ const resolutionMachineDefinition = setup({
            carries on from here rather than starting over. */
         failed: {
           entry: ({ context }, enq) => {
-            enq.emit({ type: 'toast.error', message: context.reason ?? 'That resolution step failed.' });
+            announceFailure(context, enq, 'That resolution step failed.');
             announceChange(context, enq);
           },
           always: { target: 'idle' },

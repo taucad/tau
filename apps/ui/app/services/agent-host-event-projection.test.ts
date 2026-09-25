@@ -16,7 +16,7 @@ import {
   latestAcpSessionData,
   projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatTooLongMessage, parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
@@ -989,7 +989,7 @@ describe('projectAgentHostEvent', () => {
      * person reads the host's own sentence about evicting history. */
     expect(parseErrorForPersistence(new Error(chunk.errorText))).toMatchObject({
       code: 'NO_EVICTABLE_HISTORY',
-      message: "This chat's first message is too large to continue. Start a new chat and attach less.",
+      message: chatTooLongMessage,
       raw: chunk.errorText,
     });
   });

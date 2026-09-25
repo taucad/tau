@@ -695,6 +695,11 @@ const branchMachineDefinition = setup({
             ? {}
             : { checkoutId: context.checkoutId, checkoutRoot: context.checkoutRoot }),
         });
+        /* D59: a branch made or renamed here mints nothing, so the scheduler
+         * would read *Backed up* over a ref the remote has never seen. */
+        if (context.parentRef !== undefined) {
+          enq.sendTo(context.parentRef, { type: 'sync', event: { type: 'recordsChanged' } });
+        }
       },
       always: { target: 'idle', context: clearTransient },
     },

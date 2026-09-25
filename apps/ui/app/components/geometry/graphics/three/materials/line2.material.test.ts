@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { REVISION } from 'three';
+import { NoBlending, REVISION } from 'three';
 import {
   cameraFar,
   cameraNear,
@@ -172,15 +172,17 @@ describe('Line2NodeMaterial.outputNode (gamma-space blend regression guard)', ()
     expect(view.outputNode).toBeDefined();
     expect(view.colorNode).toBeDefined();
 
-    const opacity = toChainable(materialOpacity);
+    const colorRgb = view.colorNode.rgb;
+    const colorAlpha = view.colorNode.a;
+    const opacity = toChainable(materialOpacity).mul(colorAlpha);
     // Reference graph mirrors the implementation: it samples the Tau-owned non-mip
     // singleton (`tauOpaqueViewportTexture()`) rather than three.js's stock
     // `viewportOpaqueMipTexture()`. If the implementation regresses to the mip variant,
     // the fingerprint comparison below fails because the underlying texture node carries
     // a different `generateMipmaps` flag.
-    const viewportRgb = toChainable(tauOpaqueViewportTexture()).rgb;
-    const colorRgb = view.colorNode.rgb;
-    const colorAlpha = view.colorNode.a;
+    const viewport = toChainable(tauOpaqueViewportTexture());
+    const viewportRgb = viewport.rgb;
+    const compositedAlpha = opacity.add(viewport.a.mul(opacity.oneMinus()));
 
     // Reference graph: gamma-space mix — must match the implementation byte-for-byte under
     // the uuid-stripped fingerprint helper.
@@ -190,18 +192,24 @@ describe('Line2NodeMaterial.outputNode (gamma-space blend regression guard)', ()
     const expectedSrgb = toChainable(
       vec4(
         sRGBTransferEOTF(asSrgbInput(blendedSrgb)) as unknown as Parameters<typeof vec4>[0],
-        colorAlpha as unknown as Parameters<typeof vec4>[1],
+        compositedAlpha as unknown as Parameters<typeof vec4>[1],
       ),
     );
 
     // Linear-only reference (the prior broken shape) — must NOT match.
     const linearBlend = colorRgb.mul(opacity).add(viewportRgb.mul(opacity.oneMinus()));
     const linearReference = toChainable(
-      vec4(linearBlend as unknown as Parameters<typeof vec4>[0], colorAlpha as unknown as Parameters<typeof vec4>[1]),
+      vec4(
+        linearBlend as unknown as Parameters<typeof vec4>[0],
+        compositedAlpha as unknown as Parameters<typeof vec4>[1],
+      ),
     );
 
     expect(fingerprint(view.outputNode)).toBe(fingerprint(expectedSrgb));
     expect(fingerprint(view.outputNode)).not.toBe(fingerprint(linearReference));
+    // The composite already includes the destination; blending it again made lines over the
+    // transparent canvas opaque and dark.
+    expect(material.blending).toBe(NoBlending);
   });
 
   /**

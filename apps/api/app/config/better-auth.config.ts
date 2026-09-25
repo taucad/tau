@@ -1,4 +1,5 @@
 import type { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
+import type { HostsService } from '#api/hosts/hosts.service.js';
 import type { BetterAuthOptions, LogLevel as BetterAuthLogLevel, ModelNames } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { apiKey } from '@better-auth/api-key';
@@ -64,6 +65,8 @@ type BetterAuthConfigOptions = {
   configService: ConfigService<Environment, true>;
   emailService: EmailService;
   closure?: Pick<BillingAccountClosureService, 'prepareForAuthDeletion'> | undefined;
+  /** Stops the account's cloud hosts before the cascade takes their rows (W10 a4). */
+  cloudHosts?: Pick<HostsService, 'retireCloudHosts'> | undefined;
 };
 
 /**
@@ -150,6 +153,10 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
          */
         beforeDelete: async (user, request) => {
           await options.closure?.prepareForAuthDeletion({ authUserId: user.id, request });
+          /* After the closure, which may still refuse: a cloud host holds a
+             clone of the account's project, so it stops before the account
+             goes, and never for a deletion that was refused (W10 a4). */
+          await options.cloudHosts?.retireCloudHosts(user.id);
           await databaseService.database
             .insert(storageTombstone)
             .values({ ownerId: user.id, purgeAfter: new Date(Date.now() + storageTombstoneGrace) })

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import type { FastifyReply } from 'fastify';
+import type { IncomingMessage } from 'node:http';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Environment } from '#config/environment.config.js';
 import type { RedisService } from '#redis/redis.service.js';
+import { attachHostDevice } from '#auth/auth.guard.js';
 import { gitRequestsPerUserPerWindow, gitRequestsPerWindow } from '#api/git/git.constants.js';
 import { GitController } from '#api/git/git.controller.js';
 import type { GitLfsService } from '#api/git/git-lfs.service.js';
@@ -43,6 +46,16 @@ const replyStub = (): { reply: FastifyReply; headers: Record<string, string> } =
   return { reply: reply as unknown as FastifyReply, headers };
 };
 
+/** A request no cloud host came through: the owner's own session. */
+const ownRequest = (): FastifyRequest => ({ raw: mock<IncomingMessage>(), headers: {} }) as unknown as FastifyRequest;
+
+/** A request the git transport admitted as the cloud host `agent_cloud` of `user-owner`. */
+const hostRequest = (projectId: string): FastifyRequest => {
+  const raw = mock<IncomingMessage>();
+  attachHostDevice(raw, { ownerId: 'user-owner', deviceId: 'agent_cloud', projectId });
+  return { raw, headers: {} } as unknown as FastifyRequest;
+};
+
 describe('GitController request budget (D22)', () => {
   it('answers the request past the window with 429 and Retry-After, before authorizing it', async () => {
     let authorized = 0;
@@ -62,10 +75,12 @@ describe('GitController request budget (D22)', () => {
 
     for (let request = 0; request < gitRequestsPerWindow.rpc; request += 1) {
       // oxlint-disable-next-line no-await-in-loop -- sequential by definition: the budget is a count
-      await controller.infoRefs('proj_w9.git', 'git-upload-pack', 'user-reader', replyStub().reply);
+      await controller.infoRefs('proj_w9.git', 'git-upload-pack', 'user-reader', ownRequest(), replyStub().reply);
     }
     const { reply, headers } = replyStub();
-    await expect(controller.infoRefs('proj_w9.git', 'git-upload-pack', 'user-reader', reply)).rejects.toMatchObject({
+    await expect(
+      controller.infoRefs('proj_w9.git', 'git-upload-pack', 'user-reader', ownRequest(), reply),
+    ).rejects.toMatchObject({
       status: 429,
       response: { code: 'GIT_RATE_LIMITED' },
     });
@@ -75,7 +90,7 @@ describe('GitController request budget (D22)', () => {
     /* The budget is per `(user, project)`: another caller on the same project
        is untouched by the first one's loop. */
     await expect(
-      controller.infoRefs('proj_w9.git', 'git-upload-pack', 'user-someone-else', replyStub().reply),
+      controller.infoRefs('proj_w9.git', 'git-upload-pack', 'user-someone-else', ownRequest(), replyStub().reply),
     ).resolves.toBeDefined();
   });
 
@@ -98,10 +113,18 @@ describe('GitController request budget (D22)', () => {
 
     for (let request = 0; request < gitRequestsPerUserPerWindow; request += 1) {
       // oxlint-disable-next-line no-await-in-loop -- sequential by definition: the budget is a count
-      await controller.infoRefs(`proj_cycle${String(request)}`, 'git-upload-pack', 'user-cycler', replyStub().reply);
+      await controller.infoRefs(
+        `proj_cycle${String(request)}`,
+        'git-upload-pack',
+        'user-cycler',
+        ownRequest(),
+        replyStub().reply,
+      );
     }
     const { reply, headers } = replyStub();
-    await expect(controller.infoRefs('proj_fresh', 'git-upload-pack', 'user-cycler', reply)).rejects.toMatchObject({
+    await expect(
+      controller.infoRefs('proj_fresh', 'git-upload-pack', 'user-cycler', ownRequest(), reply),
+    ).rejects.toMatchObject({
       status: 429,
     });
     expect(headers['retry-after']).toBeDefined();
@@ -125,9 +148,116 @@ describe('GitController request budget (D22)', () => {
     );
     const { reply, headers } = replyStub();
 
-    await expect(controller.infoRefs('proj_w9', 'git-upload-pack', 'user-reader', reply)).rejects.toMatchObject({
+    await expect(
+      controller.infoRefs('proj_w9', 'git-upload-pack', 'user-reader', ownRequest(), reply),
+    ).rejects.toMatchObject({
       status: 429,
     });
     expect(headers['retry-after']).toBe('3600');
+  });
+});
+
+describe('GitController cloud host attribution (W10, D21)', () => {
+  it('should authorize a push the git transport admitted as a cloud host via that device, and the owner own push via none', async () => {
+    const authorized: Array<{ viaDevice?: string | undefined }> = [];
+    const controller = new GitController(
+      { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>,
+      {
+        authorize: async (args: { viaDevice?: string | undefined }) => {
+          authorized.push(args);
+          return {
+            projectId: 'proj_w10',
+            ownerId: 'user-owner',
+            role: 'write',
+            remainingBytes: 1,
+            storageLimitBytes: 1,
+          };
+        },
+        receivePack: async () => new Uint8Array(),
+      } as unknown as GitRepositoryService,
+      {} as unknown as GitLfsService,
+      new PublicationRateLimiterService(countingRedis()),
+    );
+    const push = async (request: FastifyRequest): Promise<void> => {
+      const { reply } = replyStub();
+      Reflect.set(reply, 'raw', { once: () => undefined, writableFinished: true });
+      await controller.receivePack('proj_w10', 'user-owner', request, reply);
+    };
+
+    await push(hostRequest('proj_w10'));
+    await push(ownRequest());
+
+    expect(authorized.map((args) => args.viaDevice)).toEqual(['agent_cloud', undefined]);
+  });
+});
+
+describe('GitController cloud host budgets (RV-W10 F1, F2)', () => {
+  it('should spend a cloud host its own request windows, so a host at its budget leaves the owner admitted', async () => {
+    const authorized: Array<{ viaDevice?: string | undefined }> = [];
+    const controller = new GitController(
+      { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>,
+      {
+        authorize: async (args: { viaDevice?: string | undefined }) => {
+          authorized.push(args);
+          return {
+            projectId: 'proj_w10',
+            ownerId: 'user-owner',
+            role: 'write',
+            remainingBytes: 0,
+            storageLimitBytes: 0,
+          };
+        },
+        advertiseRefs: async () => new Uint8Array(),
+      } as unknown as GitRepositoryService,
+      {} as unknown as GitLfsService,
+      new PublicationRateLimiterService(countingRedis()),
+    );
+
+    for (let request = 0; request < gitRequestsPerWindow.rpc; request += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- sequential by definition: the budget is a count
+      await controller.infoRefs(
+        'proj_w10',
+        'git-upload-pack',
+        'user-owner',
+        hostRequest('proj_w10'),
+        replyStub().reply,
+      );
+    }
+    await expect(
+      controller.infoRefs('proj_w10', 'git-upload-pack', 'user-owner', hostRequest('proj_w10'), replyStub().reply),
+    ).rejects.toMatchObject({ status: 429 });
+
+    await expect(
+      controller.infoRefs('proj_w10', 'git-upload-pack', 'user-owner', ownRequest(), replyStub().reply),
+    ).resolves.toBeDefined();
+    expect(authorized[0]?.viaDevice).toBe('agent_cloud');
+    expect(authorized.at(-1)?.viaDevice).toBeUndefined();
+  });
+
+  it('should authorize the removal verb as the cloud host, which the service holds at write', async () => {
+    const authorized: Array<{ viaDevice?: string | undefined; mode?: string }> = [];
+    const controller = new GitController(
+      { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>,
+      {
+        authorize: async (args: { viaDevice?: string | undefined; mode?: string }) => {
+          authorized.push(args);
+          throw new HttpException({ code: 'GIT_REF_REMOVAL_OWNER_ONLY' }, HttpStatus.FORBIDDEN);
+        },
+      } as unknown as GitRepositoryService,
+      {} as unknown as GitLfsService,
+      new PublicationRateLimiterService(countingRedis()),
+    );
+
+    await expect(
+      controller.removeRef(
+        'proj_w10',
+        'refs/tags/v1',
+        undefined,
+        'user-owner',
+        hostRequest('proj_w10'),
+        replyStub().reply,
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(authorized).toEqual([expect.objectContaining({ mode: 'finalize', viaDevice: 'agent_cloud' })]);
   });
 });

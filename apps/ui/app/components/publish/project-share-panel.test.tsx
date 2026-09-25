@@ -496,6 +496,25 @@ describe('ProjectSharePanel', () => {
     expect(screen.getByRole('button', { name: 'Share with GitHub Gist' })).toBeInTheDocument();
   });
 
+  it('stops saying it is checking Gist access once the check answers', async () => {
+    getGithubGistConnectionStatus.mockResolvedValueOnce('connected');
+    renderPanel(
+      <ProjectSharePanel
+        projectId='proj_gist_returned'
+        projectName='Gist'
+        entryPath='main.ts'
+        collectSnapshot={vi.fn(async () => ({ entryPath: 'main.ts', files: [], warnings: [] }))}
+        initialMethod='github-gist'
+        githubAuthorizationOutcome='returned'
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Create Gist and copy link' })).toBeEnabled();
+    });
+    expect(screen.queryByText('GitHub authorization returned. Checking Gist access…')).not.toBeInTheDocument();
+  });
+
   it('presents signed-out Tau persistence as a normal state', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 } as Response);
 

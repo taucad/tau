@@ -613,7 +613,11 @@ function PortableShareBody({
       {isDirect ? (
         <p className='text-sm text-purple dark:text-purple/70'>Sign in to persist a Tau-hosted share.</p>
       ) : null}
-      {!isDirect && githubAuthorizationOutcome ? (
+      {/* `returned` is the wait for the status check, so it goes once that answers:
+       * connected needs no words, and anything else has its own line below. */}
+      {!isDirect &&
+      githubAuthorizationOutcome &&
+      !(githubAuthorizationOutcome === 'returned' && githubStatus !== undefined) ? (
         <div className='rounded-md border border-purple/30 bg-purple/10 px-3 py-2 text-sm text-purple dark:text-purple/80'>
           {githubAuthorizationOutcome === 'returned'
             ? 'GitHub authorization returned. Checking Gist access…'

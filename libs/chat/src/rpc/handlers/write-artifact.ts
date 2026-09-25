@@ -41,7 +41,9 @@ export async function writeArtifactSet(
     names.add(file.name);
   }
 
-  const directory = `${artifactsDirectory}/${options.toolCallId}__${slugifyTargetFile(options.targetFile)}-${options.format}`;
+  // Provider tool call ids can hold characters paths refuse (OpenAI Responses ids join `call_…|fc_…`).
+  // ponytail: ids differing only in those characters share a directory; add a digest of the raw id if that ever matters.
+  const directory = `${artifactsDirectory}/${slugifyTargetFile(options.toolCallId)}__${slugifyTargetFile(options.targetFile)}-${options.format}`;
   const written = options.files.map((file) => ({
     name: file.name,
     artifactPath: `${directory}/${file.name}`,

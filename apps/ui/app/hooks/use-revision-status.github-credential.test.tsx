@@ -11,10 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { MockProxy } from 'vitest-mock-extended';
-import { assign, createActor, setup } from 'xstate';
+import { createActor, setup, types } from 'xstate';
+import { eventSchemas } from '#lib/xstate.lib.js';
 import { Topic } from '@taucad/events';
-import type { GitRemoteCredential, RemoteFacet, SyncFacet } from '@taucad/revisions';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { GitRemoteCredential, RemoteFacet, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import {
   githubCredentialRenewDelay,
@@ -46,15 +46,13 @@ vi.mock('#lib/github-connections.js', async (importOriginal) => ({
 }));
 
 const fileManagerMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as { worker: Worker | undefined },
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as { type: 'worker'; worker: Worker | undefined },
+  schemas: {
+    context: types<{ worker: Worker | undefined }>(),
+    events: eventSchemas<{ type: 'worker'; worker: Worker | undefined }>(),
   },
 }).createMachine({
   context: { worker: undefined },
-  on: { worker: { actions: assign(({ event }) => ({ worker: event.worker })) } },
+  on: { worker: { context: ({ event }) => ({ worker: event.worker }) } },
 });
 const fileManagerRef = createActor(fileManagerMachine).start();
 const worker = mock<Worker>();

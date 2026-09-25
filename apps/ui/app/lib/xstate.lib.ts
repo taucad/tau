@@ -1,8 +1,8 @@
-import { fromEventObservable } from 'xstate';
-import type { EventObject, NonReducibleUnknown, Subscribable } from 'xstate';
+import { createEventObservableLogic } from 'xstate';
+import type { AnyStateMachine, EventObject, NonReducibleUnknown, StateMachine, Subscribable, TypeSchema } from 'xstate';
 
 // ---------------------------------------------------------------------------
-// fromSafeAsync — React Strict Mode safe alternative to fromPromise
+// fromSafeAsync — async actors that never deliver after they are stopped
 // ---------------------------------------------------------------------------
 
 type SafeSubscriber<T> = {
@@ -62,13 +62,12 @@ function createSafeSubscribable<T>(
 }
 
 /**
- * Drop-in replacement for `fromPromise` that is safe under React Strict Mode's
- * `stopRootWithRehydration` cycle (mount → stop → rehydrate → restart).
+ * The UI's async actor: one-shot work whose result reaches the parent as an event,
+ * and never reaches it once the invocation has been stopped.
  *
  * ## Generic parameters — `fromSafeAsync<TReturn, TInput>`
  *
- * Follows the same `<TOutput, TInput>` convention as `fromPromise`. Specify
- * both generic parameters explicitly to type `input` and the return value:
+ * Specify both generic parameters explicitly to type `input` and the return value:
  *
  * ```typescript
  * type LoadedEvent = { type: 'loaded'; data: string };
@@ -96,64 +95,43 @@ function createSafeSubscribable<T>(
  *
  * ## How it works
  *
- * The returned event object is automatically emitted to the parent machine's
- * `on:` handlers. `onDone` fires as a pure lifecycle signal (no data).
+ * The returned event object is sent to the parent machine's `on:` handlers;
+ * `onDone` fires as a pure lifecycle signal (no data). The work runs inside
+ * event-observable logic (`createEventObservableLogic`) with three layers:
  *
- * ## Why this exists
- *
- * `fromPromise` is fundamentally incompatible with `stopRootWithRehydration`
- * because Promise `.then()` handlers are **irrevocable**. When React Strict Mode
- * stops and rehydrates the root actor, the old Promise's `.then()` callback still
- * fires after the actor is restarted. Because rehydration restores the actor's
- * `_processingStatus` to `0` (active), the zombie `.then()` passes XState's
- * internal guard (`self.getSnapshot().status !== 'active'`), leaking stale
- * `xstate.done.invoke.*` or `xstate.error.invoke.*` events into the rehydrated
- * machine — corrupting state.
- *
- * Observable subscriptions can be severed via `unsubscribe()`, which this utility
- * leverages by wrapping `fromEventObservable`.
- *
- * ## Three safety layers
- *
- * 1. **`closed` guard** — silences post-unsubscribe emissions (`next`/`error`/`complete`)
+ * 1. **`closed` guard** — silences emissions after unsubscribe (`next`/`error`/`complete`)
  * 2. **`AbortController` teardown** — aborts the signal on unsubscribe, cancelling in-flight work
- * 3. **Observable unsubscribe contract** — XState calls `unsubscribe()` on the subscription
- *    when the invoking state is exited, preventing zombie event relay entirely
+ * 3. **Observable unsubscribe contract** — XState unsubscribes when the invoking state exits
+ *    or the actor stops, so a stopped invocation's late result is never relayed
+ *
+ * ## Why an observable
+ *
+ * A Promise's `.then()` is irrevocable; a subscription can be severed. Under
+ * XState v5 the React binding stopped and rehydrated actors in Strict Mode, and
+ * a promise actor's late settlement could reach the rehydrated machine.
+ * `@xstate/react` 7 no longer does that (a Strict Mode re-mount cancels its own
+ * stop), but a stopped invocation must still never deliver — after a real
+ * unmount, a state exit or a `reenter` — and the signal gives the work a way to
+ * stop early.
  *
  * ## TypeScript limitations
  *
  * TypeScript does not support partial type argument inference (as of TS 6.0).
- * You must specify both `TReturn` and `TInput` to type the input — same as
- * `fromPromise<TOutput, TInput>`. For actors that don't need input, omit both
- * generics entirely and let inference handle the return type.
+ * Specify both `TReturn` and `TInput` to type the input. For actors that need no
+ * input, omit both generics and let inference handle the return type. A provided
+ * override is typed by checking the actors map with
+ * `satisfies Partial<MachineActors<typeof machine>>`.
  *
- * See `docs/policy/typescript-policy.md` for the full type safety policy.
- *
- * @see https://github.com/statelyai/xstate/issues/1237 — Duplicate machine execution with React.StrictMode
- * @see https://github.com/statelyai/xstate/pull/3278 — First workaround: prevent strict mode restart (closed)
- * @see https://github.com/statelyai/xstate/issues/3509 — Overeager entry/exit actions (103x under strict mode)
- * @see https://github.com/statelyai/xstate/pull/4555 — Fix actor restarting in strict mode (superseded by #4497)
- * @see https://github.com/statelyai/xstate/pull/4497 — Scheduler PR introducing `stopRootWithRehydration`
- * @see https://github.com/statelyai/xstate/issues/4459 — `fromPromise` stuck in state (reenter semantics)
- * @see https://github.com/statelyai/xstate/issues/4852 — Promise actor error handling issues
- * @see https://github.com/statelyai/xstate/pull/4832 — AbortSignal added to `fromPromise` (partial mitigation)
- * @see https://github.com/statelyai/xstate/pull/4191 — Initial AbortSignal POC for `fromPromise`
- * @see https://github.com/statelyai/xstate/issues/3452 — completeListener not triggered on stop
- * @see https://github.com/statelyai/xstate/pull/4609 — complete listeners only on done status
- * @see https://github.com/statelyai/xstate/issues/4019 — Input not passed to `fromEventObservable` (fixed)
- * @see https://github.com/statelyai/xstate/pull/4377 — Stop calling exit actions on stop
- * @see https://github.com/statelyai/xstate/pull/4491 — Actors deep in tree failing to rehydrate
- * @see https://github.com/statelyai/xstate/discussions/4968 — Emitting events from actor logic
- * @see https://github.com/statelyai/xstate/discussions/4684 — Sending events from Promise Actor to parent
+ * See `docs/policy/xstate-policy.md` and `docs/policy/typescript-policy.md`.
  */
 // oxlint-disable-next-line typescript/explicit-module-boundary-types -- allowing type inference for the function return type
 export function fromSafeAsync<
   // eslint-disable-next-line @typescript-eslint/naming-convention -- following XState convention for generic type parameters
-  TReturn extends EventObject | void = void,
+  const TReturn extends EventObject | void = void,
   // eslint-disable-next-line @typescript-eslint/naming-convention -- following XState convention for generic type parameters
   TInput extends NonReducibleUnknown = NonReducibleUnknown,
 >(work: (args: { input: TInput; signal: AbortSignal }) => Promise<TReturn>) {
-  return fromEventObservable<TReturn & EventObject, TInput>(({ input }) =>
+  return createEventObservableLogic<TReturn & EventObject, TInput>(({ input }) =>
     createSafeSubscribable<TReturn & EventObject>((subscriber, signal) => {
       // async-iife: bootstrap — Observable executor cannot be async; bridge work() into subscriber
       void (async (): Promise<void> => {
@@ -173,3 +151,87 @@ export function fromSafeAsync<
     }),
   );
 }
+
+// ---------------------------------------------------------------------------
+// Machine schema helpers
+// ---------------------------------------------------------------------------
+
+/** An event's payload; distributes so an event whose payload is itself a union keeps every member. */
+type EventPayload<EventUnion> = EventUnion extends unknown ? Omit<EventUnion, 'type'> : never;
+
+/** The `schemas.events` or `schemas.emitted` map for a union of `{ type }` events. */
+export type EventSchemaMap<EventUnion extends { readonly type: string }> = {
+  [K in EventUnion['type']]: TypeSchema<EventPayload<Extract<EventUnion, { readonly type: K }>>>;
+};
+
+/**
+ * Declares a machine's events (or emitted events) from its exported union, for type inference only.
+ *
+ * The union stays the single source of truth; XState reads schema values at runtime only when a
+ * `validator` is configured or the machine is serialized, and Tau does neither.
+ *
+ * @returns An empty object typed as the schema map.
+ */
+export const eventSchemas = <EventUnion extends { readonly type: string }>(): EventSchemaMap<EventUnion> =>
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- type-only schema map, never validated.
+  ({}) as EventSchemaMap<EventUnion>;
+
+/**
+ * The actor source map a machine was set up with, as `machine.provide({ actors })` accepts it.
+ *
+ * `Parameters<typeof machine.provide>[0]['actors']` resolves to `undefined` slots, so composition roots
+ * read the map from the machine type instead.
+ */
+/* oxlint-disable typescript/no-explicit-any -- positional inference over StateMachine's parameters. */
+export type MachineActors<Machine extends AnyStateMachine> =
+  Machine extends StateMachine<
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    infer TActorMap,
+    any,
+    any,
+    any,
+    any
+  >
+    ? { [K in keyof TActorMap]: TActorMap[K] }
+    : never;
+/* oxlint-enable typescript/no-explicit-any */
+
+const runtimeString = (ref: Subscribable<unknown>, field: 'id' | 'sessionId'): string => {
+  const value: unknown = Reflect.get(ref, field);
+  if (typeof value !== 'string') {
+    throw new TypeError(`Expected an actor reference with a ${field}`);
+  }
+  return value;
+};
+
+/**
+ * The id an actor was spawned or invoked under.
+ *
+ * XState v6 moved `id` and `sessionId` from `ActorRef` to the runtime half of
+ * an actor (`ActorRuntime`), so `ActorRefFrom<…>`, `AnyActorRef` and the
+ * `self` a state-level transition receives no longer declare them, though
+ * every running actor carries both.
+ *
+ * @param ref - A spawned, invoked or self actor reference.
+ * @returns The actor's id relative to its parent.
+ */
+export const actorIdOf = (ref: Subscribable<unknown>): string => runtimeString(ref, 'id');
+
+/**
+ * The globally unique id of one actor instance: a replacement actor under the
+ * same id gets a new one, which is what makes it a render key.
+ *
+ * @param ref - A spawned, invoked or created actor reference.
+ * @returns The actor's session id.
+ */
+export const actorSessionIdOf = (ref: Subscribable<unknown>): string => runtimeString(ref, 'sessionId');

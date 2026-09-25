@@ -34,7 +34,7 @@ import {
   tauRemoteUrl,
 } from '#remotes.js';
 import type { GitRemoteCredential } from '#remotes.js';
-import type { PublishPublicationActorInput } from '#publish.machine.js';
+import type { PublishPublicationActorInput } from '#publish.types.js';
 /* The two W4 rows assert the *consequence* of the code, not only the code: a
    terminal class is what stops `sync.machine` retrying, and that classifier is
    the machine's, not this module's. */

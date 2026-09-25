@@ -22,11 +22,14 @@
  * currently hand-rolls over the `restore` child.
  */
 
-import { and, assign, emit, enqueueActions, fromPromise, setup } from 'xstate';
-import type { AnyActorRef, SnapshotFrom } from 'xstate';
+import { createAsyncLogic, setup, types } from 'xstate';
+import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 
 import type { CheckoutCutTrigger } from '#checkout.machine.js';
+import { eventSchemas } from '#machine-schemas.js';
+import type { MachineActors } from '#machine-schemas.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
+import type { BranchOperation } from '#branch.types.js';
 
 /** How long a delegated registry verb waits for the registry's answer. @public */
 export const branchRegistryMilliseconds = 30_000;
@@ -43,9 +46,6 @@ export const branchRegistryMilliseconds = 30_000;
  * @public
  */
 export type BranchFailureCode = RevisionPortErrorCode | 'CAS_LOST' | 'CHECKOUT_UNKNOWN';
-
-/** The five verbs this machine owns. @public */
-export type BranchOperation = 'switch' | 'merge' | 'discard' | 'create' | 'rename';
 
 /** Input accepted when creating the branchMachine actor. @public */
 export type BranchMachineInput = Readonly<{
@@ -242,21 +242,66 @@ const describeFailureCode = (error: unknown): RevisionPortErrorCode | undefined 
   return typeof code === 'string' ? (code as RevisionPortErrorCode) : undefined;
 };
 
-/**
- * Headless branch verbs for one project.
- *
- * @public
- */
-export const branchMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as BranchMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as BranchMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    emitted: {} as BranchMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as BranchMachineInput,
+type BranchEnqueue = EnqueueObject<BranchMachineEvent, BranchMachineEmitted>;
+
+const clearTransient = {
+  operation: undefined,
+  branch: undefined,
+  name: undefined,
+  from: undefined,
+  head: undefined,
+  mode: undefined,
+  checkoutId: undefined,
+  checkoutRoot: undefined,
+  needsConfirmation: false,
+  question: undefined,
+  conflicts: [],
+} satisfies Partial<BranchMachineContext>;
+
+/* The registry is one writer (`checkouts.machine`); this asks it through the
+ * parent rather than opening a second path to the same records (A38). */
+const delegate = (
+  context: BranchMachineContext,
+  enq: BranchEnqueue,
+  type: 'addCheckout' | 'removeCheckout' | 'cut',
+): void => {
+  if (context.parentRef === undefined) {
+    enq.raise({ type: 'operationFailed', reason: 'This project has no registry to ask.' });
+    return;
+  }
+  /* `cut` is the same delegation one level over: the checkout is the sole
+   * minter (F2), so a *New branch* asks the root to record rather than
+   * minting a revision of its own (P3). */
+  enq.sendTo(
+    context.parentRef,
+    type === 'addCheckout'
+      ? { type: 'addCheckout', branch: context.branch ?? '', from: context.from ?? '' }
+      : type === 'removeCheckout'
+        ? { type: 'removeCheckout', id: context.checkoutId ?? '' }
+        : { type: 'cut', trigger: 'switch', checkoutId: context.checkoutId, leaseIds: [] },
+  );
+};
+
+const failFromRegistry = (event: Extract<BranchMachineEvent, { type: 'operationFailed' }>) => ({
+  reason: event.reason,
+  reasonCode: event.code,
+});
+
+const failWith = (reason: string, code?: BranchFailureCode) => ({ reason, reasonCode: code });
+
+const failFromError = (error: unknown) => ({
+  reason: describeFailure(error),
+  reasonCode: describeFailureCode(error),
+});
+
+const registryTimeout = { target: '#branch.failed', context: failWith('This project did not answer in time.') };
+
+const branchMachineDefinition = setup({
+  schemas: {
+    context: types<BranchMachineContext>(),
+    events: eventSchemas<BranchMachineEvent>(),
+    emitted: eventSchemas<BranchMachineEmitted>(),
+    input: types<BranchMachineInput>(),
   },
   actors: {
     /*
@@ -266,35 +311,38 @@ export const branchMachine = setup({
      * that are not in a revision yet (A25) — so an unprovided check can only
      * cost a confirmation, never a file.
      */
-    checkBranch: fromPromise<BranchCheckActorOutput, BranchCheckActorInput>(async () => ({
-      needsConfirmation: false,
-    })),
-    applySwitch: fromPromise<
+    checkBranch: createAsyncLogic<BranchCheckActorOutput, BranchCheckActorInput>({
+      run: async () => ({
+        needsConfirmation: false,
+      }),
+    }),
+    applySwitch: createAsyncLogic<
       BranchApplySwitchActorOutput,
       Readonly<{ projectId: string; branch: string; checkoutId: string | undefined }>
-    >(async () => {
-      throw new Error('branchMachine: the applySwitch actor was not provided.');
+    >({
+      run: async () => {
+        throw new Error('branchMachine: the applySwitch actor was not provided.');
+      },
     }),
-    merge: fromPromise<BranchMergeActorOutput, Readonly<{ projectId: string; branch: string; into: string }>>(
-      async () => {
+    merge: createAsyncLogic<BranchMergeActorOutput, Readonly<{ projectId: string; branch: string; into: string }>>({
+      run: async () => {
         throw new Error('branchMachine: the merge actor was not provided.');
       },
-    ),
-    rename: fromPromise<BranchRenameActorOutput, Readonly<{ projectId: string; branch: string; name: string }>>(
-      async () => {
+    }),
+    rename: createAsyncLogic<BranchRenameActorOutput, Readonly<{ projectId: string; branch: string; name: string }>>({
+      run: async () => {
         throw new Error('branchMachine: the rename actor was not provided.');
       },
-    ),
+    }),
   },
   guards: {
-    needsConfirmation: ({ context }) => context.needsConfirmation,
-    hasBase: ({ context }) => context.from !== undefined && context.from !== '',
-    hasHead: ({ context }) => context.head !== undefined,
+    hasBase: (context: BranchMachineContext) => context.from !== undefined && context.from !== '',
+    hasHead: (context: BranchMachineContext) => context.head !== undefined,
     /* This verb's own cut: a turn's belongs to that turn (a2 R1), another
      * checkout's to nobody here, and an ambient `save`/`idle`/`hidden`/`close`
      * on this same checkout carries no turn id either — so the trigger is what
      * separates the answer asked for from the one that merely arrived. */
-    answersOurCut: ({ context, event }) =>
+    answersOurCut: (context: BranchMachineContext, event: BranchMachineEvent) =>
       (event.type === 'revisionMinted' ||
         event.type === 'nothingToSave' ||
         event.type === 'cutFailed' ||
@@ -302,52 +350,6 @@ export const branchMachine = setup({
       event.turnId === undefined &&
       event.trigger === 'switch' &&
       event.checkoutId === context.checkoutId,
-    isOperation: ({ context }, params: Readonly<{ operation: BranchOperation }>) =>
-      context.operation === params.operation,
-  },
-  actions: {
-    clearTransient: assign({
-      operation: undefined,
-      branch: undefined,
-      name: undefined,
-      from: undefined,
-      head: undefined,
-      mode: undefined,
-      checkoutId: undefined,
-      checkoutRoot: undefined,
-      needsConfirmation: false,
-      question: undefined,
-      conflicts: [],
-    }),
-    /* The registry is one writer (`checkouts.machine`); this asks it through the
-     * parent rather than opening a second path to the same records (A38). */
-    delegate: enqueueActions(
-      ({ context, enqueue }, params: Readonly<{ type: 'addCheckout' | 'removeCheckout' | 'cut' }>) => {
-        if (context.parentRef === undefined) {
-          enqueue.raise({ type: 'operationFailed', reason: 'This project has no registry to ask.' });
-          return;
-        }
-        /* `cut` is the same delegation one level over: the checkout is the sole
-         * minter (F2), so a *New branch* asks the root to record rather than
-         * minting a revision of its own (P3). */
-        enqueue.sendTo(
-          context.parentRef,
-          params.type === 'addCheckout'
-            ? { type: 'addCheckout', branch: context.branch ?? '', from: context.from ?? '' }
-            : params.type === 'removeCheckout'
-              ? { type: 'removeCheckout', id: context.checkoutId ?? '' }
-              : { type: 'cut', trigger: 'switch', checkoutId: context.checkoutId, leaseIds: [] },
-        );
-      },
-    ),
-    failFromRegistry: assign({
-      reason: ({ event }) => (event.type === 'operationFailed' ? event.reason : 'That branch change failed.'),
-      reasonCode: ({ event }) => (event.type === 'operationFailed' ? event.code : undefined),
-    }),
-    failWith: assign({
-      reason: (_, params: Readonly<{ reason: string; code?: BranchFailureCode }>) => params.reason,
-      reasonCode: (_, params: Readonly<{ reason: string; code?: BranchFailureCode }>) => params.code,
-    }),
   },
 }).createMachine({
   id: 'branch',
@@ -370,7 +372,7 @@ export const branchMachine = setup({
     parentRef: input.parentRef,
   }),
   on: {
-    selectBranch: { actions: assign({ currentBranch: ({ event }) => event.branch }) },
+    selectBranch: { context: ({ event }) => ({ currentBranch: event.branch }) },
   },
   initial: 'idle',
   states: {
@@ -378,52 +380,52 @@ export const branchMachine = setup({
       on: {
         switch: {
           target: 'checking',
-          actions: assign({
+          context: ({ event }) => ({
             operation: 'switch',
-            branch: ({ event }) => event.branch,
-            mode: ({ event }) => event.mode,
-            checkoutId: ({ event }) => event.checkoutId,
+            branch: event.branch,
+            mode: event.mode,
+            checkoutId: event.checkoutId,
             reason: undefined,
             reasonCode: undefined,
           }),
         },
         merge: {
           target: 'checking',
-          actions: assign({
+          context: ({ event }) => ({
             operation: 'merge',
-            branch: ({ event }) => event.branch,
+            branch: event.branch,
             reason: undefined,
             reasonCode: undefined,
           }),
         },
         discard: {
           target: 'checking',
-          actions: assign({
+          context: ({ event }) => ({
             operation: 'discard',
-            branch: ({ event }) => event.branch,
-            checkoutId: ({ event }) => event.checkoutId,
+            branch: event.branch,
+            checkoutId: event.checkoutId,
             reason: undefined,
             reasonCode: undefined,
           }),
         },
         create: {
           target: 'checking',
-          actions: assign({
+          context: ({ event }) => ({
             operation: 'create',
-            branch: ({ event }) => event.name,
-            from: ({ event }) => event.from,
-            checkoutId: ({ event }) => event.checkoutId,
-            head: ({ event }) => event.head,
+            branch: event.name,
+            from: event.from,
+            checkoutId: event.checkoutId,
+            head: event.head,
             reason: undefined,
             reasonCode: undefined,
           }),
         },
         rename: {
           target: 'checking',
-          actions: assign({
+          context: ({ event }) => ({
             operation: 'rename',
-            branch: ({ event }) => event.branch,
-            name: ({ event }) => event.name,
+            branch: event.branch,
+            name: event.name,
             reason: undefined,
             reasonCode: undefined,
           }),
@@ -441,42 +443,51 @@ export const branchMachine = setup({
         }),
         onDone: {
           target: 'checked',
-          actions: assign({
-            needsConfirmation: ({ event }) => event.output.needsConfirmation,
-            question: ({ event }) => event.output.question,
-            checkoutId: ({ context, event }) => event.output.checkoutId ?? context.checkoutId,
-            mode: ({ context, event }) => event.output.mode ?? context.mode,
+          context: ({ context, event }) => ({
+            needsConfirmation: event.output.needsConfirmation,
+            question: event.output.question,
+            checkoutId: event.output.checkoutId ?? context.checkoutId,
+            mode: event.output.mode ?? context.mode,
           }),
         },
         onError: {
           target: 'failed',
-          actions: assign({
-            reason: ({ event }) => describeFailure(event.error),
-            reasonCode: ({ event }) => describeFailureCode(event.error),
-          }),
+          context: ({ event }) => failFromError(event.error),
         },
       },
     },
     checked: {
-      always: [{ guard: 'needsConfirmation', target: 'confirming' }, { target: 'applying' }],
+      always: ({ context }) => (context.needsConfirmation ? { target: 'confirming' } : { target: 'applying' }),
     },
     confirming: {
       on: {
         confirm: { target: 'applying' },
-        cancel: { target: 'idle', actions: 'clearTransient' },
+        cancel: { target: 'idle', context: clearTransient },
       },
     },
     applying: {
       initial: 'routing',
       states: {
         routing: {
-          always: [
-            { guard: { type: 'isOperation', params: { operation: 'merge' } }, target: 'merging' },
-            { guard: { type: 'isOperation', params: { operation: 'create' } }, target: 'creating' },
-            { guard: { type: 'isOperation', params: { operation: 'discard' } }, target: 'discarding' },
-            { guard: { type: 'isOperation', params: { operation: 'rename' } }, target: 'renaming' },
-            { target: 'switching' },
-          ],
+          always: ({ context }) => {
+            switch (context.operation) {
+              case 'merge': {
+                return { target: 'merging' };
+              }
+              case 'create': {
+                return { target: 'creating' };
+              }
+              case 'discard': {
+                return { target: 'discarding' };
+              }
+              case 'rename': {
+                return { target: 'renaming' };
+              }
+              default: {
+                return { target: 'switching' };
+              }
+            }
+          },
         },
         switching: {
           invoke: {
@@ -486,28 +497,23 @@ export const branchMachine = setup({
               branch: context.branch ?? '',
               checkoutId: context.checkoutId,
             }),
-            onDone: {
-              target: '#branch.applied',
-              actions: enqueueActions(({ context, enqueue, event }) => {
-                const fact: BranchMachineEmitted = {
-                  type: 'checkoutChanged',
-                  checkoutId: event.output.checkoutId,
-                  revisionId: event.output.revisionId,
-                  treeId: event.output.treeId,
-                  branch: event.output.branch,
-                };
-                enqueue.emit(fact);
-                if (context.parentRef !== undefined) {
-                  enqueue.sendTo(context.parentRef, fact);
-                }
-              }),
+            onDone: ({ context, event }, enq) => {
+              const fact: BranchMachineEmitted = {
+                type: 'checkoutChanged',
+                checkoutId: event.output.checkoutId,
+                revisionId: event.output.revisionId,
+                treeId: event.output.treeId,
+                branch: event.output.branch,
+              };
+              enq.emit(fact);
+              if (context.parentRef !== undefined) {
+                enq.sendTo(context.parentRef, fact);
+              }
+              return { target: '#branch.applied' };
             },
             onError: {
               target: '#branch.failed',
-              actions: assign({
-                reason: ({ event }) => describeFailure(event.error),
-                reasonCode: ({ event }) => describeFailureCode(event.error),
-              }),
+              context: ({ event }) => failFromError(event.error),
             },
           },
         },
@@ -519,38 +525,27 @@ export const branchMachine = setup({
               branch: context.branch ?? '',
               into: context.currentBranch ?? '',
             }),
-            onDone: [
-              {
-                /* Both branches are kept and the checkout is untouched; the
-                 * paths are W10's to resolve. */
-                guard: ({ event }) => event.output.status === 'conflicted',
-                target: '#branch.conflicted',
-                actions: assign({
-                  conflicts: ({ event }) => (event.output.status === 'conflicted' ? event.output.paths : []),
-                }),
-              },
-              {
-                target: '#branch.applied',
-                actions: enqueueActions(({ context, enqueue, event }) => {
-                  const fact: BranchMachineEmitted = {
-                    type: 'branchMerged',
-                    branch: context.branch ?? '',
-                    into: context.currentBranch ?? '',
-                    revisionId: event.output.status === 'merged' ? event.output.revisionId : '',
-                  };
-                  enqueue.emit(fact);
-                  if (context.parentRef !== undefined) {
-                    enqueue.sendTo(context.parentRef, fact);
-                  }
-                }),
-              },
-            ],
+            onDone: ({ context, event }, enq) => {
+              /* Both branches are kept and the checkout is untouched; the
+               * paths are W10's to resolve. */
+              if (event.output.status === 'conflicted') {
+                return { target: '#branch.conflicted', context: { conflicts: event.output.paths } };
+              }
+              const fact: BranchMachineEmitted = {
+                type: 'branchMerged',
+                branch: context.branch ?? '',
+                into: context.currentBranch ?? '',
+                revisionId: event.output.revisionId,
+              };
+              enq.emit(fact);
+              if (context.parentRef !== undefined) {
+                enq.sendTo(context.parentRef, fact);
+              }
+              return { target: '#branch.applied' };
+            },
             onError: {
               target: '#branch.failed',
-              actions: assign({
-                reason: ({ event }) => describeFailure(event.error),
-                reasonCode: ({ event }) => describeFailureCode(event.error),
-              }),
+              context: ({ event }) => failFromError(event.error),
             },
           },
         },
@@ -569,112 +564,104 @@ export const branchMachine = setup({
           initial: 'routing',
           states: {
             routing: {
-              always: [{ guard: 'hasBase', target: 'adding' }, { target: 'recording' }],
+              always: ({ context, guards }) =>
+                guards.hasBase(context) ? { target: 'adding' } : { target: 'recording' },
             },
             recording: {
-              entry: { type: 'delegate', params: { type: 'cut' } },
+              entry: ({ context }, enq) => {
+                delegate(context, enq, 'cut');
+              },
               after: {
-                [branchRegistryMilliseconds]: {
-                  target: '#branch.failed',
-                  actions: { type: 'failWith', params: { reason: 'This project did not answer in time.' } },
-                },
+                [branchRegistryMilliseconds]: registryTimeout,
               },
               on: {
-                revisionMinted: {
-                  guard: { type: 'answersOurCut' },
-                  target: 'adding',
-                  actions: assign({ from: ({ event }) => event.revisionId }),
-                },
-                nothingToSave: [
-                  {
-                    /* Nothing to record, but a head to stand on — which is also
-                     * the answer a checkout an agent holds gives (a2 R1). */
-                    guard: and(['answersOurCut', 'hasHead']),
-                    target: 'adding',
-                    actions: assign({ from: ({ context }) => context.head }),
-                  },
-                  {
-                    guard: { type: 'answersOurCut' },
+                revisionMinted: ({ context, event, guards }) =>
+                  guards.answersOurCut(context, event)
+                    ? { target: 'adding', context: { from: event.revisionId } }
+                    : undefined,
+                nothingToSave: ({ context, event, guards }) => {
+                  if (!guards.answersOurCut(context, event)) {
+                    return undefined;
+                  }
+                  /* Nothing to record, but a head to stand on — which is also
+                   * the answer a checkout an agent holds gives (a2 R1). */
+                  if (guards.hasHead(context)) {
+                    return { target: 'adding', context: { from: context.head } };
+                  }
+                  return {
                     target: '#branch.failed',
-                    actions: {
-                      type: 'failWith',
-                      params: {
-                        reason: 'This project has nothing to branch from yet.',
-                        code: 'BRANCH_NEEDS_REVISION',
-                      },
-                    },
-                  },
-                ],
-                cutFailed: {
-                  guard: { type: 'answersOurCut' },
-                  target: '#branch.failed',
-                  actions: assign({
-                    reason: ({ event }) => event.reason,
-                    /* Whatever refused the cut named this; the page turns it
-                       into words rather than falling back (P4). */
-                    reasonCode: ({ event }) => event.code,
-                  }),
+                    context: failWith('This project has nothing to branch from yet.', 'BRANCH_NEEDS_REVISION'),
+                  };
                 },
-                casLost: {
-                  guard: { type: 'answersOurCut' },
-                  target: '#branch.failed',
-                  actions: {
-                    type: 'failWith',
-                    params: { reason: 'Something else changed this project first. Try again.', code: 'CAS_LOST' },
-                  },
-                },
+                cutFailed: ({ context, event, guards }) =>
+                  guards.answersOurCut(context, event)
+                    ? {
+                        target: '#branch.failed',
+                        context: {
+                          reason: event.reason,
+                          /* Whatever refused the cut named this; the page turns it
+                             into words rather than falling back (P4). */
+                          reasonCode: event.code,
+                        },
+                      }
+                    : undefined,
+                casLost: ({ context, event, guards }) =>
+                  guards.answersOurCut(context, event)
+                    ? {
+                        target: '#branch.failed',
+                        context: failWith('Something else changed this project first. Try again.', 'CAS_LOST'),
+                      }
+                    : undefined,
                 operationFailed: {
                   target: '#branch.failed',
-                  actions: 'failFromRegistry',
+                  context: ({ event }) => failFromRegistry(event),
                 },
               },
             },
             adding: {
-              entry: { type: 'delegate', params: { type: 'addCheckout' } },
+              entry: ({ context }, enq) => {
+                delegate(context, enq, 'addCheckout');
+              },
               after: {
-                [branchRegistryMilliseconds]: {
-                  target: '#branch.failed',
-                  actions: { type: 'failWith', params: { reason: 'This project did not answer in time.' } },
-                },
+                [branchRegistryMilliseconds]: registryTimeout,
               },
               on: {
-                branchesChanged: {
-                  guard: ({ context, event }) => event.branches.includes(context.branch ?? ''),
-                  target: '#branch.applied',
+                branchesChanged: ({ context, event }) => {
+                  if (!event.branches.includes(context.branch ?? '')) {
+                    return undefined;
+                  }
                   /* The registry named the checkout it made; for a `create`
                    * that is what `toast.branch` carries out (P4). */
-                  actions: assign({
-                    checkoutId: ({ context, event }) =>
-                      event.checkouts?.find((record) => record.branch === context.branch)?.checkoutId ??
-                      context.checkoutId,
-                    checkoutRoot: ({ context, event }) =>
-                      event.checkouts?.find((record) => record.branch === context.branch)?.checkoutRoot,
-                  }),
+                  const record = event.checkouts?.find((entry) => entry.branch === context.branch);
+                  return {
+                    target: '#branch.applied',
+                    context: {
+                      checkoutId: record?.checkoutId ?? context.checkoutId,
+                      checkoutRoot: record?.checkoutRoot,
+                    },
+                  };
                 },
                 operationFailed: {
                   target: '#branch.failed',
-                  actions: 'failFromRegistry',
+                  context: ({ event }) => failFromRegistry(event),
                 },
               },
             },
           },
         },
         discarding: {
-          entry: { type: 'delegate', params: { type: 'removeCheckout' } },
+          entry: ({ context }, enq) => {
+            delegate(context, enq, 'removeCheckout');
+          },
           after: {
-            [branchRegistryMilliseconds]: {
-              target: '#branch.failed',
-              actions: { type: 'failWith', params: { reason: 'This project did not answer in time.' } },
-            },
+            [branchRegistryMilliseconds]: registryTimeout,
           },
           on: {
-            branchesChanged: {
-              guard: ({ context, event }) => !event.branches.includes(context.branch ?? ''),
-              target: '#branch.applied',
-            },
+            branchesChanged: ({ context, event }) =>
+              event.branches.includes(context.branch ?? '') ? undefined : { target: '#branch.applied' },
             operationFailed: {
               target: '#branch.failed',
-              actions: 'failFromRegistry',
+              context: ({ event }) => failFromRegistry(event),
             },
           },
         },
@@ -688,31 +675,28 @@ export const branchMachine = setup({
             }),
             onDone: {
               target: '#branch.applied',
-              actions: assign({ branch: ({ event }) => event.output.branch }),
+              context: ({ event }) => ({ branch: event.output.branch }),
             },
             onError: {
               target: '#branch.failed',
-              actions: assign({
-                reason: ({ event }) => describeFailure(event.error),
-                reasonCode: ({ event }) => describeFailureCode(event.error),
-              }),
+              context: ({ event }) => failFromError(event.error),
             },
           },
         },
       },
     },
     applied: {
-      entry: emit(
-        ({ context }): BranchMachineEmitted => ({
+      entry: ({ context }, enq) => {
+        enq.emit({
           type: 'toast.branch',
           operation: context.operation ?? 'switch',
           branch: context.branch ?? '',
           ...(context.checkoutRoot === undefined
             ? {}
             : { checkoutId: context.checkoutId, checkoutRoot: context.checkoutRoot }),
-        }),
-      ),
-      always: { target: 'idle', actions: 'clearTransient' },
+        });
+      },
+      always: { target: 'idle', context: clearTransient },
     },
     conflicted: {
       /* The fact goes to the parent as well as out, exactly as `applySwitch`'s
@@ -720,34 +704,51 @@ export const branchMachine = setup({
        * the registry is stale and nothing else would ever say so. Without this
        * send the conflict is real in the graph and invisible on the screen
        * until the project is reopened (W10 review R1, P41). */
-      entry: enqueueActions(({ context, enqueue }) => {
+      entry: ({ context }, enq) => {
         const fact: BranchMachineEmitted = {
           type: 'mergeConflicted',
           branch: context.branch ?? '',
           into: context.currentBranch ?? '',
           paths: context.conflicts,
         };
-        enqueue.emit(fact);
+        enq.emit(fact);
         if (context.parentRef !== undefined) {
-          enqueue.sendTo(context.parentRef, fact);
+          enq.sendTo(context.parentRef, fact);
         }
-      }),
-      always: { target: 'idle', actions: 'clearTransient' },
+      },
+      always: { target: 'idle', context: clearTransient },
     },
     failed: {
-      entry: emit(
-        ({ context }): BranchMachineEmitted => ({
+      entry: ({ context }, enq) => {
+        enq.emit({
           type: 'toast.error',
           ...(context.operation === undefined ? {} : { operation: context.operation }),
           ...(context.branch === undefined ? {} : { branch: context.branch }),
           message: context.reason ?? 'That branch change failed.',
           ...(context.reasonCode === undefined ? {} : { code: context.reasonCode }),
-        }),
-      ),
-      always: { target: 'idle', actions: 'clearTransient' },
+        });
+      },
+      always: { target: 'idle', context: clearTransient },
     },
   },
 });
+
+type BranchMachineDefinition = typeof branchMachineDefinition;
+
+/**
+ * The type of {@link branchMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface BranchMachine extends BranchMachineDefinition {}
+
+/**
+ * Headless branch verbs for one project.
+ *
+ * @public
+ */
+export const branchMachine: BranchMachine = branchMachineDefinition;
 
 /**
  * Selects whether a branch verb is waiting for the user to confirm it.
@@ -800,4 +801,4 @@ export const selectBranchFacet = (
  *
  * @public
  */
-export type BranchActors = NonNullable<Parameters<typeof branchMachine.provide>[0]['actors']>;
+export type BranchActors = MachineActors<typeof branchMachine>;

@@ -1,7 +1,7 @@
 import { useSelector } from '@xstate/react';
 import { CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History, Rewind } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { cn } from '@taucad/ui/utils/cn';
 import { StatusMark } from '#components/nav/status-mark.js';

@@ -1,3 +1,4 @@
+import type { MachineActors } from '#lib/xstate.lib.js';
 import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
@@ -12,7 +13,7 @@ import { createRuntimeClient } from '@taucad/runtime/client';
 import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
-import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
+import { createActor, createCallbackLogic, createAsyncLogic, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { fromFsLike } from '@taucad/runtime/filesystem';
@@ -1695,19 +1696,20 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
           actors: {
             /* An agent edits the source between reads, so every load re-resolves; the manifest is
              * admitted only once per revision, and the sidecar bytes decide what changed. */
-            loadParameterSet: fromPromise(async ({ input, signal }) =>
-              loadParameterSnapshot({
-                target,
-                authority,
-                manifest,
-                ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
-                signal,
-              }),
-            ),
-            commitParameterSet: fromPromise(async ({ input: change, signal }) =>
-              commitParameterChange({ change, authority, signal }),
-            ),
-            observeParameterSet: fromCallback(({ sendBack }) =>
+            loadParameterSet: createAsyncLogic({
+              run: async ({ input, signal }) =>
+                loadParameterSnapshot({
+                  target,
+                  authority,
+                  manifest,
+                  ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+                  signal,
+                }),
+            }),
+            commitParameterSet: createAsyncLogic({
+              run: async ({ input: change, signal }) => commitParameterChange({ change, authority, signal }),
+            }),
+            observeParameterSet: createCallbackLogic(({ sendBack }) =>
               observe(
                 () => {
                   sendBack({ type: 'watch.changed' });
@@ -1720,7 +1722,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
                 },
               ),
             ),
-          },
+          } satisfies Partial<MachineActors<typeof parameterSetMachine>>,
         }),
         { input: { target } },
       );

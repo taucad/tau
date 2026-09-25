@@ -1,9 +1,9 @@
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const createGraphicsActor = () =>
-  createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
+  createActor(graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }), {
     input: { graphicsBackend: 'webgl' },
   });
 

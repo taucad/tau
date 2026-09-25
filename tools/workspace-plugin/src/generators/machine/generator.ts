@@ -247,7 +247,7 @@ const updateManifest = (target: MachineTarget): PackageManifest | undefined => {
     },
     peerDependencies: {
       ...target.manifest.peerDependencies,
-      xstate: target.manifest.peerDependencies?.['xstate'] ?? '^5.0.0',
+      xstate: target.manifest.peerDependencies?.['xstate'] ?? '^6.0.0-alpha.59',
     },
     devDependencies: {
       ...target.manifest.devDependencies,

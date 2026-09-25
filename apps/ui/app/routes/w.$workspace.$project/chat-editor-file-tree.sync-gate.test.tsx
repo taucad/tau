@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
-import type { SyncFacet } from '@taucad/revisions/sync-machine';
+import type { SyncFacet } from '@taucad/revisions';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 
 const tree = vi.hoisted(() => ({ current: new Map<string, FileEntry>() }));

@@ -76,7 +76,7 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
-    "xstate": "^5.0.0",
+    "xstate": "^6.0.0-alpha.59",
     "zod": "^4.0.0"
   },
   "devDependencies": {

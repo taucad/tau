@@ -4,6 +4,7 @@ import type { EditorState } from '#types/editor.types.js';
 import { defaultGraphicsSettings, defaultPanelState } from '#constants/editor.constants.js';
 import { editorMachine } from '#machines/editor.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { MachineActors } from '#lib/xstate.lib.js';
 
 // ---------------------------------------------------------------------------
 // Stubs
@@ -70,22 +71,21 @@ function createTestActor(options?: {
   const loadFunction = typeof loadResult === 'function' ? loadResult : async () => loadResult;
   const ensureFunction = options?.ensureResult ?? defaultEnsureFocusedChat;
 
-  const machine = editorMachine.provide({
-    actors: {
-      loadEditorStateActor: fromSafeAsync(async () => {
-        const state = await loadFunction();
-        return { type: 'editorStateRetrieved', state };
-      }),
-      ensureFocusedChatActor: fromSafeAsync(async ({ input }) => ensureFunction(input)),
-      ...(options?.saveResult
-        ? {
-            saveEditorStateActor: fromSafeAsync(async () => {
-              await options.saveResult!();
-            }),
-          }
-        : {}),
-    },
-  });
+  const baseActors = {
+    loadEditorStateActor: fromSafeAsync(async () => {
+      const state = await loadFunction();
+      return { type: 'editorStateRetrieved', state };
+    }),
+    ensureFocusedChatActor: fromSafeAsync(async ({ input }) => ensureFunction(input)),
+  } satisfies Partial<MachineActors<typeof editorMachine>>;
+  const { saveResult } = options ?? {};
+  const savingActors = {
+    ...baseActors,
+    saveEditorStateActor: fromSafeAsync(async () => {
+      await saveResult?.();
+    }),
+  } satisfies Partial<MachineActors<typeof editorMachine>>;
+  const machine = editorMachine.provide({ actors: saveResult === undefined ? baseActors : savingActors });
 
   return createActor(machine, {
     input: { projectId: options?.projectId ?? 'test-build', requestedChatId: options?.requestedChatId },

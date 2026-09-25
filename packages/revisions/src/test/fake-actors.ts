@@ -7,8 +7,8 @@
  * emitted events. Nothing here imports a test framework.
  */
 
-import { createActor, fromCallback, fromPromise } from 'xstate';
-import type { AnyActorRef, AnyEventObject, CallbackActorLogic, PromiseActorLogic } from 'xstate';
+import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
+import type { AnyActorRef, AnyEventObject, AsyncActorLogic, CallbackActorLogic } from 'xstate';
 
 /** One recorded invocation of a scripted promise actor. */
 export type RecordedCall = Readonly<{ name: string; input: unknown }>;
@@ -25,7 +25,8 @@ export type FakePromiseActors = Readonly<{
   /** Inputs recorded for one actor name, in invocation order. */
   inputsFor: (name: string) => readonly unknown[];
   /** Promise actor logic for `name`; records its input and settles from the script. */
-  actor: <ActorOutput, ActorInput = unknown>(name: string) => PromiseActorLogic<ActorOutput, ActorInput>;
+  // oxlint-disable-next-line typescript-eslint/no-explicit-any -- v6 provide() slots are invariant; a scripted stub must fit any slot.
+  actor: <ActorOutput = any, ActorInput = any>(name: string) => AsyncActorLogic<ActorOutput, ActorInput>;
   /** Queue outcomes for `name`, consumed in invocation order. */
   script: (name: string, ...outcomes: readonly ScriptedOutcome[]) => void;
   /** Settle the oldest invocation of `name` that is still running. */
@@ -54,20 +55,23 @@ export const createFakePromiseActors = (): FakePromiseActors => {
   return {
     calls,
     inputsFor: (name) => calls.filter((call) => call.name === name).map((call) => call.input),
-    actor<ActorOutput, ActorInput = unknown>(name: string): PromiseActorLogic<ActorOutput, ActorInput> {
-      return fromPromise<ActorOutput, ActorInput>(async ({ input }) => {
-        calls.push({ name, input });
-        const scripted = take(queued, name);
-        const outcome =
-          scripted ??
-          (await new Promise<ScriptedOutcome>((resolve) => {
-            put(waiting, name, { resolve });
-          }));
-        if ('error' in outcome) {
-          throw outcome.error;
-        }
-        // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- the suite scripts this actor's output.
-        return outcome.output as ActorOutput;
+    // oxlint-disable-next-line typescript-eslint/no-explicit-any -- see the type above.
+    actor<ActorOutput = any, ActorInput = any>(name: string): AsyncActorLogic<ActorOutput, ActorInput> {
+      return createAsyncLogic<ActorOutput, ActorInput>({
+        run: async ({ input }) => {
+          calls.push({ name, input });
+          const scripted = take(queued, name);
+          const outcome =
+            scripted ??
+            (await new Promise<ScriptedOutcome>((resolve) => {
+              put(waiting, name, { resolve });
+            }));
+          if ('error' in outcome) {
+            throw outcome.error;
+          }
+          // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- the suite scripts this actor's output.
+          return outcome.output as ActorOutput;
+        },
       });
     },
     script: (name, ...outcomes) => {
@@ -87,7 +91,11 @@ export const createFakePromiseActors = (): FakePromiseActors => {
 };
 
 /** One event a stubbed callback actor received, with the input it was started on. */
-export type RecordedDelivery = Readonly<{ name: string; input: unknown; event: AnyEventObject }>;
+export type RecordedDelivery = Readonly<{
+  name: string;
+  input: unknown;
+  event: AnyEventObject;
+}>;
 
 /**
  * Callback-actor stubs, used both for held resources (the turn lease, the
@@ -122,7 +130,7 @@ export const createFakeCallbackActors = (): FakeCallbackActors => {
 
   return {
     actor<ActorInput = unknown>(name: string): CallbackActorLogic<AnyEventObject, ActorInput> {
-      return fromCallback<AnyEventObject, ActorInput>(({ sendBack, receive, input }) => {
+      return createCallbackLogic<AnyEventObject, ActorInput>(({ sendBack, receive, input }) => {
         const list = holders.get(name) ?? [];
         list.push(sendBack);
         holders.set(name, list);
@@ -158,7 +166,11 @@ export const createFakeCallbackActors = (): FakeCallbackActors => {
 };
 
 /** A parent stand-in that records every event a child sends to it. */
-export type FakeParent = Readonly<{ ref: AnyActorRef; events: readonly AnyEventObject[]; stop: () => void }>;
+export type FakeParent = Readonly<{
+  ref: AnyActorRef;
+  events: readonly AnyEventObject[];
+  stop: () => void;
+}>;
 
 /**
  * Create a running actor usable as `parentRef`, recording what it receives.
@@ -168,7 +180,7 @@ export type FakeParent = Readonly<{ ref: AnyActorRef; events: readonly AnyEventO
 export const createFakeParent = (): FakeParent => {
   const events: AnyEventObject[] = [];
   const ref = createActor(
-    fromCallback<AnyEventObject>(({ receive }) => {
+    createCallbackLogic<AnyEventObject>(({ receive }) => {
       receive((event) => {
         events.push(event);
       });

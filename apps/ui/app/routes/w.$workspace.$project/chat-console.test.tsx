@@ -179,7 +179,7 @@ describe('ChatConsole', () => {
     const { ChatConsole } = await import('./chat-console.js');
     render(<ChatConsole />);
 
-    expect(screen.getByRole('textbox', { name: 'Filter logs' })).toHaveAttribute('placeholder', 'Filter logs...');
+    expect(screen.getByRole('searchbox', { name: 'Filter logs' })).toHaveAttribute('placeholder', 'Filter logs...');
     expect(screen.getByRole('button', { name: 'Filter by log level' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Console settings' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear logs' })).toBeDisabled();
@@ -217,7 +217,7 @@ describe('ChatConsole', () => {
     ).toEqual(['main first', 'main second']);
     expect(screen.getByRole('log', { name: 'Console logs for helper.ts' })).toHaveTextContent('helper warning');
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter logs' }), {
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter logs' }), {
       target: { value: 'helper' },
     });
     expect(screen.getByText('No matching logs.')).toBeInTheDocument();

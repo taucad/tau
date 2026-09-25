@@ -307,7 +307,7 @@ describe('ChatExplorerTree', () => {
 
     renderExplorerTree();
 
-    expect(screen.getByRole('textbox', { name: 'Filter parts' })).toHaveAttribute('placeholder', 'Filter parts...');
+    expect(screen.getByRole('searchbox', { name: 'Filter parts' })).toHaveAttribute('placeholder', 'Filter parts...');
     expect(screen.getByText('No model components available').closest('[data-slot="panel-empty-state"]')).toBeTruthy();
   });
 
@@ -343,7 +343,7 @@ describe('ChatExplorerTree', () => {
     expect(screen.getByText('helper_part')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show search' })).not.toBeInTheDocument();
 
-    const filterInput = screen.getByRole('textbox', { name: 'Filter parts' });
+    const filterInput = screen.getByRole('searchbox', { name: 'Filter parts' });
     await user.type(filterInput, 'helper');
 
     expect(screen.queryByText('main_part')).not.toBeInTheDocument();
@@ -396,7 +396,7 @@ describe('ChatExplorerTree', () => {
 
       renderExplorerTree({ setIsExpanded });
 
-      await user.type(screen.getByRole('textbox', { name: 'Filter parts' }), 'main');
+      await user.type(screen.getByRole('searchbox', { name: 'Filter parts' }), 'main');
 
       act(() => {
         editorRef.emit('modelComponentRevealRequested', {
@@ -411,7 +411,7 @@ describe('ChatExplorerTree', () => {
         expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
       });
       expect(setIsExpanded).toHaveBeenCalledWith(true);
-      expect(screen.getByRole('textbox', { name: 'Filter parts' })).toHaveValue('');
+      expect(screen.getByRole('searchbox', { name: 'Filter parts' })).toHaveValue('');
       expect(mocks.paneApis.get('src/helper.ts')?.setExpanded).toHaveBeenCalledWith(true);
       const rowButton = screen.getByRole('button', { name: 'helper_part' });
       const row = rowButton.parentElement;

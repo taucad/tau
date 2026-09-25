@@ -66,7 +66,15 @@ const provider = {
       filamentDiameter: { value: 1.75, unit: 'mm' },
       nozzles: [{ id: 'nozzle-0.4', diameter: { value: 0.4, unit: 'mm' } }],
     },
-    bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+    bed: {
+      plates: [
+        { id: 'cool', label: 'Cool plate' },
+        { id: 'high-temperature', label: 'High temperature plate' },
+      ],
+    },
+    slicing: {
+      recommended: { nozzleTemperature: { value: 250, unit: 'Cel' }, bedTemperature: { value: 70, unit: 'Cel' } },
+    },
   },
 } as unknown as MachineProvider;
 
@@ -91,12 +99,17 @@ const dependencies = () => ({
   machines: { listProviders: async () => [provider] },
 });
 
-const plan = async (deps: MachinePrintPlannerDependencies, entry: MachineDirectoryEntry = machine(loaded)) =>
+const plan = async (
+  deps: MachinePrintPlannerDependencies,
+  entry: MachineDirectoryEntry = machine(loaded),
+  plate?: string,
+) =>
   createMachinePrintPlanner(deps)({
     toolCallId: 'call-1',
     targetFile: 'main.ts',
     machine: entry,
     cursor,
+    plate,
     signal: new AbortController().signal,
   });
 
@@ -110,6 +123,14 @@ describe('machine print planner', () => {
       toolCallId: 'call-1',
       targetFile: 'main.ts',
       format: 'gcode.3mf',
+      /* The machine fixes plate, nozzle, filament and temperatures; the call adds none here. */
+      exportOptions: {
+        plate: 'textured-pei',
+        nozzleDiameter: 0.4,
+        filamentDiameter: 1.75,
+        nozzleTemperature: 250,
+        bedTemperature: 70,
+      },
     });
     expect(result.artifact).toEqual({
       revision: {
@@ -138,11 +159,28 @@ describe('machine print planner', () => {
     expect(result.summary?.estimatedDuration).toBeGreaterThan(0);
   });
 
-  it('falls back to the manifest plate and drops a summary it cannot derive', async () => {
+  it('asks for a plate the machine cannot report, and carries a named one as operator confirmed', async () => {
+    const unreported = machine({ materials: loaded.materials });
+    const refused = dependencies();
+    await expect(plan(refused, unreported)).rejects.toThrow(
+      'Workshop X1C does not report its build plate; ask the person which plate is installed, then pass plate as one of cool, high-temperature.',
+    );
+    await expect(plan(refused, unreported, 'textured-plate')).rejects.toThrow('does not report its build plate');
+    expect(refused.exportGeometry).not.toHaveBeenCalled();
+
+    const deps = dependencies();
+    const result = await plan(deps, unreported, 'high-temperature');
+    expect(result.configuration).toMatchObject({
+      expectedBedType: 'high-temperature',
+      operatorConfirmedBedType: 'high-temperature',
+    });
+    expect(deps.exportGeometry.mock.calls[0]![0].exportOptions).toMatchObject({ plate: 'high-temperature' });
+  });
+
+  it('drops a summary it cannot derive', async () => {
     const garbage = Uint8Array.from([1, 2, 3, 4]);
     const deps = { ...dependencies(), readArtifact: async () => garbage };
-    const result = await plan(deps, machine({ materials: loaded.materials }));
-    expect(result.configuration).toMatchObject({ expectedBedType: 'cool-plate' });
+    const result = await plan(deps);
     expect(result.summary).toBeUndefined();
     expect(result.artifact).toMatchObject({ digest: `sha256:${await sha256Bytes(garbage)}`, length: 4 });
   });

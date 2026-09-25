@@ -4,6 +4,7 @@ import type {
   MachineArtifactReference,
   MachineClient,
   MachineDirectoryEntry,
+  MachineManifest,
   MachineProvider,
   PrintRequest,
   PrintRequestSummary,
@@ -57,36 +58,95 @@ const exported = z.object({
 const failure = z.object({ message: z.string().min(1) });
 
 /**
+ * Slicer options the machine fixes rather than the print: its plate, nozzle,
+ * filament and the manifest's recommended temperatures. Callers spread their
+ * own options over these, so a person or agent can still set temperatures.
+ *
+ * ponytail: temperatures are the manifest's machine-wide recommendation (Bambu:
+ * 250 °C / 70 °C, PETG on a smooth plate); per-material recommendations belong
+ * in the manifest when a second material family is printed.
+ *
+ * @param manifest - The machine's manifest; quantities are in mm and °C.
+ * @param plate - The manifest plate id installed.
+ * @returns Slicer option values.
+ * @public
+ */
+export const machineSliceOptions = (manifest: MachineManifest, plate: string): JsonObject => ({
+  plate,
+  nozzleDiameter: manifest.toolhead.nozzles[0]!.diameter.value,
+  filamentDiameter: manifest.toolhead.filamentDiameter.value,
+  nozzleTemperature: manifest.slicing.recommended.nozzleTemperature.value,
+  bedTemperature: manifest.slicing.recommended.bedTemperature.value,
+});
+
+/**
+ * The plate a print is for: what the machine reports, else what the agent
+ * was told. A plate the machine does not report is carried as operator
+ * confirmed; the person confirms it on the start card before anything is sent.
+ *
+ * @param manifest - The machine's manifest, whose plate ids are the vocabulary.
+ * @param machine - The machine as observed.
+ * @param requested - The plate the agent named, if any.
+ * @returns The plate id and whether the machine observed it.
+ * @throws When neither names a plate, or the named one is not the machine's.
+ */
+const resolvePlate = (
+  manifest: MachineManifest,
+  machine: MachineDirectoryEntry,
+  requested: string | undefined,
+): Readonly<{ id: string; observed: boolean }> => {
+  const ids = manifest.bed.plates.map(({ id }) => id);
+  const observed = machine.snapshot.setup.bedType;
+  if (observed !== undefined) {
+    return { id: observed, observed: true };
+  }
+  if (requested === undefined || !ids.includes(requested)) {
+    throw new Error(
+      `${machine.descriptor.name} does not report its build plate; ask the person which plate is installed, then pass plate as one of ${ids.join(', ')}.`,
+    );
+  }
+  return { id: requested, observed: false };
+};
+
+/**
  * The setup the machine must still show when the print starts: what it
  * observes now, completed from the provider manifest. Preflight compares the
  * two again at approval time, so a plate or spool swapped meanwhile refuses.
  *
  * @param provider - The provider that manufactured the descriptor.
  * @param machine - The machine as the directory currently observes it.
- * @returns The provider's submission configuration.
- * @throws When no material is loaded; there is nothing to expect then.
+ * @param requestedPlate - The plate the agent named, if any.
+ * @returns The provider's submission configuration and the plate it expects.
+ * @throws When no material is loaded; there is nothing to expect then. When no plate is known.
  */
-const expectedSetup = (provider: MachineProvider, machine: MachineDirectoryEntry): PrintRequest['configuration'] => {
+const expectedSetup = (
+  provider: MachineProvider,
+  machine: MachineDirectoryEntry,
+  requestedPlate: string | undefined,
+): Readonly<{ configuration: PrintRequest['configuration']; plate: string }> => {
   const { setup } = machine.snapshot;
   const loaded = setup.materials.find((material) => material.state === 'loaded' && material.materialId !== undefined);
   if (loaded?.materialId === undefined) {
     throw new Error(`No material is loaded in ${machine.descriptor.name}; load one, then ask again.`);
   }
-  const { toolhead, bed } = provider.manifest;
+  const plate = resolvePlate(provider.manifest, machine, requestedPlate);
+  const { toolhead } = provider.manifest;
   const diameter = (quantity: Readonly<{ value: number; unit: string }>) => ({
     ...quantity,
     kind: quantityKinds.diameter,
     space: 'linear',
   });
   // ponytail: named keys are the Bambu submission vocabulary; a second provider gets its own mapping here.
-  return {
+  const configuration = {
     expectedModel: machine.descriptor.model,
-    expectedBedType: setup.bedType ?? bed.plates[0]!.id,
+    expectedBedType: plate.id,
+    ...(plate.observed ? {} : { operatorConfirmedBedType: plate.id }),
     expectedMaterials: [{ slot: loaded.slot, materialId: loaded.materialId }],
     amsMapping: [loaded.slot],
     expectedNozzleDiameter: diameter(toolhead.nozzles[0]!.diameter),
     expectedFilamentDiameter: diameter(toolhead.filamentDiameter),
   };
+  return { configuration, plate: plate.id };
 };
 
 /**
@@ -134,14 +194,14 @@ export const createMachinePrintPlanner =
     if (provider === undefined) {
       throw new Error(`No provider ${machine.providerId} backs ${machine.descriptor.name}.`);
     }
-    const configuration = expectedSetup(provider, machine);
-    /* A fresh object of the call's own keys, the preset from its own field
-     * (the registry refuses one inside `options`); nothing given leaves the
-     * slicer's defaults. */
-    const exportOptions =
-      input.preset === undefined && input.options === undefined
-        ? undefined
-        : { ...input.options, ...(input.preset === undefined ? {} : { preset: input.preset }) };
+    const { configuration, plate } = expectedSetup(provider, machine, input.plate);
+    /* The machine's own options first, then the call's keys, the preset from
+     * its own field (the registry refuses one inside `options`). */
+    const exportOptions = {
+      ...machineSliceOptions(provider.manifest, plate),
+      ...input.options,
+      ...(input.preset === undefined ? {} : { preset: input.preset }),
+    };
     const result = await deps.exportGeometry({
       toolCallId: input.toolCallId,
       targetFile: input.targetFile,

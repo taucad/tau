@@ -80,6 +80,11 @@ export type SyncFacet = Readonly<{
    * rejection, so a surface never has to read the sentence to choose an action.
    */
   reason: SyncFailureReason | undefined;
+  /**
+   * The remote head this checkout has fetched and not applied, while it waits
+   * for a turn's lease to retire (D12, RA4's *Arrived*). Absent otherwise.
+   */
+  arrived?: string;
 }>;
 
 /** How one correlated push ended, for the sibling that asked (`publish`). @public */

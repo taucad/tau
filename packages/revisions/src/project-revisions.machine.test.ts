@@ -79,6 +79,10 @@ import type { FakeCallbackActors, FakePromiseActors } from '#test/fake-actors.js
  *     the restoring checkout waits for it, the open question included (A2, M4);
  *     `restore` hears the selection's line, again when a live switch moves it (M1)
  * 32  the projection names its line: `unknown`, `unborn`, `branch` (D3)
+ * 33  W5b, RV-W5b: a conflicted turn retires its lease through the registry and
+ *     the parked scheduler resumes (F1); a scheduler cut naming an unknown
+ *     checkout is answered at once (F8); a stale registry lease over a dirty
+ *     checkout cannot spin the pull (F2)
  * --  `checkoutChanged` re-heads the checkout and keeps its branch; the checkouts'
  *     own statuses feed the `RevisionStatus` projection; serializable snapshot;
  *     one machine value
@@ -1308,6 +1312,136 @@ describe('projectRevisionsMachine', () => {
     /* The lease the turn wrote reached the record, and its release took it off
      * again — no phantom run id is left holding the checkout (R30). */
     expect(harness.actor.getSnapshot().context.checkouts[0]).toMatchObject({ leaseRunIds: [] });
+
+    harness.actor.stop();
+  });
+
+  it('routes the answer to the scheduler’s merge cut, and a retired lease, into the scheduler (D12, rule 9)', async () => {
+    const harness = start();
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+    await flush();
+    harness.promises.settle('syncFastForward', {
+      output: { status: 'held', hold: 'dirty', checkoutId: 'checkout-live', revisionId: 'remote-2' },
+    });
+    await flush();
+
+    /* The scheduler asked the checkout actor, through this root, for a `merge`
+     * cut; the tree is already the head's, so the answer is *nothing to save*,
+     * and only that answer reaching the scheduler lets it pull again. */
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    harness.promises.settle('cut', { output: { treeId: 'tree-1', cutId: 'cut-1' } });
+    await flush();
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+
+    /* Leased this time: parked until the registry says the lease retired. */
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+    await flush();
+    harness.promises.settle('syncFastForward', {
+      output: { status: 'held', hold: 'leased', checkoutId: 'checkout-live', revisionId: 'remote-2' },
+    });
+    await flush();
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).sync.arrived).toBe('remote-2');
+
+    harness.actor.send({ type: 'leaseRetired', runId: 'run-1' });
+    await flush();
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(3);
+
+    harness.actor.stop();
+  });
+
+  it('resumes a scheduler parked behind a turn that ended conflicted (rule 9, RV-W5b F1)', async () => {
+    const harness = start();
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1', leaseRunIds: ['run-7'] }]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+    await flush();
+    harness.promises.settle('syncFastForward', {
+      output: { status: 'held', hold: 'leased', checkoutId: 'checkout-live', revisionId: 'remote-2' },
+    });
+    await flush();
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).sync.arrived).toBe('remote-2');
+
+    harness.actor.send({
+      type: 'turnConflicted',
+      turnId: 'turn-7',
+      chatId: 'chat-7',
+      checkoutId: 'checkout-live',
+      runId: 'run-7',
+      revisionId: 'rev-2',
+      trigger: 'turn',
+      branch: 'main',
+      runIds: ['run-7'],
+    });
+    await flush();
+    harness.promises.settle('retireRegistryLease', { output: undefined });
+    await flush();
+
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+    expect(harness.actor.getSnapshot().context.checkouts.find(({ id }) => id === 'checkout-live')?.leaseRunIds).toEqual(
+      [],
+    );
+
+    harness.actor.stop();
+  });
+
+  it('answers a scheduler cut naming a checkout it has not spawned at once (RV-W5b F8)', async () => {
+    const harness = start();
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+    await flush();
+    harness.promises.settle('syncFastForward', {
+      output: { status: 'held', hold: 'dirty', checkoutId: 'checkout-ghost', revisionId: 'remote-2' },
+    });
+    await flush();
+
+    /* No clock advance: the answer, not the pull deadline, settles it. */
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).sync).toMatchObject({
+      state: 'queued',
+      error: 'This project has no checkout checkout-ghost.',
+    });
+
+    harness.actor.stop();
+  });
+
+  it('cannot spin the pull over a stale registry lease and a dirty checkout (RV-W5b F2)', async () => {
+    const harness = start();
+    /* The registry still lists run-7, as a conflicted turn left it before F1: the root answers `nothingToSave`. */
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1', leaseRunIds: ['run-7'] }]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (harness.promises.running('syncFetch') === 0) {
+        break;
+      }
+      harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+      // eslint-disable-next-line no-await-in-loop -- one pull at a time.
+      await flush();
+      harness.promises.settle('syncFastForward', {
+        output: { status: 'held', hold: 'dirty', checkoutId: 'checkout-live', revisionId: 'remote-2' },
+      });
+      // eslint-disable-next-line no-await-in-loop -- one pull at a time.
+      await flush();
+      // eslint-disable-next-line no-await-in-loop -- one pull at a time.
+      await flush();
+    }
+
+    /* One immediate re-pull, then the backoff: no timers advanced, two pulls. */
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+    expect(harness.promises.inputsFor('cut')).toHaveLength(0);
 
     harness.actor.stop();
   });

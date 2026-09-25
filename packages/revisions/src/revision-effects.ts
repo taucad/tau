@@ -34,7 +34,7 @@ import {
   renderConflictMarkers,
   revisionId,
 } from '#algorithms/index.js';
-import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
+import type { CaptureMemo, ParameterRecordCodec, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
 import { caseCollisions } from '#case-collisions.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
@@ -116,7 +116,8 @@ import type {
   RemoteWriteActorOutput,
 } from '#remote.machine.js';
 import type { RemoteStorageSupplier } from '#remote.types.js';
-import { isHostLocalRef, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
+import { isHostLocalRef, remoteKindOf, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
+import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { createSyncQueue } from '#sync-queue.js';
 import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
@@ -130,6 +131,7 @@ import {
 } from '#workspace-config.js';
 import type {
   SyncActors,
+  SyncHold,
   SyncFastForwardActorOutput,
   SyncFetchActorInput,
   SyncFetchActorOutput,
@@ -139,6 +141,7 @@ import type {
   SyncPushActorOutput,
   SyncReadPendingActorInput,
   SyncReadRemoteActorOutput,
+  SyncRemoteMovesActorInput,
   SyncWritePendingActorInput,
 } from '#sync.machine.js';
 import type { SyncFacet, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
@@ -154,6 +157,7 @@ import { RevisionPortError } from '#revision-port.js';
 import type {
   Checkout,
   CheckoutRecord,
+  RevisionPortErrorCode,
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionPort,
@@ -542,6 +546,31 @@ export type RevisionActorsOptions = Readonly<{
    */
   connectivity?: (report: (online: boolean) => void) => () => void;
   /**
+   * The project's `revision` entries, while its Tau Cloud remote is connected (D13).
+   *
+   * Host knowledge for the same reason `remoteUrl` is: only the host knows its
+   * API origin and how it authenticates there. A host passes
+   * `watchRevisionStream` bound to both. Without it an open project learns of
+   * another device's work only at its next open or push.
+   *
+   * @param input - The project to watch.
+   * @param handlers - Where each move, and a refusal, goes.
+   * @returns The unsubscribe the scheduler runs when the remote goes or the project closes.
+   */
+  remoteMoves?: (input: Readonly<{ projectId: string }>, handlers: RevisionStreamHandlers) => () => void;
+  /**
+   * How this host reads, validates and writes `.tau/parameters/**` records, for
+   * the per-key merge (D12): `@taucad/parameters`' `requireParameterRecord` and
+   * `serializeParameterRecord`.
+   *
+   * Every merge in this module uses it — a sync, a branch merge, a turn's
+   * settlement and the re-derivation of a recorded conflict — because a
+   * conflict read back with a different codec would settle differently from the
+   * merge that recorded it. Without it, a record both sides changed is a
+   * conflict: an unvalidated record is never merged.
+   */
+  parameters?: ParameterRecordCodec;
+  /**
    * Remember the history set's push, for a host that can re-send one (A32, S41).
    *
    * The `pagehide` keepalive offers a POST the `hidden` flush already built, and
@@ -596,6 +625,36 @@ export type RevisionActors = Readonly<{
  * machine's context carries choices and never bytes (I29).
  */
 type ChosenSide = Readonly<{ side: ResolutionSide; content?: Uint8Array<ArrayBuffer> }>;
+
+/**
+ * A checkout an integration must leave alone for now (D12, rule 9).
+ *
+ * Thrown where the refusal is decided — before the fence, inside it, or at the
+ * ref move — with the code and sentence a person-driven verb already reads, and
+ * caught by the sync effects, which turn it into a hold rather than a failure:
+ * a dirty checkout is minted first, a leased one waits for its lease.
+ */
+class CheckoutHeld extends RevisionPortError {
+  public readonly hold: SyncHold['hold'];
+  public readonly checkoutId: string;
+
+  public constructor(
+    held: Readonly<{ hold: SyncHold['hold']; checkoutId: string; message: string; code?: RevisionPortErrorCode }>,
+  ) {
+    super(held.code ?? 'CHECKOUT_CONFLICT', held.message);
+    this.hold = held.hold;
+    this.checkoutId = held.checkoutId;
+  }
+}
+
+/* What a sync effect answers for a checkout it left alone, or `undefined` for any other failure. */
+const holdOf = (error: unknown, revisionId: string): SyncHold | undefined =>
+  error instanceof CheckoutHeld
+    ? { status: 'held', hold: error.hold, checkoutId: error.checkoutId, revisionId }
+    : undefined;
+
+/* The sentence every verb reads when a turn holds the files it would rewrite (D10, A1). */
+const leasedMessage = 'An agent is working in this project’s files.';
 
 /** Where leases live, relative to the project. A `records` row in the registry. */
 const leaseDirectory = '.tau/runs';
@@ -657,9 +716,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const useFileSystem: UseCheckoutFileSystem =
     options.useFileSystem ?? (async (checkout, operation) => operation(await filesystem(checkout)));
   const actorId = options.actorId ?? 'tau-host';
+  /* One codec for every merge (D12): a recorded conflict re-derives as it was made. */
+  const mergeOptions = options.parameters === undefined ? {} : { parameters: options.parameters };
   /* A host that cannot re-send a push remembers none: the identity function. */
   const recordHistoryPush = options.recordHistoryPush ?? (async <Result>(run: () => Promise<Result>) => run());
   const clock = options.clock ?? Date.now;
+  /*
+   * Settles once the project's `revision` stream knows its tail (D13, W5b a1b).
+   * The open pull waits for it: the pull and the tail read are two reads of the
+   * remote, and a push between them would be in neither. Tail first, so a push
+   * after it is an entry and a push before it is in the pull.
+   */
+  let streamTail: Promise<void> | undefined;
   let lastReading = 0;
   /* Monotonic per process: a bounded `log` walk stops on committer time, so a
    * clock that went backwards would truncate a history (W3a review R39). */
@@ -1442,7 +1510,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    */
   const conflictTermsOf = async (revision: string): Promise<RevisionConflictTerms> => {
     await ensureStore();
-    const terms = await readConflictTerms(port, revision);
+    const terms = await readConflictTerms(port, revision, mergeOptions);
     if (terms === undefined) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', 'That revision records no conflict to resolve.');
     }
@@ -1550,8 +1618,29 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     sourceLabel?: string;
   }>;
 
-  /** Compose one branch into another, recording conflicts on the source side. */
-  const mergeBranches = async (input: MergeBranchesInput): Promise<BranchMergeActorOutput> => {
+  /**
+   * Refuse to rewrite a checkout a turn holds (rule 9, D10): the merge waits for
+   * the lease to retire, so nothing is re-based under a running agent.
+   *
+   * @param place - The checkout the merge would write.
+   * @throws CheckoutHeld When a lease names it.
+   */
+  const refuseLeased = async (place: Checkout): Promise<void> => {
+    const leases = await readLeases();
+    if (leases.some((lease) => lease.checkoutId === place.id)) {
+      throw new CheckoutHeld({ hold: 'leased', checkoutId: place.id, message: leasedMessage });
+    }
+  };
+
+  /**
+   * Compose one branch into another, recording conflicts on the source side.
+   *
+   * `checkoutId` names the checkout a landed merge moved, so its actor can
+   * re-head; it is absent when nothing moved.
+   */
+  const mergeBranches = async (
+    input: MergeBranchesInput,
+  ): Promise<BranchMergeActorOutput & Readonly<{ checkoutId?: string }>> => {
     await ensureStore();
     if (input.into === '' || input.into === input.branch) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', 'A branch cannot be merged into itself.');
@@ -1567,24 +1656,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (target === undefined) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', 'This project has no files open to merge into.');
     }
-    const live = await captureFresh(target);
-    const headTreeId = await treeIdOf(await headOf(target));
-    if (headTreeId !== (await checkoutTreeId(target.id, live))) {
-      throw new RevisionPortError(
-        'UNSUPPORTED_OPERATION',
-        'The files you have open have changes that are not in a revision yet. Save a revision before merging.',
-      );
-    }
-    const validateTarget = async (current: ImmutableRevisionTree): Promise<void> => {
-      const currentTreeId = await checkoutTreeId(target.id, current);
-      if (currentTreeId !== headTreeId) {
-        throw new RevisionPortError(
-          'CHECKOUT_CONFLICT',
-          'The files you have open changed while the merge was being prepared. Save a revision and try again.',
-        );
-      }
-    };
-
     const base =
       ours === undefined
         ? undefined
@@ -1592,6 +1663,40 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (base === theirs) {
       return { status: 'merged', revisionId: ours ?? theirs };
     }
+    /*
+     * The lease before the files, always (rule 9): a turn's own writes make its
+     * checkout dirty, and a dirty hold would be minted — which the root declines
+     * while a turn holds the checkout — so a leased checkout must read as leased.
+     * Before anything is written, even a revision.
+     */
+    await refuseLeased(target);
+    const live = await captureFresh(target);
+    const headTreeId = await treeIdOf(await headOf(target));
+    if (headTreeId !== (await checkoutTreeId(target.id, live))) {
+      throw new CheckoutHeld({
+        hold: 'dirty',
+        checkoutId: target.id,
+        code: 'UNSUPPORTED_OPERATION',
+        message: 'The files you have open have changes that are not in a revision yet. Save a revision before merging.',
+      });
+    }
+    /* Proven again inside the fence, where a turn that started meanwhile has written its lease. */
+    const validateTarget = async (current: ImmutableRevisionTree): Promise<void> => {
+      await refuseLeased(target);
+      const currentTreeId = await checkoutTreeId(target.id, current);
+      if (currentTreeId !== headTreeId) {
+        throw new CheckoutHeld({
+          hold: 'dirty',
+          checkoutId: target.id,
+          message: 'The files you have open changed while the merge was being prepared. Save a revision and try again.',
+        });
+      }
+    };
+    /* And at the ref move, as the fast-forward checks: the files are put back if a turn got in. */
+    const landMerge = async (expectedHead: string | undefined, head: string): Promise<void> => {
+      await refuseLeased(target);
+      await publishMerge(input.into, expectedHead, head);
+    };
     if (ours === undefined || base === ours) {
       const fastForward = await port.readTree(theirs);
       if (fastForward === undefined) {
@@ -1599,9 +1704,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       await materializeTree(target, fastForward, {
         validate: validateTarget,
-        publish: async () => publishMerge(input.into, ours, theirs),
+        publish: async () => landMerge(ours, theirs),
       });
-      return { status: 'merged', revisionId: theirs };
+      return { status: 'merged', revisionId: theirs, checkoutId: target.id };
     }
 
     const [baseTree, oursTree, theirsTree] = await Promise.all([
@@ -1612,7 +1717,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (baseTree === undefined || oursTree === undefined || theirsTree === undefined) {
       throw new RevisionPortError('UNKNOWN_REVISION', 'This project no longer holds both sides of that merge.');
     }
-    const merged = mergeRevisionTrees(baseTree, oursTree, theirsTree);
+    const merged = mergeRevisionTrees(baseTree, oursTree, theirsTree, mergeOptions);
     if (merged.status === 'conflicted') {
       const [oursTreeId, baseTreeId, theirsTreeId] = await Promise.all([
         treeIdOf(ours),
@@ -1648,9 +1753,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     });
     await materializeTree(target, merged.tree, {
       validate: validateTarget,
-      publish: async () => publishMerge(input.into, ours, revisionId(receipt.commitId)),
+      publish: async () => landMerge(ours, revisionId(receipt.commitId)),
     });
-    return { status: 'merged', revisionId: receipt.commitId };
+    return { status: 'merged', revisionId: receipt.commitId, checkoutId: target.id };
   };
 
   return {
@@ -1881,7 +1986,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           /* A file where the other side has a directory used to throw out of here
            * (W3a re-review); it is a typed `file-directory` conflict now, so a
            * conflicted turn is one return rather than an exception (W10). */
-          const merged = mergeRevisionTrees(base, live, agent);
+          const merged = mergeRevisionTrees(base, live, agent, mergeOptions);
           if (merged.status === 'conflicted') {
             return { status: 'conflicted' };
           }
@@ -2129,7 +2234,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       merge: fromAuthorityPromise<
         BranchMergeActorOutput,
         Readonly<{ projectId: string; branch: string; into: string }>
-      >(async ({ input }) => mergeBranches(input)),
+      >(async ({ input }) => {
+        /* The registry is re-read on `branchMerged`, so the moved checkout stays this module's. */
+        const { checkoutId: _moved, ...outcome } = await mergeBranches(input);
+        return outcome;
+      }),
       /* A rename is two ref writes, in the order that cannot lose the head: the
        * new name is born first, and only a ref that still points where we read
        * it is removed (D29's compare-and-set). */
@@ -2218,7 +2327,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const decoder = new TextDecoder();
         return {
           path: input.path,
-          text: await materializeConflict(port, input),
+          text: await materializeConflict(port, input, mergeOptions),
           ours: decoder.decode(terms.ours.get(input.path)),
           theirs: decoder.decode(terms.theirs.get(input.path)),
         };
@@ -2751,6 +2860,26 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * known ceiling and this is where it is paid.
        */
       fetch: fromAuthorityPromise<SyncFetchActorOutput, SyncFetchActorInput>(async ({ input, signal }) => {
+        const tail = streamTail;
+        if (tail !== undefined) {
+          /* ponytail: a stream that never answers holds the pull at most this long; the gap reopens only then.
+           * A stopped pull stops waiting at once (RV-W5b F9): a close waits on `settled()`. */
+          let bound: ReturnType<typeof setTimeout> | undefined;
+          const stopped = Promise.withResolvers<void>();
+          const abandon = (): void => {
+            stopped.resolve();
+          };
+          signal.addEventListener('abort', abandon, { once: true });
+          await Promise.race([
+            tail,
+            stopped.promise,
+            new Promise((resolve) => {
+              bound = setTimeout(resolve, streamTailWaitMilliseconds);
+            }),
+          ]);
+          clearTimeout(bound);
+          signal.removeEventListener('abort', abandon);
+        }
         await ensureStore();
         signal.throwIfAborted();
         const { syncChats, syncLargeExports: initialSyncLargeExports } = await projectSyncPreferences();
@@ -3059,49 +3188,68 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
           }
           let expected: RevisionId | undefined;
-          await materializeTree(place, target, {
-            signal,
-            validate: async (before) => {
-              expected = await port.readRef(branch);
-              if (!(await ancestryHolds(expected))) {
-                throw new RevisionPortError(
-                  'CHECKOUT_CONFLICT',
-                  `${input.branch} changed after synchronization checked it. Fetch and compose the newer work first.`,
-                );
-              }
-              signal.throwIfAborted();
-              const expectedTreeId = await treeIdOf(expected);
-              const beforeTreeId = await checkoutTreeId(place.id, before);
-              const pristineTreeId = revisionTreeId(generatedSetupTree, await formatOf());
-              const dirty =
-                expectedTreeId === undefined ? beforeTreeId !== pristineTreeId : expectedTreeId !== beforeTreeId;
-              const leases = await readLeases();
-              const leased = leases.some((lease) => lease.checkoutId === place.id);
-              signal.throwIfAborted();
-              if (dirty || leased) {
-                throw new RevisionPortError(
-                  'CHECKOUT_CONFLICT',
-                  leased
-                    ? 'These files are being changed by an active run. Synchronization will retry after it settles.'
-                    : 'These files have changes that are not in a revision yet. Save them before synchronizing.',
-                );
-              }
-            },
-            publish: async () => {
-              signal.throwIfAborted();
-              const currentLeases = await readLeases();
-              if (currentLeases.some((lease) => lease.checkoutId === place.id)) {
-                throw new RevisionPortError(
-                  'CHECKOUT_CONFLICT',
-                  'A run started changing these files while synchronization was applying. It will retry after the run settles.',
-                );
-              }
-              const updated = await port.updateRef({ name: branch, expectedHead: expected, head });
-              if (updated.status !== 'updated') {
-                throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
-              }
-            },
-          });
+          try {
+            await materializeTree(place, target, {
+              signal,
+              validate: async (before) => {
+                expected = await port.readRef(branch);
+                if (!(await ancestryHolds(expected))) {
+                  throw new RevisionPortError(
+                    'CHECKOUT_CONFLICT',
+                    `${input.branch} changed after synchronization checked it. Fetch and compose the newer work first.`,
+                  );
+                }
+                signal.throwIfAborted();
+                const expectedTreeId = await treeIdOf(expected);
+                const beforeTreeId = await checkoutTreeId(place.id, before);
+                const pristineTreeId = revisionTreeId(generatedSetupTree, await formatOf());
+                const dirty =
+                  expectedTreeId === undefined ? beforeTreeId !== pristineTreeId : expectedTreeId !== beforeTreeId;
+                const leases = await readLeases();
+                const leased = leases.some((lease) => lease.checkoutId === place.id);
+                signal.throwIfAborted();
+                /* The lease first: a turn's own writes are what make its checkout dirty (rule 9). */
+                if (leased) {
+                  throw new CheckoutHeld({
+                    hold: 'leased',
+                    checkoutId: place.id,
+                    message:
+                      'These files are being changed by an active run. Synchronization will retry after it settles.',
+                  });
+                }
+                if (dirty) {
+                  throw new CheckoutHeld({
+                    hold: 'dirty',
+                    checkoutId: place.id,
+                    message: 'These files have changes that are not in a revision yet. Save them before synchronizing.',
+                  });
+                }
+              },
+              publish: async () => {
+                signal.throwIfAborted();
+                const currentLeases = await readLeases();
+                if (currentLeases.some((lease) => lease.checkoutId === place.id)) {
+                  throw new CheckoutHeld({
+                    hold: 'leased',
+                    checkoutId: place.id,
+                    message:
+                      'A run started changing these files while synchronization was applying. It will retry after the run settles.',
+                  });
+                }
+                const updated = await port.updateRef({ name: branch, expectedHead: expected, head });
+                if (updated.status !== 'updated') {
+                  throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
+                }
+              },
+            });
+          } catch (error) {
+            /* Left alone, not failed (D12): the scheduler mints or waits. */
+            const held = holdOf(error, head);
+            if (held === undefined) {
+              throw error;
+            }
+            return held;
+          }
           const treeId = await treeIdOf(head);
           if (treeId === undefined) {
             throw new RevisionPortError('UNKNOWN_REVISION', `No recorded tree for ${head}.`);
@@ -3112,15 +3260,93 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
       merge: fromAuthorityPromise<SyncMergeActorOutput, SyncIntegrateActorInput>(async ({ input }) => {
         const conflictBranch = `sync/${input.remote}/${input.branch}`;
-        const outcome = await mergeBranches({
-          branch: remoteTrackingRef(input.remote, `refs/heads/${input.branch}`),
-          into: input.branch,
-          conflictBranch,
-          sourceLabel: `${input.remote}/${input.branch}`,
-        });
-        return outcome.status === 'merged'
+        const tracking = remoteTrackingRef(input.remote, `refs/heads/${input.branch}`);
+        let outcome: Awaited<ReturnType<typeof mergeBranches>>;
+        try {
+          outcome = await mergeBranches({
+            branch: tracking,
+            into: input.branch,
+            conflictBranch,
+            sourceLabel: `${input.remote}/${input.branch}`,
+          });
+        } catch (error) {
+          /* A dirty checkout is minted first and a leased one waits (D12, rule 9). */
+          const held = holdOf(error, (await port.readRef(tracking)) ?? '');
+          if (held === undefined) {
+            throw error;
+          }
+          return held;
+        }
+        if (outcome.status === 'conflicted') {
+          return { status: 'conflicted', branch: conflictBranch, into: input.branch, paths: outcome.paths };
+        }
+        const treeId = outcome.checkoutId === undefined ? undefined : await treeIdOf(outcome.revisionId);
+        return outcome.checkoutId === undefined || treeId === undefined
           ? { status: 'merged' }
-          : { status: 'conflicted', branch: conflictBranch, into: input.branch, paths: outcome.paths };
+          : { status: 'merged', moved: { checkoutId: outcome.checkoutId, revisionId: outcome.revisionId, treeId } };
+      }),
+
+      /* D13: the project's `revision` entries, for the remote the scheduler names. */
+      remoteMoves: createCallbackLogic<AnyEventObject, SyncRemoteMovesActorInput>(({ input, sendBack, receive }) => {
+        /*
+         * One session per `watch` (RV-W5b F3): a stream's handlers act only while
+         * their session is the current one, so a stopped stream's late refusal
+         * can neither end the live stream's ownership nor report a refusal.
+         * A refused session stays current, marked `refused`: every open re-sends
+         * `watch`, and a stream that refuses this credential must not become one
+         * request per pull (F5). `unwatch` — a disconnect — ends it.
+         */
+        type Session = { remote: string; stop: () => void; tailKnown: () => void; refused: boolean };
+        let session: Session | undefined;
+        const unwatch = (): void => {
+          session?.stop();
+          session?.tailKnown();
+          session = undefined;
+          streamTail = undefined;
+        };
+        receive((event) => {
+          if (event.type === 'unwatch') {
+            unwatch();
+            return;
+          }
+          const remote: unknown = event.type === 'watch' ? event['remote'] : undefined;
+          if (typeof remote !== 'string' || remote === session?.remote) {
+            return;
+          }
+          unwatch();
+          /* Only Tau Cloud announces its commits; any other Git remote is read at open and push. */
+          if (options.remoteMoves === undefined || remoteKindOf(remote) !== 'tau') {
+            return;
+          }
+          const current: Session = { remote, stop: () => undefined, tailKnown: () => undefined, refused: false };
+          session = current;
+          streamTail = new Promise<void>((resolve) => {
+            current.tailKnown = resolve;
+          });
+          const live = (): boolean => session === current && !current.refused;
+          current.stop = options.remoteMoves(
+            { projectId: input.projectId },
+            {
+              watching: () => {
+                current.tailKnown();
+              },
+              moved: (move) => {
+                if (live()) {
+                  sendBack({ type: 'remoteMoved', generation: move.generation, refs: move.refs });
+                }
+              },
+              refused: (error) => {
+                if (!live()) {
+                  return;
+                }
+                current.refused = true;
+                current.tailKnown();
+                sendBack({ type: 'remoteRefused', code: error.code, message: error.message });
+              },
+            },
+          );
+        });
+        return unwatch;
       }),
 
       connectivity: createCallbackLogic<AnyEventObject>(({ sendBack }) => {
@@ -3211,6 +3437,8 @@ export const createProjectRevisionsActor = (
 };
 
 /* How far each wait outlasts the bound it awaits, so the inner reason always lands first (rule 9). */
+/* How long an open pull waits for the stream's tail (W5b a1b): one tail read is a zero-wait GET, well inside the pull's 10 s deadline. */
+const streamTailWaitMilliseconds = 2000;
 const nestedBoundMarginMilliseconds = 2000;
 
 /**

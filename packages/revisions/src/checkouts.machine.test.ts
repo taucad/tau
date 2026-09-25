@@ -36,6 +36,8 @@ import type { FakePromiseActors } from '#test/fake-actors.js';
  * 19  a turn that ended without ever writing a lease retires nothing (R23)
  * 20  a settlement or a stale-lease report that arrives before the registry
  *     finished loading still retires its lease (R30)
+ * 21  `turnConflicted` retires the lease exactly as `turnFinalized` does, so a
+ *     sync parked behind it resumes (rule 9, RV-W5b F1)
  * --  a removable record offers removal; `open` rehydrates from records again;
  *     start and stop, serializable snapshot, one exported machine value
  */
@@ -387,6 +389,35 @@ describe('checkoutsMachine', () => {
       type: 'leaseRetired',
       runId: 'run-7',
     });
+
+    actor.stop();
+  });
+
+  it('retires a conflicted turn lease, so a sync parked behind it resumes (rule 9, RV-W5b F1)', async () => {
+    const harness = start();
+    const { actor, promises, emitted } = harness;
+
+    await toReady(harness);
+    actor.send({
+      type: 'turnConflicted',
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      checkoutId: 'checkout-b',
+      runId: 'run-7',
+      revisionId: 'rev-2',
+      trigger: 'turn',
+      branch: 'main',
+      runIds: ['run-7'],
+    });
+
+    expect(actor.getSnapshot().matches({ ready: 'retiring' })).toBe(true);
+    promises.settle('retireLease', { output: undefined });
+    await flush();
+
+    expect(actor.getSnapshot().context.checkouts[1]?.leaseRunIds).toEqual([]);
+    expect(emitted.filter((event) => event.type === 'leaseRetired')).toEqual([
+      { type: 'leaseRetired', runId: 'run-7' },
+    ]);
 
     actor.stop();
   });

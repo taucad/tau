@@ -121,6 +121,10 @@ export {
   tauRemoteUrl,
 } from '#remotes.js';
 export type { GitRemoteCredential, Remote, RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
+/* D13: the client half of a project's `revision` stream, which both hosts bind to their own auth. */
+export { watchRevisionStream } from '#revision-stream.js';
+export type { RevisionStreamHandlers } from '#revision-stream.js';
+export type { TauCloudAuth } from '#remotes.js';
 export { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
 export type { RevisionConflictTerms } from '#revision-conflict.js';
 export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';

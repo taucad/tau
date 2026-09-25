@@ -20,7 +20,7 @@
  */
 
 import { ImmutableRevisionTree, mergeRevisionTrees, renderConflictMarkers, revisionId } from '#algorithms/index.js';
-import type { ConflictMarkerLabels, RevisionTreeConflict } from '#algorithms/index.js';
+import type { ConflictMarkerLabels, MergeRevisionTreesOptions, RevisionTreeConflict } from '#algorithms/index.js';
 import { mergeBaseHeads, mergeBaseOf } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
@@ -71,6 +71,8 @@ export type MaterializeConflictInput = Readonly<{
  *
  * @param port - The store holding the revision.
  * @param id - The conflicted revision.
+ * @param options - The host's merge options: the same parameter codec the merge
+ *   that recorded the conflict used, so the terms settle as it did (D12).
  * @returns Its terms, or `undefined` when the revision records no conflict.
  * @throws RevisionPortError When the store does not hold the revision.
  * @public
@@ -85,7 +87,11 @@ export type MaterializeConflictInput = Readonly<{
  * terms?.conflicts.map((conflict) => conflict.path); // ['enclosure.ts']
  * ```
  */
-export const readConflictTerms = async (port: RevisionPort, id: string): Promise<RevisionConflictTerms | undefined> => {
+export const readConflictTerms = async (
+  port: RevisionPort,
+  id: string,
+  options: MergeRevisionTreesOptions = {},
+): Promise<RevisionConflictTerms | undefined> => {
   const record = await port.readRevision(revisionId(id));
   if (record === undefined) {
     throw new RevisionPortError('UNKNOWN_REVISION', 'This project no longer holds that conflicted revision.');
@@ -112,7 +118,7 @@ export const readConflictTerms = async (port: RevisionPort, id: string): Promise
   /* The empty tree is the honest base for two lines that share no history: every
    * path is then an add on one side or the other, which is exactly true. */
   const common = base ?? new ImmutableRevisionTree([]);
-  const merged = mergeRevisionTrees(common, ours, theirs);
+  const merged = mergeRevisionTrees(common, ours, theirs, options);
   const labels = {
     ours: recorded.labels[0] ?? 'mine',
     theirs: recorded.labels[2] ?? 'theirs',
@@ -137,6 +143,7 @@ export const readConflictTerms = async (port: RevisionPort, id: string): Promise
  *
  * @param port - The store holding the revision.
  * @param input - The conflicted revision and the path inside it.
+ * @param options - The host's merge options, as {@link readConflictTerms} takes them.
  * @returns Marker text, or `undefined` when the path is binary, is not
  *   conflicted, or the revision records no conflict at all.
  * @public
@@ -144,8 +151,9 @@ export const readConflictTerms = async (port: RevisionPort, id: string): Promise
 export const materializeConflict = async (
   port: RevisionPort,
   input: MaterializeConflictInput,
+  options: MergeRevisionTreesOptions = {},
 ): Promise<string | undefined> => {
-  const terms = await readConflictTerms(port, input.revisionId);
+  const terms = await readConflictTerms(port, input.revisionId, options);
   if (terms === undefined || !terms.conflicts.some((conflict) => conflict.path === input.path)) {
     return undefined;
   }

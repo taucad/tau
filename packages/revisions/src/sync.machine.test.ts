@@ -54,6 +54,18 @@
  * | 48 | `failed --revisionMinted--> failed` | **L2-F6**: a terminal class never re-enters the push on a save |
  * | 49 | `pushing --revisionMinted--> queued --syncBackoff--> opening` | **L2-F6**: a mid-push mint waits out the backoff |
  * | 50 | `pushing → onError(REMOTE_DAMAGED) → failed`; `REMOTE_UNAVAILABLE → queued → opening` | **D22**: a damaged repository is terminal after one attempt; a 503 still retries |
+ * | 51 | `opening` → `watch`; `remoteDisconnected` → `unwatch` | **D13**: subscribed while a remote is connected, and only then |
+ * | 52 | `backedUp --remoteMoved--> opening → fastForwarding → backedUp` | **D13/B6**: another device's push applies without reopening |
+ * | 53 | `pushing --remoteMoved--> recording → opening` | a move that lands while busy is fetched once the work settles |
+ * | 54 | `fastForwarding(held leased) → awaitingLease --leaseRetired--> opening` | **rule 9**: a leased checkout applies nothing, parks without backoff, shows the arrival, applies after the lease |
+ * | 55 | `leaseRetired` during the pull, then a leased hold | the retirement is not lost: the pull runs again at once |
+ * | 56 | `fastForwarding(held dirty) → minting --revisionMinted--> opening → merging → pushing` | **D12, rule 6**: a dirty checkout is minted by its checkout actor (trigger `merge`) and then composed |
+ * | 57 | `minting --cutFailed / casLost / after--> queued` | a merge cut that does not land waits out the backoff; another requester's answer is not this one's |
+ * | 58 | `backedUp --remoteRefused--> opening` | **rule 19, RV-W5b F5**: a refused stream is only the wake-up channel; the git fetch, with the same credential, is what the classifier reads |
+ * | 61 | `minting --nothingToSave--> opening` once, then `queued` | **RV-W5b F2**: a hold the cut cannot mint re-pulls at most once, then backs off — a frozen clock fetches a bounded number of times |
+ * | 62 | `awaitingLease --remoteMoved / pushAcknowledged--> recording → opening` | **RV-W5b F7**: a parked apply is remembered, so leaving the park any way re-pulls |
+ * | 60 | `pending --revisionMinted every 500 ms--> pushing` within `syncDebounceMaxWaitMilliseconds` | **W13 follow-up**: a steady mint cadence faster than the window still pushes, at least once per bound |
+ * | 59 | `merging(merged) → pushing` | **D12**: a diverged clean checkout merges, re-heads its actor, and pushes the merge revision under the fetched lease |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -137,6 +149,7 @@ const start = (
     fastForward: effects.actor('fastForward'),
     merge: effects.actor('merge'),
     connectivity: holds.actor('connectivity'),
+    remoteMoves: holds.actor('remoteMoves'),
   };
   const actor = createActor(syncMachine.provide({ actors }), {
     clock,
@@ -1057,6 +1070,7 @@ describe('syncMachine', () => {
       fastForward: effects.actor('fastForward'),
       merge: effects.actor('merge'),
       connectivity: holds.actor('connectivity'),
+      remoteMoves: holds.actor('remoteMoves'),
     });
 
     const first = createActor(syncMachine.provide({ actors: actors() }), {
@@ -1495,5 +1509,407 @@ describe('syncMachine', () => {
 
   it('L2-F9: the open pull’s deadline is exported for the bounds that wait on it', () => {
     expect(machineModule.syncPullDeadlineMilliseconds).toBe(10_000);
+  });
+});
+
+describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
+  const moved = { type: 'remoteMoved', generation: 2, refs: [mainRef] } as const;
+
+  /** Deliver one remote move, and wait for the pull it starts. */
+  const moveRemote = async (harness: Harness, fetches: number): Promise<void> => {
+    harness.holds.sendBack('remoteMoves', moved);
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(fetches);
+    });
+  };
+
+  const fastForwardFetched = {
+    output: { leases: { [mainRef]: 'remote-2' }, integration: 'fastForward' } satisfies SyncFetchActorOutput,
+  };
+
+  it('row 51 (D13): subscribes while a remote is connected, and stops when it goes', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    expect(harness.holds.inputsFor('remoteMoves')).toEqual([{ projectId: 'p1' }]);
+    expect(harness.holds.deliveries).toContainEqual({
+      name: 'remoteMoves',
+      input: { projectId: 'p1' },
+      event: { type: 'watch', remote: 'tau' },
+    });
+
+    harness.actor.send({ type: 'remoteDisconnected' });
+    await vi.waitFor(() => {
+      expect(harness.holds.deliveries.at(-1)?.event).toEqual({ type: 'unwatch' });
+    });
+
+    harness.stop();
+  });
+
+  it('row 52 (D13, B6): another device’s push reaches this checkout without reopening', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    await moveRemote(harness, 2);
+    harness.effects.settle('fetch', fastForwardFetched);
+    await settleWhenRunning(harness.effects, 'fastForward', {
+      output: { checkoutId: 'live', revisionId: 'remote-2', treeId: 'tree-2' },
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+    expect(harness.parent.events).toContainEqual({
+      type: 'checkoutChanged',
+      checkoutId: 'live',
+      revisionId: 'remote-2',
+      treeId: 'tree-2',
+      branch: 'main',
+    });
+
+    harness.stop();
+  });
+
+  it('row 53: a move that lands mid-push is fetched as soon as the push settles', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+
+    harness.holds.sendBack('remoteMoves', moved);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(1);
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+    });
+
+    harness.stop();
+  });
+
+  it('row 54 (rule 9): a leased checkout applies nothing, parks without backing off, and applies after the lease', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await moveRemote(harness, 2);
+    harness.effects.settle('fetch', fastForwardFetched);
+    await settleWhenRunning(harness.effects, 'fastForward', {
+      output: { status: 'held', hold: 'leased', checkoutId: 'live', revisionId: 'remote-2' },
+    });
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('awaitingLease')).toBe(true);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ state: 'backedUp', arrived: 'remote-2' });
+    expect(harness.parent.events.some((event) => event.type === 'checkoutChanged')).toBe(false);
+
+    /* Parked, not backing off: no amount of waiting fetches again. */
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+
+    harness.actor.send({ type: 'leaseRetired', runId: 'run-1' });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
+    });
+    harness.effects.settle('fetch', fastForwardFetched);
+    await settleWhenRunning(harness.effects, 'fastForward', {
+      output: { checkoutId: 'live', revisionId: 'remote-2', treeId: 'tree-2' },
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot()).arrived).toBeUndefined();
+
+    harness.stop();
+  });
+
+  it('row 55 (rule 9): a lease that retires while the pull is still deciding is not lost', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await moveRemote(harness, 2);
+    harness.effects.settle('fetch', fastForwardFetched);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fastForward')).toBe(1);
+    });
+
+    harness.actor.send({ type: 'leaseRetired', runId: 'run-1' });
+    harness.effects.settle('fastForward', {
+      output: { status: 'held', hold: 'leased', checkoutId: 'live', revisionId: 'remote-2' },
+    });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
+    });
+
+    harness.stop();
+  });
+
+  it('row 56 (D12, rule 6): a dirty checkout is minted by its checkout actor, then composed and pushed', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await moveRemote(harness, 2);
+    harness.effects.settle('fetch', fastForwardFetched);
+    await settleWhenRunning(harness.effects, 'fastForward', {
+      output: { status: 'held', hold: 'dirty', checkoutId: 'live', revisionId: 'remote-2' },
+    });
+
+    await vi.waitFor(() => {
+      expect(harness.parent.events).toContainEqual({
+        type: 'cut',
+        trigger: 'merge',
+        checkoutId: 'live',
+        leaseIds: [],
+        requestId: 'sync-1',
+      });
+    });
+    expect(harness.effects.running('merge')).toBe(0);
+
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'merge',
+      requestId: 'sync-1',
+      revisionId: 'minted-1',
+    });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
+    });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-2' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', {
+      output: {
+        status: 'merged',
+        moved: { checkoutId: 'live', revisionId: 'merged-1', treeId: 'tree-m' },
+      } satisfies SyncMergeActorOutput,
+    });
+
+    /* The merge re-heads the checkout actor, and the minted and merged revisions go out. */
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.parent.events).toContainEqual({
+      type: 'checkoutChanged',
+      checkoutId: 'live',
+      revisionId: 'merged-1',
+      treeId: 'tree-m',
+      branch: 'main',
+    });
+
+    harness.stop();
+  });
+
+  it('row 57: a merge cut that does not land waits out the backoff, and another requester’s answer is not this one’s', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await moveRemote(harness, 2);
+    harness.effects.settle('fetch', fastForwardFetched);
+    await settleWhenRunning(harness.effects, 'fastForward', {
+      output: { status: 'held', hold: 'dirty', checkoutId: 'live', revisionId: 'remote-2' },
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('minting')).toBe(true);
+    });
+
+    harness.actor.send({
+      type: 'cutFailed',
+      checkoutId: 'live',
+      trigger: 'switch',
+      requestId: 'branch-1',
+      reason: 'x',
+    });
+    expect(harness.actor.getSnapshot().matches('minting')).toBe(true);
+
+    harness.actor.send({
+      type: 'casLost',
+      checkoutId: 'live',
+      trigger: 'merge',
+      requestId: 'sync-1',
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot()).error).toBe(
+      'Another writer moved this branch first; this project will try again.',
+    );
+
+    /* The backoff's pull asks for a new cut; a cut that never answers is bounded by the pull deadline. */
+    harness.clock.advance(5000);
+    await settleWhenRunning(harness.effects, 'fetch', fastForwardFetched);
+    await settleWhenRunning(harness.effects, 'fastForward', {
+      output: { status: 'held', hold: 'dirty', checkoutId: 'live', revisionId: 'remote-2' },
+    });
+    await vi.waitFor(() => {
+      expect(harness.parent.events.findLast((event) => event.type === 'cut')).toMatchObject({
+        requestId: 'sync-2',
+      });
+    });
+    harness.clock.advance(10_000);
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    harness.stop();
+  });
+
+  it('row 59 (D12): a diverged clean checkout merges, re-heads its actor and pushes the merge revision', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await moveRemote(harness, 2);
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-2' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', {
+      output: {
+        status: 'merged',
+        moved: { checkoutId: 'live', revisionId: 'merged-1', treeId: 'tree-m' },
+      } satisfies SyncMergeActorOutput,
+    });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('push').at(-1)).toMatchObject({ leases: { [mainRef]: 'remote-2' } });
+    expect(harness.parent.events.filter((event) => event.type === 'checkoutChanged')).toHaveLength(1);
+
+    harness.stop();
+  });
+
+  it('row 60 (W13): a mint cadence faster than the window still pushes within the bound, every bound', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    const pushStarts: number[] = [];
+
+    /* An agent minting every 500 ms for 30 s: the 2 s window alone would restart forever. */
+    for (let tick = 1; tick <= 60; tick += 1) {
+      harness.actor.send({
+        type: 'revisionMinted',
+        checkoutId: 'live',
+        trigger: 'save',
+        revisionId: `r${String(tick)}`,
+      });
+      harness.clock.advance(500);
+      // oxlint-disable-next-line no-await-in-loop -- the machine's own invocations start on the next task.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      if (harness.effects.running('push') > 0) {
+        pushStarts.push(tick * 500);
+        harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r' }) });
+        // oxlint-disable-next-line no-await-in-loop -- the queue write settles each push before the next mint.
+        await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+      }
+    }
+
+    expect(pushStarts[0]).toBeLessThanOrEqual(4000);
+    const gaps = pushStarts.slice(1).map((at, index) => at - (pushStarts[index] ?? 0));
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(4500);
+    expect(pushStarts.length).toBeGreaterThanOrEqual(6);
+    expect(machineModule.syncDebounceMaxWaitMilliseconds).toBe(4000);
+
+    harness.stop();
+  });
+
+  it('row 58 (rule 19, RV-W5b F5): a refused stream is only the wake-up channel; the git fetch is what is classified', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.holds.sendBack('remoteMoves', {
+      type: 'remoteRefused',
+      code: 'REMOTE_UNAUTHORIZED',
+      message: 'This credential cannot read the stream.',
+    });
+
+    /* A repository-scoped credential is refused on every non-git route (I10): the pull still works. */
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+    });
+    expect(harness.actor.getSnapshot().matches('failed')).toBe(false);
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+
+    /* The same refusal on the fetch is the one the classifier names. */
+    harness.holds.sendBack('remoteMoves', { type: 'remoteRefused', code: 'REMOTE_NOT_FOUND', message: 'x' });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      error: Object.assign(new Error('Project not found.'), { code: 'REMOTE_NOT_FOUND' }),
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ reason: 'notFound' });
+
+    harness.stop();
+  });
+
+  it('row 61 (RV-W5b F2): a hold the cut cannot mint re-pulls at most once, then backs off', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await moveRemote(harness, 2);
+
+    /* The clock never moves: every fetch here is an immediate re-pull. */
+    for (let answer = 1; answer <= 6; answer += 1) {
+      if (harness.effects.running('fetch') === 0) {
+        break;
+      }
+      harness.effects.settle('fetch', fastForwardFetched);
+      // eslint-disable-next-line no-await-in-loop -- one hold, one answer, in order.
+      await settleWhenRunning(harness.effects, 'fastForward', {
+        output: { status: 'held', hold: 'dirty', checkoutId: 'live', revisionId: 'remote-2' },
+      });
+      // eslint-disable-next-line no-await-in-loop -- one hold, one answer, in order.
+      await vi.waitFor(() => {
+        expect(harness.actor.getSnapshot().matches('minting')).toBe(true);
+      });
+      harness.actor.send({
+        type: 'nothingToSave',
+        checkoutId: 'live',
+        trigger: 'merge',
+        requestId: `sync-${String(answer)}`,
+      });
+      // eslint-disable-next-line no-await-in-loop -- let the answer settle before reading it.
+      await vi.waitFor(() => {
+        expect(harness.actor.getSnapshot().matches('minting')).toBe(false);
+      });
+    }
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
+    /* The backoff's pull asks again. */
+    harness.clock.advance(5000);
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(4);
+    });
+
+    harness.stop();
+  });
+
+  it('row 62 (RV-W5b F7): a parked apply is remembered, so leaving the park any way pulls again', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await moveRemote(harness, 2);
+    harness.effects.settle('fetch', fastForwardFetched);
+    await settleWhenRunning(harness.effects, 'fastForward', {
+      output: { status: 'held', hold: 'leased', checkoutId: 'live', revisionId: 'remote-2' },
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('awaitingLease')).toBe(true);
+    });
+
+    /* The page's own keepalive POST is answered while parked (A32). */
+    harness.actor.send({ type: 'pushAcknowledged', refs: [{ name: mainRef, status: 'upToDate', head: 'local' }] });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
+    });
+
+    harness.stop();
   });
 });

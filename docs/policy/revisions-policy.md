@@ -336,7 +336,7 @@ Treat `REMOTE_UNAUTHORIZED`, `REMOTE_NOT_ENTITLED`, `REMOTE_NOT_FOUND`, `REMOTE_
 
 Render the reason on every surface showing **Not backed up**, `failed`, `reconnectRequired`, or a connect error, with exactly one action matching the class — _Sign in_, _Upgrade_, _Reconnect GitHub_, _Sync now_, _Open Revisions_, or _Retry_.
 
-Consult `canSyncFiles` and `canConnectGitHub` before offering Tau Cloud or a Git remote. Show an unentitled account the existing upgrade affordance and never issue a connect on its behalf. Register nothing on the server before the plan admits it: a failed connect must leave no remote in Git config, no durable-queue mutation, and no server row.
+Consult `canSyncFiles` before offering Tau Cloud; a Git remote, GitHub included, is offered on every plan. Show an unentitled account the existing upgrade affordance and never issue a connect on its behalf. Register nothing on the server before the plan admits it: a failed connect must leave no remote in Git config, no durable-queue mutation, and no server row.
 
 Answer git-facing refusals as `text/plain` when the request carries no `Origin`, so stock Git prints the sentence; keep the JSON envelope for browsers and carry CORS headers on every 401.
 

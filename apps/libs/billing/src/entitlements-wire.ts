@@ -15,7 +15,6 @@ export const wireEntitlementsSchema = z.object({
   canUseProKernels: z.boolean(),
   canCreatePrivateShares: z.boolean(),
   canSyncFiles: z.boolean(),
-  canConnectGitHub: z.boolean(),
   canConnectEnterpriseGit: z.boolean(),
   apiCadGatewayMonthlyLimit: z.number().nullable(),
   conversionApiMonthlyLimit: z.number().nullable(),

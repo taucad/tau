@@ -23,7 +23,6 @@ const github = vi.hoisted(() => ({
   branch: vi.fn(),
 }));
 const desktop = vi.hoisted(() => ({ current: false }));
-const plan = vi.hoisted(() => ({ canConnectGitHub: true, isResolved: true, requestUpgrade: vi.fn() }));
 const session = vi.hoisted((): { current: { user: { id: string } } | undefined } => ({
   current: { user: { id: 'tau-user' } },
 }));
@@ -36,10 +35,6 @@ vi.mock('#filesystem/desktop-bridge.js', () => ({
   get isDesktopTarget() {
     return desktop.current;
   },
-}));
-vi.mock('#cloud/commercial-features.js', () => ({
-  CommercialUpgradeLabel: () => 'Upgrade',
-  useCommercialFeatures: () => plan,
 }));
 
 const renderPicker = (ui: React.JSX.Element): RenderResult =>
@@ -75,8 +70,6 @@ describe('GithubRepositoryPicker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     desktop.current = false;
-    plan.canConnectGitHub = true;
-    plan.isResolved = true;
     session.current = { user: { id: 'tau-user' } };
     github.configuration.mockResolvedValue({ installUrl: 'https://github.com/apps/tau/installations/new' });
     HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -182,17 +175,6 @@ describe('GithubRepositoryPicker', () => {
 
     expect(await screen.findByText(/GitHub connection isn’t set up on this deployment/u)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeDisabled();
-  });
-
-  it('should offer the upgrade instead of the picker when the plan cannot connect GitHub', async () => {
-    plan.canConnectGitHub = false;
-
-    renderPicker(<GithubRepositoryPicker onSelect={vi.fn()} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Upgrade' }));
-
-    expect(screen.getByText(/available on Pro/u)).toBeInTheDocument();
-    expect(plan.requestUpgrade).toHaveBeenCalledOnce();
-    expect(github.list).not.toHaveBeenCalled();
   });
 
   it('should stop the desktop poll on a failed callback and say why', async () => {

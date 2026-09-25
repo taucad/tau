@@ -77,8 +77,6 @@ export type RevisionSyncRegionProps = {
    */
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the `useCommercialFeatures()` entitlement field.
   readonly canSyncFiles?: boolean;
-  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the `useCommercialFeatures()` entitlement field.
-  readonly canConnectGitHub?: boolean;
   /** Take a free account to the plan surface; the pane supplies the route. */
   readonly onUpgrade?: () => void;
   /** Where *Sign in* goes when the remote answered 401 (N3). */
@@ -462,7 +460,6 @@ export function RevisionSyncRegion({
   syncLargeExports,
   onSyncLargeExportsChange,
   canSyncFiles = true,
-  canConnectGitHub = true,
   onUpgrade,
   signInHref,
   role,
@@ -611,10 +608,10 @@ export function RevisionSyncRegion({
   };
 
   const requestConnection = async (pending: PendingConnection): Promise<void> => {
-    /* N4: a free account issues **no** connect. The radio is already disabled;
-     * this is the one funnel every kind passes through, including the GitHub
-     * picker's own `onSelect`. */
-    if (pending.kind === 'tau' ? !canSyncFiles : !canConnectGitHub) {
+    /* N4: an account without Tau Cloud sync issues **no** Tau connect. The
+     * radio is already disabled; this is the one funnel every kind passes
+     * through. A Git remote, GitHub included, is on every plan. */
+    if (pending.kind === 'tau' && !canSyncFiles) {
       onUpgrade?.();
       return;
     }
@@ -769,12 +766,11 @@ export function RevisionSyncRegion({
             {canSyncFiles ? null : <PlanGate onUpgrade={onUpgrade} />}
           </div>
           <div className='flex items-center gap-2'>
-            <RadioGroupItem id='remote-git' value='git' disabled={!canConnectGitHub} />
+            <RadioGroupItem id='remote-git' value='git' />
             <GitBranch aria-hidden className='size-4 shrink-0 text-muted-foreground' />
-            <Label htmlFor='remote-git' className={cn('font-normal', !canConnectGitHub && 'text-muted-foreground')}>
+            <Label htmlFor='remote-git' className='font-normal'>
               Git remote
             </Label>
-            {canConnectGitHub ? null : <PlanGate onUpgrade={onUpgrade} />}
           </div>
         </RadioGroup>
       )}

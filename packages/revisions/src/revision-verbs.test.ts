@@ -156,6 +156,18 @@ describe('revision verbs', () => {
     ]);
   });
 
+  /* W1 Details: the Tree row reads the id the log already carries, never a second read per row. */
+  it("carries each revision's tree id onto its row", async () => {
+    const port = await openPort();
+    await port.setHead('main');
+    const first = await record(port, { parents: [], content: 'one', actorId: 'ada', summary: 'First' });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: first });
+
+    const [row] = await readRevisionLog(port);
+    const recorded = await port.readRevision(first);
+    expect(row?.treeId).toBe(recorded?.treeId);
+  });
+
   it('gives a merged-in revision no number of its own on this branch', async () => {
     const port = await openPort();
     await port.setHead('main');
@@ -282,6 +294,21 @@ describe('revision verbs', () => {
     expect(objectReads.count).toBeLessThanOrEqual(51);
     expect(rows).toHaveLength(50);
     expect(rows.map((row) => row.revisionNumber)).toEqual(Array.from({ length: 50 }, (_, index) => 81 - index));
+  });
+
+  /* B2: a surface holding one page reads an older revision on its own, numbered as the whole history numbers it. */
+  it('reads one revision older than the page by id, with its Rev N, in a bounded read', async () => {
+    const port = await openMemoryPort();
+    await history(port, 80, 'e6-from');
+    const whole = await readRevisionLog(port);
+    const old = whole.find((row) => row.revisionNumber === 12)!;
+    objectReads.count = 0;
+
+    const rows = await readRevisionLog(port, { from: old.revisionId, limit: 1 });
+
+    expect(rows).toStrictEqual([old]);
+    expect(objectReads.count).toBeLessThanOrEqual(2);
+    await expect(readRevisionLog(port, { from: 'f'.repeat(40), limit: 1 })).resolves.toStrictEqual([]);
   });
 
   it('numbers a bounded page read cold exactly as the whole history does', async () => {

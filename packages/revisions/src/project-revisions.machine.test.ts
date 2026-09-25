@@ -792,6 +792,45 @@ describe('projectRevisionsMachine', () => {
     actor.stop();
   });
 
+  /* W1 palette/strip: offer Undo restore exactly when the machine would answer it, never UNDO_UNAVAILABLE. */
+  it('says a restore is undoable only while its row is the selected head this root minted (M1)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks } = harness;
+    /* A reload, or a restore another device made: the head is a restore row this root never minted. */
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    expect(selectRevisionStatus(actor.getSnapshot()).restore.undoable).toBe(false);
+
+    actor.getSnapshot().children['restore']?.send({ type: 'restore', revisionId: 'rev-3' });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
+    await flush();
+    promises.settle('computePlan', {
+      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3, removedPathCount: 0, dirty: false },
+    });
+    await flush();
+    promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
+    await flush();
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-3', cutId: 'cut-2' } });
+    await flush();
+    promises.settle('writeRevision', { output: { revisionId: 'rev-6' } });
+    await flush();
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-6' } });
+    await flush();
+    expect(selectRevisionStatus(actor.getSnapshot()).restore.undoable).toBe(true);
+
+    /* A save on top: the restore row is history now, and Undo would not reverse the newest change. */
+    actor.send({
+      type: 'checkoutStatusChanged',
+      checkoutId: 'checkout-live',
+      status: 'clean',
+      headRevisionId: 'rev-7',
+    });
+    expect(selectRevisionStatus(actor.getSnapshot()).restore.undoable).toBe(false);
+
+    actor.stop();
+  });
+
   it('refuses a restore on a checkout a turn holds before any cut, in Switch’s words (A1)', () => {
     const harness = start();
     const { actor, promises } = harness;
@@ -924,7 +963,14 @@ describe('projectRevisionsMachine', () => {
       attention: 0,
       /* The restore child is idle until someone asks for a restore, and the
        * plan's two risk facts are read from it rather than copied (S19). */
-      restore: { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined },
+      restore: {
+        asking: false,
+        busy: false,
+        removedPathCount: 0,
+        dirty: false,
+        revisionNumber: undefined,
+        undoable: false,
+      },
       /* Same rule for the remote child: the facet is read from it, and it is
          still reading git's remotes list here (S26 shows *Sync* only once a
          remote exists, D26). */
@@ -1433,6 +1479,67 @@ describe('projectRevisionsMachine', () => {
     /* The registry's own announcement is what settles the delegated verb. */
     expect(harness.actor.getSnapshot().children.branch?.getSnapshot().matches('idle')).toBe(true);
     expect(selectRevisionStatus(harness.actor.getSnapshot()).branches.map((row) => row.name)).toContain('enclosure-v2');
+
+    harness.actor.stop();
+  });
+
+  /* A registry still loading takes no verb: a *New branch* from a named base
+   * asked for then was dropped, and waited out its whole bound (W4 a3b). */
+  it('asks the registry for a branch sent before the registry answered, once it answers', async () => {
+    const harness = start();
+
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2', from: 'rev-12' } });
+    await flush();
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
+
+    await readyRegistry(harness);
+
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([
+      { projectId: 'project-1', branch: 'enclosure-v2', from: 'rev-12' },
+    ]);
+    harness.promises.settle('addCheckout', {
+      error: Object.assign(new Error('no such revision'), { code: 'UNKNOWN_REVISION' }),
+    });
+    await flush();
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reasonCode).toBe('UNKNOWN_REVISION');
+
+    harness.actor.stop();
+  });
+
+  /* The clock never moves here, so a verb the registry dropped would sit busy
+   * forever instead of failing at its 30 s bound (W4 a3c). */
+  it('makes a new branch asked for while a lease is retiring, once the retirement lands', async () => {
+    const harness = start();
+    await readyRegistry(harness, [live, { ...linked, leaseRunIds: ['run-9'] }]);
+    harness.actor.send({ type: 'leaseStale', runId: 'run-9' });
+    await flush();
+    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([{ projectId: 'project-1', runId: 'run-9' }]);
+
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2', from: 'rev-12' } });
+    await flush();
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
+    harness.promises.settle('retireRegistryLease', { output: undefined });
+    await flush();
+
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([
+      { projectId: 'project-1', branch: 'enclosure-v2', from: 'rev-12' },
+    ]);
+
+    harness.actor.stop();
+  });
+
+  it('refuses a new branch at once when the registry failed to open', async () => {
+    const harness = start();
+    harness.promises.settle('sweepLeases', { error: new Error('no runs directory') });
+    await flush();
+
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2', from: 'rev-12' } });
+    await flush();
+
+    /* `failed` is transient: the verb is back to idle, carrying the open's refusal. */
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).branchVerb.busy).toBe(false);
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reason).toBe('no runs directory');
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
 
     harness.actor.stop();
   });

@@ -93,6 +93,16 @@ type CheckoutMachineContextFields = Readonly<{
   writeGeneration: number;
   /** The write generation the running mint cut at. */
   cutGeneration: number;
+  /**
+   * The paths written since the last cut took them (NS15, E1).
+   *
+   * `undefined` is "unknown": the next capture reads every file. A checkout
+   * spawns there and returns there whenever its head moves, so the first capture
+   * against any head is a whole one (D4, I6).
+   */
+  changedPaths: readonly string[] | undefined;
+  /** The paths the running mint took; a mint that fails gives them back. */
+  cutPaths: readonly string[] | undefined;
   /** The request the current mint serves. */
   pending: CheckoutCutRequest | undefined;
   /** Requests that arrived while a mint was running, served in order. */
@@ -169,11 +179,25 @@ export type CheckoutMachineEmitted =
       headRevisionId?: string;
     }>;
 
-/** Input of the injected `cut` actor: hash the checkout's versioned tree. @public */
-export type CheckoutCutActorInput = Readonly<{ checkoutId: string; trigger: CheckoutCutTrigger }>;
+/**
+ * Input of the injected `cut` actor: hash the checkout's versioned tree.
+ *
+ * `changedPaths` names every path written since the previous cut, or is absent
+ * when that is unknown; a host whose change feed is complete re-reads only those (E1).
+ *
+ * @public
+ */
+export type CheckoutCutActorInput = Readonly<{
+  checkoutId: string;
+  trigger: CheckoutCutTrigger;
+  changedPaths?: readonly string[] | undefined;
+}>;
 
 /** Input of the injected `captureTree` actor: hash the live tree without holding it (D4). @public */
-export type CheckoutCaptureTreeActorInput = Readonly<{ checkoutId: string }>;
+export type CheckoutCaptureTreeActorInput = Readonly<{
+  checkoutId: string;
+  changedPaths?: readonly string[] | undefined;
+}>;
 
 /** Output of the injected `captureTree` actor. @public */
 export type CheckoutCaptureTreeActorOutput = Readonly<{ treeId: string }>;
@@ -324,16 +348,40 @@ const movedHead = (
   event: Extract<CheckoutMachineEvent, { type: 'headChanged' }>,
 ): boolean => event.revisionId !== context.headRevisionId;
 
+/*
+ * A moved head also forgets the changed paths, so the capture that compares
+ * the files with it reads all of them. Nothing about a head enters a capture —
+ * the files a switch or a fast-forward writes reach `changed` like any other
+ * write — so this is belt and braces for a host whose applies bypass its feed,
+ * paid once per head move, not per save.
+ */
 const adoptHead = (event: Extract<CheckoutMachineEvent, { type: 'headChanged' }>): Partial<CheckoutMachineContext> => ({
   headRevisionId: event.revisionId,
   headTreeId: event.treeId,
+  changedPaths: undefined,
 });
+
+/* ponytail: past this many distinct paths a whole capture is as cheap as the list; the next one reads everything. */
+const changedPathLimit = 1024;
+
+/* Two changed-path sets as one; unknown absorbs everything (E1). */
+const unionPaths = (
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): readonly string[] | undefined => {
+  if (left === undefined || right === undefined) {
+    return undefined;
+  }
+  const union = [...new Set([...left, ...right])];
+  return union.length > changedPathLimit ? undefined : union;
+};
 
 const recordWrite = (
   context: CheckoutMachineContext,
   event: Extract<CheckoutMachineEvent, { type: 'changed' }>,
 ): Partial<CheckoutMachineContext> => ({
   writeGeneration: Math.max(context.writeGeneration, event.generation),
+  changedPaths: unionPaths(context.changedPaths, event.paths),
 });
 
 const takeRequest = (
@@ -489,6 +537,8 @@ const checkoutMachineDefinition = setup({
     parentRef: input.parentRef,
     writeGeneration: 0,
     cutGeneration: 0,
+    changedPaths: undefined,
+    cutPaths: undefined,
     pending: undefined,
     queued: [],
     cutId: undefined,
@@ -553,7 +603,7 @@ const checkoutMachineDefinition = setup({
           entry: () => ({ context: { treeCompared: true } }),
           invoke: {
             src: 'captureTree',
-            input: ({ context }) => ({ checkoutId: context.checkoutId }),
+            input: ({ context }) => ({ checkoutId: context.checkoutId, changedPaths: context.changedPaths }),
             onDone: ({ context, event }) =>
               event.output.treeId === context.headTreeId ? { target: 'rested' } : { target: '#checkout.dirty' },
             onError: { target: 'rested' },
@@ -590,7 +640,7 @@ const checkoutMachineDefinition = setup({
           entry: () => ({ context: { treeCompared: true } }),
           invoke: {
             src: 'captureTree',
-            input: ({ context }) => ({ checkoutId: context.checkoutId }),
+            input: ({ context }) => ({ checkoutId: context.checkoutId, changedPaths: context.changedPaths }),
             onDone: ({ context, event }) =>
               event.output.treeId === context.headTreeId ? { target: '#checkout.clean' } : { target: 'quiet' },
             onError: { target: 'quiet' },
@@ -631,7 +681,11 @@ const checkoutMachineDefinition = setup({
     minting: {
       entry: ({ context }, enq) => {
         reportStatus(context, enq, 'minting');
-        return { context: { cutGeneration: context.writeGeneration } };
+        /* The paths are taken with the generation (F4): a write after this
+         * point is the next cut's, and leaves this checkout dirty. */
+        return {
+          context: { cutGeneration: context.writeGeneration, cutPaths: context.changedPaths, changedPaths: [] },
+        };
       },
       invoke: {
         id: 'fence',
@@ -672,6 +726,7 @@ const checkoutMachineDefinition = setup({
             input: ({ context }) => ({
               checkoutId: context.checkoutId,
               trigger: context.pending?.trigger ?? 'save',
+              changedPaths: context.cutPaths,
             }),
             onDone: ({ context, event, guards }, enq) => {
               if (guards.treeUnchanged(context, event.output.treeId)) {
@@ -753,7 +808,11 @@ const checkoutMachineDefinition = setup({
         input: ({ context }) => ({ checkoutId: context.checkoutId }),
         onDone: {
           target: 'dirty',
-          context: ({ event }) => ({ headRevisionId: event.output.revisionId, headTreeId: event.output.treeId }),
+          context: ({ event }) => ({
+            headRevisionId: event.output.revisionId,
+            headTreeId: event.output.treeId,
+            changedPaths: undefined,
+          }),
         },
         onError: {
           target: 'failed',
@@ -767,7 +826,10 @@ const checkoutMachineDefinition = setup({
         announce(context, enq, { type: 'cutFailed', reason: context.reason ?? 'The cut failed.' });
         const drained = failQueuedRequests(context, enq);
         reportStatus(context, enq, 'failed');
-        return { context: drained };
+        /* The failed mint's paths are still unrecorded: the next cut reads them again. */
+        return {
+          context: { ...drained, changedPaths: unionPaths(context.cutPaths, context.changedPaths), cutPaths: [] },
+        };
       },
       on: {
         changed: { target: 'dirty', context: ({ context, event }) => recordWrite(context, event) },

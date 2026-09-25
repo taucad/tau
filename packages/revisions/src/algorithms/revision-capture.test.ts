@@ -613,6 +613,24 @@ describe('captureRevisionTree changedSince (E1)', () => {
     expect(incremental.size).toBe(previous.size);
   });
 
+  it('should not read a changed path that is itself excluded, though it is still on disk', async () => {
+    const { filesystem, reads } = await project();
+    const staged = 'src/1/.file-4.ts.tau-staged.0.tmp';
+    const excludeStaged = (path: string): boolean => exclude(path) || path.endsWith('.tmp');
+    const previous = await captureRevisionTree(filesystem, { exclude: excludeStaged });
+    await filesystem.writeFile(staged, 'half written\n');
+    reads.mockClear();
+
+    const incremental = await captureRevisionTree(filesystem, {
+      exclude: excludeStaged,
+      changedSince: { tree: previous, paths: [staged] },
+    });
+
+    expect(reads).not.toHaveBeenCalled();
+    expect(incremental.has(staged)).toBe(false);
+    expect(incremental.size).toBe(previous.size);
+  });
+
   it('should walk everything when a changed path names the root', async () => {
     const { filesystem, reads } = await project();
     const previous = await captureRevisionTree(filesystem, { exclude });

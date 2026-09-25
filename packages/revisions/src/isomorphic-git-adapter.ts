@@ -85,6 +85,8 @@ import type {
   RevisionConflict,
   RevisionDiffEntry,
   RevisionDiffInput,
+  RevisionDivergence,
+  RevisionDivergenceInput,
   RevisionEngineDescriptor,
   RevisionHead,
   RevisionLogEntry,
@@ -391,6 +393,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       id,
       changeId: commit.changeId ?? '',
       parents: Object.freeze(commit.parents.map((parent) => revisionId(parent))),
+      treeId: commit.tree,
       summary: trailer?.summary ?? { generated: commit.message.split('\n')[0] ?? '' },
       provenance: trailer?.provenance ?? unattributed,
       conflicted: commit.conflictedTrees !== undefined,
@@ -1095,6 +1098,69 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           input?.limit,
         ),
       );
+    },
+
+    /*
+     * Paint both heads down in committer-time order, each revision marked with
+     * the heads that reach it, until nothing still queued could change a count: every queued revision
+     * is reachable from both, and none is as new as a one-sided revision it
+     * might yet reach. Below that line the two histories are the same, so
+     * neither log is ever walked (git's merge-base walk, and its assumption of
+     * a non-decreasing committer time from parent to child, as `log`'s bounded
+     * walk makes).
+     *
+     * ponytail: the queue and the one-sided minimum are rescanned per step,
+     * quadratic in the diverged region only; a heap if two lines ever diverge
+     * by thousands of revisions.
+     */
+    divergence: async (input: RevisionDivergenceInput): Promise<RevisionDivergence> => {
+      /* Which head reaches each revision read so far. */
+      const sides = new Map<string, 'head' | 'base' | 'both'>();
+      const nodes = new Map<string, Readonly<{ parents: readonly string[]; seconds: number }>>();
+      const queue = new Set<string>();
+      const paint = async (id: string, side: 'head' | 'base' | 'both'): Promise<void> => {
+        const held = sides.get(id);
+        const joined = held === undefined || held === side ? side : 'both';
+        if (joined === held) {
+          return;
+        }
+        if (!nodes.has(id)) {
+          const commit = await requireCommit(revisionId(id));
+          nodes.set(id, { parents: commit.parents, seconds: commit.committer.seconds });
+        }
+        sides.set(id, joined);
+        queue.add(id);
+      };
+      const secondsOf = (id: string): number => nodes.get(id)?.seconds ?? 0;
+      const unsettled = (): boolean => {
+        let oldestOneSided = Number.POSITIVE_INFINITY;
+        for (const [id, side] of sides) {
+          if (side !== 'both') {
+            oldestOneSided = Math.min(oldestOneSided, secondsOf(id));
+          }
+        }
+        return [...queue].some((id) => sides.get(id) !== 'both' || secondsOf(id) >= oldestOneSided);
+      };
+      await paint(input.head, 'head');
+      await paint(input.base, 'base');
+      while (unsettled()) {
+        let newest: string | undefined;
+        for (const id of queue) {
+          if (newest === undefined || secondsOf(id) > secondsOf(newest)) {
+            newest = id;
+          }
+        }
+        queue.delete(newest!);
+        for (const parent of nodes.get(newest!)?.parents ?? []) {
+          // oxlint-disable-next-line no-await-in-loop -- the walk is the order: each read decides what is read next.
+          await paint(parent, sides.get(newest!)!);
+        }
+      }
+      const sided = [...sides.values()];
+      return Object.freeze({
+        ahead: sided.filter((side) => side === 'head').length,
+        behind: sided.filter((side) => side === 'base').length,
+      });
     },
 
     diff: async (input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]> => {

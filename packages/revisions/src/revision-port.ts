@@ -75,11 +75,18 @@ export type RevisionRecord = Readonly<{
   receipt: RevisionReceipt;
 }>;
 
-/** One graph node as `log` reports it. Tree-free by contract. @public */
+/**
+ * One graph node as `log` reports it. Tree-free by contract: the tree's id is
+ * on the commit the walk already read, and no tree object is ever opened.
+ *
+ * @public
+ */
 export type RevisionLogEntry = Readonly<{
   id: RevisionId;
   changeId: string;
   parents: readonly RevisionId[];
+  /** Object id of the tree this revision carries, as {@link RevisionRecord.treeId}. */
+  treeId: string;
   summary: RevisionSummary;
   provenance: RevisionProvenance;
   conflicted: boolean;
@@ -206,6 +213,25 @@ export type RevisionLogInput = Readonly<{
   /** Heads to walk back from. Every recorded revision when absent. */
   heads?: readonly RevisionId[];
   limit?: number;
+}>;
+
+/** Two heads to compare by reachability. @public */
+export type RevisionDivergenceInput = Readonly<{
+  head: RevisionId;
+  base: RevisionId;
+}>;
+
+/**
+ * How far two heads have gone apart, as `git rev-list --left-right --count
+ * head...base` counts it.
+ *
+ * @public
+ */
+export type RevisionDivergence = Readonly<{
+  /** Revisions reachable from `head` and not from `base`. */
+  ahead: number;
+  /** Revisions reachable from `base` and not from `head`. */
+  behind: number;
 }>;
 
 /** Input for a tree-free path diff. @public */
@@ -485,6 +511,11 @@ export type RevisionPort = Readonly<{
    * may place a parent before a child (review 4 R39).
    */
   log(input?: RevisionLogInput): Promise<readonly RevisionLogEntry[]>;
+  /**
+   * Count what each of two heads has that the other lacks, without listing
+   * either history: the walk stops at their common ancestry.
+   */
+  divergence(input: RevisionDivergenceInput): Promise<RevisionDivergence>;
   diff(input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]>;
   /** Every ref the remote advertises, without fetching an object. */
   listRemoteRefs(remote: string): Promise<readonly RemoteRef[]>;

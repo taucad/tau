@@ -423,8 +423,42 @@ const conformance = (adapter: Adapter): void => {
         'parents',
         'provenance',
         'summary',
+        'treeId',
       ]);
     });
+
+    it("carries each revision's tree id on its log row, the same one readRevision names", async () => {
+      const entries = await port.log({ heads: [child] });
+      const records = await Promise.all([child, base].map(async (id) => port.readRevision(id)));
+      expect(entries.map((entry) => entry.treeId)).toStrictEqual(records.map((record) => record?.treeId));
+      expect(entries[0]?.treeId).toMatch(/^[\da-f]{40}$/u);
+    });
+
+    it('counts what each of two heads has that the other lacks, across a fork and a merge', async () => {
+      const write = async (parents: readonly RevisionId[], content: string): Promise<RevisionId> => {
+        const receipt = await port.writeRevision({
+          parents,
+          tree: tree({ 'a.txt': `${content}\n` }),
+          provenance: provenance('user'),
+          summary: summary(content),
+        });
+        return revisionId(receipt.commitId);
+      };
+      const left1 = await write([child], 'divergence left 1');
+      const left2 = await write([left1], 'divergence left 2');
+      const right1 = await write([child], 'divergence right 1');
+      const merge = await write([left2, right1], 'divergence merge');
+
+      await expect(port.divergence({ head: left2, base: right1 })).resolves.toStrictEqual({ ahead: 2, behind: 1 });
+      await expect(port.divergence({ head: right1, base: left2 })).resolves.toStrictEqual({ ahead: 1, behind: 2 });
+      await expect(port.divergence({ head: left2, base: child })).resolves.toStrictEqual({ ahead: 2, behind: 0 });
+      await expect(port.divergence({ head: child, base: left2 })).resolves.toStrictEqual({ ahead: 0, behind: 2 });
+      await expect(port.divergence({ head: merge, base: right1 })).resolves.toStrictEqual({ ahead: 3, behind: 0 });
+      await expect(port.divergence({ head: left2, base: left2 })).resolves.toStrictEqual({ ahead: 0, behind: 0 });
+      await expect(port.divergence({ head: left2, base: revisionId('0'.repeat(40)) })).rejects.toMatchObject({
+        code: 'UNKNOWN_REVISION',
+      });
+    }, 180_000);
 
     it('never sees a tree whose path collides with a directory (review 4 R27)', () => {
       /* `a` beside `a/b.txt` made `isomorphic-git` write a tree

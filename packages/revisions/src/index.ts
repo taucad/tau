@@ -44,6 +44,8 @@ export type {
   RevisionConflict,
   RevisionDiffEntry,
   RevisionDiffInput,
+  RevisionDivergence,
+  RevisionDivergenceInput,
   RevisionEngineDescriptor,
   RevisionHead,
   RevisionLogEntry,

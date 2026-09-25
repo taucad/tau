@@ -295,15 +295,20 @@ const lfsAccept = (request: FastifyRequest): string | undefined => {
  * The request body, with a ceiling, reusing the shape the LFS relay already
  * uses for its exact-size check below.
  *
- * @param body - The incoming request stream.
+ * The git module parses `application/vnd.git-lfs+json` for its own LFS
+ * endpoints, which drains the raw stream first; that body is forwarded as the
+ * JSON it was, or the upstream receives nothing (D43).
+ *
+ * @param request - The incoming request.
  * @param limitBytes - The most it may carry.
  * @returns A stream that fails once the ceiling is passed.
  */
-const boundedBody = (body: Readable, limitBytes: number): Readable =>
+const boundedBody = (request: FastifyRequest, limitBytes: number): Readable =>
   Readable.from(
     (async function* (): AsyncGenerator<Uint8Array<ArrayBuffer>> {
       let received = 0;
-      for await (const chunk of body) {
+      const parsed = request.body !== undefined && !(request.body instanceof Readable);
+      for await (const chunk of parsed ? [Buffer.from(JSON.stringify(request.body))] : request.raw) {
         const bytes = Uint8Array.from(chunk as Uint8Array<ArrayBuffer>);
         received += bytes.byteLength;
         if (received > limitBytes) {
@@ -479,9 +484,11 @@ export class GitProxyController {
     let target = this.resolveTarget(rawUrl);
     await this.consumeRequestSlot(userId);
     const proxyAuthorization = request.headers[proxyAuthorizationHeader];
+    const accept = lfsAccept(request);
     const headers = new Headers({
-      'user-agent': 'git/tau-proxy',
-      accept: lfsAccept(request) ?? '*/*',
+      /* GitHub's LFS API answers any `git/…` agent with an HTML 403 (D42). */
+      'user-agent': accept === undefined ? 'git/tau-proxy' : 'git-lfs/tau-proxy',
+      accept: accept ?? '*/*',
     });
     if (typeof proxyAuthorization === 'string') {
       headers.set('authorization', proxyAuthorization);
@@ -501,7 +508,7 @@ export class GitProxyController {
       headers,
       ...(request.method === 'POST'
         ? {
-            body: Readable.toWeb(boundedBody(request.raw, proxyRequestLimitBytes)) as ReadableStream,
+            body: Readable.toWeb(boundedBody(request, proxyRequestLimitBytes)) as ReadableStream,
             duplex: 'half',
           }
         : {}),
@@ -701,6 +708,16 @@ export class GitProxyController {
     }
     const target = new URL(record.url);
     const headers = new Headers(record.headers);
+    /* The pinned request sends no agent of its own, and GitHub's LFS verify
+     * refuses an anonymous one with an HTML 403 (D45). */
+    if (!headers.has('user-agent')) {
+      headers.set('user-agent', 'git-lfs/tau-proxy');
+    }
+    /* A presigned S3 PUT refuses a chunked body with 501; the sealed size is
+     * the length, and the stream below enforces it (D46). */
+    if (method === 'PUT') {
+      headers.set('content-length', String(record.size));
+    }
     const contentType = request.headers['content-type'];
     if (typeof contentType === 'string' && !headers.has('content-type')) {
       headers.set('content-type', contentType);
@@ -727,7 +744,7 @@ export class GitProxyController {
               }
             })(),
           )
-        : boundedBody(request.raw, lfsVerifyLimitBytes);
+        : boundedBody(request, lfsVerifyLimitBytes);
     const response = await this.fetchTarget(target, {
       method,
       headers,

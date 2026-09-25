@@ -57,14 +57,14 @@ const relayHandle = '0f8fad5b-d9cb-469f-a165-70867728950e';
 /** The key the batch issued for the relay record in {@link verifyRelayRedis}. */
 let relayKey = '';
 
-/** A Redis holding one sealed verify relay record for `user-1`, aimed at `url`. */
-const verifyRelayRedis = (url: string): RedisService => {
+/** A Redis holding one sealed relay record (a verify unless told) for `user-1`, aimed at `url`. */
+const verifyRelayRedis = (url: string, method: 'POST' | 'PUT' = 'POST'): RedisService => {
   const { sealed, key } = sealRelayRecord(relayHandle, {
     userId: 'user-1',
     oid: 'a'.repeat(64),
     size: 3,
     url,
-    method: 'POST',
+    method,
     headers: { Authorization: 'signed' },
     expiresAt: Date.now() + 60_000,
   });
@@ -438,6 +438,56 @@ describe('GitProxyController', () => {
     expect(accepts).toEqual([lfsMediaType, '*/*', lfsMediaType]);
   });
 
+  it('names itself a git-lfs client on LFS requests, which GitHub refuses from a git or anonymous agent (D42, D45)', async () => {
+    const agents: Array<string | undefined> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        agents.push(new Headers(init.headers).get('user-agent') ?? undefined);
+        return new Response(JSON.stringify({ objects: [] }), { status: 200 });
+      }),
+    );
+
+    const controller = proxyController();
+    await controller.proxyPost(
+      'user-1',
+      { url: 'https://github.com/tau/x.git/info/lfs/objects/batch' },
+      request({ accept: lfsMediaType, 'content-type': lfsMediaType }, 'POST'),
+      reply(),
+    );
+    await controller.proxyGet('user-1', { url: 'https://github.com/tau/x.git/info/refs' }, request({}), reply());
+    /* The relayed verify names itself too: GitHub refuses an anonymous agent (D45). */
+    await proxyController(false, verifyRelayRedis('https://lfs.example.com/verify')).relayPost(
+      'user-1',
+      relayHandle,
+      request({ accept: lfsMediaType, 'x-tau-lfs-key': relayKey }, 'POST', Readable.from([Buffer.from('{}')])),
+      reply(),
+    );
+
+    expect(agents).toEqual(['git-lfs/tau-proxy', 'git/tau-proxy', 'git-lfs/tau-proxy']);
+  });
+
+  it('forwards an LFS batch the git module already parsed, whose raw stream is drained (D43)', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent.push(await new Response(init.body).text());
+        return new Response(JSON.stringify({ objects: [] }), { status: 200 });
+      }),
+    );
+    const batch = { operation: 'upload', objects: [{ oid: 'e3b0', size: 0 }] };
+
+    await proxyController().proxyPost(
+      'user-1',
+      { url: 'https://github.com/tau/x.git/info/lfs/objects/batch' },
+      { ...request({ accept: lfsMediaType, 'content-type': lfsMediaType }, 'POST'), body: batch } as FastifyRequest,
+      reply(),
+    );
+
+    expect(sent.map((body) => JSON.parse(body) as unknown)).toEqual([batch]);
+  });
+
   it('refuses a credentialed redirect to a blocked host as a moved repository without echoing it (D11)', async () => {
     vi.stubGlobal(
       'fetch',
@@ -698,6 +748,37 @@ describe('GitProxyController', () => {
           reply(),
         ),
       ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_REQUEST_TOO_LARGE' } });
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it('sends a relayed object PUT with its sealed length, since S3 answers a chunked one 501 (D46)', async () => {
+    const seen: Array<{ length?: string; encoding?: string }> = [];
+    const server = createServer((incoming, outgoing) => {
+      seen.push({ length: incoming.headers['content-length'], encoding: incoming.headers['transfer-encoding'] });
+      incoming.resume();
+      incoming.once('end', () => outgoing.end());
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      const controller = proxyController(
+        true,
+        verifyRelayRedis(`http://127.0.0.1:${String(port)}/object`, 'PUT'),
+        'pinned',
+      );
+      await controller.relayPut(
+        'user-1',
+        relayHandle,
+        request({ 'x-tau-lfs-key': relayKey }, 'PUT', Readable.from([Buffer.from('abc')])),
+        reply(),
+      );
+
+      expect(seen).toEqual([{ length: '3', encoding: undefined }]);
     } finally {
       server.closeAllConnections();
       server.close();

@@ -16,6 +16,7 @@ import {
   repositoryByteCeiling,
   retentionWindowMilliseconds,
 } from '#api/git/store/limits.js';
+import { markRetired, sweepRepository } from '#api/git/store/sweep.js';
 import {
   ManifestError,
   assertGenerationSucceeds,
@@ -24,11 +25,11 @@ import {
   indexKeyFor,
   encodeManifest,
   isTombstoned,
+  spilledPushLog,
   succeedManifest,
   tombstoneManifest,
 } from '#api/git/store/manifest.js';
-import type { Manifest, ManifestPack, RetiredPack } from '#api/git/store/manifest.js';
-import { sweepRepository } from '#api/git/store/sweep.js';
+import type { Manifest, ManifestPack } from '#api/git/store/manifest.js';
 
 /**
  * The commit protocol: what happens after stock `receive-pack` exits and
@@ -258,27 +259,22 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
     const pack = await uploadPack(store, lease.locator, upload);
     uploaded.push(pack);
   }
-  await args.faults?.('after-pack-upload');
-
-  const retiredNow: RetiredPack[] = hydrated
-    .filter((pack) => compacted && pack.key !== keptPack?.key)
-    .map((pack) => ({ key: pack.key, retiredAt: at.toISOString() }));
-  const previouslyRetired = lease.manifest?.retired ?? [];
-  const keptRetired = previouslyRetired.filter(
-    (entry) => at.getTime() - Date.parse(entry.retiredAt) <= retentionWindowMilliseconds,
-  );
-  const droppedRetired = previouslyRetired.filter((entry) => !keptRetired.includes(entry)).map((entry) => entry.key);
+  // Retirement is recorded before the manifest that drops these packs, so no
+  // committed manifest ever leaves a live-until-now pack without its marker.
+  await markRetired({
+    store,
+    locator: lease.locator,
+    packKeys: hydrated.filter((pack) => compacted && pack.key !== keptPack?.key).map((pack) => pack.key),
+    at,
+  });
 
   const next = succeedManifest(
     lease.manifest,
-    {
-      refs: references,
-      packs: [...retainedLive, ...uploaded],
-      retired: [...keptRetired, ...retiredNow],
-      committedBy: args.committedBy,
-    },
+    { refs: references, packs: [...retainedLive, ...uploaded], committedBy: args.committedBy },
     at,
   );
+  await writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next });
+  await args.faults?.('after-pack-upload');
 
   if (lease.manifest !== undefined) {
     // A self-check on the succession this commit is about to write: the base a
@@ -299,28 +295,28 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
 
   /*
    * Past this line the push is durable and the client is owed the truth about
-   * it (NI2). The sweep is housekeeping on garbage nothing reads: if it fails,
-   * or the worker dies inside it, the keys it would have removed simply wait
-   * for the next compacting committer. Rejecting here would tell a client its
-   * committed push failed, which is the one lie this protocol must not tell.
+   * it (NI2). The sweep is housekeeping on garbage nothing reads, and only the
+   * compacting holder runs it: if it fails, or the worker dies inside it, the
+   * keys it would have removed simply wait for the next compacting committer.
+   * Rejecting here would tell a client its committed push failed, which is the
+   * one lie this protocol must not tell.
    */
   let swept: readonly string[] = [];
-  try {
-    swept = await sweepRepository({
-      store,
-      locator: lease.locator,
-      committed: next,
-      droppedRetired,
-      at,
-      // Orphan discovery rides the listing the compacting holder is already doing.
-      scanOrphans: compacted,
-      ...(args.faults === undefined ? {} : { faults: args.faults }),
-    });
-  } catch (error) {
-    logger.warn(
-      `sweep after generation ${String(next.generation)} of ${lease.locator.projectId} failed; ` +
-        `${String(droppedRetired.length)} retired keys and any orphans remain for the next committer: ${String(error)}`,
-    );
+  if (compacted) {
+    try {
+      swept = await sweepRepository({
+        store,
+        locator: lease.locator,
+        committed: next,
+        at,
+        ...(args.faults === undefined ? {} : { faults: args.faults }),
+      });
+    } catch (error) {
+      logger.warn(
+        `sweep after generation ${String(next.generation)} of ${lease.locator.projectId} failed; ` +
+          `expired and orphaned keys remain for the next compacting committer: ${String(error)}`,
+      );
+    }
   }
 
   return {
@@ -421,6 +417,28 @@ const putFile = async (args: {
   await store.putObject(locator, key, body, {
     contentLength: body.byteLength,
     sha256: createHash('sha256').update(body).digest('base64'),
+  });
+};
+
+/**
+ * Stores the push-log segment `next` spilled, if it spilled one (EQ11,
+ * W13b). Every writer of a successor calls this before its manifest write,
+ * so a committed `earlierPushes` always names a segment that exists.
+ */
+export const writeSpilledPushLog = async (args: {
+  store: RepositoryStore;
+  locator: RepositoryLocator;
+  base: Manifest | undefined;
+  next: Manifest;
+}): Promise<void> => {
+  const { store, locator } = args;
+  const segment = spilledPushLog(args.base, args.next);
+  if (segment === undefined) {
+    return;
+  }
+  await store.putObject(locator, segment.key, segment.bytes, {
+    contentLength: segment.bytes.byteLength,
+    sha256: createHash('sha256').update(segment.bytes).digest('base64'),
   });
 };
 
@@ -542,7 +560,6 @@ export const commitTombstone = async (args: {
           {
             refs: {},
             packs: [],
-            retired: [],
             committedBy: args.committedBy,
             tombstone: {
               tombstonedAt: at.toISOString(),
@@ -559,6 +576,7 @@ export const commitTombstone = async (args: {
           ...(args.erasureVerified === undefined ? {} : { erasureVerified: args.erasureVerified }),
         });
 
+  await writeSpilledPushLog({ store: args.store, locator: args.locator, base: current, next });
   const token = await args.store.commitManifest(args.locator, encodeManifest(next), read?.token ?? 'absent');
   if (token === 'lost') {
     throw new RepositoryStoreError('lost', `another writer changed ${args.locator.projectId} before the tombstone`);

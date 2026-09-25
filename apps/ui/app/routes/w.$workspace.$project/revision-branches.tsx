@@ -117,6 +117,7 @@ function ConflictCard({
   const target = into ?? conflict.labels?.ours ?? 'the other branch';
   const count = conflict.paths.length;
   const [modes, setModes] = useState<Readonly<Record<string, 'compare' | 'edit'>>>({});
+  const undecided = conflict.paths.filter((path) => path.side === undefined).length;
 
   return (
     <div className='flex flex-col gap-2 pl-5'>
@@ -251,7 +252,9 @@ function ConflictCard({
       </ul>
       {conflict.ready ? null : (
         <p className='text-xs text-muted-foreground'>
-          {`${String(conflict.paths.filter((path) => path.side === undefined).length)} file${conflict.paths.filter((path) => path.side === undefined).length === 1 ? '' : 's'} still need a choice before the merge can finish.`}
+          {undecided === 1
+            ? '1 file still needs a choice before the merge can finish.'
+            : `${String(undecided)} files still need a choice before the merge can finish.`}
         </p>
       )}
       <div className='flex flex-wrap items-center justify-between gap-2'>

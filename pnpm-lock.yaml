@@ -543,6 +543,9 @@ catalogs:
     nanoid:
       specifier: ^5.1.14
       version: 5.1.14
+    nanoraster:
+      specifier: ^0.5.2
+      version: 0.5.2
     netlify-cli:
       specifier: ^25.6.2
       version: 25.6.2
@@ -781,8 +784,6 @@ catalogs:
 overrides:
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
   '@types/express': ^5.0.0
-  nanoraster: https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2
-  nanoraster-darwin-arm64: https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2
   replicad: npm:@taulabs/replicad@0.23.4-beta.2
   replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
   vitest: 4.1.11
@@ -1988,8 +1989,8 @@ importers:
         specifier: 'catalog:'
         version: 0.3.0
       nanoraster:
-        specifier: https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2
-        version: https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2
+        specifier: 'catalog:'
+        version: 0.5.2
       pino-pretty:
         specifier: 'catalog:'
         version: 13.1.3
@@ -3764,8 +3765,8 @@ importers:
         specifier: 'catalog:'
         version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
       nanoraster:
-        specifier: https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2
-        version: https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2
+        specifier: 'catalog:'
+        version: 0.5.2
     devDependencies:
       '@taucad/camera':
         specifier: workspace:*
@@ -3777,8 +3778,8 @@ importers:
         specifier: 'catalog:'
         version: 1.7.2(next@16.3.2(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(@types/node@26.3.0)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))
       nanoraster-darwin-arm64:
-        specifier: https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2
-        version: https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2
+        specifier: 0.5.2
+        version: 0.5.2
       vite:
         specifier: 'catalog:'
         version: 8.0.10(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
@@ -21682,127 +21683,110 @@ packages:
     engines: {node: ^18 || >=20}
     hasBin: true
 
-  nanoraster-android-arm-eabi@https://pkg.pr.new/taucad/nanoraster/nanoraster-android-arm-eabi@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-pXHilDCL6lMEb2hbckREAOXWnF8geG58Aa5BCtPavTLf9XV0C8vOALivvfUeAPA1voS5Mp12vqONdT3c4uUDKg==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-android-arm-eabi@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-android-arm-eabi@0.5.2:
+    resolution: {integrity: sha512-9MRF27aXz3oRtuO8LMW7uyJHBQG3+/3XMJYB9v3cqGcL70sEH/aOV1Oy70oA3zGRWPt5iX1xoLXxK8zYU8TyIg==}
     engines: {node: '>=22.13.0'}
     cpu: [arm]
     os: [android]
 
-  nanoraster-android-arm64@https://pkg.pr.new/taucad/nanoraster/nanoraster-android-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-d1vdaFY28jUADwpbx6qp3S4h0Qv2FZ7VjZykPcqaNXolQR/LcB5KU5k/6pBM3hIjAJn0f22EWRINZSmioIEuEQ==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-android-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-android-arm64@0.5.2:
+    resolution: {integrity: sha512-D7dOcOzJ2BSp9T1R83ed+jPRWiRFkla+qKCkjYYCx48vsDm5aYup1pbiIW/XxvZyBvBFOgybEftCOCD73eqWCw==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [android]
 
-  nanoraster-darwin-arm64@https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-RBgjppx5DXSkC40TuWjppiGRWHKQ1Wm0s2UZO3MmDYBWviTeUShBuNDv5K4AZoqtTdGDE2U5hnd2aLXgmcDDdA==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-darwin-arm64@0.5.2:
+    resolution: {integrity: sha512-AumX+Dv+Y8vxP7GsGIuvoU5tC/TjUSrLEbsn4xJUNfiKuhbT+DmXxCFmkd28F+Ct55E8jjo8UaKXikBdAdTFUg==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [darwin]
 
-  nanoraster-darwin-x64@https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-x64@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-V3tk2WLZcsmngfhF6Rh9bKCATz/aZgvy1mA00sXlYsISuemiYEHDXq7w2UOgffFYE3hejiiFt2MXABj4lxst+w==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-x64@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-darwin-x64@0.5.2:
+    resolution: {integrity: sha512-SrgnGMIRom0EclKuXr1qkRqWt2aO/YHtx3g8oO8QD3Vs/KhcSrM0vpmTFLgC4dZ0gZpndkN0waneWs2jwzdKPQ==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [darwin]
 
-  nanoraster-freebsd-x64@https://pkg.pr.new/taucad/nanoraster/nanoraster-freebsd-x64@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-dZ7cdcV3EsBz/WK9qLfyZRO4YN64VQk1A1y1BRjQAR7EijkaCgFN9IUJDgsP9CjRHDYrKP6REnjzSGWBCNknBA==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-freebsd-x64@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-freebsd-x64@0.5.2:
+    resolution: {integrity: sha512-SEpazRAocdanZk4cn8oPwEmEEnW+nlcnCfZtA2ugG23oUczHT13jUrHt9rssarzz5e+Lvct4OYDODcpxtKb7bA==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [freebsd]
 
-  nanoraster-linux-arm-gnueabihf@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm-gnueabihf@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-SQXG7qXj5Ccj/Cg6MVb0B+wUZE9v/hFTj7L1TtNXMxpA7NtBUxKDSD3gDiGXtERC/zxCJYX/L6p415FZ6aTDQQ==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm-gnueabihf@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-linux-arm-gnueabihf@0.5.2:
+    resolution: {integrity: sha512-q8M1uTJJl1Qf59RU1mGYdvqVDNl9z11RO5yKnCuyWF5pjGtAG8HIuO0eIx1xQvcsBCyDS5bKE2N8941dXa60VA==}
     engines: {node: '>=22.13.0'}
     cpu: [arm]
     os: [linux]
 
-  nanoraster-linux-arm-musleabihf@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm-musleabihf@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-Og2Aqin1hh+asNhJOJuvNDeAxU8jDilALCIgF83ysuBJtwl70942/LOzYfWPxChtYIwLBDXkVFTM9Pjs61qSfQ==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm-musleabihf@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-linux-arm-musleabihf@0.5.2:
+    resolution: {integrity: sha512-r3ZS+FBgsmVNZM5WriXYmOCGdUhVmvX6xqA9yi8RbL8U8bjKbGt5PJ+EcL064jSoZQyNsPKNwUoFNv8Ghi1maQ==}
     engines: {node: '>=22.13.0'}
     cpu: [arm]
     os: [linux]
 
-  nanoraster-linux-arm64-gnu@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-eIkRxVLRz4AXIQqniLoWRcrMXs/CFDchCrxKPhw8ndPLpihbYdOZypAglZUYCTD5x6nYmX9EqVLFXYhcWsyg2w==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-linux-arm64-gnu@0.5.2:
+    resolution: {integrity: sha512-oVdFRE09v5KijJGvh9extTGiCGvhM+38Mqh39jw2YE80+LerqvpkkLzOnk2EZP8MdG0Vrk2OAkq+fkgDIMYOsg==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  nanoraster-linux-arm64-musl@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm64-musl@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-Vr4eWDfUPUuBhJ/HIeSRoYcW9q1ial6Fz1zFJQ4VIDZsQF18wg0eDJKl0Mz7GekepYgjQSRBdFm2Vv7cImDBBw==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm64-musl@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-linux-arm64-musl@0.5.2:
+    resolution: {integrity: sha512-QUuOOPfKwuun76wUL9gshYzZ1GBdMNS9Vt5EFDdMhfiyd4mFb24ok7fbc5CpsVrf2egaI7pQ8puhCIO41xtGxA==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  nanoraster-linux-ppc64-gnu@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-ppc64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-8/1a+Rz9qVuJB5y7vd5Ts7VeKMUQiLHZFkaxqy9NOaIKzrQfg7r70P/rx/REYI36QYrLNSi3M2hggKO69i+stA==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-ppc64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-linux-ppc64-gnu@0.5.2:
+    resolution: {integrity: sha512-xnhL23O0HH3Zy3udIcwl/wFKqSNt1BbqpPMM2jFogShV+WCryMt6hJbo8h70GAC47/aQg9WMGFg1EAJoTeLmIw==}
     engines: {node: '>=22.13.0'}
     cpu: [ppc64]
     os: [linux]
     libc: [glibc]
 
-  nanoraster-linux-s390x-gnu@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-s390x-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-e0zWB0mjF3Ng7rm6QjMovSJiTK8z5U7Xu+x2u2aDrEhA4Zpa5BYp9KX9bpECnOkDCthyzC1gTpDj5LrPnLVcEQ==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-s390x-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-linux-s390x-gnu@0.5.2:
+    resolution: {integrity: sha512-bPFzTXGjKBAvwr67Ov6V7hUS8LnFUKJe6oCMmWmBxweZxFWqOTNsIGmBJB5CgOtRtWbU7iAB3AuML+9q1tP0UQ==}
     engines: {node: '>=22.13.0'}
     cpu: [s390x]
     os: [linux]
     libc: [glibc]
 
-  nanoraster-linux-x64-gnu@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-x64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-DNbbFqQ9yInB6bBsc/Oax5kFLvGA7QVbxC4f1xwFUSlHzC5MhcKl/PoO3irdk0zg1xDGVlHAhaWRibrvAb5rJw==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-x64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-linux-x64-gnu@0.5.2:
+    resolution: {integrity: sha512-EFsu5HcMG+IRqPFxqm/MnHZ22jsf9A4S9avoKYP++9bZIb71/BXkfdmjoYDiPx4I1sVrMfcYvkyZa1Hm23WGiw==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  nanoraster-linux-x64-musl@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-x64-musl@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-/YgMaSEmw6kuRFMtYuRYuA5RZh6MjJ1v5UC8XIJb9CPWR2OEoJbt03s/pdOwB4+2/atky2DGhrpNA6T6ZyOBAw==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-x64-musl@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-linux-x64-musl@0.5.2:
+    resolution: {integrity: sha512-0uatDprS92q+joJpyUWHGfmIEeakIld3P4nCxeoeYRlSqNKY9KQv5B43VXAz/eITdqaEnWUSFS6DiQ8Yvtxp8A==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  nanoraster-win32-arm64-msvc@https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-arm64-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-XDacHuU0GCg2FhIHJB3NwfVNAM1FLExgU/Oqc0tHE3CAY3FEaepExfrZtXzJkIewba01UnwaGfcAsTtMpxxOSg==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-arm64-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-win32-arm64-msvc@0.5.2:
+    resolution: {integrity: sha512-lxn0uD2ItNlkFgk4+6frOn0pTQ+Znt/ELLlqN1PzoHgJ3wEGIKH6W1bRLLgjNTlGPLrdrmg03gmQUjNeM5wPBA==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [win32]
 
-  nanoraster-win32-ia32-msvc@https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-ia32-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-vkrhZOiD6vMFN4KkNKjRaDBUjbgRzj34XmQ5NkJJOd4xFE7XB4Jv4df5I2Z+nWnuCPcq4bzErTRPbFRcXq5Guw==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-ia32-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-win32-ia32-msvc@0.5.2:
+    resolution: {integrity: sha512-9V7/xkZXtxMAXiL1Yj42jCPr54NJlrqZZUpUeEKLShg1psE2jTO51sEnO0HBUR5x+7d03wGqSHi7EFbKck2q0A==}
     engines: {node: '>=22.13.0'}
     cpu: [ia32]
     os: [win32]
 
-  nanoraster-win32-x64-msvc@https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-x64-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-GvKo9JU6S+RqvpRizxyXA1m26TnawyJijwAd0mjS8mTnffDvScAcwg+dK80jYW+o3f32Y9iIKOLoc2UMTwdc+A==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-x64-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster-win32-x64-msvc@0.5.2:
+    resolution: {integrity: sha512-eAaIqwjAl0tE6fFAPR2Y5qVU1GaA6oBZAXEDt/vP3gnu3Ql8wqoMjg1udCGod1MQbyv3FvyGiDERDtsoBYcSyg==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [win32]
 
-  nanoraster@https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2:
-    resolution: {integrity: sha512-xAMRT7dwsigVqhJkwsWgSULGdHnIdBEUyAnuaTstoWmJyJR4DeDTkFQPv6dLnRI7YmrWe9sc1nmPsQFtyTz91A==, tarball: https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2}
-    version: 0.0.0-preview-b8c0029
+  nanoraster@0.5.2:
+    resolution: {integrity: sha512-JgAyNC4vMUEWTPRS+jaBuQgbDHy5U71F7Vp2KDG9LPGVLBnQECqMEYZsGTZISup8i5s5cI/NleVUaT6aSzKE7A==}
     engines: {node: '>=22.13.0'}
 
   nanospinner@1.2.2:
@@ -46670,71 +46654,71 @@ snapshots:
 
   nanoid@5.1.14: {}
 
-  nanoraster-android-arm-eabi@https://pkg.pr.new/taucad/nanoraster/nanoraster-android-arm-eabi@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-android-arm-eabi@0.5.2:
     optional: true
 
-  nanoraster-android-arm64@https://pkg.pr.new/taucad/nanoraster/nanoraster-android-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-android-arm64@0.5.2:
     optional: true
 
-  nanoraster-darwin-arm64@https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2: {}
+  nanoraster-darwin-arm64@0.5.2: {}
 
-  nanoraster-darwin-x64@https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-x64@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-darwin-x64@0.5.2:
     optional: true
 
-  nanoraster-freebsd-x64@https://pkg.pr.new/taucad/nanoraster/nanoraster-freebsd-x64@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-freebsd-x64@0.5.2:
     optional: true
 
-  nanoraster-linux-arm-gnueabihf@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm-gnueabihf@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-linux-arm-gnueabihf@0.5.2:
     optional: true
 
-  nanoraster-linux-arm-musleabihf@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm-musleabihf@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-linux-arm-musleabihf@0.5.2:
     optional: true
 
-  nanoraster-linux-arm64-gnu@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-linux-arm64-gnu@0.5.2:
     optional: true
 
-  nanoraster-linux-arm64-musl@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm64-musl@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-linux-arm64-musl@0.5.2:
     optional: true
 
-  nanoraster-linux-ppc64-gnu@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-ppc64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-linux-ppc64-gnu@0.5.2:
     optional: true
 
-  nanoraster-linux-s390x-gnu@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-s390x-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-linux-s390x-gnu@0.5.2:
     optional: true
 
-  nanoraster-linux-x64-gnu@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-x64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-linux-x64-gnu@0.5.2:
     optional: true
 
-  nanoraster-linux-x64-musl@https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-x64-musl@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-linux-x64-musl@0.5.2:
     optional: true
 
-  nanoraster-win32-arm64-msvc@https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-arm64-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-win32-arm64-msvc@0.5.2:
     optional: true
 
-  nanoraster-win32-ia32-msvc@https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-ia32-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-win32-ia32-msvc@0.5.2:
     optional: true
 
-  nanoraster-win32-x64-msvc@https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-x64-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster-win32-x64-msvc@0.5.2:
     optional: true
 
-  nanoraster@https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2:
+  nanoraster@0.5.2:
     optionalDependencies:
-      nanoraster-android-arm-eabi: https://pkg.pr.new/taucad/nanoraster/nanoraster-android-arm-eabi@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-android-arm64: https://pkg.pr.new/taucad/nanoraster/nanoraster-android-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-darwin-arm64: https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-darwin-x64: https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-x64@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-freebsd-x64: https://pkg.pr.new/taucad/nanoraster/nanoraster-freebsd-x64@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-linux-arm-gnueabihf: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm-gnueabihf@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-linux-arm-musleabihf: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm-musleabihf@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-linux-arm64-gnu: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-linux-arm64-musl: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-arm64-musl@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-linux-ppc64-gnu: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-ppc64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-linux-s390x-gnu: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-s390x-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-linux-x64-gnu: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-x64-gnu@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-linux-x64-musl: https://pkg.pr.new/taucad/nanoraster/nanoraster-linux-x64-musl@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-win32-arm64-msvc: https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-arm64-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-win32-ia32-msvc: https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-ia32-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2
-      nanoraster-win32-x64-msvc: https://pkg.pr.new/taucad/nanoraster/nanoraster-win32-x64-msvc@b8c00291558b88cb659cb5f581d72779fadbabc2
+      nanoraster-android-arm-eabi: 0.5.2
+      nanoraster-android-arm64: 0.5.2
+      nanoraster-darwin-arm64: 0.5.2
+      nanoraster-darwin-x64: 0.5.2
+      nanoraster-freebsd-x64: 0.5.2
+      nanoraster-linux-arm-gnueabihf: 0.5.2
+      nanoraster-linux-arm-musleabihf: 0.5.2
+      nanoraster-linux-arm64-gnu: 0.5.2
+      nanoraster-linux-arm64-musl: 0.5.2
+      nanoraster-linux-ppc64-gnu: 0.5.2
+      nanoraster-linux-s390x-gnu: 0.5.2
+      nanoraster-linux-x64-gnu: 0.5.2
+      nanoraster-linux-x64-musl: 0.5.2
+      nanoraster-win32-arm64-msvc: 0.5.2
+      nanoraster-win32-ia32-msvc: 0.5.2
+      nanoraster-win32-x64-msvc: 0.5.2
 
   nanospinner@1.2.2:
     dependencies:

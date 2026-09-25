@@ -72,6 +72,13 @@ export type RevisionRow = Readonly<{
    * in, which History already lists without a number.
    */
   parent?: string;
+  /**
+   * A merge's other parents — the sides it brought in — by id; absent on an
+   * ordinary revision. A reader that holds the history below a new head can
+   * append a revision that has none, but must re-read after a merge, whose
+   * sides appear further down the order.
+   */
+  otherParents?: readonly string[];
 }>;
 
 /** Where the reader is, and what else this project holds. @public */
@@ -90,7 +97,10 @@ export type RevisionPlace = Readonly<{
 export type RevisionLogRequest = Readonly<{
   /** Defaults to the branch the live tree is on. */
   branch?: string | undefined;
-  /** Newest first; every revision on the branch when absent. */
+  /**
+   * Newest first; every revision on the branch when absent. A limit bounds the
+   * walk itself, not only the rows returned (E6).
+   */
   limit?: number | undefined;
 }>;
 
@@ -114,20 +124,21 @@ const firstParentChain = (head: RevisionId, entries: ReadonlyMap<string, Revisio
 };
 
 /**
- * The head this request is about, and the whole reachable graph behind it.
+ * The head this request is about, and the graph behind it in the port's order.
  *
- * ponytail: one unbounded `log`. `Rev N` is a count from the branch's first
- * revision, so a bounded walk cannot produce it — and the walk is tree-free, so
- * the cost is one object read per revision. Pass the head to a bounded `log`
- * instead when a pane needs a page rather than a numbered history.
+ * With a limit the walk itself is bounded — the port reads what the first
+ * `limit` rows need and no more — and `Rev N` comes from {@link numbersOn}
+ * rather than from a count of the whole chain (E6, L4-F5).
  *
  * @param port - The store to read.
  * @param branch - The branch to read, or the live tree's when absent.
- * @returns The branch, its head, and every reachable entry by id.
+ * @param limit - How many rows, newest first; the whole history when absent.
+ * @returns The branch, its head, and the entries read, by id, in the port's order.
  */
 const readGraph = async (
   port: RevisionPort,
   branch: string | undefined,
+  limit?: number,
 ): Promise<
   Readonly<{ branch: string | undefined; head: RevisionId | undefined; entries: ReadonlyMap<string, RevisionLogEntry> }>
 > => {
@@ -136,11 +147,82 @@ const readGraph = async (
   const head = name === undefined ? undefined : name === live?.branch ? live.head : await port.readRef(name);
   const entries = new Map<string, RevisionLogEntry>();
   if (head !== undefined) {
-    for (const entry of await port.log({ heads: [head] })) {
+    for (const entry of await port.log(limit === undefined ? { heads: [head] } : { heads: [head], limit })) {
       entries.set(entry.id, entry);
     }
   }
   return { branch: name, head, entries };
+};
+
+/*
+ * First-parent ordinals already known, by revision id (E6).
+ *
+ * A revision's ordinal is a property of the revision alone — its first-parent
+ * chain is fixed by its id — so an entry is never stale, and one table serves
+ * every port, branch and caller in the process: the ordinal of a new head is
+ * its first parent's plus one.
+ *
+ * ponytail: insertion-order eviction at 4 096 ids (a few hundred KiB). A long
+ * history evicts its oldest ordinals first, and a miss costs one unbounded walk,
+ * which refills the table. An LRU if a workload ever thrashes it.
+ */
+const ordinals = new Map<string, number>();
+const maximumOrdinals = 4096;
+
+const rememberOrdinal = (id: string, ordinal: number): void => {
+  ordinals.delete(id);
+  ordinals.set(id, ordinal);
+  if (ordinals.size > maximumOrdinals) {
+    ordinals.delete(ordinals.keys().next().value!);
+  }
+};
+
+/**
+ * `Rev N` of every revision on `head`'s first-parent line that `page` holds.
+ *
+ * The line is followed through the page until it meets a revision whose
+ * ordinal is known or the branch's first revision; only when neither is in
+ * reach is the whole chain walked, once, and remembered.
+ *
+ * @param port - The store, for the one walk a cold table needs.
+ * @param head - The branch head.
+ * @param page - The entries read, by id.
+ * @returns Ordinals by revision id, for the page's first-parent line.
+ */
+const numbersOn = async (
+  port: RevisionPort,
+  head: RevisionId,
+  page: ReadonlyMap<string, RevisionLogEntry>,
+): Promise<ReadonlyMap<string, number>> => {
+  /* The page's own stretch of the line, newest first. */
+  const line = firstParentChain(head, page).filter((id) => page.has(id));
+  const knownAt = line.findIndex((id) => ordinals.has(id));
+  const below = page.get(line.at(-1) ?? head)?.parents[0];
+  /* The branch's first revision is `Rev 1`, so a line that reaches it has the head's ordinal as its length. */
+  const belowOrdinal = below === undefined ? 0 : ordinals.get(below);
+  const headOrdinal =
+    knownAt === -1
+      ? belowOrdinal === undefined
+        ? undefined
+        : belowOrdinal + line.length
+      : ordinals.get(line[knownAt]!)! + knownAt;
+  if (headOrdinal === undefined) {
+    /* ponytail: a cold table reads the whole chain once, and remembers it. */
+    const whole = new Map(page);
+    for (const entry of await port.log({ heads: [head] })) {
+      whole.set(entry.id, entry);
+    }
+    const chain = firstParentChain(head, whole);
+    for (const [index, id] of chain.entries()) {
+      rememberOrdinal(id, chain.length - index);
+    }
+    return new Map(chain.flatMap((id, index) => (page.has(id) ? [[id, chain.length - index] as const] : [])));
+  }
+  const numbers = new Map(line.map((id, index) => [id, headOrdinal - index]));
+  for (const [id, ordinal] of numbers) {
+    rememberOrdinal(id, ordinal);
+  }
+  return numbers;
 };
 
 const rowOf = (
@@ -162,6 +244,7 @@ const rowOf = (
     trigger: entry.provenance.trigger,
     ...(entry.provenance.restoredFrom === undefined ? {} : { restoredFrom: entry.provenance.restoredFrom }),
     ...(entry.parents[0] === undefined ? {} : { parent: entry.parents[0] }),
+    ...(entry.parents.length > 1 ? { otherParents: Object.freeze(entry.parents.slice(1)) } : {}),
   });
 
 /**
@@ -186,12 +269,15 @@ export const readRevisionLog = async (
   port: RevisionPort,
   request: RevisionLogRequest = {},
 ): Promise<readonly RevisionRow[]> => {
-  const { head, entries } = await readGraph(port, request.branch);
+  const limit = request.limit === undefined ? undefined : Math.max(0, request.limit);
+  if (limit === 0) {
+    return Object.freeze([]);
+  }
+  const { head, entries } = await readGraph(port, request.branch, limit);
   if (head === undefined) {
     return Object.freeze([]);
   }
-  const chain = firstParentChain(head, entries);
-  const numbers = new Map(chain.map((id, index) => [id, chain.length - index]));
+  const numbers = await numbersOn(port, head, entries);
   /* One `listTags` for the whole page, not one per row. */
   const named = new Map<string, string[]>();
   for (const tag of await port.listTags()) {
@@ -203,7 +289,7 @@ export const readRevisionLog = async (
   const rows = [...entries.values()].map((entry) =>
     rowOf(entry, numbers.get(entry.id), Object.freeze((named.get(entry.id) ?? []).toSorted())),
   );
-  return Object.freeze(request.limit === undefined ? rows : rows.slice(0, Math.max(0, request.limit)));
+  return Object.freeze(limit === undefined ? rows : rows.slice(0, limit));
 };
 
 /**
@@ -261,6 +347,10 @@ export const readRevisionPlace = async (port: RevisionPort): Promise<RevisionPla
       revisionId: reference.head,
     }),
   );
+  /* This walk already answered every head's ordinal: a later page reads it back. */
+  for (const entry of branches) {
+    rememberOrdinal(entry.revisionId, entry.revisionNumber);
+  }
   return Object.freeze({
     branch,
     revisionNumber,

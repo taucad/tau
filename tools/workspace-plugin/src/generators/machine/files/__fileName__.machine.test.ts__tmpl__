@@ -1,21 +1,42 @@
-import { createActor } from 'xstate';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
+import type { AnyMachineSnapshot } from 'xstate';
 
 import * as machineModule from '<%= testImport %>';
-import { <%= machineName %> } from '<%= testImport %>';
+import { create<%= className %>Actor, <%= machineName %>, <%= propertyName %>IgnoredEvents } from '<%= testImport %>';
+import type { <%= className %>MachineEvent } from '<%= testImport %>';
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
+const publicEvents: readonly <%= className %>MachineEvent[] = [{ type: 'reset' }];
+
 describe('<%= machineName %>', () => {
   it('should start headlessly and export exactly one machine value', () => {
-    const actor = createActor(<%= machineName %>, { input: {} });
+    const guard = guardActors({ ignore: { '<%= fileName %>': <%= propertyName %>IgnoredEvents } });
+    const actor = create<%= className %>Actor({}, { clock: new StepClock(), inspect: guard.inspect });
 
     actor.start();
+    actor.send({ type: 'reset' });
 
     expect(actor.getSnapshot().matches('idle')).toBe(true);
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([<%= machineName %>]);
 
     actor.stop();
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const options = {
+      input: {},
+      // `xstate.error.execution` reaches the state a root onError enters.
+      events: [...publicEvents, { type: 'xstate.error.execution' }],
+      limit: 100,
+      serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+    };
+
+    expect(unansweredEvents(<%= machineName %>, { ...options, ignore: <%= propertyName %>IgnoredEvents })).toEqual([]);
+    expect(unreachedStates(<%= machineName %>, options)).toEqual([]);
   });
 });

@@ -36,6 +36,7 @@ import {
   parseBambuVersionPayload,
 } from '#bambu.protocol.js';
 import { prepareBambuArtifact } from '#bambu.archive.js';
+import { bambuX1cManifest } from '#bambu.manifest.js';
 
 type Binding = Readonly<{
   logicalId: string;
@@ -726,7 +727,7 @@ export const connectBambuMachine = async (
             },
           ],
           materialSystem: { kind: 'ams', slotCount: 16 },
-          bedTypes: ['cool-plate', 'engineering-plate', 'high-temperature-plate', 'textured-plate'],
+          bedTypes: bambuX1cManifest.bed.plates.map(({ id }) => id),
         };
         return Object.freeze(descriptor);
       },

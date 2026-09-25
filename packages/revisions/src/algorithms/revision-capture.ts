@@ -93,6 +93,28 @@ export const captureRevisionTree = async (
   filesystem: RevisionCaptureFileSystem,
   options?: CaptureRevisionTreeOptions,
 ): Promise<ImmutableRevisionTree> => {
+  if (options?.changedSince === undefined) {
+    return captureOnce(filesystem, options);
+  }
+  try {
+    return await captureOnce(filesystem, options);
+  } catch (error) {
+    /* E1 trusts a change set only as far as the disk agrees with it. A path
+     * spelled another way than the disk spells it, a parent that is now a file,
+     * a collision in the derived tree, a failed read — each proves the set
+     * cannot be trusted, and the capture walks everything, which answers or
+     * fails on its own terms. A caller's abort is not a failure of the set. */
+    if (options.signal?.aborted === true) {
+      throw error;
+    }
+    return captureOnce(filesystem, { ...options, changedSince: undefined });
+  }
+};
+
+const captureOnce = async (
+  filesystem: RevisionCaptureFileSystem,
+  options: CaptureRevisionTreeOptions | undefined,
+): Promise<ImmutableRevisionTree> => {
   const concurrency = assertCaptureLimit(options?.concurrency ?? defaultCaptureConcurrency, 'concurrency', 256);
   const maximumTotalBytes = assertCaptureLimit(
     options?.maximumTotalBytes ?? defaultCaptureMaximumTotalBytes,
@@ -198,6 +220,40 @@ export const captureRevisionTree = async (
     }
   };
   const files = new Map<string, RevisionTreeFile>();
+  const listings = new Map<string, Promise<DirectoryEntry[]>>();
+  /*
+   * What a changed path is on disk, resolved one segment at a time through
+   * each parent's listing by exact name — so the tree records the disk's
+   * spelling, as the full walk would. A parent that is missing or not a
+   * directory, or a name the disk holds under another letter case or Unicode
+   * form, throws: the change set and the disk disagree (review finding 1).
+   */
+  const kindOnDisk = async (root: string): Promise<'file' | 'dir' | undefined> => {
+    const segments = root.split('/');
+    let parent = '';
+    for (const [index, segment] of segments.entries()) {
+      const listing = listings.get(parent) ?? admittedChildren(parent);
+      listings.set(parent, listing);
+      // oxlint-disable-next-line no-await-in-loop -- each segment's listing is its parent's child.
+      const children = await listing;
+      const exact = children.find((child) => child.name === segment);
+      const last = index === segments.length - 1;
+      if (exact === undefined) {
+        if (!last || children.some((child) => foldedName(child.name) === foldedName(segment))) {
+          throw new Error(`The change set does not match the disk at ${root}.`);
+        }
+        return undefined;
+      }
+      if (last) {
+        return exact.kind;
+      }
+      if (exact.kind !== 'dir') {
+        throw new Error(`The change set does not match the disk at ${root}.`);
+      }
+      parent = joinRelativePath(parent, segment);
+    }
+    return undefined;
+  };
   /*
    * E1: every file outside the changed paths is the previous tree's own
    * record; each changed path is asked of its parent's listing, which applies
@@ -218,10 +274,8 @@ export const captureRevisionTree = async (
       if (hasAncestorIn(root, roots) || isExcludedPath(root, excluded)) {
         continue;
       }
-      const slash = root.lastIndexOf('/');
       // oxlint-disable-next-line no-await-in-loop -- sequential traversal, as the full walk.
-      const siblings = await admittedChildren(slash === -1 ? '' : root.slice(0, slash));
-      const kind = siblings.find((entry) => entry.name === root.slice(slash + 1))?.kind;
+      const kind = await kindOnDisk(root);
       if (kind === 'file') {
         // oxlint-disable-next-line no-await-in-loop -- sequential traversal, as the full walk.
         filePaths.push({ path: root, mode: await modeOf(root) });
@@ -389,17 +443,9 @@ export const captureRevisionTree = async (
     if (missingRequired.length > 0) {
       throw new Error(`Required capture paths were not captured: ${missingRequired.join(', ')}`);
     }
-    try {
-      return adoptRevisionTree(files);
-    } catch (error) {
-      /* A file and a directory at one path cannot both be on disk, so a
-       * derived tree that holds both proves the change set missed a write:
-       * it is not trusted, and the capture walks everything. */
-      if (changedSince !== undefined && error instanceof TypeError) {
-        return await captureRevisionTree(filesystem, { ...options, changedSince: undefined });
-      }
-      throw error;
-    }
+    /* A file and a directory at one path cannot both be on disk, so a derived
+     * tree that holds both throws here, and the caller walks everything. */
+    return adoptRevisionTree(files);
   } finally {
     options?.signal?.removeEventListener('abort', abortFromCaller);
   }
@@ -416,6 +462,9 @@ const changedRoots = (paths: readonly string[]): ReadonlySet<string> | undefined
   const roots = new Set(paths.map((path) => assertRootedPath(path)));
   return roots.has('') ? undefined : roots;
 };
+
+/* A name as a case-insensitive, normalizing disk compares it. */
+const foldedName = (name: string): string => name.normalize('NFC').toLowerCase();
 
 /* Whether any ancestor directory of a path is one of the roots. */
 const hasAncestorIn = (path: string, roots: ReadonlySet<string>): boolean => {

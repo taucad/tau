@@ -128,10 +128,12 @@ export const lfsObjectPath = (oid: string): string => `lfs/objects/${oid.slice(0
  * - bytes that already *are* a pointer are stored as themselves, so a checkout
  *   holding an un-smudged pointer never becomes a pointer to a pointer.
  *
- * Pure: the objects come back for the caller's own store to write.
+ * Pure: the objects come back for the caller's own store to write. They are
+ * the tree's own bytes, shared rather than copied — a store writes them out
+ * and must never write *into* them.
  *
  * @param tree - The captured tree, with every file's real bytes.
- * @returns The tree to record, and the large objects by their oid.
+ * @returns The tree to record, and the large objects by their oid (read-only).
  * @public
  */
 export const cleanLargeObjects = (
@@ -167,8 +169,10 @@ export const cleanLargeObjects = (
       continue;
     }
     const { oid, bytes } = pointerOf(file.content);
-    /* The caller's copy: a store may do what it likes with it. */
-    objects.set(oid, new Uint8Array(file.content));
+    /* The tree's own bytes, not a copy: the result is cached for as long as
+     * the tree lives, so a copy held every large export twice and cost a
+     * whole copy per gate (review finding 7). Both stores only write them out. */
+    objects.set(oid, file.content);
     cleaned.set(path, Object.freeze({ content: bytes, mode: file.mode }));
   }
   if (attributes !== undefined && attributes !== existing) {

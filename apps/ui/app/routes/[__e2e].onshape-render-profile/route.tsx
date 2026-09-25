@@ -88,7 +88,7 @@ async function compressCapture(bytes: Uint8Array<ArrayBuffer>): Promise<string> 
   return uint8ArrayToBase64(compressed);
 }
 
-/** Capture WebGL pixels alongside the PNG to verify their shared straight-alpha contract. */
+/** Read shader output before canvas PNG conversion unpremultiplies sRGB channels. */
 async function captureFramebuffer(renderer: WebGLRenderer): Promise<Record<string, unknown>> {
   const context = renderer.getContext();
   const { drawingBufferWidth: width, drawingBufferHeight: height } = context;

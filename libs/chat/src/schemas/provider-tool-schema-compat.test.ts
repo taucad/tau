@@ -194,7 +194,13 @@ describe('provider-facing tool schema compatibility', () => {
   it('should offer request_print its slicer options as a plain described object slot', () => {
     const schema = providerSchemaFor(toolName.requestPrint);
 
-    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['machineId', 'options', 'preset', 'targetFile']);
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
+      'machineId',
+      'options',
+      'plate',
+      'preset',
+      'targetFile',
+    ]);
     expect(schema.required).toEqual(['targetFile']);
     expect(schema.properties?.['options']).toEqual({
       description: 'Slicer options: a JSON object mapping option names to JSON values.',

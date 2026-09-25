@@ -106,11 +106,13 @@ export default function ConnectGithubGistRoute(): React.JSX.Element {
           <CardDescription>
             {granted ? (
               'You can return to Tau.'
-            ) : (
+            ) : authorizationReturn?.failure === undefined ? (
               <>
                 Tau shares projects as GitHub Gists. This adds Gist access to the Tau account{' '}
                 <strong className='break-all'>{session.user.email}</strong>.
               </>
+            ) : (
+              authorizationReturn.failure
             )}
           </CardDescription>
         </CardHeader>

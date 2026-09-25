@@ -23,6 +23,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import type { OnModuleDestroy } from '@nestjs/common';
 import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { DatabaseService } from '#database/database.service.js';
 import { project, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
@@ -219,8 +220,18 @@ const flushPacketBytes = 4;
  */
 const ownerLeaseCap = (slots: number): number => Math.max(1, Math.floor(slots / 2));
 
+/**
+ * How long a stopping worker waits for tracked work before abandoning it:
+ * half of Fly's `kill_timeout = '30s'` (`apps/api/fly.prod.toml`,
+ * `fly.staging.toml`; Fly's own default is 5 s). The other half is for what
+ * Nest does after this module: the durable-event subscriber, the database pool
+ * and Redis close, the HTTP server closes, and the OTEL flush takes up to 5 s.
+ * Milliseconds.
+ */
+const shutdownDrainBound = 15_000;
+
 @Injectable()
-export class GitRepositoryService {
+export class GitRepositoryService implements OnModuleDestroy {
   /**
    * Scratch reserved per in-flight lease (D33: 2.5 GiB). Public so the
    * admission suite can raise it past any real disk without a fake `statfs`.
@@ -844,6 +855,41 @@ export class GitRepositoryService {
   /** Waits for the work a finished request left running. */
   public async settled(): Promise<void> {
     await Promise.all(this.#background);
+  }
+
+  /**
+   * Drains the tracked work before the process stops, so a deploy or a Machine
+   * restart does not cut short the D13 announcement a reader is parked on.
+   *
+   * `onModuleDestroy`, not an application-shutdown hook: Nest destroys every
+   * module before it calls either of those, and the announcement writes through
+   * `DurableEventsModule`, `DatabaseModule` and the global Redis module, which
+   * Nest destroys after this one because this module imports them. The HTTP
+   * server closes only after every module is destroyed, so work a request
+   * starts during the drain is waited for as well. Past `shutdownDrainBound` the
+   * work is abandoned and logged: a lost announcement leaves its readers to
+   * learn of the push on their next fetch, and a sweep cut short is I3's case.
+   */
+  public async onModuleDestroy(): Promise<void> {
+    let drainExpiry: NodeJS.Timeout | undefined;
+    const expired = new Promise<'expired'>((resolve) => {
+      drainExpiry = setTimeout(resolve, shutdownDrainBound, 'expired');
+    });
+    const drained = (async (): Promise<'drained'> => {
+      while (this.#background.size > 0) {
+        // oxlint-disable-next-line no-await-in-loop -- each pass waits for what the last one left behind
+        await this.settled();
+      }
+      return 'drained';
+    })();
+    const outcome = await Promise.race([drained, expired]);
+    clearTimeout(drainExpiry);
+    if (outcome === 'expired') {
+      this.#logger.warn(
+        { pending: this.#background.size, bound: shutdownDrainBound },
+        'Shutdown abandoned background work that outlived the drain bound; an unannounced push reaches readers on their next fetch',
+      );
+    }
   }
 
   /**

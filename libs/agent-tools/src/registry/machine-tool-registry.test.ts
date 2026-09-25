@@ -663,7 +663,10 @@ describe('request_print slicer options through the chat registry', () => {
         filamentDiameter: { value: 1.75, unit: 'mm' },
         nozzles: [{ id: 'nozzle-0.4', diameter: { value: 0.4, unit: 'mm' } }],
       },
-      bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+      bed: { plates: [{ id: 'textured-pei', label: 'Textured PEI plate' }] },
+      slicing: {
+        recommended: { nozzleTemperature: { value: 250, unit: 'Cel' }, bedTemperature: { value: 70, unit: 'Cel' } },
+      },
     },
   } as unknown as MachineProvider;
 
@@ -720,7 +723,16 @@ describe('request_print slicer options through the chat registry', () => {
     expect(host.exportModel).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
       source: { path: 'main.ts' },
       signal: expect.any(AbortSignal) as AbortSignal,
-      exportOptions: { walls: 3, preset: 'fine' },
+      /* The machine's own options under the agent's; the observed plate wins. */
+      exportOptions: {
+        plate: 'textured-pei',
+        nozzleDiameter: 0.4,
+        filamentDiameter: 1.75,
+        nozzleTemperature: 250,
+        bedTemperature: 70,
+        walls: 3,
+        preset: 'fine',
+      },
     });
   });
 

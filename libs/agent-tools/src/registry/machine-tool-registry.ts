@@ -180,6 +180,8 @@ export type MachinePrintPlanner = (
     /** Where the directory was read; qualifies the reference's authority and workspace. */
     cursor: MachineDirectoryCursor;
     preset?: 'fast' | 'standard' | 'fine' | undefined;
+    /** The plate the agent was told is installed; the machine's own report wins. */
+    plate?: string | undefined;
     /** Slicer options, keys from `requestPrintOptionKeys` only; the slicer's own schema validates the values. */
     options?: JsonObject | undefined;
     signal: AbortSignal;
@@ -323,6 +325,7 @@ const requestPrint = async (
     machine,
     cursor,
     preset: parsed.preset,
+    plate: parsed.plate,
     // SAFETY: a zod record of JSON values is a JSON object.
     options: parsed.options as JsonObject | undefined,
     signal,

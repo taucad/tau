@@ -4,7 +4,11 @@ export {
   type MachinePrintPlanner,
   type MachineToolRegistryOptions,
 } from '#registry/machine-tool-registry.js';
-export { createMachinePrintPlanner, type MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
+export {
+  createMachinePrintPlanner,
+  machineSliceOptions,
+  type MachinePrintPlannerDependencies,
+} from '#registry/machine-print-planner.js';
 export { createProviderRpcFileSystem, type ProviderRpcFileSystemOptions } from '#registry/provider-file-system.js';
 export { createSkillBundleOverlay, createSkillBundleRegistry } from '#registry/skill-overlay.js';
 export type {

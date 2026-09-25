@@ -181,6 +181,20 @@ describe('createDaemonAgentHostTransport', () => {
     expect(channel.seen.some((command) => (command as { type: string }).type === 'close')).toBe(false);
   });
 
+  /* W0.3 (L3 D3). A reattached page knows its run only from `attach`, and
+   * `cancel` found no chat for it: `RUN_NOT_FOUND`, which the transport
+   * swallowed, so Stop never reached the host. */
+  it('should cancel a run it only attached to', async () => {
+    const channel = fakeChannel();
+    const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
+
+    await client.attach({ chatId: 'chat-attached', cursor: 0, limit: 16 });
+    await expect(client.cancel('run-1')).resolves.toMatchObject({ runId: 'run-1' });
+
+    expect(channel.seen.at(-1)).toEqual({ type: 'cancel', chatId: 'chat-attached', runId: 'run-1' });
+    await client.close();
+  });
+
   it('carries the approval round trip and the durable stream unchanged', async () => {
     const channel = fakeChannel();
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));

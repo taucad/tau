@@ -37,6 +37,8 @@ const harness = {
   finalizedTurns: [] as ReadonlyArray<{ runId: string }>,
   /** The chat's persisted execution; `undefined` runs the build's default placement. */
   activeExecution: undefined as CadAgentExecution | undefined,
+  /** The project the chat's own record names (W0.4). */
+  chatProjectId: 'project_1' as string | undefined,
 };
 
 const workspace = {
@@ -90,6 +92,15 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   usePreparedChatWorkspace: () => harness.workspace,
 }));
 
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project_1' }) }));
+
+vi.mock('#hooks/use-project-manager.js', () => ({
+  useProjectManager: () => ({
+    getChat: async (chatId: string) =>
+      harness.chatProjectId === undefined ? undefined : { id: chatId, resourceId: harness.chatProjectId },
+  }),
+}));
+
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getBrowserAgentHostRun: () => harness.browserRun,
   getHostFinalizedTurns: () => harness.finalizedTurns,
@@ -122,6 +133,7 @@ describe('ProjectChatRunSettlement', () => {
     harness.reclaim.mockResolvedValue(workspace);
     harness.finalizedTurns = [];
     harness.activeExecution = undefined;
+    harness.chatProjectId = 'project_1';
     harness.finalize.mockResolvedValue(undefined);
     harness.discard.mockResolvedValue(undefined);
     harness.prepare.mockResolvedValue(workspace);
@@ -157,6 +169,26 @@ describe('ProjectChatRunSettlement', () => {
     });
     expect(harness.clearBrowserAgentHostRun).toHaveBeenCalledWith('chat_1');
     expect(harness.discard).not.toHaveBeenCalled();
+  });
+
+  /* W0.4 (L3 D2(a)). The store holds every project's chats and this route
+   * publishes a settler for each, all on the focused project's authority. A
+   * completed run of another project's chat was re-leased and finalized on
+   * this project's revision root. */
+  it('should never settle a chat whose record names another project', async () => {
+    harness.chatProjectId = 'project_2';
+    /* This project's authority holds no claim for the other project's chat. */
+    harness.reclaim.mockResolvedValue(undefined);
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn();
+
+    expect(harness.prepare).not.toHaveBeenCalled();
+    expect(harness.finalize).not.toHaveBeenCalled();
+    expect(harness.discard).not.toHaveBeenCalled();
+    expect(harness.persistBrowserTurnSettlement).not.toHaveBeenCalled();
+    expect(harness.releaseDurableRun).not.toHaveBeenCalled();
+    expect(harness.clearBrowserAgentHostRun).not.toHaveBeenCalled();
   });
 
   it('discards a failed run and never publishes it', async () => {

@@ -465,6 +465,12 @@ export const chatPersistenceMachine = setup({
               enq.emit({ type: 'dispatchRequest', request: event.request });
               return { target: 'invoking', context: { persistedError: undefined } };
             },
+            /* A reattached run streams without a request of its own, so this
+             * state is where the person's Stop lands for it. Dropping it left
+             * the host run going (W0.3); with nothing streaming it stops nothing. */
+            stopRequest: (_, enq) => {
+              enq.emit({ type: 'dispatchStop' });
+            },
           },
         },
         invoking: {

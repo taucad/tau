@@ -2131,6 +2131,48 @@ describe('ChatSessionStore', () => {
       store.release(chatId);
     });
 
+    /*
+     * W0.3 (L3 D3). A reattached run streams outside the request lifecycle, so
+     * the persistence machine is idle and dropped the person's Stop; the
+     * resumed stream carries no abort signal either. Stop is the host's
+     * `cancel` for the attached run.
+     */
+    it('should send the host cancel for a reattached run when the person stops it', async () => {
+      const chatId = 'chat_stop_reattached';
+      const runId = 'run_stop_reattached';
+      const store = createStore();
+      store.acquire(chatId);
+      const running = { chatId, runId, turnId: 'turn_stop_reattached', state: 'running', messages: [] } as const;
+      const hostClient: AgentHostClient = {
+        start: vi.fn(),
+        steer: vi.fn(),
+        cancel: vi.fn(async () => ({ ...running, state: 'cancelled' }) as const),
+        resume: vi.fn(),
+        resolveInterrupt: vi.fn(),
+        attach: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [], snapshot: running })),
+        tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
+        subscribe: vi.fn(() => () => undefined),
+        close: vi.fn(async () => undefined),
+      };
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => {
+          throw new Error('Unused by this reattach.');
+        },
+        createClient: async () => hostClient,
+        markRunId: async () => undefined,
+      });
+      const reattached = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
+
+      store.stopRun(chatId);
+
+      await vi.waitFor(() => {
+        expect(hostClient.cancel).toHaveBeenCalledWith(runId);
+      });
+      await reattached?.getReader().cancel();
+      unregister();
+      store.release(chatId);
+    });
+
     it('returns the same session on subsequent acquires for the same chatId', () => {
       const store = createStore();
       const first = store.acquire('chat_a');

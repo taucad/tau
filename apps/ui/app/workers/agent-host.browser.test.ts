@@ -863,9 +863,7 @@ it('answers every command it declines: a stale generation and a frame it cannot 
   });
   // A second channel object receives its own context's posts; only the sending
   // object is skipped. This one plays the follower whose command is declined.
-  const followerChannel = new BroadcastChannel(
-    agentHostAuthorityName({ projectId: providerBasePath, workspaceId: providerBasePath, chatId }),
-  );
+  const followerChannel = new BroadcastChannel(agentHostAuthorityName({ projectId: providerBasePath, chatId }));
   const refusals = new Map<string, { readonly code: string; readonly targetId: string | undefined }>();
   const answered = Promise.withResolvers<void>();
   followerChannel.addEventListener('message', (event: MessageEvent<unknown>) => {
@@ -917,6 +915,241 @@ it('answers every command it declines: a stale generation and a frame it cannot 
     expect(refusals.get('req-unreadable')).toEqual({ code: 'LEADER_COMMAND_UNREADABLE', targetId: 'tab-follower' });
   } finally {
     followerChannel.close();
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});
+
+type LeaderFrame = Readonly<Record<string, unknown>> & {
+  readonly type?: string;
+  readonly senderId?: string;
+  readonly targetId?: string;
+  readonly cursor?: number;
+  readonly command?: { readonly type: string; readonly requestId: string };
+  readonly response?: { readonly type: string; readonly requestId: string; readonly code?: string };
+};
+
+/** Collects the frames a channel hears and waits for the first one a predicate accepts. */
+const frameLog = (channel: BroadcastChannel) => {
+  const frames: LeaderFrame[] = [];
+  const waiters = new Set<{
+    readonly accept: (frame: LeaderFrame) => boolean;
+    readonly found: (frame: LeaderFrame) => void;
+  }>();
+  channel.addEventListener('message', (event: MessageEvent<LeaderFrame>) => {
+    frames.push(event.data);
+    for (const waiter of waiters) {
+      if (waiter.accept(event.data)) {
+        waiters.delete(waiter);
+        waiter.found(event.data);
+      }
+    }
+  });
+  return {
+    frames,
+    next: async (accept: (frame: LeaderFrame) => boolean, within: number): Promise<LeaderFrame> =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error(`No matching leader frame within ${String(within)} ms.`));
+        }, within);
+        waiters.add({
+          accept,
+          found: (frame) => {
+            clearTimeout(timer);
+            resolve(frame);
+          },
+        });
+      }),
+  };
+};
+
+/*
+ * W0.17 (L2b HD-2, O3). The channel was keyed on the protocol version and the
+ * checkout while the lock was keyed on the project and chat, so a follower of
+ * another build or checkout lost the lock race to a leader it could never hear,
+ * and failed `LEADER_RESPONSE_TIMEOUT` about seven seconds later.
+ *
+ * UNRUN until the load gate allows the browser tier.
+ */
+it('should refuse a follower of another build within one heartbeat and answer one on another checkout', async () => {
+  const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const providerBasePath = `agent-host-keys-${crypto.randomUUID()}`;
+  const chatId = 'chat-keys';
+  const sessionId = `session-${crypto.randomUUID()}`;
+  await seedChatLog(fileSystemProvider, {
+    providerBasePath,
+    chatId,
+    runId: 'run-keys',
+    rows: [{ type: 'run.lifecycle', state: 'admitted' }],
+  });
+  const name = agentHostAuthorityName({ projectId: providerBasePath, chatId });
+  const followerChannel = new BroadcastChannel(name);
+  const heard = frameLog(followerChannel);
+
+  try {
+    await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
+    await handleAgentHostWorkerRequest(
+      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
+      sessionId,
+    );
+    const tail = { type: 'tail', chatId, cursor: 0, limit: agentHostTailBatchLimit, sessionId } as const;
+
+    followerChannel.postMessage({
+      version: agentHostProtocolVersion + 1,
+      projectId: providerBasePath,
+      workspaceId: providerBasePath,
+      chatId,
+      type: 'command',
+      senderId: 'tab-next-build',
+      command: { ...tail, requestId: 'req-next-build' },
+    });
+    const refused = await heard.next((frame) => frame.response?.requestId === 'req-next-build', 1000);
+    expect(refused).toMatchObject({
+      targetId: 'tab-next-build',
+      response: { type: 'error', code: 'LEADER_VERSION_MISMATCH' },
+    });
+
+    followerChannel.postMessage({
+      version: agentHostProtocolVersion,
+      projectId: providerBasePath,
+      workspaceId: 'another-checkout',
+      chatId,
+      type: 'command',
+      senderId: 'tab-other-checkout',
+      command: { ...tail, requestId: 'req-other-checkout' },
+    });
+    const answered = await heard.next((frame) => frame.response?.requestId === 'req-other-checkout', 1000);
+    expect(answered).toMatchObject({ targetId: 'tab-other-checkout', response: { type: 'tail', chatId } });
+
+    // One writer: the lease is still this context's.
+    await expect(
+      navigator.locks.request(name, { mode: 'exclusive', ifAvailable: true }, (lock) => lock !== null),
+    ).resolves.toBe(false);
+  } finally {
+    followerChannel.close();
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});
+
+/*
+ * W0.13 (L2b HD-1). `forwardCommand` set the follower's replication cursor from
+ * whatever window the page asked for: a re-attach at cursor 0 pulled it back
+ * into a full re-tail, and a window past it skipped rows this worker's
+ * listeners never received. This context follows; the test plays the leader.
+ *
+ * UNRUN until the load gate allows the browser tier.
+ */
+it('should not move the replication cursor when serving a forwarded window', async () => {
+  const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const providerBasePath = `agent-host-cursor-${crypto.randomUUID()}`;
+  const chatId = 'chat-cursor';
+  const sessionId = `session-${crypto.randomUUID()}`;
+  const generation = 'generation-test-leader';
+  const name = agentHostAuthorityName({ projectId: providerBasePath, chatId });
+  const leaderChannel = new BroadcastChannel(name);
+  const heard = frameLog(leaderChannel);
+  const binding = {
+    version: agentHostProtocolVersion,
+    projectId: providerBasePath,
+    workspaceId: providerBasePath,
+    chatId,
+  };
+  const rows = (from: number, to: number) =>
+    Array.from({ length: to - from }, (_, index) => ({
+      version: 1,
+      leaderEpoch: generation,
+      sequence: from + index,
+      recordedAt: '2026-09-01T00:00:00.000Z',
+      runId: 'run-cursor',
+      type: 'run.lifecycle',
+      state: 'running',
+    }));
+  const batch = (cursor: number, nextCursor: number, endCursor: number) => ({
+    cursor,
+    nextCursor,
+    endCursor,
+    events: rows(cursor, nextCursor),
+  });
+  const held = Promise.withResolvers<void>();
+  const leased = Promise.withResolvers<void>();
+  const lease = navigator.locks.request(name, { mode: 'exclusive' }, async () => {
+    leased.resolve();
+    await held.promise;
+  });
+  await leased.promise;
+  /* Run one page command, answering the frame it forwards with the window the test chooses. */
+  const forwardAnswering = async (
+    request: Parameters<typeof handleAgentHostWorkerRequest>[0],
+    window: Readonly<Record<string, unknown>>,
+  ): Promise<void> => {
+    const forwarded = heard.next((frame) => frame.type === 'command', 2000);
+    const answered = handleAgentHostWorkerRequest(request, sessionId);
+    const frame = await forwarded;
+    leaderChannel.postMessage({
+      ...binding,
+      type: 'response',
+      targetId: frame.senderId,
+      generation,
+      response: { requestId: frame.command!.requestId, chatId, ...window },
+    });
+    await answered;
+  };
+  /* Whether this context asks to re-tail within `within` ms. */
+  const tailRequestWithin = async (within: number): Promise<LeaderFrame | undefined> => {
+    try {
+      return await heard.next((frame) => frame.type === 'tail-request', within);
+    } catch {
+      return undefined;
+    }
+  };
+
+  try {
+    await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
+    /* A worker opens a chat's channel on its first command for that chat, so
+     * the page's first attach is what makes this context a listening follower.
+     * Its window covers the whole log and must not count as replicated. */
+    await forwardAnswering(
+      { type: 'attach', chatId, cursor: 0, limit: 4 },
+      { type: 'attach', batch: batch(0, 4, 4), leadership: { role: 'leader', generation }, takeover: false },
+    );
+    // Replication starts from its own cursor, 0, and reaches 4.
+    const replicated = heard.next((frame) => frame.type === 'tail-request', 1000);
+    leaderChannel.postMessage({ ...binding, type: 'cursor', senderId: 'tab-test-leader', generation, endCursor: 4 });
+    const tailRequest = await replicated;
+    expect(tailRequest.cursor).toBe(0);
+    leaderChannel.postMessage({
+      ...binding,
+      type: 'tail',
+      targetId: tailRequest.senderId,
+      generation,
+      batch: batch(0, 4, 4),
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    // The page re-attaches at cursor 0; the answered window ends at 2.
+    await forwardAnswering(
+      { type: 'attach', chatId, cursor: 0, limit: 2 },
+      { type: 'attach', batch: batch(0, 2, 4), leadership: { role: 'leader', generation }, takeover: false },
+    );
+    const pulledBack = tailRequestWithin(300);
+    leaderChannel.postMessage({ ...binding, type: 'cursor', senderId: 'tab-test-leader', generation, endCursor: 4 });
+    expect(await pulledBack).toBeUndefined();
+
+    // A window past the cursor: rows 4..6 went to the page, not to replication.
+    await forwardAnswering({ type: 'tail', chatId, cursor: 4, limit: 2 }, { type: 'tail', batch: batch(4, 6, 6) });
+    const resumed = tailRequestWithin(1000);
+    leaderChannel.postMessage({ ...binding, type: 'cursor', senderId: 'tab-test-leader', generation, endCursor: 6 });
+    const resumedFrame = await resumed;
+    expect(resumedFrame?.cursor).toBe(4);
+  } finally {
+    held.resolve();
+    await lease;
+    leaderChannel.close();
     await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
   }
 });

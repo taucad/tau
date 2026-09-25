@@ -19,8 +19,8 @@
  * here knows about a remote.
  */
 
-import { ImmutableRevisionTree } from '#algorithms/index.js';
-import type { RevisionTreeInput } from '#algorithms/index.js';
+import type { ImmutableRevisionTree } from '#algorithms/index.js';
+import { adoptRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
 
 import { digestHex } from '#object-hash.js';
 import {
@@ -146,35 +146,39 @@ export const cleanLargeObjects = (
   if (cached !== undefined) {
     return cached;
   }
-  const entries = tree.entries();
-  const attributesEntry = entries.find((entry) => entry.path === generatedGitattributesPath);
-  const existing = attributesEntry === undefined ? undefined : decoder.decode(attributesEntry.content);
-  const untracked = entries
+  /* The tree's own records, uncopied: every file this leaves alone is shared
+   * with the cleaned tree, so its blob id stays memoised across cuts (E3). */
+  const files = revisionTreeFiles(tree);
+  const attributesFile = files.get(generatedGitattributesPath);
+  const existing = attributesFile === undefined ? undefined : decoder.decode(attributesFile.content);
+  const untracked = [...files]
     .filter(
-      (entry) =>
-        entry.content.byteLength >= largeObjectThresholdBytes &&
-        !isTrackedLargeObjectPath(entry.path, existing) &&
-        readLfsPointer(entry.content) === undefined,
+      ([path, { content }]) =>
+        content.byteLength >= largeObjectThresholdBytes &&
+        !isTrackedLargeObjectPath(path, existing) &&
+        readLfsPointer(content) === undefined,
     )
-    .map((entry) => entry.path);
+    .map(([path]) => path);
   const attributes = untracked.length === 0 ? existing : generatedGitattributesContent(existing, untracked);
   const objects = new Map<string, Uint8Array<ArrayBuffer>>();
-  const cleaned = entries.map((entry): RevisionTreeInput => {
-    if (entry.path === generatedGitattributesPath && attributes !== existing) {
-      return [entry.path, textEncoder.encode(attributes), entry.mode];
+  const cleaned = new Map(files);
+  for (const [path, file] of files) {
+    if (!isTrackedLargeObjectPath(path, attributes) || readLfsPointer(file.content) !== undefined) {
+      continue;
     }
-    if (!isTrackedLargeObjectPath(entry.path, attributes) || readLfsPointer(entry.content) !== undefined) {
-      return [entry.path, entry.content, entry.mode];
-    }
-    const { pointer, bytes } = lfsPointerFor(entry.content);
-    objects.set(pointer.oid, entry.content);
-    return [entry.path, bytes, entry.mode];
-  });
-  if (attributes !== existing && attributesEntry === undefined) {
-    cleaned.push([generatedGitattributesPath, textEncoder.encode(attributes)]);
+    const { oid, bytes } = pointerOf(file.content);
+    /* The caller's copy: a store may do what it likes with it. */
+    objects.set(oid, new Uint8Array(file.content));
+    cleaned.set(path, Object.freeze({ content: bytes, mode: file.mode }));
+  }
+  if (attributes !== undefined && attributes !== existing) {
+    cleaned.set(
+      generatedGitattributesPath,
+      Object.freeze({ content: attributesBytesOf(attributes), mode: attributesFile?.mode ?? '100644' }),
+    );
   }
   const recorded = Object.freeze({
-    tree: objects.size === 0 && attributes === existing ? tree : new ImmutableRevisionTree(cleaned),
+    tree: objects.size === 0 && attributes === existing ? tree : adoptRevisionTree(cleaned),
     objects,
   });
   cleanedTrees.set(tree, recorded);
@@ -186,3 +190,40 @@ const cleanedTrees = new WeakMap<
   ImmutableRevisionTree,
   Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }>
 >();
+
+/**
+ * The pointer for one large file's bytes, computed once per shared buffer (E2).
+ *
+ * Keyed on the bytes a tree holds, which every later cut of an unchanged file
+ * shares, so a 5 MiB export is SHA-256'd when it changes and never again. The
+ * pointer bytes are shared too, so their blob id is memoised as well (E3).
+ *
+ * @param content - Bytes a tree holds, never written.
+ * @returns The pointer's oid and its bytes, shared by every caller.
+ */
+const pointerOf = (content: Uint8Array<ArrayBuffer>): Readonly<{ oid: string; bytes: Uint8Array<ArrayBuffer> }> => {
+  let held = pointers.get(content);
+  if (held === undefined) {
+    const { pointer, bytes } = lfsPointerFor(content);
+    held = Object.freeze({ oid: pointer.oid, bytes });
+    pointers.set(content, held);
+  }
+  return held;
+};
+
+const pointers = new WeakMap<Uint8Array<ArrayBuffer>, Readonly<{ oid: string; bytes: Uint8Array<ArrayBuffer> }>>();
+
+/*
+ * The generated attributes block's last bytes, so an unchanged block keeps one
+ * identity — and one memoised blob id — across cuts.
+ *
+ * ponytail: one slot; two projects alternating in one process re-hash a few
+ * hundred bytes. A map keyed on the text if that ever shows up.
+ */
+let attributesBytes: Readonly<{ text: string; bytes: Uint8Array<ArrayBuffer> }> | undefined;
+const attributesBytesOf = (text: string): Uint8Array<ArrayBuffer> => {
+  if (attributesBytes?.text !== text) {
+    attributesBytes = { text, bytes: textEncoder.encode(text) };
+  }
+  return attributesBytes.bytes;
+};

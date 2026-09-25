@@ -13,8 +13,8 @@ import { bufferToStream } from '@taucad/filesystem/backend/stream-utils';
 import { walk } from '@taucad/filesystem/content-ops';
 import type { WalkFileSystem } from '@taucad/filesystem/content-ops';
 import type { DirectoryEntry, FileMode, FileStatEntry, FileSystemProvider } from '@taucad/filesystem';
-import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
-import type { RevisionTreeInput } from '#algorithms/revision-tree.js';
+import { adoptRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
+import type { ImmutableRevisionTree, RevisionTreeFile } from '#algorithms/revision-tree.js';
 
 /** Read capabilities required to capture one immutable revision tree. @public */
 export type RevisionCaptureFileSystem = Pick<
@@ -46,8 +46,20 @@ export type CaptureRevisionTreeOptions = Readonly<{
    * instead of the file itself — see {@link createCaptureMemo}.
    */
   reuse?: (path: string) => Uint8Array<ArrayBuffer> | undefined;
-  /** Every file this capture did read, with the bytes it read. */
+  /**
+   * Every file this capture did read, with the bytes it read. They are the
+   * captured tree's own bytes, shared rather than copied: never write them.
+   */
   onRead?: (path: string, content: Uint8Array<ArrayBuffer>) => void;
+  /**
+   * The last tree this checkout captured and every versioned path written
+   * since (E1). Only those paths are listed and read; every other file is the
+   * previous tree's own record, so its ids are memoised already. A path names a
+   * file or a whole directory, present or gone. Omit it whenever the paths are
+   * not known to be complete — a gap in the change bus, a write no watcher saw,
+   * a first capture — and the capture walks everything.
+   */
+  changedSince?: Readonly<{ tree: ImmutableRevisionTree; paths: readonly string[] }>;
 }>;
 
 const defaultCaptureConcurrency = 16;
@@ -144,51 +156,96 @@ export const captureRevisionTree = async (
    * path is dropped before its kind is asked for, so an excluded entry costs no
    * `stat` and no descent.
    */
+  const admittedChildren = async (path: string): Promise<DirectoryEntry[]> => {
+    throwIfAborted();
+    const children = await skipIfVanished(async () => listChildren(path));
+    const admitted: DirectoryEntry[] = [];
+    for (const child of children ?? []) {
+      throwIfAborted();
+      const childPath = joinRelativePath(path, child.name);
+      if (excluded?.(childPath) === true) {
+        continue;
+      }
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids a second nested concurrency pool.
+      const kind = child.kind ?? (await statKind(childPath));
+      if (kind !== undefined) {
+        admitted.push({ name: child.name, kind });
+      }
+    }
+    return admitted;
+  };
   const listing: WalkFileSystem = {
     readdir: async (path) => filesystem.readdir(path),
     stat: async (path) => filesystem.stat(path),
-    readdirEntries: async (path) => {
-      throwIfAborted();
-      const children = await skipIfVanished(async () => listChildren(path));
-      const admitted: DirectoryEntry[] = [];
-      for (const child of children ?? []) {
-        throwIfAborted();
-        const childPath = joinRelativePath(path, child.name);
-        if (excluded?.(childPath) === true) {
-          continue;
-        }
-        // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids a second nested concurrency pool.
-        const kind = child.kind ?? (await statKind(childPath));
-        if (kind !== undefined) {
-          admitted.push({ name: child.name, kind });
-        }
-      }
-      return admitted;
-    },
+    readdirEntries: admittedChildren,
   };
   const filePaths: Array<Readonly<{ path: string; mode: FileMode }>> = [];
-  try {
-    for await (const entry of walk(listing, '')) {
+  const modeOf = async (path: string): Promise<FileMode> =>
+    (filesystem.getFileMode === undefined
+      ? undefined
+      : await skipIfVanished(async () => filesystem.getFileMode!(path))) ??
+    options?.inheritedMode?.(path) ??
+    '100644';
+  const listFiles = async (root: string): Promise<void> => {
+    for await (const entry of walk(listing, root)) {
       throwIfAborted();
       if (entry.kind === 'dir') {
         continue;
       }
-      const mode =
-        (filesystem.getFileMode === undefined
-          ? undefined
-          : // oxlint-disable-next-line no-await-in-loop -- mode belongs to the entry reached by sequential traversal.
-            await skipIfVanished(async () => filesystem.getFileMode!(entry.relativePath))) ??
-        options?.inheritedMode?.(entry.relativePath) ??
-        '100644';
-      filePaths.push({ path: entry.relativePath, mode });
+      const path = joinRelativePath(root, entry.relativePath);
+      // oxlint-disable-next-line no-await-in-loop -- mode belongs to the entry reached by sequential traversal.
+      filePaths.push({ path, mode: await modeOf(path) });
     }
-    const entries = Array.from<RevisionTreeInput | undefined>({
-      length: filePaths.length,
-    });
+  };
+  const files = new Map<string, RevisionTreeFile>();
+  /*
+   * E1: every file outside the changed paths is the previous tree's own
+   * record; each changed path is asked of its parent's listing, which applies
+   * `exclude` and answers file, directory or gone. Answers the bytes the kept
+   * records already count against the budget.
+   */
+  const listChanged = async (previous: ImmutableRevisionTree, roots: ReadonlySet<string>): Promise<number> => {
+    let keptBytes = 0;
+    for (const [path, file] of revisionTreeFiles(previous)) {
+      if (!isUnder(path, roots)) {
+        files.set(path, file);
+        keptBytes += file.content.byteLength;
+      }
+    }
+    for (const root of roots) {
+      /* A root inside another is read with it; one the walk could never
+       * reach is not read at all. */
+      if (hasAncestorIn(root, roots) || isExcludedPath(root, excluded)) {
+        continue;
+      }
+      const slash = root.lastIndexOf('/');
+      // oxlint-disable-next-line no-await-in-loop -- sequential traversal, as the full walk.
+      const siblings = await admittedChildren(slash === -1 ? '' : root.slice(0, slash));
+      const kind = siblings.find((entry) => entry.name === root.slice(slash + 1))?.kind;
+      if (kind === 'file') {
+        // oxlint-disable-next-line no-await-in-loop -- sequential traversal, as the full walk.
+        filePaths.push({ path: root, mode: await modeOf(root) });
+      } else if (kind === 'dir') {
+        // oxlint-disable-next-line no-await-in-loop -- sequential traversal, as the full walk.
+        await listFiles(root);
+      }
+    }
+    return keptBytes;
+  };
+  const changedSince = options?.changedSince;
+  const changed = changedSince === undefined ? undefined : changedRoots(changedSince.paths);
+  try {
+    let capturedBytes =
+      changedSince === undefined || changed === undefined ? 0 : await listChanged(changedSince.tree, changed);
+    if (changed === undefined) {
+      await listFiles('');
+    }
+    if (capturedBytes > maximumTotalBytes) {
+      throw new RangeError(`Revision tree capture exceeds maximumTotalBytes (${maximumTotalBytes}).`);
+    }
     let nextIndex = 0;
-    let capturedBytes = 0;
     let firstFailure: unknown;
-    const captureFile = async (path: string, mode: FileMode, index: number): Promise<void> => {
+    const captureFile = async (path: string, mode: FileMode): Promise<void> => {
       let reservedBytes = 0;
       let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
       let cancellation: Promise<void> | undefined;
@@ -222,7 +279,10 @@ export const captureRevisionTree = async (
           }
           capturedBytes += held.byteLength;
           reservedBytes += held.byteLength;
-          entries[index] = [path, held, mode];
+          /* Bytes a capture read are shared, so their ids stay memoised across
+           * cuts; anything else a caller hands in is copied, as the tree's
+           * constructor would. */
+          files.set(path, Object.freeze({ content: capturedBytesOf.has(held) ? held : new Uint8Array(held), mode }));
           return;
         }
         const streamOptions = { signal: abortController.signal };
@@ -264,7 +324,8 @@ export const captureRevisionTree = async (
           content.set(chunk, offset);
           offset += chunk.byteLength;
         }
-        entries[index] = [path, content, mode];
+        capturedBytesOf.add(content);
+        files.set(path, Object.freeze({ content, mode }));
         options?.onRead?.(path, content);
       } catch (error) {
         capturedBytes -= reservedBytes;
@@ -310,7 +371,7 @@ export const captureRevisionTree = async (
         try {
           const file = filePaths[index]!;
           // oxlint-disable-next-line no-await-in-loop -- Each worker owns one sequential lane in the shared pool.
-          await captureFile(file.path, file.mode, index);
+          await captureFile(file.path, file.mode);
         } catch (error) {
           firstFailure ??= error;
           abortController.abort(error);
@@ -324,17 +385,71 @@ export const captureRevisionTree = async (
         : new Error('Revision tree capture failed.', { cause: firstFailure });
     }
     throwIfAborted();
-    const completeEntries = entries.filter((entry): entry is RevisionTreeInput => entry !== undefined);
-    const capturedPaths = new Set(completeEntries.map(([path]) => path));
-    const missingRequired = [...requiredPaths].filter((path) => !capturedPaths.has(path));
+    const missingRequired = [...requiredPaths].filter((path) => !files.has(path));
     if (missingRequired.length > 0) {
       throw new Error(`Required capture paths were not captured: ${missingRequired.join(', ')}`);
     }
-    return new ImmutableRevisionTree(completeEntries);
+    try {
+      return adoptRevisionTree(files);
+    } catch (error) {
+      /* A file and a directory at one path cannot both be on disk, so a
+       * derived tree that holds both proves the change set missed a write:
+       * it is not trusted, and the capture walks everything. */
+      if (changedSince !== undefined && error instanceof TypeError) {
+        return await captureRevisionTree(filesystem, { ...options, changedSince: undefined });
+      }
+      throw error;
+    }
   } finally {
     options?.signal?.removeEventListener('abort', abortFromCaller);
   }
 };
+
+/**
+ * The changed paths as a set of canonical roots.
+ *
+ * @param paths - Root-relative paths from the change bus.
+ * @returns The roots, or `undefined` when one names the whole tree and the
+ *   capture must walk it.
+ */
+const changedRoots = (paths: readonly string[]): ReadonlySet<string> | undefined => {
+  const roots = new Set(paths.map((path) => assertRootedPath(path)));
+  return roots.has('') ? undefined : roots;
+};
+
+/* Whether any ancestor directory of a path is one of the roots. */
+const hasAncestorIn = (path: string, roots: ReadonlySet<string>): boolean => {
+  for (let index = path.indexOf('/'); index !== -1; index = path.indexOf('/', index + 1)) {
+    if (roots.has(path.slice(0, index))) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/* Whether a path is one of the roots or inside one. */
+const isUnder = (path: string, roots: ReadonlySet<string>): boolean => roots.has(path) || hasAncestorIn(path, roots);
+
+/* The full walk never descends into an excluded directory, so neither may a changed path.
+ * The path itself is asked of its parent's listing, which applies `exclude` already. */
+const isExcludedPath = (path: string, excluded: ((path: string) => boolean) | undefined): boolean => {
+  if (excluded === undefined) {
+    return false;
+  }
+  for (let index = path.indexOf('/'); index !== -1; index = path.indexOf('/', index + 1)) {
+    if (excluded(path.slice(0, index))) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/*
+ * Bytes a capture read itself. Only these are shared with a tree when a caller
+ * hands them back through `reuse`: a buffer from anywhere else may still be
+ * written by whoever made it, so it is copied.
+ */
+const capturedBytesOf = new WeakSet<Uint8Array<ArrayBuffer>>();
 
 /**
  * The coarsest modification time a filesystem we capture through reports: FAT's
@@ -382,19 +497,18 @@ export type CaptureMemo = Readonly<{
  * a same-size same-timestamp rewrite is read and seen (C3). And a capture whose
  * bytes did not match the size its stat claimed memoises nothing for that path.
  *
- * **What it retains is a second copy.** `ImmutableRevisionTree` copies every byte
- * run it is given and every one it hands back, so a memoised file is resident
- * twice while a tree built from it is alive — the memo's own copy and the tree's.
- * That is why the ceiling is {@link defaultMemoRetainedBytes} and not the
- * capture's payload bound.
+ * **What it retains is the captured trees' own bytes.** A capture shares the
+ * bytes it read with the tree it builds and hands those same bytes to this
+ * memo, and a reused file goes back into the next tree uncopied — so a memoised
+ * file is resident once however many trees hold it, and its blob and pointer
+ * ids stay memoised across cuts (E2, E3). The ceiling is still
+ * {@link defaultMemoRetainedBytes} and not the capture's payload bound, because
+ * what the memo holds outlives every tree built from it.
  *
  * ponytail: a byte budget with per-file admission, in capture order, and no
  * eviction — a file that does not fit is simply not held and pays its read next
  * time, so a tree larger than the budget keeps the first files that fit rather
- * than the most useful ones. Upgrade path, in order: hold the blob **id** rather
- * than the bytes, which needs `ImmutableRevisionTree` to carry a lazily loaded
- * entry (it is a synchronous copy-on-read value today, read by thirteen modules
- * and three port adapters) — and only if that proves impossible, an LRU here.
+ * than the most useful ones. Upgrade path: an LRU here.
  *
  * @param options - Byte ceiling for what this memo keeps resident.
  * @returns A memo to hand the captures of one checkout, dropped with it.

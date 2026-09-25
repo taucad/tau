@@ -115,19 +115,12 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   return harness.revisionStatusMock();
 });
 
-vi.mock('#hooks/use-revisions.js', () => ({
-  useRevisions: () => ({ canReturnToLatest: false, revisions: [], headRevisionId: undefined, isDirty: false }),
-}));
 vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({
   useSaveRevisionRequest: () => saveRequest,
 }));
 
 vi.mock('#hooks/use-thumbnail-generator.js', () => ({
   useThumbnailGenerator: () => ({ regenerate: vi.fn() }),
-}));
-
-vi.mock('#hooks/use-restore-to-point.js', () => ({
-  useRestoreToPoint: () => ({ returnToLatest: vi.fn() }),
 }));
 
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
@@ -249,6 +242,26 @@ describe('ProjectCommandPaletteItems', () => {
     revisionStatusHarness.role = 'revoked';
     rerender(<ProjectCommandPaletteItems match={match} />);
     expect(registeredItems.find((item) => item.id === 'sync-now')?.disabled).toBe(true);
+  });
+
+  /* RA3/HQ7: one Revisions group, and backup verbs wait until the line is known. */
+  it('keeps every revision verb in one group, deferring Change backup and Disconnect until the line is known', () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'unknown' },
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    };
+    const { rerender } = render(<ProjectCommandPaletteItems match={match} />);
+    const revisionIds = ['change-backup', 'disconnect-remote', 'sync-now', 'save-revision', 'revision-history'];
+    for (const id of revisionIds) {
+      expect(registeredItems.find((item) => item.id === id)?.group).toBe('Revisions');
+    }
+    expect(registeredItems.find((item) => item.id === 'change-backup')?.visible).toBe(false);
+    expect(registeredItems.find((item) => item.id === 'disconnect-remote')?.visible).toBe(false);
+
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'branch', name: 'main' } };
+    rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'change-backup')?.visible).toBe(true);
   });
 
   it('keeps Kernel hidden unless tauDebug is enabled', () => {

@@ -18,7 +18,7 @@ const emptyStatus = (): RevisionStatusProjection => ({
   projectId: 'p',
   checkoutId: 'live',
   checkoutRoot: '/projects/p',
-  branch: 'main',
+  line: { kind: 'branch', name: 'main' },
   registrySettled: true,
   projectDirty: false,
   dirty: false,
@@ -76,7 +76,6 @@ export const revisionStatusHarness = {
   toasts: new Set<(toast: RevisionToast) => void>(),
   commands: {
     restore: vi.fn<(revisionId: string) => void>(),
-    returnToLatest: vi.fn(),
     undo: vi.fn(),
     confirm: vi.fn(),
     cancel: vi.fn(),

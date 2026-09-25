@@ -14,7 +14,9 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import type { RevisionRow } from '@taucad/revisions';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { RevisionsPanelBody, groupRevisionHistory } from '#routes/w.$workspace.$project/chat-revisions.js';
+import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
@@ -24,7 +26,15 @@ const projectRef = {
   getSnapshot: () => projectSnapshot,
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef }) }));
+const editorRef = {
+  getSnapshot: () => ({ context: { focusedChatId: undefined } }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef, editorRef }) }));
+const openPanel = vi.fn();
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useProjectWorkspace: () => ({ openPanel }),
+}));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ updateProject: vi.fn() }),
 }));
@@ -136,7 +146,7 @@ describe('Revisions pane', () => {
     ];
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       headRevisionId: 'rev-4',
       branches: [
         { name: 'main', head: 'rev-4', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
@@ -165,7 +175,7 @@ describe('Revisions pane', () => {
   });
 
   it('shows the branch region only once a second branch exists', async () => {
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main' };
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'branch', name: 'main' } };
 
     const { rerender } = render(<RevisionsPanelBody />, { wrapper });
     expect(screen.queryByRole('list', { name: 'Branches' })).not.toBeInTheDocument();
@@ -192,14 +202,14 @@ describe('Revisions pane', () => {
     expect(screen.getByText('Optimize bracket')).toBeInTheDocument();
   });
 
-  /* W10 red pin (d): a conflicted head is a *Needs resolution* card on that
-   * branch's row, and every per-file choice is one machine verb. Nothing here
+  /* W10 red pin (d), HQ1–HQ2: a conflicted head is a decision in *Choose a
+   * version*, and every per-file choice is one machine verb. Nothing here
    * touches main — the card says so, because that is AC14's promise to a
-   * person. */
-  it('renders a Needs resolution card for a conflicted branch head', async () => {
+   * person — and the strip names the line being decided on. */
+  it('asks for a decision on a conflicted branch head, naming the line (HQ1, HQ2)', async () => {
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -227,7 +237,10 @@ describe('Revisions pane', () => {
 
     renderPane();
 
-    expect(await screen.findByText('Needs resolution')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Choose a version' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent('Needs your decision on main');
+    expect(screen.getByLabelText('Needs your decision')).toHaveClass('text-warning');
+    expect(screen.queryByText(/Needs resolution/u)).toBeNull();
     expect(screen.getByText('src/bracket.ts')).toBeInTheDocument();
     /* AC14's promise, in the one sentence a person reads first. */
     expect(screen.getByText(/main is untouched until you choose/u)).toBeInTheDocument();
@@ -242,7 +255,7 @@ describe('Revisions pane', () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -282,7 +295,7 @@ describe('Revisions pane', () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -319,7 +332,7 @@ describe('Revisions pane', () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -394,7 +407,7 @@ describe('Revisions pane', () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -462,7 +475,7 @@ describe('Revisions pane', () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -485,7 +498,7 @@ describe('Revisions pane', () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -498,8 +511,11 @@ describe('Revisions pane', () => {
       ],
     };
 
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+
     renderPane();
-    await user.click(screen.getByRole('button', { name: 'New branch' }));
+    await user.click(await screen.findByRole('button', { name: 'New branch' }));
     await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
 
@@ -509,11 +525,18 @@ describe('Revisions pane', () => {
   /* C3: the composer offers no branch, so a one-line project makes its second here. */
   it('offers New branch at one line, where the Branches region does not exist yet', async () => {
     const user = userEvent.setup();
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main' };
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-1',
+    };
 
     renderPane();
     expect(screen.queryByRole('list', { name: 'Branches' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'New branch' }));
+    await user.click(await screen.findByRole('button', { name: 'New branch' }));
+    /* The one naming form, which says where the branch starts (round 14). */
+    expect(screen.getByText('Starts from Rev 1. main stays as it is.')).toBeInTheDocument();
     await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
 
@@ -524,7 +547,7 @@ describe('Revisions pane', () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -562,7 +585,7 @@ describe('Revisions pane', () => {
     /* The *Branches* region appears at two branches (S26). */
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -574,10 +597,12 @@ describe('Revisions pane', () => {
         },
       ],
     };
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
     const refusing = refuseCreateBranch('enclosure-v2');
 
     renderPane();
-    await user.click(screen.getByRole('button', { name: 'New branch' }));
+    await user.click(await screen.findByRole('button', { name: 'New branch' }));
     await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
     await refusing.settled();
@@ -593,7 +618,7 @@ describe('Revisions pane', () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       headRevisionId: 'rev-4',
       dirty: true,
     };
@@ -603,41 +628,60 @@ describe('Revisions pane', () => {
     await waitFor(() => {
       expect(screen.getByText('Modified since Rev 4')).toBeInTheDocument();
     });
-    await user.click(screen.getAllByRole('button', { name: 'Discard changes' })[0]!);
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Discard changes' }));
     expect(revisionStatusHarness.commands.restore).toHaveBeenCalledWith('rev-4');
   });
 
-  it('offers Return to latest only while the checkout sits behind the branch tip', async () => {
+  /* D1 + RA4: a restore is a new row on the line, so there is nothing to return to. */
+  it('names the line and the restore row after a restore, and offers no Return to latest', async () => {
     revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-5', revisionNumber: 5, summary: 'Restore', source: 'restore', restoredFrom: 'rev-3' }),
       row({ revisionId: 'rev-4', revisionNumber: 4 }),
       row({ revisionId: 'rev-3', revisionNumber: 3 }),
     ];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-3' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-5',
+    };
 
     renderPane();
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Return to latest' })).toBeInTheDocument();
+      expect(screen.getByText('Restored Rev 3')).toBeInTheDocument();
     });
+    expect(screen.getAllByText('Rev 5').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'History · main' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Return to latest' })).not.toBeInTheDocument();
+    /* D2: the strip offers the undo while nothing has landed after the restore. */
+    expect(screen.getByRole('button', { name: 'Undo restore' })).toBeInTheDocument();
   });
 
   it('shows the Sync region only once a remote exists, and offers to open it otherwise', async () => {
     const user = userEvent.setup();
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main' };
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-1',
+    };
 
     renderPane();
     expect(screen.queryByRole('radio', { name: 'Tau Cloud' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Connect Tau Cloud' }));
+    await user.click(await screen.findByRole('button', { name: 'Back up' }));
 
     expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeInTheDocument();
+    /* A29: the offer that opened Sync does not keep standing beside it. */
+    expect(screen.queryByRole('button', { name: 'Back up' })).not.toBeInTheDocument();
   });
 
   it('names no git word in what a person reads (A18, I12)', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       headRevisionId: 'rev-4',
       branches: [
         { name: 'main', head: 'rev-4', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
@@ -662,7 +706,7 @@ describe('Revisions pane', () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -677,11 +721,11 @@ describe('Revisions pane', () => {
 
     render(<RevisionsPanelBody />, { wrapper });
     await user.click(screen.getByRole('button', { name: 'Actions for bracket-fillet' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Rename bracket-fillet' }));
-    const field = screen.getByRole('textbox', { name: 'New name for bracket-fillet' });
+    await user.click(screen.getByRole('menuitem', { name: 'Rename bracket-fillet…' }));
+    const field = await screen.findByRole('textbox', { name: 'New name for bracket-fillet' });
     await user.clear(field);
     await user.type(field, 'enclosure-v2');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(screen.getByRole('button', { name: 'Rename branch' }));
 
     expect(revisionStatusHarness.commands.renameBranch).toHaveBeenCalledWith('bracket-fillet', 'enclosure-v2');
   });
@@ -692,7 +736,7 @@ describe('Revisions pane closeout', () => {
   it('offers a resolution surface for a conflict on the only branch (C35)', async () => {
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       /* A sync divergence records its conflict on the *same* branch
        * (`sync.machine.ts` `conflictRef = refs/heads/${branch}`), so a
        * one-branch project announced *Needs resolution* with nowhere to go. */
@@ -732,7 +776,9 @@ describe('Revisions pane closeout', () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
     revisionStatusHarness.diff = [{ path: 'src/main.scad', kind: 'modified' }];
 
+    const user = userEvent.setup();
     renderPane();
+    await user.click(await screen.findByRole('button', { name: 'Rev 1 · Thicker base' }));
 
     expect(
       await screen.findByRole('button', { name: 'Compare src/main.scad with the current file' }),
@@ -742,7 +788,7 @@ describe('Revisions pane closeout', () => {
   it('marks a branch on a host data directory as Linked (C40, I2)', async () => {
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       checkoutId: 'live',
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
@@ -766,7 +812,7 @@ describe('Revisions pane closeout', () => {
   it('places no chat on a remote-only branch, which has no checkout (D37)', async () => {
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       checkoutId: 'live',
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
@@ -782,7 +828,7 @@ describe('Revisions pane closeout', () => {
     expect(remote).not.toHaveTextContent('Sketch lid');
   });
 
-  it('asks for no diff it does not render, including inside the closed Earlier fold (C52)', async () => {
+  it('asks for no diff it does not render, and shows twelve rows before Show more (C52)', async () => {
     const rows = Array.from({ length: 40 }, (_, index) =>
       row({ revisionId: `rev-${String(index)}`, revisionNumber: 40 - index, trigger: 'save' }),
     );
@@ -792,12 +838,12 @@ describe('Revisions pane closeout', () => {
     renderPane();
 
     await waitFor(() => {
-      expect(screen.getAllByRole('listitem', { name: /^Revision \d+$/u }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('button', { name: /^Rev \d+ · /u }).length).toBeGreaterThan(0);
     });
-    const visible = screen.getAllByRole('listitem', { name: /^Revision \d+$/u }).length;
-    expect(visible).toBeLessThanOrEqual(8);
-    /* One `revision-diff` query per *rendered* row, not per row in the graph. */
-    expect(new Set(revisionStatusHarness.diffRequests).size).toBeLessThanOrEqual(visible);
+    expect(screen.getAllByRole('button', { name: /^Rev \d+ · /u })).toHaveLength(12);
+    expect(screen.getByRole('button', { name: 'Show 28 more' })).toBeInTheDocument();
+    /* A closed row asks for nothing: its files are read when it opens. */
+    expect(revisionStatusHarness.diffRequests).toEqual([]);
   });
 
   it('names every live region the pane owns (C43)', async () => {
@@ -835,5 +881,165 @@ describe('Revisions pane closeout', () => {
       (node) => node.getAttribute('aria-label') === null && node.getAttribute('aria-labelledby') === null,
     );
     expect(unnamed.map((node) => node.textContent)).toEqual([]);
+  });
+});
+
+/** RA11, M2, HQ3, HQ7 and the round 4–20 History geometry, on the shipped pane. */
+describe('Revisions pane vocabulary and History', () => {
+  const conflicted = {
+    revisionId: 'rev-c',
+    branch: 'bracket-fillet',
+    labels: { ours: 'main', theirs: 'bracket-fillet' },
+    paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
+    busy: false,
+    ready: false,
+  } as const;
+
+  it.each([
+    ['at rest', {}, 'Saved on this device'],
+    ['modified', { dirty: true }, 'Modified since Rev 4'],
+    ['deciding a merge', { attention: 1, conflicts: [conflicted] }, 'Needs your decision on main'],
+    ['before the line is known', { line: { kind: 'unknown' } as const, headRevisionId: undefined }, 'Loading history…'],
+  ] as const)(
+    'says one sentence %s, identical in the header’s name, its card and the strip (RA11)',
+    async (_, over, sentence) => {
+      const user = userEvent.setup();
+      revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
+      revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4', ...over };
+
+      render(
+        <TooltipProvider>
+          <RevisionStatusAction />
+          <RevisionsPanelBody />
+        </TooltipProvider>,
+        { wrapper },
+      );
+
+      const strip = await screen.findByRole('status', { name: 'Revision status' });
+      await waitFor(() => {
+        expect(strip).toHaveTextContent(sentence);
+      });
+      expect(strip.textContent).toBe(sentence);
+      const trigger = screen.getByRole('button', { name: /^Open Revisions\./u });
+      expect(trigger.getAttribute('aria-label')).toContain(sentence.replaceAll(' · ', ', ').replace(/…$/u, ''));
+      await user.tab();
+      expect(trigger).toHaveFocus();
+      const card = await waitFor(() => {
+        const found = document.querySelector('[data-slot="revision-card"]');
+        expect(found).not.toBeNull();
+        return found!;
+      });
+      expect(card).toHaveTextContent(sentence);
+    },
+  );
+
+  /* M2 (I6, S20): an unlocated line is loading geometry, never *No revisions yet*, never `main`. */
+  it('renders History’s loading geometry while the line is unknown', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+
+    renderPane();
+
+    expect(await screen.findByRole('status', { name: 'Loading history' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('No revisions yet')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'History' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Where you are' })).not.toHaveTextContent('main');
+    /* HQ7: nothing is offered over a line nobody has located yet. */
+    expect(screen.queryByRole('button', { name: 'New branch' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
+  });
+
+  it('names the line History shows, and says why an empty one is empty', async () => {
+    renderPane();
+
+    expect(await screen.findByRole('heading', { name: 'History · main' })).toBeInTheDocument();
+    expect(await screen.findByText('No revisions yet')).toBeInTheDocument();
+  });
+
+  it('keeps the revision you are on in view, however far down it is (round 4)', async () => {
+    revisionStatusHarness.rows = Array.from({ length: 20 }, (_, index) =>
+      row({ revisionId: `rev-${String(20 - index)}`, revisionNumber: 20 - index, trigger: 'save' }),
+    );
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
+
+    renderPane();
+
+    expect(await screen.findByRole('button', { name: 'Rev 3 · Thicker base' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show 2 more' })).toBeInTheDocument();
+  });
+
+  it('folds consecutive autosaves into one row that opens to them', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-4', revisionNumber: 4, trigger: 'save' }),
+      row({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'idle' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'idle' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
+
+    renderPane();
+
+    const fold = await screen.findByRole('button', { name: /^2 autosaves/u });
+    expect(screen.queryByRole('button', { name: 'Rev 3 · Thicker base' })).not.toBeInTheDocument();
+    await user.click(fold);
+    expect(screen.getByRole('button', { name: 'Rev 3 · Thicker base' })).toBeInTheDocument();
+  });
+
+  it('is one Tab stop, on the row you are on, and moves by arrow keys (A1 item 14)', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-3', revisionNumber: 3, trigger: 'save' }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, trigger: 'save' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, trigger: 'save' }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
+
+    renderPane();
+
+    const current = await screen.findByRole('button', { name: 'Rev 2 · Thicker base' });
+    await waitFor(() => {
+      expect(current).toHaveAttribute('tabindex', '0');
+    });
+    expect(screen.getByRole('button', { name: 'Rev 3 · Thicker base' })).toHaveAttribute('tabindex', '-1');
+    current.focus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('button', { name: 'Rev 1 · Thicker base' })).toHaveFocus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('button', { name: 'Rev 1 · Thicker base' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('keeps a removed collaborator calm: the strip and Sync say Access removed and what to do (HQ3)', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
+    revisionStatusHarness.role = 'revoked';
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-4',
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+      sync: { ...revisionStatusHarness.status.sync, state: 'failed', reason: 'forbidden' },
+    };
+
+    renderPane();
+
+    await waitFor(() => {
+      expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent('Saved · Access removed');
+    });
+    const backup = screen.getByRole('status', { name: 'Backup status' });
+    expect(backup).toHaveTextContent('Access removed');
+    expect(backup).toHaveTextContent('Ask them to add you again');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
+  });
+
+  it('never renders an actor id, and names the agent (HQ4)', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-2', revisionNumber: 2, actor: 'claude-opus-4', source: 'agent' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, actor: 'user_2abc' }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-2' };
+
+    const { container } = render(<RevisionsPanelBody />, { wrapper });
+
+    expect(await screen.findByText('Tau agent')).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/claude-opus-4|user_2abc|anon:/u);
   });
 });

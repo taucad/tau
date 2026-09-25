@@ -14,6 +14,7 @@ import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hook
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import type { RevisionFailureSubject } from '#lib/revision-failure-copy.js';
 import type { BranchOperation } from '@taucad/revisions';
+import { needsDecision, revisionName } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
 /** What the question above a waiting branch verb asks. Document words only (A18, I12). */
 const branchVerbTitle: Readonly<Record<BranchOperation, string>> = {
@@ -49,6 +50,9 @@ const revisionFailureEvent: Readonly<Record<RevisionFailureSubject, string>> = {
   /* Not raised here: a turn announces its own failure through `turn.failed`,
    * which `revision-outcomes.tsx` phrases from the same table (W9). */
   turn: 'revision_turn_failed',
+  /* Not raised here either: the Sync line and the name-removal dialog own their own. */
+  backup: 'revision_backup_failed',
+  removeName: 'revision_remove_name_failed',
 };
 
 /**
@@ -83,7 +87,21 @@ export function RevisionRestore(): React.JSX.Element {
         const copy = describeRevisionFailure(entry.subject, entry.code);
         analytics.capture(revisionFailureEvent[entry.subject], { message: entry.message, code: entry.code });
         console.error('[revisions]', entry.subject, entry.code, entry.message);
+        /* W0 N1, M1: files that are back, and an undo that belongs elsewhere, lost nothing; they are not failures. */
+        if (entry.code === 'RESTORE_UNRECORDED' || entry.code === 'UNDO_UNAVAILABLE') {
+          toast.warning(copy.title, { description: copy.description });
+          return;
+        }
         toast.error(copy.title, { description: copy.description });
+        return;
+      }
+      /* W2b: the remote and resolution children phrase their own notices for a person. */
+      if (entry.type === 'notice') {
+        if (entry.tone === 'error') {
+          toast.error(entry.message);
+        } else {
+          toast.info(entry.message);
+        }
         return;
       }
       if (entry.type === 'nothingToSave') {
@@ -117,26 +135,25 @@ export function RevisionRestore(): React.JSX.Element {
        * did not move; the card on the branch's row says the rest (review R1). */
       if (entry.type === 'mergeConflicted') {
         analytics.capture('revision_merge_conflicted', { pathCount: entry.paths.length });
-        toast.warning(`${entry.branch} needs your attention`, {
+        /* HQ1, HQ2: the one sentence, naming the line the decision lands on. */
+        toast.warning(`${needsDecision} on ${entry.into}`, {
           description: `${String(entry.paths.length)} ${entry.paths.length === 1 ? 'file changed' : 'files changed'} on both lines. ${entry.into} is untouched until you choose.`,
         });
         return;
       }
-      analytics.capture('revision_restored', {
-        revision: entry.revisionNumber,
-        unrecoverableCount: entry.unrecoverable.length,
-      });
-      toast.success(`Restored to Revision ${String(entry.revisionNumber)}`, {
-        description:
-          entry.unrecoverable.length > 0
-            ? `${String(entry.unrecoverable.length)} ${entry.unrecoverable.length === 1 ? 'file could' : 'files could'} not be recovered (recorded before content capture).`
-            : undefined,
-        action: { label: 'Undo', onClick: commands.undo },
-      });
+      analytics.capture('revision_restored', { revision: entry.revisionNumber });
+      /* A target off the line has no `Rev N` of its own, and none is invented (A9). */
+      toast.success(
+        entry.revisionNumber === undefined
+          ? 'Restored an earlier revision'
+          : `Restored Rev ${String(entry.revisionNumber)}`,
+        { action: { label: 'Undo restore', onClick: commands.undo } },
+      );
     });
   }, [analytics, client, commands]);
 
   const deleteCount = restore?.removedPathCount ?? 0;
+  const restoreTarget = revisionName(restore?.revisionNumber);
   const branchVerb = status?.branchVerb;
   return (
     <>
@@ -151,15 +168,15 @@ export function RevisionRestore(): React.JSX.Element {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {restore?.revisionNumber === undefined
-                ? 'Restore this revision?'
-                : `Restore Revision ${String(restore.revisionNumber)}?`}
+              {restoreTarget === undefined ? 'Restore this revision?' : `Restore ${restoreTarget}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
+              {/* D1: a restore is a new revision on the line, so the dialog says nothing is lost. */}
+              {`Your files go back to ${restoreTarget ?? 'this revision'} as a new revision, so nothing in History is lost. `}
               {deleteCount > 0
-                ? `This deletes ${String(deleteCount)} ${deleteCount === 1 ? 'file' : 'files'} created since. `
+                ? `${String(deleteCount)} ${deleteCount === 1 ? 'file' : 'files'} added since will be removed. `
                 : ''}
-              {restore?.dirty === true ? 'Unsaved editor changes will be overwritten. ' : ''}
+              {restore?.dirty === true ? 'Your unsaved edits are saved first. ' : ''}
               You can undo this restore.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -167,7 +184,9 @@ export function RevisionRestore(): React.JSX.Element {
             <Button autoFocus variant='outline' onClick={commands.cancel}>
               Cancel
             </Button>
-            <Button onClick={commands.confirm}>Restore</Button>
+            <Button onClick={commands.confirm}>
+              {restoreTarget === undefined ? 'Restore' : `Restore ${restoreTarget}`}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

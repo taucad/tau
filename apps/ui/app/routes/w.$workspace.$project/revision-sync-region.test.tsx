@@ -160,6 +160,12 @@ const renderRegion = (
   };
 };
 
+/** Change backup lives in the backup's More, beside Details (round 19). */
+const chooseChangeBackup = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
+  await user.click(screen.getByRole('button', { name: 'Backup settings' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Change backup…' }));
+};
+
 describe('RevisionSyncRegion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -214,11 +220,9 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
+    /* Round 18: under 75 % the figure rides the backup line; the meter waits until storage is worth watching. */
     expect(screen.getByText('2.1 GB of 10.0 GB')).toBeInTheDocument();
-    expect(screen.getByRole('meter', { name: 'Storage used against your plan' })).toHaveAttribute(
-      'aria-valuenow',
-      '21',
-    );
+    expect(screen.queryByRole('meter', { name: 'Storage used against your plan' })).not.toBeInTheDocument();
     expect(screen.getByText('Tau Cloud')).toBeInTheDocument();
     expect(screen.queryByText('https://api.tau.new/v1/git/p1.git')).not.toBeInTheDocument();
   });
@@ -237,21 +241,27 @@ describe('RevisionSyncRegion', () => {
     expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
   });
 
-  it('syncs a writable project through the existing scheduler and opens its GitHub page', async () => {
+  it('syncs a writable project while revisions wait to go, and opens its GitHub page from More', async () => {
     const user = userEvent.setup();
-    const { syncNow } = renderRegion(
-      facet({
-        kind: 'git',
-        phase: 'connected',
-        url: 'https://github.com/o/design.git',
-        provider: 'github',
-      }),
-    );
+    const remote = facet({
+      kind: 'git',
+      phase: 'connected',
+      url: 'https://github.com/o/design.git',
+      provider: 'github',
+    });
+    const { syncNow, show } = renderRegion(remote, syncFacet({ state: 'backedUp' }));
 
+    /* A1 item 6: nothing waits, so there is nothing for Sync now to do. */
+    expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
+    show(remote, syncFacet({ state: 'queued', pendingCount: 2 }));
     await user.click(screen.getByRole('button', { name: 'Sync now' }));
     expect(syncNow).toHaveBeenCalledTimes(1);
     expect(screen.getByText('o/design')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open GitHub' })).toHaveAttribute('href', 'https://github.com/o/design');
+    await user.click(screen.getByRole('button', { name: 'Backup settings' }));
+    expect(screen.getByRole('menuitem', { name: 'Open on GitHub' })).toHaveAttribute(
+      'href',
+      'https://github.com/o/design',
+    );
   });
 
   it('can change the linked repository or GitHub account without disconnecting first', async () => {
@@ -265,7 +275,7 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await chooseChangeBackup(user);
     expect(screen.getByRole('button', { name: 'Pick GitHub repository' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Keep current repository' }));
@@ -282,7 +292,7 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await chooseChangeBackup(user);
     await user.click(screen.getByRole('radio', { name: 'Git remote' }));
     await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
 
@@ -308,7 +318,7 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await chooseChangeBackup(user);
     await user.click(screen.getByRole('radio', { name: 'No remote' }));
     await user.click(screen.getByRole('button', { name: 'Apply backup change' }));
 
@@ -319,7 +329,7 @@ describe('RevisionSyncRegion', () => {
     await user.click(screen.getByRole('button', { name: 'Keep it' }));
     expect(disconnect).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await chooseChangeBackup(user);
     await user.click(screen.getByRole('radio', { name: 'No remote' }));
     await user.click(screen.getByRole('button', { name: 'Apply backup change' }));
     await user.click(screen.getByRole('button', { name: 'Disconnect Tau Cloud' }));
@@ -590,7 +600,7 @@ describe('RevisionSyncRegion', () => {
         reason: 'unauthorized',
       }),
     );
-    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await chooseChangeBackup(user);
     expect(screen.queryByText('GitHub connect started')).not.toBeInTheDocument();
 
     await user.click(
@@ -615,7 +625,7 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await chooseChangeBackup(user);
     await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
 
     await waitFor(() => {
@@ -707,7 +717,7 @@ describe('RevisionSyncRegion', () => {
       }),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await chooseChangeBackup(user);
     await user.click(screen.getByRole('radio', { name: 'No remote' }));
     await user.click(screen.getByRole('button', { name: 'Apply backup change' }));
 
@@ -728,7 +738,7 @@ describe('RevisionSyncRegion', () => {
     ['pending', 2, 'Backing up… 2 revisions'],
     ['queued', 1, 'Not backed up · 1 revision'],
     ['failed', 3, 'Not backed up · 3 revisions'],
-    ['conflicted', 0, 'Needs resolution'],
+    ['conflicted', 0, 'Needs your decision'],
   ];
 
   it.each(rows)('should say %s as “%s”', (state, pendingCount, copy) => {
@@ -889,7 +899,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
 
   it('keeps a commit affordance when a live connection leaves connected (C9)', () => {
     const region = renderRegion(connected);
-    expect(screen.getByRole('button', { name: 'Change backup' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Backup settings' })).toBeInTheDocument();
 
     region.show(facet({ kind: 'tau', phase: 'failed', error: 'Sign in to back this project up to Tau Cloud.' }));
 
@@ -986,9 +996,9 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     const user = userEvent.setup();
     const region = renderRegion(connected);
 
-    const exports = screen.getByRole('switch', { name: 'Sync exports' });
-    expect(exports).toBeInTheDocument();
-    await user.click(exports);
+    await user.click(screen.getByRole('button', { name: 'Backup settings' }));
+    expect(within(screen.getByRole('menuitem', { name: /^Sync chats/u })).getByRole('switch')).toBeChecked();
+    await user.click(screen.getByRole('menuitem', { name: /^Sync exports/u }));
     expect(region.setSyncLargeExports).toHaveBeenCalledWith(true);
   });
 });
@@ -1071,8 +1081,15 @@ describe('RevisionSyncRegion collaborators', () => {
   it('says so when access was revoked while the project was open', () => {
     renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'revoked', projectId: 'proj_1' });
 
-    expect(screen.getByText("You no longer have access to this project's cloud copy.")).toBeDefined();
+    /* HQ3: calm, owner-directed, and nothing lost. */
+    const backup = screen.getByRole('status', { name: 'Backup status' });
+    expect(backup).toHaveTextContent('Access removed');
+    expect(backup).toHaveTextContent(
+      'The owner removed your access to this project’s cloud copy. Ask them to add you again',
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Backup settings' })).toBeNull();
   });
 
   /* F4: an unread list is not an empty one. */
@@ -1115,7 +1132,7 @@ describe('RevisionSyncRegion collaborators', () => {
     renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'read', projectId: 'proj_1' });
 
     expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
-    expect(screen.getByText('Read only')).toBeDefined();
+    expect(screen.getByText('View only')).toBeDefined();
   });
 
   it('surfaces the one-time link, its expiry and who it is for', async () => {
@@ -1166,5 +1183,66 @@ describe('RevisionSyncRegion collaborators', () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'People with access' }));
     });
+  });
+});
+
+/** The round 19 layout and the W2a / HQ7 rows. */
+describe('RevisionSyncRegion backup line', () => {
+  const tau = facet({ kind: 'tau', phase: 'connected', url: 'https://api.tau.new/v1/git/p1.git' });
+
+  /* W2a, I12: a damaged cloud copy is terminal; the one honest thing to offer is the truth. */
+  it('says a damaged Tau Cloud copy stopped backing up, and offers no action it cannot keep', () => {
+    renderRegion(
+      tau,
+      syncFacet({ state: 'failed', pendingCount: 2, reason: 'damaged', error: 'GIT_REPOSITORY_INCOMPLETE' }),
+    );
+
+    const backup = screen.getByRole('status', { name: 'Backup status' });
+    expect(backup).toHaveTextContent(
+      'Tau has to repair this project’s copy on Tau Cloud before it can back it up again. Nothing on this device is lost.',
+    );
+    expect(backup).not.toHaveTextContent('GIT_REPOSITORY_INCOMPLETE');
+    expect(within(backup).queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
+  });
+
+  it('ends the backup line with More and Details as one pair, and opens the facts from Details', async () => {
+    const user = userEvent.setup();
+    renderRegion(tau, syncFacet({ state: 'backedUp' }));
+
+    const end = document.querySelector('[data-slot="sync-status-line"] [data-slot="actions-end"]');
+    expect(within(end as HTMLElement).getByRole('button', { name: 'Backup settings' })).toBeInTheDocument();
+    await user.click(within(end as HTMLElement).getByRole('button', { name: 'Details' }));
+    const facts = document.querySelector('dl[aria-label="Details for Tau Cloud"]');
+    expect(facts).toHaveTextContent('Read and write');
+    expect(facts).toHaveTextContent('Files, history and chats');
+  });
+
+  it('disconnects from More only after it confirms, then hands focus back (A1 item 2)', async () => {
+    const user = userEvent.setup();
+    const { disconnect } = renderRegion(tau, syncFacet({ state: 'backedUp' }));
+
+    await user.click(screen.getByRole('button', { name: 'Backup settings' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Disconnect Tau Cloud…' }));
+    expect(screen.getByText('Disconnect Tau Cloud? Every revision stays on this device.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Disconnect Tau Cloud' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(disconnect).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Backup settings' })).toHaveFocus();
+  });
+
+  /* HQ7: before the projection names the line, a backup verb could only fail after the gesture. */
+  it('defers Change backup and Disconnect until the line is known', async () => {
+    const user = userEvent.setup();
+    renderRegion(
+      facet({ kind: 'git', phase: 'connected', url: 'https://github.com/o/design.git', provider: 'github' }),
+      syncFacet({ state: 'backedUp' }),
+      { isLineKnown: false },
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Backup settings' }));
+    expect(screen.getByRole('menuitem', { name: 'Open on GitHub' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Change backup…' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /^Disconnect/u })).toBeNull();
   });
 });

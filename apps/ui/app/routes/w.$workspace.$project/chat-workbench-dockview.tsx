@@ -91,7 +91,6 @@ import type {
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import { useRevisions } from '#hooks/use-revisions.js';
 import type { OpenFile } from '#types/editor.types.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -1540,8 +1539,6 @@ export const WorkbenchDockview = memo(function ({
   const { connectWorkbench, setWorkbenchOpen } = useProjectWorkspace();
   const isMobile = useIsMobile();
   const isTauDebugEnabled = useFeature('tauDebug');
-  const { canReturnToLatest, headRevisionId, isDirty, revisions } = useRevisions();
-  const headRevisionNumber = revisions.find((revision) => revision.revisionId === headRevisionId)?.n;
   const monaco = useConfiguredMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
@@ -1805,14 +1802,9 @@ export const WorkbenchDockview = memo(function ({
 
     const updateTitle = (): void => {
       const revisionsPanel = api.panels.find((panel) => panel.id === workbenchPanels.revisions.id);
-      if (!revisionsPanel) {
-        return;
-      }
-      const marker =
-        headRevisionNumber === undefined
-          ? 'No revisions yet'
-          : `Rev ${String(headRevisionNumber)}${isDirty ? ' · Modified' : ''}`;
-      revisionsPanel.api.setTitle(canReturnToLatest ? `Revisions · ${marker}` : 'Revisions');
+      /* A layout saved while the retired *viewing an older revision* marker
+       * showed (RS5, RA4) still carries it; the tab is always *Revisions*. */
+      revisionsPanel?.api.setTitle('Revisions');
     };
 
     updateTitle();
@@ -1820,7 +1812,7 @@ export const WorkbenchDockview = memo(function ({
     return () => {
       disposable.dispose();
     };
-  }, [api, canReturnToLatest, headRevisionNumber, isDirty]);
+  }, [api]);
 
   useEffect(() => {
     if (!api) {

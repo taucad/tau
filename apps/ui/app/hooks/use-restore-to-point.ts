@@ -4,7 +4,6 @@ import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-stat
 export type UseRestoreToPoint = {
   /** Restore one recorded revision by id; a risky plan asks first (S19). */
   restore: (revisionId: string) => void;
-  returnToLatest: () => void;
   undo: () => void;
   isDirty: boolean;
   isBusy: boolean;
@@ -28,7 +27,6 @@ export function useRestoreToPoint(): UseRestoreToPoint {
   return useMemo(
     () => ({
       restore: commands.restore,
-      returnToLatest: commands.returnToLatest,
       undo: commands.undo,
       isDirty,
       isBusy,

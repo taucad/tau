@@ -1685,6 +1685,25 @@ for (const actorSet of actorSets) {
         expect(await captureMainAndLiveTrees(context.port, context.filesystem)).toStrictEqual(before);
       }, 30_000);
 
+      /* D58: a card bound to a conflict the branch has moved past. */
+      it('refuses to finish a conflict no branch names any more, and writes nothing', async () => {
+        const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+        const revision = await conflicted(context);
+        await keep(context, { revisionId: revision, path: 'a.txt', side: 'mine' });
+        await context.port.updateRef({
+          name: 'feature',
+          expectedHead: revisionId(revision),
+          head: revisionId(context.theirs),
+        });
+        const before = await context.port.log();
+
+        await expect(
+          run(context.actors.resolution.finishMerge, { projectId: 'project-1', revisionId: revision }),
+        ).rejects.toMatchObject({ code: 'UNKNOWN_REVISION' });
+        expect(await context.port.readRef('feature')).toBe(context.theirs);
+        expect(await context.port.log()).toHaveLength(before.length);
+      }, 30_000);
+
       it('takes the editor’s bytes when a person composed the two sides by hand', async () => {
         const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
         const revision = await conflicted(context);

@@ -8,11 +8,11 @@
  * that root and asserts what the hook makes of its answers.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import type { RevisionRow } from '@taucad/revisions';
+import type { RevisionLogRequest, RevisionRow } from '@taucad/revisions';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import {
   useRevisionChanges,
@@ -417,6 +417,75 @@ describe('useRevisions', () => {
     expect(result.current.line).toEqual({ kind: 'unborn', name: 'main' });
     expect(result.current.isLoading).toBe(false);
     expect(revisionStatusHarness.logRequests).toEqual([]);
+  });
+});
+
+describe('useRevisions after a mint (E6)', () => {
+  const history = [
+    row({ revisionId: 'rev-2', revisionNumber: 2, parent: 'rev-1' }),
+    row({ revisionId: 'rev-1', revisionNumber: 1 }),
+  ];
+  const mounted = async () => {
+    revisionStatusHarness.rows = history;
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-2',
+      branches: [{ name: 'main', head: 'rev-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+    };
+    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
+    const client = (
+      useRevisionClient as () => { log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]> }
+    )();
+    /* One cache across renders, as the app has: an append lands in the cache it was read from. */
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const stableWrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const rendered = renderHook(() => useRevisions(), { wrapper: stableWrapper });
+    await waitFor(() => {
+      expect(rendered.result.current.revisions).toHaveLength(2);
+    });
+    /* The harness's client is one object for the suite, so the spy is cleared and restored per row. */
+    const log = vi.spyOn(client, 'log');
+    log.mockClear();
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    return { ...rendered, log };
+  };
+
+  it('appends the minted row from a one-row read instead of re-reading the history', async () => {
+    const { result, rerender, log } = await mounted();
+
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-3', revisionNumber: 3, parent: 'rev-2' }), ...history];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-3',
+      branches: [{ name: 'main', head: 'rev-3', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.revisions.map((card) => card.n)).toEqual([3, 2, 1]);
+    });
+    expect(log.mock.calls.map(([request]) => request)).toEqual([{ branch: 'main', limit: 1 }]);
+    expect(result.current.branchFacts?.get('main')).toEqual({ revisionNumber: 3, ahead: 0, behind: 0 });
+  });
+
+  it('re-reads the whole history when the new head is a merge, whose other side lands further down', async () => {
+    const { result, rerender, log } = await mounted();
+
+    const side = row({ revisionId: 'side-1', revisionNumber: undefined, parent: 'rev-1' });
+    const merge = row({ revisionId: 'merge-3', revisionNumber: 3, parent: 'rev-2', otherParents: ['side-1'] });
+    revisionStatusHarness.rows = [merge, history[0]!, side, history[1]!];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'merge-3' };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.revisions.map((card) => card.revisionId)).toEqual(['merge-3', 'rev-2', 'side-1', 'rev-1']);
+    });
+    expect(log.mock.calls.map(([request]) => request)).toEqual([{ branch: 'main', limit: 1 }, { branch: 'main' }]);
   });
 });
 

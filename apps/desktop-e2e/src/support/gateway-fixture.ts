@@ -113,6 +113,12 @@ export type GatewayFixture = {
    * `uiSetAgentHostGatewayFailure`, one hop further out.
    */
   readonly setFailure: (failure: GatewayFixtureFailure | undefined) => void;
+  /**
+   * Park every later closing round (the one after the tool ran) until the
+   * returned release is called, so a turn keeps its lease on the files for as
+   * long as a spec needs (W5b, rule 9).
+   */
+  readonly holdClosing: () => () => void;
   readonly close: () => Promise<void>;
 };
 
@@ -198,6 +204,7 @@ export const startGatewayFixture = async (
   const apiChatRequests: string[] = [];
   let requestIndex = 0;
   let failure: GatewayFixtureFailure | undefined;
+  let closingGate: Promise<void> | undefined;
 
   const server = createServer((request, response) => {
     // async-iife: bootstrap
@@ -252,6 +259,9 @@ export const startGatewayFixture = async (
         const completedCalls = completedToolCallCount(body);
         const toolCall = (typeof script === 'function' ? script(turnIndex(body)) : script)[completedCalls];
         const closing = toolCall === undefined;
+        if (closing && closingGate !== undefined) {
+          await closingGate;
+        }
         const writeEvent = (event: string, data: unknown): void => {
           response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         };
@@ -362,6 +372,16 @@ export const startGatewayFixture = async (
     routeThrough,
     setFailure: (next) => {
       failure = next;
+    },
+    holdClosing: () => {
+      let release = (): void => undefined;
+      closingGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => {
+        closingGate = undefined;
+        release();
+      };
     },
     close: async () =>
       new Promise<void>((resolve) => {

@@ -1467,6 +1467,220 @@ describe('a project on the browser client', () => {
   }, 900_000);
 });
 
+/*
+ * Live and automatic (W5b; charter D12, D13, B6; rules 6, 9).
+ *
+ * One project open on a browser (A) and a desktop (B) at once, with no reload
+ * between rows: each device learns of the other's push from the project's
+ * `revision` stream and fetches it on its own. A dirty checkout is saved before
+ * anything lands on it, so each divergence here is made by leaving B's edit
+ * unsaved when A pushes; B then saves, merges and pushes the merge itself.
+ */
+describe('live and automatic', () => {
+  const liveName = 'W5b Live Sync';
+  const settleMilliseconds = 5000;
+  const recordPath = ['.tau', 'parameters', 'main.scad.json'] as const;
+  let source: BrowserClient | undefined;
+  let destination: DesktopSession | undefined;
+  let fixture: Awaited<ReturnType<typeof startGatewayFixture>> | undefined;
+  let sourceSlug = '';
+  let liveProjectId = '';
+  let destinationRoot = '';
+
+  const a = (): BrowserClient => required(source, 'W5b: the browser device did not launch.');
+  const b = (): DesktopSession => required(destination, 'W5b: the desktop device did not launch.');
+  const remoteHead = async (): Promise<string | undefined> => gitHead(await tauRepository(liveProjectId));
+  const remoteFile = async (revision: string, path: string): Promise<string | undefined> =>
+    gitOutput(await tauRepository(liveProjectId), ['show', `${revision}:${path}`]);
+  const saveOnDesktop = async (): Promise<void> => {
+    await b().page.keyboard.press(`${modifier}+KeyS`);
+  };
+
+  /* A write straight into A's project store, the bytes a Files-pane edit leaves. */
+  const writeBrowserFile = async (path: readonly string[], contents: string): Promise<void> => {
+    await a().page.evaluate(
+      async ([text, project, ...segments]: readonly string[]) => {
+        const filename = segments.at(-1);
+        if (!project || !filename || text === undefined) {
+          throw new Error('W5b: no browser path to write.');
+        }
+        const root = await navigator.storage.getDirectory();
+        let directory = await root.getDirectoryHandle(project);
+        for (const segment of segments.slice(0, -1)) {
+          directory = await directory.getDirectoryHandle(segment, { create: true });
+        }
+        const handle = await directory.getFileHandle(filename, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(text);
+        await writable.close();
+      },
+      [contents, sourceSlug, ...path],
+    );
+  };
+
+  const record = (values: Readonly<Record<string, number>>): string =>
+    `${JSON.stringify({ activeGroup: 'default', groups: { default: { values } } }, undefined, 2)}\n`;
+
+  /* Every device on one head, and that head on Tau Cloud. */
+  const expectConverged = async (row: string): Promise<string> => {
+    await expect
+      .poll(
+        async () => {
+          const [remote, onA, onB] = await Promise.all([
+            remoteHead(),
+            browserHead(a(), sourceSlug),
+            gitHead(destinationRoot),
+          ]);
+          return remote !== undefined && remote === onA && remote === onB ? remote : undefined;
+        },
+        { message: `W5b ${row}: both devices must settle on Tau Cloud's head without a reload`, timeout: 180_000 },
+      )
+      .toBeDefined();
+    return required(await remoteHead(), `W5b ${row}: Tau Cloud has no head.`);
+  };
+
+  beforeAll(async () => {
+    const accountOwner = required(owner, 'The account was not seeded.');
+    source = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
+    destination = await launchDesktopApp({ token: bearer });
+    fixture = await startGatewayFixture({
+      toolCalls: [{ name: 'create_file', input: { targetFile: 'agent.scad', content: 'cube(3); // the agent\n' } }],
+    });
+    await fixture.routeThrough(source.page);
+    sourceSlug = await createProjectInBrowser(source, liveName);
+    liveProjectId = required(await browserProjectId(source, sourceSlug), 'W5b: the project id is absent.');
+    await registerProjectOnRemote(accountOwner, liveProjectId, liveName);
+    await openSyncRegion(source);
+    await chooseTauCloud(source);
+    await expect.poll(async () => syncRegionText(a()), { timeout: 180_000 }).toMatch(/Backed up/u);
+    const destinationSlug = await openTauCloudProject(destination.page, {
+      projectsUrl: 'app://tau/projects',
+      name: liveName,
+      direction: 'W5b browser→desktop',
+    });
+    destinationRoot = join(destination.homeRoot, destinationSlug);
+    await openSyncRegion(destination);
+    await expect.poll(async () => syncRegionText(b()), { timeout: 180_000 }).toMatch(/Backed up/u);
+    await expectConverged('setup');
+  }, 900_000);
+
+  afterAll(async () => {
+    await fixture?.close();
+    await destination?.close();
+    await source?.close();
+  }, 120_000);
+
+  afterEach(async ({ task }) => {
+    if (task.result?.state === 'fail') {
+      await captureFailure(`live-${task.name}`, [source, destination]);
+    }
+  }, 120_000);
+
+  it('should settle the desktop on the browser’s pushed head within 5 s, without a reload', async () => {
+    await createFileInBrowser(a(), 'live.scad');
+    await saveRevisionInBrowser(a());
+    await expect.poll(async () => browserHead(a(), sourceSlug), { timeout: 120_000 }).not.toBe(await remoteHead());
+    const pushed = required(await browserHead(a(), sourceSlug), 'B6: the browser minted nothing.');
+    await expect
+      .poll(remoteHead, { message: 'B6: the browser’s revision must reach Tau Cloud', timeout: 180_000 })
+      .toBe(pushed);
+    /* The clock starts once Tau Cloud holds it: the stream wakes B, and B fetches and fast-forwards. */
+    await expect
+      .poll(async () => gitHead(destinationRoot), {
+        message: 'B6: the desktop must settle on the browser’s head within 5 s of the push',
+        timeout: settleMilliseconds,
+        interval: 100,
+      })
+      .toBe(pushed);
+    expect(existsSync(join(destinationRoot, 'live.scad'))).toBe(true);
+  }, 600_000);
+
+  it('should converge two devices that changed different files', async () => {
+    const before = required(await remoteHead(), 'B6: Tau Cloud has no head.');
+    /* B's edit stays unsaved, so A's push finds B dirty: B saves first (rule 6), then merges. */
+    await writeFile(join(destinationRoot, 'desktop-only.scad'), 'sphere(4); // desktop\n');
+    await createFileInBrowser(a(), 'browser-only.scad');
+    await saveRevisionInBrowser(a());
+
+    const merged = await expectConverged('different files');
+    const remote = await tauRepository(liveProjectId);
+    expect(await gitOutput(remote, ['rev-list', '--parents', '-n', '1', merged]), 'B6: a merge revision').toMatch(
+      /^\S+ \S+ \S+$/u,
+    );
+    expect(await gitOutput(remote, ['merge-base', '--is-ancestor', before, merged])).toBeDefined();
+    expect(await remoteFile(merged, 'desktop-only.scad')).toBe('sphere(4); // desktop');
+    expect(await remoteFile(merged, 'browser-only.scad')).toBeDefined();
+  }, 600_000);
+
+  it('should apply nothing while a turn holds the files, and merge once the turn settles', async () => {
+    const gate = required(fixture, 'W5b: the gateway fixture did not start.');
+    const before = required(await browserHead(a(), sourceSlug), 'Rule 9: the browser has no head.');
+    const release = gate.holdClosing();
+    try {
+      await selectChatModel(a().page, gatewayFixtureModelName);
+      const requested = gate.gatewayRequests.length;
+      await sendPrompt(a().page, 'Add the agent part (W5b rule 9).');
+      /* The tool ran and the closing round is parked: the turn holds A's files. */
+      await expect.poll(() => gate.gatewayRequests.length, { timeout: 180_000 }).toBeGreaterThanOrEqual(requested + 2);
+
+      await writeFile(join(destinationRoot, 'during-turn.scad'), 'cylinder(2, 2, 2); // desktop during the turn\n');
+      await saveOnDesktop();
+      await expect.poll(async () => gitHead(destinationRoot), { timeout: 120_000 }).not.toBe(before);
+      const theirs = required(await gitHead(destinationRoot), 'Rule 9: the desktop minted nothing.');
+      await expect.poll(remoteHead, { timeout: 180_000 }).toBe(theirs);
+
+      /* A has been told (the header's Arrived line) and has applied nothing. */
+      await expect
+        .poll(
+          async () =>
+            a()
+              .page.getByRole('button', { name: /arrived/u })
+              .count(),
+          {
+            message: 'D12: the browser must say a revision arrived while its turn holds the files',
+            timeout: 60_000,
+          },
+        )
+        .toBeGreaterThan(0);
+      expect(await browserHead(a(), sourceSlug), 'Rule 9: a leased checkout is never re-based').toBe(before);
+      expect(await readBrowserFile(a(), sourceSlug, ['during-turn.scad'])).toBeUndefined();
+    } finally {
+      release();
+    }
+
+    await expectVisible(turnReply(a().page, 'Add the agent part (W5b rule 9).'), 180_000);
+    const merged = await expectConverged('leased divergence');
+    expect(await remoteFile(merged, 'agent.scad')).toBe('cube(3); // the agent');
+    expect(await remoteFile(merged, 'during-turn.scad')).toBe('cylinder(2, 2, 2); // desktop during the turn');
+  }, 900_000);
+
+  it('should merge disjoint keys of one parameter record cleanly', async () => {
+    const [directory] = recordPath;
+    await mkdir(join(destinationRoot, directory, 'parameters'), { recursive: true });
+    await writeFile(join(destinationRoot, ...recordPath), record({ height: 10, width: 10 }));
+    await saveOnDesktop();
+    await expect
+      .poll(async () => readBrowserFile(a(), sourceSlug, recordPath), {
+        message: 'D12: the base record must reach the browser live',
+        timeout: 180_000,
+      })
+      .toBe(record({ height: 10, width: 10 }));
+
+    /* Adjacent lines: a line merge conflicts here, the record codec does not. */
+    await writeFile(join(destinationRoot, ...recordPath), record({ height: 10, width: 20 }));
+    await writeBrowserFile(recordPath, record({ height: 30, width: 10 }));
+    await saveRevisionInBrowser(a());
+
+    const merged = await expectConverged('parameter record');
+    expect(JSON.parse(required(await remoteFile(merged, recordPath.join('/')), 'D12: no merged record.'))).toEqual({
+      activeGroup: 'default',
+      groups: { default: { values: { height: 30, width: 20 } } },
+    });
+    await openSyncRegion(b());
+    await expect.poll(async () => syncRegionText(b()), { timeout: 60_000 }).toMatch(/Backed up/u);
+  }, 600_000);
+});
+
 /** Charter W13/V18 and blueprint S48(15): real close-and-continue in both directions. */
 describe('close and continue', () => {
   /** The pre-insert page-clock sample, then the close signals W13/V18 require within 1 s. */

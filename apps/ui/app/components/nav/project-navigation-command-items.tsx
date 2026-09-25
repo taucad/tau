@@ -4,6 +4,8 @@ import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useAllChats } from '#hooks/use-all-chats.js';
 import { useProjects } from '#hooks/use-projects.js';
+import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
+import { formatRelativeTime } from '#utils/date.utils.js';
 import { projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
 import type { ProjectListItem } from '#types/project.types.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
@@ -11,6 +13,19 @@ import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
 const hasSlugs = (
   project: ProjectListItem,
 ): project is ProjectListItem & { slugs: NonNullable<ProjectListItem['slugs']> } => project.slugs !== undefined;
+
+function ProjectThumbnail({ projectId }: { readonly projectId: string }): React.JSX.Element {
+  const thumbnailSource = useProjectThumbnail(projectId);
+  return (
+    <span className='flex size-12 items-center justify-center overflow-hidden rounded-md border bg-muted'>
+      {thumbnailSource ? (
+        <img src={thumbnailSource} alt='' className='size-full object-cover' />
+      ) : (
+        <Folder aria-hidden />
+      )}
+    </span>
+  );
+}
 
 /** Registers every navigable project and non-deleted chat with global search. */
 export function ProjectNavigationCommandItems(): undefined {
@@ -35,8 +50,13 @@ export function ProjectNavigationCommandItems(): undefined {
         id: `project-${project.id}`,
         label: project.name,
         searchValue: project.name,
+        // Same-named projects differ by slug path, recency and description; three lines at most.
+        details: [
+          `${project.slugs.workspaceSlug}/${project.slugs.projectSlug} · ${formatRelativeTime(project.lastActivityAt)}`,
+          ...(project.description.trim() ? [project.description.trim()] : []),
+        ],
         group: 'Projects',
-        icon: <Folder aria-hidden />,
+        icon: <ProjectThumbnail projectId={project.id} />,
         link: projectUrl(project.slugs),
       })),
       ...[...chats].sort(compareChatsByRecency).flatMap((chat): CommandPaletteItem[] => {

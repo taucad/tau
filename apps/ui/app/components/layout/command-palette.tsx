@@ -17,6 +17,7 @@ import type { KeyCombination } from '#utils/keys.utils.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { menuItemLayoutClass } from '@taucad/ui/components/menu.variants';
+import { cn } from '@taucad/ui/utils/cn';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { SidebarMenuButton } from '#components/ui/sidebar.js';
 
@@ -69,6 +70,8 @@ export function useCommandPaletteItems(
 export type CommandPaletteItem = {
   id: string;
   label: string;
+  /** Muted single-line rows under the label that tell similarly named items apart. */
+  details?: readonly string[];
   searchValue?: string;
   group: string;
   icon: React.JSX.Element;
@@ -78,6 +81,26 @@ export type CommandPaletteItem = {
   link?: string;
   visible?: boolean;
 };
+
+function CommandPaletteItemLabel({ item }: { readonly item: CommandPaletteItem }): React.JSX.Element {
+  return (
+    <div className={cn(menuItemLayoutClass, 'min-w-0')}>
+      <span className='shrink-0'>{item.icon}</span>
+      {item.details ? (
+        <div className='flex min-w-0 flex-col'>
+          <span className='truncate'>{item.label}</span>
+          {item.details.map((detail) => (
+            <span key={detail} className='truncate text-xs text-muted-foreground'>
+              {detail}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <span>{item.label}</span>
+      )}
+    </div>
+  );
+}
 
 type CommandPaletteProperties = {
   readonly isOpen: boolean;
@@ -137,10 +160,7 @@ function CommandPalette({ isOpen, onOpenChange, items }: CommandPalettePropertie
                   }
                 }}
               >
-                <div className={menuItemLayoutClass}>
-                  <span className='shrink-0'>{item.icon}</span>
-                  <span>{item.label}</span>
-                </div>
+                <CommandPaletteItemLabel item={item} />
                 {item.shortcut ? <KeyShortcut className='ml-auto'>{item.shortcut}</KeyShortcut> : null}
               </CommandItem>
             ))}
@@ -215,10 +235,7 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
 
   const renderItemLabel = useCallback(
     (item: CommandPaletteItem, _selectedItem: CommandPaletteItem | undefined) => (
-      <div className={menuItemLayoutClass}>
-        {item.icon}
-        {item.label}
-      </div>
+      <CommandPaletteItemLabel item={item} />
     ),
     [],
   );

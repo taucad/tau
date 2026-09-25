@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
@@ -239,12 +239,14 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
 /**
  * The selected branch's history and where the checkout sits on it.
  *
- * The log is re-read whenever the projection's head moves, which is what a
- * settled turn, a save, a restore and a switch all do — so no surface has to be
- * told that the graph changed. The query is keyed by the branch alone and
- * remembers the head it was read at (D3): a head that moves re-reads it with the
- * rows still on screen, and no head — earlier or later — is ever answered from a
- * log read at another.
+ * The log follows the projection's head, which is what a settled turn, a save,
+ * a restore and a switch all move — so no surface has to be told that the graph
+ * changed. The query is keyed by the branch alone and remembers the head it was
+ * read at (D3), and no head — earlier or later — is ever answered from a log
+ * read at another. A head that moved by one ordinary revision on top of the
+ * one the log was read at is *appended* from a one-row read (E6); anything
+ * else — a restore, a merge, a switch, two mints at once — re-reads the log
+ * with the rows still on screen.
  *
  * @returns The view every revision surface reads.
  * @public
@@ -286,12 +288,51 @@ export function useRevisions(): RevisionsView {
     staleTime: Number.POSITIVE_INFINITY,
   });
   const readAt = log?.head;
+  const queryClient = useQueryClient();
   useEffect(() => {
-    if (readAt !== headRevisionId && log !== undefined) {
-      /* Every mounted reader sees the same move; `cancelRefetch: false` makes them one read. */
-      void refetch({ cancelRefetch: false });
+    if (readAt === headRevisionId || log === undefined) {
+      return;
     }
-  }, [headRevisionId, log, readAt, refetch]);
+    /* Every mounted reader sees the same move; `cancelRefetch: false` makes them one read. */
+    const reread = (): void => {
+      void refetch({ cancelRefetch: false });
+    };
+    const top = log.rows[0];
+    if (client === undefined || branch === undefined || headRevisionId === undefined || top?.revisionId !== readAt) {
+      reread();
+      return;
+    }
+    /*
+     * E6: the newest row alone, a bounded read the worker numbers from the
+     * parent it remembers. A revision whose only parent is the log's head is
+     * exactly that head's log with one row on top, in the port's order; a merge
+     * brings its other side in further down, so it is re-read instead.
+     */
+    const appendMinted = async (): Promise<void> => {
+      try {
+        const [minted] = await queryClient.fetchQuery({
+          queryKey: ['revision-log-head', projectId, branch, headRevisionId],
+          queryFn: async () => client.log({ branch, limit: 1 }),
+          staleTime: Number.POSITIVE_INFINITY,
+          gcTime: 0,
+        });
+        if (minted?.revisionId !== headRevisionId || minted.parent !== readAt || minted.otherParents !== undefined) {
+          reread();
+          return;
+        }
+        /* Only onto the log it was asked against: another reader may have appended it already. */
+        queryClient.setQueryData<HeadLog>(['revision-log', projectId, branch], (current) =>
+          current !== undefined && current.head === readAt
+            ? { head: headRevisionId, rows: [minted, ...current.rows] }
+            : current,
+        );
+      } catch {
+        /* A failed one-row read is a history not yet known: read it whole. */
+        reread();
+      }
+    };
+    void appendMinted();
+  }, [branch, client, headRevisionId, log, projectId, queryClient, readAt, refetch]);
   const rows = log?.rows;
   /*
    * `combine` is not an optimisation here, it is the difference between this
@@ -319,7 +360,9 @@ export function useRevisions(): RevisionsView {
   const branchRows = useQueries({
     queries: (status?.branches ?? []).map((entry) => ({
       queryKey: ['revision-log', projectId, entry.name, entry.head ?? ''],
-      enabled: client !== undefined && entry.head !== undefined,
+      /* The selected line's facts come from its own log above, which a mint
+       * appends to; reading it again here was a whole walk per mint (E6). */
+      enabled: client !== undefined && entry.head !== undefined && entry.name !== branch,
       queryFn: async () => client?.log({ branch: entry.name }) ?? [],
       staleTime: Number.POSITIVE_INFINITY,
     })),
@@ -360,7 +403,7 @@ export function useRevisions(): RevisionsView {
     const selectedIds = new Set((rows ?? []).map((row) => row.revisionId));
     const branchFacts = new Map<string, { revisionNumber: number | undefined; ahead: number; behind: number }>();
     for (const [index, entry] of (status?.branches ?? []).entries()) {
-      const branchLog = branchRows.logs[index] ?? emptyRows;
+      const branchLog = entry.name === branch ? (rows ?? emptyRows) : (branchRows.logs[index] ?? emptyRows);
       const branchIds = new Set(branchLog.map((row) => row.revisionId));
       branchFacts.set(entry.name, {
         revisionNumber: branchLog[0]?.revisionNumber,
@@ -377,7 +420,10 @@ export function useRevisions(): RevisionsView {
       isLoading:
         isPending ||
         settledBranchRows.isPending ||
-        branchRows.pending.some((pending, index) => status?.branches[index]?.head !== undefined && pending),
+        branchRows.pending.some((pending, index) => {
+          const entry = status?.branches[index];
+          return entry?.head !== undefined && entry.name !== branch && pending;
+        }),
       branchFacts,
     };
   }, [

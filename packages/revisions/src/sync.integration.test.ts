@@ -377,6 +377,53 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
   }, 180_000);
 
   /*
+   * A project opened from Tau Cloud is created with a placeholder `tau.json`
+   * before the open pull. An unborn branch has recorded nothing, so the
+   * manifest is not work to lose: the pull must replace it, not refuse it.
+   */
+  it('materializes a remote project over the placeholder manifest a cloud open writes', async () => {
+    const remoteRoot = await temporaryRoot('cloud-open-manifest');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-cloud-open', remoteUrl: remote.url });
+      const files = { 'tau.json': '{"name":"Bracket","main":"bracket.scad"}\n', 'bracket.scad': 'cube(7);\n' };
+      const head = await record({ device: one, files, summary: 'Device A' });
+      const first = one.scheduler();
+      first.start();
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      first.stop();
+
+      const two = await device({
+        leg,
+        label: 'b-cloud-open',
+        remoteUrl: remote.url,
+        files: { 'tau.json': '{"name":"Bracket","main":"main.scad"}\n' },
+      });
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+
+      expect(await two.port.readRef(mainRef)).toBe(head);
+      expect(await two.filesystem.readFile('tau.json', 'utf8')).toBe(files['tau.json']);
+      expect(await two.filesystem.readFile('bracket.scad', 'utf8')).toBe(files['bracket.scad']);
+      second.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
    * W18 DEF-2 red pin (c): the second device holds a project it has never seen.
    *
    * Device A backs a project up — history *and* its chat record ref — and

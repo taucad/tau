@@ -594,6 +594,8 @@ const hostAuthor = Object.freeze({ name: 'Tau', email: 'noreply@tau.new' });
  */
 const divergenceWalkLimit = 1000;
 
+/** The project manifest: versioned, and on an unborn branch never work to lose. */
+const projectManifestPath = 'tau.json';
 const textEncoder = new TextEncoder();
 const generatedSetupTree = new ImmutableRevisionTree([
   [generatedGitattributesPath, generatedGitattributesContent(undefined)],
@@ -1477,9 +1479,25 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
         signal.throwIfAborted();
         const expectedTreeId = await treeIdOf(expected);
-        const beforeTreeId = revisionTreeId(await recordedTree(before), await formatOf());
-        const pristineTreeId = revisionTreeId(generatedSetupTree, await formatOf());
-        const dirty = expectedTreeId === undefined ? beforeTreeId !== pristineTreeId : expectedTreeId !== beforeTreeId;
+        const recorded = await recordedTree(before);
+        const format = await formatOf();
+        /* An unborn branch has recorded nothing, so only files beyond the
+         * generated setup and the project manifest are work to lose. A project
+         * opened from Tau Cloud holds exactly those: its placeholder `tau.json`
+         * is replaced by the remote's, and treating it as unsaved work refused
+         * every open pull on a second device. */
+        const dirty =
+          expectedTreeId === undefined
+            ? revisionTreeId(
+                new ImmutableRevisionTree(
+                  recorded
+                    .entries()
+                    .filter((entry) => entry.path !== projectManifestPath)
+                    .map((entry) => [entry.path, entry.content, entry.mode] as const),
+                ),
+                format,
+              ) !== revisionTreeId(generatedSetupTree, format)
+            : expectedTreeId !== revisionTreeId(recorded, format);
         const leases = await readLeases();
         const leased = leases.some((lease) => lease.checkoutId === place.id);
         signal.throwIfAborted();

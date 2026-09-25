@@ -29,8 +29,6 @@ export type ManifestPack = {
   readonly indexStored: boolean;
 };
 
-export type RetiredPack = { readonly key: string; readonly retiredAt: string };
-
 /**
  * One commit's attribution (EQ11, L6-F12): who the server authenticated, which
  * device carried it, and the tip every ref it moved now holds. `tip` is absent
@@ -60,33 +58,28 @@ export type PushRecord = {
 export const pushRecordRefLimit = 64;
 
 /**
- * The encoded bytes the push log may occupy (EQ11). The oldest records go
- * first, so every request's manifest read stays bounded however many refs
- * each push moved; at a typical record's ~200 bytes this is over a thousand
- * pushes.
- *
- * ponytail: a byte cap drops the oldest attribution; spill older records to
- * their own store objects if evidence ever needs further back.
+ * The encoded bytes the manifest's push log may occupy (EQ11, W13b). The
+ * manifest is read on every request and written on every push, so its size
+ * must not follow the push count: when the next record would pass this, the
+ * whole log moves into an immutable segment object and the manifest keeps the
+ * new record and the segment's key ({@link Manifest.earlierPushes}). About 80
+ * typical records; one record is at most a few kilobytes
+ * ({@link pushRecordRefLimit}).
  */
-export const pushLogByteLimit = 256 * 1024;
+export const pushLogByteLimit = 16 * 1024;
 
-/** Keeps the newest records whose encoded sizes fit in {@link pushLogByteLimit}. */
-const boundedPushLog = (records: readonly PushRecord[]): PushRecord[] => {
-  const kept: PushRecord[] = [];
-  /* The array's brackets, then each record and its separator: the log's exact encoded length. */
-  let bytes = 1;
-  for (let index = records.length - 1; index >= 0; index -= 1) {
-    const record = records[index];
-    if (record === undefined) {
-      break;
-    }
-    bytes += JSON.stringify(record).length + 1;
-    if (bytes > pushLogByteLimit) {
-      break;
-    }
-    kept.push(record);
-  }
-  return kept.reverse();
+/** The log's exact encoded length, as `JSON.stringify` writes it inside the manifest. */
+const encodedLength = (records: readonly PushRecord[]): number => JSON.stringify(records).length;
+
+/**
+ * One spilled stretch of the push log, oldest record first. `previous` names
+ * the segment spilled before it, so the manifest's one key reaches every
+ * record the repository has ever committed.
+ */
+export type PushLogSegment = {
+  /* oxlint-disable-next-line typescript/no-restricted-types -- the first segment has no predecessor; same wire shape as the manifest */
+  readonly previous: string | null;
+  readonly pushes: readonly PushRecord[];
 };
 
 /**
@@ -113,9 +106,15 @@ export type Manifest = {
   readonly committedBy: string;
   readonly refs: Readonly<Record<string, ManifestRef>>;
   readonly packs: readonly ManifestPack[];
-  readonly retired: readonly RetiredPack[];
-  /** Per-commit attribution, appended (EQ11). */
+  /** The newest per-commit attribution records, bounded by {@link pushLogByteLimit} (EQ11). */
   readonly pushes: readonly PushRecord[];
+  /**
+   * The newest spilled {@link PushLogSegment}, or `null` before the log has
+   * ever spilled. Retirement is not in the manifest at all: it is a marker
+   * object per retired pack (`sweep.ts`), so nothing here grows with pushes.
+   */
+  /* oxlint-disable-next-line typescript/no-restricted-types -- `null` on the wire, like `tombstone` */
+  readonly earlierPushes: string | null;
   readonly encryption: 'none';
   /* oxlint-disable-next-line typescript/no-restricted-types -- `null` is the north star's manifest shape on the wire, not a Tau-internal optional */
   readonly tombstone: ManifestTombstone | null;
@@ -137,6 +136,7 @@ export class ManifestError extends Error {
 const objectIdPattern = /^[\da-f]{40}$|^[\da-f]{64}$/u;
 const refNamePattern = /^refs\/[\w.\-/]+$/u;
 const packKeyPattern = /^packs\/[\w.-]+\.pack$/u;
+const segmentKeyPattern = /^pushes\/[\w.-]+\.json$/u;
 const incarnationPattern = /^[\da-f]{32}$/u;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -215,26 +215,23 @@ const readPacks = (value: unknown): ManifestPack[] => {
   });
 };
 
-const readRetired = (value: unknown): RetiredPack[] => {
-  if (!Array.isArray(value)) {
-    refuse('malformed', 'manifest field `retired` must be an array');
+/* oxlint-disable-next-line typescript/no-restricted-types -- decodes the wire shape above */
+const readEarlierPushes = (value: unknown): string | null => {
+  if (value === null) {
+    return null;
   }
-
-  return value.map((entry) => {
-    if (!isRecord(entry)) {
-      refuse('malformed', 'every entry of `retired` must be an object');
-    }
-    const key = readString(entry, 'key');
-    if (!packKeyPattern.test(key) || key.includes('..')) {
-      refuse('malformed', `retired key '${key}' is not a storable pack key`);
-    }
-    return { key, retiredAt: readTimestamp(entry, 'retiredAt') };
-  });
+  if (typeof value !== 'string' || !segmentKeyPattern.test(value) || value.includes('..')) {
+    refuse('malformed', 'manifest field `earlierPushes` must be null or a push-log segment key');
+  }
+  return value;
 };
 
 const readPushes = (value: unknown): PushRecord[] => {
   if (!Array.isArray(value)) {
     refuse('malformed', 'manifest field `pushes` must be an array');
+  }
+  if (encodedLength(value as PushRecord[]) > pushLogByteLimit) {
+    refuse('malformed', `manifest field \`pushes\` is past its ${String(pushLogByteLimit)}-byte bound`);
   }
 
   return value.map((entry) => {
@@ -341,8 +338,8 @@ export const decodeManifest = (bytes: Uint8Array<ArrayBuffer>): Manifest => {
     committedBy: readString(source, 'committedBy'),
     refs: readReferences(source['refs']),
     packs: readPacks(source['packs']),
-    retired: readRetired(source['retired']),
     pushes: readPushes(source['pushes']),
+    earlierPushes: readEarlierPushes(source['earlierPushes']),
     encryption: 'none',
     tombstone: readTombstone(source['tombstone']),
   };
@@ -354,7 +351,6 @@ export const newIncarnation = (): string => randomBytes(16).toString('hex');
 export type ManifestDraft = {
   readonly refs: Readonly<Record<string, ManifestRef>>;
   readonly packs: readonly ManifestPack[];
-  readonly retired: readonly RetiredPack[];
   readonly committedBy: string;
   /** The host that pushed on the account's behalf (W10); absent for the account's own push. */
   readonly viaDevice?: string;
@@ -379,7 +375,10 @@ const movedTips = (before: Manifest['refs'], after: Manifest['refs']): PushRecor
  * exist yet: generation 1 with a fresh nonce.
  *
  * Every successor — a push, a removal, a restore, a tombstone — appends its
- * attribution record here, so no writer can forget to (EQ11).
+ * attribution record here, so no writer can forget to (EQ11). When the record
+ * would carry the log past {@link pushLogByteLimit}, the base's log becomes a
+ * new segment: the successor names it in `earlierPushes`, and its writer must
+ * store {@link spilledPushLog} before committing the manifest.
  */
 export const succeedManifest = (base: Manifest | undefined, draft: ManifestDraft, at: Date = new Date()): Manifest => {
   const generation = (base?.generation ?? 0) + 1;
@@ -393,6 +392,8 @@ export const succeedManifest = (base: Manifest | undefined, draft: ManifestDraft
     refs: moved.slice(0, pushRecordRefLimit),
     ...(moved.length > pushRecordRefLimit ? { omitted: moved.length - pushRecordRefLimit } : {}),
   };
+  const earlier = base?.pushes ?? [];
+  const spills = earlier.length > 0 && encodedLength([...earlier, record]) > pushLogByteLimit;
   return {
     format: manifestFormat,
     incarnation: draft.incarnation ?? base?.incarnation ?? newIncarnation(),
@@ -401,10 +402,36 @@ export const succeedManifest = (base: Manifest | undefined, draft: ManifestDraft
     committedBy: draft.committedBy,
     refs: draft.refs,
     packs: draft.packs,
-    retired: draft.retired,
-    pushes: boundedPushLog([...(base?.pushes ?? []), record]),
+    pushes: spills ? [record] : [...earlier, record],
+    earlierPushes: spills ? segmentKeyFor(earlier) : (base?.earlierPushes ?? null),
     encryption: 'none',
     tombstone: draft.tombstone ?? null,
+  };
+};
+
+/** `pushes/<first generation>-<last generation>-<nonce>.json`: unique to this writer, as a pack key is (NI4). */
+const segmentKeyFor = (records: readonly PushRecord[]): string =>
+  `pushes/${String(records[0]?.generation ?? 0)}-${String(records.at(-1)?.generation ?? 0)}-${randomBytes(8).toString('hex')}.json`;
+
+/**
+ * The segment `next` names and its writer must store before the manifest, or
+ * `undefined` when `next` did not spill. A lost race leaves the segment under
+ * a key no manifest names, like an orphaned pack upload.
+ *
+ * ponytail: a lost racer's segment is never swept (a few kilobytes, only when
+ * a race coincides with a spill); purge removes it with the tenant.
+ */
+export const spilledPushLog = (
+  base: Manifest | undefined,
+  next: Manifest,
+): { key: string; bytes: Uint8Array<ArrayBuffer> } | undefined => {
+  if (base === undefined || next.earlierPushes === null || next.earlierPushes === base.earlierPushes) {
+    return undefined;
+  }
+  const segment: PushLogSegment = { previous: base.earlierPushes, pushes: base.pushes };
+  return {
+    key: next.earlierPushes,
+    bytes: new TextEncoder().encode(JSON.stringify(segment)),
   };
 };
 
@@ -453,7 +480,6 @@ export const tombstoneManifest = (
     {
       refs: base.refs,
       packs: base.packs,
-      retired: base.retired,
       committedBy: args.committedBy,
       tombstone: {
         tombstonedAt: args.at.toISOString(),

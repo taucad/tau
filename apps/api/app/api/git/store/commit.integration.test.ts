@@ -247,6 +247,28 @@ describe('repository store commit protocol', () => {
     return keys.sort();
   };
 
+  /** Each pack the store holds a retirement marker for, with its newest retirement time (W13b). */
+  const retiredPacks = async (locator: RepositoryLocator): Promise<Map<string, number>> => {
+    const newest = new Map<string, number>();
+    for await (const object of store.listObjects(locator, 'retired/')) {
+      const [, at, file] = /^retired\/(\d+)-(.+)$/u.exec(object.key) ?? [];
+      if (at !== undefined && file !== undefined) {
+        newest.set(`packs/${file}`, Math.max(newest.get(`packs/${file}`) ?? 0, Number(at)));
+      }
+    }
+    return newest;
+  };
+
+  const isRetired = async (locator: RepositoryLocator, key: string): Promise<boolean> => {
+    const retired = await retiredPacks(locator);
+    return retired.has(key);
+  };
+
+  const livePackKeys = async (locator: RepositoryLocator): Promise<string[]> => {
+    const manifest = await readManifest(locator);
+    return (manifest?.packs ?? []).map((pack) => pack.key);
+  };
+
   /** Hydrates, pushes and commits in one step, the way the write path does. */
   const pushAndCommit = async (args: {
     locator: RepositoryLocator;
@@ -742,7 +764,6 @@ describe('repository store commit protocol', () => {
       const withStoredIndex = succeedManifest(committed, {
         refs: committed.refs,
         packs: [{ ...pack, indexStored: true }],
-        retired: [],
         committedBy,
       });
       const token = await store.readManifest(locator);
@@ -926,7 +947,6 @@ describe('repository store commit protocol', () => {
       const reborn: Manifest = succeedManifest(undefined, {
         refs: current?.refs ?? {},
         packs: current?.packs ?? [],
-        retired: [],
         committedBy,
       });
       await store.commitManifest(locator, encodeManifest(reborn), lease.token === 'absent' ? 'absent' : lease.token);
@@ -974,7 +994,8 @@ describe('repository store commit protocol', () => {
       // The bound is restored: the kept pack plus the pack that consolidates the rest.
       expect(after?.packs).toHaveLength(2);
       expect(after?.packs.map((pack) => pack.key)).toContain(keptKey);
-      expect(after?.retired.map((entry) => entry.key).sort()).toStrictEqual(
+      const retiredNow = await retiredPacks(locator);
+      expect([...retiredNow.keys()].sort()).toStrictEqual(
         (before?.packs ?? [])
           .map((pack) => pack.key)
           .filter((key) => key !== keptKey)
@@ -1013,8 +1034,9 @@ describe('repository store commit protocol', () => {
       // The base pack survived untouched: still live, never retired, never re-uploaded.
       expect(after?.packs.map((pack) => pack.key)).toContain(base?.key);
       expect(after?.packs).toHaveLength(2);
-      expect(after?.retired.map((entry) => entry.key)).not.toContain(base?.key);
-      expect(after?.retired).toHaveLength((before?.packs.length ?? 0) - 1);
+      const retired = await retiredPacks(locator);
+      expect(retired.has(base?.key ?? '')).toBe(false);
+      expect(retired.size).toBe((before?.packs.length ?? 0) - 1);
       // Only the small consolidated pack was uploaded.
       const uploaded = after?.packs.find((pack) => pack.key !== base?.key);
       expect(uploaded?.bytes).toBeLessThan(base?.bytes ?? 0);
@@ -1092,7 +1114,7 @@ describe('repository store commit protocol', () => {
         expect(stored).toContain(pack.key);
       }
       // The retired key is inside its window, so the sweep left it alone.
-      expect(after?.retired.map((entry) => entry.key)).toContain(retiring.small);
+      await expect(isRetired(locator, retiring.small)).resolves.toBe(true);
       expect(stored).toContain(retiring.small);
       expect(after?.packs.map((pack) => pack.key)).toContain(retiring.base);
     }, 120_000);
@@ -1132,8 +1154,7 @@ describe('repository store commit protocol', () => {
 
       client.revise(3);
       await pushAndCommit({ locator, client: client.directory, refspecs: ['main'], overrides: { packBound: 1 } });
-      const second = await readManifest(locator);
-      expect(second?.retired.map((entry) => entry.key)).toContain(original);
+      await expect(isRetired(locator, original)).resolves.toBe(true);
       expect(await listPacks(locator)).toContain(original);
 
       client.revise(4);
@@ -1147,12 +1168,105 @@ describe('repository store commit protocol', () => {
         },
       });
 
-      const after = await readManifest(locator);
-      expect(after?.retired.map((entry) => entry.key)).not.toContain(original);
+      // The marker goes with the pack it expired for.
+      await expect(isRetired(locator, original)).resolves.toBe(false);
       // The pack and the index stored beside it go together (D33).
       expect(await listPacks(locator)).not.toContain(original);
       expect(await listPacks(locator)).not.toContain(`${original.slice(0, -'.pack'.length)}.idx`);
     }, 120_000);
+
+    /**
+     * The crash row (W13b): a compacting committer that marks its packs and
+     * then dies leaves markers on packs that are still live. The compaction
+     * that really retires them later marks them again, and the newest marker
+     * governs, so the early one can never cut the window short.
+     */
+    it('should keep a retired pack for the whole window after its real retirement, whatever a dead writer marked earlier', async () => {
+      const locator = newRepository();
+      const client = newClient();
+      const retiring = await buildRetiringShape(locator, client);
+      const day = 24 * 60 * 60 * 1000;
+      const start = Date.now();
+
+      // Dies after marking and uploading, before the manifest write.
+      client.revise(3);
+      const dying = await hydrateLease({ store, locator, parentDirectory: scratch('lease') });
+      push(client.directory, dying.directory, ['main']);
+      await expect(
+        commitLease({
+          store,
+          lease: dying,
+          committedBy,
+          packBound: 1,
+          faults: (point) => {
+            if (point === 'before-manifest-commit') {
+              throw new Error('simulated worker crash');
+            }
+          },
+        }),
+      ).rejects.toThrow(/simulated worker crash/u);
+      await dying.dispose();
+      const marked = await retiredPacks(locator);
+      expect(marked.get(retiring.small)).toBeLessThanOrEqual(Date.now());
+      await expect(livePackKeys(locator)).resolves.toContain(retiring.small);
+
+      // The real retirement, one day short of a window after the dead marker.
+      const retiredAt = start + retentionWindowMilliseconds - day;
+      await pushAndCommit({
+        locator,
+        client: client.directory,
+        overrides: { packBound: 1, now: () => new Date(retiredAt) },
+      });
+      await expect(livePackKeys(locator)).resolves.not.toContain(retiring.small);
+
+      // Past the dead marker's window but inside the real one: still readable.
+      client.revise(4);
+      await pushAndCommit({
+        locator,
+        client: client.directory,
+        overrides: { packBound: 1, now: () => new Date(start + retentionWindowMilliseconds + day) },
+      });
+      expect(await listPacks(locator)).toContain(retiring.small);
+
+      // Past the real one: gone, with its index and every marker.
+      client.revise(5);
+      await pushAndCommit({
+        locator,
+        client: client.directory,
+        overrides: { packBound: 1, now: () => new Date(retiredAt + retentionWindowMilliseconds + day) },
+      });
+      expect(await listPacks(locator)).not.toContain(retiring.small);
+      await expect(isRetired(locator, retiring.small)).resolves.toBe(false);
+    }, 180_000);
+
+    /**
+     * W13b: every push reads and writes the manifest, so nothing in it may
+     * grow with the number of compactions. Every push here compacts and
+     * retires packs; what the manifest holds besides its bounded push log
+     * stays the same size.
+     */
+    it('should keep the manifest the same size apart from its bounded push log however many compactions retire packs', async () => {
+      const locator = newRepository();
+      const client = newClient();
+      const sizes: number[] = [];
+      for (let revision = 2; revision <= 25; revision += 1) {
+        client.revise(revision);
+        // oxlint-disable-next-line no-await-in-loop -- pushes are sequential by definition
+        await pushAndCommit({ locator, client: client.directory, overrides: { packBound: 1 } });
+        // oxlint-disable-next-line no-await-in-loop -- same reason
+        const manifest = await readManifest(locator);
+        if (manifest === undefined) {
+          throw new Error('unreachable: the push committed');
+        }
+        // Everything but the push log, with the numbers whose digit count follows history held fixed.
+        const rest = { ...manifest, pushes: [], committedAt: '', generation: 1 };
+        sizes.push(encodeManifest({ ...rest, packs: rest.packs.map((pack) => ({ ...pack, bytes: 0 })) }).byteLength);
+      }
+
+      expect(new Set(sizes.slice(2)).size).toBe(1);
+      const retired = await retiredPacks(locator);
+      expect(retired.size).toBeGreaterThanOrEqual(20);
+    }, 180_000);
 
     it('should keep the manifest readable through every sweep', async () => {
       const locator = newRepository();
@@ -1393,7 +1507,7 @@ describe('repository store commit protocol', () => {
       );
       const created = await store.commitManifest(
         locator,
-        encodeManifest(succeedManifest(undefined, { refs: {}, packs: [], retired: [], committedBy })),
+        encodeManifest(succeedManifest(undefined, { refs: {}, packs: [], committedBy })),
         'absent',
       );
       expect(created).toBe('lost');

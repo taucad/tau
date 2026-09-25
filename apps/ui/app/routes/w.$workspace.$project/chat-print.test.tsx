@@ -25,6 +25,7 @@ import {
   manifest,
   printing,
   provider,
+  renderGeometry,
   sliceFixture,
   timestamp,
 } from '#routes/w.$workspace.$project/chat-print.fixture.js';
@@ -359,6 +360,50 @@ describe('Print pane prepare and send', () => {
         exportOptions: { ...machineSliceOptions, layerHeight: 0.16 },
       });
     });
+    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+  });
+
+  it('clears a slice error once the model renders again, since it described the geometry before', async () => {
+    const fixture = createFixture();
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    mockExport.mockResolvedValueOnce({
+      success: false,
+      data: [],
+      issues: [{ message: 'The GLB carries no triangle primitives.' }],
+    } as unknown as Awaited<ReturnType<typeof mockExport>>);
+
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    expect(await within(prepareRegion()).findByText('The GLB carries no triangle primitives.')).toBeInTheDocument();
+
+    act(() => {
+      renderGeometry();
+    });
+
+    expect(within(prepareRegion()).queryByText('The GLB carries no triangle primitives.')).not.toBeInTheDocument();
+    expect(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
+  });
+
+  it('marks a slice stale once the model renders again, so the old toolpath cannot be sent', async () => {
+    const fixture = createFixture();
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+
+    act(() => {
+      renderGeometry();
+    });
+
+    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+    expect(
+      screen.getByText('The model changed since this slice. Slice again to send the current model.'),
+    ).toBeInTheDocument();
+
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
     expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
   });
 

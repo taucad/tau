@@ -79,9 +79,20 @@ const kernelClient = {
   bestRouteFor: (format: string) => capabilities.routes.find((route) => route.targetFormat === format),
   export: mockExport,
 };
+const cadRenders = new Topic<void>({ name: 'chat-print-fixture.cad-renders' });
+const cadSnapshot = (): { context: Record<string, unknown> } => ({
+  context: { kernelClient, activeKernelId: 'replicad', capabilities, geometry: {} },
+});
+let cadState = cadSnapshot();
 const cadActor = {
-  getSnapshot: () => ({ context: { kernelClient, activeKernelId: 'replicad', capabilities, geometry: {} } }),
-  subscribe: () => ({ unsubscribe: () => undefined }),
+  getSnapshot: () => cadState,
+  subscribe: (listener: () => void) => ({ unsubscribe: cadRenders.subscribe(listener) }),
+};
+
+/** The kernel renders the model again: a new geometry, as after an edit. */
+export const renderGeometry = (): void => {
+  cadState = cadSnapshot();
+  cadRenders.emit();
 };
 
 type ProjectSeam = Readonly<{
@@ -654,6 +665,7 @@ export const sliceFixture: SlicedArtifact = {
   length: 4,
   mimeType: accepted.mediaType,
   optionsKey: '{}',
+  geometry: {},
   summary: summarizeGcodeContainerMock(),
   fit: { fits: true },
 };

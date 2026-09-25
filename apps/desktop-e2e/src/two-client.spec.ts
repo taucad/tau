@@ -405,11 +405,37 @@ const gitOutput = async (repository: string, args: readonly string[]): Promise<s
 const gitHead = async (repository: string): Promise<string | undefined> =>
   gitOutput(repository, ['rev-parse', 'refs/heads/main']);
 
-const tauRepository = (projectId: string): string => join(tauGitRoot, `${projectId}.git`);
+/**
+ * A local mirror of the Tau Hosted Remote's repository for `projectId`.
+ *
+ * The server keeps repositories in object storage (git storage substrate D1),
+ * so the suite reads them the way any client would: a forced mirror fetch over
+ * smart HTTP refreshes every advertised ref (heads, tags, `refs/tau/chats/*`)
+ * and prunes deleted ones before each read. A failed fetch (the repository does
+ * not exist yet) removes the mirror, so reads resolve `undefined` rather than
+ * stale refs.
+ */
+const tauRepository = async (projectId: string): Promise<string> => {
+  const mirror = join(tauGitRoot, `${projectId}.git`);
+  if (!existsSync(mirror)) {
+    await mkdir(mirror, { recursive: true });
+    const initialized = await runGit(['init', '--quiet', '--bare'], mirror);
+    expect(initialized.code, initialized.stderr).toBe(0);
+  }
+  const authorization = `http.extraHeader=Authorization: ${basicAuthorization(bearer)}`;
+  const remoteUrl = `${desktopE2EApiUrl}/v1/git/${projectId}.git`;
+  const fetched = await runGit(
+    ['-c', authorization, 'fetch', '--quiet', '--force', '--prune', '--no-tags', remoteUrl, '+refs/*:refs/*'],
+    mirror,
+  );
+  if (fetched.code !== 0) {
+    await rm(mirror, { recursive: true, force: true });
+  }
+  return mirror;
+};
 
-/** The revision id in the last durable host-attested turn settlement. */
-const finalizedTurnRevision = async (logPath: string): Promise<string | undefined> => {
-  const contents = await readFile(logPath, 'utf8').catch(() => '');
+/** The revision id in the last durable host-attested turn settlement of one event log's contents. */
+const finalizedTurnRevisionIn = (contents: string, logPath: string): string | undefined => {
   if (!contents) {
     return undefined;
   }
@@ -431,6 +457,10 @@ const finalizedTurnRevision = async (logPath: string): Promise<string | undefine
   }
   return undefined;
 };
+
+/** The revision id in the last durable host-attested turn settlement. */
+const finalizedTurnRevision = async (logPath: string): Promise<string | undefined> =>
+  finalizedTurnRevisionIn(await readFile(logPath, 'utf8').catch(() => ''), logPath);
 
 const chatIdentity = async (page: Page, chatId: string): Promise<ChatIdentity | undefined> => {
   const link = chatRowLink(page, chatId);
@@ -488,7 +518,11 @@ const openTauCloudProject = async (
       timeout: 60_000,
     })
     .toBeGreaterThan(0);
-  await title.locator('../..').getByRole('button', { name: 'Open' }).click();
+  await region
+    .getByRole('listitem')
+    .filter({ has: page.getByText(name, { exact: true }) })
+    .getByRole('button', { name: 'Open' })
+    .click();
   await expect
     .poll(async () => page.url(), {
       message: `${continuationOwner} ${direction}: destination must open the Tau Cloud project`,
@@ -838,11 +872,11 @@ describe('a project on the browser client', () => {
       'V13/V14: the browser STEP revision has no head.',
     );
     await expect
-      .poll(async () => gitHead(tauRepository(lfsProjectId)), { timeout: 180_000 })
+      .poll(async () => gitHead(await tauRepository(lfsProjectId)), { timeout: 180_000 })
       .toBe(browserHeadAfterStep);
-    expect(await gitOutput(tauRepository(lfsProjectId), ['show', `${browserHeadAfterStep}:roundtrip.step`])).toContain(
-      `oid sha256:${browserDigest}`,
-    );
+    expect(
+      await gitOutput(await tauRepository(lfsProjectId), ['show', `${browserHeadAfterStep}:roundtrip.step`]),
+    ).toContain(`oid sha256:${browserDigest}`);
 
     /* The named version is authored through the product, then read from each
      * destination's own revision store — not inferred from the remote tag or
@@ -851,13 +885,13 @@ describe('a project on the browser client', () => {
     await source.page.getByRole('combobox', { name: /Version name/iu }).fill('v1');
     await source.page.getByRole('button', { name: /Publish and copy link/iu }).click();
     await expect
-      .poll(async () => gitOutput(tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1^{}']), {
+      .poll(async () => gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1^{}']), {
         message: 'V15: the browser named version must reach Tau Cloud',
         timeout: 180_000,
       })
       .toBe(browserHeadAfterStep);
     const publishedTagOid = required(
-      await gitOutput(tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1']),
+      await gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v1']),
       'V10/V15: Tau Cloud has no unpeeled named-version ref.',
     );
     expect(publishedTagOid, 'V10/V15: the unpeeled named-version ref must be a concrete SHA-1 OID').toMatch(
@@ -936,11 +970,11 @@ describe('a project on the browser client', () => {
       'V13/V14: the desktop STEP revision has no head.',
     );
     await expect
-      .poll(async () => gitHead(tauRepository(lfsProjectId)), { timeout: 180_000 })
+      .poll(async () => gitHead(await tauRepository(lfsProjectId)), { timeout: 180_000 })
       .toBe(desktopHeadAfterStep);
-    expect(await gitOutput(tauRepository(lfsProjectId), ['show', `${desktopHeadAfterStep}:roundtrip.step`])).toContain(
-      `oid sha256:${desktopDigest}`,
-    );
+    expect(
+      await gitOutput(await tauRepository(lfsProjectId), ['show', `${desktopHeadAfterStep}:roundtrip.step`]),
+    ).toContain(`oid sha256:${desktopDigest}`);
     await source.page.reload({ waitUntil: 'domcontentloaded' });
     await expect
       .poll(async () => browserHead(source, sourceSlug), {
@@ -972,14 +1006,17 @@ describe('a project on the browser client', () => {
       await desktopHead(destinationRoot),
       'V13/V14: the repeated desktop push has no head.',
     );
-    await expect.poll(async () => gitHead(tauRepository(lfsProjectId)), { timeout: 180_000 }).toBe(repeatedHead);
+    await expect.poll(async () => gitHead(await tauRepository(lfsProjectId)), { timeout: 180_000 }).toBe(repeatedHead);
     expect(await projectLfsBytes(lfsProjectId), 'V13: an existing LFS object must not be uploaded twice').toBe(
       2 * fiveMiB,
     );
     const persistedExport = await readFile(localExportPath);
     expect(persistedExport.byteLength, 'AC16: the full 50 MiB export must remain on desktop').toBe(fiftyMiB);
     expect(createHash('sha256').update(persistedExport).digest('hex')).toBe(localExportDigest);
-    const remoteExport = await runGit(['show', `${repeatedHead}:exports/local.step`], tauRepository(lfsProjectId));
+    const remoteExport = await runGit(
+      ['show', `${repeatedHead}:exports/local.step`],
+      await tauRepository(lfsProjectId),
+    );
     expect(remoteExport.code, 'V8/V13/AC16: the 50 MiB exports/** file must not enter the remote revision').not.toBe(0);
   }, 900_000);
 
@@ -1000,7 +1037,7 @@ describe('a project on the browser client', () => {
     await openSyncRegion(client);
     await chooseTauCloud(client);
     await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
-    const previousRemoteHead = await gitHead(tauRepository(projectId));
+    const previousRemoteHead = await gitHead(await tauRepository(projectId));
     const peer = await scratch('conflict-peer');
     const authorization = `http.extraHeader=Authorization: ${basicAuthorization(bearer)}`;
     const remoteUrl = `${desktopE2EApiUrl}/v1/git/${projectId}.git`;
@@ -1017,7 +1054,9 @@ describe('a project on the browser client', () => {
     expect(committed.code, committed.stderr).toBe(0);
     const pushed = await runGit(['-c', authorization, 'push', '--quiet', 'origin', 'HEAD:refs/heads/main'], peer);
     expect(pushed.code, pushed.stderr).toBe(0);
-    await expect.poll(async () => gitHead(tauRepository(projectId)), { timeout: 120_000 }).not.toBe(previousRemoteHead);
+    await expect
+      .poll(async () => gitHead(await tauRepository(projectId)), { timeout: 120_000 })
+      .not.toBe(previousRemoteHead);
 
     await client.page.keyboard.press('Control+KeyF');
     await client.page
@@ -1068,13 +1107,13 @@ describe('a project on the browser client', () => {
       'W10/W13: Keep mine completed without a resolved local HEAD.',
     );
     await expect
-      .poll(async () => gitHead(tauRepository(projectId)), {
+      .poll(async () => gitHead(await tauRepository(projectId)), {
         message: 'W10/W13: the bare remote HEAD must equal the resolved browser HEAD',
         timeout: 120_000,
       })
       .toBe(resolvedHead);
     expect(await readBrowserFile(client, slug, ['main.scad'])).toBe(browserVersion);
-    const remoteFile = await runGit(['show', `${resolvedHead}:main.scad`], tauRepository(projectId));
+    const remoteFile = await runGit(['show', `${resolvedHead}:main.scad`], await tauRepository(projectId));
     expect(remoteFile.code, remoteFile.stderr).toBe(0);
     expect(remoteFile.stdout).toBe(browserVersion);
   }, 900_000);
@@ -1100,7 +1139,13 @@ describe('a project on the browser client', () => {
       .poll(async () => fromTauCloud.getByText(/W18 Two Client/u).count(), { timeout: 45_000 })
       .toBeGreaterThan(0);
 
-    await fromTauCloud.getByRole('button', { name: 'Open' }).first().click();
+    /* By name: other rows back up projects of their own, and the section lists
+     * them in its own order. */
+    await fromTauCloud
+      .getByRole('listitem')
+      .filter({ has: client.page.getByText('W18 Two Client', { exact: true }) })
+      .getByRole('button', { name: 'Open' })
+      .click();
     /* The canonical project URL (`/w/{workspace}/{project}`): the local project
      * was created under the remote's own id and the open pull is running. */
     await expect.poll(async () => client.page.url(), { timeout: 120_000 }).toMatch(/\/w\//u);
@@ -1133,11 +1178,12 @@ describe('a project on the browser client', () => {
       const chatRef = `refs/tau/chats/${chatId}`;
       await expect.poll(async () => source.page.getByText(setupPrompt, { exact: true }).count()).toBeGreaterThan(0);
       await expect
-        .poll(async () => gitOutput(tauRepository(chatProjectId), ['rev-parse', chatRef]), {
+        .poll(async () => gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]), {
           message: 'V15: the common chat base must reach Tau Cloud before the second device opens it',
           timeout: 180_000,
         })
         .toBeDefined();
+      const baseChatHead = await gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]);
 
       const destinationSlug = await openTauCloudProject(destination.page, {
         projectsUrl: 'app://tau/projects',
@@ -1174,31 +1220,38 @@ describe('a project on the browser client', () => {
         await readSourceChatHead(),
         'V15: the browser device did not write its local chat ref.',
       );
+      /* The desktop's first chat commit starts its own chain and the server
+       * refuses it as a non-fast-forward; the retry rebuilds it on the common
+       * base and moves the local ref (`chat-ref.ts`, `revision-effects.ts`).
+       * So the published head is the one both sides settle on, not the first
+       * local value. */
+      const readDestinationChatHead = async (): Promise<string | undefined> =>
+        gitOutput(destinationRoot, ['rev-parse', chatRef]);
       await expect
-        .poll(async () => gitOutput(destinationRoot, ['rev-parse', chatRef]), {
-          message: 'V14/V15: the native desktop device must write its divergent local chat ref',
-          timeout: 120_000,
-        })
-        .toBeDefined();
+        .poll(
+          async () => {
+            const local = await readDestinationChatHead();
+            const remote = await gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]);
+            return local !== undefined && local !== baseChatHead && local === remote;
+          },
+          {
+            message: 'V14/V15: native desktop must publish its divergent segment while browser Git is held',
+            timeout: 180_000,
+          },
+        )
+        .toBe(true);
       const destinationChatHead = required(
-        await gitOutput(destinationRoot, ['rev-parse', chatRef]),
+        await readDestinationChatHead(),
         'V14/V15: the native desktop device did not write its local chat ref.',
       );
       expect(destinationChatHead, 'V14/V15: browser and native desktop must hold divergent chat-ref heads').not.toBe(
         sourceChatHead,
       );
-
-      await expect
-        .poll(async () => gitOutput(tauRepository(chatProjectId), ['rev-parse', chatRef]), {
-          message: 'V14/V15: native desktop must publish its divergent segment while browser Git is held',
-          timeout: 180_000,
-        })
-        .toBe(destinationChatHead);
       await source.context.unroute(`${desktopE2EApiUrl}/v1/git/**`);
       await expect
         .poll(
           async () => {
-            const head = await gitOutput(tauRepository(chatProjectId), ['rev-parse', chatRef]);
+            const head = await gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]);
             return head !== undefined && head !== sourceChatHead && head !== destinationChatHead ? head : undefined;
           },
           {
@@ -1208,7 +1261,7 @@ describe('a project on the browser client', () => {
         )
         .toBeDefined();
       const mergedChatHead = required(
-        await gitOutput(tauRepository(chatProjectId), ['rev-parse', chatRef]),
+        await gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]),
         'V15: the merged remote chat ref is absent.',
       );
       expect(
@@ -1416,17 +1469,32 @@ describe('close and continue', () => {
       await sendPrompt(source.page, 'Build the browser continuation source.');
       const chatId = activeChatId(source.page);
       const sourceChat = await terminalChatIdentity(source.page, chatId, direction);
-      const remote = tauRepository(projectId);
+      /* The settlement, not the first `Tau-Trigger: turn` revision on the
+       * remote: a turn on a never-recorded base pre-mints that base with the
+       * same trigger (`turn.machine.ts`), and it lands on Tau Cloud first. */
+      const chatLog = ['.tau', 'chats', chatId, 'events.jsonl'];
+      const settledTurn = async (): Promise<string | undefined> =>
+        finalizedTurnRevisionIn((await readBrowserFile(source, slug, chatLog)) ?? '', chatLog.join('/'));
       await expect
-        .poll(async () => gitOutput(remote, ['show', '-s', '--format=%B', 'refs/heads/main']), {
+        .poll(settledTurn, {
+          message: `${continuationOwner} ${direction}: the host must attest turn.finalized before the last edit`,
+          timeout: 180_000,
+        })
+        .toBeDefined();
+      const beforeClose = required(
+        await settledTurn(),
+        `${continuationOwner} ${direction}: finalized turn revisionId is absent`,
+      );
+      await expect
+        .poll(async () => gitHead(await tauRepository(projectId)), {
           message: `${continuationOwner} ${direction}: terminal chat must settle its turn revision before the last edit`,
           timeout: 180_000,
         })
-        .toContain('Tau-Trigger: turn');
-      const beforeClose = await gitHead(remote);
-      if (beforeClose === undefined) {
-        throw new Error(`${continuationOwner} ${direction}: settled turn revisionId is absent`);
-      }
+        .toBe(beforeClose);
+      expect(
+        await gitOutput(await tauRepository(projectId), ['show', '-s', '--format=%B', beforeClose]),
+        `${continuationOwner} ${direction}: the settled revision must be the turn's`,
+      ).toContain('Tau-Trigger: turn');
       await expect
         .poll(async () => browserHead(source, slug), {
           message: `${continuationOwner} ${direction}: source head must be the settled turn before the last edit`,
@@ -1450,17 +1518,23 @@ describe('close and continue', () => {
         row: direction,
       });
       await expect
-        .poll(async () => gitHead(remote), {
+        .poll(async () => gitHead(await tauRepository(projectId)), {
           message: `${continuationOwner} ${direction}: close revision must reach Tau Cloud`,
           timeout: 180_000,
         })
         .toBe(closeRevisionId);
       expect(
-        await gitOutput(remote, ['show', '-s', '--format=%B', closeRevisionId]),
+        await gitOutput(await tauRepository(projectId), ['show', '-s', '--format=%B', closeRevisionId]),
         `${continuationOwner} ${direction}: source revision must be the close event prepared while hidden`,
       ).toContain('Tau-Trigger: close');
       expect(
-        await gitOutput(remote, ['diff-tree', '--no-commit-id', '--name-only', '-r', closeRevisionId]),
+        await gitOutput(await tauRepository(projectId), [
+          'diff-tree',
+          '--no-commit-id',
+          '--name-only',
+          '-r',
+          closeRevisionId,
+        ]),
         `${continuationOwner} ${direction}: source close revision changed paths must contain main.scad`,
       ).toContain('main.scad');
 
@@ -1598,7 +1672,7 @@ describe('close and continue', () => {
         `${continuationOwner} ${direction}: source close revision changed paths must contain main.scad`,
       ).toContain('main.scad');
       await expect
-        .poll(async () => gitHead(tauRepository(projectId)), {
+        .poll(async () => gitHead(await tauRepository(projectId)), {
           message: `${continuationOwner} ${direction}: close revision must reach Tau Cloud before quit completes`,
           timeout: 180_000,
         })
@@ -1693,7 +1767,7 @@ describe('close and continue', () => {
       `${continuationOwner} offline: source head is absent before close`,
     );
     await expect
-      .poll(async () => gitHead(tauRepository(offlineProjectId)), {
+      .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
         message: `${continuationOwner} offline: Tau Cloud must acknowledge the baseline before the outage`,
         timeout: 180_000,
       })
@@ -1745,7 +1819,7 @@ describe('close and continue', () => {
       })
       .toMatch(/Backed up/u);
     await expect
-      .poll(async () => gitHead(tauRepository(offlineProjectId)), {
+      .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
         message: `${continuationOwner} offline: Tau Cloud destination head must equal the queued close revisionId`,
         timeout: 180_000,
       })
@@ -1884,9 +1958,6 @@ describe('a git remote', () => {
   );
 });
 
-/** Kept for the git-remote cases that push with a Tau credential. */
-void basicAuthorization;
-
 /**
  * W15: attachments across two devices (blueprint §Sync, D26, W12).
  *
@@ -1933,21 +2004,23 @@ describe('chat attachments across two clients', () => {
       await sendPrompt(source.page, firstPrompt);
       const chatId = activeChatId(source.page);
       const chatRef = `refs/tau/chats/${chatId}`;
-      const repository = tauRepository(projectId);
       await expect
-        .poll(async () => gitOutput(repository, ['rev-parse', chatRef]), {
+        .poll(async () => gitOutput(await tauRepository(projectId), ['rev-parse', chatRef]), {
           message: 'the chat ref carrying the attachments must reach Tau Cloud',
           timeout: 180_000,
         })
         .toBeDefined();
-      const firstHead = required(await gitOutput(repository, ['rev-parse', chatRef]), 'The chat ref is absent.');
+      const firstHead = required(
+        await gitOutput(await tauRepository(projectId), ['rev-parse', chatRef]),
+        'The chat ref is absent.',
+      );
 
       /* One object per attachment, at its content-addressed name and its exact
        * size: an LFS pointer would be 127 bytes and the wrong name (D26). */
       await expect
         .poll(
           async () => {
-            const listing = await gitOutput(repository, ['ls-tree', '-r', '-l', chatRef]);
+            const listing = await gitOutput(await tauRepository(projectId), ['ls-tree', '-r', '-l', chatRef]);
             return (listing ?? '')
               .split('\n')
               .map((row) => row.trim().split(/\s+/u))
@@ -1996,12 +2069,16 @@ describe('chat attachments across two clients', () => {
       await selectChatModel(destination.page, gatewayFixtureModelName);
       await sendPrompt(destination.page, secondPrompt);
       await expect
-        .poll(async () => gitOutput(repository, ['rev-parse', chatRef]), {
+        .poll(async () => gitOutput(await tauRepository(projectId), ['rev-parse', chatRef]), {
           message: 'the second turn must publish a new chat head',
           timeout: 180_000,
         })
         .not.toBe(firstHead);
-      const added = await gitOutput(repository, ['rev-list', '--objects', `${firstHead}..${chatRef}`]);
+      const added = await gitOutput(await tauRepository(projectId), [
+        'rev-list',
+        '--objects',
+        `${firstHead}..${chatRef}`,
+      ]);
       expect(
         (added ?? '').split('\n').filter((row) => row.includes('attachments/')),
         'the second turn transferred attachment bytes again',

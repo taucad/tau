@@ -31,7 +31,7 @@
  */
 
 import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
-import type { Actor, AnyActorRef, AnyEventObject, AsyncActorLogic } from 'xstate';
+import type { Actor, AnyActorRef, AnyEventObject, AnyMachineSnapshot, AsyncActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#publish.machine.js';
@@ -39,6 +39,7 @@ import { publishMachine, publishPushMilliseconds, selectPublishFacet } from '#pu
 import type {
   PublishActors,
   PublishMachineEmitted,
+  PublishMachineEvent,
   PublishTagActorInput,
   PublishVersionsActorOutput,
 } from '#publish.machine.js';
@@ -46,7 +47,48 @@ import type { PublishDraft } from '#publish.types.js';
 import { revisionId } from '#algorithms/index.js';
 
 import type { RevisionTag } from '#revision-port.js';
-import { createManualClock } from '#test/fake-actors.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
+
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 answers each one or moves it to an exported
+ * `publishIgnoredEvents` (D13, MC-R17), and deletes the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  publish: [
+    // W5: a `pushSettled` that names no push this state awaits is dropped without an answer (L7 F3).
+    ['pushing', 'pushSettled'],
+    // W5: every other public event a state does not take (totality).
+    ['idle', 'confirm'],
+    ['idle', 'cancel'],
+    ['idle', 'pushSettled'],
+    ['idle', 'reset'],
+    ['choosingVersion', 'publish'],
+    ['choosingVersion', 'pushSettled'],
+    ['choosingVersion', 'reset'],
+    ['tagging', 'publish'],
+    ['tagging', 'confirm'],
+    ['tagging', 'pushSettled'],
+    ['tagging', 'reset'],
+    ['pushing', 'publish'],
+    ['pushing', 'confirm'],
+    ['pushing', 'reset'],
+    ['publishing', 'publish'],
+    ['publishing', 'confirm'],
+    ['publishing', 'cancel'],
+    ['publishing', 'pushSettled'],
+    ['publishing', 'reset'],
+    ['success', 'confirm'],
+    ['success', 'cancel'],
+    ['success', 'pushSettled'],
+    ['error', 'confirm'],
+    ['error', 'cancel'],
+    ['error', 'pushSettled'],
+  ],
+};
 
 const tagV1: RevisionTag = {
   name: 'v1',
@@ -99,7 +141,7 @@ const head: PublishVersionsActorOutput = {
 type Started = Readonly<{
   actor: Actor<typeof publishMachine>;
   emitted: PublishMachineEmitted[];
-  clock: ReturnType<typeof createManualClock>;
+  clock: StepClock;
   calls: Array<Readonly<{ name: string; input: unknown }>>;
   /** Everything the dialog sent its root — `syncNow`, and nothing else (P39). */
   asked: AnyEventObject[];
@@ -167,7 +209,8 @@ const start = (
     createPublication: record('createPublication', () => ({ publicationId: 'pub_1', url: 'https://tau.new/p/pub_1' })),
     ...overrides,
   };
-  const clock = createManualClock();
+  const guard = guardActors({ ignore: knownDefects });
+  const clock = new StepClock();
   const provided = publishMachine.provide({ actors });
   /*
    * The root's forwarding edge, as small as it really is (W22 DEF-W22-2).
@@ -191,13 +234,14 @@ const start = (
         }
       });
     }),
+    { inspect: guard.inspect },
   );
   parent.start();
   const input = { projectId: 'p1', parentRef: parent };
   const actor =
     from === undefined
-      ? createActor(provided, { clock, input })
-      : createActor(provided, { clock, input, snapshot: provided.resolveState(from) });
+      ? createActor(provided, { clock, input, inspect: guard.inspect })
+      : createActor(provided, { clock, input, inspect: guard.inspect, snapshot: provided.resolveState(from) });
   dialog.ref = actor;
   const emitted: PublishMachineEmitted[] = [];
   for (const type of ['published', 'toast.info', 'toast.error'] as const) {
@@ -518,7 +562,12 @@ describe('publishMachine', () => {
   });
 
   it('15: starts headlessly, keeps a serializable context and exports one machine', () => {
-    const actor = createActor(publishMachine, { input: { projectId: 'p1' } });
+    const guard = guardActors({ ignore: knownDefects });
+    const actor = createActor(publishMachine, {
+      input: { projectId: 'p1' },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
 
     actor.start();
 
@@ -559,5 +608,44 @@ describe('publishMachine', () => {
       input: { name: 'v2', revisionId: 'rev-2', note: 'first release' },
     });
     actor.stop();
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const invokeOf = (path: string): string => publishMachine.getStateNodeById(`publish.${path}`).invoke[0]?.id ?? '';
+    const [readInvoke, tagInvoke, pushInvoke, publishInvoke] = [
+      'choosingVersion.reading',
+      'tagging',
+      'pushing',
+      'publishing',
+    ].map((path) => invokeOf(path));
+    const publicEvents: readonly PublishMachineEvent[] = [
+      { type: 'publish' },
+      { type: 'confirm', draft },
+      { type: 'cancel' },
+      { type: 'pushSettled', pushId: 'push-1', outcome: 'backedUp' },
+      { type: 'reset' },
+    ];
+    const options = {
+      input: { projectId: 'p1' },
+      /* Effect outcomes reach the states behind each invoke; they are not public. */
+      events: [
+        ...publicEvents,
+        { type: `xstate.done.actor.${readInvoke}`, output: head },
+        { type: `xstate.error.actor.${readInvoke}`, error: new Error('graph unreadable') },
+        { type: `xstate.done.actor.${tagInvoke}`, output: { ...tagV1, name: 'v2', revisionId: revisionId('rev-2') } },
+        { type: `xstate.done.actor.${pushInvoke}`, output: { pushId: 'push-1', remote: 'tau' } },
+        {
+          type: `xstate.done.actor.${publishInvoke}`,
+          output: { publicationId: 'pub_1', url: 'https://tau.new/p/pub_1' },
+        },
+      ],
+      limit: 200,
+      /* The value alone merges `pushing` before and after the push answers; `pushSettled` reads `pushId`. */
+      serializeState: (snapshot: AnyMachineSnapshot) =>
+        JSON.stringify([snapshot.value, (snapshot.context as { pushId?: string }).pushId]),
+    };
+
+    expect(unansweredEvents(publishMachine, { ...options, ignore: knownDefects['publish'] })).toEqual([]);
+    expect(unreachedStates(publishMachine, options)).toEqual([]);
   });
 });

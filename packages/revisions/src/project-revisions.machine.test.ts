@@ -1,9 +1,11 @@
+/* oxlint-disable max-lines -- the root's path table and its enumeration row (MC-S5) are one suite */
 import { createActor } from 'xstate';
-import type { ActorRefFrom, AnyActorRef } from 'xstate';
+import type { ActorRefFrom, AnyActorRef, AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#project-revisions.machine.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
+import type { ProjectRevisionsMachineEvent } from '#project-revisions.machine.js';
 import { checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
@@ -15,13 +17,12 @@ import { restoreMachine } from '#restore.machine.js';
 import { syncMachine } from '#sync.machine.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnLeaseActorInput } from '#turn.machine.js';
-import {
-  createFakeCallbackActors,
-  createFakePromiseActors,
-  createManualClock,
-  recordEmitted,
-} from '#test/fake-actors.js';
-import type { FakeCallbackActors, FakePromiseActors } from '#test/fake-actors.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFakeCallbackActors, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
+import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
  * Path table — `project-revisions.machine` (catalogue: 10).
@@ -76,6 +77,30 @@ import type { FakeCallbackActors, FakePromiseActors } from '#test/fake-actors.js
  *     the `RevisionStatus` projection; serializable snapshot; one machine value
  */
 
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored, keyed by the machine id of the actor that dropped them. The
+ * root runs its real children, so their drops are rows here too. W5 answers
+ * each one or moves it to that machine's exported `<name>IgnoredEvents` (D13,
+ * MC-R17), and deletes the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  branch: [
+    // W5: every registry announcement is forwarded, and `idle` has no verb to settle.
+    ['idle', 'branchesChanged'],
+    // W5: a trigger-only cut's answer is forwarded whether or not a verb asked for it.
+    ['idle', 'nothingToSave'],
+  ],
+  checkouts: [
+    // W5: a reopen (`branchMerged`, `conflictResolved`) that lands while the first open is still sweeping.
+    ['recovering', 'open'],
+  ],
+  sync: [
+    // W5: a composed conflict reaches the scheduler before it has read its queue.
+    ['reading.queue', 'conflictResolved'],
+  ],
+};
+
 /** Let every queued microtask and the actors' promise handlers run. */
 const flush = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
@@ -117,6 +142,7 @@ type Harness = Readonly<{
 }>;
 
 const start = (): Harness => {
+  const guard = guardActors({ ignore: knownDefects });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const actor = createActor(
@@ -195,7 +221,11 @@ const start = (): Harness => {
         }),
       },
     }),
-    { clock: createManualClock(), input: { projectId: 'project-1', liveCheckoutId: 'checkout-live' } },
+    {
+      input: { projectId: 'project-1', liveCheckoutId: 'checkout-live' },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    },
   );
   const emitted = recordEmitted(actor);
   actor.start();
@@ -1634,6 +1664,95 @@ describe('projectRevisionsMachine', () => {
       typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([projectRevisionsMachine]);
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const settlement = {
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      checkoutId: 'checkout-b',
+      runId: 'run-1',
+      revisionId: 'rev-2',
+      trigger: 'turn',
+      branch: 'agent/b',
+      runIds: ['run-1'],
+    } as const;
+    const publicEvents: readonly ProjectRevisionsMachineEvent[] = [
+      { type: 'checkoutsChanged', checkouts: [live, linked] },
+      { type: 'branchesFetched', branches: [{ name: 'remote-feature', head: 'rev-remote' }] },
+      { type: 'checkoutStatusChanged', checkoutId: 'checkout-live', status: 'dirty', headRevisionId: 'rev-1' },
+      { type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' },
+      { type: 'turnPrepared', turnId: 'turn-1', chatId: 'chat-1', checkoutId: 'checkout-b', branch: 'agent/b' },
+      { type: 'cut', trigger: 'save', checkoutId: 'checkout-live', leaseIds: [] },
+      { type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'save', revisionId: 'rev-2' },
+      { type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'save' },
+      { type: 'cutFailed', checkoutId: 'checkout-live', trigger: 'save', reason: 'write failed' },
+      { type: 'casLost', checkoutId: 'checkout-live', trigger: 'save' },
+      { type: 'turnFinalized', ...settlement },
+      { type: 'turnConflicted', ...settlement },
+      { type: 'leaseStale', runId: 'run-9' },
+      { type: 'checkoutChanged', checkoutId: 'checkout-b', revisionId: 'rev-4', treeId: 'tree-4', branch: undefined },
+      { type: 'changed', checkoutId: 'checkout-b', paths: ['a.ts'], generation: 1 },
+      { type: 'turnCompleted', turnId: 'turn-1' },
+      { type: 'turnAbandoned', turnId: 'turn-1' },
+      { type: 'release', turnId: 'turn-1' },
+      { type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-1' },
+      {
+        type: 'turnReleased',
+        turnId: 'turn-1',
+        chatId: 'chat-1',
+        checkoutId: 'checkout-b',
+        runId: 'run-1',
+        outcome: 'released',
+      },
+      { type: 'leaseRetired', runId: 'run-0' },
+      { type: 'removalOffered', checkoutId: 'checkout-b' },
+      { type: 'checkoutFailed', operation: 'add', reason: 'That branch already has a checkout.' },
+      { type: 'addCheckout', branch: 'enclosure-v2', from: 'rev-12' },
+      { type: 'removeCheckout', id: 'checkout-b' },
+      { type: 'switch', branch: 'agent/b' },
+      { type: 'followChat', chatId: 'chat-1' },
+      { type: 'pinTo', checkoutId: 'checkout-b' },
+      { type: 'remote', event: { type: 'connect', kind: 'tau' } },
+      { type: 'branch', event: { type: 'create', name: 'enclosure-v2', from: 'rev-12' } },
+      { type: 'publish', event: { type: 'publish' } },
+      { type: 'sync', event: { type: 'online' } },
+      { type: 'syncNow', pushId: 'push-1' },
+      { type: 'pushSettled', pushId: 'push-1', outcome: 'backedUp' },
+      { type: 'resolution', revisionId: 'rev-conflict', event: { type: 'keepMine', path: 'enclosure.ts' } },
+      { type: 'mergeConflicted', branch: 'agent/b', into: 'main', paths: ['enclosure.ts'] },
+      { type: 'branchMerged', branch: 'agent/b', into: 'main', revisionId: 'rev-2' },
+      { type: 'remoteConnected', kind: 'tau', url: 'https://api.tau.new/git/p1', name: 'tau' },
+      { type: 'remoteDisconnected' },
+      { type: 'conflictResolved', revisionId: 'rev-conflict', branch: 'agent/b' },
+      { type: 'resolutionChanged', revisionId: 'rev-conflict' },
+      {
+        type: 'conflictMaterialized',
+        revisionId: 'rev-conflict',
+        path: 'enclosure.ts',
+        text: '',
+        ours: '',
+        theirs: '',
+      },
+      { type: 'conflictMaterializationFailed', revisionId: 'rev-conflict', path: 'enclosure.ts', reason: 'binary' },
+      { type: 'turnRequested', revisionId: 'rev-conflict', checkoutId: 'checkout-b', paths: ['enclosure.ts'] },
+    ];
+    /* The root is one `ready` state whose invokes never leave it, so the public
+     * events are the whole sample: no invoke outcome is needed to reach a state. */
+    const options = {
+      input: { projectId: 'project-1', liveCheckoutId: 'checkout-live' },
+      events: publicEvents,
+      limit: 1000,
+      serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+    };
+
+    /* W5 (RV4-F3): the root spawns `checkout`, `turn` and `resolution` by string
+     * key, which pure `transition` cannot resolve, so the walk throws on the first
+     * `checkoutsChanged`. Spawning by logic value lets it run; then both become
+     * `toEqual([])`, the first with `ignore: knownDefects['project-revisions']`. */
+    const notProvided = "Actor source 'checkout' is not provided";
+    expect(() => unansweredEvents(projectRevisionsMachine, options)).toThrow(notProvided);
+    expect(() => unreachedStates(projectRevisionsMachine, options)).toThrow(notProvided);
   });
 });
 

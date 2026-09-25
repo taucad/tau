@@ -33,6 +33,14 @@ import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-conf
 import { restoreMachine } from '#restore.machine.js';
 import { createRevisionActors, describeTurnRelease, revisionTreeId } from '#revision-effects.js';
 import type { RevisionActors, RevisionActorsOptions } from '#revision-effects.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+
+/** A clock stopped at `time`: these rows read only its `now()`. */
+const clockAt = (time: number): StepClock => {
+  const clock = new StepClock();
+  clock.set(time);
+  return clock;
+};
 
 const roots: string[] = [];
 
@@ -735,7 +743,7 @@ describe('the checkout registry', () => {
       authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       /* Forty days after the revision both branches name. */
-      clock: () => recordedAt + 40 * day,
+      clock: clockAt(recordedAt + 40 * day),
     });
 
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
@@ -774,7 +782,7 @@ describe('the checkout registry', () => {
       projectId: 'project-1',
       authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
-      clock: () => recordedAt + 60_000,
+      clock: clockAt(recordedAt + 60_000),
     });
 
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });

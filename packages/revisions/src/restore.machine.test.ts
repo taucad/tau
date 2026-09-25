@@ -1,10 +1,16 @@
 import { createActor } from 'xstate';
+import type { AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#restore.machine.js';
 import { latestRevisionTarget, restoreMachine } from '#restore.machine.js';
-import { createFakeParent, createFakePromiseActors, recordEmitted } from '#test/fake-actors.js';
-import type { FakePromiseActors } from '#test/fake-actors.js';
+import type { RestoreMachineEvent } from '#restore.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFakeParent, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
+import type { FakePromiseActors } from '@taucad/xstate-testing/fakes';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
  * Path table — `restore.machine` (catalogue: 10).
@@ -23,6 +29,33 @@ import type { FakePromiseActors } from '#test/fake-actors.js';
  * --  start and stop, serializable snapshot, one exported machine value
  */
 
+/**
+ * Known defects (MC-S5): public events a reachable state neither takes nor
+ * declares ignored. W5 answers each one or moves it to an exported
+ * `restoreIgnoredEvents` (D13, MC-R17), and deletes the row as it lands.
+ */
+const knownDefects: IgnoredEvents = {
+  restore: [
+    // W5: `undo` with nothing to undo is refused without an answer.
+    ['idle', 'undo'],
+    ['idle', 'confirm'],
+    ['idle', 'cancel'],
+    ['planning', 'restore'],
+    ['planning', 'returnToLatest'],
+    ['planning', 'undo'],
+    ['planning', 'confirm'],
+    ['planning', 'cancel'],
+    ['confirming', 'restore'],
+    ['confirming', 'returnToLatest'],
+    ['confirming', 'undo'],
+    ['applying', 'restore'],
+    ['applying', 'returnToLatest'],
+    ['applying', 'undo'],
+    ['applying', 'confirm'],
+    ['applying', 'cancel'],
+  ],
+};
+
 /** Let every queued microtask and the actor's promise handlers run. */
 const flush = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
@@ -38,6 +71,7 @@ type Harness = Readonly<{
 }>;
 
 const start = (): Harness => {
+  const guard = guardActors({ ignore: knownDefects });
   const promises = createFakePromiseActors();
   const parent = createFakeParent();
   const actor = createActor(
@@ -49,6 +83,8 @@ const start = (): Harness => {
     }),
     {
       input: { projectId: 'project-1', checkoutId: 'checkout-1', headRevisionId: 'rev-5', parentRef: parent.ref },
+      clock: new StepClock(),
+      inspect: guard.inspect,
     },
   );
   const emitted = recordEmitted(actor);
@@ -260,5 +296,33 @@ describe('restoreMachine', () => {
       typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([restoreMachine]);
+  });
+
+  it('should answer every public event in every reachable state', () => {
+    const planInvoke = restoreMachine.getStateNodeById('restore.planning').invoke[0]?.id ?? '';
+    const applyInvoke = restoreMachine.getStateNodeById('restore.applying').invoke[0]?.id ?? '';
+    const publicEvents: readonly RestoreMachineEvent[] = [
+      { type: 'restore', revisionId: 'rev-3' },
+      { type: 'returnToLatest' },
+      { type: 'undo' },
+      { type: 'confirm' },
+      { type: 'cancel' },
+      { type: 'selectCheckout', checkoutId: 'checkout-b', headRevisionId: 'rev-9' },
+    ];
+    const options = {
+      input: { projectId: 'project-1', checkoutId: 'checkout-1', headRevisionId: 'rev-5', parentRef: undefined },
+      /* Effect outcomes reach the states behind each invoke; they are not public. */
+      events: [
+        ...publicEvents,
+        { type: `xstate.done.actor.${planInvoke}`, output: { ...plan, removedPathCount: 1 } },
+        { type: `xstate.error.actor.${planInvoke}`, error: new Error('unknown revision') },
+        { type: `xstate.done.actor.${applyInvoke}`, output: { revisionId: 'rev-3', treeId: 'tree-3', branch: 'main' } },
+      ],
+      limit: 200,
+      serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
+    };
+
+    expect(unansweredEvents(restoreMachine, { ...options, ignore: knownDefects['restore'] })).toEqual([]);
+    expect(unreachedStates(restoreMachine, options)).toEqual([]);
   });
 });

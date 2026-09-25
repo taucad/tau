@@ -4565,6 +4565,9 @@ importers:
 
   tools/formal:
     dependencies:
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../libs/xstate-testing
       fast-check:
         specifier: 'catalog:'
         version: 4.10.1

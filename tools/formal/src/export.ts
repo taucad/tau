@@ -101,10 +101,17 @@ export const generatedFiles = (directory: string, module: string, exported: Grap
       }
     : {};
 
-/** The committed files that differ from their regenerated text. */
+/**
+ * The committed files whose value differs from their regenerated JSON. Compared by value, not by
+ * bytes: the commit hook runs oxfmt over every staged file, so the committed layout is oxfmt's.
+ */
 export const staleFiles = (files: Readonly<Record<string, string>>): string[] =>
   Object.entries(files)
-    .filter(([file, text]) => !existsSync(file) || readFileSync(file, 'utf8') !== text)
+    .filter(
+      ([file, text]) =>
+        !existsSync(file) ||
+        JSON.stringify(JSON.parse(readFileSync(file, 'utf8'))) !== JSON.stringify(JSON.parse(text)),
+    )
     .map(([file]) => file);
 
 /**

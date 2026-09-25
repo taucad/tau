@@ -495,51 +495,45 @@ describe('ChatLedger differential (Lean goldens)', () => {
     60_000,
   );
 
-  // S5 D1: after a reload, an identical re-append whose object carries an undefined optional key is
-  // EVENT_MUTATED in TypeScript and a duplicate in the model. W0.1 skips undefined keys; this flips
-  // to a failure once it lands, and the `it.fails` comes off.
-  it.skipIf(updating).fails(
+  // S5 D1: after a reload, an identical re-append whose object carries an undefined optional key was
+  // EVENT_MUTATED in TypeScript and a duplicate in the model. W0.1 skips undefined keys; the specs'
+  // mutant `undefined-key-skip` removes that skip and this test catches it (RV6-F2).
+  it.skipIf(updating)(
     'should match the Lean goldens on the undefined-key corpus (S5 D1; fixed by W0.1)',
     async () => {
       const traces = await tracesOf(corpora.undefinedKeys);
 
-      expect(mismatches(traces, readFileSync(corpusFile(corpora.undefinedKeys, 'expected'), 'utf8'))).toEqual([]);
-    },
-    60_000,
-  );
-
-  it.skipIf(updating)(
-    'should differ from the goldens on the undefined-key corpus only by S5 D1',
-    async () => {
-      const traces = await tracesOf(corpora.undefinedKeys);
-      const found = mismatches(traces, readFileSync(corpusFile(corpora.undefinedKeys, 'expected'), 'utf8'));
-
       expect(
-        found.filter((line) => !/^log-\d+: typescript "A \d+ EVENT_MUTATED", lean "A \d+ duplicate"$/.test(line)),
+        mismatches(traces, readFileSync(corpusFile(corpora.undefinedKeys, 'expected'), 'utf8')).slice(0, 3),
       ).toEqual([]);
     },
     60_000,
   );
 
-  // The undefined-key generator joins the nightly once W0.1 lands; until then S5 D1 makes every run differ.
   it.runIf(freshTraces > 0)(
-    'should write a fresh-seed base corpus and its TypeScript output for the nightly oracle',
+    'should write fresh-seed corpora and their TypeScript output for the nightly oracle',
     async () => {
       const seed = Number(process.env['FORMAL_SEED'] ?? Math.floor(Math.random() * 2_147_483_647));
       process.stdout.write(
-        `chat-ledger fresh differential: seed ${seed}, ${freshTraces} traces (replay with FORMAL_SEED=${seed})\n`,
+        `chat-ledger fresh differential: seed ${seed}, ${freshTraces} traces per generator (replay with FORMAL_SEED=${seed})\n`,
       );
-      const traces = await generate({ name: 'fresh', seed, count: freshTraces, undefinedKeys: false });
       rmSync(freshDirectory, { recursive: true, force: true });
       mkdirSync(freshDirectory, { recursive: true });
-      writeFileSync(`${freshDirectory}base-${seed}.trace`, traceText(traces));
-      writeFileSync(
-        `${freshDirectory}base-${seed}.typescript`,
-        `${traces.flatMap((trace) => trace.expected).join('\n')}\n`,
-      );
+      for (const [name, undefinedKeys] of [
+        ['base', false],
+        ['undefined-keys', true],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one generator at a time bounds memory at 20,000 traces.
+        const traces = await generate({ name: 'fresh', seed, count: freshTraces, undefinedKeys });
+        writeFileSync(`${freshDirectory}${name}-${seed}.trace`, traceText(traces));
+        writeFileSync(
+          `${freshDirectory}${name}-${seed}.typescript`,
+          `${traces.flatMap((trace) => trace.expected).join('\n')}\n`,
+        );
+      }
 
-      expect(existsSync(`${freshDirectory}base-${seed}.typescript`)).toBe(true);
+      expect(existsSync(`${freshDirectory}undefined-keys-${seed}.typescript`)).toBe(true);
     },
-    900_000,
+    1_800_000,
   );
 });

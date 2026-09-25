@@ -18,6 +18,7 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
+    "@taucad/xstate-testing": "workspace:*",
     "fast-check": "catalog:",
     "xstate": "catalog:"
   }

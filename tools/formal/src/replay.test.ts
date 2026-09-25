@@ -1,35 +1,26 @@
 import { createActor, createMachine } from 'xstate';
 import type { AnyEventObject, AnyStateMachine } from 'xstate';
+import { recordTransitions } from '@taucad/xstate-testing/inspect';
 import { describe, expect, it } from 'vitest';
 import type { SpecView } from '#graph.js';
 import type { ConformanceAdapter, TransitionRecord } from '#replay.js';
 import { replayEquality, replaySuite } from '#replay.js';
 
-/* Stand-in for W2's `recordTransitions` (@taucad/xstate-testing/inspect): one record per delivery. */
+/* One record per delivery after `@xstate.init`, through W2's recorder. */
 const record = (
   machine: AnyStateMachine,
   events: readonly AnyEventObject[],
   between: () => void = () => undefined,
 ): TransitionRecord[] => {
-  const records: TransitionRecord[] = [];
-  const actor = createActor(machine, {
-    inspect: (inspection) => {
-      if (inspection.type === '@xstate.transition' && inspection.event.type !== '@xstate.init') {
-        const { value, context } = inspection.snapshot as unknown as {
-          readonly value: unknown;
-          readonly context: unknown;
-        };
-        records.push({ event: inspection.event, value, context });
-      }
-    },
-  });
+  const recorder = recordTransitions();
+  const actor = createActor(machine, { inspect: recorder.inspect });
   actor.start();
   for (const event of events) {
     between();
     actor.send(event);
   }
   actor.stop();
-  return records;
+  return recorder.records().filter((entry) => entry.event.type !== '@xstate.init');
 };
 
 type Counter = { readonly count: number };

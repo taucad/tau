@@ -1,5 +1,5 @@
 import type { Scheduler } from 'fast-check';
-import { StepClock } from '#seam/step-clock.js';
+import { flush, StepClock } from '@taucad/xstate-testing/clock';
 
 export type SeamFault = 'portClose' | 'processDeath' | 'duplicate' | 'reconnect' | 'freeze' | 'thaw';
 
@@ -84,12 +84,6 @@ type PortEnd<T> = {
   closed: boolean;
   peer?: PortEnd<T>;
 };
-
-/** One real macrotask, so promise effects that settled in a step deliver before the next one. */
-const flush = async (): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, 0);
-  });
 
 const removable = <T>(set: Set<T>, item: T): (() => void) => {
   set.add(item);

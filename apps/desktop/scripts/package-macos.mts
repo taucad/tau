@@ -209,18 +209,21 @@ const nanorasterDarwinArm64 = dirname(
 const nanorasterMetadata = await readJson<{ readonly version: string }>(resolve(nanoraster, 'package.json'));
 /* The ACP adapters are spawned as `node <modulePath>` from inside the packaged
  * app, so they are staged with their runtime dependency closure and unpacked
- * out of the ASAR — a module path inside `app.asar` is not a real file. */
+ * out of the ASAR — a module path inside `app.asar` is not a real file. A native
+ * ACP agent (Grok Build) is the user's installed CLI and has nothing to stage. */
 const acpAdapters = await Promise.all(
-  acpAgentProfiles.map(async (profile) => {
-    const manifest = await readJson<{ readonly version: string }>(
-      resolve(desktopRoot, 'node_modules', profile.package, 'package.json'),
-    );
-    return {
-      name: profile.package,
-      source: await realpath(resolve(desktopRoot, 'node_modules', profile.package)),
-      version: manifest.version,
-    };
-  }),
+  acpAgentProfiles
+    .flatMap((profile) => (profile.package === undefined ? [] : [profile.package]))
+    .map(async (name) => {
+      const manifest = await readJson<{ readonly version: string }>(
+        resolve(desktopRoot, 'node_modules', name, 'package.json'),
+      );
+      return {
+        name,
+        source: await realpath(resolve(desktopRoot, 'node_modules', name)),
+        version: manifest.version,
+      };
+    }),
 );
 
 /* The sandbox runtime resolves its vendored helpers relative to its own module file

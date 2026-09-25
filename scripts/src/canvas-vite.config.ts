@@ -71,6 +71,10 @@ export const createCanvasConfig = (
     root,
     base: './',
     publicDir: false,
+    // One dependency optimizer cache per canvas: canvases served at once from one checkout
+    // otherwise rewrite each other's `deps/_metadata.json`, and every page but the last
+    // writer's fails with 504 Outdated Optimize Dep.
+    cacheDir: resolve(repoRoot, 'node_modules/.vite/canvas', relative(realpathSync(allowedRoot), root)),
     resolve: {
       alias: {
         '@taucad/ui': resolve(repoRoot, 'packages/ui/src'),

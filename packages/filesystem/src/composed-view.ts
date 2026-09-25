@@ -60,7 +60,7 @@ export type ComposedOverlayNode =
  * A read-only source composed into a view at a fixed path.
  *
  * Data, not a filesystem: the producer (the skill bundle registry today) owns
- * the bytes and their identity, and `libs/filesystem` never learns what a skill
+ * the bytes and their identity, and `packages/filesystem` never learns what a skill
  * is.
  *
  * @public

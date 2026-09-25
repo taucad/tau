@@ -3,16 +3,18 @@
   "version": "0.1.0-beta.1",
   "description": "Filesystem abstraction layer with watch-based reactivity for Tau (core / worker-facing; UI client facades live in @taucad/fs-client)",
   "type": "module",
-  "private": true,
+  "sideEffects": false,
+  "private": false,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "libs/filesystem"
+    "directory": "packages/filesystem"
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "keywords": [
@@ -32,7 +34,8 @@
     "./path-registry": "./src/path-registry.ts",
     "./backend/stream-utils": "./src/backend/stream-utils.ts",
     "./content-ops": "./src/content-ops/index.ts",
-    "./storage-root-key": "./src/storage-root-key.ts"
+    "./storage-root-key": "./src/storage-root-key.ts",
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
@@ -81,23 +84,38 @@
         "types": "./dist/storage-root-key.d.mts",
         "import": "./dist/storage-root-key.mjs",
         "default": "./dist/storage-root-key.mjs"
-      }
-    }
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
   },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/events": "workspace:*",
-    "@taucad/memory": "workspace:*",
-    "@taucad/types": "workspace:*",
-    "@taucad/utils": "workspace:*",
     "jszip": "^3.10.1",
-    "zod": "catalog:"
+    "nanoid": "catalog:",
+    "type-fest": "catalog:"
   },
   "devDependencies": {
+    "@taucad/events": "workspace:*",
+    "@taucad/memory": "workspace:*",
+    "@taucad/nx": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "fast-check": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/filesystem#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "engines": {
+    "node": ">=24.0.0"
   }
 }

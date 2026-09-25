@@ -57,6 +57,19 @@ type FakeChatInstance = {
   '~registerErrorCallback': (onChange: () => void) => () => void;
 };
 
+/**
+ * Finish a run that streamed a reply: the status walk the AI SDK makes before `onFinish`.
+ *
+ * @param chat - The chat whose request ends.
+ */
+function finishRun(chat: FakeChatInstance): void {
+  for (const status of ['submitted', 'streaming', 'ready'] as const) {
+    chat.status = status;
+    chat.emitStatusChange();
+  }
+  chat.finish();
+}
+
 const harness = vi.hoisted(() => ({
   created: [] as FakeChatInstance[],
   envApi: 'http://test.local',
@@ -1201,8 +1214,9 @@ describe('ChatSessionStore', () => {
     it('marks unattended terminal success and error, but not abort or disconnect', async () => {
       const { store, deps } = storeInProject();
 
+      store.retainDurableRun({ chatId: 'chat_success', runId: 'run_chat_success' });
+      finishRun(harness.created.at(-1)!);
       for (const [chatId, options] of [
-        ['chat_success', {}],
         ['chat_error', { isError: true }],
         ['chat_abort', { isAbort: true }],
         ['chat_disconnect', { isDisconnect: true }],
@@ -1277,6 +1291,30 @@ describe('ChatSessionStore', () => {
       expect(store.isUnread('chat_active')).toBe(false);
     });
 
+    /* An opened chat resumes, and a host holding no run for it closes the stream without a chunk. Its
+     * `onFinish` lands after focus has moved on, and marking it left a chat nothing ran in unread. */
+    it('should not mark a chat unread when its resume ends without output after focus moved away', async () => {
+      const { store, deps } = storeInProject();
+      store.acquire('chat_opened');
+      store.focusChat('chat_opened');
+      store.focusChat('chat_next');
+      store.blurChat('chat_opened');
+      const chat = harness.created[0]!;
+
+      for (const status of ['submitted', 'ready'] as const) {
+        chat.status = status;
+        chat.emitStatusChange();
+      }
+      chat.finish();
+
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledWith('chat_opened');
+      });
+      await settle();
+      expect(deps.client.json(unreadPath)).toBeUndefined();
+      expect(store.isUnread('chat_opened')).toBe(false);
+    });
+
     /* R3: every sidebar row holds a view of its chat, so a view alone is not the person reading it. */
     it('should mark a chat that finishes while another chat is focused in an active document', async () => {
       const { store, deps } = storeInProject();
@@ -1284,7 +1322,7 @@ describe('ChatSessionStore', () => {
       store.acquire('chat_focused');
       store.focusChat('chat_focused');
 
-      harness.created[0]!.finish();
+      finishRun(harness.created[0]!);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_listed: true } });
@@ -1299,7 +1337,7 @@ describe('ChatSessionStore', () => {
       store.focusChat('chat_next');
       store.blurChat('chat_left');
 
-      harness.created[0]!.finish();
+      finishRun(harness.created[0]!);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_left: true } });
@@ -1311,7 +1349,7 @@ describe('ChatSessionStore', () => {
       const { store, deps } = storeInProject();
       store.acquire('chat_hidden');
 
-      harness.created[0]!.finish();
+      finishRun(harness.created[0]!);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_hidden: true } });
@@ -4304,7 +4342,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     const client = createMemoryClient();
     const first = openStore(client);
     first.store.acquire(chatId);
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
     await vi.waitFor(() => {
       expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
     });
@@ -4545,7 +4583,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     store.unreadRecordRef(projectId).on('writeFailed', failed);
     vi.spyOn(client, 'writeFile').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
 
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
 
     await vi.waitFor(() => {
       expect(failed).toHaveBeenCalledOnce();
@@ -4635,7 +4673,7 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     const client = createMemoryClient();
     const first = openStore(client);
     first.store.acquire(chatId, projectId);
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
     await vi.waitFor(() => {
       expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
     });
@@ -4693,7 +4731,7 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     await settle();
 
     await store.removeProject(projectId);
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
     await settle();
 
     expect(client.json(unreadPath)).toBeUndefined();

@@ -186,7 +186,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
     }
     const subscription = mainCadActor.on('geometryEvaluated', (event) => {
       generationRef.current += 1;
-      identityRef.current = `${projectId}:${mainEntryPath}:${event.geometry.hash}:webp:q0.9:768x576:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v4`;
+      identityRef.current = `${projectId}:${mainEntryPath}:${event.geometry.hash}:webp:q0.9:768x576:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
       thumbnailActor.send({ type: 'settled', hash: identityRef.current });
     });
     return () => {

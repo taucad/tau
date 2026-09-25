@@ -142,8 +142,8 @@ export const imageTranscoder = defineTranscoder({
   name: 'ImageTranscoder',
   // Bump whenever the renderer's output bytes change for identical input, or
   // persisted export caches keep serving images from the previous renderer.
-  // 9.0.0 = caller-declared world coordinates over canonical glTF input.
-  version: '11.0.0',
+  // 12.0.0 = scale-independent ambient occlusion normals.
+  version: '12.0.0',
   edges,
 
   async initialize() {

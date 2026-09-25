@@ -17,9 +17,15 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   return harness.revisionStatusMock();
 });
 vi.mock('#components/code/diff-viewer.js', () => ({
-  DiffViewer: ({ originalContent, modifiedContent }: { originalContent: string; modifiedContent: string }) => (
-    <pre data-testid='diff'>{`${originalContent}|${modifiedContent}`}</pre>
-  ),
+  DiffViewer: ({
+    originalContent,
+    modifiedContent,
+    language,
+  }: {
+    originalContent: string;
+    modifiedContent: string;
+    language?: string;
+  }) => <pre data-testid='diff' data-language={language}>{`${originalContent}|${modifiedContent}`}</pre>,
 }));
 
 beforeEach(() => {
@@ -83,6 +89,13 @@ describe('RevisionMarker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Compare main.geospec.ts' }));
     const diff = await screen.findByTestId('diff');
     expect(diff.textContent).toBe('before|after');
+  });
+
+  it('T-RM-COMPARE-LANGUAGE: should highlight a comparison in the language its path names', async () => {
+    revisionStatusHarness.comparison = { original: 'cube(1);', modified: 'cube(2);' };
+    renderMarker();
+    fireEvent.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+    expect(await screen.findByTestId('diff')).toHaveAttribute('data-language', 'openscad');
   });
 
   it('T-RM-COMPARE-RETRY: distinguishes a failed comparison from an empty file', async () => {

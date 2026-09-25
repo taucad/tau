@@ -19,10 +19,45 @@ import { useProject } from '#hooks/use-project.js';
 import { PrintNotice, PrintSection, operator } from '#routes/w.$workspace.$project/chat-print-section.js';
 import {
   formatDuration,
+  formatProducer,
   formatQuantity,
   materialSlotLabel,
   shortDigest,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
+
+/**
+ * Why the real Bambu printer will not take a file, in the person's words (blueprint P3).
+ * @public
+ */
+export const bambuStudioRequired =
+  'This printer only accepts files sliced by Bambu Studio. Install Bambu Studio (or set TAU_BAMBU_STUDIO_PATH) and use the Tau desktop app.';
+
+const unqualifiedCode = 'ARTIFACT_UNQUALIFIED';
+
+/**
+ * A refusal as the pane shows it: the host's message, except that a file the
+ * printer refuses for its producer says how to slice one it accepts.
+ *
+ * @param code - The refusal code, when there is one.
+ * @param message - The host's message.
+ * @returns Plain copy.
+ * @public
+ */
+export const describePrintFailure = (code: string | undefined, message: string): string =>
+  code === unqualifiedCode ? bambuStudioRequired : message;
+
+/**
+ * A thrown request failure as the pane shows it, mapping `ARTIFACT_UNQUALIFIED` like {@link describePrintFailure}.
+ *
+ * @param error - What a machine client call rejected with.
+ * @returns Plain copy.
+ * @public
+ */
+export const describePrintError = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = isRecord(error) && typeof error['code'] === 'string' ? error['code'] : undefined;
+  return describePrintFailure(code ?? (message.includes(unqualifiedCode) ? unqualifiedCode : undefined), message);
+};
 
 /** One physical fact the person confirms before a start. @public */
 export type StartConfirmation = Readonly<{ id: 'plate' | 'material' | 'nozzle'; label: string }>;
@@ -337,6 +372,9 @@ function ApprovalCard({
           </h4>
           <p className='text-xs'>{pendingPrompt ?? describeApprovalPrompt(request, machineName)}</p>
           <p className='text-xs text-muted-foreground'>Requested by {request.requestedBy.label}</p>
+          {request.summary.producer ? (
+            <p className='text-xs text-muted-foreground'>Sliced by {formatProducer(request.summary.producer)}</p>
+          ) : null}
         </div>
       </div>
       <ArtifactDetails request={request} />
@@ -517,7 +555,7 @@ function FailureCard({
           : 'The request was refused before anything was sent'}
         {failure ? ` (${failure.code})` : ''}
       </p>
-      {failure ? <p>{failure.message}</p> : null}
+      {failure ? <p>{describePrintFailure(failure.code, failure.message)}</p> : null}
       <p className='text-muted-foreground'>{request.summary.fileName}. Slice and send again to prepare a new print.</p>
       <Button type='button' size='xs' variant='outline' className='mt-1' onClick={onDismiss}>
         Dismiss
@@ -568,7 +606,7 @@ export function SendSection({
     } catch (error) {
       setErrors((current) => ({
         ...current,
-        [request.requestId]: error instanceof Error ? error.message : String(error),
+        [request.requestId]: describePrintError(error),
       }));
     } finally {
       setBusyRequestId(undefined);

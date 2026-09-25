@@ -10,6 +10,7 @@ import { vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type { CapabilitiesManifest } from '@taucad/runtime';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { parseMachineManifest } from '@taucad/runtime/machine';
@@ -22,11 +23,13 @@ import type {
   MachineProvider,
   PrintRequest,
 } from '@taucad/runtime/machine';
+import type { BambuPresetSummary, BambuStudioSelection, BambuStudioSettings } from '@taucad/slicer/bambu-studio';
 import type { Quantity } from '@taucad/units/quantity';
 import type { RJSFSchema } from '@rjsf/utils';
 import { mergeFormDefaults } from '#components/geometry/parameters/rjsf-utils.js';
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import type { PendingAgentHostApproval } from '#components/chat/chat-approval-banner.js';
+import type { DesktopBambuStudio } from '#filesystem/desktop-bridge.js';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { SlicedArtifact } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import type { SliceSummary } from '#routes/w.$workspace.$project/chat-print-summary.js';
@@ -130,16 +133,29 @@ export const converterMock = {
   }),
 };
 
-/** The summary the slicer would read from the exported container. */
-export const summarizeGcodeContainerMock = (): SliceSummary => ({
+/** The summary read from the exported container; a test names its producer with `mockReturnValueOnce`. */
+export const baseSliceSummary: SliceSummary = {
   layers: 125,
   estimatedDuration: 2520,
+  isSlicerEstimate: false,
+  producer: undefined,
   filamentLength: 3200,
   // Every move: from home along the front-edge purge line to the end lift above the part.
   bounds: { min: [0, 0, 0], max: [236, 153, 35] },
   partBounds: { min: [103, 103, 0], max: [153, 153, 25] },
   coverageComplete: true,
-});
+};
+
+/** The summary the slicer would read from the exported container. */
+export const summarizeGcodeContainerMock = vi.fn((): SliceSummary => baseSliceSummary);
+
+/** What Bambu Studio's own archive reads as: its producer and its header estimate. */
+export const bambuStudioSliceSummary: SliceSummary = {
+  ...baseSliceSummary,
+  estimatedDuration: 1703,
+  isSlicerEstimate: true,
+  producer: { name: 'Bambu Studio', version: '02.08.02.61' },
+};
 
 /** A quantity as the machine reports it; the pane reads only the value and the unit code. */
 const observed = (value: number, code: string): Quantity => {
@@ -297,9 +313,16 @@ export const provider: MachineProvider = {
   queries: {},
 };
 
+/** The simulator: the same printer shape, and it accepts files from any slicer (blueprint P3). */
+export const simulatorProvider: MachineProvider = { ...provider, id: 'bambu-simulator', name: 'Bambu simulator' };
+
+/**
+ * A machine as the directory reports it. The simulator by default, so the reference-engine
+ * flow can send; the real printer (`providerId: 'bambu'`) takes only Bambu Studio archives.
+ */
 export const entry = (overrides: Partial<MachineDirectoryEntry> = {}): MachineDirectoryEntry => ({
   machineId: 'machine-1',
-  providerId: 'bambu',
+  providerId: 'bambu-simulator',
   descriptor: {
     id: 'physical-1',
     name: 'Workshop X1C',
@@ -323,7 +346,7 @@ export const entry = (overrides: Partial<MachineDirectoryEntry> = {}): MachineDi
       toolId: '0.4mm',
       bedType: 'textured-pei',
       materials: [
-        { slot: 0, state: 'loaded', materialId: 'pla-black', color: 'black' },
+        { slot: 0, state: 'loaded', materialId: 'pla-black', profileId: 'GFA01', color: 'black' },
         { slot: 1, state: 'empty' },
       ],
     },
@@ -566,7 +589,7 @@ export const createFixture = ({
   );
 
   const client: MachineClient = {
-    listProviders: async () => [provider],
+    listProviders: async () => [provider, simulatorProvider],
     async *discover() {
       yield* [];
     },
@@ -666,6 +689,185 @@ export const sliceFixture: SlicedArtifact = {
   mimeType: accepted.mediaType,
   optionsKey: '{}',
   geometry: {},
-  summary: summarizeGcodeContainerMock(),
+  summary: baseSliceSummary,
   fit: { fits: true },
+};
+
+/* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio setting keys and filament ids are fixed names. */
+
+/** Bambu Studio's version on the fake desktop host. */
+export const bambuStudioVersion = '02.08.02.61';
+
+const x1c = 'Bambu Lab X1 Carbon 0.4 nozzle';
+const processByPreset = {
+  fast: '0.28mm Extra Draft @BBL X1C',
+  standard: '0.20mm Standard @BBL X1C',
+  fine: '0.12mm Fine @BBL X1C',
+} as const;
+const layerHeights: Readonly<Record<string, number>> = {
+  [processByPreset.fast]: 0.28,
+  [processByPreset.standard]: 0.2,
+  [processByPreset.fine]: 0.12,
+  '0.20mm Standard Gyroid PETG @BBL X1C': 0.2,
+};
+const filamentByProfile: Readonly<Record<string, string>> = {
+  GFA01: 'Bambu PLA Matte @BBL X1C',
+  GFG00: 'Bambu PETG Basic @BBL X1C',
+};
+
+/**
+ * The settings Bambu Studio's presets resolve to, shaped as lane B's schema: scope → group → key.
+ * Fine drops ironing, so an override of it no longer applies after switching to Fine.
+ */
+export const bambuSettingsFor = (
+  selection: Pick<BambuStudioSelection, 'printer' | 'process' | 'filaments'>,
+): BambuStudioSettings => {
+  const hasIroning = selection.process !== processByPreset.fine;
+  const nozzleTemperature = selection.filaments[0] === filamentByProfile['GFG00'] ? 255 : 220;
+  const group = (title: string, properties: Record<string, JSONSchema7>): JSONSchema7 => ({
+    type: 'object',
+    title,
+    properties,
+  });
+  // Lane B's annotations sit beside the draft-7 keywords, which the JSONSchema7 type does not list.
+  const annotated = (schema: JSONSchema7, annotations: Record<string, unknown>): JSONSchema7 =>
+    Object.assign(annotations, schema);
+  return {
+    schema: {
+      type: 'object',
+      properties: {
+        process: {
+          type: 'object',
+          properties: {
+            quality: group('Quality', {
+              layer_height: annotated(
+                { type: 'number', title: 'Layer height', description: 'Height of each printed layer.', minimum: 0.04 },
+                { 'x-tau-unit': 'mm' },
+              ),
+              ...(hasIroning
+                ? { ironing_speed: annotated({ type: 'number', title: 'Ironing speed' }, { 'x-tau-unit': 'mm/s' }) }
+                : {}),
+            }),
+            strength: group('Strength', {
+              wall_loops: { type: 'integer', title: 'Wall loops', minimum: 0 },
+              sparse_infill_pattern: {
+                type: 'string',
+                title: 'Sparse infill pattern',
+                oneOf: [
+                  { const: 'grid', title: 'Grid' },
+                  { const: 'gyroid', title: 'Gyroid' },
+                ],
+              },
+            }),
+            support: group('Support', { enable_support: { type: 'boolean', title: 'Enable support' } }),
+            'process-all': group('All other settings', {
+              bridge_flow: annotated(
+                { type: ['number', 'string'], title: 'Bridge flow', pattern: '^-?(?:\\d+\\.?\\d*|\\.\\d+)%$' },
+                { 'x-tau-inferred': true },
+              ),
+            }),
+          },
+        },
+        filament: {
+          type: 'object',
+          properties: {
+            'filament-temperatures': group('Temperatures', {
+              nozzle_temperature: annotated({ type: 'integer', title: 'Nozzle temperature' }, { 'x-tau-unit': 'Cel' }),
+            }),
+          },
+        },
+      },
+    },
+    values: {
+      process: {
+        quality: { layer_height: layerHeights[selection.process] ?? 0.2, ...(hasIroning ? { ironing_speed: 30 } : {}) },
+        strength: { wall_loops: 2, sparse_infill_pattern: 'grid' },
+        support: { enable_support: false },
+        'process-all': { bridge_flow: 1 },
+      },
+      filament: { 'filament-temperatures': { nozzle_temperature: nozzleTemperature } },
+    },
+    groups: [
+      { id: 'quality', label: 'Quality', scope: 'process' },
+      { id: 'strength', label: 'Strength', scope: 'process' },
+      { id: 'support', label: 'Support', scope: 'process' },
+      { id: 'process-all', label: 'All other settings', scope: 'process' },
+      { id: 'filament-temperatures', label: 'Temperatures', scope: 'filament' },
+    ],
+  };
+};
+
+/* eslint-enable @typescript-eslint/naming-convention -- End of Bambu Studio keys. */
+
+/** A fake desktop Bambu Studio: the X1C 0.4 catalog, selection by hints and the settings above. */
+export type BambuStudioFake = Readonly<{
+  [Key in keyof DesktopBambuStudio]: Mock<DesktopBambuStudio[Key]>;
+}>;
+
+/**
+ * Create the fake Bambu Studio the desktop host would answer with.
+ *
+ * @param available - Whether Bambu Studio is installed.
+ * @returns The fake, whose calls the tests read.
+ */
+export const createBambuStudio = (available = true): BambuStudioFake => ({
+  status: vi.fn<DesktopBambuStudio['status']>(async () =>
+    available
+      ? { available: true, version: bambuStudioVersion, executable: '/Applications/BambuStudio.app' }
+      : { available: false, reason: 'Bambu Studio is not installed.' },
+  ),
+  catalog: vi.fn<DesktopBambuStudio['catalog']>(async () => ({
+    installation: {
+      executable: '/Applications/BambuStudio.app',
+      version: bambuStudioVersion,
+      resourcesDir: '/Applications/BambuStudio.app/Contents/Resources',
+    },
+    printers: [
+      { name: x1c, kind: 'machine', source: 'system', printerModel: 'Bambu Lab X1 Carbon', nozzleDiameter: 0.4 },
+    ],
+    processes: [
+      ...Object.values(processByPreset).map(
+        (name): BambuPresetSummary => ({
+          name,
+          kind: 'process',
+          source: 'system',
+          layerHeight: layerHeights[name]!,
+          compatiblePrinters: [x1c],
+        }),
+      ),
+      { name: '0.20mm Standard Gyroid PETG @BBL X1C', kind: 'process', source: 'user', layerHeight: 0.2 },
+      { name: '0.20mm Standard @BBL P1P', kind: 'process', source: 'system', compatiblePrinters: ['P1P'] },
+    ],
+    filaments: Object.entries(filamentByProfile).map(
+      ([filamentId, name]): BambuPresetSummary => ({
+        name,
+        kind: 'filament',
+        source: 'system',
+        filamentId,
+        compatiblePrinters: [x1c],
+      }),
+    ),
+    plates: [
+      { id: 'cool', bambuName: 'Cool Plate' },
+      { id: 'textured-pei', bambuName: 'Textured PEI Plate' },
+    ],
+  })),
+  resolveSelection: vi.fn<DesktopBambuStudio['resolveSelection']>(async ({ hints, partial }) => ({
+    printer: partial?.printer ?? x1c,
+    process: partial?.process ?? processByPreset[hints.preset ?? 'standard'],
+    filaments:
+      partial?.filaments ??
+      hints.materials.map((material) => filamentByProfile[material.profileId ?? ''] ?? 'Generic PLA @BBL X1C'),
+    plate: partial?.plate ?? hints.plate ?? 'textured-pei',
+  })),
+  settings: vi.fn<DesktopBambuStudio['settings']>(async (selection) => bambuSettingsFor(selection)),
+});
+
+/** The Bambu Studio the fake desktop bridge hands the pane; `undefined` is the web build. */
+export const desktopHost: { bambuStudio: BambuStudioFake | undefined } = { bambuStudio: undefined };
+
+/** What the pane reads from `#filesystem/desktop-bridge.js`. */
+export const desktopBridgeMock = {
+  desktopBridge: (): { slicers: { bambuStudio: BambuStudioFake } } | undefined =>
+    desktopHost.bambuStudio === undefined ? undefined : { slicers: { bambuStudio: desktopHost.bambuStudio } },
 };

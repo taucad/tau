@@ -1,4 +1,5 @@
-import { readBambuContainer } from '@taucad/slicer/container';
+import { readBambuContainer, readBambuContainerProducer } from '@taucad/slicer/container';
+import type { BambuContainerProducer } from '@taucad/slicer/container';
 import { parseGcode } from '@taucad/slicer/toolpath';
 import type { MachineManifest } from '@taucad/runtime/machine';
 import type { Quantity } from '@taucad/units/quantity';
@@ -13,8 +14,12 @@ export type SliceBounds = Readonly<{
 /** What one sliced artifact says about itself, read from its own toolpath. @public */
 export type SliceSummary = Readonly<{
   layers: number;
-  /** Seconds. */
+  /** Seconds: the slicer's own estimate when its header carries one, else the toolpath timing. */
   estimatedDuration: number;
+  /** Whether `estimatedDuration` is the slicer's own estimate rather than Tau's toolpath timing. */
+  isSlicerEstimate: boolean;
+  /** The slicer that wrote the container; absent when neither Bambu Studio nor the reference engine did. */
+  producer: BambuContainerProducer | undefined;
   /** Millimetres of filament. */
   filamentLength: number;
   /** Every move the nozzle makes, from home through the purge line to the end lift; the plate-fit check reads these. */
@@ -37,7 +42,9 @@ export const summarizeGcodeContainer = (bytes: Uint8Array<ArrayBuffer>): SliceSu
   const program = parseGcode(container.gcode);
   return {
     layers: program.layerTable.length,
-    estimatedDuration: program.duration,
+    estimatedDuration: program.headerEstimate?.seconds ?? program.duration,
+    isSlicerEstimate: program.headerEstimate !== undefined,
+    producer: readBambuContainerProducer(bytes),
     filamentLength: program.filamentLength,
     bounds: program.bounds,
     partBounds: partBounds(program),
@@ -155,6 +162,16 @@ const unitSymbols: ReadonlyMap<string, string> = new Map([
   ['m', 'm'],
   ['%', '%'],
 ]);
+
+/**
+ * Who sliced an artifact, as the person reads it: "Bambu Studio 02.08.02.61".
+ *
+ * @param producer - The producer a container or a request summary names.
+ * @returns The name and version, when there is one.
+ * @public
+ */
+export const formatProducer = (producer: Readonly<{ name: string; version?: string }>): string =>
+  producer.version === undefined ? producer.name : `${producer.name} ${producer.version}`;
 
 /** A snapshot quantity or a manifest quantity: both carry a value and a UCUM unit code. @public */
 export type PrintQuantity = Quantity | Readonly<{ value: number; unit: string }>;

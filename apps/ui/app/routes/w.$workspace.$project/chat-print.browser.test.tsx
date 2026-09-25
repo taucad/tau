@@ -6,8 +6,11 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type * as PrintSummary from '#routes/w.$workspace.$project/chat-print-summary.js';
 import {
   agentRequest,
+  bambuStudioVersion,
+  createBambuStudio,
   createBridge,
   createFixture,
+  desktopHost,
   entry,
   printing,
 } from '#routes/w.$workspace.$project/chat-print.fixture.js';
@@ -48,16 +51,26 @@ vi.mock('#routes/w.$workspace.$project/chat-print-summary.js', async (importOrig
   ]);
   return { ...actual, summarizeGcodeContainer: fixtures.summarizeGcodeContainerMock };
 });
+vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
+  const [actual, fixtures] = await Promise.all([
+    importOriginal<Record<string, unknown>>(),
+    import('#routes/w.$workspace.$project/chat-print.fixture.js'),
+  ]);
+  return { ...actual, ...fixtures.desktopBridgeMock };
+});
 // The chat stack behind the approval bridge is not under test here; the pane receives a bridge directly.
 vi.mock('#hooks/use-machines-approvals.js', () => ({
   usePrintApprovalBridge: () => ({ pendingFor: () => undefined, respond: async () => undefined }),
 }));
 
 const outputDirectory = '../../../../../out/research/design-to-print-workbench-blueprint/2026-09-24-implementation/K';
+/** Bambu Studio mode evidence (Bambu Studio slicing engine blueprint, lane G). */
+const studioOutputDirectory =
+  '../../../../../out/research/bambu-studio-slicing-engine-blueprint/2026-09-25-implementation/G';
 const widths = { desktop: 480, narrow: 320 } as const;
 const themes = ['light', 'dark'] as const;
 
-type Scenario = 'prepare' | 'approval' | 'busy';
+type Scenario = 'prepare' | 'approval' | 'busy' | 'studio';
 
 /** The fixture machine observed just now, so the freshness budgets read as current rather than stale. */
 const observedNow = (machine: ReturnType<typeof entry>): ReturnType<typeof entry> => ({
@@ -66,9 +79,10 @@ const observedNow = (machine: ReturnType<typeof entry>): ReturnType<typeof entry
 });
 
 const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> => {
+  desktopHost.bambuStudio = scenario === 'studio' ? createBambuStudio() : undefined;
   const fixture =
-    scenario === 'prepare'
-      ? createFixture({ entries: [observedNow(entry())] })
+    scenario === 'prepare' || scenario === 'studio'
+      ? createFixture({ entries: [observedNow(entry(scenario === 'studio' ? { providerId: 'bambu' } : {}))] })
       : createFixture({
           entries: [observedNow(scenario === 'busy' ? printing() : entry())],
           requests: [agentRequest()],
@@ -81,7 +95,16 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
       </div>
     </TooltipProvider>,
   );
-  if (scenario === 'prepare') {
+  if (scenario === 'studio') {
+    // The real printer with Bambu Studio: presets, then the Quality settings open with one change.
+    await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`);
+    await screen.findByRole('group', { name: 'Bambu Studio presets' });
+    await page.getByRole('button', { name: /^Advanced/u }).click();
+    await page.getByRole('button', { name: /^Quality/u }).click();
+    await page.getByLabelText('Layer height', { exact: true }).fill('0.16');
+    await page.getByLabelText('Ironing speed', { exact: true }).click();
+    await screen.findByRole('button', { name: /^Quality\W+1 changed$/u });
+  } else if (scenario === 'prepare') {
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
     await page.getByRole('region', { name: 'Prepare' }).getByRole('button', { name: 'Slice and preview' }).click();
     await screen.findByLabelText('Slice result');
@@ -106,7 +129,7 @@ afterEach(() => {
 });
 
 describe('Print pane screenshots', () => {
-  for (const scenario of ['prepare', 'approval', 'busy'] as const) {
+  for (const scenario of ['prepare', 'approval', 'busy', 'studio'] as const) {
     for (const [size, width] of Object.entries(widths)) {
       for (const theme of themes) {
         it(`captures ${scenario} at ${size} in ${theme}`, async () => {
@@ -118,7 +141,7 @@ describe('Print pane screenshots', () => {
           expect(frame.scrollWidth).toBeLessThanOrEqual(width);
           const path = await page.screenshot({
             element: frame,
-            path: `${outputDirectory}/print-${scenario}-${size}-${theme}.png`,
+            path: `${scenario === 'studio' ? studioOutputDirectory : outputDirectory}/print-${scenario}-${size}-${theme}.png`,
           });
           expect(path).toContain(`print-${scenario}-${size}-${theme}.png`);
         });

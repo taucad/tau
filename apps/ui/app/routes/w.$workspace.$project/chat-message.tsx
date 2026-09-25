@@ -246,6 +246,7 @@ const genericToolPart = (
     | ToolInvocation<typeof toolName.getParameters>
     | ToolInvocation<typeof toolName.applyParameterOperation>
     | ToolInvocation<typeof toolName.getMachine>
+    | ToolInvocation<typeof toolName.getPrintProfiles>
     | ToolInvocation<typeof toolName.getPrintRequest>
     | ToolInvocation<typeof toolName.listPrintRequests>
     | ToolInvocation<typeof toolName.cancelPrint>,
@@ -253,6 +254,7 @@ const genericToolPart = (
     | typeof toolName.getParameters
     | typeof toolName.applyParameterOperation
     | typeof toolName.getMachine
+    | typeof toolName.getPrintProfiles
     | typeof toolName.getPrintRequest
     | typeof toolName.listPrintRequests
     | typeof toolName.cancelPrint,
@@ -474,6 +476,10 @@ function renderAssistantPart(
      * pane already show, so the generic card is enough. */
     case 'tool-get_machine': {
       return <ChatMessageToolExternal key={part.toolCallId} part={genericToolPart(part, toolName.getMachine)} />;
+    }
+
+    case 'tool-get_print_profiles': {
+      return <ChatMessageToolExternal key={part.toolCallId} part={genericToolPart(part, toolName.getPrintProfiles)} />;
     }
 
     case 'tool-get_print_request': {

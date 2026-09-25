@@ -251,6 +251,10 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
     output: (output) => JSON.stringify(output, null, 2),
   },
+  [toolName.getPrintProfiles]: {
+    input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
   [toolName.requestPrint]: {
     input: (input) =>
       joinLines(

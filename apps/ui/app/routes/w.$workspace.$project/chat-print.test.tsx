@@ -13,8 +13,12 @@ import {
   accepted,
   agentRequest,
   artifact,
+  bambuStudioSliceSummary,
+  bambuStudioVersion,
+  createBambuStudio,
   createBridge,
   createFixture,
+  desktopHost,
   entry,
   gcodeRoute,
   later,
@@ -27,10 +31,11 @@ import {
   provider,
   renderGeometry,
   sliceFixture,
+  summarizeGcodeContainerMock,
   timestamp,
 } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { submissionDefaults } from '#routes/w.$workspace.$project/chat-print-prepare.js';
-import { startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
+import { bambuStudioRequired, startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
 import { PrintPanel, nextAction, presentMachine } from '#routes/w.$workspace.$project/chat-print.js';
 
 vi.mock('#hooks/use-project.js', async () => {
@@ -52,6 +57,13 @@ vi.mock('#routes/w.$workspace.$project/chat-converter.js', async () => {
 vi.mock('#components/geometry/parameters/parameters.js', async () => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return { Parameters: fixtures.ParametersFake };
+});
+vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
+  const [actual, fixtures] = await Promise.all([
+    importOriginal<Record<string, unknown>>(),
+    import('#routes/w.$workspace.$project/chat-print.fixture.js'),
+  ]);
+  return { ...actual, ...fixtures.desktopBridgeMock };
 });
 vi.mock('#routes/w.$workspace.$project/chat-print-summary.js', async (importOriginal) => {
   const [actual, fixtures] = await Promise.all([
@@ -98,6 +110,7 @@ const confirmAll = (card: HTMLElement): void => {
 beforeEach(() => {
   vi.clearAllMocks();
   globalThis.localStorage.clear();
+  desktopHost.bambuStudio = undefined;
 });
 
 describe('Print pane orientation', () => {
@@ -825,5 +838,309 @@ describe('Print pane monitor and controls', () => {
       within(confirmation).getByText('Wait for a current observation from Workshop X1C before starting.'),
     ).toBeInTheDocument();
     expect(screen.getAllByText('Stale').length).toBeGreaterThan(0);
+  });
+});
+
+describe('Print pane Bambu Studio mode', () => {
+  const x1c = 'Bambu Lab X1 Carbon 0.4 nozzle';
+  const standard = '0.20mm Standard @BBL X1C';
+  const plaMatte = 'Bambu PLA Matte @BBL X1C';
+  const hints = {
+    model: 'X1C',
+    nozzleDiameter: 0.4,
+    plate: 'textured-pei',
+    materials: [{ slot: 0, materialId: 'pla-black', profileId: 'GFA01' }],
+  };
+  /** The real printer, which takes only Bambu Studio archives. */
+  const realPrinter = (): ReturnType<typeof entry> => entry({ providerId: 'bambu' });
+  const combobox = (name: string): HTMLElement => screen.getByRole('combobox', { name });
+
+  const renderStudio = async (
+    machine = realPrinter(),
+  ): Promise<Readonly<{ fixture: ReturnType<typeof createFixture>; studio: ReturnType<typeof createBambuStudio> }>> => {
+    const studio = createBambuStudio();
+    desktopHost.bambuStudio = studio;
+    const fixture = createFixture({ entries: [machine] });
+    renderPane(fixture.client);
+    expect(await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(combobox('Process preset')).toHaveValue(standard);
+    });
+    return { fixture, studio };
+  };
+
+  /** Open Advanced and one settings group, returning the group's trigger. */
+  const openGroup = async (user: ReturnType<typeof userEvent.setup>, group: RegExp): Promise<void> => {
+    if (screen.queryByRole('group', { name: 'Bambu Studio settings' }) === null) {
+      await user.click(screen.getByRole('button', { name: /^Advanced/u }));
+    }
+    const settings = await screen.findByRole('group', { name: 'Bambu Studio settings' });
+    const trigger = within(settings).getByRole('button', { name: group });
+    if (trigger.getAttribute('aria-expanded') !== 'true') {
+      await user.click(trigger);
+    }
+  };
+
+  /** Type a value into a number or text setting and commit it the way a person does: leave the field. */
+  const enter = (name: string, value: string): void => {
+    const field = screen.getByLabelText(name);
+    fireEvent.change(field, { target: { value } });
+    fireEvent.blur(field);
+  };
+
+  it("loads Bambu Studio's defaults for the bound printer and slices with its presets and hints", async () => {
+    const user = userEvent.setup();
+    const { fixture, studio } = await renderStudio();
+
+    expect(studio.catalog).toHaveBeenCalledWith({ model: 'X1C', nozzleDiameter: 0.4 });
+    expect(studio.resolveSelection).toHaveBeenLastCalledWith({ hints, partial: { plate: 'textured-pei' } });
+    expect(studio.settings).toHaveBeenLastCalledWith({ printer: x1c, process: standard, filaments: [plaMatte] });
+    expect(combobox('Printer preset')).toHaveValue(x1c);
+    // The tray's Bambu filament id picks the preset; the tray's own type and colour sit beside it.
+    expect(combobox('Filament preset for A1')).toHaveValue(plaMatte);
+    // Compatible processes only, the person's own presets apart from the system ones.
+    const processes = within(combobox('Process preset'));
+    expect(processes.getByRole('group', { name: 'Your presets' })).toHaveTextContent(
+      '0.20mm Standard Gyroid PETG @BBL X1C',
+    );
+    expect(processes.queryByRole('option', { name: '0.20mm Standard @BBL P1P' })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Standard/u }),
+    ).toHaveAttribute('aria-pressed', 'true');
+
+    summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await waitFor(() => {
+      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        exportOptions: {
+          engine: 'bambu-studio',
+          bambuStudio: { printer: x1c, process: standard, filaments: [plaMatte], plate: 'textured-pei', hints },
+        },
+      });
+    });
+    const result = await screen.findByLabelText('Slice result');
+    expect(within(result).getByText(`Sliced by Bambu Studio ${bambuStudioVersion}`)).toBeInTheDocument();
+    expect(within(result).getByText('Time').nextElementSibling).toHaveTextContent(
+      'about 28 min (Bambu Studio estimate)',
+    );
+
+    // A Bambu Studio archive is what the real printer takes: the request names its producer.
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' }));
+    const confirmation = screen.getByRole('group', { name: 'Confirm before starting' });
+    confirmAll(confirmation);
+    await user.click(within(confirmation).getByRole('button', { name: 'Start print on Workshop X1C' }));
+    await waitFor(() => {
+      expect(fixture.resolvePrintRequest).toHaveBeenCalledOnce();
+    });
+    expect(fixture.requestPrint.mock.calls.at(0)?.[0].summary).toEqual({
+      fileName: 'main.gcode.3mf',
+      layers: 125,
+      estimatedDuration: 1703,
+      filamentLength: 3200,
+      producer: { name: 'Bambu Studio', version: bambuStudioVersion },
+    });
+    expect(fixture.requestPrint.mock.calls.at(0)?.[0].configuration).toMatchObject({
+      expectedBedType: 'textured-pei',
+      expectedMaterials: [{ slot: 0, materialId: 'pla-black' }],
+      amsMapping: [0],
+    });
+  });
+
+  it('marks an edited setting, counts it, resets it, and slices with only the changed keys', async () => {
+    const user = userEvent.setup();
+    await renderStudio();
+    await openGroup(user, /^Strength/u);
+    const settings = screen.getByRole('group', { name: 'Bambu Studio settings' });
+    expect(within(settings).getByRole('status')).toHaveTextContent('Preset values');
+    expect(screen.getByLabelText('Wall loops')).toHaveValue(2);
+    expect(screen.getByRole('button', { name: 'Reset Wall loops' })).toBeDisabled();
+
+    enter('Wall loops', '3');
+    expect(within(settings).getByRole('status')).toHaveTextContent('1 changed');
+    expect(screen.getByLabelText(/^Wall loops/u)).toHaveValue(3);
+    expect(screen.getByText('(changed)')).toBeInTheDocument();
+    expect(within(settings).getByRole('button', { name: /^Strength\W+1 changed$/u })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Advanced/u })).toHaveTextContent('1 changed');
+    await user.click(screen.getByRole('button', { name: 'Reset Wall loops' }));
+    expect(within(settings).getByRole('status')).toHaveTextContent('Preset values');
+    expect(screen.getByLabelText('Wall loops')).toHaveValue(2);
+
+    // Enumerations, switches and out-of-range numbers; Reset all clears them together.
+    await user.selectOptions(screen.getByLabelText('Sparse infill pattern'), 'Gyroid');
+    await openGroup(user, /^Support/u);
+    await user.click(screen.getByRole('checkbox', { name: 'Enable support' }));
+    enter('Wall loops', '-1');
+    expect(screen.getByLabelText('Wall loops')).toHaveValue(2);
+    expect(within(settings).getByRole('status')).toHaveTextContent('2 changed');
+    await user.click(within(settings).getByRole('button', { name: 'Reset all' }));
+    expect(within(settings).getByRole('status')).toHaveTextContent('Preset values');
+
+    // The filter opens every group with a match; a number-or-percent setting keeps its percent.
+    await user.type(within(settings).getByRole('searchbox', { name: 'Filter settings' }), 'bridge');
+    expect(within(settings).queryByLabelText('Wall loops')).not.toBeInTheDocument();
+    enter('Bridge flow', 'lots');
+    expect(screen.getByLabelText('Bridge flow')).toHaveValue('1');
+    enter('Bridge flow', '95%');
+
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await waitFor(() => {
+      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        exportOptions: {
+          engine: 'bambu-studio',
+          bambuStudio: {
+            printer: x1c,
+            process: standard,
+            filaments: [plaMatte],
+            plate: 'textured-pei',
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- a Bambu Studio setting key.
+            settings: { bridge_flow: '95%' },
+            hints,
+          },
+        },
+      });
+    });
+    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeInTheDocument();
+
+    // A changed setting after slicing makes the slice stale, as a changed option does.
+    await user.clear(within(settings).getByRole('searchbox', { name: 'Filter settings' }));
+    await openGroup(user, /^Strength/u);
+    enter('Wall loops', '4');
+    expect(
+      screen.getByText('Options changed since this slice. Slice again to send the current settings.'),
+    ).toBeInTheDocument();
+    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+
+    const accessibility = await axe.run(document.body, { rules: { region: { enabled: false } } });
+    expect(accessibility.violations).toEqual([]);
+  });
+
+  it('blocks sending the previous slice when a new filament choice fails to resolve', async () => {
+    const user = userEvent.setup();
+    const { studio } = await renderStudio();
+    summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    const sendButton = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    expect(sendButton).toBeEnabled();
+
+    studio.resolveSelection.mockRejectedValueOnce(new Error('No compatible process for Bambu PETG Basic @BBL X1C.'));
+    await user.selectOptions(combobox('Filament preset for A1'), 'Bambu PETG Basic @BBL X1C');
+    expect(await screen.findByText('No compatible process for Bambu PETG Basic @BBL X1C.')).toBeInTheDocument();
+    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+  });
+
+  it('reloads the settings for another process or filament and drops overrides the new presets lack', async () => {
+    const user = userEvent.setup();
+    const { studio } = await renderStudio();
+    await openGroup(user, /^Quality/u);
+    enter('Ironing speed', '40');
+    enter('Layer height', '0.16');
+    const settings = screen.getByRole('group', { name: 'Bambu Studio settings' });
+    expect(within(settings).getByRole('status')).toHaveTextContent('2 changed');
+
+    // The Fine chip is a shortcut for the 0.12 mm process; Fine has no ironing, so that override goes.
+    await user.click(
+      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Fine/u }),
+    );
+    await waitFor(() => {
+      expect(combobox('Process preset')).toHaveValue('0.12mm Fine @BBL X1C');
+    });
+    expect(studio.settings).toHaveBeenLastCalledWith({
+      printer: x1c,
+      process: '0.12mm Fine @BBL X1C',
+      filaments: [plaMatte],
+    });
+    expect(
+      await screen.findByText('1 changed setting does not exist in these presets and was dropped.'),
+    ).toBeInTheDocument();
+    expect(within(settings).getByRole('status')).toHaveTextContent('1 changed');
+    expect(screen.getByLabelText(/^Layer height/u)).toHaveValue(0.16);
+    expect(screen.queryByLabelText('Ironing speed')).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('group', { name: 'Quality preset' })).getByRole('button', { name: /Fine/u }),
+    ).toHaveAttribute('aria-pressed', 'true');
+
+    // Picking a process by name keeps the person's choice through the next resolution.
+    await user.selectOptions(combobox('Process preset'), '0.20mm Standard Gyroid PETG @BBL X1C');
+    await waitFor(() => {
+      expect(studio.resolveSelection).toHaveBeenLastCalledWith({
+        hints: { ...hints, preset: 'fine' },
+        partial: { process: '0.20mm Standard Gyroid PETG @BBL X1C', plate: 'textured-pei' },
+      });
+    });
+
+    await user.selectOptions(combobox('Filament preset for A1'), 'Bambu PETG Basic @BBL X1C');
+    await waitFor(() => {
+      expect(studio.settings).toHaveBeenLastCalledWith({
+        printer: x1c,
+        process: '0.20mm Standard Gyroid PETG @BBL X1C',
+        filaments: ['Bambu PETG Basic @BBL X1C'],
+      });
+    });
+    await openGroup(user, /^Temperatures/u);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Nozzle temperature')).toHaveValue(255);
+    });
+  });
+
+  it('asks the real printer for a Bambu Studio slice when Bambu Studio is unavailable, and keeps the simulator sendable', async () => {
+    const user = userEvent.setup();
+    const unavailable = createBambuStudio(false);
+    desktopHost.bambuStudio = unavailable;
+    const fixture = createFixture({ entries: [realPrinter()] });
+    const { unmount } = renderPane(fixture.client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    expect(await within(prepareRegion()).findByText(bambuStudioRequired)).toBeInTheDocument();
+    expect(unavailable.catalog).not.toHaveBeenCalled();
+
+    // The reference engine still slices and previews; only Send waits.
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await waitFor(() => {
+      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', { exportOptions: machineSliceOptions });
+    });
+    const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAccessibleDescription(bambuStudioRequired);
+    expect(screen.getByRole('article', { name: 'Workshop X1C, Ready' })).toHaveTextContent(bambuStudioRequired);
+    unmount();
+
+    // The web build has no bridge; the simulator takes the reference slice.
+    desktopHost.bambuStudio = undefined;
+    renderPane(createFixture().client);
+    expect(
+      await screen.findByText("Slicing with Tau's reference slicer: Bambu Studio is not available here."),
+    ).toBeInTheDocument();
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+  });
+
+  it("names the slicer on an agent's request and states a producer refusal plainly", async () => {
+    const fixture = createFixture({
+      requests: [
+        agentRequest({
+          summary: {
+            fileName: 'pyramid.gcode.3mf',
+            layers: 125,
+            estimatedDuration: 2520,
+            producer: { name: 'Bambu Studio', version: bambuStudioVersion },
+          },
+        }),
+      ],
+    });
+    const rendered = renderPane(fixture.client);
+    const region = await screen.findByRole('region', { name: requestRegionName });
+    expect(within(region).getByText(`Sliced by Bambu Studio ${bambuStudioVersion}`)).toBeInTheDocument();
+    rendered.unmount();
+
+    const refused = createFixture({
+      requests: [
+        agentRequest({
+          state: 'failed',
+          failure: { code: 'ARTIFACT_UNQUALIFIED', message: 'This file was not sliced by Bambu Studio.' },
+        }),
+      ],
+    });
+    renderPane(refused.client);
+    expect(await screen.findByText(bambuStudioRequired)).toBeInTheDocument();
+    expect(screen.queryByText('This file was not sliced by Bambu Studio.')).not.toBeInTheDocument();
   });
 });

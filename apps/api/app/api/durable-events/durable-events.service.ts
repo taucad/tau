@@ -1,7 +1,7 @@
 import { setTimeout } from 'node:timers/promises';
 import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { and, asc, desc, eq, gt, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, lte, ne } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import { Topic } from '@taucad/events';
 import { idPrefix } from '@taucad/types/constants';
@@ -10,14 +10,21 @@ import type { DatabaseType } from '#database/database.service.js';
 import { DatabaseService } from '#database/database.service.js';
 import { durableStream, durableStreamEvent } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
+import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type {
   DurableAppendOutcome,
   DurableStreamEvent,
   DurableStreamKind,
   DurableStreamReadOutcome,
   DurableStreamSnapshot,
+  RevisionCommittedPayload,
 } from '#api/durable-events/durable-events.types.js';
-import { durableStreamEventSchema } from '#api/durable-events/durable-events.types.js';
+import {
+  durableStreamEventSchema,
+  revisionCommittedEventType,
+  revisionStreamId,
+  revisionStreamProjectId,
+} from '#api/durable-events/durable-events.types.js';
 
 const durableEventChannel = 'tau:durable-events:v1';
 /** Snapshot-complete streams retain this many replayable events after compaction. */
@@ -49,11 +56,18 @@ type ReadEventsInput = {
   readonly limit?: number;
   /** `forward` preserves every delta; `tail` reconstructs from the latest snapshot with bounded activity. */
   readonly delivery?: 'forward' | 'tail';
+  /** The kind the stored stream must be, so an id never reads a stream of another kind. */
+  readonly kind?: DurableStreamKind;
 };
 
 type WaitForEventsInput = ReadEventsInput & {
   /** Milliseconds. */
   readonly longPollDuration: number;
+};
+
+type WaitForCallerEventsInput = Omit<WaitForEventsInput, 'ownerId'> & {
+  /** The authenticated caller, never the stream's owner. */
+  readonly userId: string;
 };
 
 @Injectable()
@@ -65,6 +79,7 @@ export class DurableEventsService implements OnModuleInit, OnModuleDestroy {
   public constructor(
     private readonly databaseService: DatabaseService,
     private readonly redisService: RedisService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   public async onModuleInit(): Promise<void> {
@@ -224,7 +239,13 @@ export class DurableEventsService implements OnModuleInit, OnModuleDestroy {
         const streamQuery = transaction
           .select()
           .from(durableStream)
-          .where(and(eq(durableStream.id, input.streamId), eq(durableStream.ownerId, input.ownerId)));
+          .where(
+            and(
+              eq(durableStream.id, input.streamId),
+              eq(durableStream.ownerId, input.ownerId),
+              input.kind === undefined ? undefined : eq(durableStream.kind, input.kind),
+            ),
+          );
         const streamRows = forward ? await streamQuery.limit(1) : await streamQuery.for('update').limit(1);
         const row = streamRows[0];
         if (!row) {
@@ -279,6 +300,64 @@ export class DurableEventsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /**
+   * Appends one committed manifest to its project's `revision` stream (D13).
+   *
+   * The stream is created on the project's first commit and owned by the
+   * project's owner, whose collaborators read it through `read` access.
+   *
+   * @param input - The project, its owner and what the commit moved.
+   * @returns The appended event.
+   */
+  public async appendRevision(
+    input: RevisionCommittedPayload & { readonly projectId: string; readonly ownerId: string },
+  ): Promise<DurableAppendOutcome> {
+    const payload: RevisionCommittedPayload = { generation: input.generation, refs: input.refs };
+    const entry = {
+      streamId: revisionStreamId(input.projectId),
+      ownerId: input.ownerId,
+      type: revisionCommittedEventType,
+      payload,
+      snapshot: { generation: input.generation },
+    };
+    const outcome = await this.append(entry);
+    if (outcome.appended || outcome.reason !== 'not-found') {
+      return outcome;
+    }
+    await this.ensureRevisionStream(input.projectId, input.ownerId);
+    return this.append(entry);
+  }
+
+  /**
+   * The long poll behind `GET /v1/streams/:streamId/events`, authorized per kind.
+   *
+   * A `revision` stream is readable by anybody with `read` access to its
+   * project (D13), so a non-member is told the project does not exist. Every
+   * other stream keeps owner equality: a project collaborator never reads the
+   * owner's job streams.
+   *
+   * @param input - The stream, the caller and the long-poll bounds.
+   * @returns What `waitForEvents` returned for the stream's owner.
+   * @throws NotFoundException When the caller may not read a `revision` stream's project.
+   */
+  public async waitForCallerEvents(input: WaitForCallerEventsInput): Promise<DurableStreamReadOutcome> {
+    const { userId, ...read } = input;
+    const projectId = revisionStreamProjectId(read.streamId);
+    if (projectId === undefined) {
+      return this.waitForEvents({ ...read, ownerId: userId, kind: 'job' });
+    }
+    const { ownerId } = await this.projectAccess.authorize(projectId, userId, 'read');
+    const outcome = await this.waitForEvents({ ...read, ownerId, kind: 'revision' });
+    if (outcome.found) {
+      return outcome;
+    }
+    /* Nobody has pushed yet, or the project changed hands since the stream was
+       made. A reader subscribes before the first commit, so the stream is
+       created (or handed to the current owner) rather than answered 404. */
+    await this.ensureRevisionStream(projectId, ownerId);
+    return this.waitForEvents({ ...read, ownerId, kind: 'revision' });
+  }
+
   public async waitForEvents(input: WaitForEventsInput): Promise<DurableStreamReadOutcome> {
     const initial = await this.read(input);
     if (!initial.found || initial.events.length > 0 || input.longPollDuration === 0) {
@@ -299,6 +378,35 @@ export class DurableEventsService implements OnModuleInit, OnModuleDestroy {
     } finally {
       unsubscribe();
     }
+  }
+
+  /**
+   * The project's `revision` stream, owned by the project's current owner.
+   *
+   * It follows an ownership change rather than refusing it: who may read it is
+   * decided by project access, never by the stream's owner column, so moving
+   * the column is safe and keeps an open project live across a transfer. A row
+   * under this id of any other kind is left alone, and the kind-filtered read
+   * then answers 404.
+   *
+   * @param projectId - The project.
+   * @param ownerId - Its current owner, from `ProjectAccessService`.
+   */
+  private async ensureRevisionStream(projectId: string, ownerId: string): Promise<void> {
+    await this.databaseService.database
+      .insert(durableStream)
+      .values({
+        id: revisionStreamId(projectId),
+        ownerId,
+        kind: 'revision',
+        subjectId: projectId,
+        snapshot: { generation: 0 },
+      })
+      .onConflictDoUpdate({
+        target: durableStream.id,
+        set: { ownerId },
+        setWhere: and(eq(durableStream.kind, 'revision'), ne(durableStream.ownerId, ownerId)),
+      });
   }
 
   private subscribe(streamId: string, onEvent: (event: DurableStreamEvent) => void): () => void {

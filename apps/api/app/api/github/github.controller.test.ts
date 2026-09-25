@@ -243,6 +243,24 @@ describe('GithubController over HTTP', () => {
     });
   });
 
+  /* D61: a missing connection id reached the database as `undefined` and answered 500. */
+  it.each([
+    '/v1/github/installations',
+    '/v1/github/repositories?installationId=7',
+    '/v1/github/repositories/7/branches',
+    '/v1/github/repositories/7?connectionId=',
+    '/v1/github/repositories/7?connectionId=a&connectionId=b',
+  ])('should refuse %s without one connection id with 400', async (url) => {
+    await withApp(configured, async ({ app, auth }) => {
+      auth.api.getSession.mockResolvedValue(signedIn);
+
+      const response = await app.inject({ method: 'GET', url });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({ code: 'GITHUB_CONNECTION_REQUIRED' });
+    });
+  });
+
   it('should expose the retry estimate of a rate-limited answer to the cross-origin client', async () => {
     await withApp(configured, async ({ app, auth, github }) => {
       auth.api.getSession.mockResolvedValue(signedIn);

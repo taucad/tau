@@ -655,6 +655,47 @@ describe('captureRevisionTree changedSince (E1)', () => {
     ).rejects.toThrow('Required capture paths were not captured: src/0/file-0.ts');
   });
 
+  it('should read a changed path again when its read fails once, by walking everything', async () => {
+    const { filesystem, reads } = await project();
+    const previous = await captureRevisionTree(filesystem, { exclude });
+    await filesystem.writeFile('src/1/file-4.ts', 'export const x = "edited";\n');
+    /* The provider's own read, not the spy that wraps it. */
+    const read = (Object.getPrototypeOf(filesystem) as typeof filesystem).readFile.bind(filesystem);
+    let failures = 0;
+    reads.mockImplementation((async (path: string) => {
+      if (path === 'src/1/file-4.ts' && failures === 0) {
+        failures += 1;
+        throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+      }
+      return read(path);
+    }) as typeof filesystem.readFile);
+
+    const incremental = await captureRevisionTree(filesystem, {
+      exclude,
+      changedSince: { tree: previous, paths: ['src/1/file-4.ts'] },
+    });
+
+    reads.mockRestore();
+    const full = await captureRevisionTree(filesystem, { exclude });
+    expect(failures).toBe(1);
+    expect(incremental.entries()).toEqual(full.entries());
+  });
+
+  it('should not fall back to a full walk when the caller aborted', async () => {
+    const { filesystem, reads } = await project();
+    const previous = await captureRevisionTree(filesystem, { exclude });
+    reads.mockClear();
+
+    await expect(
+      captureRevisionTree(filesystem, {
+        exclude,
+        signal: AbortSignal.abort(new Error('closed')),
+        changedSince: { tree: previous, paths: ['src/1/file-4.ts'] },
+      }),
+    ).rejects.toThrow('closed');
+    expect(reads).not.toHaveBeenCalled();
+  });
+
   it('should copy reused bytes it did not read itself, so their owner cannot rewrite the tree', async () => {
     const { filesystem } = await project();
     const foreign = text('export const x = 0;\n');
@@ -713,5 +754,99 @@ describe('createCaptureMemo invalidation', () => {
     }
 
     expect(reads).toHaveBeenCalledTimes(3);
+  });
+});
+
+/**
+ * A case-insensitive, case-preserving disk (macOS, Windows): a name resolves
+ * whatever its letter case, and keeps the spelling it was first created with.
+ */
+const caseInsensitiveFileSystem = () => {
+  type Node =
+    | { kind: 'dir'; name: string; children: Map<string, Node> }
+    | { kind: 'file'; name: string; content: Uint8Array<ArrayBuffer> };
+  const root: Node = { kind: 'dir', name: '', children: new Map() };
+  const key = (name: string): string => name.normalize('NFC').toLowerCase();
+  const enoent = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+  const lookup = (path: string): Node | undefined => {
+    let node: Node | undefined = root;
+    for (const segment of path === '' ? [] : path.split('/')) {
+      node = node?.kind === 'dir' ? node.children.get(key(segment)) : undefined;
+    }
+    return node;
+  };
+  const directory = (path: string): Extract<Node, { kind: 'dir' }> => {
+    const node = lookup(path);
+    if (node?.kind !== 'dir') {
+      throw enoent(path);
+    }
+    return node;
+  };
+  const write = (path: string, text: string): void => {
+    const segments = path.split('/');
+    let node = root;
+    for (const segment of segments.slice(0, -1)) {
+      let next = node.children.get(key(segment));
+      if (next === undefined) {
+        next = { kind: 'dir', name: segment, children: new Map() };
+        node.children.set(key(segment), next);
+      }
+      if (next.kind !== 'dir') {
+        throw new Error(`ENOTDIR: ${segment}`);
+      }
+      node = next;
+    }
+    const leaf = segments.at(-1)!;
+    const existing = node.children.get(key(leaf));
+    const content = new TextEncoder().encode(text);
+    if (existing?.kind === 'file') {
+      existing.content = content;
+    } else {
+      node.children.set(key(leaf), { kind: 'file', name: leaf, content });
+    }
+  };
+  const filesystem: RevisionCaptureFileSystem = {
+    readdir: async (path) => [...directory(path).children.values()].map((child) => child.name),
+    readdirEntries: async (path) =>
+      [...directory(path).children.values()].map((child) => ({ name: child.name, kind: child.kind })),
+    stat: (async (path: string) => {
+      const node = lookup(path);
+      if (node === undefined) {
+        throw enoent(path);
+      }
+      return node.kind === 'dir'
+        ? { type: 'dir', size: 0, mtimeMs: 0 }
+        : { type: 'file', size: node.content.byteLength, mtimeMs: 0, contentKind: 'text', lineCount: 1 };
+    }) as RevisionCaptureFileSystem['stat'],
+    readFile: (async (path: string) => {
+      const node = lookup(path);
+      if (node?.kind !== 'file') {
+        throw enoent(path);
+      }
+      return new Uint8Array(node.content);
+    }) as RevisionCaptureFileSystem['readFile'],
+  };
+  return { filesystem, write };
+};
+
+describe('captureRevisionTree changedSince on a case-insensitive disk (review finding 1)', () => {
+  it.each([
+    ['a parent directory', ['Dir/x.txt', 'Dir/y.txt']],
+    ['the file itself', ['dir/X.txt', 'dir/Y.txt']],
+    ['an accent in NFD', ['dir/x.txt', 'dir/y.txt', 'dir/cafe\u0301.txt']],
+  ])('should equal a full capture when the change bus spells %s differently from the disk', async (_label, spelled) => {
+    const { filesystem, write } = caseInsensitiveFileSystem();
+    write('dir/a.txt', 'a');
+    write('dir/x.txt', 'x1');
+    write('dir/caf\u00E9.txt', 'coffee');
+    const previous = await captureRevisionTree(filesystem);
+    for (const path of spelled) {
+      write(path, `edited ${path}`);
+    }
+
+    const incremental = await captureRevisionTree(filesystem, { changedSince: { tree: previous, paths: spelled } });
+
+    const full = await captureRevisionTree(filesystem);
+    expect(incremental.entries()).toEqual(full.entries());
   });
 });

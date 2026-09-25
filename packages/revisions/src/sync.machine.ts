@@ -280,7 +280,8 @@ export type SyncIntegrateActorInput = Readonly<{ remote: string; branch: string 
 
 /** What composing a diverged local and remote branch produced. @public */
 export type SyncMergeActorOutput =
-  | Readonly<{ status: 'merged' }>
+  /** The branch now holds `revisionId`; optional so a host that cannot say still merges. */
+  | Readonly<{ status: 'merged'; revisionId?: string }>
   | Readonly<{ status: 'conflicted'; branch: string; into: string; paths: readonly string[] }>;
 
 /** The checkout a successful open pull re-headed. @public */
@@ -942,6 +943,17 @@ const syncMachineDefinition = setup({
             input: ({ context }) => ({ remote: context.remote ?? '', branch: context.branch }),
             onDone: ({ context, event }, enq) => {
               if (event.output.status !== 'conflicted') {
+                /* D57: the branch and its checkout moved, and a finished sync
+                 * conflict retired a checkout; the parent re-reads the registry
+                 * on this, as it does after any merge. */
+                if (context.parentRef !== undefined && event.output.revisionId !== undefined) {
+                  enq.sendTo(context.parentRef, {
+                    type: 'branchMerged',
+                    branch: `${context.remote ?? ''}/${context.branch}`,
+                    into: context.branch,
+                    revisionId: event.output.revisionId,
+                  });
+                }
                 return { target: 'done' };
               }
               const conflict = {

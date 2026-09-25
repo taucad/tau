@@ -1512,6 +1512,37 @@ for (const actorSet of actorSets) {
       ).resolves.toMatchObject({ paths: [{ path: 'a.txt' }] });
     }, 30_000);
 
+    /* D57: the resolution lands on the sync branch; the next pull has to carry it home. */
+    it('finishes a resolved sync conflict on the next pull and retires its branch', async () => {
+      const { port, actors, filesystem, theirs, ours } = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+      await port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: revisionId(theirs) });
+      const merge = async (): Promise<{ status: string; revisionId?: string }> =>
+        run(actors.sync.merge, { projectId: 'project-1', remote: 'tau', branch: 'main' });
+
+      await expect(merge()).resolves.toMatchObject({ status: 'conflicted' });
+      const conflict = (await port.readRef('sync/tau/main')) ?? '';
+      await run(actors.resolution.applyResolution, {
+        projectId: 'project-1',
+        revisionId: conflict,
+        path: 'a.txt',
+        side: 'theirs',
+      });
+      const finished = await run<{ revisionId: string }>(actors.resolution.finishMerge, {
+        projectId: 'project-1',
+        revisionId: conflict,
+      });
+
+      await expect(merge()).resolves.toStrictEqual({ status: 'merged', revisionId: finished.revisionId });
+      expect(await port.readRef('main')).toBe(finished.revisionId);
+      expect(new TextDecoder().decode(await filesystem.readFile('a.txt'))).toBe('theirs\n');
+      /* Both heads are in it, so the push that follows is a fast-forward. */
+      const walk = await port.log({ heads: [revisionId(finished.revisionId)] });
+      expect(walk.map((entry) => entry.id)).toEqual(expect.arrayContaining([theirs, ours]));
+      expect(await port.readRef('sync/tau/main')).toBeUndefined();
+      const checkouts = (await port.listCheckouts?.()) ?? [];
+      expect(checkouts.some((checkout) => checkout.branch === 'sync/tau/main')).toBe(false);
+    }, 30_000);
+
     /* D55: from `conflicted`, Sync now and a reconnect pull again. */
     it('answers a repeated sync pull with the conflict that is already waiting', async () => {
       const { port, actors, theirs } = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });

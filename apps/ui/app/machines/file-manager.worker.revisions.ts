@@ -21,6 +21,7 @@ import {
   awaitCheckoutCuts,
   awaitSyncSettled,
   createProjectRevisionsActor,
+  releaseUnplacedTurns,
   describeTurnRelease,
   describeTurnSettlement,
   syncQuiesceMilliseconds,
@@ -32,7 +33,8 @@ import {
   versionedChangePaths as classifiedChangePaths,
 } from '@taucad/revisions/revision-projection';
 import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
-import { isAmbientCut } from '@taucad/revisions/checkout-machine';
+import { isAmbientCut, satisfiesCut } from '@taucad/revisions/checkout-machine';
+import type { CheckoutCutTrigger } from '@taucad/revisions/checkout-machine';
 import type {
   BranchOperation,
   CheckoutRecord,
@@ -893,8 +895,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       throw new Error('The project checkout was not ready before close.');
     }
     const cut = Promise.withResolvers<void>();
-    const matches = (event: Readonly<{ checkoutId: string; trigger: string }>): boolean =>
-      event.checkoutId === checkoutId && event.trigger === trigger;
+    /* A save queued behind a mint may be absorbed by a later `hidden` or `close` (RV-W2b #4). */
+    const matches = (event: Readonly<{ checkoutId: string; trigger: CheckoutCutTrigger }>): boolean =>
+      event.checkoutId === checkoutId && satisfiesCut(event.trigger, trigger);
     const subscriptions = [
       actor.on('revisionMinted', (event) => {
         if (matches(event)) {
@@ -1360,13 +1363,24 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       /* Every checkout no turn holds, live and linked (the close ruling, D6).
        * A refused cut still lets the scheduler push what the others minted,
        * and then keeps the tree: the next close re-attempts the cut. */
+      /* A turn still waiting to be placed would hold every checkout from the
+       * cuts; a closing document is not going to run it (RV-W2b #5). */
+      for (const runId of releaseUnplacedTurns(actor)) {
+        refuseAdmission(runId, 'it stopped before the turn was placed.');
+      }
       let refused: Error | undefined;
       try {
         await awaitCheckoutCuts(actor, 'close');
       } catch (error) {
         refused = error instanceof Error ? error : new Error(String(error));
       }
-      await awaitSyncSettled(actor);
+      try {
+        await awaitSyncSettled(actor);
+      } catch {
+        /* RV-W2b #2: only a refused cut keeps the tree. A failed or unsettled
+         * sync is already in the durable queue, and the Sync region keeps its
+         * refusal (D28). */
+      }
       if (refused !== undefined) {
         throw refused;
       }

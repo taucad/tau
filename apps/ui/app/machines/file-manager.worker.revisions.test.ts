@@ -158,6 +158,25 @@ const harness = (projectIds: readonly string[]): Harness => {
   return entry;
 };
 
+/*
+ * Wait for a turn's own settlement, never a fixed count of event-loop turns.
+ *
+ * The turn's mint hashes through the real store, so how many turns it takes
+ * is a property of the machine's load: under the full suite, `settle(20)` read
+ * the head before the turn's revision existed (W2c a1b).
+ */
+const turnFinalized = async (client: Client, turnId: string): Promise<void> =>
+  vi.waitFor(
+    () => {
+      expect(
+        client.frames.some(
+          (frame) => frame.type === 'event' && frame.event.type === 'turn.finalized' && frame.event.turnId === turnId,
+        ),
+      ).toBe(true);
+    },
+    { timeout: 10_000 },
+  );
+
 /** Make a branch through the port and wait for the checkout the registry made for it. */
 const branchOff = async (
   client: Client,
@@ -200,7 +219,11 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(alphaRoot.inspect().status).toBe('active');
 
     second.send({ command: 'close' });
-    await settle();
+    /* The release records a close cut through the real store first, so it is
+     * waited on, not counted in event-loop turns (W2c a1b). */
+    await vi.waitFor(() => {
+      expect(alphaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
+    });
 
     /* The actor itself, not the registry's bookkeeping: a released root has
      * stopped and has no child left running. */
@@ -209,9 +232,9 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(fixture.registry.openProjectIds()).toEqual(['beta']);
 
     beta.send({ command: 'close' });
-    await settle();
-
-    expect(betaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
+    await vi.waitFor(() => {
+      expect(betaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
+    });
     expect(fixture.registry.openProjectIds()).toEqual([]);
   });
 
@@ -510,7 +533,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(placed.type).toBe('result');
     await project.writeFile('main.scad', 'cube(20);');
     alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-    await settle(20);
+    await turnFinalized(alpha, 'turn-1');
 
     const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
     expect(head).toBeDefined();
@@ -640,10 +663,17 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(placed.type).toBe('result');
     await project.writeFile('main.scad', 'cube(20);');
     alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-    await settle(20);
+    await turnFinalized(alpha, 'turn-1');
     const root = await fixture.root('alpha');
     const head = root.status().headRevisionId;
     expect(head).toBeDefined();
+    /* The older revision, named while the checkout's head is a newer one: the
+     * comparison reads the revision it is given, never the head (W2c a1b). */
+    const [, older] = await root.log();
+    expect(await root.compare(older!.revisionId, 'main.scad', { against: 'checkout' })).toEqual({
+      original: 'cube(10);',
+      modified: 'cube(20);',
+    });
 
     /* An edit that is not in any revision yet: the revision's own first parent
      * cannot answer "what have I changed since this". */
@@ -683,7 +713,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await settle(20);
 
     alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-    await settle(30);
+    await turnFinalized(alpha, 'turn-1');
 
     const root = await fixture.root('alpha');
     const rows = await root.log();
@@ -811,7 +841,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
      * bound; held behind `leased`, it settles like any other. */
     alpha.send({ command: 'admitTurn', id: 1, turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
     alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-    await settle(40);
+    await turnFinalized(alpha, 'turn-1');
 
     const answer = alpha.frames.find((frame) => frame.type === 'result' || frame.type === 'error');
     expect(answer?.type).toBe('result');
@@ -850,7 +880,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       expect(alpha.frames.find((frame) => frame.type === 'error' && frame.id === 77)).toBeDefined();
 
       alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-      await settle(40);
+      await turnFinalized(alpha, 'turn-1');
 
       /* The abandoned run never takes a lease, so nothing holds the checkout. */
       await expect(project.readdir('.tau/runs')).resolves.toEqual([]);

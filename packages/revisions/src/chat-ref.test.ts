@@ -255,6 +255,50 @@ describe.each([
     expect(repeated.status).toBe('upToDate');
   });
 
+  it.runIf(enabled)('adopts a fetched head that already holds everything its own orphan chain has', async () => {
+    const adoptedChat = 'chat_adopted';
+    await writeChatFiles(
+      harness.checkout,
+      { 'chat.json': '{"id":"chat_adopted"}', 'events.jsonl': '{"leaderEpoch":"e1","sequence":0}\n' },
+      adoptedChat,
+    );
+    const orphan = await writeChatRef({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      chatId: adoptedChat,
+      syncChats: true,
+      actorId,
+      now,
+    });
+    const tree = await harness.port.readTree(orphan.head!);
+    /* What the remote holds: another orphan commit of the same tree, as a first
+     * push that raced this device's own first write leaves it. */
+    const fetched = await harness.port.writeRevision({
+      parents: [],
+      tree: tree!,
+      largeObjects: false,
+      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      summary: { generated: `Chat ${adoptedChat}` },
+    });
+
+    const replayed = await replayChatSegment({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      chatId: adoptedChat,
+      syncChats: true,
+      actorId,
+      now,
+      onto: revisionId(fetched.commitId),
+    });
+
+    /* Nothing to add, so the local ref becomes the remote's head, and the next
+     * push offers a fast-forward instead of the refused orphan again. */
+    expect(replayed.status).toBe('upToDate');
+    expect(await harness.port.readRef(chatRefName(adoptedChat))).toBe(revisionId(fetched.commitId));
+  });
+
   it.runIf(enabled)("projects a fetched tree into the checkout without touching this device's own log", async () => {
     /* Device B's world: its own log at `events.jsonl`, and device A's ref. */
     const head = await harness.port.readRef(chatRefName(chatId));

@@ -519,10 +519,22 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
     return unchanged;
   }
   if (sameTree(tree, base)) {
-    /* This device has nothing the base does not already hold. The local ref is
-     * left where it is: its tree is a subset of the base's, and the next write
-     * parents on it with every projected segment read back off disk, so nothing
-     * is lost by not re-pointing it here. */
+    /* This device has nothing the base does not already hold, so the base is
+     * this chat's head here too. Left on its own orphan commit, the local ref
+     * was offered again after every refusal and refused for the same reason
+     * forever; the base's tree is a superset of it, so moving it loses nothing. */
+    if (input.onto !== undefined && localHead !== input.onto) {
+      const adopted = await input.port.updateRef({ name: ref, expectedHead: localHead, head: input.onto });
+      if (adopted.status !== 'updated') {
+        return Object.freeze({
+          chatId: input.chatId,
+          ref,
+          status: 'conflicted',
+          head: adopted.actualHead,
+          expectedLocalHead: localHead,
+        });
+      }
+    }
     return unchanged;
   }
   const now = input.now ?? Date.now();

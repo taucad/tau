@@ -527,6 +527,43 @@ describe('useRevisions after a mint (E6)', () => {
     expect(result.current.branchFacts?.get('main')).toEqual({ revisionNumber: 3, ahead: 0, behind: 0 });
   });
 
+  it('keeps one page when a mint lands on a full page: the oldest row moves behind Show more (B4)', async () => {
+    const line = (top: number) =>
+      Array.from({ length: top }, (_, index) => {
+        const n = top - index;
+        return row({
+          revisionId: `rev-${String(n)}`,
+          revisionNumber: n,
+          ...(n === 1 ? {} : { parent: `rev-${String(n - 1)}` }),
+        });
+      });
+    const { result, rerender } = await mounted();
+    /* A head that is not one mint on top of the log re-reads one page. */
+    revisionStatusHarness.rows = line(revisionPageSize + 1);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: `rev-${String(revisionPageSize + 1)}`,
+    };
+    rerender();
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(revisionPageSize);
+    });
+
+    revisionStatusHarness.rows = line(revisionPageSize + 2);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: `rev-${String(revisionPageSize + 2)}`,
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.revisions[0]?.n).toBe(revisionPageSize + 2);
+    });
+    expect(result.current.revisions).toHaveLength(revisionPageSize);
+    expect(result.current.revisions.at(-1)?.n).toBe(3);
+    expect(result.current.hasOlder).toBe(true);
+  });
+
   it('re-reads the whole history when the new head is a merge, whose other side lands further down', async () => {
     const { result, rerender, log } = await mounted();
 

@@ -23,10 +23,10 @@ import {
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import {
+  configureGithubAccess,
   GithubRequestError,
   githubConnections,
   githubErrorMessage,
-  githubSetupReturn,
 } from '#lib/github-connections.js';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
@@ -378,12 +378,8 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     setBusy(true);
     setError(undefined);
     try {
-      const configuration = await githubConnections.configuration();
-      if (!isDesktopTarget) {
-        /* D16d: GitHub returns to the App's Setup URL (/github/complete) with no Tau state. */
-        githubSetupReturn.remember(returnTo);
-      }
-      globalThis.location.assign(configuration.installUrl);
+      const { installUrl } = await githubConnections.configuration();
+      configureGithubAccess(installUrl, returnTo);
       if (isDesktopTarget) {
         setBusy(false);
       }

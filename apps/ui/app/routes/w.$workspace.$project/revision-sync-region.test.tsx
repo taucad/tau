@@ -30,9 +30,17 @@ const githubRepository = vi.hoisted(() => vi.fn());
 /* No connected account unless a test lists one. */
 const githubList = vi.hoisted(() => vi.fn(async (): Promise<ReadonlyArray<{ id: string }>> => []));
 
+const configureAccess = vi.hoisted(() => vi.fn((_installUrl: string, _returnTo: string) => undefined));
+
 vi.mock('#lib/github-connections.js', async (importOriginal) => ({
   ...(await importOriginal<typeof GithubConnectionsModule>()),
-  githubConnections: { token: githubToken, repository: githubRepository, list: githubList },
+  githubConnections: {
+    token: githubToken,
+    repository: githubRepository,
+    list: githubList,
+    configuration: async () => ({ installUrl: 'https://github.com/apps/tau/installations/new' }),
+  },
+  configureGithubAccess: configureAccess,
 }));
 /* eslint-disable @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({
@@ -598,6 +606,42 @@ describe('RevisionSyncRegion', () => {
     );
 
     expect(await screen.findByText('GitHub connect started')).toBeInTheDocument();
+    expect(region.connect).not.toHaveBeenCalled();
+  });
+
+  /* D67: a repository transferred out of the app's reach, or removed from its
+   * installation, answered GitHub consent — which returned to the same refusal. */
+  it('sends Reconnect GitHub to the app’s repository access when a working account cannot see the repository', async () => {
+    const user = userEvent.setup();
+    githubList.mockResolvedValueOnce([{ id: '00000000-0000-4000-8000-000000000001' }]);
+    githubRepository.mockRejectedValueOnce(new GithubRequestError(404, 'GITHUB_NOT_FOUND_OR_DENIED'));
+    const region = renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/r.git',
+        provider: 'github',
+        repositoryId: '99',
+      }),
+      syncFacet({
+        state: 'failed',
+        pendingCount: 1,
+        error: 'Write access to repository not granted.',
+        reason: 'unauthorized',
+      }),
+    );
+
+    await user.click(
+      within(screen.getByRole('status', { name: 'Backup status' })).getByRole('button', { name: 'Reconnect GitHub' }),
+    );
+
+    await waitFor(() => {
+      expect(configureAccess).toHaveBeenCalledExactlyOnceWith(
+        'https://github.com/apps/tau/installations/new',
+        expect.any(String),
+      );
+    });
+    expect(screen.queryByText('GitHub connect started')).not.toBeInTheDocument();
     expect(region.connect).not.toHaveBeenCalled();
   });
 

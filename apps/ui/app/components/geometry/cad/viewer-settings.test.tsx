@@ -70,7 +70,7 @@ describe('ViewerSettings', () => {
       </TooltipProvider>,
     );
 
-    await user.click(screen.getByRole('button'));
+    await user.click(screen.getByRole('button', { name: 'Viewer settings' }));
 
     expect(await screen.findByText('Post-processing')).toBeVisible();
     expect(await screen.findByText('Timeout')).toBeVisible();

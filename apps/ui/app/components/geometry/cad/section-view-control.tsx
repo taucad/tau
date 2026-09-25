@@ -22,6 +22,8 @@ export function SectionViewControl(): React.JSX.Element {
         <Button
           variant='overlay'
           size='icon'
+          aria-label='Section view'
+          aria-pressed={isSectionViewActive}
           data-active={isSectionViewActive ? 'true' : 'false'}
           className={cn('data-[active=true]:bg-accent data-[active=true]:text-primary', is2dGeometry && 'hidden')}
           onClick={handleClick}

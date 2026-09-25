@@ -66,6 +66,7 @@
     "./components/menu.variants": "./src/components/menu.variants.ts",
     "./components/nested-action.variants": "./src/components/nested-action.variants.ts",
     "./components/navigation-menu": "./src/components/navigation-menu.tsx",
+    "./components/password-input": "./src/components/password-input.tsx",
     "./components/popover": "./src/components/popover.tsx",
     "./components/popover.variants": "./src/components/popover.variants.ts",
     "./components/progress": "./src/components/progress.tsx",
@@ -231,6 +232,11 @@
         "types": "./dist/components/navigation-menu.d.mts",
         "import": "./dist/components/navigation-menu.mjs",
         "default": "./dist/components/navigation-menu.mjs"
+      },
+      "./components/password-input": {
+        "types": "./dist/components/password-input.d.mts",
+        "import": "./dist/components/password-input.mjs",
+        "default": "./dist/components/password-input.mjs"
       },
       "./components/popover": {
         "types": "./dist/components/popover.d.mts",

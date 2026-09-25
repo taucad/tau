@@ -404,9 +404,24 @@ const noConnectivity = createCallbackLogic(() => () => undefined);
 
 const historyRefOf = (branch: string): string => `refs/heads/${branch}`;
 
-/** A refused ref's reason in a person's words; `leaseLost` is the ports' code for "the remote moved" (D39). */
-const refusalSaid = (reason: string | undefined): string | undefined =>
-  reason === 'leaseLost' ? 'This branch changed on the remote; this project will catch up and try again.' : reason;
+/**
+ * A refused ref's reason in a person's words; `leaseLost` is the ports' code
+ * for "the remote moved" (D39). Another checkout's branch is named: the row
+ * belongs to the branch in view, and "this branch" pointed at the wrong one.
+ */
+const refusalSaid = (
+  refused: Readonly<{ ref: string; reason: string | undefined }> | undefined,
+  branch: string,
+): string | undefined => {
+  if (refused?.reason !== 'leaseLost') {
+    return refused?.reason;
+  }
+  const other =
+    refused.ref.startsWith('refs/heads/') && refused.ref !== historyRefOf(branch)
+      ? refused.ref.slice('refs/heads/'.length)
+      : undefined;
+  return `${other ?? 'This branch'} changed on the remote; this project will catch up and try again.`;
+};
 
 /**
  * The queue entries *this* remote is owed.
@@ -1112,7 +1127,10 @@ const syncMachineDefinition = setup({
               failure: pending.length > 0 ? 'retry' : 'none',
               attempt: pending.length > 0 ? context.attempt + 1 : 0,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
-              error: refusalSaid(refusedHistory?.reason ?? (pending.length > 0 ? pending[0]?.reason : undefined)),
+              error: refusalSaid(
+                refusedHistory === undefined ? pending[0] : { ref: refusedHistory.name, reason: refusedHistory.reason },
+                context.branch,
+              ),
               /* D20's ceiling refusal arrives here as a per-ref result rather
                  than as a thrown transport error, and it is a quota answer:
                  *Sync now* replays the same bytes and cannot clear a ceiling

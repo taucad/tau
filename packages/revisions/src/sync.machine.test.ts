@@ -1293,6 +1293,27 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  it('names another checkout’s branch whose lease was lost', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'r1' },
+        { name: 'refs/heads/feature', status: 'rejected', head: 'f1', reason: 'leaseLost' },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().context.error).toBe(
+        'feature changed on the remote; this project will catch up and try again.',
+      );
+    });
+    harness.stop();
+  });
+
   it('row 34 (review 2 R9): a throw during a narrowed retry records only what it offered', async () => {
     const harness = start();
     await openCleanly(harness);

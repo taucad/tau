@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { ToolRegistry } from '@taucad/agent-host';
-import { createIsomorphicGitRevisionPort, readRevisionLog } from '@taucad/revisions';
+import { RevisionPortError, createIsomorphicGitRevisionPort, readRevisionLog } from '@taucad/revisions';
 import { createNativeGitRevisionPort } from '@taucad/revisions/node';
 import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -582,6 +582,24 @@ for (const row of ports) {
         abort.abort();
         await reading.catch(() => undefined);
       }
+    }, 30_000);
+
+    /* RV-W2b #2: a terminally failed sync is already in the durable record and
+     * on the Sync region; it must not hold every close for ever. */
+    it('lets a project go when its sync has failed, keeping the refusal in the projection', async () => {
+      const held = await harness(row.create, {
+        wrapPort: (port) => ({
+          ...port,
+          listRemotes: async () => [{ name: 'origin', kind: 'git', url: 'https://git.example.invalid/project.git' }],
+          listRemoteRefs: async () => {
+            throw new RevisionPortError('REMOTE_DAMAGED', "Tau: this project's cloud copy is damaged");
+          },
+        }),
+      });
+      await expect.poll(() => held.revisions.status().sync.state, { timeout: 10_000 }).toBe('failed');
+
+      await expect(held.revisions.channel.request({ command: 'quiesce' })).resolves.toMatchObject({ result: null });
+      expect(held.revisions.status().sync).toMatchObject({ state: 'failed', reason: 'damaged' });
     }, 30_000);
 
     /* Red pin (attempt a2): a project that holds a large object records like any other.

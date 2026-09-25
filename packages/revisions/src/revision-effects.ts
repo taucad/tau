@@ -57,7 +57,7 @@ import type { ResolutionSide } from '#resolution.types.js';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { AnyEventObject, AsyncActorLogic, AsyncLogicFunction } from 'xstate';
 
-import { checkoutMachine } from '#checkout.machine.js';
+import { checkoutMachine, satisfiesCut } from '#checkout.machine.js';
 import type {
   CheckoutActors,
   CheckoutCaptureTreeActorInput,
@@ -944,8 +944,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     captureOptions: Readonly<{ memo: CaptureMemo; bypassMemo: boolean }>,
   ): Promise<ImmutableRevisionTree> => {
     /* The reading comes first, so a file whose timestamp the stats then report
-     * as this recent is racily clean and is read rather than trusted (EQ7). */
-    const observedAt = now();
+     * as this recent is racily clean and is read rather than trusted (EQ7).
+     * The raw clock, not the monotonic `now()`: after a clock step back the
+     * high-water mark lies in the future of every fresh write, and a file
+     * written moments ago would read as old enough to trust (RV-W4W5a #5). */
+    const observedAt = clock();
     const memoOptions = captureOptions.memo.unchanged(
       await rooted.statTree?.('', { admits: (path) => policy.classify(path).versioned }),
       observedAt,
@@ -3188,6 +3191,47 @@ export const awaitSyncSettled = async (
 };
 
 /**
+ * How long a close waits for its checkouts' cuts, before it waits for the scheduler.
+ *
+ * One value for both hosts (RV-W2b #1): a desktop host's close and a browser
+ * worker's release are the same question, and each is nested inside the quit
+ * that waits on it. After it, the bytes are still on disk and the next open's
+ * comparison finds them (D4).
+ *
+ * @public
+ */
+export const closeCutMilliseconds = 5000;
+
+/**
+ * End every turn that has not been placed on a checkout yet, before a close records (RV-W2b #5).
+ *
+ * An unplaced turn could land on any checkout, so {@link awaitCheckoutCuts}
+ * treats it as holding all of them, and a close that let it be would record
+ * nothing. A closing host is not going to run it: the admissions the root
+ * still buffers and the turns still preparing are released here, and the
+ * caller refuses the runs this returns, in its own refusal's words. A placed
+ * turn is left alone; it records its own checkout.
+ *
+ * @param actor - The project's running revision root.
+ * @returns The run ids whose admissions the caller must refuse.
+ * @public
+ */
+export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly string[] => {
+  const { pendingAdmissions, turnRefs } = actor.getSnapshot().context;
+  const unplaced = [
+    ...pendingAdmissions.map(({ turnId, runId }) => ({ turnId, runId })),
+    ...Object.values(turnRefs)
+      .map((ref) => ref.getSnapshot().context)
+      .filter((turn) => turn.checkoutId === undefined)
+      .map(({ turnId, runId }) => ({ turnId, runId })),
+  ];
+  for (const turn of unplaced) {
+    actor.send({ type: 'release', ...turn });
+  }
+  return unplaced.map((turn) => turn.runId);
+};
+
+/**
  * Record every checkout no turn holds, and wait for each one's answer.
  *
  * The close ruling (D6, rule 7): closing or quitting saves every dirty
@@ -3206,7 +3250,7 @@ export const awaitSyncSettled = async (
  *
  * @param actor - The project's running revision root.
  * @param trigger - `close`, or the browser's `hidden` close preparation.
- * @param timeoutMilliseconds - One bound for all the cuts. Defaults to {@link syncQuiesceMilliseconds}.
+ * @param timeoutMilliseconds - One bound for all the cuts. Defaults to {@link closeCutMilliseconds}.
  * @returns Once every cut has answered. Rejects with the first refusal (a failed cut, a
  *   lost compare-and-swap) once all have answered, or at the bound.
  * @public
@@ -3214,7 +3258,7 @@ export const awaitSyncSettled = async (
 export const awaitCheckoutCuts = async (
   actor: ProjectRevisionsActor,
   trigger: 'hidden' | 'close',
-  timeoutMilliseconds: number = syncQuiesceMilliseconds,
+  timeoutMilliseconds: number = closeCutMilliseconds,
 ): Promise<void> => {
   const { checkouts, checkoutRefs, turnRefs } = actor.getSnapshot().context;
   const turnCheckouts = Object.values(turnRefs).map((ref) => ref.getSnapshot().context.checkoutId);
@@ -3229,10 +3273,11 @@ export const awaitCheckoutCuts = async (
   /* Each answer settles to its refusal, or `undefined` when the checkout recorded or had nothing to record. */
   const answers = new Map(ids.map((id) => [id, Promise.withResolvers<string | undefined>()]));
   const answer = (
-    event: Readonly<{ checkoutId: string; trigger: string; turnId?: string }>,
+    event: Readonly<{ checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>,
     refusal?: string,
   ): void => {
-    if (event.trigger === trigger && event.turnId === undefined) {
+    /* A queued `hidden` absorbed by a later `close` is answered as `close` (RV-W2b #4). */
+    if (satisfiesCut(event.trigger, trigger) && event.turnId === undefined) {
       answers.get(event.checkoutId)?.resolve(refusal);
     }
   };

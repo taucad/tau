@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#project-revisions.machine.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
+import { releaseUnplacedTurns } from '#revision-effects.js';
 import { checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
@@ -1277,6 +1278,26 @@ describe('projectRevisionsMachine', () => {
 
     expect(harness.emitted.map((event) => event.type)).toContain('leaseRetired');
     expect(harness.emitted.map((event) => event.type)).toContain('removalOffered');
+
+    harness.actor.stop();
+  });
+
+  it('releases every turn a close would wait on, buffered or still placing, and names their runs (RV-W2b #5)', async () => {
+    const harness = start();
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-0', chatId: 'chat-0', runId: 'run-0' });
+
+    expect(releaseUnplacedTurns(harness.actor)).toEqual(['run-0']);
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+
+    await readyRegistry(harness);
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['turn-1']);
+
+    expect(releaseUnplacedTurns(harness.actor)).toEqual(['run-1']);
+    await flush();
+    /* Nothing is left holding every checkout, so a close cuts them all. */
+    expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
+    expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
 
     harness.actor.stop();
   });

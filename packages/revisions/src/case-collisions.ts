@@ -8,6 +8,7 @@
  * exists to prevent.
  */
 import type { ImmutableRevisionTree } from '#algorithms/index.js';
+import { revisionTreeFiles } from '#algorithms/revision-tree.js';
 
 /** Two tracked paths one supported filesystem cannot hold together. @internal */
 export type PortableCollision = Readonly<{
@@ -30,7 +31,8 @@ const portableKey = (path: string): string => path.normalize('NFC').toLowerCase(
 export const portableCollisions = (tree: ImmutableRevisionTree): readonly PortableCollision[] => {
   const seen = new Map<string, string>();
   const collisions: PortableCollision[] = [];
-  for (const { path } of tree.entries()) {
+  /* Paths only, in `entries()` order: `entries()` copies every file's bytes (RV-W4W5a #6). */
+  for (const path of [...revisionTreeFiles(tree).keys()].toSorted()) {
     const key = portableKey(path);
     const first = seen.get(key);
     if (first === undefined) {

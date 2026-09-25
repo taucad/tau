@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 
@@ -46,5 +46,20 @@ describe('portable revision tree admission', () => {
     expect(() => {
       assertMaterializableRevisionTree(tree);
     }).not.toThrow();
+  });
+
+  it('should check a tree by its paths alone, copying no file bytes (RV-W4W5a #6)', () => {
+    const tree = new ImmutableRevisionTree([
+      ['Part.ts', 'one'],
+      ['part.ts', 'two'],
+      ['notes.md', 'three'],
+    ]);
+    const entries = vi.spyOn(tree, 'entries');
+
+    expect(caseCollisions(tree)).toEqual(['Part.ts', 'part.ts']);
+    expect(() => {
+      assertMaterializableRevisionTree(tree);
+    }).toThrow();
+    expect(entries).not.toHaveBeenCalled();
   });
 });

@@ -258,6 +258,34 @@ const requestFromEvent = (event: CheckoutMachineEvent): CheckoutCutRequest | und
  * trigger, so it never collapses into one of these (D1). */
 const ambientTriggers: ReadonlySet<CheckoutCutTrigger> = new Set(['save', 'idle', 'hidden', 'close']);
 
+/* The ambient triggers by strength: a stronger one records everything a weaker one asked for (RV-W2b #4). */
+const ambientStrength = new Map<CheckoutCutTrigger, number>([
+  ['idle', 0],
+  ['save', 1],
+  ['hidden', 2],
+  ['close', 3],
+]);
+
+/**
+ * Whether an answer to a cut with trigger `answered` also answers a waiter for `awaited`.
+ *
+ * Queued ambient requests collapse into the strongest of them (R13), so a
+ * waiter for `save` or `hidden` may be answered by the `close` that absorbed
+ * it. An operation's or a turn's trigger is answered only by itself.
+ *
+ * @param answered - The trigger the answer carries.
+ * @param awaited - The trigger the waiter asked with.
+ * @returns Whether the waiter may settle on this answer.
+ * @public
+ */
+export const satisfiesCut = (answered: CheckoutCutTrigger, awaited: CheckoutCutTrigger): boolean => {
+  const answeredStrength = ambientStrength.get(answered);
+  const awaitedStrength = ambientStrength.get(awaited);
+  return answeredStrength === undefined || awaitedStrength === undefined
+    ? answered === awaited
+    : answeredStrength >= awaitedStrength;
+};
+
 /**
  * Whether a cut request, or the answer to one, is ambient: `save`, `idle`, `hidden` or `close` with no turn.
  *
@@ -290,6 +318,17 @@ const announce = (
   }
 };
 
+/* Whether a `headChanged` names a head other than the one this checkout already has (RV-W2b #3). */
+const movedHead = (
+  context: CheckoutMachineContext,
+  event: Extract<CheckoutMachineEvent, { type: 'headChanged' }>,
+): boolean => event.revisionId !== context.headRevisionId;
+
+const adoptHead = (event: Extract<CheckoutMachineEvent, { type: 'headChanged' }>): Partial<CheckoutMachineContext> => ({
+  headRevisionId: event.revisionId,
+  headTreeId: event.treeId,
+});
+
 const recordWrite = (
   context: CheckoutMachineContext,
   event: Extract<CheckoutMachineEvent, { type: 'changed' }>,
@@ -314,10 +353,11 @@ const takeRequest = (
  * `Mod+S` held down, an idle window that fires while the tab is being
  * hidden, and `hidden` followed by `pagehide` all describe the same wish —
  * "record what is on disk" — and the checkout can only honour it once. Two
- * consecutive ambient requests that no turn is waiting on therefore collapse, with
- * the later trigger winning because it is the more specific one (`close`
- * after `idle` is a close). A turn-bearing request never collapses: its
- * requester is waiting for an answer addressed to its own turn id.
+ * consecutive ambient requests that no turn is waiting on therefore collapse
+ * into the stronger trigger (`close` after `idle` is a close; a `save` after a
+ * `close` is still a close), and {@link satisfiesCut} lets the absorbed
+ * request's waiter settle on it (RV-W2b #4). A turn-bearing request never
+ * collapses: its requester is waiting for an answer addressed to its own turn id.
  */
 const queueRequest = (
   context: CheckoutMachineContext,
@@ -330,7 +370,8 @@ const queueRequest = (
   }
   const last = context.queued.at(-1);
   if (last !== undefined && isAmbientCut(request) && isAmbientCut(last)) {
-    return { queued: [...context.queued.slice(0, -1), request] };
+    const stronger = satisfiesCut(request.trigger, last.trigger) ? request : last;
+    return { queued: [...context.queued.slice(0, -1), stronger] };
   }
   if (context.queued.length >= checkoutQueuedCutLimit) {
     announce({ ...context, pending: request }, enq, { type: 'cutFailed', reason: 'queue-full' });
@@ -461,10 +502,15 @@ const checkoutMachineDefinition = setup({
   on: {
     /* One event per content-change event, whatever its path count (A38, F9). */
     changed: { context: ({ context, event }) => recordWrite(context, event) },
-    headChanged: {
-      target: '.clean',
-      context: ({ event }) => ({ headRevisionId: event.revisionId, headTreeId: event.treeId }),
-    },
+    /*
+     * I6: a head that moved under `dirty`, `stale`, `rereading` or `failed`
+     * says nothing about the files, so they are compared with it — as D4 does
+     * at spawn — rather than declared clean. `dirty` stays the reading until
+     * the comparison proves otherwise. The checkout's own head arriving back
+     * (a registry re-read after its own mint) is not a move at all.
+     */
+    headChanged: ({ context, event }) =>
+      movedHead(context, event) ? { target: '.dirty.comparing', context: adoptHead(event) } : undefined,
     /* The line, not the files: whatever this checkout was doing, its next CAS names the new branch (N9). */
     lineChanged: { context: ({ event }) => ({ branch: event.branch }) },
     /* Reached only from `minting`, `stale` and `rereading`; the resting states
@@ -481,6 +527,13 @@ const checkoutMachineDefinition = setup({
       on: {
         changed: { target: 'dirty', context: ({ context, event }) => recordWrite(context, event) },
         cut: { target: 'minting', context: ({ context, event }) => takeRequest(context, event) },
+        /* Files that matched the old head were applied to the new one (a switch,
+         * a fast-forward) or are another writer's same bytes: `clean` reports
+         * the new head and compares nothing, as before (D4 compares once). */
+        headChanged: ({ context, event }) =>
+          movedHead(context, event)
+            ? { target: '#checkout.clean', reenter: true, context: adoptHead(event) }
+            : undefined,
       },
       initial: 'routing',
       states: {
@@ -508,15 +561,10 @@ const checkoutMachineDefinition = setup({
           on: {
             /* The answer in flight is against the old head, so the capture starts
              * again — through `clean`'s entry, which reports the new head (M5). */
-            headChanged: {
-              target: '#checkout.clean',
-              reenter: true,
-              context: ({ event }) => ({
-                headRevisionId: event.revisionId,
-                headTreeId: event.treeId,
-                treeCompared: false,
-              }),
-            },
+            headChanged: ({ context, event }) =>
+              movedHead(context, event)
+                ? { target: '#checkout.clean', reenter: true, context: { ...adoptHead(event), treeCompared: false } }
+                : undefined,
           },
         },
         rested: {},
@@ -533,6 +581,26 @@ const checkoutMachineDefinition = setup({
       },
       initial: 'quiet',
       states: {
+        /*
+         * I6: the D4 comparison, for bytes that were unrecorded when the head
+         * moved. `dirty` until the capture shows the files are the new head's;
+         * a failed capture proves nothing, so it stays `dirty`.
+         */
+        comparing: {
+          entry: () => ({ context: { treeCompared: true } }),
+          invoke: {
+            src: 'captureTree',
+            input: ({ context }) => ({ checkoutId: context.checkoutId }),
+            onDone: ({ context, event }) =>
+              event.output.treeId === context.headTreeId ? { target: '#checkout.clean' } : { target: 'quiet' },
+            onError: { target: 'quiet' },
+          },
+          on: {
+            changed: { target: 'quiet', context: ({ context, event }) => recordWrite(context, event) },
+            headChanged: ({ context, event }) =>
+              movedHead(context, event) ? { target: 'comparing', reenter: true, context: adoptHead(event) } : undefined,
+          },
+        },
         /*
          * S30's idle window, and the only timer in this machine.
          *
@@ -579,11 +647,12 @@ const checkoutMachineDefinition = setup({
          * decides whether the files still differ from the new head.
          */
         headChanged: ({ context, event }, enq) => {
+          /* RV-W2b #3: a registry re-read naming the head this checkout already has moved nothing. */
+          if (!movedHead(context, event)) {
+            return undefined;
+          }
           announce(context, enq, { type: 'casLost' });
-          return {
-            target: '#checkout.clean',
-            context: { headRevisionId: event.revisionId, headTreeId: event.treeId, treeCompared: false },
-          };
+          return { target: '#checkout.dirty.comparing', context: adoptHead(event) };
         },
       },
       initial: 'acquiring',

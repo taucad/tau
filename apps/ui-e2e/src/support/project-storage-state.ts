@@ -467,7 +467,7 @@ export const readProjectTree = async (config: StoredProjectConfig): Promise<Read
  * `WorkspaceFileService._configureProjectRoots`), and the revision worker mounts
  * each checkout at `.tau/checkouts/<projectId>/<checkoutId>` on the project's
  * provider (`apps/ui/app/machines/file-manager.worker.revisions.ts` `createCheckoutRoutes`,
- * `libs/filesystem/src/mount-table.ts` `CheckoutRootConfig`, and the
+ * `packages/filesystem/src/mount-table.ts` `CheckoutRootConfig`, and the
  * `.tau/checkouts/` guard in `workspace-file-service.ts`). There is no `tree/`
  * segment — that spelling was the daemon's and is written by nothing.
  *

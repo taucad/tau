@@ -2462,7 +2462,32 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         let quotaMessage: string | undefined;
         let quotaStorage: RemoteStorageRefusal | undefined;
 
-        if (history.length > 0) {
+        /*
+         * D54: a lease is only a licence to rewrite the remote when this device
+         * has *integrated* what it leases. The lease is the head the last fetch
+         * saw, and a fetch whose merge did not happen (open files mid-save, a
+         * branch this checkout is not on) still records it — so a push under
+         * it overwrote the remote's own commits. A branch whose local head does
+         * not contain its lease is refused here as `leaseLost`, never offered;
+         * the scheduler's retry pulls and merges, or raises the conflict.
+         */
+        const unintegrated = new Set<string>();
+        for (const name of history) {
+          const lease = input.leases[name];
+          const local = localHeads.get(name);
+          if (!name.startsWith('refs/heads/') || lease === undefined || local === undefined || lease === local) {
+            continue;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one bounded walk per diverging branch, before anything is sent.
+          const walk = await port.log({ heads: [local, lease], limit: divergenceWalkLimit });
+          if (integrationOf(walk, revisionId(local), revisionId(lease)) !== 'upToDate') {
+            unintegrated.add(name);
+            results.push({ name, status: 'rejected', head: local, reason: 'leaseLost' });
+          }
+        }
+        const offeredHistory = history.filter((name) => !unintegrated.has(name));
+
+        if (offeredHistory.length > 0) {
           signal.throwIfAborted();
           try {
             /* The one push a `pagehide` re-send may carry (D28, S41, review 2
@@ -2471,7 +2496,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               port.push({
                 remote: input.remote,
                 atomic: true,
-                refs: history.map((name) => offerOf(name, input.leases)),
+                refs: offeredHistory.map((name) => offerOf(name, input.leases)),
               }),
             );
             results.push(...pushed.refs.map((entry) => outcomeOf(entry, localHeads)));
@@ -2492,7 +2517,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               quotaMessage = error.refusal.message;
               quotaStorage = storageRefusalOf(error.refusal) ?? quotaStorage;
             }
-            results.push(...refusedAll(history, message, localHeads));
+            results.push(...refusedAll(offeredHistory, message, localHeads));
           }
         }
 

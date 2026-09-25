@@ -754,6 +754,56 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       await remote.close();
     }
   }, 180_000);
+
+  /*
+   * D54: a lease is the head this device integrated, not the head it last saw.
+   * A fetch records the remote's head before any merge runs, and a merge that
+   * does not happen (open files mid-save) left that lease in place — so the
+   * next push, forced under a lease that still matched, overwrote the remote's
+   * own commit. Observed live against GitHub on 2026-09-25.
+   */
+  it('row 11: a push never overwrites a remote commit this device fetched but did not merge (D54)', async () => {
+    const remoteRoot = await temporaryRoot('remote-unmerged');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-unmerged', remoteUrl: remote.url, files: { 'part.scad': 'a\n' } });
+      const shared = await record({ device: one, files: { 'part.scad': 'a\n' }, summary: 'Shared' });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
+      /* Someone else's commit on the remote, on top of the shared one. */
+      const theirs = await remote.git([
+        '-c',
+        'user.name=Remote',
+        '-c',
+        'user.email=remote@example.com',
+        'commit-tree',
+        `${shared}^{tree}`,
+        '-p',
+        shared,
+        '-m',
+        'Remote edit',
+      ]);
+      await remote.git(['update-ref', mainRef, theirs, shared]);
+      const mine = await record({ device: one, files: { 'part.scad': 'b\n' }, summary: 'Mine', parent: shared });
+
+      const fetched = await run<{ leases: Readonly<Record<string, string>>; integration: string }>(
+        one.actors.sync.fetch,
+        { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 },
+      );
+      expect(fetched).toMatchObject({ integration: 'diverged', leases: { [mainRef]: theirs } });
+
+      const pushed = await run<{ refs: ReadonlyArray<{ name: string; status: string; reason?: string }> }>(
+        one.actors.sync.push,
+        { remote: 'tau', branch: 'main', leases: fetched.leases },
+      );
+      expect(pushed.refs).toContainEqual(
+        expect.objectContaining({ name: mainRef, status: 'rejected', reason: 'leaseLost' }),
+      );
+      expect(await remote.git(['rev-parse', mainRef])).toBe(theirs);
+      expect(await one.port.readRef(mainRef)).toBe(mine);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
 });
 
 /*

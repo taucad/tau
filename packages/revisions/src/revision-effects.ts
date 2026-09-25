@@ -2479,7 +2479,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             continue;
           }
           // oxlint-disable-next-line no-await-in-loop -- one bounded walk per diverging branch, before anything is sent.
-          const walk = await port.log({ heads: [local, lease], limit: divergenceWalkLimit });
+          const walk = await port.log({ heads: [revisionId(local), revisionId(lease)], limit: divergenceWalkLimit });
           if (integrationOf(walk, revisionId(local), revisionId(lease)) !== 'upToDate') {
             unintegrated.add(name);
             results.push({ name, status: 'rejected', head: local, reason: 'leaseLost' });

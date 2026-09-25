@@ -14,7 +14,11 @@ import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-stat
 import { useChats } from '#hooks/use-chats.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { isGithubRemote, syncCopy } from '#routes/w.$workspace.$project/revision-sync-region.js';
+import {
+  isGithubRemote,
+  isRefusedWhileBackedUp,
+  syncCopy,
+} from '#routes/w.$workspace.$project/revision-sync-region.js';
 
 /** What the trigger draws for one state: one glyph in one tone, the mark it stands for, and the sentence. */
 export type RevisionFacts = Readonly<{
@@ -106,7 +110,13 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
   const ask = backupAsk(status);
   return ask === undefined
     ? undefined
-    : { icon: CloudAlert, tone: 'text-warning', mark: 'attention', sentence: `Not backed up · ${ask}` };
+    : {
+        icon: CloudAlert,
+        tone: 'text-warning',
+        mark: 'attention',
+        /* D68: a refusal with nothing waiting has lost no work. */
+        sentence: `${isRefusedWhileBackedUp(sync) ? 'Backed up' : 'Not backed up'} · ${ask}`,
+      };
 };
 
 /** Work the person started, while it runs. */
@@ -146,7 +156,7 @@ const restingFacts = (status: RevisionStatusProjection, where: RevisionWhere): R
   if (where.head === undefined) {
     return { icon: History, tone: '', mark: 'none', sentence: 'Nothing saved yet' };
   }
-  const backup = syncCopy(status.sync);
+  const backup = syncCopy(status.sync, status.remote);
   return {
     icon: History,
     tone: '',
@@ -344,7 +354,7 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
             where={where}
             facts={facts}
             showing={where.latest === undefined ? undefined : head}
-            backup={syncCopy(status.sync) ?? 'No backup connected'}
+            backup={syncCopy(status.sync, status.remote) ?? 'No backup connected'}
             chat={hasDiverged && focusedChat !== undefined ? `${focusedChat.name} · on ${chatBranch}` : undefined}
             recent={revisions.slice(0, 3)}
           />

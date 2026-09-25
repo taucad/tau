@@ -112,9 +112,10 @@ export type RevisionSyncRegionProps = {
  * holding a spinner over a pull that is still running.
  *
  * @param sync - The settled sync facet.
+ * @param remote - The connection, so a refusal names who refused.
  * @returns What the row reads, or `undefined` when there is nothing to say.
  */
-export const syncCopy = (sync: SyncFacet): string | undefined => {
+export const syncCopy = (sync: SyncFacet, remote?: RemoteFacet): string | undefined => {
   switch (sync.state) {
     case 'noRemote': {
       return undefined;
@@ -137,12 +138,38 @@ export const syncCopy = (sync: SyncFacet): string | undefined => {
       /* `queued` and `failed` read the same to a person: their work is not on
        * the server. What differs is whether this device will retry by itself,
        * which the offline line below says. */
-      return sync.pendingCount > 0
-        ? `Not backed up · ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`
-        : 'Not backed up';
+      if (sync.pendingCount > 0) {
+        return `Not backed up · ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`;
+      }
+      if (isRefusedWhileBackedUp(sync)) {
+        const refuser =
+          remote === undefined
+            ? 'The remote'
+            : isGithubRemote(remote)
+              ? 'GitHub'
+              : remote.kind === 'tau'
+                ? 'Tau Cloud'
+                : 'The remote';
+        return `Backed up · ${refuser} refused access`;
+      }
+      return 'Not backed up';
     }
   }
 };
+
+/**
+ * Whether the remote refused access after acknowledging everything (D68).
+ *
+ * *Not backed up* is reserved for revisions the server has not acknowledged
+ * (revisions policy), so a refused credential with nothing waiting has lost
+ * no work. `notFound` is not this: a deleted repository answers exactly as an
+ * unshared one does, and only the first has lost its copy.
+ *
+ * @param sync - The settled sync facet.
+ * @returns Whether the row may still say *Backed up*.
+ */
+export const isRefusedWhileBackedUp = (sync: SyncFacet): boolean =>
+  sync.state === 'failed' && sync.pendingCount === 0 && (sync.reason === 'unauthorized' || sync.reason === 'forbidden');
 
 /**
  * Whether a credential refusal on this remote is GitHub's to fix (D18).
@@ -493,7 +520,7 @@ export function RevisionSyncRegion({
   const handleConnectRequest = (): void => {
     setShouldConnect(false);
   };
-  const syncState = syncCopy(sync);
+  const syncState = syncCopy(sync, remote);
   const failureAction = syncFailureAction(sync.reason, remote);
   /*
    * One renderer for rule 19's action, because there are now two surfaces that

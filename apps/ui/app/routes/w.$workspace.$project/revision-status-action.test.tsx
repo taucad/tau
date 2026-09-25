@@ -158,7 +158,7 @@ describe('selectRevisionFacts', () => {
     ],
     [
       'Tau Cloud asking for sign-in',
-      status({ remote: tauRemote, sync: sync({ state: 'failed', reason: 'unauthorized' }) }),
+      status({ remote: tauRemote, sync: sync({ state: 'failed', reason: 'unauthorized', pendingCount: 1 }) }),
       onMain,
       CloudAlert,
       'attention',
@@ -166,7 +166,7 @@ describe('selectRevisionFacts', () => {
     ],
     [
       'GitHub refusing its credential (R-U4)',
-      status({ remote: githubRemote, sync: sync({ state: 'failed', reason: 'unauthorized' }) }),
+      status({ remote: githubRemote, sync: sync({ state: 'failed', reason: 'unauthorized', pendingCount: 1 }) }),
       onMain,
       CloudAlert,
       'attention',
@@ -174,11 +174,19 @@ describe('selectRevisionFacts', () => {
     ],
     [
       'another Git host refusing its credential (R-U4)',
-      status({ remote: gitRemote, sync: sync({ state: 'failed', reason: 'unauthorized' }) }),
+      status({ remote: gitRemote, sync: sync({ state: 'failed', reason: 'unauthorized', pendingCount: 1 }) }),
       onMain,
       CloudAlert,
       'attention',
       'Not backed up · Remote refused access',
+    ],
+    [
+      'GitHub refusing its credential after acknowledging everything (D68)',
+      status({ remote: githubRemote, sync: sync({ state: 'failed', reason: 'unauthorized', pendingCount: 0 }) }),
+      onMain,
+      CloudAlert,
+      'attention',
+      'Backed up · Reconnect GitHub',
     ],
     [
       'a Git remote refusing large files (R-U4)',

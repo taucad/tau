@@ -788,6 +788,29 @@ describe('RevisionSyncRegion', () => {
     expect(screen.getByRole('status')).toHaveTextContent(copy);
   });
 
+  /*
+   * D68: *Not backed up* is for revisions the server has not acknowledged. A
+   * repository removed from the app refuses access with nothing waiting; a
+   * deleted one answers not-found, which cannot be told from an unshared one.
+   */
+  it.each([
+    ['forbidden', 'Backed up · GitHub refused access'],
+    ['unauthorized', 'Backed up · GitHub refused access'],
+    ['notFound', 'Not backed up'],
+  ] as const)('should say a %s refusal with nothing waiting as “%s”', (reason, copy) => {
+    renderRegion(
+      facet({
+        kind: 'git',
+        provider: 'github',
+        phase: 'connected',
+        url: 'https://github.com/rifont/example.git',
+      }),
+      syncFacet({ state: 'failed', reason, pendingCount: 0 }),
+    );
+
+    expect(screen.getByText(copy, { exact: true })).toBeInTheDocument();
+  });
+
   it('says nothing about backup when the project has no remote', () => {
     renderRegion(facet());
 

@@ -172,6 +172,7 @@ vi.mock('@taucad/host', () => ({
   defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
   discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
   externalAgentDescriptors: vi.fn(() => []),
+  projectReleaseMilliseconds: 22_000,
 }));
 vi.mock('#tau/kernel-host.entry?modulePath', () => ({ default: '/kernel-host.entry.js' }));
 vi.mock('#tau/services-host.entry?modulePath', () => ({ default: '/services-host.entry.js' }));

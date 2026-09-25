@@ -28,7 +28,12 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
-import { defaultConfigDirectory, discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
+import {
+  defaultConfigDirectory,
+  discoverAcpAgents,
+  externalAgentDescriptors,
+  projectReleaseMilliseconds,
+} from '@taucad/host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host';
 
 import kernelUtilityEntry from '#tau/kernel-host.entry?modulePath';
@@ -169,11 +174,14 @@ if (launchDeepLink !== undefined) {
 /**
  * How long quit waits for every served project to settle (W19, D31).
  *
- * Long enough for a close cut plus W13's `closeFlushMilliseconds` sync wait on
- * several projects, short enough that a wedged utility never holds the app
- * open: after it the durable queue is the guarantee (D28).
+ * Derived from the host's own worst case for letting one project go (live
+ * checkout wait, close cuts, sync quiesce), so rule 9's nesting holds whatever
+ * those bounds become: the host's reason lands before this wait's. Projects
+ * release in parallel, so the per-project bound is the whole bound. Short
+ * enough that a wedged utility never holds the app open: after it the durable
+ * queue is the guarantee (D28).
  */
-const quitQuiesceMilliseconds = 20_000;
+const quitQuiesceMilliseconds = projectReleaseMilliseconds + 3000;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).

@@ -51,6 +51,10 @@ export type CheckoutCutRequest = Readonly<{
   turnId?: string;
   /** Run ids of the leases on this checkout when the request was made. */
   leaseIds: readonly string[];
+  /** The revision whose tree a restore applied, when this cut records that restore (D1). */
+  restoredFrom?: string;
+  /** The requester's own id for this cut, echoed on its answer so a late one is never another's (N2). */
+  requestId?: string;
 }>;
 
 /** Settled condition of one checkout, as its parent reads it. @public */
@@ -59,7 +63,7 @@ export type CheckoutStatus = 'clean' | 'dirty' | 'minting' | 'stale' | 'failed';
 /** Input accepted when creating the checkoutMachine actor. @public */
 export type CheckoutMachineInput = Readonly<{
   checkoutId: string;
-  /** The branch this checkout tracks; `undefined` when it is detached. */
+  /** The branch this checkout tracks; `undefined` only when the store names none for it. */
   branch?: string;
   /** Head revision recorded for the branch, rehydrated from records (I3). */
   headRevisionId?: string;
@@ -76,8 +80,8 @@ export type CheckoutMachineInput = Readonly<{
   parentRef?: AnyActorRef;
 }>;
 
-/** Serializable state owned by checkoutMachine. @public */
-export type CheckoutMachineContext = Readonly<{
+/* The fields of {@link CheckoutMachineContext}, named by the interface below. */
+type CheckoutMachineContextFields = Readonly<{
   checkoutId: string;
   branch: string | undefined;
   headRevisionId: string | undefined;
@@ -99,14 +103,36 @@ export type CheckoutMachineContext = Readonly<{
   cutTreeId: string | undefined;
   revisionId: string | undefined;
   reason: string | undefined;
+  /**
+   * Whether the spawn-time comparison of the live tree with the head's has run (D4).
+   *
+   * Once per actor: a checkout rehydrated from records trusts nothing about the
+   * bytes under it until that one capture answers, and every later `clean` is a
+   * state this actor reached itself. A head that moves before it answers asks
+   * again against the new head rather than abandoning it (M5).
+   */
+  treeCompared: boolean;
 }>;
+
+/** Serializable state owned by checkoutMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface CheckoutMachineContext extends CheckoutMachineContextFields {}
 
 /** Events accepted by checkoutMachine. @public */
 export type CheckoutMachineEvent =
   /** One content-change event, never one per path (A38). */
   | Readonly<{ type: 'changed'; paths: readonly string[]; generation: number }>
-  | Readonly<{ type: 'cut'; trigger: CheckoutCutTrigger; turnId?: string; leaseIds: readonly string[] }>
+  | Readonly<{
+      type: 'cut';
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      leaseIds: readonly string[];
+      restoredFrom?: string;
+      requestId?: string;
+    }>
   | Readonly<{ type: 'headChanged'; revisionId: string; treeId: string }>
+  /** The branch this checkout tracks is now another name: a live Switch or a rename (N9). */
+  | Readonly<{ type: 'lineChanged'; branch: string }>
   | Readonly<{ type: 'fenceGranted' }>
   | Readonly<{ type: 'fenceRefused'; reason: string }>;
 
@@ -117,17 +143,25 @@ export type CheckoutMachineEmitted =
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       revisionId: string;
     }>
-  | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{
+      type: 'nothingToSave';
+      checkoutId: string;
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      requestId?: string;
+    }>
   | Readonly<{
       type: 'cutFailed';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       reason: string;
     }>
-  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string; requestId?: string }>
   | Readonly<{
       type: 'checkoutStatusChanged';
       checkoutId: string;
@@ -137,6 +171,12 @@ export type CheckoutMachineEmitted =
 
 /** Input of the injected `cut` actor: hash the checkout's versioned tree. @public */
 export type CheckoutCutActorInput = Readonly<{ checkoutId: string; trigger: CheckoutCutTrigger }>;
+
+/** Input of the injected `captureTree` actor: hash the live tree without holding it (D4). @public */
+export type CheckoutCaptureTreeActorInput = Readonly<{ checkoutId: string }>;
+
+/** Output of the injected `captureTree` actor. @public */
+export type CheckoutCaptureTreeActorOutput = Readonly<{ treeId: string }>;
 
 /**
  * Output of the injected `cut` actor.
@@ -157,6 +197,8 @@ export type CheckoutWriteRevisionActorInput = Readonly<{
   trigger: CheckoutCutTrigger;
   turnId?: string;
   leaseIds: readonly string[];
+  /** The revision a restore applied; only a `restore` cut that records one carries it (D1). */
+  restoredFrom?: string;
 }>;
 
 /** Input of the injected `casHead` actor: publish the branch head expected-old (I7). @public */
@@ -195,6 +237,7 @@ const announcement = (
     checkoutId: context.checkoutId,
     trigger: pending.trigger,
     ...(pending.turnId === undefined ? {} : { turnId: pending.turnId }),
+    ...(pending.requestId === undefined ? {} : { requestId: pending.requestId }),
   };
   return { ...fact, ...addressed };
 };
@@ -205,8 +248,29 @@ const requestFromEvent = (event: CheckoutMachineEvent): CheckoutCutRequest | und
         trigger: event.trigger,
         leaseIds: event.leaseIds,
         ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+        ...(event.restoredFrom === undefined ? {} : { restoredFrom: event.restoredFrom }),
+        ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
       }
     : undefined;
+
+/* The wishes that only ever mean "record what is on disk". An operation's own
+ * cut (`restore`, `switch`, `merge`) is a step its machine is waiting on by
+ * trigger, so it never collapses into one of these (D1). */
+const ambientTriggers: ReadonlySet<CheckoutCutTrigger> = new Set(['save', 'idle', 'hidden', 'close']);
+
+/**
+ * Whether a cut request, or the answer to one, is ambient: `save`, `idle`, `hidden` or `close` with no turn.
+ *
+ * The line every host draws for its *save* channel: a turn's cut is answered
+ * in its chat and an operation's own cut (`restore`, `switch`, `merge`) by the
+ * child that asked, so neither may also read as a failed save (M3).
+ *
+ * @param request - A request, or an answer addressed with one's trigger and turn.
+ * @returns Whether no turn and no operation is waiting on it.
+ * @public
+ */
+export const isAmbientCut = (request: Readonly<{ trigger: CheckoutCutTrigger; turnId?: string }>): boolean =>
+  request.turnId === undefined && ambientTriggers.has(request.trigger);
 
 type CheckoutEnqueue = EnqueueObject<CheckoutMachineEvent, CheckoutMachineEmitted>;
 
@@ -250,7 +314,7 @@ const takeRequest = (
  * `Mod+S` held down, an idle window that fires while the tab is being
  * hidden, and `hidden` followed by `pagehide` all describe the same wish —
  * "record what is on disk" — and the checkout can only honour it once. Two
- * consecutive requests that no turn is waiting on therefore collapse, with
+ * consecutive ambient requests that no turn is waiting on therefore collapse, with
  * the later trigger winning because it is the more specific one (`close`
  * after `idle` is a close). A turn-bearing request never collapses: its
  * requester is waiting for an answer addressed to its own turn id.
@@ -265,7 +329,7 @@ const queueRequest = (
     return {};
   }
   const last = context.queued.at(-1);
-  if (request.turnId === undefined && last !== undefined && last.turnId === undefined) {
+  if (last !== undefined && isAmbientCut(request) && isAmbientCut(last)) {
     return { queued: [...context.queued.slice(0, -1), request] };
   }
   if (context.queued.length >= checkoutQueuedCutLimit) {
@@ -356,6 +420,12 @@ const checkoutMachineDefinition = setup({
       sendBack({ type: 'fenceRefused', reason: 'checkoutMachine: the fence actor was not provided.' });
       return () => undefined;
     }),
+    /* A host that cannot compare trusts its records, which is what it did before D4. */
+    captureTree: createAsyncLogic<CheckoutCaptureTreeActorOutput, CheckoutCaptureTreeActorInput>({
+      run: async () => {
+        throw new Error('checkoutMachine: the captureTree actor was not provided.');
+      },
+    }),
   },
   delays: {
     idleWindow: ({ context }) => context.idleWindow,
@@ -384,6 +454,8 @@ const checkoutMachineDefinition = setup({
     cutTreeId: undefined,
     revisionId: undefined,
     reason: undefined,
+    /* Nothing to compare against on an unborn branch: every tree is new there. */
+    treeCompared: input.headTreeId === undefined,
   }),
   initial: 'clean',
   on: {
@@ -393,6 +465,8 @@ const checkoutMachineDefinition = setup({
       target: '.clean',
       context: ({ event }) => ({ headRevisionId: event.revisionId, headTreeId: event.treeId }),
     },
+    /* The line, not the files: whatever this checkout was doing, its next CAS names the new branch (N9). */
+    lineChanged: { context: ({ event }) => ({ branch: event.branch }) },
     /* Reached only from `minting`, `stale` and `rereading`; the resting states
      * below take `cut` straight into a mint. */
     cut: ({ context, event }, enq) => ({ context: queueRequest(context, event, enq) }),
@@ -407,6 +481,45 @@ const checkoutMachineDefinition = setup({
       on: {
         changed: { target: 'dirty', context: ({ context, event }) => recordWrite(context, event) },
         cut: { target: 'minting', context: ({ context, event }) => takeRequest(context, event) },
+      },
+      initial: 'routing',
+      states: {
+        routing: {
+          always: ({ context }) => (context.treeCompared ? { target: 'rested' } : { target: 'comparing' }),
+        },
+        /*
+         * D4: records say where the head is, not what the files are.
+         *
+         * A tree restored, edited or rewound while no actor watched it would
+         * read `clean` over bytes its head does not carry. The checkout spawns
+         * `clean` so the first render waits for nothing, and moves to `dirty`
+         * when this capture answers. The capture goes through the host's memo,
+         * so the first cut after it reads only what changed since.
+         */
+        comparing: {
+          entry: () => ({ context: { treeCompared: true } }),
+          invoke: {
+            src: 'captureTree',
+            input: ({ context }) => ({ checkoutId: context.checkoutId }),
+            onDone: ({ context, event }) =>
+              event.output.treeId === context.headTreeId ? { target: 'rested' } : { target: '#checkout.dirty' },
+            onError: { target: 'rested' },
+          },
+          on: {
+            /* The answer in flight is against the old head, so the capture starts
+             * again — through `clean`'s entry, which reports the new head (M5). */
+            headChanged: {
+              target: '#checkout.clean',
+              reenter: true,
+              context: ({ event }) => ({
+                headRevisionId: event.revisionId,
+                headTreeId: event.treeId,
+                treeCompared: false,
+              }),
+            },
+          },
+        },
+        rested: {},
       },
     },
     dirty: {
@@ -457,6 +570,22 @@ const checkoutMachineDefinition = setup({
         src: 'fence',
         input: ({ context }) => ({ checkoutId: context.checkoutId }),
       },
+      on: {
+        /*
+         * L2-F5: the head moved under a running mint. Its parents were read from
+         * the old head, so finishing would publish a revision that drops the new
+         * one; abandon it and answer the requester the way a lost CAS does,
+         * rather than leaving it to wait out its own bound. The comparison then
+         * decides whether the files still differ from the new head.
+         */
+        headChanged: ({ context, event }, enq) => {
+          announce(context, enq, { type: 'casLost' });
+          return {
+            target: '#checkout.clean',
+            context: { headRevisionId: event.revisionId, headTreeId: event.treeId, treeCompared: false },
+          };
+        },
+      },
       initial: 'acquiring',
       states: {
         acquiring: {
@@ -499,6 +628,7 @@ const checkoutMachineDefinition = setup({
               trigger: context.pending?.trigger ?? 'save',
               ...(context.pending?.turnId === undefined ? {} : { turnId: context.pending.turnId }),
               leaseIds: context.pending?.leaseIds ?? [],
+              ...(context.pending?.restoredFrom === undefined ? {} : { restoredFrom: context.pending.restoredFrom }),
             }),
             onDone: {
               target: 'publishing',

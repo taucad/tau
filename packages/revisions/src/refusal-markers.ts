@@ -32,3 +32,25 @@ export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
  */
 export const isCeilingRefusal = (message: string | undefined): boolean =>
   message?.includes(ceilingRefusalMarker) ?? false;
+
+/**
+ * The fixed first words of the hosted remote's `GIT_REPOSITORY_INCOMPLETE` refusal.
+ *
+ * The manifest names a pack the store does not hold, so no retry can repair
+ * the repository; only an operator restore can. A leg that reads the JSON
+ * envelope keys on its body `code`; stock git sees only the `text/plain`
+ * sentence, so this marker is the other half. The server prints it from
+ * `incompleteRepositoryMarker` in `apps/api/app/api/git/git.constants.ts`;
+ * those two copies, both tested, are the only ones.
+ */
+export const incompleteRepositoryMarker = "Tau: this project's cloud copy is damaged";
+
+/**
+ * Whether a refusal the remote wrote says its repository is damaged.
+ *
+ * @param message - The sentence the remote sent, verbatim.
+ * @returns True when it is the incomplete-repository refusal.
+ * @public
+ */
+export const isIncompleteRepositoryRefusal = (message: string | undefined): boolean =>
+  message?.includes(incompleteRepositoryMarker) ?? false;

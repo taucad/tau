@@ -47,6 +47,13 @@
  * | 40 | `opening --offline--> queued` + `pushSettled { queued }` | **C18**: a correlated `syncNow` made offline settles instead of hanging |
  * | 41 | `pendingCount` excludes `projection` | **C19**: `n` is what the remote is owed; a failed inbound restore shows through `error` |
  * | 42 | a queue entry naming another remote is not offered | **C12**: disconnect pauses that destination's queue |
+ * | 44 | `pushing --syncNow { pushId }--> recording` + one `pushSettled` | **L2-F3**: a correlated request is never dropped by a busy state |
+ * | 45 | `opening --syncNow { pushId }--> pushing` | **L2-F3**: a pull that owes nothing still pushes for a waiting request |
+ * | 46 | `opening --onError / pullDeadline--> queued` + `pushSettled { queued }` | **L2-F3**: every exit from the pull answers |
+ * | 47 | `noRemote --syncNow { pushId }--> pushSettled { failed }` | **L2-F3**: nowhere to push is an answer, not a wait |
+ * | 48 | `failed --revisionMinted--> failed` | **L2-F6**: a terminal class never re-enters the push on a save |
+ * | 49 | `pushing --revisionMinted--> queued --syncBackoff--> opening` | **L2-F6**: a mid-push mint waits out the backoff |
+ * | 50 | `pushing → onError(REMOTE_DAMAGED) → failed`; `REMOTE_UNAVAILABLE → queued → opening` | **D22**: a damaged repository is terminal after one attempt; a 503 still retries |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -1304,5 +1311,189 @@ describe('syncMachine', () => {
     unconnected.clock.advance(2100);
     expect(unconnected.effects.running('push')).toBe(0);
     unconnected.stop();
+  });
+
+  const settledPushes = (harness: Harness): ReadonlyArray<Record<string, unknown>> =>
+    harness.parent.events.filter((event) => event.type === 'pushSettled');
+
+  it('row 44 (L2-F3): a syncNow that arrives mid-push settles once with that push, not at publish’s 60 s', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    expect(harness.actor.getSnapshot().matches('pushing')).toBe(true);
+    harness.actor.send({ type: 'syncNow', pushId: 'publish-1', remote: 'tau' });
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(settledPushes(harness)).toEqual([{ type: 'pushSettled', pushId: 'publish-1', outcome: 'backedUp' }]);
+    });
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+
+    harness.stop();
+  });
+
+  it('row 45 (L2-F3): a syncNow during the open pull is served by a push once the pull lands', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+
+    harness.actor.send({ type: 'syncNow', pushId: 'publish-1' });
+    harness.effects.settle('fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    /* Nothing is owed and nothing was minted: the correlated request alone is
+     * what makes this open push rather than settle into `backedUp` unanswered. */
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'upToDate', head: 'remote-head' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(settledPushes(harness)).toEqual([{ type: 'pushSettled', pushId: 'publish-1', outcome: 'backedUp' }]);
+    });
+
+    harness.stop();
+  });
+
+  it('row 46 (L2-F3): a pull that fails or runs out of time answers a waiting syncNow as queued', async () => {
+    const failing = start();
+    await vi.waitFor(() => {
+      expect(failing.effects.running('fetch')).toBe(1);
+    });
+    failing.actor.send({ type: 'syncNow', pushId: 'publish-1' });
+    failing.effects.settle('fetch', { error: new Error('Failed to fetch') });
+    await vi.waitFor(() => {
+      expect(settledPushes(failing)).toEqual([{ type: 'pushSettled', pushId: 'publish-1', outcome: 'queued' }]);
+    });
+    failing.stop();
+
+    const slow = start();
+    await vi.waitFor(() => {
+      expect(slow.effects.running('fetch')).toBe(1);
+    });
+    slow.actor.send({ type: 'syncNow', pushId: 'publish-2' });
+    slow.clock.advance(10_000);
+    expect(settledPushes(slow)).toEqual([{ type: 'pushSettled', pushId: 'publish-2', outcome: 'queued' }]);
+    slow.stop();
+  });
+
+  it('row 47 (L2-F3): with no remote to push to, a syncNow is answered failed at once', async () => {
+    const harness = start({ remote: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('noRemote')).toBe(true);
+    });
+
+    harness.actor.send({ type: 'syncNow', pushId: 'publish-1' });
+
+    expect(settledPushes(harness)).toEqual([{ type: 'pushSettled', pushId: 'publish-1', outcome: 'failed' }]);
+    expect(harness.effects.running('push')).toBe(0);
+
+    harness.stop();
+  });
+
+  it('row 48 (L2-F6): a terminal refusal followed by a save pushes nothing until Sync now', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'push', {
+      error: Object.assign(new Error('Tau Cloud is not part of this plan.'), { code: 'REMOTE_NOT_ENTITLED' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
+    harness.clock.advance(600_000);
+
+    expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+    expect(harness.effects.running('fetch')).toBe(0);
+
+    /* The save is owed, not forgotten: Sync now pulls and then pushes it. */
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: {}, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+
+    harness.stop();
+  });
+
+  it('row 49 (L2-F6): a mint that lands during a failed push retries no earlier than the backoff', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
+    harness.effects.settle('push', { error: new Error('Failed to fetch') });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    /* A later save waits too: `queued` is left by its backoff, not by work. */
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r3' });
+    harness.clock.advance(4999);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+    expect(harness.effects.running('fetch')).toBe(0);
+
+    harness.clock.advance(1);
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: {}, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('push')).toHaveLength(2);
+
+    harness.stop();
+  });
+
+  it('row 50 (D22): a damaged repository fails after one push and stays failed; a race-lost 503 retries', async () => {
+    const damaged = start();
+    await openCleanly(damaged);
+    damaged.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(damaged.effects, 'push', {
+      error: Object.assign(new Error("Tau: this project's cloud copy is damaged"), { code: 'REMOTE_DAMAGED' }),
+    });
+    await settleWhenRunning(damaged.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(damaged.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(selectSyncFacet(damaged.actor.getSnapshot()).reason).toBe('damaged');
+    damaged.clock.advance(600_000);
+    expect(damaged.effects.inputsFor('push')).toHaveLength(1);
+    expect(damaged.effects.running('fetch')).toBe(0);
+    damaged.stop();
+
+    const busy = start();
+    await openCleanly(busy);
+    busy.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(busy.effects, 'push', {
+      error: Object.assign(new Error('Try again shortly.'), { code: 'REMOTE_UNAVAILABLE' }),
+    });
+    await settleWhenRunning(busy.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(busy.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+    busy.clock.advance(5000);
+    await vi.waitFor(() => {
+      expect(busy.effects.running('fetch')).toBe(1);
+    });
+    busy.stop();
+  });
+
+  it('L2-F9: the open pull’s deadline is exported for the bounds that wait on it', () => {
+    expect(machineModule.syncPullDeadlineMilliseconds).toBe(10_000);
   });
 });

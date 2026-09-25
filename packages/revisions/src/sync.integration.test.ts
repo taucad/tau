@@ -20,7 +20,6 @@
  * `git` (a disk host's), because A15 is that the two legs are one transport.
  */
 
-import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,21 +38,13 @@ import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncQueueRecord } from '#sync.types.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { RevisionPort } from '#revision-port.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const chatId = 'c1';
 const chatRef = `refs/tau/chats/${chatId}`;
 const mainRef = 'refs/heads/main';
 const syncQueuePath = '.git/sync-pending';
-
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const temporaryRoots: string[] = [];
 
@@ -234,7 +225,7 @@ const queueOf = async (device_: Device): Promise<SyncQueueRecord> => {
   return JSON.parse(stored) as SyncQueueRecord;
 };
 
-describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backend — $name', (leg) => {
+describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git http-backend — $name', (leg) => {
   it('row 1 (red pin c): a refused record ref re-queues only itself while main reaches the remote', async () => {
     const remoteRoot = await temporaryRoot('remote-refuse');
     const remote = await startGitHttpBackend({ root: remoteRoot, refusedRef: chatRef });
@@ -763,7 +754,7 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
  * own timeouts, and the machine leaves `opening` on the deadline either way —
  * what is asserted here is the half that was missing, the *request* ending.
  */
-describe.runIf(gitOnPath)('the open pull’s deadline over isomorphic-git', () => {
+describe.runIf(gitToolchainOnPath)('the open pull’s deadline over isomorphic-git', () => {
   it('row 5 (red pin g): a remote that never answers has its request aborted, and the queue takes over', async () => {
     const remoteRoot = await temporaryRoot('remote-hold');
     const remote = await startGitHttpBackend({ root: remoteRoot, hold: true });

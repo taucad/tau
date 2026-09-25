@@ -141,7 +141,13 @@ export type {
   SyncQueueRecord,
   SyncRefOutcome,
 } from '#sync.types.js';
-export type { RemoteFacet, RemoteMachineEvent } from '#remote.types.js';
+export type {
+  RemoteFacet,
+  RemoteMachineEvent,
+  RemoteStorage,
+  RemoteStorageSupplier,
+  RevisionChildToast,
+} from '#remote.types.js';
 export type {
   PublishDraft,
   PublishFacet,
@@ -149,6 +155,11 @@ export type {
   PublishPublicationActorOutput,
   PublishVisibility,
 } from '#publish.types.js';
-export type { RevisionBranchFacet, RevisionConflictFacet, RevisionStatusProjection } from '#project-revisions.types.js';
+export type {
+  RevisionBranchFacet,
+  RevisionConflictFacet,
+  RevisionLine,
+  RevisionStatusProjection,
+} from '#project-revisions.types.js';
 export type { BranchOperation } from '#branch.types.js';
 export type { ResolutionSide } from '#resolution.types.js';

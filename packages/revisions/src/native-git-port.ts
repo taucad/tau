@@ -1401,7 +1401,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       );
       const fetchedReferences = wanted.map((ref) => remoteTrackingRef(input.remote, ref));
       const fetchedLargeObjects = await largeObjectPaths(fetchedReferences.map((name) => ({ name })));
-      if (fetchedLargeObjects.length > 0 && remoteCarriesLargeObjects(configuredRemote ?? input.remote)) {
+      if (
+        fetchedLargeObjects.length > 0 &&
+        configuredRemote !== undefined &&
+        remoteCarriesLargeObjects(configuredRemote)
+      ) {
         await output(['lfs', 'fetch', '--', input.remote, ...fetchedReferences], {
           env: await remoteEnvironment(input.remote, configuredRemotes),
           signal: input.signal,
@@ -1467,7 +1471,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const configuredRemotes = await port.listRemotes();
       const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
       const large = await largeObjectPaths(input.refs);
-      if (!remoteCarriesLargeObjects(configuredRemote ?? input.remote) && large.length > 0) {
+      /* An unconfigured name has no provider to ask, and no URL to push to either. */
+      if ((configuredRemote === undefined || !remoteCarriesLargeObjects(configuredRemote)) && large.length > 0) {
         throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(large));
       } else if (large.length > 0) {
         const transfer = await run(['lfs', 'push', '--', input.remote, ...input.refs.map((ref) => ref.name)], {

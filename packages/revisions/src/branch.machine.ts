@@ -55,8 +55,8 @@ export type BranchMachineInput = Readonly<{
   parentRef?: AnyActorRef;
 }>;
 
-/** Serializable state owned by branchMachine. @public */
-export type BranchMachineContext = Readonly<{
+/* The fields of {@link BranchMachineContext}, named by the interface below. */
+type BranchMachineContextFields = Readonly<{
   projectId: string;
   currentBranch: string | undefined;
   /** The verb in flight, or `undefined` while idle. */
@@ -90,8 +90,16 @@ export type BranchMachineContext = Readonly<{
   reasonCode: BranchFailureCode | undefined;
   /** Paths a merge could not settle; W10's resolution reads them. */
   conflicts: readonly string[];
+  /** The id the checkout echoes on the answer to this actor's latest cut (N2), as restore's. */
+  requestId: string | undefined;
+  /** How many cuts this actor has asked for, so each `requestId` is new. */
+  cutCount: number;
   parentRef: AnyActorRef | undefined;
 }>;
+
+/** Serializable state owned by branchMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface BranchMachineContext extends BranchMachineContextFields {}
 
 /** Events accepted by branchMachine. @public */
 export type BranchMachineEvent =
@@ -123,19 +131,27 @@ export type BranchMachineEvent =
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       revisionId: string;
     }>
-  | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{
+      type: 'nothingToSave';
+      checkoutId: string;
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      requestId?: string;
+    }>
   | Readonly<{
       type: 'cutFailed';
       /** Undefined when the cut named a checkout this project does not have. */
       checkoutId: string | undefined;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       reason: string;
       code?: BranchFailureCode;
     }>
-  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>;
+  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string; requestId?: string }>;
 
 /** One checkout as the registry names it, beside the branch it tracks. @public */
 export type BranchCheckoutRecord = Readonly<{ branch: string; checkoutId: string; checkoutRoot: string }>;
@@ -278,7 +294,13 @@ const delegate = (
       ? { type: 'addCheckout', branch: context.branch ?? '', from: context.from ?? '' }
       : type === 'removeCheckout'
         ? { type: 'removeCheckout', id: context.checkoutId ?? '' }
-        : { type: 'cut', trigger: 'switch', checkoutId: context.checkoutId, leaseIds: [] },
+        : {
+            type: 'cut',
+            trigger: 'switch',
+            checkoutId: context.checkoutId,
+            leaseIds: [],
+            ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
+          },
   );
 };
 
@@ -338,18 +360,16 @@ const branchMachineDefinition = setup({
   guards: {
     hasBase: (context: BranchMachineContext) => context.from !== undefined && context.from !== '',
     hasHead: (context: BranchMachineContext) => context.head !== undefined,
-    /* This verb's own cut: a turn's belongs to that turn (a2 R1), another
-     * checkout's to nobody here, and an ambient `save`/`idle`/`hidden`/`close`
-     * on this same checkout carries no turn id either — so the trigger is what
-     * separates the answer asked for from the one that merely arrived. */
+    /* This verb's own cut, by the id the checkout echoes (N2): a turn's cut,
+     * an ambient one, and the late answer to an earlier *New branch* that
+     * timed out all carry another id or none. */
     answersOurCut: (context: BranchMachineContext, event: BranchMachineEvent) =>
       (event.type === 'revisionMinted' ||
         event.type === 'nothingToSave' ||
         event.type === 'cutFailed' ||
         event.type === 'casLost') &&
-      event.turnId === undefined &&
-      event.trigger === 'switch' &&
-      event.checkoutId === context.checkoutId,
+      event.requestId !== undefined &&
+      event.requestId === context.requestId,
   },
 }).createMachine({
   id: 'branch',
@@ -369,6 +389,8 @@ const branchMachineDefinition = setup({
     reason: undefined,
     reasonCode: undefined,
     conflicts: [],
+    requestId: undefined,
+    cutCount: 0,
     parentRef: input.parentRef,
   }),
   on: {
@@ -569,7 +591,10 @@ const branchMachineDefinition = setup({
             },
             recording: {
               entry: ({ context }, enq) => {
-                delegate(context, enq, 'cut');
+                const cutCount = context.cutCount + 1;
+                const cut = { cutCount, requestId: `branch-${String(cutCount)}` };
+                delegate({ ...context, ...cut }, enq, 'cut');
+                return { context: cut };
               },
               after: {
                 [branchRegistryMilliseconds]: registryTimeout,

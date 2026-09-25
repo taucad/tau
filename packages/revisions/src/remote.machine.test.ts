@@ -38,18 +38,22 @@
  *
  * | 29 | `authorizing|validating|initialSync → abandoning → failed` | **C10**: a failed attempt removes the remote it wrote, so the next open is not `connected` |
  * | 30 | `reconnectRequired --authorized--> validating → failed` | **C10**: and an attempt that wrote nothing removes nothing |
+ * | 31 | `connected --quotaRefused--> --connect--> choosing` | **L2-F10**: a replaced remote does not keep the old destination's refused files |
+ * | 32 | `failed --quotaRefused-->` | **L2-F10**: a refusal forwarded outside `connected` is not dropped |
+ * | 33 | `initialSync → failed` + parent `childToast` | **L2-F8**: a toast reaches the root, not only a subscriber of this child |
  *
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
 
 import { createActor, createAsyncLogic, setup } from 'xstate';
-import type { Actor, AsyncActorLogic } from 'xstate';
+import type { Actor, AnyActorRef, AsyncActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#remote.machine.js';
 import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
 import { reauthorizationRequired } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
+import { createFakeParent } from '#test/fake-actors.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 import type { SyncFailureReason } from '#sync.types.js';
 import type {
@@ -113,6 +117,7 @@ type Overrides = Partial<RemoteActors>;
 
 const start = (
   overrides: Overrides = {},
+  parentRef?: AnyActorRef,
 ): Readonly<{ actor: Actor<typeof remoteMachine>; emitted: RemoteMachineEmitted[] }> => {
   const actors: RemoteActors = {
     readRemote: reads(undefined),
@@ -127,7 +132,9 @@ const start = (
     initialSync: createAsyncLogic({ run: async (): Promise<RemoteInitialSyncActorOutput> => ({}) }),
     ...overrides,
   };
-  const actor = createActor(remoteMachine.provide({ actors }), { input: { projectId: 'p1' } });
+  const actor = createActor(remoteMachine.provide({ actors }), {
+    input: { projectId: 'p1', ...(parentRef === undefined ? {} : { parentRef }) },
+  });
   const emitted: RemoteMachineEmitted[] = [];
   for (const type of ['remoteConnected', 'remoteDisconnected', 'toast.info', 'toast.error'] as const) {
     actor.on(type, (event) => emitted.push(event));
@@ -169,6 +176,8 @@ describe('remoteMachine', () => {
     expect(actor.getSnapshot().matches('connected')).toBe(true);
     expect(received).toStrictEqual([
       { type: 'remoteConnected', kind: 'tau', url: tauRemote.url, name: tauRemote.name },
+      /* L2-F8: the connect confirmation reaches the root too. */
+      { type: 'childToast', subject: 'remote', tone: 'info', message: 'This project is backed up.' },
     ]);
 
     actor.send({ type: 'disconnect' });
@@ -800,5 +809,57 @@ describe('remoteMachine', () => {
     const facet = selectRemoteFacet(actor.getSnapshot());
     expect({ error: facet.error, reason: facet.reason }).toStrictEqual({ error: undefined, reason: undefined });
     actor.stop();
+  });
+
+  it('31 (L2-F10): replacing a remote forgets the refused files of the one it replaced', async () => {
+    const githubRemote: RemoteRecord = {
+      name: 'origin',
+      url: 'https://github.com/o/r.git',
+      kind: 'git',
+      provider: 'github',
+    };
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      writeRemote: createAsyncLogic({ run: async () => ({ remote: githubRemote }) }),
+      validate: pending(),
+    });
+    await settle();
+    actor.send({ type: 'quotaRefused', paths: ['models/bracket.step'], storage: { remainingBytes: 0 } });
+    expect(selectRemoteFacet(actor.getSnapshot()).overQuota).toStrictEqual(['models/bracket.step']);
+
+    actor.send({ type: 'connect', kind: 'git', url: githubRemote.url, provider: 'github' });
+    await settle();
+
+    const facet = selectRemoteFacet(actor.getSnapshot());
+    expect(facet.url).toBe(githubRemote.url);
+    expect(facet.overQuota).toStrictEqual([]);
+    expect(facet.quota).toBeUndefined();
+    actor.stop();
+  });
+
+  it('32 (L2-F10): a quota refusal that arrives outside `connected` still names its files', async () => {
+    const { actor } = start({ readRemote: failing('config unreadable') });
+    await settle();
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+
+    actor.send({ type: 'quotaRefused', paths: ['huge.bin'] });
+
+    expect(selectRemoteFacet(actor.getSnapshot()).overQuota).toStrictEqual(['huge.bin']);
+    actor.stop();
+  });
+
+  it('33 (L2-F8): a failed first sync toasts through the root, not only to a subscriber of this child', async () => {
+    const parent = createFakeParent();
+    const { actor } = start({ initialSync: failing('the push was refused') }, parent.ref);
+    await settle();
+
+    actor.send({ type: 'connect', kind: 'tau' });
+    await settle();
+
+    expect(parent.events.filter((event) => event.type === 'childToast')).toStrictEqual([
+      { type: 'childToast', subject: 'remote', tone: 'error', message: 'the push was refused' },
+    ]);
+    actor.stop();
+    parent.stop();
   });
 });

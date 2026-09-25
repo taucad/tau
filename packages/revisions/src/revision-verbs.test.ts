@@ -20,16 +20,9 @@ import type { RevisionId } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 const roots: string[] = [];
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 const createdAt = Date.UTC(2026, 8, 12, 9, 0, 0);
 
 afterEach(async () => {
@@ -103,6 +96,33 @@ describe('revision verbs', () => {
     expect(rows.map((row) => row.trigger)).toStrictEqual(['idle', 'save']);
   });
 
+  /* A9: only the revision a restore minted names what it restored; the cut before it does not. */
+  it('carries restoredFrom onto the row a restore minted and onto no other', async () => {
+    const port = await openPort();
+    await port.setHead('main');
+    const first = await record(port, { parents: [], content: 'one', actorId: 'ada', summary: 'First' });
+    const before = await port.writeRevision({
+      parents: [first],
+      tree: new ImmutableRevisionTree([['part.ts', 'late']]),
+      provenance: { source: 'user', actorId: 'ada', trigger: 'restore', createdAt },
+      summary: { generated: 'Saved changes (restore)' },
+    });
+    const restored = await port.writeRevision({
+      parents: [revisionId(before.commitId)],
+      tree: new ImmutableRevisionTree([['part.ts', 'one']]),
+      provenance: { source: 'restore', actorId: 'ada', trigger: 'restore', restoredFrom: first, createdAt },
+      summary: { generated: 'Restored Rev 1' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(restored.commitId) });
+
+    const rows = await readRevisionLog(port);
+    expect(rows.map((row) => [row.revisionNumber, row.restoredFrom])).toStrictEqual([
+      [3, first],
+      [2, undefined],
+      [1, undefined],
+    ]);
+  });
+
   it('gives a merged-in revision no number of its own on this branch', async () => {
     const port = await openPort();
     await port.setHead('main');
@@ -146,7 +166,7 @@ describe('revision verbs', () => {
   /* Review a1 R8: the fix for an epoch-dated import was made on both legs and
    * asserted on one. This is the browser leg's decode, over a history stock
    * `git` wrote — the same thing a person clones. */
-  it.runIf(gitOnPath)('dates a revision it did not write by the revision itself', async () => {
+  it.runIf(gitToolchainOnPath)('dates a revision it did not write by the revision itself', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revision-verbs-stock-'));
     roots.push(root);
     /* Environment names, not identifiers: assigned rather than spelled as keys,

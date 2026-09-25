@@ -49,6 +49,11 @@ import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/f
  *     turn-bearing requests keep their order (R13)
  * 24  the queue is capped, and the request that does not fit is answered
  *     `cutFailed { reason: 'queue-full' }` rather than dropped (R13)
+ * 25  an operation's cut (`restore`, `switch`) never collapses into an ambient one,
+ *     and a restore cut carries `restoredFrom` to `writeRevision` (D1)
+ * 26  a lost CAS on a trigger-only cut is exactly one terminal answer (D3, T5)
+ * 27  a checkout spawned over a stale tree rests `clean`, then reads `dirty` when
+ *     the spawn-time comparison answers; an equal tree stays `clean` (D4)
  * --  `getSimplePaths` generates no state value the table above leaves unexercised
  */
 
@@ -77,6 +82,7 @@ const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWi
         casHead: promises.actor('casHead'),
         readHead: promises.actor('readHead'),
         fence: callbacks.actor<CheckoutFenceActorInput>('fence'),
+        captureTree: promises.actor('captureTree'),
       },
     }),
     {
@@ -632,6 +638,176 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
+  it('keeps an operation’s cut apart from the ambient ones queued beside it (D1)', () => {
+    const harness = start();
+    const { actor } = harness;
+
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', trigger: 'restore', leaseIds: [], restoredFrom: 'rev-0' });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+
+    expect(actor.getSnapshot().context.queued).toEqual([
+      { trigger: 'restore', leaseIds: [], restoredFrom: 'rev-0' },
+      { trigger: 'save', leaseIds: [] },
+    ]);
+
+    actor.stop();
+  });
+
+  it('writes a restore revision with the revision it restored (D1)', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'cut', trigger: 'restore', leaseIds: [], restoredFrom: 'rev-0' });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-1' } });
+    await flush();
+
+    expect(promises.inputsFor('writeRevision')).toEqual([
+      {
+        checkoutId: 'checkout-1',
+        cutId: 'cut-1',
+        treeId: nextTreeId,
+        parents: ['rev-1'],
+        trigger: 'restore',
+        leaseIds: [],
+        restoredFrom: 'rev-0',
+      },
+    ]);
+
+    actor.stop();
+  });
+
+  it('answers a lost CAS on a trigger-only cut exactly once, and rests dirty (T5)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    await mintToCas(harness);
+    promises.settle('casHead', { output: { status: 'conflicted', head: 'rev-9' } });
+    await flush();
+    promises.settle('readHead', { output: { revisionId: 'rev-9', treeId: 'tree-9' } });
+    await flush();
+
+    const answers = parent.events.filter(
+      (event) =>
+        event.type === 'revisionMinted' ||
+        event.type === 'nothingToSave' ||
+        event.type === 'cutFailed' ||
+        event.type === 'casLost',
+    );
+    expect(answers).toEqual([{ type: 'casLost', checkoutId: 'checkout-1', trigger: 'save' }]);
+    expect(actor.getSnapshot().matches('dirty')).toBe(true);
+
+    actor.stop();
+  });
+
+  it('answers a turn exactly once with a lost CAS when the head moves mid-mint, then drains its queue (L2-F5)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks, parent } = harness;
+
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-1', leaseIds: [] });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    actor.send({ type: 'cut', trigger: 'turn', turnId: 'turn-2', leaseIds: [] });
+    actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
+    await flush();
+    /* The abandoned cut answers late; nothing may come of it. */
+    promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-stale' } });
+    await flush();
+
+    const answers = parent.events.filter(
+      (event) =>
+        event.type === 'revisionMinted' ||
+        event.type === 'nothingToSave' ||
+        event.type === 'cutFailed' ||
+        event.type === 'casLost',
+    );
+    expect(answers).toEqual([{ type: 'casLost', checkoutId: 'checkout-1', trigger: 'turn', turnId: 'turn-1' }]);
+    /* The queued turn mints on the new head, not the abandoned one. */
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    await flush();
+    promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-2' } });
+    await flush();
+    expect(promises.inputsFor('writeRevision')).toHaveLength(1);
+    expect(promises.inputsFor('writeRevision').at(-1)).toMatchObject({ parents: ['rev-7'], turnId: 'turn-2' });
+
+    actor.stop();
+  });
+
+  it('rests clean at spawn and reads dirty once a stale tree is found (D4)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    /* The first render is never held: the checkout is `clean` before anything is read. */
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    expect(parent.events.filter((event) => event.type === 'checkoutStatusChanged')).toEqual([
+      { type: 'checkoutStatusChanged', checkoutId: 'checkout-1', status: 'clean', headRevisionId: 'rev-1' },
+    ]);
+    expect(promises.inputsFor('captureTree')).toEqual([{ checkoutId: 'checkout-1' }]);
+
+    promises.settle('captureTree', { output: { treeId: 'tree-stale' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches('dirty')).toBe(true);
+    expect(parent.events.at(-1)).toMatchObject({ type: 'checkoutStatusChanged', status: 'dirty' });
+
+    actor.stop();
+  });
+
+  it('compares again against the new head when the head moves mid-capture (D4, M5, P2)', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    /* A registry re-announce lands before the first capture answers. */
+    actor.send({ type: 'headChanged', revisionId: 'rev-2', treeId: 'tree-2' });
+    await flush();
+
+    expect(promises.inputsFor('captureTree')).toHaveLength(2);
+    /* The first, cancelled capture's answer changes nothing; the second's is read. */
+    promises.settle('captureTree', { output: { treeId: 'tree-2' } });
+    await flush();
+    expect(actor.getSnapshot().matches({ clean: 'comparing' })).toBe(true);
+    promises.settle('captureTree', { output: { treeId: 'tree-stale' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches('dirty')).toBe(true);
+
+    actor.stop();
+  });
+
+  it('echoes the request id it was asked with on the answer, so a verb matches its own cut (N2)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+
+    actor.send({ type: 'cut', trigger: 'restore', leaseIds: [], requestId: 'restore-1' });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
+    await flush();
+
+    expect(parent.events.filter((event) => event.type === 'nothingToSave')).toEqual([
+      { type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'restore', requestId: 'restore-1' },
+    ]);
+
+    actor.stop();
+  });
+
+  it('stays clean when the spawn-time comparison finds the head’s tree, and compares only once it has answered (D4)', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+    actor.send({ type: 'headChanged', revisionId: 'rev-2', treeId: 'tree-2' });
+
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    expect(promises.inputsFor('captureTree')).toHaveLength(1);
+
+    actor.stop();
+  });
+
   it('exercises every state value xstate/graph can generate', () => {
     const paths = getSimplePaths(checkoutMachine, {
       events: [
@@ -648,7 +824,8 @@ describe('checkoutMachine', () => {
       limit: 200,
     });
     const exercised = new Set([
-      '"clean"',
+      '{"clean":"rested"}',
+      '{"clean":"comparing"}',
       '{"dirty":"quiet"}',
       '"failed"',
       '"stale"',

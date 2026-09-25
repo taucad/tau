@@ -11,12 +11,48 @@ export type ProjectCardForeground = {
 };
 
 const normalizedMaskSize = 96;
+/** A colour neither renderer draws, so the backdrop never matches a lit face. */
+const backdropKey = 'rgb(255, 0, 255)';
 
 export const measureProjectCardForeground = async (
   media: Locator | string,
   surface: target.TargetSurface = 'primary',
 ): Promise<ProjectCardForeground | undefined> => {
-  const screenshot = await target.screenshot(media, undefined, surface);
+  /* Both surfaces are transparent outside the model, so keying the card's backdrop segments the silhouette
+   * itself. Against `bg-muted` the segmentation measured shading instead: the live viewer lights a pale face
+   * to within the foreground threshold of the card, while the thumbnail renderer shades it darker. */
+  await target.evaluateLocator(
+    media,
+    (element, key) => {
+      const backdrop = getComputedStyle(element).backgroundColor;
+      for (const node of [element, ...element.querySelectorAll('*')]) {
+        if (node instanceof HTMLElement && getComputedStyle(node).backgroundColor === backdrop) {
+          node.dataset['backdropKeyed'] = node.style.getPropertyValue('background-color');
+          node.style.setProperty('background-color', key, 'important');
+        }
+      }
+    },
+    backdropKey,
+    surface,
+  );
+  let screenshot: string;
+  try {
+    screenshot = await target.screenshot(media, undefined, surface);
+  } finally {
+    await target.evaluateLocator(
+      media,
+      (element) => {
+        for (const node of [element, ...element.querySelectorAll('[data-backdrop-keyed]')]) {
+          if (node instanceof HTMLElement && node.dataset['backdropKeyed'] !== undefined) {
+            node.style.setProperty('background-color', node.dataset['backdropKeyed']);
+            delete node.dataset['backdropKeyed'];
+          }
+        }
+      },
+      undefined,
+      surface,
+    );
+  }
   return target.evaluate(
     async ({ pngBase64, maskSize }) => {
       const image = new Image();
@@ -181,25 +217,16 @@ export const measureProjectCardForeground = async (
         return undefined;
       }
 
+      // Each cell samples the pixel under its centre. Marking the cell each pixel lands in instead leaves empty
+      // rows and columns in a component narrower than the mask, at positions that move with its exact size.
+      const componentWidth = bestComponent.maxX - bestComponent.minX + 1;
+      const componentHeight = bestComponent.maxY - bestComponent.minY + 1;
       const normalizedMask = new Uint8Array(maskSize * maskSize);
-      for (let y = bestComponent.minY; y <= bestComponent.maxY; y++) {
-        for (let x = bestComponent.minX; x <= bestComponent.maxX; x++) {
-          if (componentLabels[y * image.width + x] !== bestComponent.id) {
-            continue;
-          }
-          const normalizedX = Math.min(
-            Math.floor(
-              ((x - bestComponent.minX) * maskSize) / Math.max(bestComponent.maxX - bestComponent.minX + 1, 1),
-            ),
-            maskSize - 1,
-          );
-          const normalizedY = Math.min(
-            Math.floor(
-              ((y - bestComponent.minY) * maskSize) / Math.max(bestComponent.maxY - bestComponent.minY + 1, 1),
-            ),
-            maskSize - 1,
-          );
-          normalizedMask[normalizedY * maskSize + normalizedX] = 1;
+      for (let cellY = 0; cellY < maskSize; cellY++) {
+        const y = bestComponent.minY + Math.floor(((cellY + 0.5) * componentHeight) / maskSize);
+        for (let cellX = 0; cellX < maskSize; cellX++) {
+          const x = bestComponent.minX + Math.floor(((cellX + 0.5) * componentWidth) / maskSize);
+          normalizedMask[cellY * maskSize + cellX] = Number(componentLabels[y * image.width + x] === bestComponent.id);
         }
       }
 

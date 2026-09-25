@@ -801,6 +801,20 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
         });
         await two.port.push({ remote: 'tau', atomic: true, refs: [{ name: featureRef }] });
 
+        /* A pull while the linked files are unsaved leaves the branch, and
+         * moves the tracking ref past it; saving must not strand it there. */
+        /* This fixture serves every checkout from the one root. */
+        const linkedPart = 'part.scad';
+        await one.filesystem.writeFile(linkedPart, 'unsaved\n');
+        const refused = await run<{ advanced?: unknown }>(one.actors.sync.fetch, {
+          remote: 'tau',
+          branch: 'main',
+          deadlineMilliseconds: 25_000,
+        });
+        expect(refused.advanced).toBeUndefined();
+        expect(await one.port.readRef('feature')).toBe(shared);
+        await one.filesystem.writeFile(linkedPart, 'a\n');
+
         const fetched = await run<{
           leases: Readonly<Record<string, string>>;
           advanced?: ReadonlyArray<{ branch: string; revisionId: string }>;

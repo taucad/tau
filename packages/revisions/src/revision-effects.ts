@@ -2806,32 +2806,42 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           places.flatMap((place) => (place.branch === undefined ? [] : [`refs/heads/${place.branch}`])),
         );
         const advanced: Array<NonNullable<SyncFastForwardActorOutput> & Readonly<{ branch: string }>> = [];
+        /* D60: another checkout's branch the remote moved on, with no work of
+         * its own, follows as the live one does. Left behind, every push
+         * offered it under a lease it could never integrate — `leaseLost` on
+         * each retry, for ever. Unsaved or leased files, or local work, keep it
+         * where it is. Ancestry, not the tracking ref before this fetch: an
+         * earlier fetch that moved the tracking ref while the files were
+         * unsaved must not strand the branch once they are saved. */
+        const followRemote = async (branch: `refs/heads/${string}`, head: string): Promise<void> => {
+          const local = localByName.get(branch);
+          if (local === undefined || local === head) {
+            return;
+          }
+          const walk = await port.log({ heads: [revisionId(head), revisionId(local)], limit: divergenceWalkLimit });
+          if (integrationOf(walk, revisionId(local), revisionId(head)) !== 'fastForward') {
+            return;
+          }
+          const name = branch.slice('refs/heads/'.length);
+          try {
+            const moved = await fastForwardBranch({ remote: input.remote, branch: name }, signal);
+            localByName.set(branch, head);
+            if (moved !== undefined) {
+              advanced.push({ ...moved, branch: name });
+            }
+          } catch (error) {
+            if (!(error instanceof RevisionPortError && error.code === 'CHECKOUT_CONFLICT')) {
+              throw error;
+            }
+          }
+        };
         for (const [branch, head] of advertisedBranches) {
           if (branch === activeBranch) {
             continue;
           }
           if (checkedOut.has(branch)) {
-            /* D60: another checkout's branch the remote moved on, with no work
-             * of its own since the last fetch, follows as the live one does.
-             * Left behind, every push offered it under a lease it could never
-             * integrate — `leaseLost` on each retry, for ever. Unsaved or
-             * leased files, or local work, keep it where it is. */
-            const local = localByName.get(branch);
-            if (local !== undefined && local !== head && local === priorByBranch.get(branch)) {
-              const name = branch.slice('refs/heads/'.length);
-              try {
-                // oxlint-disable-next-line no-await-in-loop -- each checkout is fenced on its own.
-                const moved = await fastForwardBranch({ remote: input.remote, branch: name }, signal);
-                localByName.set(branch, head);
-                if (moved !== undefined) {
-                  advanced.push({ ...moved, branch: name });
-                }
-              } catch (error) {
-                if (!(error instanceof RevisionPortError && error.code === 'CHECKOUT_CONFLICT')) {
-                  throw error;
-                }
-              }
-            }
+            // oxlint-disable-next-line no-await-in-loop -- each checkout is fenced on its own.
+            await followRemote(branch, head);
             continue;
           }
           const local = localByName.get(branch);

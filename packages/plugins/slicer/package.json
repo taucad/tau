@@ -39,6 +39,11 @@
     ".": "./src/index.ts",
     "./toolpath": "./src/toolpath.ts",
     "./container": "./src/container.ts",
+    "./bambu-studio": {
+      "types": "./src/bambu-studio/engine.ts",
+      "node": "./src/bambu-studio/engine.ts",
+      "default": "./src/bambu-studio/engine.stub.ts"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -59,11 +64,27 @@
         "import": "./dist/container.mjs",
         "default": "./dist/container.mjs"
       },
+      "./bambu-studio": {
+        "types": "./dist/bambu-studio/engine.d.mts",
+        "node": "./dist/bambu-studio/engine.mjs",
+        "default": "./dist/bambu-studio/engine.stub.mjs"
+      },
       "./package.json": "./package.json"
     },
-    "imports": {}
+    "imports": {
+      "#bambu-studio/engine.js": {
+        "types": "./dist/bambu-studio/engine.d.mts",
+        "node": "./dist/bambu-studio/engine.mjs",
+        "default": "./dist/bambu-studio/engine.stub.mjs"
+      }
+    }
   },
   "imports": {
+    "#bambu-studio/engine.js": {
+      "types": "./src/bambu-studio/engine.ts",
+      "node": "./src/bambu-studio/engine.ts",
+      "default": "./src/bambu-studio/engine.stub.ts"
+    },
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },

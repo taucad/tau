@@ -19,6 +19,9 @@ const celsius = () =>
 const millimetresPerSecond = () => quantity({ unit: 'mm/s', quantityKind: quantityKinds.speed, space: 'linear' });
 const percent = () => quantity({ unit: '%', quantityKind: quantityKinds.dimensionlessRatio, space: 'linear' });
 
+const presetName = () => z.string().min(1).max(256);
+const bambuPlateId = z.enum(['cool', 'engineering', 'high-temperature', 'textured-pei']);
+
 /** Layer heights the quality presets select when `layerHeight` is omitted. @public */
 export const slicerPresets = Object.freeze({
   fast: Object.freeze({ layerHeight: 0.28 }),
@@ -30,9 +33,11 @@ export const slicerPresets = Object.freeze({
 export const slicerOptionsSchema = z
   .object({
     engine: z
-      .enum(['reference', 'service'])
+      .enum(['reference', 'service', 'bambu-studio'])
       .default('reference')
-      .describe('In-process reference engine or the configured tau-slicer-service companion'),
+      .describe(
+        "In-process reference engine, the configured tau-slicer-service companion, or the person's installed Bambu Studio (desktop only)",
+      ),
     preset: z.enum(['fast', 'standard', 'fine']).default('standard').describe('Quality preset; sets the layer height'),
     layerHeight: millimetres().min(0.05).max(0.6).optional().describe('Layer height; defaults from the preset'),
     walls: z.number().int().min(1).max(16).default(2).describe('Perimeter loops per layer'),
@@ -57,6 +62,51 @@ export const slicerOptionsSchema = z
       .strict()
       .optional()
       .describe('Companion service endpoint; honoured only when engine is "service"'),
+    bambuStudio: z
+      .object({
+        printer: presetName().optional().describe('Bambu Studio printer preset'),
+        process: presetName().optional().describe('Bambu Studio process preset'),
+        filaments: z.array(presetName()).min(1).max(16).optional().describe('Filament preset per used slot, in order'),
+        plate: bambuPlateId.optional().describe('Build plate'),
+        settings: z
+          .record(
+            z.string().min(1).max(128),
+            z.union([
+              z.string().max(65_536),
+              z.number(),
+              z.boolean(),
+              z.null(),
+              z.array(z.union([z.string().max(4096), z.number()])).max(64),
+            ]),
+          )
+          .optional()
+          .describe('Bambu Studio setting keys and values applied over the presets'),
+        hints: z
+          .object({
+            model: z.string().min(1).max(64).describe('Printer model, for example X1C'),
+            nozzleDiameter: millimetres().min(0.1).max(2).optional().describe('Installed nozzle diameter'),
+            preset: z.enum(['fast', 'standard', 'fine']).optional().describe('Quality preset for the default process'),
+            plate: bambuPlateId.optional().describe('Operator-confirmed build plate'),
+            materials: z
+              .array(
+                z
+                  .object({
+                    slot: z.number().int().min(0).max(255),
+                    materialId: z.string().min(1).max(128).optional().describe('Tray material type, for example PETG'),
+                    profileId: z.string().min(1).max(128).optional().describe('Tray Bambu filament id'),
+                  })
+                  .strict(),
+              )
+              .max(16)
+              .describe('Loaded material per used slot'),
+          })
+          .strict()
+          .optional()
+          .describe('What the bound printer reports; fills presets not chosen above'),
+      })
+      .strict()
+      .optional()
+      .describe('Bambu Studio presets and overrides; honoured only when engine is "bambu-studio"'),
   })
   .strict();
 

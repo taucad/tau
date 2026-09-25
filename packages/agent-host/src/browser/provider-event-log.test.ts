@@ -106,7 +106,7 @@ describe('createProviderEventLog', () => {
     await first.append(event(0));
     files.delete(`${filePath}.lock`);
     const thief = await createProviderEventLog({ fileSystem, filePath, access: 'write' });
-    await thief.append({ ...event(0), leaderEpoch: 'leader-2', state: 'running' });
+    await thief.append({ ...event(1), leaderEpoch: 'leader-2', sequence: 0 });
     const stolen = files.get(filePath);
 
     await expect(first.append(event(1))).rejects.toMatchObject({ code: 'LOG_FENCED' });

@@ -985,7 +985,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
        * save on it records nothing. A lease has no heartbeat by policy (§8),
        * so this host giving up is the only liveness signal it has.
        */
-      actor.send({ type: 'turnAbandoned', key });
+      actor.send({ type: 'turnAbandoned', key, legacy: true });
       /*
        * And the run id becomes admittable again, as it does on every other way
        * an admission ends (`turnReleased`, a failed `execute`).
@@ -1164,6 +1164,13 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       actor.on('cutFailed', (event) => {
         if (event.requestId === requestId) {
           settledCut.reject(new Error(event.reason));
+        }
+      }),
+      /* A lost compare-and-swap means another writer moved the head first; the
+       * next host to open the project mints these same bytes. */
+      actor.on('casLost', (event) => {
+        if (event.requestId === requestId) {
+          settledCut.resolve();
         }
       }),
     ];
@@ -1651,7 +1658,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             /* Sent straight through: `turn.machine` buffers a completion that
              * arrives while it is still `preparing` and replays it on
              * `leased.held`, so the host holds nothing (W6). */
-            actor.send({ type: 'turnCompleted', key });
+            actor.send({ type: 'turnCompleted', key, legacy: true });
           }
         } catch (error) {
           /* A durable subscription can *error* — the launcher's fan-out drops
@@ -1706,7 +1713,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
               /* Named by attempt: an edit reuses the message id the previous
                * run leased, so the verb must not end whichever run holds that
                * turn id now (D14). */
-              actor.send({ type: 'turnAbandoned', key });
+              actor.send({ type: 'turnAbandoned', key, legacy: true });
               turns.delete(command.runId);
             }
             options.checkouts?.delete(command.runId);

@@ -5,8 +5,25 @@ import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ServiceUnavailableException } from '@nestjs/common';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { ServiceUnavailableException, VersioningType } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { APP_FILTER } from '@nestjs/core';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { Test } from '@nestjs/testing';
+import { AuthGuard } from '#auth/auth.guard.js';
+import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
+import type { RedisService } from '#redis/redis.service.js';
+import { GitController } from '#api/git/git.controller.js';
+import { GitLfsService } from '#api/git/git-lfs.service.js';
+import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import {
+  hydratesFromOthersPerOwnerPerDay,
+  hydratesPerCallerPerDay,
+  incompleteRepositoryMarker,
+} from '#api/git/git.constants.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
@@ -15,6 +32,7 @@ import type { GitAccess } from '#api/git/git.service.js';
 import { commitLease } from '#api/git/store/commit.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
+import { decodeManifest } from '#api/git/store/manifest.js';
 import type {
   CommitToken,
   ManifestBytes,
@@ -138,29 +156,43 @@ type GitRow = { generation: number; derivedGeneration: number; storageBytes: num
  * reachability pass opens. `failTransaction` is how a broken derivation is
  * expressed — that is what a worker that dies inside one looks like from here.
  */
-const databaseStub = (row: GitRow, control: { failTransaction: boolean }): DatabaseService => {
+const databaseStub = (
+  row: GitRow,
+  control: {
+    failTransaction: boolean;
+    /** What the publication lookup answers: the ref-removal verb's check (D24). */
+    publications?: readonly unknown[];
+    /** Every `update().set(...)` payload, in order: how a retirement is seen. */
+    updates?: Array<Record<string, unknown>>;
+  },
+): DatabaseService => {
+  const { publications = [], updates = [] } = control;
   const update = (): unknown => ({
-    set: () => ({ where: () => ({ returning: async (): Promise<unknown[]> => [] }) }),
+    set: (payload: Record<string, unknown>) => {
+      updates.push(payload);
+      return { where: () => ({ returning: async (): Promise<unknown[]> => [] }) };
+    },
   });
   /* oxlint-disable typescript/promise-function-async -- a Drizzle builder is
      both awaitable and chainable; an `async` member would return a promise of
      the builder rather than being one. */
+  const select = (): unknown => ({
+    from: () => ({
+      /* Two readers, two shapes: the generation read ends in `.limit(1)`,
+         and the materializer's publication lookup awaits the builder
+         itself. Both are answered here so a derivation that throws is a
+         real failure rather than a stub that ran out of methods. */
+      where: () =>
+        Object.assign(Promise.resolve([...publications]), {
+          limit: async (): Promise<unknown[]> => [
+            { generation: row.generation, derivedGeneration: row.derivedGeneration },
+          ],
+        }),
+    }),
+  });
   return {
     database: {
-      select: () => ({
-        from: () => ({
-          /* Two readers, two shapes: the generation read ends in `.limit(1)`,
-             and the materializer's publication lookup awaits the builder
-             itself. Both are answered here so a derivation that throws is a
-             real failure rather than a stub that ran out of methods. */
-          where: () =>
-            Object.assign(Promise.resolve([] as unknown[]), {
-              limit: async (): Promise<unknown[]> => [
-                { generation: row.generation, derivedGeneration: row.derivedGeneration },
-              ],
-            }),
-        }),
-      }),
+      select,
       insert: () => ({
         values: (values: Partial<GitRow>) => ({
           onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
@@ -182,14 +214,23 @@ const databaseStub = (row: GitRow, control: { failTransaction: boolean }): Datab
         if (control.failTransaction) {
           throw new Error('the worker died inside the derivation');
         }
-        return run({ execute: async (): Promise<void> => undefined, update });
+        return run({ execute: async (): Promise<void> => undefined, select, update });
       },
     },
   } as unknown as DatabaseService;
   /* oxlint-enable typescript/promise-function-async -- end of the builder stub */
 };
 
-const createService = (store: RepositoryStore, database: DatabaseService): GitRepositoryService =>
+/** A hydrate budget that always has room, unless a row says otherwise. */
+const roomyBudget = {
+  consumeWindowBudget: async () => ({ allowed: true, count: 1, retryAfterSeconds: 1 }),
+} as unknown as PublicationRateLimiterService;
+
+const createService = (
+  store: RepositoryStore,
+  database: DatabaseService,
+  rateLimiter: PublicationRateLimiterService = roomyBudget,
+): GitRepositoryService =>
   new GitRepositoryService(
     database,
     { getEntitlements: async () => ({ tier: 'pro', canSyncFiles: true }) } as unknown as CommercialEntitlementsService,
@@ -199,12 +240,14 @@ const createService = (store: RepositoryStore, database: DatabaseService): GitRe
       invalidate: () => undefined,
     } as unknown as ProjectAccessService,
     store,
+    rateLimiter,
   );
 
 const access: GitAccess = {
   projectId,
   ownerId,
   role: 'owner',
+  callerId: ownerId,
   remainingBytes: 10 * 1024 ** 3,
   storageLimitBytes: 10 * 1024 ** 3,
 };
@@ -402,6 +445,395 @@ describe('GitRepositoryService derived state (D19)', () => {
     await expect(service.advertiseRefs(access, 'git-upload-pack')).rejects.toMatchObject({
       response: { code: 'GIT_LEASE_DISK_FULL' },
     });
+  });
+});
+
+/**
+ * D22, D24, EQ11 and the terminal `GIT_REPOSITORY_INCOMPLETE`, over a store of
+ * their own: the removal verb moves this store's refs, which the D19 rows above
+ * must not see.
+ */
+describe('GitRepositoryService security floor (W9)', () => {
+  const store = memoryStore();
+  const locator = repositoryLocator({ ownerId, projectId });
+  const caughtUp = (): DatabaseService =>
+    databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false });
+
+  beforeAll(async () => {
+    const client = scratch('floor-client');
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'W9');
+    git(client, 'config', 'user.email', 'w9@tau.test');
+    writeFileSync(path.join(client, 'main.scad'), 'cube(10);\n');
+    git(client, 'add', '.');
+    git(client, 'commit', '--quiet', '-m', 'first revision');
+    git(client, 'tag', '-a', 'v1', '-m', 'v1');
+    git(client, 'tag', 'v2');
+    git(client, 'branch', 'conflicts/main/device-b');
+
+    const lease = await hydrateLease({ store, locator, parentDirectory: scratch('floor-lease') });
+    try {
+      execFileSync(
+        'git',
+        ['push', lease.directory, 'main', 'refs/tags/v1', 'refs/tags/v2', 'refs/heads/conflicts/main/device-b'],
+        { cwd: client, stdio: ['ignore', 'pipe', 'pipe'], env: gitEnvironment },
+      );
+      const result = await commitLease({ store, lease, committedBy: ownerId });
+      expect(result.committed).toBe(true);
+    } finally {
+      await lease.dispose();
+    }
+  }, 60_000);
+
+  const manifestReferences = async (): Promise<Record<string, unknown>> => {
+    const read = await store.readManifest(locator);
+    return read === undefined ? {} : decodeManifest(read.manifest).refs;
+  };
+
+  /* D22 / L6-F3 / RV-W9 M3: one owner holds at most half a worker's slots and
+     never its last, so with a realistic eight slots a second owner's second
+     request and a third owner are still admitted while the first owner is
+     saturating the worker. */
+  it('keeps one owner to half of eight slots, so two other owners are still admitted', async () => {
+    const service = createService(store, caughtUp());
+    const { bavail, bsize } = await statfs(tmpdir());
+    /* Eight slots on this disk, whatever its size. */
+    service.leaseDiskBytesPerLease = Math.floor((bavail * bsize) / 8.5);
+    const ownerB: GitAccess = { ...access, ownerId: 'user-w9-b', callerId: 'user-w9-b' };
+    const ownerC: GitAccess = { ...access, ownerId: 'user-w9-c', callerId: 'user-w9-c' };
+    const gate = Promise.withResolvers<void>();
+    const held: Array<Promise<unknown>> = [];
+    /** Starts one lease that stays open until the gate opens, and waits until it is admitted. */
+    const hold = async (who: GitAccess): Promise<void> => {
+      const admitted = Promise.withResolvers<void>();
+      held.push(
+        service.withLease(who, async () => {
+          admitted.resolve();
+          await gate.promise;
+        }),
+      );
+      await admitted.promise;
+    };
+
+    try {
+      for (let lease = 0; lease < 4; lease += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- each lease is admitted before the next is asked for
+        await hold(access);
+      }
+      await expect(service.withLease(access, async () => undefined)).rejects.toMatchObject({
+        response: { code: 'GIT_LEASE_OWNER_BUSY' },
+      });
+      await hold(ownerB);
+      await hold(ownerB);
+      await hold(ownerC);
+    } finally {
+      gate.resolve();
+      await Promise.all(held);
+    }
+    /* Every admission came back: the first owner is admitted again. */
+    await expect(service.withLease(access, async () => 'admitted')).resolves.toBe('admitted');
+  }, 60_000);
+
+  /* D22 ruling: a caller's daily bucket is its own per owner, and everybody
+     who is not the owner also shares one aggregate; neither is ever the
+     owner's, so a read collaborator that spends everything it can does not
+     lock the owner out of their own repository. */
+  it('refuses a collaborator that spent its hydrate budget and still admits the owner', async () => {
+    const counters = new Map<string, number>();
+    const limiter = new PublicationRateLimiterService({
+      client: {
+        // oxlint-disable-next-line max-params -- `eval(script, numberOfKeys, key, expiry, count)` is Redis's own signature
+        eval: async (_script: string, _keys: number, key: string, _expiry: string, count: string): Promise<number> => {
+          const next = (counters.get(key) ?? 0) + Number(count);
+          counters.set(key, next);
+          return next;
+        },
+      },
+    } as unknown as RedisService);
+    const day = Math.floor(Date.now() / 86_400_000);
+    counters.set(`git:hydrate:${ownerId}:caller:user-w9-reader:w86400:${String(day)}`, hydratesPerCallerPerDay);
+    const service = createService(store, caughtUp(), limiter);
+    const reader: GitAccess = { ...access, role: 'read', callerId: 'user-w9-reader' };
+
+    await expect(service.advertiseRefs(reader, 'git-upload-pack')).rejects.toMatchObject({
+      status: 429,
+      response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' },
+    });
+    await expect(service.advertiseRefs(access, 'git-upload-pack')).resolves.toBeDefined();
+
+    /* The aggregate every non-owner shares: spent, it refuses a second reader
+       too, and still never the owner. */
+    counters.set(`git:hydrate:${ownerId}:others:w86400:${String(day)}`, hydratesFromOthersPerOwnerPerDay);
+    await expect(
+      service.advertiseRefs({ ...reader, callerId: 'user-w9-other-reader' }, 'git-upload-pack'),
+    ).rejects.toMatchObject({ status: 429 });
+    await expect(service.advertiseRefs(access, 'git-upload-pack')).resolves.toBeDefined();
+  }, 60_000);
+
+  it('answers 429 with the wait when a hydrate budget is spent, before hydrating', async () => {
+    let hydrated = false;
+    const watched: RepositoryStore = {
+      ...store,
+      readManifest: async (at) => {
+        hydrated = true;
+        return store.readManifest(at);
+      },
+    };
+    const spent = {
+      consumeWindowBudget: async (args: { key: string }) => {
+        expect(args.key).toBe(`git:hydrate:${ownerId}:owner`);
+        return { allowed: false, count: hydratesPerCallerPerDay + 1, retryAfterSeconds: 3600 };
+      },
+    } as unknown as PublicationRateLimiterService;
+
+    await expect(
+      createService(watched, caughtUp(), spent).advertiseRefs(access, 'git-upload-pack'),
+    ).rejects.toMatchObject({
+      status: 429,
+      response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED', retryAfterSeconds: 3600 },
+    });
+    expect(hydrated).toBe(false);
+  });
+
+  /* L6-F8: a 500 that says so in words the client can classify, never a 503. */
+  it('answers a manifest naming a missing pack with a terminal 500 that opens with the marker', async () => {
+    const damaged: RepositoryStore = {
+      ...store,
+      listObjects: () =>
+        (async function* () {
+          /* The store holds none of the packs the manifest names. */
+        })(),
+    };
+
+    const refusal = createService(damaged, caughtUp()).advertiseRefs(access, 'git-upload-pack');
+    await expect(refusal).rejects.toMatchObject({ status: 500, response: { code: 'GIT_REPOSITORY_INCOMPLETE' } });
+    await expect(refusal).rejects.not.toBeInstanceOf(ServiceUnavailableException);
+    let message = '';
+    try {
+      await refusal;
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message.startsWith(incompleteRepositoryMarker)).toBe(true);
+    expect(message).not.toContain('packs/');
+  });
+
+  /**
+   * I9 through the real receive path (RV-W9 M2): a lease's `receive-pack`,
+   * its configuration and its hook, fed crafted commits by a stock `git push`.
+   * A tree with two `events` entries is refused by `receive.fsckObjects`
+   * before the hook, and a segment whose mode changes under the same bytes is
+   * refused by the hook; an ordinary two-device append still lands.
+   */
+  describe('chat segments through receive-pack (I9)', () => {
+    const chatRef = 'refs/tau/chats/chat_w9';
+    let client: string;
+    let leaseDirectory: string;
+    let dispose: () => Promise<void>;
+    let base: string;
+
+    const push = (commit: string): { ok: boolean; output: string } => {
+      try {
+        execFileSync('git', ['push', '--quiet', leaseDirectory, `${commit}:${chatRef}`], {
+          cwd: client,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: gitEnvironment,
+        });
+        return { ok: true, output: '' };
+      } catch (error) {
+        return { ok: false, output: String((error as { stderr?: unknown }).stderr) };
+      }
+    };
+    /** A commit on `parent` whose tree is `tree`. */
+    const commitTree = (tree: string, parent: string): string =>
+      git(client, 'commit-tree', tree, '-p', parent, '-m', 'chat').trim();
+
+    beforeAll(async () => {
+      client = scratch('chat-client');
+      git(client, 'init', '--quiet', '--initial-branch=main', '.');
+      git(client, 'config', 'user.name', 'W9');
+      git(client, 'config', 'user.email', 'w9@tau.test');
+      mkdirSync(path.join(client, 'events'));
+      writeFileSync(path.join(client, 'events', 'device-a.jsonl'), '{"n":1}\n');
+      writeFileSync(path.join(client, 'events', 'device-b.jsonl'), '{"n":1}\n');
+      git(client, 'add', '.');
+      git(client, 'commit', '--quiet', '-m', 'chat');
+      base = git(client, 'rev-parse', 'HEAD').trim();
+
+      const lease = await hydrateLease({
+        store: memoryStore(),
+        locator: repositoryLocator({ ownerId, projectId: 'proj-w9-chat' }),
+        parentDirectory: scratch('chat-lease'),
+      });
+      leaseDirectory = lease.directory;
+      dispose = async () => lease.dispose();
+      expect(push(base).ok).toBe(true);
+    }, 60_000);
+
+    afterAll(async () => {
+      await dispose();
+    });
+
+    it('refuses a tree with two events entries, which readers resolve differently', () => {
+      const original = git(client, 'rev-parse', `${base}:events`).trim();
+      writeFileSync(path.join(client, 'events', 'device-b.jsonl'), '{"forged":true}\n');
+      git(client, 'add', '.');
+      const forged = git(client, 'write-tree').trim();
+      const forgedEvents = git(client, 'rev-parse', `${forged}:events`).trim();
+      git(client, 'checkout', '--quiet', '--', '.');
+      git(client, 'reset', '--quiet', '--hard', base);
+      /* Raw tree bytes, because no porcelain writes a duplicate entry. */
+      const entry = (oid: string): Uint8Array<ArrayBuffer> =>
+        Buffer.concat([Buffer.from('40000 events\0'), Buffer.from(oid, 'hex')]);
+      const duplicate = execFileSync('git', ['hash-object', '-t', 'tree', '-w', '--literally', '--stdin'], {
+        cwd: client,
+        input: Buffer.concat([entry(original), entry(forgedEvents)]),
+        env: gitEnvironment,
+        encoding: 'utf8',
+      }).trim();
+
+      const pushed = push(commitTree(duplicate, base));
+      expect(pushed.ok, 'a duplicate-entry tree reached the ref').toBe(false);
+      expect(pushed.output).toMatch(/duplicateEntries|duplicate entries/iu);
+    });
+
+    it('refuses a segment whose mode changes under the same bytes', () => {
+      git(client, 'reset', '--quiet', '--hard', base);
+      git(client, 'update-index', '--chmod=+x', 'events/device-a.jsonl');
+      const tree = git(client, 'write-tree').trim();
+      git(client, 'reset', '--quiet', '--hard', base);
+
+      const pushed = push(commitTree(tree, base));
+      expect(pushed.ok, 'a mode change reached the ref').toBe(false);
+      expect(pushed.output).toContain('chat log only grows');
+    });
+
+    it('lands an ordinary two-device append', () => {
+      git(client, 'reset', '--quiet', '--hard', base);
+      writeFileSync(path.join(client, 'events', 'device-a.jsonl'), '{"n":1}\n{"n":2}\n');
+      writeFileSync(path.join(client, 'events', 'device-b.jsonl'), '{"n":1}\n{"n":3}\n');
+      writeFileSync(path.join(client, 'events', 'device-c.jsonl'), '{"n":1}\n');
+      git(client, 'add', '.');
+      git(client, 'commit', '--quiet', '-m', 'append');
+
+      const pushed = push(git(client, 'rev-parse', 'HEAD').trim());
+      expect(pushed.ok, pushed.output).toBe(true);
+    });
+  });
+
+  describe('the audited ref-removal verb (D24)', () => {
+    const published = { id: 'pub_w9', title: 'Bracket v1', visibility: 'public' };
+
+    it('refuses a collaborator, and any ref that is not a named version or a conflict line', async () => {
+      const service = createService(store, caughtUp());
+
+      await expect(
+        service.removeRef({ access: { ...access, role: 'write' }, ref: 'refs/tags/v2', committedBy: 'user-w9-writer' }),
+      ).rejects.toMatchObject({ status: 403 });
+      for (const ref of ['refs/heads/main', 'refs/tau/chats/chat_1', 'refs/tags/../heads/main']) {
+        // oxlint-disable-next-line no-await-in-loop -- one refusal per ref
+        await expect(service.removeRef({ access, ref, committedBy: ownerId })).rejects.toMatchObject({
+          status: 400,
+          response: { code: 'GIT_REF_NOT_REMOVABLE' },
+        });
+      }
+      expect(await manifestReferences()).toHaveProperty(['refs/tags/v2']);
+    });
+
+    /* RV-W9 M1: the publication has to reach the client, or it can never be
+       confirmed. Driven over HTTP through the controller and the global
+       exception filter, with the real service deciding. */
+    it('answers DELETE on a published name with 409 whose body carries the publication', async () => {
+      const service = createService(
+        store,
+        databaseStub(
+          { generation: 1, derivedGeneration: 1, storageBytes: 0 },
+          { failTransaction: false, publications: [published] },
+        ),
+      );
+      vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({ storageBytes: 0, lfsBytes: 0 });
+      const moduleRef = await Test.createTestingModule({
+        controllers: [GitController],
+        providers: [
+          { provide: GitRepositoryService, useValue: service },
+          { provide: GitLfsService, useValue: {} },
+          { provide: PublicationRateLimiterService, useValue: roomyBudget },
+          { provide: ConfigService, useValue: { get: () => 'https://api.tau.test' } },
+          { provide: APP_FILTER, useClass: HttpExceptionFilter },
+        ],
+      })
+        .overrideGuard(AuthGuard)
+        .useValue({
+          canActivate: (context: ExecutionContext): boolean => {
+            context.switchToHttp().getRequest<{ user?: unknown }>().user = { id: ownerId };
+            return true;
+          },
+        })
+        .compile();
+      const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+      app.enableVersioning({ type: VersioningType.URI });
+      await app.init();
+      await app.getHttpAdapter().getInstance().ready();
+      try {
+        const answer = await app.inject({
+          method: 'DELETE',
+          url: `/v1/git/${projectId}.git/refs?name=${encodeURIComponent('refs/tags/v1')}`,
+        });
+
+        expect(answer.statusCode).toBe(409);
+        expect(answer.json()).toMatchObject({ code: 'GIT_REF_PUBLISHED', publication: published });
+        expect(await manifestReferences()).toHaveProperty(['refs/tags/v1']);
+      } finally {
+        await app.close();
+      }
+    }, 60_000);
+
+    it('retires the publication with the name once confirmed, in the same step (D24, RV-W9 M5)', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      const service = createService(
+        store,
+        databaseStub(
+          { generation: 1, derivedGeneration: 1, storageBytes: 0 },
+          { failTransaction: false, publications: [published], updates },
+        ),
+      );
+
+      await expect(service.removeRef({ access, ref: 'refs/tags/v1', committedBy: ownerId })).resolves.toStrictEqual({
+        outcome: 'confirm',
+        publication: published,
+      });
+      expect(updates).toStrictEqual([]);
+
+      const removed = await service.removeRef({
+        access,
+        ref: 'refs/tags/v1',
+        committedBy: ownerId,
+        confirmPublicationId: published.id,
+      });
+      expect(removed).toMatchObject({ outcome: 'removed', ref: 'refs/tags/v1', publication: published });
+      expect(updates[0]).toMatchObject({ unpublishedAt: expect.any(Date) as unknown });
+      expect(await manifestReferences()).not.toHaveProperty(['refs/tags/v1']);
+    }, 60_000);
+
+    it('removes an abandoned conflict line at the owner’s request and records it without a tip (EQ11)', async () => {
+      const service = createService(store, caughtUp());
+
+      await service.removeRef({ access, ref: 'refs/heads/conflicts/main/device-b', committedBy: ownerId });
+
+      const read = await store.readManifest(locator);
+      const manifest = decodeManifest(read?.manifest ?? new Uint8Array());
+      expect(manifest.refs).not.toHaveProperty(['refs/heads/conflicts/main/device-b']);
+      expect(manifest.refs).toHaveProperty(['refs/heads/main']);
+      expect(manifest.pushes.at(-1)).toMatchObject({
+        committedBy: ownerId,
+        refs: [{ ref: 'refs/heads/conflicts/main/device-b' }],
+      });
+      expect(manifest.pushes.at(-1)?.refs[0]).not.toHaveProperty('tip');
+
+      await expect(
+        service.removeRef({ access, ref: 'refs/heads/conflicts/main/device-b', committedBy: ownerId }),
+      ).rejects.toMatchObject({ status: 404, response: { code: 'GIT_REF_NOT_FOUND' } });
+    }, 60_000);
   });
 });
 

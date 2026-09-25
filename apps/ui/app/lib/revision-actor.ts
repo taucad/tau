@@ -18,12 +18,34 @@
  * Anonymity is applied **here**, before the revision is written, which is what
  * makes "switching it never rewrites history" true rather than aspirational:
  * what was recorded was recorded, and the next mint records differently.
+ *
+ * **Anonymity is a promise (EQ10 option (a)).** The pseudonym derives from a
+ * salt nothing in the tree records: for a signed-in person, the one the API
+ * serves their account for this workspace (`GET /v1/revisions/salt`), cached
+ * here in host state; signed out, a random one this device keeps per
+ * workspace. So the same person is one `Anonymous` in a workspace on every
+ * device, a different one in every other workspace, and nobody holding the
+ * history — even with every user id it records — can recompute who it is.
+ *
+ * The account's salt is fetched as soon as a signed-in document opens a
+ * workspace, whether or not anonymity is on, so it is already in host state
+ * the first time anonymity is chosen and survives going offline. The one
+ * residual is a device that has never been online signed in to that
+ * workspace: until the API has answered once, it records under its own
+ * device salt, a second pseudonym for the same person that is still
+ * unlinkable.
+ *
+ * The salt is keyed by the workspace slug from the route. It is the one
+ * workspace name two devices share: a workspace's `wsp_` id is minted per
+ * device (`handle-store.ts`) and Home has none, so an id would give the same
+ * person a different pseudonym on every device.
  */
 
 import { Topic } from '@taucad/events';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { RevisionUserActor } from '@taucad/revisions';
-import { deviceId } from '#lib/device-id.js';
+import { randomUuid } from '@taucad/utils/id';
+import { ENV } from '#environment.config.js';
 
 /** Local-storage key prefix; one entry per workspace (EQ8). @public */
 export const anonymousRevisionsStorageKeyPrefix = 'tau-anonymous-revisions:';
@@ -131,26 +153,131 @@ export const useRevisionSessionUser = (): RevisionSessionUser | undefined =>
     () => undefined,
   );
 
+/** Local-storage key prefix for the salts this host keeps; never written to the tree (EQ10). @public */
+export const revisionSaltStorageKeyPrefix = 'tau-revision-salt:';
+
+const saltTopic = new Topic<void>({ name: 'revision-salt' });
+
+/** Salts for a document whose storage throws, so its pseudonym is still stable for the session. */
+const unstoredSalts = new Map<string, string>();
+
+/** Account salts already asked for, so every mounted consumer shares one request. */
+const requestedSalts = new Set<string>();
+
+const saltKey = (workspace: string, userId?: string): string =>
+  `${revisionSaltStorageKeyPrefix}${workspace}${userId === undefined ? '' : `\0${userId}`}`;
+
+const readSalt = (key: string): string | undefined => {
+  try {
+    return globalThis.localStorage.getItem(key) ?? undefined;
+  } catch {
+    return unstoredSalts.get(key);
+  }
+};
+
+const writeSalt = (key: string, salt: string): void => {
+  try {
+    globalThis.localStorage.setItem(key, salt);
+  } catch {
+    /* No storage: a session copy keeps the pseudonym stable until the document closes. */
+    unstoredSalts.set(key, salt);
+  }
+};
+
 /**
- * Hash one workspace and one subject into the stable anonymous id A26 names.
+ * This device's own random salt for a workspace: what a signed-out person's
+ * pseudonym derives from (P29), and a signed-in person's until the API's salt
+ * arrives. Random rather than the device id, because the device id names a
+ * chat segment in the tree and a pseudonym derived from it could be recomputed.
+ */
+const deviceSalt = (workspace: string): string => {
+  const key = saltKey(workspace);
+  const held = readSalt(key);
+  if (held !== undefined) {
+    return held;
+  }
+  const minted = randomUuid();
+  writeSalt(key, minted);
+  return minted;
+};
+
+/**
+ * Hash a salt into the stable anonymous id A26 names.
  *
- * Per workspace, so the same subject is one consistent `Anonymous` across a
- * workspace's history and is not linkable across workspaces. Synchronous and
- * non-cryptographic on purpose: this is a *pseudonym*, not a secret — it is
- * derived from an id the store never records, so there is nothing to invert.
+ * Synchronous and non-cryptographic on purpose: the pseudonym is not the
+ * secret, the salt is. It comes from nothing the history records — the API's
+ * per-`(workspace, account)` salt, or this device's random one — so knowing the
+ * workspace and every user id in the history still recomputes nothing (L6-F10).
  *
- * @param workspace - Workspace slug.
- * @param subject - The signed-in person, or this device when nobody is (P29).
+ * @param salt - The salt this pseudonym is for.
  * @returns A short hexadecimal digest.
  */
-const anonymousId = (workspace: string, subject: string): string => {
+const anonymousId = (salt: string): string => {
   let hash = 0;
-  for (const character of `${workspace}\0${subject}`) {
+  for (const character of salt) {
     hash = (hash * 31 + (character.codePointAt(0) ?? 0)) % 0x7f_ff_ff_ff;
   }
   return `anon:${hash.toString(16).padStart(8, '0')}`;
 };
 
+const fetchAccountSalt = async (workspace: string): Promise<string> => {
+  const response = await fetch(
+    `${ENV.TAU_API_URL.replace(/\/$/u, '')}/v1/revisions/salt?workspace=${encodeURIComponent(workspace)}`,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire.
+    { credentials: 'include', headers: { Accept: 'application/json' } },
+  );
+  if (!response.ok) {
+    throw new Error(`Tau Cloud answered ${String(response.status)}`);
+  }
+  const { salt } = (await response.json()) as { salt?: unknown };
+  if (typeof salt !== 'string' || salt === '') {
+    throw new Error('Tau Cloud answered without a salt');
+  }
+  return salt;
+};
+
+/**
+ * The signed-in account's salt for this workspace, fetched once per account
+ * and workspace as soon as either is known, and cached in host state (EQ10
+ * option (a)).
+ *
+ * Fetched whether or not anonymity is on, so the first anonymous revision
+ * already has it (coordinator ruling 2026-09-25). A failed request is asked
+ * again on the next mount; until an answer has ever arrived the pseudonym
+ * uses this device's own salt.
+ *
+ * @param input - Workspace slug and the signed-in account.
+ * @returns The salt, or `undefined` signed out or before the API has answered once.
+ * @public
+ */
+export const useRevisionSalt = (
+  input: Readonly<{ workspace: string; userId: string | undefined }>,
+): string | undefined => {
+  const { workspace, userId } = input;
+  const key = userId === undefined ? undefined : saltKey(workspace, userId);
+  const salt = useSyncExternalStore(
+    (listener) => saltTopic.subscribe(listener),
+    () => (key === undefined ? undefined : readSalt(key)),
+    () => undefined,
+  );
+  useEffect(() => {
+    if (key === undefined || workspace === '' || salt !== undefined || requestedSalts.has(key)) {
+      return;
+    }
+    requestedSalts.add(key);
+    // async-iife: bootstrap -- the answer lands in host state and re-renders every consumer.
+    void (async (): Promise<void> => {
+      try {
+        writeSalt(key, await fetchAccountSalt(workspace));
+        saltTopic.emit();
+      } catch {
+        /* Offline, or not signed in on the server: this device's salt stands in. */
+        requestedSalts.delete(key);
+      }
+    })();
+  }, [key, salt, workspace]);
+  return salt;
+};
 /**
  * The person half of an actor: the signed-in user, or their anonymous stand-in.
  *
@@ -163,6 +290,8 @@ export const revisionUserActor = (
     workspace: string;
     user: RevisionSessionUser | undefined;
     anonymous: boolean;
+    /** The account's salt for this workspace, from {@link useRevisionSalt}; absent signed out or before it answers. */
+    salt?: string;
     /**
      * The name and address commits are authored with instead of the session's,
      * for a project linked to GitHub: GitHub declines a push that exposes a
@@ -174,17 +303,17 @@ export const revisionUserActor = (
 ): RevisionUserActor => {
   if (input.anonymous || input.user === undefined) {
     /*
-     * Signed in: the person, so anonymity hides *who* and one person stays one
-     * `Anonymous` in a workspace however many devices they record from.
-     * Signed out: this device (P29) — there is no person to hash, and hashing
-     * the same "signed-out" constant made every signed-out person in a shared
-     * workspace one identity, which is a false identity, not anonymity.
+     * Signed in: the account's salt, so anonymity hides *who* and one person
+     * stays one `Anonymous` in a workspace however many devices they record
+     * from (EQ10). Signed out: this device's own salt (P29) — there is no
+     * account, and one shared "signed-out" pseudonym would make every
+     * signed-out person in a workspace one false identity.
      *
      * No email either way: it is the identifying half, so an anonymous actor
      * never carries one and nothing downstream has to remember to strip it.
      */
-    const subject = input.user === undefined ? `device:${deviceId()}` : `user:${input.user.id}`;
-    return { kind: 'user', id: anonymousId(input.workspace, subject), name: 'Anonymous', anonymous: true };
+    const salt = (input.user === undefined ? undefined : input.salt) ?? deviceSalt(input.workspace);
+    return { kind: 'user', id: anonymousId(salt), name: 'Anonymous', anonymous: true };
   }
   if (input.commitIdentity !== undefined) {
     return { kind: 'user', id: input.user.id, ...input.commitIdentity };

@@ -142,10 +142,11 @@ export const seedTauCloudOwner = async (label: string): Promise<TauCloudOwner> =
  *
  * Buying a plan is an operator action with a Stripe leg this suite has no
  * business driving, so the rows it would leave are written directly — the same
- * shape `BillingService.projectEntitlements` reads: an owned subscription
- * (`customer_binding_id` and `offer_snapshot` non-null, which the
- * `subscription_financial_state` check also requires `request_id`,
- * `request_hash` and a `slot_state` for) whose `paid_through` is in the future.
+ * shape `BillingService.projectEntitlements` reads: an account-owned
+ * subscription slot (every financial column is `NOT NULL` since migration 0044
+ * retired the Better Auth plugin's `reference_id` and period columns, and
+ * `subscription_slot_state` admits `current`) whose `paid_through` is in the
+ * future.
  * One hour, not thirty days: `protect_payment_identity` refuses to delete the
  * row or to pull its `paid_through` back, so the shortest horizon that outlives
  * a run is the one that leaves the least behind.
@@ -162,11 +163,10 @@ export const seedProPlan = async (owner: TauCloudOwner): Promise<void> => {
       `VALUES ('${id}', '${owner.accountId}', 'development', 'acct_tau_git_e2e', false);`,
   );
   await psql(
-    `INSERT INTO subscription (id, plan, reference_id, status, account_id, environment, customer_binding_id, ` +
-      `offer_snapshot, request_id, request_hash, slot_state, paid_through, period_start, period_end, updated_at) ` +
-      `VALUES ('${id}', 'pro', '${owner.userId}', 'active', '${owner.accountId}', 'development', '${id}', ` +
-      `'{"plan":"pro"}'::jsonb, '${id}-request', '${id}-hash', 'current', now() + interval '1 hour', now(), ` +
-      `now() + interval '1 hour', now());`,
+    `INSERT INTO subscription (id, plan, status, account_id, environment, customer_binding_id, ` +
+      `offer_snapshot, request_id, request_hash, slot_state, paid_through, updated_at) ` +
+      `VALUES ('${id}', 'pro', 'active', '${owner.accountId}', 'development', '${id}', ` +
+      `'{"plan":"pro"}'::jsonb, '${id}-request', '${id}-hash', 'current', now() + interval '1 hour', now());`,
   );
 };
 

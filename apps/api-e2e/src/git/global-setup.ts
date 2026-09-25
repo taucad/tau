@@ -5,6 +5,15 @@ import { apiRoot, logDirectory, startApi, stopChild } from './api-process.ts';
 import { gitE2EApiUrl, gitE2EFrontendUrl, gitE2ESecondaryApiUrl } from './config.ts';
 /* oxlint-enable no-restricted-imports */
 import { resolve } from 'node:path';
+import type { TestProject } from 'vitest/node';
+
+declare module 'vitest' {
+  // oxlint-disable-next-line typescript/consistent-type-definitions -- merging into vitest's `ProvidedContext` requires `interface`.
+  export interface ProvidedContext {
+    /** The pids of the two API processes this setup owns: whose lease folders a spec may count. */
+    gitE2EApiPids: readonly number[];
+  }
+}
 
 /**
  * The git-server tier's own API processes (charter W18, W8; success criterion S2).
@@ -35,7 +44,7 @@ import { resolve } from 'node:path';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 
-export const setup = async (): Promise<() => Promise<void>> => {
+export const setup = async (project: TestProject): Promise<() => Promise<void>> => {
   mkdirSync(logDirectory, { recursive: true });
 
   /* Unconditional and cheap (~200 ms warm): a stale `dist/main.js` is the one
@@ -54,6 +63,11 @@ export const setup = async (): Promise<() => Promise<void>> => {
     primary.log.end();
     throw error;
   }
+
+  project.provide(
+    'gitE2EApiPids',
+    [primary.child.pid, secondary.child.pid].filter((pid) => pid !== undefined),
+  );
 
   return async () => {
     await Promise.all([stopChild(primary.child), stopChild(secondary.child)]);

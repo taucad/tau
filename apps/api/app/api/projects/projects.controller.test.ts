@@ -65,7 +65,6 @@ describe('ProjectsController', () => {
   /** Whether the daily registration budget has room left (review R5). */
   let withinBudget: boolean;
   let inserted: Array<Record<string, unknown>>;
-  let conditions: SQL[];
   /** What the caller's plan entitles, which N5 checks before either write. */
   let canSyncFiles: boolean;
   let controller: ProjectsController;
@@ -145,7 +144,6 @@ describe('ProjectsController', () => {
     owned = 0;
     withinBudget = true;
     inserted = [];
-    conditions = [];
     canSyncFiles = true;
     databaseStub = {
       database: {
@@ -157,7 +155,6 @@ describe('ProjectsController', () => {
                registration route's existence probe and its ceiling count. */
             leftJoin: () => ({
               where: (condition: SQL) => {
-                conditions.push(condition);
                 const caller = ownerOf(condition);
                 const visible = table.filter(
                   (row) => row.ownerId === caller || (caller !== undefined && caller in row.collaborators),
@@ -174,8 +171,7 @@ describe('ProjectsController', () => {
                 };
               },
             }),
-            where: (condition: SQL) => {
-              conditions.push(condition);
+            where: () => {
               const counting = projection !== undefined && 'value' in projection;
               return {
                 limit: async (): Promise<unknown[]> => (counting ? [{ value: owned }] : rows),
@@ -326,14 +322,43 @@ describe('ProjectsController', () => {
     expect(inserted).toEqual([]);
   });
 
-  it('refuses a caller over its daily registration budget before it reads or writes anything', async () => {
+  it('refuses a caller over its daily registration budget before it writes anything', async () => {
     withinBudget = false;
     await expect(controller.register(projectId, body(), ownerId)).rejects.toMatchObject({
       response: { code: 'PROJECT_REGISTRATION_RATE_LIMITED' },
       status: HttpStatus.TOO_MANY_REQUESTS,
     });
-    expect(conditions).toEqual([]);
     expect(inserted).toEqual([]);
+  });
+
+  /* D22 / L6-F15: the budget is spent after the ownership and entitlement
+     checks, so a refused call costs the caller nothing. */
+  it('spends no registration budget on a call refused for ownership or plan', async () => {
+    let spent = 0;
+    const counting = new ProjectsController(
+      databaseStub as DatabaseService,
+      {
+        consumeDailyBudget: async () => {
+          spent += 1;
+          return { allowed: true, count: spent };
+        },
+      } as unknown as PublicationRateLimiterService,
+      entitlements(),
+      access(),
+    );
+
+    rows = [{ ownerId: strangerId }];
+    await expect(counting.register(projectId, body(), ownerId)).rejects.toBeInstanceOf(NotFoundException);
+    rows = [];
+    canSyncFiles = false;
+    await expect(counting.register(projectId, body(), ownerId)).rejects.toMatchObject({
+      response: { code: 'GIT_SYNC_NOT_ENTITLED' },
+    });
+    expect(spent).toBe(0);
+
+    canSyncFiles = true;
+    await expect(counting.register(projectId, body(), ownerId)).resolves.toEqual({ id: projectId });
+    expect(spent).toBe(1);
   });
 
   it('refuses an id that cannot name a repository before it writes anything', async () => {

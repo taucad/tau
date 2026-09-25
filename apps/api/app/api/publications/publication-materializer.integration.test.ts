@@ -229,6 +229,8 @@ type PublicationFixture = {
   entryPath: string;
   manifestKey: string;
   revisionId: string;
+  /** Set once the publication is retired (D24); a live one has none. */
+  unpublishedAt?: Date;
 };
 
 /**
@@ -295,7 +297,10 @@ const createPublicationDatabase = (
   };
 
   const database = {
-    select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(async () => rows) })) })),
+    /* The column is `null` for a live publication, as the database answers it. */
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({ where: vi.fn(async () => rows.map((row) => ({ unpublishedAt: null, ...row }))) })),
+    })),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
         where: vi.fn(() => ({
@@ -830,6 +835,34 @@ describe('materializing the tags a push moved', () => {
       utf8('// entry\n'),
     );
     expect(database.increments).toHaveLength(1);
+  });
+
+  /* D24: the ref-removal verb retires the publication a removed name backed,
+     and a push that re-creates the name must not bring it back. */
+  it('should not materialize a retired publication when its name is pushed again', async () => {
+    const lease = await leaseFor(seed(new Map([['main.ts', utf8('// entry\n')]])), 'proj_retired');
+    const { dependencies, written } = createRecordingStorage();
+    const database = createPublicationDatabase([
+      {
+        id: 'pub_retired',
+        projectId: 'proj_retired',
+        tag: 'v1',
+        visibility: 'public',
+        entryPath: 'main.ts',
+        manifestKey: 'publications/pub_retired/old.json',
+        revisionId: 'old',
+        unpublishedAt: new Date('2026-09-25T00:00:00.000Z'),
+      },
+    ]);
+
+    const materialized = await materializePublishedTags(
+      { ...dependencies, databaseService: database.databaseService },
+      { projectId: 'proj_retired', ownerId: 'user_w4c', directory: lease.directory, tags: movedTag(lease) },
+    );
+
+    expect(materialized).toStrictEqual([]);
+    expect([...written.keys()]).toStrictEqual([]);
+    expect(database.updates).toStrictEqual([]);
   });
 
   it('should do nothing for a tag already materialized at that oid', async () => {

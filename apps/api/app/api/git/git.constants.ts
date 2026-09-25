@@ -19,6 +19,13 @@ export const pushableRefPrefixes = [
 ] as const;
 
 /**
+ * Refs the audited removal verb may remove (D24): named versions, and conflict
+ * lines (D14). Everything else only ever moves forward (I2).
+ */
+export const isRemovableRef = (ref: string): boolean =>
+  /^refs\/(?:tags|heads\/conflicts)\/[\w.\-/]+$/u.test(ref) && !ref.includes('..') && !ref.endsWith('/');
+
+/**
  * DI token for the `RepositoryStore` port.
  *
  * The module binds the S3 adapter to it; nothing that injects the port names a
@@ -73,6 +80,64 @@ export const registeredProjectLimitPerOwner = 200;
  * so it only ever catches a script.
  */
 export const projectRegistrationsPerOwnerPerDay = 1000;
+
+/**
+ * The window every per-`(user, project)` git request budget is counted in (D22,
+ * charter I11).
+ */
+export const gitRequestWindowSeconds = 60;
+
+/**
+ * Requests one account may make against one project per window, per route
+ * family (D22, L6-F3). `rpc` is the three smart-HTTP routes, each of which
+ * hydrates a whole lease; `lfs` is the batch and verify API, which touches the
+ * database and presigns but hydrates nothing, and which a push of many large
+ * files calls once per object.
+ *
+ * Sized so one always-on client never meets them: a push is two `rpc` requests
+ * and a fetch two to four, against a 2 s push debounce. A loop that is not a
+ * client does, and is answered `429` with `Retry-After`.
+ */
+export const gitRequestsPerWindow = { rpc: 120, lfs: 1200 } as const;
+
+/**
+ * Requests one account may make per window across every project and route
+ * family together (D22, I11). Spent ahead of authorization with the
+ * per-project budget, so cycling project ids cannot buy unbounded
+ * authorization reads. Twice one project's `lfs` budget, so one project's
+ * large push never meets it.
+ */
+export const gitRequestsPerUserPerWindow = 2400;
+
+/**
+ * Leases one caller may hydrate from one owner's repositories per UTC day (D22,
+ * coordinator ruling 2026-09-25).
+ *
+ * Sized from the always-on case: a push is two hydrates (`info/refs` and
+ * `receive-pack`), and a client pushing on the 2 s debounce all day makes
+ * 43 200 pushes, or 86 400 hydrates, before its fetches. So a caller that is a
+ * client never meets it, and a loop that is not one does. The owner's own
+ * requests have a bucket of their own, which nobody else can spend.
+ */
+export const hydratesPerCallerPerDay = 100_000;
+
+/**
+ * Leases everybody who is not the owner may hydrate, together, from one owner's
+ * repositories per UTC day (D22, coordinator ruling 2026-09-25): three
+ * always-on collaborators' worth. Every lease is a full read billed to the
+ * owner, so third parties together must not make that egress unbounded;
+ * exhausting it refuses them and never the owner.
+ */
+export const hydratesFromOthersPerOwnerPerDay = 300_000;
+
+/**
+ * The fixed first words of the `GIT_REPOSITORY_INCOMPLETE` refusal (D22,
+ * L6-F8): the manifest names a pack the store does not hold, which no retry can
+ * repair. A leg that reads the JSON envelope keys on the body `code`; stock git
+ * sees only the `text/plain` sentence, so the client matches this marker the
+ * way it matches {@link ceilingRefusalMarker}.
+ */
+export const incompleteRepositoryMarker = "Tau: this project's cloud copy is damaged";
 
 /**
  * Where one large object lives in the private bucket. Same `oid` layout
@@ -147,7 +212,8 @@ export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
 
 /**
  * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag,
- * compare-and-swap for every ref family (I7/I9, ruling OQ4), and the two byte
+ * compare-and-swap for every ref family (I7/I9, ruling OQ4), append-only chat
+ * log segments (charter I9, D22), and the two byte
  * bounds measured on the quarantine directory receive-pack has already written:
  * the owner's plan headroom, and D20's per-repository ceiling with the file
  * list that makes it actionable. A non-zero exit rejects the whole push and git
@@ -165,6 +231,43 @@ if [ "\${TAU_GIT_PUSH_ADMITTED:-}" != "1" ]; then
   echo "Tau: this repository accepts pushes only through the Tau API." >&2
   exit 1
 fi
+
+# I9 (D22): a device's chat log only grows. Between the old and the new tip of
+# a chat ref, every change under \`events/\` must be a regular file
+# (\`100644\`) that was one before and whose old bytes are a byte prefix of
+# its new blob, or a new \`100644\` file; a deletion, a mode or type change
+# (a symlink, an executable, a submodule, a tree) and any rewrite are refused
+# (L6-F13, RV-W9 M2). A tree with duplicate or unsorted entries never reaches
+# this hook: \`receive.fsckObjects\` refuses it first (\`store/lease.ts\`).
+# \`diff-tree\` names each change by modes and object ids, so nothing here
+# parses a path, and a path git quotes cannot slip past. \`head -c 0\` is not
+# portable, so an empty old segment is a prefix of anything without reading it.
+segments_only_grow() {
+  if ! changes=$(git diff-tree -r --no-renames "$1" "$2" -- events/ 2>/dev/null); then
+    echo "Tau: refused $3 — its chat log could not be compared with the one it replaces." >&2
+    return 1
+  fi
+  printf '%s\\n' "$changes" | {
+    refused=0
+    while read -r was_mode now_mode was now change rest; do
+      case "$change" in
+        '') continue ;;
+        A) [ "$now_mode" = "100644" ] && continue ;;
+        M)
+          if [ "$was_mode" = ":100644" ] && [ "$now_mode" = "100644" ]; then
+            size=$(git cat-file -s "$was")
+            if [ "$size" -eq 0 ] || [ "$(git cat-file blob "$now" 2>/dev/null | head -c "$size" | git hash-object --stdin)" = "$was" ]; then
+              continue
+            fi
+          fi
+          ;;
+      esac
+      echo "Tau: refused $3 — it rewrites $rest, and a device's chat log only grows." >&2
+      refused=1
+    done
+    exit "$refused"
+  }
+}
 
 status=0
 arriving=''
@@ -203,6 +306,11 @@ while read -r _old _new ref; do
         echo "Tau: refused $ref — it does not fast-forward $_old; fetch and merge first." >&2
         status=1
       fi
+      case "$ref" in
+        refs/tau/chats/?*)
+          segments_only_grow "$_old" "$_new" "$ref" || status=1
+          ;;
+      esac
       ;;
   esac
   arriving="$arriving $_new"

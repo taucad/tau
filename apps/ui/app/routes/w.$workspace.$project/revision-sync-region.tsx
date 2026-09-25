@@ -15,7 +15,12 @@ import type { RemoteFacet, SyncFacet, SyncFailureReason } from '@taucad/revision
    contract forbids (§3). */
 import { CommercialUpgradeLabel } from '#cloud/commercial-features.js';
 import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#components/github/github-repository-picker.js';
-import { githubConnections, githubErrorMessage } from '#lib/github-connections.js';
+import {
+  configureGithubAccess,
+  githubConnections,
+  githubErrorMessage,
+  GithubRequestError,
+} from '#lib/github-connections.js';
 import type { GithubRepository } from '#lib/github-connections.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
 import { formatBytes } from '#lib/format-bytes.js';
@@ -649,8 +654,9 @@ export function RevisionSyncRegion({
    * D48: *Reconnect GitHub* reconnects. Opening the picker was all it did, so
    * with the picker already open — where a disconnect leaves it — the click
    * changed nothing. An account that still reaches this repository re-mints
-   * for it (the D3 route, no picking); with none, GitHub's own consent starts,
-   * and it returns here with the account listed.
+   * for it (the D3 route, no picking); an account that works but cannot see
+   * it goes to GitHub to share it with the app (D67); with none, GitHub's own
+   * consent starts, and it returns here with the account listed.
    */
   const reconnectGithub = async (): Promise<void> => {
     setChoice('git');
@@ -659,14 +665,27 @@ export function RevisionSyncRegion({
     try {
       const repositoryId = Number(remote.repositoryId);
       const connections = Number.isSafeInteger(repositoryId) ? await githubConnections.list().catch(() => []) : [];
+      /* D67: an account that answers but cannot see the repository is not
+       * fixed by signing in again, which only returned to the same refusal:
+       * the repository has to be shared with the app on GitHub. */
+      let unshared = false;
       for (const connection of connections) {
-        // oxlint-disable-next-line no-await-in-loop -- the first account that reaches the repository is the reconnect.
-        const repository = await githubConnections.repository(connection.id, repositoryId).catch(() => undefined);
-        if (repository !== undefined) {
-          // oxlint-disable-next-line no-await-in-loop -- this is the reconnect; the loop ends here.
-          await requestConnection({ kind: 'github', connectionId: connection.id, repository });
-          return;
+        let repository: GithubRepository;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- the first account that reaches the repository is the reconnect.
+          repository = await githubConnections.repository(connection.id, repositoryId);
+        } catch (error) {
+          unshared ||= error instanceof GithubRequestError && error.code === 'GITHUB_NOT_FOUND_OR_DENIED';
+          continue;
         }
+        // oxlint-disable-next-line no-await-in-loop -- this is the reconnect; the loop ends here.
+        await requestConnection({ kind: 'github', connectionId: connection.id, repository });
+        return;
+      }
+      if (unshared) {
+        const { installUrl } = await githubConnections.configuration();
+        configureGithubAccess(installUrl, globalThis.location.pathname);
+        return;
       }
       setShouldConnect(true);
     } finally {

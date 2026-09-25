@@ -79,6 +79,8 @@ type StubRelay = {
   readonly control: Promise<WebSocket>;
   /** Every control frame the daemon has sent, parsed. */
   readonly controlFrames: unknown[];
+  /** Every plain HTTP request the daemon made: method, path and query, and its `authorization`. */
+  readonly requests: Array<{ readonly line: string; readonly authorization: string | undefined }>;
   /** The route socket the daemon spliced onto `pathname`. */
   route(pathname: string): Promise<WebSocket>;
   /** The first frame the daemon pushed *through* that route. */
@@ -97,6 +99,7 @@ const startRelay = async (): Promise<StubRelay> => {
   resources.push(socketServer);
   const control = Promise.withResolvers<WebSocket>();
   const controlFrames: unknown[] = [];
+  const requests: StubRelay['requests'] = [];
   const routeSockets = new Map<string, PromiseWithResolvers<WebSocket>>();
   const routeFrames = new Map<string, PromiseWithResolvers<WebSocket.RawData>>();
   const slotFor = <T>(slots: Map<string, PromiseWithResolvers<T>>, key: string): PromiseWithResolvers<T> => {
@@ -111,7 +114,11 @@ const startRelay = async (): Promise<StubRelay> => {
   /* Anything that is not an upgrade is refused rather than left hanging: this
    * origin is also the Tau API, so a daemon may ask it for a Git advertisement,
    * and a socket that never answers would hold the close cut open. */
-  httpServer.on('request', (_request, response) => {
+  httpServer.on('request', (request, response) => {
+    requests.push({
+      line: `${request.method ?? ''} ${request.url ?? ''}`,
+      authorization: request.headers.authorization,
+    });
     response.statusCode = 404;
     response.end();
   });
@@ -145,6 +152,7 @@ const startRelay = async (): Promise<StubRelay> => {
     url: new URL(`http://127.0.0.1:${String(address.port)}`),
     control: control.promise,
     controlFrames,
+    requests,
     route: async (pathname) => slotFor(routeSockets, pathname).promise,
     firstFrame: async (pathname) => slotFor(routeFrames, pathname).promise,
   };
@@ -945,6 +953,51 @@ describe('startHostDaemon', () => {
       await expect
         .poll(async () => readFile(join(workspaceRoot, '.git', 'config'), 'utf8').catch(() => ''), { timeout: 10_000 })
         .toContain(tauRemoteUrl(relay.url.origin, 'workspace'));
+
+      await daemon.close();
+    },
+    30_000,
+  );
+
+  /*
+   * D21: a cloud host serves the clone its entrypoint made, as the project that
+   * clone is, and backs it up with the push credential it was provisioned —
+   * over that project's git routes, from the remote the clone already has,
+   * without the *Connect Tau Cloud* registration a push credential cannot make.
+   */
+  it.runIf(hasGit)(
+    'syncs a cloned Tau Cloud project over its own git route with the push credential',
+    async () => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-cloud-clone-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      const projectId = 'proj-cloud';
+      const pushCredential = 'taugit_push-credential-for-proj-cloud';
+      const workspaceRoot = join(temporaryDirectory, projectId);
+      await mkdir(workspaceRoot);
+      execFileSync('git', ['init', '--quiet', '--initial-branch=main'], { cwd: workspaceRoot });
+      execFileSync('git', ['remote', 'add', 'tau', tauRemoteUrl(relay.url.origin, projectId)], { cwd: workspaceRoot });
+      await writeHostCredential({ v: 1, deviceId: 'agent_cloud', credential: 'device-credential-for-the-relay-only' });
+
+      const agentOptions = await agentOptionsIn(temporaryDirectory);
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: { ...agentOptions, workspaceRoot, tauApiToken: pushCredential },
+      });
+      await daemon.ready;
+
+      await expect
+        .poll(() => relay.requests.find((request) => request.line.includes('/info/refs')), { timeout: 15_000 })
+        .toEqual({
+          line: `GET /v1/git/${projectId}.git/info/refs?service=git-upload-pack`,
+          authorization: `Bearer ${pushCredential}`,
+        });
+      expect(relay.requests.filter((request) => request.line.startsWith('PUT /v1/projects'))).toEqual([]);
+      expect(relay.requests.map((request) => request.authorization)).not.toContain(
+        'Bearer device-credential-for-the-relay-only',
+      );
 
       await daemon.close();
     },

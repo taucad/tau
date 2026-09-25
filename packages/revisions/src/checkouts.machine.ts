@@ -50,12 +50,23 @@ export type CheckoutsMachineEvent =
   | Readonly<{ type: 'leaseStale'; runId: string }>
   | Readonly<{ type: 'leaseWritten'; checkoutId: string | undefined; runId: string }>
   | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement)
+  /* A conflicted turn settled too, and its lease is retired the same way (L7 P-1). */
+  | (Readonly<{ type: 'turnConflicted' }> & TurnSettlement)
   /* A turn that ended without a settlement still had a lease (R12). */
   | Readonly<{ type: 'turnReleased'; turnId: string; checkoutId: string | undefined; runId: string }>;
 
 /** Facts checkoutsMachine emits, and sends to its parent when they change the registry. @public */
 export type CheckoutsMachineEmitted =
-  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
+  | Readonly<{
+      type: 'checkoutsChanged';
+      checkouts: readonly CheckoutRecord[];
+      /**
+       * Set when a record's head, head tree and branch are the ones read at the
+       * last `loading`, republished with a lease or membership change. The root
+       * keeps its own for a checkout it already has (W0.10, L7 D-L7-1).
+       */
+      headsCached?: true;
+    }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
   /* P4: a refusal crosses as a code; the page that shows it owns the words. */
@@ -100,8 +111,13 @@ const publish = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue, fact: 
   }
 };
 
-const announceRegistry = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue): void => {
-  publish(context, enq, { type: 'checkoutsChanged', checkouts: context.checkouts });
+/* Records are read only at `loading`; every other announcement republishes their heads as cached. */
+const announceRegistry = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue, loaded = false): void => {
+  publish(context, enq, {
+    type: 'checkoutsChanged',
+    checkouts: context.checkouts,
+    ...(loaded ? {} : { headsCached: true }),
+  });
   for (const checkout of context.checkouts) {
     if (checkout.removable === true) {
       publish(context, enq, { type: 'removalOffered', checkoutId: checkout.id });
@@ -154,7 +170,12 @@ const queueRetirements = (
    * the checkout. Retiring all of them takes the other chat's lease
    * (AC9), so a settlement retires only its own `runId`. */
   const runIds =
-    event.type === 'leaseStale' || event.type === 'turnFinalized' || event.type === 'turnReleased' ? [event.runId] : [];
+    event.type === 'leaseStale' ||
+    event.type === 'turnFinalized' ||
+    event.type === 'turnConflicted' ||
+    event.type === 'turnReleased'
+      ? [event.runId]
+      : [];
   const added = runIds.filter((runId) => !context.pendingRetirements.includes(runId));
   return { pendingRetirements: [...context.pendingRetirements, ...added] };
 };
@@ -307,6 +328,7 @@ const checkoutsMachineDefinition = setup({
     },
     leaseStale: { context: ({ context, event }) => queueRetirements(context, event) },
     turnFinalized: { context: ({ context, event }) => queueRetirements(context, event) },
+    turnConflicted: { context: ({ context, event }) => queueRetirements(context, event) },
     turnReleased: { context: ({ context, event }) => queueRetirements(context, event) },
   },
   states: {
@@ -335,7 +357,7 @@ const checkoutsMachineDefinition = setup({
         input: ({ context }) => ({ projectId: context.projectId }),
         onDone: ({ context, event }, enq) => {
           const patch = { checkouts: event.output.checkouts };
-          announceRegistry({ ...context, ...patch }, enq);
+          announceRegistry({ ...context, ...patch }, enq, true);
           return { target: 'ready', context: patch };
         },
         /* R2/W6: a registry that could not load used to rest here silently, so

@@ -96,7 +96,7 @@ export type ProjectRevisionsMachineContext = Readonly<{
 
 /** Events accepted by projectRevisionsMachine. @public */
 export type ProjectRevisionsMachineEvent =
-  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
+  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[]; headsCached?: true }>
   | Readonly<{
       type: 'branchesFetched';
       branches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
@@ -321,6 +321,25 @@ export type ProjectRevisionsMachineEmitted =
       paths: readonly string[];
     }>;
 
+/*
+ * W0.10 (L7 D-L7-1): a republished record's head, head tree and branch are the
+ * registry's read at `loading`. The root's own, kept by `checkoutChanged`, stay
+ * for a checkout it already has, so a lease change never re-heads a checkout
+ * backwards or back onto the branch it left. The registry's other fields win.
+ */
+const mergeRecords = (
+  known: readonly CheckoutRecord[],
+  event: Extract<ProjectRevisionsMachineEvent, { type: 'checkoutsChanged' }>,
+): readonly CheckoutRecord[] =>
+  event.headsCached === true
+    ? event.checkouts.map((record) => {
+        const own = known.find((checkout) => checkout.id === record.id);
+        return own === undefined
+          ? record
+          : { ...record, headRevisionId: own.headRevisionId, headTreeId: own.headTreeId, branch: own.branch };
+      })
+    : event.checkouts;
+
 const selectedRecord = (context: ProjectRevisionsMachineContext): CheckoutRecord | undefined =>
   context.checkouts.find((checkout) => checkout.id === context.selectedCheckoutId);
 
@@ -490,8 +509,8 @@ const releaseAdmissions = (
 /*
  * A turn's settlement: the registry retires its lease, the host hears it, and the root drops the ref.
  *
- * Forwarded verbatim, as it always was — `turnConflicted` included, which the
- * registry does not handle — so the registry is addressed as any actor.
+ * Forwarded verbatim; the registry retires the lease of each of the three the
+ * same way (L7 P-1), and is addressed as any actor until W5 types the send.
  */
 const settleTurn = (
   context: ProjectRevisionsMachineContext,
@@ -652,14 +671,15 @@ const projectRevisionsMachineDefinition = setup({
       on: {
         branchesFetched: { context: ({ event }) => ({ availableBranches: event.branches }) },
         checkoutsChanged: ({ context, event, self }, enq) => {
-          const known = new Set(event.checkouts.map((checkout) => checkout.id));
+          const checkouts = mergeRecords(context.checkouts, event);
+          const known = new Set(checkouts.map((checkout) => checkout.id));
           for (const [id, ref] of Object.entries(context.checkoutRefs)) {
             if (!known.has(id)) {
               enq.stop(ref);
               continue;
             }
             const previous = context.checkouts.find((checkout) => checkout.id === id);
-            const next = event.checkouts.find((checkout) => checkout.id === id);
+            const next = checkouts.find((checkout) => checkout.id === id);
             if (
               previous?.headRevisionId !== next?.headRevisionId &&
               next?.headRevisionId !== undefined &&
@@ -677,9 +697,9 @@ const projectRevisionsMachineDefinition = setup({
            * host that pins none still gets one — without this the selection,
            * and therefore the whole `RevisionStatus` projection, stays empty
            * forever (W3d). `input.liveCheckoutId` remains the override. */
-          const liveId = context.liveCheckoutId ?? event.checkouts.find((checkout) => checkout.kind === 'live')?.id;
+          const liveId = context.liveCheckoutId ?? checkouts.find((checkout) => checkout.kind === 'live')?.id;
           const kept = Object.fromEntries(Object.entries(context.checkoutRefs).filter(([id]) => known.has(id)));
-          for (const record of event.checkouts) {
+          for (const record of checkouts) {
             if (kept[record.id] !== undefined) {
               continue;
             }
@@ -702,7 +722,7 @@ const projectRevisionsMachineDefinition = setup({
               : liveId;
           let next: ProjectRevisionsMachineContext = {
             ...context,
-            checkouts: event.checkouts,
+            checkouts,
             checkoutRefs: kept,
             chatCheckouts: Object.fromEntries(
               Object.entries(context.chatCheckouts).filter(([, checkoutId]) => known.has(checkoutId)),
@@ -716,7 +736,7 @@ const projectRevisionsMachineDefinition = setup({
           const previousHead = context.checkouts.find(
             (checkout) => checkout.id === context.selectedCheckoutId,
           )?.headRevisionId;
-          const nextHead = event.checkouts.find((checkout) => checkout.id === selected)?.headRevisionId;
+          const nextHead = checkouts.find((checkout) => checkout.id === selected)?.headRevisionId;
           if (
             selected !== undefined &&
             (context.checkouts.length === 0 || selected !== context.selectedCheckoutId || nextHead !== previousHead)
@@ -729,10 +749,10 @@ const projectRevisionsMachineDefinition = setup({
            * the registry's own answer is what settles them. */
           enq.sendTo('branch', {
             type: 'branchesChanged',
-            branches: event.checkouts.flatMap((checkout) => (checkout.branch === undefined ? [] : [checkout.branch])),
+            branches: checkouts.flatMap((checkout) => (checkout.branch === undefined ? [] : [checkout.branch])),
             /* The records too, so a settled `create` knows which checkout it
                made without scraping the projection (P4). */
-            checkouts: event.checkouts.flatMap((checkout) =>
+            checkouts: checkouts.flatMap((checkout) =>
               checkout.branch === undefined
                 ? []
                 : [{ branch: checkout.branch, checkoutId: checkout.id, checkoutRoot: checkout.root }],
@@ -741,7 +761,7 @@ const projectRevisionsMachineDefinition = setup({
           next = { ...next, registrySettled: true };
           /* The registry has answered, so the turns that arrived before it
            * can be admitted onto checkouts that now have actors. */
-          if (context.pendingAdmissions.length > 0 && event.checkouts.length > 0) {
+          if (context.pendingAdmissions.length > 0 && checkouts.length > 0) {
             next = { ...next, ...releaseAdmissions(next, enq) };
           }
           return {
@@ -1001,13 +1021,14 @@ const projectRevisionsMachineDefinition = setup({
               type: 'headChanged',
               revisionId: event.revisionId,
               treeId: event.treeId,
+              ...(event.branch === undefined ? {} : { branch: event.branch }),
             });
           }
           return {
             context: {
               checkouts: context.checkouts.map((checkout) =>
                 checkout.id === event.checkoutId
-                  ? { ...checkout, headRevisionId: event.revisionId, branch: event.branch }
+                  ? { ...checkout, headRevisionId: event.revisionId, headTreeId: event.treeId, branch: event.branch }
                   : checkout,
               ),
             },

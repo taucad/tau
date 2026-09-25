@@ -53,6 +53,14 @@ export const requestPrintInputSchema = z.strictObject({
   machineId: machineIdentitySchema.optional().describe('Omit when exactly one machine is bound.'),
   targetFile: rootedFilePathSchema.max(512).describe('Project-relative CAD source file to slice and print.'),
   preset: z.enum(['fast', 'standard', 'fine']).optional(),
+  plate: z
+    .string()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe(
+      'Build plate installed, by its manifest plate id. Required when the machine does not report its plate; ask the person which plate is on it rather than guess.',
+    ),
   options: slicerOptionsSchema.optional(),
 });
 

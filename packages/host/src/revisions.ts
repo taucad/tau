@@ -59,7 +59,10 @@ import {
   publishOverHttp,
   registerProjectOverHttp,
   tauRemoteUrl,
+  watchRevisionStream,
 } from '@taucad/revisions';
+import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
+import type { ParameterRecordCodec } from '@taucad/revisions/algorithms';
 import type { branchMachine } from '@taucad/revisions/branch-machine';
 import { isAmbientCut } from '@taucad/revisions/checkout-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
@@ -92,6 +95,14 @@ import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
+
+/**
+ * How this host reads and writes `.tau/parameters/**` for the per-key merge (D12).
+ *
+ * One value for every composition in this module, and the same pair the browser
+ * worker injects, so a conflict re-derived here settles as it was recorded.
+ */
+const parameterCodec: ParameterRecordCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };
 
 /**
  * Where one prepared turn runs, and what it descends from.
@@ -757,10 +768,27 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * as it does in the browser.
      */
     completeChanges: options.watchWorkspace !== false,
+    parameters: parameterCodec,
     ...(apiBaseUrl === undefined ? {} : { remoteUrl: (id: string) => tauRemoteUrl(apiBaseUrl, id) }),
     ...(apiBaseUrl === undefined || options.tauCredential === undefined
       ? {}
       : {
+          /* D13: another device's push wakes this open project over the API's
+           * long poll, with the same bearer the git routes take. */
+          remoteMoves: (input, handlers) =>
+            watchRevisionStream(
+              {
+                projectId: input.projectId,
+                apiBaseUrl: () => apiBaseUrl,
+                auth: () => {
+                  const credential = options.tauCredential?.();
+                  return credential === undefined
+                    ? undefined
+                    : { kind: 'bearer', authorization: credential.authorization };
+                },
+              },
+              handlers,
+            ),
           registerRemoteProject: async (id: string) => {
             const credential = options.tauCredential?.();
             if (credential === undefined) {
@@ -2097,6 +2125,7 @@ export const openProjectRevisions = (
         projectId,
         authorityEpoch: projectAuthorityEpoch(options.workspaceRoot, options.authorityEpoch ?? processAuthorityEpoch),
         filesystem: (checkout) => new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
+        parameters: parameterCodec,
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
         ...(registerRemoteProject === undefined ? {} : { registerRemoteProject }),

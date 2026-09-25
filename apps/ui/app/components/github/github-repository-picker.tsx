@@ -52,6 +52,13 @@ type GithubRepositoryPickerProps = Readonly<{
   onSelect: (selection: GithubRepositorySelection) => void | Promise<void>;
   actionLabel?: string;
   returnTo?: string;
+  /**
+   * Start GitHub's connect flow, as *Connect GitHub* would, for a caller whose
+   * own button is the reconnect (D48). The picker calls
+   * `onConnectRequestHandled` as it starts, so a later remount does not replay it.
+   */
+  shouldConnect?: boolean;
+  onConnectRequestHandled?: () => void;
 }>;
 
 /**
@@ -85,6 +92,8 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
   onSelect,
   actionLabel = 'Use repository',
   returnTo = '/import',
+  shouldConnect = false,
+  onConnectRequestHandled,
 }: GithubRepositoryPickerProps): React.JSX.Element {
   const { data: session, isPending: sessionPending } = useSession(authClient);
   const { canConnectGitHub, isResolved: planResolved, requestUpgrade } = useCommercialFeatures();
@@ -333,6 +342,14 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
       setOauthPending(false);
     }
   }, [loadConnections, returnTo]);
+
+  useEffect(() => {
+    if (!shouldConnect || busy || connectionAvailable === false) {
+      return;
+    }
+    onConnectRequestHandled?.();
+    void connect();
+  }, [busy, connect, shouldConnect, connectionAvailable, onConnectRequestHandled]);
 
   const cancelOauth = useCallback(async (): Promise<void> => {
     const attemptId = oauthAttempt.current;

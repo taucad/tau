@@ -2,6 +2,7 @@
 import axe from 'axe-core';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineClient } from '@taucad/runtime/machine';
 import { writeBambuContainer } from '@taucad/slicer/container';
@@ -1142,5 +1143,31 @@ describe('Print pane Bambu Studio mode', () => {
     renderPane(refused.client);
     expect(await screen.findByText(bambuStudioRequired)).toBeInTheDocument();
     expect(screen.queryByText('This file was not sliced by Bambu Studio.')).not.toBeInTheDocument();
+  });
+});
+
+describe('Print pane without printers', () => {
+  it('sends the person to Settings › Machines to set one up, instead of asking for binding fields', async () => {
+    const fixture = createFixture({ entries: [] });
+    function Location(): React.JSX.Element {
+      return <output aria-label='location'>{useLocation().search}</output>;
+    }
+    render(
+      <MemoryRouter initialEntries={['/w/workspace/project']}>
+        <TooltipProvider>
+          <PrintPanel machines={{ available: true, ...fixture.client }} bridge={createBridge().bridge} />
+        </TooltipProvider>
+        <Location />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'No printers yet' })).toBeInTheDocument();
+    /* Discovery and the access-code ceremony live in settings; the pane offers no binding form of its own. */
+    expect(screen.queryByRole('button', { name: 'Discover' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Logical Id/u)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set up a printer' }));
+
+    expect(screen.getByRole('status', { name: 'location' })).toHaveTextContent('?settings=machines');
   });
 });

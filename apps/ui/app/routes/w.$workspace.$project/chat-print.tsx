@@ -1,13 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { RJSFSchema } from '@rjsf/utils';
-import type { JSONSchema7 } from '@taucad/json-schema';
 import {
   CircleAlert,
   CircleCheck,
   LoaderCircle,
   PauseCircle,
   Printer,
-  Radio,
   RefreshCw,
   ScanSearch,
   Send,
@@ -15,12 +12,10 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type {
-  MachineCandidate,
   MachineClient,
   MachineDirectoryEntry,
   MachineOperationReceipt,
   MachineOperationSnapshot,
-  MachineProvider,
   PrintRequest,
 } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
@@ -28,7 +23,6 @@ import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Progress } from '@taucad/ui/components/progress';
 import { cn } from '@taucad/ui/utils/cn';
-import { Parameters } from '#components/geometry/parameters/parameters.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { usePrintApprovalBridge } from '#hooks/use-machines-approvals.js';
@@ -36,6 +30,7 @@ import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { isOpenPrintRequest, useMachinesPrintRequests } from '#hooks/use-machines-print-requests.js';
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import {
   ActivitySection,
   ControlsSection,
@@ -44,12 +39,8 @@ import {
   describeRun,
 } from '#routes/w.$workspace.$project/chat-print-monitor.js';
 import type { LedgerEntry } from '#routes/w.$workspace.$project/chat-print-monitor.js';
-import {
-  PrepareSection,
-  useCompiledConfigurationManifest,
-  usePrintPrepare,
-} from '#routes/w.$workspace.$project/chat-print-prepare.js';
-import type { PrintPrepare, ResolvedSchema } from '#routes/w.$workspace.$project/chat-print-prepare.js';
+import { PrepareSection, usePrintPrepare } from '#routes/w.$workspace.$project/chat-print-prepare.js';
+import type { PrintPrepare } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import { PrintNotice, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
 import { SendSection } from '#routes/w.$workspace.$project/chat-print-send.js';
 import { formatAge } from '#routes/w.$workspace.$project/chat-print-summary.js';
@@ -287,173 +278,25 @@ function MachineCard({
   );
 }
 
-const bindingDefaults = (provider: MachineProvider): Record<string, unknown> => {
-  const projection = provider.bindingConfiguration.parameters.input;
-  return projection.status === 'usable' ? { ...projection.declaration.defaults } : {};
-};
-
-const printUnits = { length: { displaySymbol: 'mm' } } as const;
-
-function Discovery({
-  client,
-  providers,
-}: {
-  readonly client: MachineClient;
-  readonly providers: readonly MachineProvider[];
-}): React.JSX.Element {
-  const [providerId, setProviderId] = useState<string>();
-  const [configurationByProvider, setConfigurationByProvider] = useState<
-    Readonly<Record<string, Record<string, unknown>>>
-  >({});
-  const [candidates, setCandidates] = useState<readonly MachineCandidate[]>([]);
-  const [isBusy, setIsBusy] = useState(false);
-  const [message, setMessage] = useState('');
-  const selected = providers.find(({ id }) => id === providerId) ?? providers[0];
-  const configuration = selected ? (configurationByProvider[selected.id] ?? {}) : {};
-  const resolved = useMemo<ResolvedSchema | undefined>(
-    () =>
-      selected
-        ? {
-            schema: selected.bindingConfiguration.legacyProjection.inputSchema as JSONSchema7,
-            defaults: bindingDefaults(selected),
-          }
-        : undefined,
-    [selected],
-  );
-  const manifest = useCompiledConfigurationManifest(selected?.id, 'print/binding', resolved);
-
-  const discover = async (): Promise<void> => {
-    if (!selected) {
-      return;
-    }
-    setIsBusy(true);
-    setMessage('Discovering machines…');
-    setCandidates([]);
-    try {
-      for await (const event of client.discover({
-        providerId: selected.id,
-        configuration: configuration as Parameters<MachineClient['discover']>[0]['configuration'],
-      })) {
-        setCandidates((current) =>
-          event.type === 'lost'
-            ? current.filter(({ id }) => id !== event.candidateId)
-            : [event.candidate, ...current.filter(({ id }) => id !== event.candidate.id)],
-        );
-      }
-      setMessage('Discovery finished.');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const bind = async (candidate: MachineCandidate): Promise<void> => {
-    setIsBusy(true);
-    try {
-      const outcome = await client.beginBinding({ candidate, name: candidate.name });
-      setMessage(
-        outcome.status === 'bound'
-          ? `${candidate.name} is bound as ${outcome.machineId}.`
-          : `Continue ceremony ${outcome.ceremonyId} in the trusted host prompt.`,
-      );
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  if (!selected || !resolved) {
-    return (
-      <PanelEmptyState
-        icon={Printer}
-        title='No machine providers'
-        description='Install a machine provider on the host.'
-      />
-    );
-  }
+/** Printers are set up in Settings › Machines, where the access code stays in the host ceremony. */
+function NoMachines(): React.JSX.Element {
+  const { open } = useSettingsDialog();
   return (
-    <section aria-labelledby='print-discovery-heading' className='flex min-w-0 flex-col gap-3'>
-      <div>
-        <h2 id='print-discovery-heading' className='text-sm font-medium'>
-          Find a printer
-        </h2>
-        <p className='mt-1 text-xs text-muted-foreground'>
-          Search is bounded and starts only when you ask. Credentials stay in the trusted host ceremony.
-        </p>
-      </div>
-      {providers.length > 1 ? (
-        <label className='flex flex-col gap-1 text-xs font-medium'>
-          Provider
-          <select
-            className='h-8 rounded-md border border-input bg-background px-2 font-normal'
-            value={selected.id}
-            onChange={(event) => {
-              setProviderId(event.target.value);
-            }}
-          >
-            {providers.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      <div className='min-h-40 overflow-hidden rounded-xl border border-border/70 bg-card'>
-        {manifest ? (
-          <Parameters
-            parameters={configuration}
-            defaultParameters={resolved.defaults}
-            jsonSchema={resolved.schema as RJSFSchema}
-            onParametersChange={(value) => {
-              setConfigurationByProvider((current) => ({ ...current, [selected.id]: value }));
-            }}
-            enableSearch={false}
-            units={printUnits}
-            parameterManifest={manifest}
-            parameterEdit={{ kind: 'transient' }}
-            emptyMessage='No discovery settings'
-          />
-        ) : (
-          <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
-            Preparing discovery settings…
-          </p>
-        )}
-      </div>
-      <Button type='button' size='sm' disabled={isBusy} className='self-start' onClick={discover}>
-        {isBusy ? (
-          <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-        ) : (
-          <Radio aria-hidden />
-        )}
-        Discover
+    <PanelEmptyState
+      icon={Printer}
+      title='No printers yet'
+      description='Find a Bambu Lab printer on your network or add the simulated X1C in Settings.'
+    >
+      <Button
+        type='button'
+        size='sm'
+        onClick={() => {
+          open('machines');
+        }}
+      >
+        Set up a printer
       </Button>
-      <p aria-live='polite' role='status' className='min-h-4 text-xs text-muted-foreground'>
-        {message}
-      </p>
-      {candidates.length > 0 ? (
-        <ul aria-label='Discovered machines' className='flex list-none flex-col gap-2'>
-          {candidates.map((candidate) => (
-            <li
-              key={candidate.id}
-              className='flex min-w-0 items-center gap-2 rounded-xl border border-border/70 bg-card p-3'
-            >
-              <span className='min-w-0 flex-1'>
-                <strong className='block truncate text-sm font-medium'>{candidate.name}</strong>
-                <span className='block truncate text-xs text-muted-foreground'>
-                  {candidate.claimedIdentity.model ?? 'Unknown model'} · {candidate.endpoint.address}
-                </span>
-              </span>
-              <Button type='button' size='sm' variant='outline' disabled={isBusy} onClick={async () => bind(candidate)}>
-                Bind
-              </Button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
+    </PanelEmptyState>
   );
 }
 
@@ -570,7 +413,7 @@ function ConnectedPrintPanel({
             </span>
           </div>
         )}
-        {snapshot && entries.length === 0 ? <Discovery client={client} providers={providers} /> : null}
+        {snapshot && entries.length === 0 ? <NoMachines /> : null}
         {selected ? (
           <div className='flex min-w-0 flex-col gap-3'>
             <MachineCard entry={selected} openRequest={openRequest} prepare={prepare} onReview={review} />

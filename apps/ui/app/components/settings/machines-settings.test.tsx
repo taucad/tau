@@ -240,6 +240,46 @@ describe('MachinesSettings', () => {
     expect(screen.getByLabelText('Access code')).toHaveFocus();
   });
 
+  it('should fill the form from the first printer heard while the pass keeps listening, with Bind usable', async () => {
+    const facet = facetWith([]);
+    const { promise: passEnds, resolve: endPass } = Promise.withResolvers<void>();
+    facet.discover.mockImplementation(async function* () {
+      yield {
+        type: 'found',
+        candidate: {
+          ...candidate,
+          id: 'bambu:00M1',
+          name: 'Workshop X1C',
+          endpoint: { address: '192.168.0.112', interface: 'udp4' },
+          claimedIdentity: { model: 'X1C', serial: '00M1' },
+        },
+      };
+      await passEnds;
+    });
+    state.project = projectWith(facet);
+    renderSettings();
+    const find = screen.getByRole('button', { name: 'Find on network' });
+    await waitFor(() => {
+      expect(find).toBeEnabled();
+    });
+
+    fireEvent.click(find);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Address')).toHaveValue('192.168.0.112');
+    });
+    expect(screen.getByLabelText('Name')).toHaveValue('Workshop X1C');
+    expect(screen.getByRole('status')).toHaveTextContent('Listening for more printers…');
+    expect(find).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Bind' })).toBeEnabled();
+
+    endPass();
+    await waitFor(() => {
+      expect(find).toBeEnabled();
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('');
+  });
+
   it('should list bound machines as one line each, marking the simulator, and explain a missing project or facet', async () => {
     state.project = projectWith(facetWith([simulatedEntry]));
     const { unmount } = renderSettings();

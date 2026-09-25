@@ -102,25 +102,35 @@ const bind = async (client: MachineClient, input: BindInput): Promise<MachineBin
 };
 
 /**
- * Listen for the printers advertising on this LAN; the host bounds the pass (Bambu: 5 s on UDP 2021).
- * Nothing is sent to a printer: discovery only hears broadcasts.
+ * Listen for the printers advertising on this LAN; the host bounds the pass (Bambu: 11 s on UDP 2021,
+ * two advertisement periods). Nothing is sent to a printer: discovery only hears broadcasts.
  *
  * @param client - The project's machines facet.
+ * @param onHeard - Every distinct candidate so far, each time a new one is heard.
  * @returns Every distinct candidate heard, latest advertisement winning.
  */
-const findOnNetwork = async (client: MachineClient): Promise<readonly MachineCandidate[]> => {
+const findOnNetwork = async (
+  client: MachineClient,
+  onHeard: (candidates: readonly MachineCandidate[]) => void,
+): Promise<readonly MachineCandidate[]> => {
   const found = new Map<string, MachineCandidate>();
   for await (const frame of client.discover({
     providerId: bambuProviderId,
     configuration: { logicalId: 'discovery' },
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(20_000),
   })) {
     if (frame.type === 'found' || frame.type === 'updated') {
+      const isNew = !found.has(frame.candidate.id);
       found.set(frame.candidate.id, frame.candidate);
+      if (isNew) {
+        onHeard([...found.values()]);
+      }
     }
   }
   return [...found.values()];
 };
+
+const listeningForMore = 'Listening for more printers…';
 
 const describeOutcome = (name: string, outcome: MachineBindingOutcome): string =>
   outcome.status === 'bound'
@@ -171,6 +181,8 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
   const directory = useMachineDirectory(client);
   const [status, setStatus] = useState<string>();
   const [busy, setBusy] = useState(false);
+  /* Its own flag: a heard printer can be bound while the pass still listens for others. */
+  const [finding, setFinding] = useState(false);
   const [simulatorFields, setSimulatorFields] = useState<Record<string, unknown>>({});
   const [candidates, setCandidates] = useState<readonly MachineCandidate[]>();
   const bindForm = useRef<HTMLFormElement>(null);
@@ -212,24 +224,31 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
   };
 
   const onFind = async (): Promise<void> => {
-    setBusy(true);
+    setFinding(true);
     setCandidates(undefined);
     setStatus('Listening for printers on this network…');
     try {
-      const heard = await findOnNetwork(client);
+      // The first printer heard fills the form at once; the pass keeps listening for others.
+      const heard = await findOnNetwork(client, (sofar) => {
+        setCandidates(sofar);
+        setStatus(listeningForMore);
+        if (sofar.length === 1 && sofar[0]) {
+          pick(sofar[0]);
+        }
+      });
       setCandidates(heard);
-      setStatus(
+      // A bind finished meanwhile keeps its own message.
+      setStatus((current) =>
         heard.length === 0
           ? 'No printer answered. Check it is on this network with LAN mode on, or enter its address.'
-          : undefined,
+          : current === listeningForMore
+            ? undefined
+            : current,
       );
-      if (heard.length === 1 && heard[0]) {
-        pick(heard[0]);
-      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
-      setBusy(false);
+      setFinding(false);
     }
   };
 
@@ -315,7 +334,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             type='button'
             size='sm'
             variant='outline'
-            disabled={busy || !providers.has(bambuProviderId)}
+            disabled={busy || finding || !providers.has(bambuProviderId)}
             onClick={onFind}
           >
             Find on network
@@ -375,7 +394,7 @@ export function MachinesSettings(): React.JSX.Element {
   return (
     <SettingsSectionCard aria-labelledby='machines-title'>
       <CardHeader>
-        <CardTitle id='machines-title'>Machines</CardTitle>
+        <CardTitle id='machines-title'>Printers</CardTitle>
       </CardHeader>
       <CardContent className='flex flex-col gap-4'>
         {project === undefined ? (

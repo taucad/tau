@@ -1,4 +1,15 @@
-import { Bot, BrainCircuit, Cpu, CreditCard, FlaskConical, HardDrive, Lock, Settings2, User } from 'lucide-react';
+import {
+  Bot,
+  BrainCircuit,
+  Cpu,
+  CreditCard,
+  FlaskConical,
+  HardDrive,
+  Lock,
+  Printer,
+  Settings2,
+  User,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
 import { featureFlagNames, flagRegistry } from '#flags/flag.constants.js';
@@ -149,6 +160,14 @@ const settingsCatalog = [
         description: 'Pair and manage remote compute devices',
         keywords: ['local', 'remote', 'rendering', 'revoke'],
       },
+    ],
+  },
+  {
+    id: 'machines',
+    label: 'Machines',
+    icon: Printer,
+    group: 'Workspace',
+    entries: [
       {
         id: 'machines',
         label: 'Machines',
@@ -277,14 +296,10 @@ const cloudSections: readonly SettingsSectionDefinition[] = tauCloudEnabled
           : section,
       );
 /* Machines are hosted by the desktop services utility; the web build has no
- * host to add one to, so the entry is hidden rather than shown empty. */
+ * host to add one to, so the section is hidden rather than shown empty. */
 export const settingsSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
   ? cloudSections
-  : cloudSections.map((section) =>
-      section.id === 'compute'
-        ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'machines') }
-        : section,
-    );
+  : cloudSections.filter((section) => section.id !== 'machines');
 
 function normalizeSearch(value: string): string {
   return value

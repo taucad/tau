@@ -67,15 +67,19 @@ function SettingsContent({ section }: { readonly section: SettingsSection }): Re
           <SettingsItem settingId='compute-reuse'>
             <ComputeReuseSettings />
           </SettingsItem>
-          <SettingsItem settingId='machines'>
-            <MachinesSettings />
-          </SettingsItem>
           <SettingsAuthGate>
             <SettingsItem settingId='tau-host'>
               <RemoteComputeSettings />
             </SettingsItem>
           </SettingsAuthGate>
         </>
+      );
+    }
+    case 'machines': {
+      return (
+        <SettingsItem settingId='machines'>
+          <MachinesSettings />
+        </SettingsItem>
       );
     }
     case 'models': {

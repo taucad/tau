@@ -17,16 +17,16 @@
 import { createActor } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
-import { checkoutMachine } from '#checkout.machine.js';
+import { checkoutIgnoredEvents, checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
-import { projectRevisionsMachine } from '#project-revisions.machine.js';
+import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
 import { remoteMachine } from '#remote.machine.js';
 import { resolutionMachine } from '#resolution.machine.js';
 import { restoreMachine } from '#restore.machine.js';
 import type { CheckoutRecord } from '#revision-port.js';
 import { syncMachine } from '#sync.machine.js';
-import { turnMachine } from '#turn.machine.js';
+import { turnIgnoredEvents, turnMachine } from '#turn.machine.js';
 import type { TurnLeaseActorInput } from '#turn.machine.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { createFakeCallbackActors, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
@@ -49,14 +49,11 @@ const live: CheckoutRecord = {
   leaseChatIds: [],
 };
 
-/** Defects this suite reaches, as in `project-revisions.machine.test.ts`; W5 deletes each row as it lands. */
-const knownDefects: IgnoredEvents = {
-  // W5: every registry announcement is forwarded, and `idle` has no verb to settle.
-  branch: [['idle', 'branchesChanged']],
-};
+/* W5 answered every row this suite reached (RM-R11), so nothing is ignored. */
+const knownDefects: IgnoredEvents = {};
 
 const start = () => {
-  const guard = guardActors({ ignore: knownDefects });
+  const guard = guardActors({ ignore: { ...knownDefects, turn: turnIgnoredEvents, checkout: checkoutIgnoredEvents } });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const stub = promises.actor;
@@ -146,6 +143,11 @@ const readyRegistry = async (harness: Harness, checkouts: readonly CheckoutRecor
   await flush();
 };
 
+const key = { chatId: 'chat-1', turnId: 'turn-1', runId: 'run-1', attempt: 0 } as const;
+
+/** The view the page reads: status first, then the registry (RM-R5). */
+const viewOfLive = (harness: Harness) => selectRevisionStatus(harness.actor.getSnapshot());
+
 describe('projectRevisionsMachine and its checkout registry', () => {
   /* W0.10, L7 D-L7-1: the registry republishes the heads it read at `loading`
    * on every lease change, which used to re-head the checkout backwards. */
@@ -155,22 +157,22 @@ describe('projectRevisionsMachine and its checkout registry', () => {
     const head = () =>
       harness.actor.getSnapshot().context.checkoutRefs['checkout-live']?.getSnapshot().context.headRevisionId;
 
+    /* A producer's fact is a hint: the checkout re-reads its own head. */
+    harness.actor.send({ type: 'checkoutChanged', checkoutId: 'checkout-live', revisionId: 'rev-2' });
+    harness.promises.settle('readHead', { output: { revisionId: 'rev-2', treeId: 'tree-2', branch: 'main' } });
+    await flush();
+    /* The registry republishes the record it read at `loading`, still at `rev-1`. */
     harness.actor.send({
-      type: 'checkoutChanged',
+      type: 'leaseWritten',
+      key: { ...key, runId: 'run-9' },
       checkoutId: 'checkout-live',
-      revisionId: 'rev-2',
-      treeId: 'tree-2',
-      branch: 'main',
+      leaseIds: ['run-9'],
     });
-    harness.actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
     await flush();
 
     expect(head()).toBe('rev-2');
-    expect(harness.actor.getSnapshot().context.checkouts[0]).toMatchObject({
-      headRevisionId: 'rev-2',
-      headTreeId: 'tree-2',
-      leaseRunIds: ['run-9'],
-    });
+    expect(viewOfLive(harness)).toMatchObject({ headRevisionId: 'rev-2', branch: 'main' });
+    expect(harness.actor.getSnapshot().context.checkouts[0]).toMatchObject({ leaseRunIds: ['run-9'] });
 
     harness.actor.stop();
   });
@@ -181,31 +183,38 @@ describe('projectRevisionsMachine and its checkout registry', () => {
     const harness = start();
     await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
 
-    harness.actor.send({
-      type: 'checkoutChanged',
-      checkoutId: 'checkout-live',
-      revisionId: 'rev-1',
-      treeId: 'tree-1',
-      branch: 'feature',
-    });
+    harness.actor.send({ type: 'checkoutChanged', checkoutId: 'checkout-live', branch: 'feature' });
+    harness.promises.settle('readHead', { output: { revisionId: 'rev-1', treeId: 'tree-1', branch: 'feature' } });
+    await flush();
     /* The registry's next announcements, on a lease landing and retiring, still name `main`. */
-    harness.actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
+    harness.actor.send({
+      type: 'leaseWritten',
+      key: { ...key, runId: 'run-9' },
+      checkoutId: 'checkout-live',
+      leaseIds: ['run-9'],
+    });
     harness.actor.send({ type: 'leaseStale', runId: 'run-9' });
     await flush();
     harness.promises.settle('retireRegistryLease', { output: undefined });
     await flush();
     harness.actor.send({ type: 'changed', checkoutId: 'checkout-live', paths: ['a.ts'], generation: 1 });
-    harness.actor.send({ type: 'cut', trigger: 'save', checkoutId: 'checkout-live', leaseIds: [] });
+    harness.actor.send({
+      type: 'cut',
+      requestId: 'save-1',
+      trigger: 'save',
+      checkoutId: 'checkout-live',
+      leaseIds: [],
+    });
     harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
     harness.promises.settle('cut', { output: { treeId: 'tree-2', cutId: 'cut-1' } });
     await flush();
-    harness.promises.settle('writeRevision', { output: { revisionId: 'rev-2' } });
+    harness.promises.settle('writeRevision', { output: { status: 'written', revisionId: 'rev-2' } });
     await flush();
 
     expect(harness.promises.inputsFor('casHead')).toEqual([
       { checkoutId: 'checkout-live', branch: 'feature', expectedHead: 'rev-1', head: 'rev-2' },
     ]);
-    expect(harness.actor.getSnapshot().context.checkouts[0]?.branch).toBe('feature');
+    expect(viewOfLive(harness).branch).toBe('feature');
 
     harness.actor.stop();
   });
@@ -215,26 +224,47 @@ describe('projectRevisionsMachine and its checkout registry', () => {
    * checkout was answered `nothingToSave` by the root until a reload. */
   it('should retire the lease of a conflicted turn', async () => {
     const harness = start();
-    await readyRegistry(harness, [{ ...live, leaseRunIds: ['run-1'], leaseChatIds: ['chat-1'] }]);
+    await readyRegistry(harness, [live]);
 
-    harness.actor.send({
-      type: 'turnConflicted',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      checkoutId: 'checkout-live',
-      runId: 'run-1',
-      revisionId: undefined,
-      trigger: 'turn',
-      branch: 'main',
-      runIds: ['run-1'],
+    harness.actor.send({ type: 'admitTurn', key, legacy: true });
+    harness.promises.settle('prepare', {
+      output: { checkoutId: 'checkout-live', branch: 'main', baseRevisionId: undefined, dirty: false, staleRunIds: [] },
     });
-    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([{ projectId: 'project-1', runId: 'run-1' }]);
+    await flush();
+    harness.promises.settle('writeLease', {
+      output: {
+        lease: { ...key, checkoutId: 'checkout-live', authorityEpoch: 'epoch-1', startedAt: 1 },
+        leaseIds: ['run-1'],
+        held: [],
+      },
+    });
+    await flush();
+    harness.callbacks.sendBack('lease', { type: 'leaseGranted' });
+    harness.actor.send({ type: 'turnCompleted', key });
+    harness.promises.settle('capture', { output: { captureId: 'capture-1' } });
+    await flush();
+    harness.promises.settle('merge', { output: { status: 'conflicted', conflictRevisionId: 'rev-conflict' } });
+    await flush();
+
+    /* The legacy attempt is acknowledged by the root, so its record retires, then the registry drops it (RM-R10). */
+    harness.promises.settle('retireTurnLease', { output: undefined });
+    await flush();
+    expect(harness.emitted.map((event) => event.type)).toContain('turnConflicted');
+    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([
+      { projectId: 'project-1', runId: 'run-1', key },
+    ]);
     harness.promises.settle('retireRegistryLease', { output: undefined });
     await flush();
 
     expect(harness.actor.getSnapshot().children.checkouts?.getSnapshot().context.checkouts[0]?.leaseRunIds).toEqual([]);
     harness.actor.send({ type: 'changed', checkoutId: 'checkout-live', paths: ['a.ts'], generation: 1 });
-    harness.actor.send({ type: 'cut', trigger: 'save', checkoutId: 'checkout-live', leaseIds: [] });
+    harness.actor.send({
+      type: 'cut',
+      requestId: 'save-1',
+      trigger: 'save',
+      checkoutId: 'checkout-live',
+      leaseIds: [],
+    });
 
     expect(harness.emitted.find((event) => event.type === 'nothingToSave')).toBeUndefined();
     expect(

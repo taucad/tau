@@ -7,33 +7,35 @@ import { checkoutsMachine, selectLeaseSet } from '#checkouts.machine.js';
 import type { CheckoutsMachineEvent } from '#checkouts.machine.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { CheckoutRecord } from '#revision-port.js';
+import type { TurnAttemptKey } from '#turn.types.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { createFakeParent, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
 import type { FakePromiseActors } from '@taucad/xstate-testing/fakes';
 import { guardActors } from '@taucad/xstate-testing/inspect';
-import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 /*
- * Path table — `checkouts.machine` (catalogue: 14).
+ * Path table — `checkouts.machine` (catalogue: 22).
  *
  *  1  `open` sweeps stale leases, then rehydrates the registry from records
  *  2  a sweep that retired runs announces `leaseRetired` for each
  *  3  `sweepLeases` failure → `failed`
  *  4  `listCheckouts` failure → `failed`
  *  5  `failed` accepts `open` again
- *  6  `addCheckout` appends a checkout and announces the new registry
+ *  6  `addCheckout` appends a checkout, announces the new registry and answers
+ *     `checkoutAdded` with its request id
  *  7  a branch that already has a checkout is refused (one checkout per branch)
- *  8  `addCheckout` failure keeps the registry and announces `checkoutFailed`
- *  9  `removeCheckout` drops a checkout and announces the new registry
+ *  8  `addCheckout` failure keeps the registry and answers `checkoutFailed` by id
+ *  9  `removeCheckout` drops a checkout, announces the new registry and answers
+ *     `checkoutRemoved` by id
  * 10  a checkout a lease holds is never removed (A25/I9)
- * 11  `removeCheckout` failure announces `checkoutFailed`
- * 12  `turnFinalized` retires the lease without removing the checkout (D17)
+ * 11  `removeCheckout` failure answers `checkoutFailed` by id
+ * 12  `turnEnded` retires the lease without removing the checkout (D17, RM-R10)
  * 13  `leaseStale { runId }` retires that lease
  * 14  two retirements in one burst are both served
  * 15  `leaseWritten { checkoutId, runId }` appends the lease and re-announces,
  *     arming the D10 switch guard and the A25/I9 removal guard (R1)
- * 16  `turnFinalized` retires only that turn's own lease, so a second chat on
+ * 16  `turnEnded` retires only that attempt's own lease, so a second chat on
  *     the same checkout keeps its lease (AC9, R2)
  * 17  every registry fact the parent has to route reaches it, not just the
  *     emit stream (R11)
@@ -42,39 +44,13 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  * 19  a turn that ended without ever writing a lease retires nothing (R23)
  * 20  a settlement or a stale-lease report that arrives before the registry
  *     finished loading still retires its lease (R30)
+ * 21  an add or remove that arrives while the registry is busy, still opening or
+ *     failed is queued and answered by id — never dropped (RM-R11)
+ * 22  a reopen while sweeping is served by the load that follows; a reopen while
+ *     loading reads again
  * --  a removable record offers removal; `open` rehydrates from records again;
  *     start and stop, serializable snapshot, one exported machine value
  */
-
-/**
- * Known defects (MC-S5): public events a reachable state neither takes nor
- * declares ignored. W5 (or the W0 item named on the row) answers each one or
- * moves it to an exported `checkoutsIgnoredEvents` (D13, MC-R17), and deletes
- * the row as it lands.
- */
-const knownDefects: IgnoredEvents = {
-  checkouts: [
-    // W0.8: `turnConflicted` leaves the lease held; no state takes it.
-    ['*', 'turnConflicted'],
-    // W5: L7 F3 — an operation or `open` outside the state that serves it is dropped unanswered.
-    ['idle', 'addCheckout'],
-    ['idle', 'removeCheckout'],
-    ['recovering', 'open'],
-    ['recovering', 'addCheckout'],
-    ['recovering', 'removeCheckout'],
-    ['loading', 'open'],
-    ['loading', 'addCheckout'],
-    ['loading', 'removeCheckout'],
-    ['failed', 'addCheckout'],
-    ['failed', 'removeCheckout'],
-    ['ready.adding', 'addCheckout'],
-    ['ready.adding', 'removeCheckout'],
-    ['ready.removing', 'addCheckout'],
-    ['ready.removing', 'removeCheckout'],
-    ['ready.retiring', 'addCheckout'],
-    ['ready.retiring', 'removeCheckout'],
-  ],
-};
 
 /** Let every queued microtask and the actor's promise handlers run. */
 const flush = async (): Promise<void> => {
@@ -110,7 +86,7 @@ const linked: CheckoutRecord = {
 };
 
 const start = (): Harness => {
-  const guard = guardActors({ ignore: knownDefects });
+  const guard = guardActors();
   const promises = createFakePromiseActors();
   const parent = createFakeParent();
   const actor = createActor(
@@ -141,6 +117,8 @@ const toReady = async (
   harness.promises.settle('listCheckouts', { output: { checkouts: options?.checkouts ?? [live, linked] } });
   await flush();
 };
+
+const keyOf = (runId: string): TurnAttemptKey => ({ chatId: 'chat-1', turnId: 'turn-1', runId, attempt: 1 });
 
 const types = (events: ReadonlyArray<{ type: string }>): readonly string[] => events.map((event) => event.type);
 
@@ -217,7 +195,7 @@ describe('checkoutsMachine', () => {
     const { actor, promises, parent } = harness;
 
     await toReady(harness);
-    actor.send({ type: 'addCheckout', branch: 'agent/c', from: 'rev-1' });
+    actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' });
 
     expect(actor.getSnapshot().matches({ ready: 'adding' })).toBe(true);
     expect(promises.inputsFor('addCheckout')).toEqual([{ projectId: 'project-1', branch: 'agent/c', from: 'rev-1' }]);
@@ -238,7 +216,7 @@ describe('checkoutsMachine', () => {
     const { actor, promises, emitted } = harness;
 
     await toReady(harness);
-    actor.send({ type: 'addCheckout', branch: 'main', from: 'rev-1' });
+    actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'main', from: 'rev-1' });
 
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
     expect(promises.inputsFor('addCheckout')).toEqual([]);
@@ -252,7 +230,7 @@ describe('checkoutsMachine', () => {
     const { actor, promises, emitted } = harness;
 
     await toReady(harness);
-    actor.send({ type: 'addCheckout', branch: 'agent/c', from: 'rev-1' });
+    actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' });
     /* P4: the refusal crosses as a code as well as a diagnostic, so the page
      * that shows it chooses the words. */
     promises.settle('addCheckout', {
@@ -276,7 +254,7 @@ describe('checkoutsMachine', () => {
     const { actor, promises } = harness;
 
     await toReady(harness);
-    actor.send({ type: 'removeCheckout', id: 'checkout-live' });
+    actor.send({ type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-live' });
 
     expect(actor.getSnapshot().matches({ ready: 'removing' })).toBe(true);
     promises.settle('removeCheckout', { output: undefined });
@@ -292,7 +270,7 @@ describe('checkoutsMachine', () => {
     const { actor, promises, emitted } = harness;
 
     await toReady(harness);
-    actor.send({ type: 'removeCheckout', id: 'checkout-b' });
+    actor.send({ type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-b' });
 
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
     expect(promises.inputsFor('removeCheckout')).toEqual([]);
@@ -306,7 +284,7 @@ describe('checkoutsMachine', () => {
     const { actor, promises, emitted } = harness;
 
     await toReady(harness);
-    actor.send({ type: 'removeCheckout', id: 'checkout-live' });
+    actor.send({ type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-live' });
     promises.settle('removeCheckout', { error: new Error('directory busy') });
     await flush();
 
@@ -317,22 +295,12 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
-  it('retires a finalized turn lease without removing its checkout', async () => {
+  it('retires an ended attempt\u2019s lease without removing its checkout', async () => {
     const harness = start();
     const { actor, promises, emitted } = harness;
 
     await toReady(harness);
-    actor.send({
-      type: 'turnFinalized',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      checkoutId: 'checkout-b',
-      runId: 'run-7',
-      revisionId: 'rev-2',
-      trigger: 'turn',
-      branch: 'main',
-      runIds: ['run-7'],
-    });
+    actor.send({ type: 'turnEnded', key: keyOf('run-7'), checkoutId: 'checkout-b' });
 
     expect(actor.getSnapshot().matches({ ready: 'retiring' })).toBe(true);
     promises.settle('retireLease', { output: undefined });
@@ -417,7 +385,7 @@ describe('checkoutsMachine', () => {
     expect(parent.events.filter((event) => event.type === 'checkoutsChanged')).toHaveLength(announcements + 1);
 
     /* A25/I9: the same lease now blocks removal. */
-    actor.send({ type: 'removeCheckout', id: 'checkout-live' });
+    actor.send({ type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-live' });
 
     expect(promises.inputsFor('removeCheckout')).toEqual([]);
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
@@ -439,28 +407,20 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
-  it('retires only the finalizing turn\u2019s own lease, leaving a second chat leased', async () => {
+  it('retires only the ended attempt\u2019s own lease, leaving a second chat leased', async () => {
     const harness = start();
     const { actor, promises } = harness;
     const shared: CheckoutRecord = { ...linked, leaseRunIds: ['run-a', 'run-b'] };
 
     await toReady(harness, { checkouts: [live, shared] });
-    actor.send({
-      type: 'turnFinalized',
-      turnId: 'turn-a',
-      chatId: 'chat-a',
-      checkoutId: 'checkout-b',
-      runId: 'run-a',
-      revisionId: 'rev-2',
-      trigger: 'turn',
-      branch: 'main',
-      runIds: ['run-a', 'run-b'],
-    });
+    actor.send({ type: 'turnEnded', key: keyOf('run-a'), checkoutId: 'checkout-b' });
     promises.settle('retireLease', { output: undefined });
     await flush();
 
     /* AC9: two chats share the checkout; chat B is still working in it. */
-    expect(promises.inputsFor('retireLease')).toEqual([{ projectId: 'project-1', runId: 'run-a' }]);
+    expect(promises.inputsFor('retireLease')).toEqual([
+      { projectId: 'project-1', runId: 'run-a', key: keyOf('run-a') },
+    ]);
     expect(selectLeaseSet(actor.getSnapshot())['checkout-b']).toEqual(['run-b']);
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
 
@@ -475,7 +435,7 @@ describe('checkoutsMachine', () => {
       retired: ['run-0'],
       checkouts: [live, { ...linked, leaseRunIds: [], removable: true }],
     });
-    actor.send({ type: 'addCheckout', branch: 'main', from: 'rev-1' });
+    actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'main', from: 'rev-1' });
 
     expect(types(parent.events)).toContain('leaseRetired');
     expect(types(parent.events)).toContain('removalOffered');
@@ -512,7 +472,7 @@ describe('checkoutsMachine', () => {
     const { actor, promises, emitted } = harness;
 
     await toReady(harness);
-    actor.send({ type: 'turnReleased', turnId: 'turn-1', checkoutId: 'checkout-live', runId: 'run-never' });
+    actor.send({ type: 'turnEnded', key: keyOf('run-never'), checkoutId: 'checkout-live' });
 
     /* R11 routes a retirement failure to the host, so retiring a lease that was
      * never written would surface a failure nobody can act on. */
@@ -530,23 +490,15 @@ describe('checkoutsMachine', () => {
     actor.send({ type: 'open' });
     promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
-    actor.send({
-      type: 'turnFinalized',
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      checkoutId: 'checkout-b',
-      runId: 'run-7',
-      revisionId: 'rev-2',
-      trigger: 'turn',
-      branch: 'main',
-      runIds: ['run-7'],
-    });
+    actor.send({ type: 'turnEnded', key: keyOf('run-7'), checkoutId: 'checkout-b' });
     promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
     await flush();
     promises.settle('retireLease', { output: undefined });
     await flush();
 
-    expect(promises.inputsFor('retireLease')).toEqual([{ projectId: 'project-1', runId: 'run-7' }]);
+    expect(promises.inputsFor('retireLease')).toEqual([
+      { projectId: 'project-1', runId: 'run-7', key: keyOf('run-7') },
+    ]);
     expect(selectLeaseSet(actor.getSnapshot())['checkout-b']).toEqual([]);
 
     actor.stop();
@@ -576,7 +528,7 @@ describe('checkoutsMachine', () => {
 
     actor.send({ type: 'open' });
     actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
-    actor.send({ type: 'turnReleased', turnId: 'turn-1', checkoutId: 'checkout-live', runId: 'run-9' });
+    actor.send({ type: 'turnEnded', key: keyOf('run-9'), checkoutId: 'checkout-live' });
     promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
     promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
@@ -587,6 +539,114 @@ describe('checkoutsMachine', () => {
     expect(selectLeaseSet(actor.getSnapshot())['checkout-live']).toEqual([]);
     expect(promises.inputsFor('retireLease')).toEqual([]);
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
+
+    actor.stop();
+  });
+
+  it('answers an add and a remove by request id', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    await toReady(harness);
+    actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' });
+    const added = { ...linked, id: 'checkout-c', branch: 'agent/c', leaseRunIds: [] };
+    promises.settle('addCheckout', { output: { checkout: added } });
+    await flush();
+    actor.send({ type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-c' });
+    promises.settle('removeCheckout', { output: undefined });
+    await flush();
+
+    expect(parent.events.filter((event) => event.type === 'checkoutAdded' || event.type === 'checkoutRemoved')).toEqual(
+      [
+        { type: 'checkoutAdded', requestId: 'add-1', checkout: added },
+        { type: 'checkoutRemoved', requestId: 'remove-1', checkoutId: 'checkout-c' },
+      ],
+    );
+
+    actor.stop();
+  });
+
+  /* L7 F3, RM-R11: an add outside `ready.idle` was dropped, and the branch verb waited out its 30 s bound. */
+  it('should queue an add that arrives while busy', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    await toReady(harness, { checkouts: [live, { ...linked, leaseRunIds: [] }] });
+    actor.send({ type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-b' });
+    actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' });
+
+    expect(actor.getSnapshot().matches({ ready: 'removing' })).toBe(true);
+    promises.settle('removeCheckout', { output: undefined });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ ready: 'adding' })).toBe(true);
+    const added = { ...linked, id: 'checkout-c', branch: 'agent/c', leaseRunIds: [] };
+    promises.settle('addCheckout', { output: { checkout: added } });
+    await flush();
+
+    expect(parent.events.filter((event) => event.type === 'checkoutAdded')).toEqual([
+      { type: 'checkoutAdded', requestId: 'add-1', checkout: added },
+    ]);
+
+    actor.stop();
+  });
+
+  it('serves an add sent before the registry opened once it loads', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' });
+    await toReady(harness);
+
+    expect(promises.inputsFor('addCheckout')).toEqual([{ projectId: 'project-1', branch: 'agent/c', from: 'rev-1' }]);
+    promises.settle('addCheckout', { error: new Error('cannot nest a worktree') });
+    await flush();
+
+    expect(parent.events.find((event) => event.type === 'checkoutFailed')).toMatchObject({
+      operation: 'add',
+      requestId: 'add-1',
+    });
+
+    actor.stop();
+  });
+
+  it('refuses every held and later operation by id when the registry fails', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'open' });
+    actor.send({ type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-b' });
+    promises.settle('sweepLeases', { error: new Error('no runs directory') });
+    await flush();
+    actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' });
+
+    expect(
+      parent.events
+        .filter((event) => event.type === 'checkoutFailed')
+        .map((event): unknown[] => [event['operation'], event['requestId']]),
+    ).toEqual([
+      ['open', undefined],
+      ['remove', 'remove-1'],
+      ['add', 'add-1'],
+    ]);
+
+    actor.stop();
+  });
+
+  it('reads the records again when reopened while loading', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'open' });
+    actor.send({ type: 'open' });
+    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
+    await flush();
+    actor.send({ type: 'open' });
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    await flush();
+
+    expect(promises.inputsFor('sweepLeases')).toHaveLength(1);
+    expect(promises.inputsFor('listCheckouts')).toHaveLength(2);
 
     actor.stop();
   });
@@ -652,31 +712,18 @@ describe('checkoutsMachine', () => {
     const addInvoke = invokeId('ready.adding');
     const removeInvoke = invokeId('ready.removing');
     const retireInvoke = invokeId('ready.retiring');
-    const settlement = {
-      turnId: 'turn-1',
-      chatId: 'chat-1',
-      checkoutId: 'checkout-b',
-      runId: 'run-7',
-      revisionId: 'rev-2',
-      trigger: 'turn',
-      branch: 'agent/b',
-      runIds: ['run-7'],
-    } as const;
     const publicEvents: readonly CheckoutsMachineEvent[] = [
       { type: 'open' },
-      { type: 'addCheckout', branch: 'agent/c', from: 'rev-1' },
-      { type: 'removeCheckout', id: 'checkout-live' },
+      { type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' },
+      { type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-live' },
       { type: 'leaseStale', runId: 'run-7' },
       { type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' },
-      { type: 'turnFinalized', ...settlement },
-      { type: 'turnReleased', turnId: 'turn-1', checkoutId: 'checkout-b', runId: 'run-7' },
+      { type: 'turnEnded', key: keyOf('run-7'), checkoutId: 'checkout-b' },
     ];
     const options = {
       input: { projectId: 'project-1', parentRef: undefined },
       events: [
         ...publicEvents,
-        /* W0.8: the turn sends `turnConflicted`, which the registry's event union does not name yet. */
-        { type: 'turnConflicted', ...settlement },
         /* Effect outcomes reach the states behind each invoke; they are not public. */
         { type: `xstate.done.actor.${sweepInvoke}`, output: { retiredRunIds: [] } },
         { type: `xstate.error.actor.${sweepInvoke}`, error: new Error('no runs directory') },
@@ -696,7 +743,7 @@ describe('checkoutsMachine', () => {
       serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
     };
 
-    expect(unansweredEvents(checkoutsMachine, { ...options, ignore: knownDefects['checkouts'] })).toEqual([]);
+    expect(unansweredEvents(checkoutsMachine, options)).toEqual([]);
     expect(unreachedStates(checkoutsMachine, options)).toEqual([]);
   });
 });

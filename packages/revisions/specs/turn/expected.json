@@ -1,22 +1,86 @@
 {
   "configs": {
-    "TurnProtocol.pr.cfg": { "tier": "pr", "expect": "pass", "ref": "S6" },
+    "TurnProtocol.pr.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W5 RM-S7: the code's knobs, the interim; the blueprint's legacy configuration (the target machine under today's commands, nine properties); deleted with W8's TS-S6, when target is the code's"
+    },
     "TurnProtocol.no-unretired-lease.cfg": {
       "tier": "pr",
-      "expect": { "violated": "NoUnretiredLease" },
-      "kind": "defect",
-      "ref": "S6 design counterexample",
-      "fixedBy": "W5"
+      "expect": "pass",
+      "ref": "S6 design counterexample: PrepareOk(clean), Release, OrphanDone(writeLease); fixed by W5 RM-S7"
     },
     "TurnProtocol.no-mint-behind-unsettled-turn.cfg": {
       "tier": "pr",
-      "expect": { "violated": "NoMintBehindUnsettledTurn" },
-      "kind": "defect",
-      "ref": "S6 design counterexample",
-      "fixedBy": "W5"
+      "expect": "pass",
+      "ref": "S6 design counterexample: PrepareOk(dirty), BaseTimeout, LateAnswer(revisionMinted); fixed by W5 RM-S7"
+    },
+    "TurnProtocol.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W5 blueprint: ten properties, 1,107 states"
+    },
+    "TurnProtocol.witness-cut-bound.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoMintBehindUnsettledTurn"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R3: CutBound TRUE, 7 states"
+    },
+    "TurnProtocol.witness-defer-release.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoOrphans"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R4: DeferRelease FALSE, 2 states"
+    },
+    "TurnProtocol.witness-lease-first.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "MintOnlyUnderLease"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R12: LeaseFirst FALSE, 3 states"
+    },
+    "TurnProtocol.witness-ack-retire.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "RetireAfterAck"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R10: AckRetire FALSE, 4 states"
+    },
+    "TurnProtocol.witness-port-verbs.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CompleteCuts"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R13: PortVerbs FALSE, 6 states"
+    },
+    "TurnProtocol.witness-m1-host.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CompleteCuts"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-R11: M1Host FALSE, 3 states"
+    },
+    "TurnProtocol.witness-defer-release-legacy.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoUnretiredLease"
+      },
+      "kind": "witness",
+      "ref": "W5 RM-R4: DeferRelease and M1Host FALSE, 5 states"
     }
   },
   "graphs": {
-    "TurnProtocol": { "config": "TurnProtocol.pr.cfg", "phase": "turn.phase" }
+    "TurnProtocol": {
+      "config": "TurnProtocol.pr.cfg",
+      "phase": "turn.phase"
+    }
   }
 }

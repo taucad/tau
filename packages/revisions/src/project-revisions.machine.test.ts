@@ -1234,6 +1234,25 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  it('reads a checked-out branch row at the live head, not the lagging registry record (D47)', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
+    harness.actor.send({
+      type: 'checkoutStatusChanged',
+      checkoutId: 'checkout-live',
+      status: 'clean',
+      headRevisionId: 'rev-2',
+    });
+    await flush();
+
+    const status = selectRevisionStatus(harness.actor.getSnapshot());
+    expect(status.headRevisionId).toBe('rev-2');
+    expect(status.branches.find((row) => row.checkoutId === 'checkout-live')?.head).toBe('rev-2');
+
+    harness.actor.stop();
+  });
+
   /*
    * A trigger-only cut naming no checkout was dropped on the floor, so the
    * `branch` child sat in `recording` for the whole 30 s bound and the person

@@ -21,7 +21,7 @@ import {
 } from '#services/agent-host-event-projection.js';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { Topic } from '@taucad/events';
-import { isResumableRunFailure } from '@taucad/agent-host';
+import { emptyChatLedger, foldReadAnswer, isResumableRunFailure } from '@taucad/agent-host';
 import type { AgentHostRefusalCode } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 
@@ -29,6 +29,9 @@ type AgentLogEvent = Parameters<Parameters<AgentHostClient['subscribe']>[0]>[1];
 type AgentLiveEvent = Parameters<Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0]>[1];
 type HostRunSnapshot = Awaited<ReturnType<AgentHostClient['start']>>;
 type HostEventBatch = Awaited<ReturnType<AgentHostClient['attach']>>;
+
+/** ponytail: a bound on refolds and stale pages per replay; a log that keeps moving under a read is reported. */
+const maxReadPages = 10_000;
 type UserProviderMessage = Exclude<Parameters<AgentHostClient['start']>[0]['message'], string>;
 type JsonValue = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message']['content'];
 type BrowserRunState = HostRunSnapshot['state'];
@@ -830,6 +833,7 @@ const createHostStream = <Message extends UIMessage>(input: {
     let { runId } = input;
     let closed = false;
     let cursor = 0;
+    let ledger = emptyChatLedger;
     let eventCount = 0;
     let state: BrowserRunState = 'admitted';
     let turnId: string | undefined;
@@ -999,13 +1003,39 @@ const createHostStream = <Message extends UIMessage>(input: {
      * if a chat ever outgrows that, page the *earlier* runs into the rebuild
      * incrementally and keep only the trailing run's events here.
      */
-    const collectLog = async (hostClient: AgentHostClient, batch: HostEventBatch): Promise<AgentLogEvent[]> => {
-      cursor = batch.nextCursor;
-      if (cursor >= batch.endCursor) {
-        return [...batch.events];
+    const collectLog = async (hostClient: AgentHostClient, first: HostEventBatch): Promise<AgentLogEvent[]> => {
+      /* Every page goes through the ledger's read fold (CL-R13): a page that does not start at this reader's
+       * cursor is stale and read again, and a version-1 host's clamp — the log is shorter than this reader has
+       * read — refolds from the start instead of ending the replay on a log that is not the one it was reading.
+       * Rows already projected are skipped by `seen`. */
+      let events: AgentLogEvent[] = [];
+      let batch = first;
+      for (let page = 0; ; page++) {
+        const fold = foldReadAnswer(ledger, { status: 'batch', ...batch });
+        if (fold.kind === 'folded') {
+          ledger = fold.ledger;
+          events.push(...batch.events);
+          if (ledger.position.cursor >= batch.endCursor) {
+            cursor = ledger.position.cursor;
+            return events;
+          }
+        } else if (fold.kind === 'reset') {
+          console.warn(
+            `[agentHost] the chat log read came back ${fold.reason}; reading it again from the start`,
+            input.chatId,
+          );
+          ledger = emptyChatLedger;
+          events = [];
+        }
+        if (page > maxReadPages) {
+          throw Object.assign(new Error(`The log of chat ${input.chatId} did not settle while it was read.`), {
+            code: 'LOG_READ_UNSETTLED',
+          });
+        }
+        cursor = ledger.position.cursor;
+        // oxlint-disable-next-line no-await-in-loop -- pages are read in order from the reader's cursor.
+        batch = await hostClient.tail({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
       }
-      const next = await hostClient.tail({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
-      return [...batch.events, ...(await collectLog(hostClient, next))];
     };
     const reconcileSnapshot = (snapshot: HostRunSnapshot | undefined, reopens = false): boolean => {
       if (!snapshot || snapshot.runId !== runId) {

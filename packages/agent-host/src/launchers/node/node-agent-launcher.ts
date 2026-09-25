@@ -26,7 +26,7 @@ import { join } from 'node:path';
 
 import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
-import { replayedStartOutcome } from '#host/replayed-start.js';
+import { emptyChatLedger, foldChatLedger, replayedStartOutcome } from '#log/chat-ledger.js';
 import { createNodeAttachmentReader, createNodeEventLog } from '#node.js';
 import { createPortableId } from '#harness/session-record.js';
 import type {
@@ -349,11 +349,15 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
       return cached;
     }
     const opened = (async (): Promise<DurableEventLog> => {
-      const log = await createNodeEventLog({
-        filePath: eventLogPath(chatId),
-      });
+      const log = await createNodeEventLog({ filePath: eventLogPath(chatId), access: 'write' });
       return {
-        append: async (event: AgentLogEvent) => {
+        append: async (candidate: AgentLogEvent) => {
+          /* The binding's durability class, stated on the run's admission as the page's bindings state theirs:
+           * `appendFile` then `sync()` per append, and the directory synced once at creation (W3 §11). */
+          const event: AgentLogEvent =
+            candidate.type === 'run.lifecycle' && candidate.state === 'admitted'
+              ? { ...candidate, storageDurability: 'exclusive-append' }
+              : candidate;
           const outcome = await log.append(event);
           if (outcome.appended) {
             durable.publish({ chatId, event });
@@ -362,6 +366,9 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
         },
         read: async () => log.read(),
         readBatch: async (input) => log.readBatch(input),
+        messages: async () => log.messages(),
+        historyIntact: async () => log.historyIntact(),
+        anomalies: async () => log.anomalies(),
         close: async () => log.close(),
       };
     })();
@@ -611,7 +618,7 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
          * has — admitting it again would refuse the id as taken and lose the
          * turn. The browser worker reads the same function. */
         const log = await openEventLog(command.chatId);
-        switch (replayedStartOutcome({ events: await log.read(), runId: command.runId })) {
+        switch (replayedStartOutcome(foldChatLedger(emptyChatLedger, await log.read()), command.runId)) {
           case 'settled': {
             return { type: 'result', operation: 'start', snapshot: await host.snapshot(command.chatId) };
           }
@@ -631,6 +638,9 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
                 })),
             };
           }
+          /* ponytail: an admission a dead leader never committed goes to admission as before, which refuses its
+           * id (L2a D6); M1's `idle.orphaned` recovers it (W7). */
+          case 'recover':
           case 'admit': {
             break;
           }

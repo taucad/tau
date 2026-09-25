@@ -1,6 +1,8 @@
 import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
+import { parseEventLogBytes } from '#log/serialization.js';
+import type { AgentLogEvent } from '#log/event-types.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
 
@@ -17,15 +19,27 @@ type SyncAccessCapableFileHandle = FileSystemFileHandle & {
   createSyncAccessHandle?: () => Promise<SyncAccessHandle>;
 };
 
+/** A read-only open: no handle, lock or writer is kept between reads (W6 RH-A18). */
+type BrowserEventLogReader = Pick<EventLogAppender, 'read' | 'close'>;
+
 /** Browser OPFS event-log options. @public */
 export type OpfsEventLogOptions = {
   /** Exact OPFS file handle for `.tau/chats/<chatId>/events.jsonl`. */
   readonly fileHandle: FileSystemFileHandle;
+  /** `read` takes no sync handle; `write` holds the exclusive sync handle for the log's life. */
+  readonly access: 'read' | 'write';
 };
 
 /** Provider or bridge-proxy event-log options. @public */
 export type ProviderEventLogOptions = {
   readonly filePath: string;
+  /** `read` creates nothing and takes no lock; `write` fences every append inside a per-append Web Lock. */
+  readonly access: 'read' | 'write';
+  /**
+   * The per-append Web Lock's name, unique per chat log across projects, such as `tau-log-append:<projectId>:<chatId>`.
+   * Defaults to one derived from `filePath`, which serializes same-path logs of different projects needlessly.
+   */
+  readonly lockName?: string | undefined;
   readonly fileSystem: {
     exists(path: string): Promise<boolean>;
     readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
@@ -67,22 +81,54 @@ const appendAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>): vo
   handle.flush();
 };
 
+const readerOf = (read: () => Promise<Uint8Array<ArrayBuffer>>): BrowserEventLogReader => {
+  let closed = false;
+  return {
+    read: async (): Promise<readonly AgentLogEvent[]> => {
+      if (closed) {
+        throw new EventLogError('LOG_CLOSED', 'The event log reader is closed.');
+      }
+      return parseEventLogBytes(await read()).events;
+    },
+    close: async () => {
+      closed = true;
+    },
+  };
+};
+
 /**
  * Open an OPFS positional-append event log in a dedicated browser worker.
  *
- * Every JSONL line is written at `getSize()` and flushed before its append
- * resolves. OPFS is unavailable on null origins, so tests must use a real origin.
+ * A write open holds the exclusive sync access handle for the log's life: every JSONL line is written at
+ * `getSize()` and flushed before its append resolves, and every append is fenced on the log's length (`LOG_FENCED`,
+ * D5). While another worker holds the handle the open is refused `WRITER_LOCKED`, whose recovery is to wait (CL-Q1).
+ * A read open reads the file without a handle. OPFS is unavailable on null origins, so tests must use a real origin.
  *
- * @param options - Exact OPFS file handle owned by the elected worker leader.
- * @returns An initialized, leader-epoch-idempotent event-log appender.
+ * @param options - Exact OPFS file handle owned by the elected worker leader, and the access mode.
+ * @returns A reader, or an initialized, leader-epoch-idempotent event-log appender.
  * @public
  */
-export const createOpfsEventLog = async (options: OpfsEventLogOptions): Promise<EventLogAppender> => {
+export function createOpfsEventLog(
+  options: OpfsEventLogOptions & { readonly access: 'read' },
+): Promise<BrowserEventLogReader>;
+export function createOpfsEventLog(
+  options: OpfsEventLogOptions & { readonly access: 'write' },
+): Promise<EventLogAppender>;
+/** Implements both access overloads of {@link createOpfsEventLog}. @public */
+export async function createOpfsEventLog(
+  options: OpfsEventLogOptions,
+): Promise<BrowserEventLogReader | EventLogAppender> {
   if (location.origin === 'null') {
     throw new EventLogError(
       'STORAGE_NOT_WRITABLE',
       'OPFS is unavailable on a null origin. Run the dedicated worker from a real secure or localhost origin.',
     );
+  }
+  if (options.access === 'read') {
+    return readerOf(async () => {
+      const file = await options.fileHandle.getFile();
+      return new Uint8Array(await file.arrayBuffer());
+    });
   }
 
   const acquire = (options.fileHandle as SyncAccessCapableFileHandle).createSyncAccessHandle;
@@ -98,8 +144,8 @@ export const createOpfsEventLog = async (options: OpfsEventLogOptions): Promise<
     handle = await acquire.call(options.fileHandle);
   } catch (error) {
     throw new EventLogError(
-      'STORAGE_NOT_WRITABLE',
-      'Could not acquire the exclusive OPFS sync access handle. Confirm this worker owns the active leader epoch.',
+      'WRITER_LOCKED',
+      "Another worker holds this chat log's exclusive OPFS handle. Wait until it closes the log, then open it again.",
       { cause: error },
     );
   }
@@ -113,6 +159,9 @@ export const createOpfsEventLog = async (options: OpfsEventLogOptions): Promise<
       handle.truncate(size);
       handle.flush();
     },
+    size: async () => handle.getSize(),
+    // The exclusive handle is held for the log's life, so every section is already exclusive.
+    exclusive: async (section) => section(),
     close: async () => {
       handle.close();
     },
@@ -124,23 +173,42 @@ export const createOpfsEventLog = async (options: OpfsEventLogOptions): Promise<
     handle.close();
     throw error;
   }
-};
+}
 
 /**
  * Open an event log through Tau's abstract filesystem provider or bridge proxy.
  *
- * The provider owns parent creation and per-path append ordering. The adjacent
- * marker mirrors the Node adapter's advisory single-writer lock; browser host
- * leader epochs remain the authoritative fencing mechanism.
+ * A write open fences every append inside a per-append Web Lock, exclusive and never stolen (EQ2): the log's length
+ * is checked against this writer's view and the line appended in one section, so a writer whose view is stale is
+ * refused `LOG_FENCED` without writing, and a frozen holder holds nothing between appends. The adjacent `.lock`
+ * marker is kept as a courtesy for builds that honour only it until the desktop support window ends (CL-S11).
+ * A read open creates nothing and takes no lock.
  *
+ * @param options - The log's provider path, the provider, the access mode and the lock's name.
+ * @returns A reader, or an initialized, leader-epoch-idempotent event-log appender.
  * @public
  */
-export const createProviderEventLog = async (options: ProviderEventLogOptions): Promise<EventLogAppender> => {
+export function createProviderEventLog(
+  options: ProviderEventLogOptions & { readonly access: 'read' },
+): Promise<BrowserEventLogReader>;
+export function createProviderEventLog(
+  options: ProviderEventLogOptions & { readonly access: 'write' },
+): Promise<EventLogAppender>;
+/** Implements both access overloads of {@link createProviderEventLog}. @public */
+export async function createProviderEventLog(
+  options: ProviderEventLogOptions,
+): Promise<BrowserEventLogReader | EventLogAppender> {
   const { filePath, fileSystem } = options;
+  const readBytes = async (): Promise<Uint8Array<ArrayBuffer>> =>
+    (await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : new Uint8Array();
+  if (options.access === 'read') {
+    return readerOf(readBytes);
+  }
   const { appendFile } = fileSystem;
   if (!appendFile) {
     throw new EventLogError('STORAGE_NOT_WRITABLE', 'The selected filesystem provider cannot append event-log data.');
   }
+  const lockName = options.lockName ?? `tau-log-append:${filePath}`;
 
   const lockPath = `${filePath}.lock`;
   if (await fileSystem.exists(lockPath)) {
@@ -152,7 +220,7 @@ export const createProviderEventLog = async (options: ProviderEventLogOptions): 
     await fileSystem.unlink(lockPath).catch(() => undefined);
   };
   const storage: EventLogStorage = {
-    read: async () => ((await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : new Uint8Array()),
+    read: readBytes,
     append: async (bytes) => appendFile.call(fileSystem, filePath, bytes),
     truncate: async (size) => {
       if (!(await fileSystem.exists(filePath))) {
@@ -164,6 +232,12 @@ export const createProviderEventLog = async (options: ProviderEventLogOptions): 
       const bytes = await fileSystem.readFile(filePath);
       await fileSystem.writeFile(filePath, bytes.slice(0, size));
     },
+    // ponytail: size by reading the file; a provider `stat` would save the read when logs grow large.
+    size: async () => {
+      const bytes = await readBytes();
+      return bytes.byteLength;
+    },
+    exclusive: async (section) => navigator.locks.request(lockName, { mode: 'exclusive' }, section),
     close: releaseWriterLock,
   };
 
@@ -173,7 +247,7 @@ export const createProviderEventLog = async (options: ProviderEventLogOptions): 
     await releaseWriterLock();
     throw error;
   }
-};
+}
 
 /**
  * Read chat attachments through Tau's abstract filesystem provider or bridge proxy (D15).

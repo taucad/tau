@@ -2,7 +2,7 @@ export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
 export { mergeLogSegments } from '#log/segments.js';
-export type { ChatLogSegment } from '#log/segments.js';
+export type { ChatLogSegment, MergeLogSegmentsOptions } from '#log/segments.js';
 export {
   agentLogEventSchema,
   jsonValueSchema,
@@ -11,9 +11,24 @@ export {
   userProviderMessageSchema,
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
-export { agentHostRefusalCodes, createTauAgentHost, isResumableRunFailure } from '#host/tau-agent-host.js';
-export { replayedStartOutcome } from '#host/replayed-start.js';
-export type { ReplayedStartOutcome } from '#host/replayed-start.js';
+export { agentHostRefusalCodes, createTauAgentHost } from '#host/tau-agent-host.js';
+export { isResumableRunFailure } from '#log/resumable.js';
+export {
+  emptyChatLedger,
+  foldChatLedger,
+  foldReadAnswer,
+  replayedStartOutcome,
+  unsettledAttempts,
+} from '#log/chat-ledger.js';
+export type {
+  ChatLedger,
+  InvocationEntry,
+  LedgerAnomaly,
+  LedgerPosition,
+  ReadFold,
+  ReplayedStartOutcome,
+  RunEntry,
+} from '#log/chat-ledger.js';
 /* The daemon channel vocabulary. Zod only — the WebSocket client half validates
  * against these same schemas inside a browser bundle, so they must not ride the
  * Node-only `/node-launcher` subpath. */
@@ -75,7 +90,8 @@ export { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gatewa
 export { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
 export { normalizeLatexDelimiters, trimToolResultContext } from '#harness/cad-middleware.js';
 export { HostCompactionError } from '#harness/compaction.js';
-export { canonicalJson, defaultSafeguardThresholds, summarizeToolEvents } from '#harness/safeguards.js';
+export { defaultSafeguardThresholds, summarizeToolEvents } from '#harness/safeguards.js';
+export { canonicalJson } from '#log/canonical-json.js';
 export { normalizeToolInput, tauToolKinds, toPiToolContent } from '#harness/tools.js';
 export type { EventLogErrorCode } from '#log/event-log-error.js';
 export type { EventLogAppender, EventLogAppendOutcome, EventLogBatch } from '#log/event-log-appender.js';
@@ -90,12 +106,14 @@ export type {
   JsonObject,
   JsonValue,
   LogEventBase,
+  RowKey,
   ModelSystemPromptBlock,
   ModelProviderKind,
   MessageAppendedEvent,
   MessageEnvelopeReplacedEvent,
   ModelInvocationBoundEvent,
   ModelInvocationPreparedEvent,
+  ModelInvocationSettledEvent,
   ModelReasoningConfig,
   ProviderMessage,
   ProviderMessageMetadata,
@@ -115,6 +133,7 @@ export type {
   TurnContextSnapshot,
   TurnModelConfig,
   TurnHistoryProjectionCommittedEvent,
+  TurnPlacement,
   UserProviderMessage,
 } from '#log/event-types.js';
 export { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createEventLogAppender } from '#log/event-log-appender.js';
-import type { EventLogStorage } from '#log/event-log-appender.js';
+import { withLength } from '#log/event-log-storage.fixture.js';
+import type { BareEventLogStorage } from '#log/event-log-storage.fixture.js';
 import type {
   InterruptApprovalPort,
   ModelStreamEvent,
@@ -8,13 +9,10 @@ import type {
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
-import {
-  createTauAgentHost,
-  hostRunStateOfLifecycle,
-  isHostLifecycleLegal,
-  isResumableRunFailure,
-  runLedgerOf,
-} from '#host/tau-agent-host.js';
+import { createTauAgentHost } from '#host/tau-agent-host.js';
+import { chatRunState, emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
+import { isResumableRunFailure } from '#log/resumable.js';
+import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import type { ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
@@ -29,7 +27,7 @@ const createMemoryLogFile = () => {
   let bytes = new Uint8Array(new ArrayBuffer(0));
   return {
     open: async () => {
-      const storage: EventLogStorage = {
+      const storage: BareEventLogStorage = {
         read: async () => bytes,
         append: async (next) => {
           const combined = new Uint8Array(bytes.byteLength + next.byteLength);
@@ -42,7 +40,7 @@ const createMemoryLogFile = () => {
         },
         close: async () => undefined,
       };
-      return createEventLogAppender(storage);
+      return createEventLogAppender(withLength(storage));
     },
   };
 };
@@ -173,6 +171,9 @@ describe('createTauAgentHost', () => {
           },
           read: opened.read,
           readBatch: opened.readBatch,
+          messages: opened.messages,
+          historyIntact: opened.historyIntact,
+          anomalies: opened.anomalies,
           close: opened.close,
         }),
         transport: {
@@ -1893,7 +1894,13 @@ describe('the host run ledger', () => {
   /** One seeded body under the envelope the fold reads it through. */
   const recorded = (event: SeededLogEvent, sequence: number): AgentLogEvent =>
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- one envelope over a closed union of seeded bodies.
-    ({ ...event, version: 1, leaderEpoch: 'epoch-fold', sequence, recordedAt: '' }) as AgentLogEvent;
+    ({
+      ...event,
+      version: 1,
+      leaderEpoch: 'epoch-fold',
+      sequence,
+      recordedAt: '2026-09-26T00:00:00.000Z',
+    }) as AgentLogEvent;
 
   it('should fold one log into the chat run and every run append state', () => {
     const seeded: readonly SeededLogEvent[] = [
@@ -1912,14 +1919,91 @@ describe('the host run ledger', () => {
       settlementOnlySecondRun,
     ];
 
-    const ledger = runLedgerOf(seeded.map((event, index) => recorded(event, index)));
+    const ledger = foldChatLedger(
+      emptyChatLedger,
+      seeded.map((event, index) => recorded(event, index)),
+    );
 
-    expect(ledger.chat).toEqual({ runId: 'run-2', state: 'admitted' });
-    expect(ledger.runs.get('run-1')?.state).toBe('settled');
+    expect(ledger.currentRunId).toBe('run-2');
+    expect(chatRunState(ledger)).toBe('admitted');
+    expect(ledger.runs['run-1']?.appendState).toBe('settled');
     /* `run-2` carries both an admission and, from the seeded tail, a
      * settlement — the shape a fixed host will no longer write. */
-    expect(ledger.runs.get('run-2')?.state).toBe('settled');
-    expect(runLedgerOf([]).chat).toBeUndefined();
+    expect(ledger.runs['run-2']?.appendState).toBe('settled');
+    expect(chatRunState(emptyChatLedger)).toBe('none');
+  });
+
+  // CL-A15 (L2a D18): the host folds a log once and then folds its own appends; it never re-reads per append.
+  it('should append without re-reading the log', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    let reads = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            read: async () => {
+              reads++;
+              return log.read();
+            },
+          };
+        },
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'no-reread',
+      }),
+    );
+
+    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    const afterFirst = reads;
+    for (const reason of ['a', 'b', 'c']) {
+      // oxlint-disable-next-line no-await-in-loop -- appends are serial per chat.
+      await host
+        .recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: { ...settlement, reason } })
+        .catch(() => undefined);
+    }
+
+    expect(afterFirst).toBe(1);
+    expect(reads).toBe(afterFirst);
+    await host.close();
+  });
+
+  // CL-S10 (L2a D18): eviction closes the chat's log and drops its ledger; the next use reopens and refolds.
+  it('should reopen an evicted chat with an equal ledger', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    let opens = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          opens++;
+          return file.open();
+        },
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'evict',
+      }),
+    );
+    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    const before = await host.describeRun('chat-ledger');
+
+    await host.evictChat('chat-ledger');
+
+    expect(await host.describeRun('chat-ledger')).toEqual(before);
+    // The repeat settlement is still recognised: the refolded ledger holds the first.
+    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    expect(opens).toBe(2);
+    await host.close();
   });
 
   it('should treat an identical repeat of a settlement as a no-op', async () => {
@@ -1983,7 +2067,12 @@ describe('the host run ledger', () => {
     ['failed', 'terminal'],
     ['cancelled', 'terminal'],
   ] as const)('should read the lifecycle %s as %s', (lifecycle, expected) => {
-    expect(hostRunStateOfLifecycle(lifecycle)).toBe(expected);
+    const states = lifecycle === undefined ? [] : [...new Set(['admitted', lifecycle] as const)];
+    const ledger = foldChatLedger(
+      emptyChatLedger,
+      states.map((state, index) => recorded({ type: 'run.lifecycle', runId: 'run-1', state }, index)),
+    );
+    expect(chatRunState(ledger)).toBe(expected);
   });
 });
 
@@ -2066,38 +2155,21 @@ describe('the attempt ledger and its refusal taxonomy', () => {
   });
 
   it('rules every lifecycle record an attempt may add', () => {
+    const { table } = lifecycleTable;
     // `admitted` is a run's first word.
-    expect(
-      isHostLifecycleLegal({ next: 'admitted', state: 'unadmitted', lifecycle: undefined, reopenable: false }),
-    ).toBe(true);
-    expect(isHostLifecycleLegal({ next: 'admitted', state: 'open', lifecycle: 'running', reopenable: false })).toBe(
-      false,
-    );
-    expect(isHostLifecycleLegal({ next: 'admitted', state: 'terminal', lifecycle: 'failed', reopenable: true })).toBe(
-      false,
-    );
+    expect(table.unadmitted.admitted).toBe('ok');
+    expect(table.open.admitted).toBe('RUN_ID_TAKEN');
+    expect(table.ended.admitted).toBe('RUN_ID_TAKEN');
     // Everything before the settlement stays legal: teardown re-records, resume reopens.
-    expect(
-      isHostLifecycleLegal({ next: 'cancelled', state: 'terminal', lifecycle: 'cancelled', reopenable: false }),
-    ).toBe(true);
-    expect(isHostLifecycleLegal({ next: 'running', state: 'terminal', lifecycle: 'failed', reopenable: false })).toBe(
-      true,
-    );
+    expect(table.ended.cancelled).toBe('ok');
+    expect(table.ended.running).toBe('ok');
     /* A settlement that landed while the run was executing does not stop it
      * recording how it ended — refusing that row would kill a live run. */
-    expect(isHostLifecycleLegal({ next: 'completed', state: 'settled', lifecycle: 'running', reopenable: false })).toBe(
-      true,
-    );
+    expect(table['settled-open'].completed).toBe('ok');
     // Once it has ended and settled, only a reopening `running` may follow.
-    expect(isHostLifecycleLegal({ next: 'completed', state: 'settled', lifecycle: 'failed', reopenable: true })).toBe(
-      false,
-    );
-    expect(isHostLifecycleLegal({ next: 'running', state: 'settled', lifecycle: 'failed', reopenable: false })).toBe(
-      false,
-    );
-    expect(isHostLifecycleLegal({ next: 'running', state: 'settled', lifecycle: 'failed', reopenable: true })).toBe(
-      true,
-    );
+    expect(table.reopenable.completed).toBe('RUN_ID_TAKEN');
+    expect(table.settled.running).toBe('RUN_ID_TAKEN');
+    expect(table.reopenable.running).toBe('ok');
   });
 
   it('refuses a lifecycle record an external runner writes for a settled run', async () => {
@@ -2144,7 +2216,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     await host.close();
   });
 
-  it('refuses the second of two differing settlements appended in one batch', async () => {
+  it('refuses a batch of two differing settlements whole, writing neither', async () => {
     const file = createMemoryLogFile();
     const refusals: unknown[] = [];
     const externalPort: ExternalAgentPort = {
@@ -2188,7 +2260,8 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     });
     expect(refusals[0]).toMatchObject({ code: 'SETTLEMENT_CONFLICT' });
     const recorded = await readLog(file);
-    expect(recorded.filter((event) => event.type === 'turn.failed')).toHaveLength(1);
+    // The gate refuses the batch at its first refused row, before anything is written (T9).
+    expect(recorded.filter((event) => event.type === 'turn.failed')).toHaveLength(0);
     await host.close();
   });
 
@@ -3168,8 +3241,14 @@ describe('attempts in doubt (W0.16, W0.19)', () => {
       ...events
         .slice(0, cut)
         .map(
-          ({ version: _version, leaderEpoch: _leaderEpoch, sequence: _sequence, recordedAt: _recordedAt, ...event }) =>
-            event as SeededLogEvent,
+          ({
+            version: _version,
+            leaderEpoch: _leaderEpoch,
+            epoch: _epoch,
+            sequence: _sequence,
+            recordedAt: _recordedAt,
+            ...event
+          }) => event as SeededLogEvent,
         ),
       {
         type: 'model.invocation-prepared',

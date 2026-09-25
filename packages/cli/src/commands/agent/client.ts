@@ -14,6 +14,7 @@ import { text as readStream } from 'node:stream/consumers';
 import type {
   AgentChannelResponse,
   AgentLogEvent,
+  ChatLedger,
   EventLogBatch,
   ExternalAgentLogin,
   ProviderMessage,
@@ -191,6 +192,14 @@ export const readPage = async (input: {
       exitCodes.error,
     );
   }
+  /* A version-1 daemon answers a cursor past the log's end from its end: the log is not the one this reader was
+   * reading, and following on from there would print a rewound transcript as if it continued (W3 CL-R13). */
+  if (answer.batch.cursor !== input.cursor) {
+    throw cliError(
+      'LOG_READ_CLAMPED',
+      `The host answered chat ${input.chatId} from cursor ${String(answer.batch.cursor)}, not ${String(input.cursor)}: the log changed under this reader. Read it again from the start.`,
+    );
+  }
   return answer.batch;
 };
 
@@ -245,20 +254,25 @@ export const replayChat = async (input: {
   readonly cursor: number;
   readonly state: string | undefined;
   readonly refusal: ExternalRefusal | undefined;
+  /** The chat ledger over the rows read. */
+  readonly ledger: ChatLedger;
 }> => {
+  const { emptyChatLedger, foldChatLedger } = await import('@taucad/agent-host');
   let cursor = input.from;
-  let state: string | undefined;
+  /* The chat ledger over the rows read (W3 CL-S8): from a later `from` it holds only those rows, which still name
+   * the chat's current run and its state. */
+  let ledger = emptyChatLedger;
   let login: ExternalAgentLogin | undefined;
   let refusal: ExternalRefusal | undefined;
   let attach = input.follow;
+  const stateOf = (): string | undefined =>
+    ledger.currentRunId === undefined ? undefined : ledger.runs[ledger.currentRunId]?.lifecycle;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- a cursored replay is sequential by definition.
     const batch = await readPage({ client: input.client, chatId: input.chatId, cursor, attach });
     attach = false;
+    ledger = foldChatLedger(ledger, batch.events);
     for (const event of batch.events) {
-      if (event.type === 'run.lifecycle') {
-        state = event.state;
-      }
       login = externalLoginOf(event) ?? login;
       const coded = externalRefusalOf(event);
       refusal = coded === undefined ? refusal : { ...coded, ...(login === undefined ? {} : { login }) };
@@ -269,8 +283,8 @@ export const replayChat = async (input: {
 
     const caughtUp = batch.events.length === 0 || cursor >= batch.endCursor;
     // oxlint-disable-next-line no-await-in-loop -- the reader is re-checked on every pass.
-    if ((caughtUp && (!input.follow || isSettled(state))) || !(await sinkAlive())) {
-      return { cursor, state, refusal };
+    if ((caughtUp && (!input.follow || isSettled(stateOf()))) || !(await sinkAlive())) {
+      return { cursor, state: stateOf(), refusal, ledger };
     }
     if (caughtUp) {
       // oxlint-disable-next-line no-await-in-loop -- let the daemon append before asking again.
@@ -296,27 +310,22 @@ export const pendingInterrupts = async (input: {
   readonly client: AgentChannelClient;
   readonly chatId: string;
 }): Promise<ReadonlyArray<{ readonly interruptId: string; readonly runId: string; readonly reason: string }>> => {
-  const requested = new Map<string, { interruptId: string; runId: string; reason: string }>();
-  await replayChat({
+  const rows = new Map<string, AgentLogEvent>();
+  const { ledger } = await replayChat({
     ...input,
     from: 0,
     follow: false,
     onEvent: async (event) => {
-      if (event.type !== 'interrupt.recorded') {
-        return;
-      }
-      if (event.phase === 'resolved') {
-        requested.delete(event.interruptId);
-        return;
-      }
-      requested.set(event.interruptId, {
-        interruptId: event.interruptId,
-        runId: event.runId,
-        reason: event.reason,
-      });
+      rows.set(`${event.leaderEpoch}\u0000${String(event.sequence)}`, event);
     },
   });
-  return [...requested.values()];
+  // The ledger keeps each run's unresolved requests by row; the rows carry their reasons.
+  return Object.entries(ledger.runs).flatMap(([runId, entry]) =>
+    Object.entries(entry.pendingInterrupts).flatMap(([interruptId, key]) => {
+      const row = rows.get(`${key.leaderEpoch}\u0000${String(key.sequence)}`);
+      return row?.type === 'interrupt.recorded' ? [{ interruptId, runId, reason: row.reason }] : [];
+    }),
+  );
 };
 
 /**

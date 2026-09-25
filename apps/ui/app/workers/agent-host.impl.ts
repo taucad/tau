@@ -24,7 +24,7 @@ import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
-import { createTauAgentHost, replayedStartOutcome } from '@taucad/agent-host';
+import { createTauAgentHost, emptyChatLedger, foldChatLedger, replayedStartOutcome } from '@taucad/agent-host';
 import type {
   AgentLiveEvent,
   AgentLogEvent,
@@ -651,6 +651,7 @@ const openProjectEventLog = async (active: WorkerSession, chatId: string): Promi
               fileHandle: await chat.getFileHandle('events.jsonl', {
                 create: true,
               }),
+              access: 'write',
             });
           } catch (error) {
             throw Object.assign(new Error(`Project event storage for ${chatId} is not writable.`), {
@@ -663,6 +664,9 @@ const openProjectEventLog = async (active: WorkerSession, chatId: string): Promi
           fileSystem: active.projectRoot,
           // Bridge paths are root-relative (a leading slash fails assertRootedPath).
           filePath: `.tau/chats/${chatPath}/events.jsonl`,
+          access: 'write',
+          // One append fence per project's log, shared by every tab of this origin (D5, EQ2).
+          lockName: `tau-log-append:${active.projectId}/${chatPath}`,
         });
   return {
     append: async (event) => {
@@ -684,6 +688,9 @@ const openProjectEventLog = async (active: WorkerSession, chatId: string): Promi
     },
     read: async () => log.read(),
     readBatch: async (input) => log.readBatch(input),
+    messages: async () => log.messages(),
+    historyIntact: async () => log.historyIntact(),
+    anomalies: async () => log.anomalies(),
     close: async () => log.close(),
   };
 };
@@ -831,17 +838,18 @@ const executeCommand = async (
        * log already carries is the same turn arriving twice — it attaches or
        * answers as settled — and only the worker's own log can tell it apart
        * from a new turn. ponytail: one whole-log read per start; the ceiling is
-       * the log's size, and the upgrade path is the host's own run ledger
-       * (`runLedgerOf`) exposed as a cached read. */
+       * the log's size, and the upgrade path is the host's own ledger exposed as a
+       * cached read. */
       const batch = await active.host.readEvents({ chatId: command.chatId, cursor: 0, limit: wholeLogLimit });
-      outcome = replayedStartOutcome({ events: batch.events, runId: command.runId });
+      outcome = replayedStartOutcome(foldChatLedger(emptyChatLedger, batch.events), command.runId);
     } catch {
       // The log could not be read, so nothing proves this command was already
       // admitted; replay it below. Only this read is forgiven — a resume or a
       // snapshot that fails is reported as itself, not as an admission conflict.
       outcome = 'admit';
     }
-    if (outcome !== 'admit') {
+    // ponytail: `recover` (an admission a dead leader never committed) is admitted as before; W7's orphan state owns it.
+    if (outcome !== 'admit' && outcome !== 'recover') {
       if (outcome === 'resume') {
         /* A duplicate `start` for a run this worker is *still executing* has
          * nothing to resume: the host would refuse the reservation as a live

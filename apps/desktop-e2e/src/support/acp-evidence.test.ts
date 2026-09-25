@@ -33,10 +33,21 @@ it('rejects stale-run, wrong-target and unmatched-call captures even when nonbla
 });
 
 it('does not reuse a completed run when the latest run failed or remains active', () => {
-  const completed = JSON.stringify({ type: 'run.lifecycle', runId: 'old', state: 'completed' });
+  // Rows as the log holds them: the chat ledger reads the envelope.
+  const row = (sequence: number, runId: string, state: string) =>
+    JSON.stringify({
+      version: 1,
+      leaderEpoch: 'e01',
+      sequence,
+      recordedAt: '2026-09-26T00:00:00.000Z',
+      type: 'run.lifecycle',
+      runId,
+      state,
+    });
+  const completed = [row(0, 'old', 'admitted'), row(1, 'old', 'completed')].join('\n');
   expect(latestCompletedRun(completed)).toBe('old');
   for (const state of ['running', 'failed', 'cancelled']) {
-    const newer = JSON.stringify({ type: 'run.lifecycle', runId: 'new', state });
+    const newer = [row(2, 'new', 'admitted'), row(3, 'new', state)].join('\n');
     expect(() => latestCompletedRun(`${completed}\n${newer}`)).toThrow();
   }
 });

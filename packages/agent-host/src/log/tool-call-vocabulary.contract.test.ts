@@ -18,7 +18,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { createEventLogAppender } from '#log/event-log-appender.js';
-import type { EventLogStorage } from '#log/event-log-appender.js';
+import { withLength } from '#log/event-log-storage.fixture.js';
+import type { BareEventLogStorage } from '#log/event-log-storage.fixture.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { serializeLogEvent } from '#log/serialization.js';
 import { tauToolKinds } from '#harness/tools.js';
@@ -62,7 +63,7 @@ const base = (sequence: number): LogEventBase => ({
 
 const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } } as const;
 
-const memoryStorage = (): EventLogStorage & { bytes: () => Uint8Array<ArrayBuffer> } => {
+const memoryStorage = (): BareEventLogStorage & { bytes: () => Uint8Array<ArrayBuffer> } => {
   let bytes = new Uint8Array(new ArrayBuffer(0));
   return {
     bytes: () => bytes,
@@ -119,14 +120,14 @@ describe('the durable tool-call vocabulary', () => {
       { ...base(1), type: 'message.appended', message: output },
     ];
 
-    const writer = await createEventLogAppender(storage);
+    const writer = await createEventLogAppender(withLength(storage));
     for (const event of events) {
       // oxlint-disable-next-line no-await-in-loop -- one physical append order is the contract.
       await writer.append(event);
     }
     await writer.close();
 
-    const reader = await createEventLogAppender(storage);
+    const reader = await createEventLogAppender(withLength(storage));
     const replayed = await reader.read();
     expect(replayed).toEqual(events);
     expect(replayed.map((event) => serializeLogEvent(event)).join('')).toBe(new TextDecoder().decode(storage.bytes()));
@@ -165,7 +166,7 @@ describe('the durable tool-call vocabulary', () => {
 
   it('preserves an ACP fact this vocabulary has no event for without acting on it', async () => {
     const storage = memoryStorage();
-    const writer = await createEventLogAppender(storage);
+    const writer = await createEventLogAppender(withLength(storage));
     /* `plan`, `current_mode_update` and friends are dropped by the projection
      * today. A daemon that starts recording one must not make an older reader
      * unable to open the chat, and must not make this reader replay it. */
@@ -175,7 +176,7 @@ describe('the durable tool-call vocabulary', () => {
       entries: [{ content: 'Measure the part', status: 'pending' }],
     } as unknown as AgentLogEvent;
 
-    await expect(writer.append(plan)).resolves.toEqual({ appended: true });
+    await expect(writer.append(plan)).resolves.toMatchObject({ appended: true });
     await writer.append({
       ...base(1),
       type: 'message.appended',
@@ -183,7 +184,7 @@ describe('the durable tool-call vocabulary', () => {
     });
     await writer.close();
 
-    const reader = await createEventLogAppender(storage);
+    const reader = await createEventLogAppender(withLength(storage));
     const replayed = await reader.read();
     expect(replayed[0]).toMatchObject({ type: 'acp.plan', entries: [{ content: 'Measure the part' }] });
     expect(reduceEventLog(replayed).map((message) => message.id)).toEqual(['after-plan']);

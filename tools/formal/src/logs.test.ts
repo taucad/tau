@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LogValidator } from '#logs.js';
-import { capturedLogDirectory, validateCapturedLogs, verdictsFile } from '#logs.js';
+import { capturedLogDirectory, knownLogDefectsFile, validateCapturedLogs, verdictsFile } from '#logs.js';
 import { sanitizeLog } from '#sanitize.js';
 import type { FormalContext } from '#toolchain.js';
 
@@ -107,5 +107,75 @@ describe('validateCapturedLogs', () => {
 
     expect(code).toBe(0);
     expect(JSON.parse(readFileSync(verdictsFile(context, 'desktop-e2e'), 'utf8'))).toEqual({});
+  });
+
+  // A known defect is a counterexample CI must not turn red on, with the lifecycle expected.json gives configs.
+  describe('known defects', () => {
+    const rowsNeedRun = { rule: 'RowsNeedRun', kind: 'defect', fixedBy: 'W7 RA-S5', ref: 'RA-R3' } as const;
+    const register = (context: FormalContext): void => {
+      const file = knownLogDefectsFile(context);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify({ 'ui-e2e': [rowsNeedRun] }));
+    };
+    const rejectedBy =
+      (rules: Record<string, readonly string[]>): LogValidator =>
+      async (sanitized) => {
+        const rule = Object.entries(rules).find(([name]) => sanitized.endsWith(name))?.[1];
+        return rule === undefined
+          ? { outcome: 'pass', seconds: 1 }
+          : { outcome: { rejected: { row: 7, rules: rule } }, seconds: 1 };
+      };
+
+    it('should pass a log rejected only by a listed defect rule and report it as known', async () => {
+      const context = temporaryContext();
+      register(context);
+      capture(context, { 'chat.spec/a.jsonl': '{}\n', 'chat.spec/b.jsonl': '{}\n' });
+      const lines: string[] = [];
+
+      const code = await validateCapturedLogs(context, {
+        project: 'ui-e2e',
+        validate: rejectedBy({ 'b.jsonl': ['RowsNeedRun'] }),
+        log: (line) => lines.push(line),
+      });
+
+      expect(code).toBe(0);
+      expect(JSON.parse(readFileSync(verdictsFile(context, 'ui-e2e'), 'utf8'))['chat.spec/b.jsonl']).toEqual({
+        accepted: true,
+        verdict: 'rejected at row 7 by RowsNeedRun',
+        knownDefect: 'RowsNeedRun (fixed by W7 RA-S5)',
+        seconds: 1,
+      });
+      expect(lines.join('\n')).toContain('1 known defect');
+    });
+
+    it('should fail a log rejected by a rule the registry does not list', async () => {
+      const context = temporaryContext();
+      register(context);
+      capture(context, { 'chat.spec/a.jsonl': '{}\n', 'chat.spec/b.jsonl': '{}\n' });
+
+      const code = await validateCapturedLogs(context, {
+        project: 'ui-e2e',
+        validate: rejectedBy({ 'a.jsonl': ['RowsNeedRun'], 'b.jsonl': ['RowsNeedRun', 'SettledOnce'] }),
+        log: () => undefined,
+      });
+
+      expect(code).toBe(1);
+    });
+
+    it('should fail when a listed defect no longer occurs, so its entry flips', async () => {
+      const context = temporaryContext();
+      register(context);
+      capture(context, { 'chat.spec/a.jsonl': '{}\n' });
+      const lines: string[] = [];
+
+      const code = await validateCapturedLogs(context, {
+        project: 'ui-e2e',
+        validate: rejectedBy({}),
+        log: (line) => lines.push(line),
+      });
+
+      expect(code).toBe(1);
+      expect(lines.join('\n')).toContain('RowsNeedRun no longer occurs');
+    });
   });
 });

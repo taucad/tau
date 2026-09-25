@@ -230,7 +230,9 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
         clientSecret: configService.get('GITHUB_CLIENT_SECRET', {
           infer: true,
         }),
-        // Default scopes for initial sign-in (basic profile info)
+        // Identity only for initial sign-in. The provider would add these same
+        // two again as its defaults, so the authorization URL asked for each twice.
+        disableDefaultScope: true,
         scope: ['read:user', 'user:email'],
       },
       google: {

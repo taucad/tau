@@ -35,7 +35,9 @@ import {
   admissionMilliseconds,
   awaitCheckoutCuts,
   awaitSyncSettled,
+  closeCutMilliseconds,
   createProjectRevisionsActor,
+  releaseUnplacedTurns,
   syncQuiesceMilliseconds,
   describeTurnSettlement,
   describeTurnRelease,
@@ -304,8 +306,8 @@ const liveRoot = Symbol('live checkout');
 /** A watched checkout root: the live one, or a linked checkout by id. */
 type WatchKey = string | typeof liveRoot;
 
-/** How long a host waits for the `close` mint before it lets the project go. */
-const closeFlushMilliseconds = 5000;
+/** How long a host waits for the live checkout, and then for the `close` cuts, before it lets the project go. */
+const closeFlushMilliseconds = closeCutMilliseconds;
 
 /**
  * The longest `release()` holds one project before it lets go (rule 9).
@@ -318,6 +320,18 @@ const closeFlushMilliseconds = 5000;
  * @public
  */
 export const projectReleaseMilliseconds = closeFlushMilliseconds * 2 + syncQuiesceMilliseconds;
+
+/**
+ * The longest a recorded launcher's `close()` holds one project (rule 9, RV-W2b #1).
+ *
+ * `close()` first drains the runs it started, and a run ends within its
+ * admission — which itself outlasts its turn's base-cut settlement — before
+ * {@link projectReleaseMilliseconds}. A utility quit that waits on it nests
+ * outside this sum.
+ *
+ * @public
+ */
+export const projectCloseMilliseconds = admissionMilliseconds + projectReleaseMilliseconds;
 
 const hostRevisionRequestSchema = z.object({ command: z.string().min(1) }).catchall(jsonValueSchema);
 
@@ -1230,9 +1244,14 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * to nobody. A process that dies before the turn settles loses nothing
      * either: the next host to open the project mints from the same bytes.
      */
+    /* A turn still waiting to be placed would hold every checkout from the
+     * cuts; a closing host is not going to run it (RV-W2b #5). */
+    for (const runId of releaseUnplacedTurns(actor)) {
+      refuseAdmission(runId, 'it stopped serving this project before the turn was placed.');
+    }
     let refused: Error | undefined;
     try {
-      await awaitCheckoutCuts(actor, 'close', closeFlushMilliseconds);
+      await awaitCheckoutCuts(actor, 'close');
     } catch (error) {
       refused = error instanceof Error ? error : new Error(String(error));
     }
@@ -1248,7 +1267,14 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * and the next open retries it (D28, AC21). The bound is rule 9's quiesce,
      * which outlasts the open pull it may be waiting on.
      */
-    await awaitSyncSettled(actor);
+    try {
+      await awaitSyncSettled(actor);
+    } catch {
+      /* RV-W2b #2: only a refused cut keeps the project. A sync that failed
+       * (a damaged copy, revoked access) or ran out its bound has already
+       * written `.git/sync-pending`, and the Sync region keeps its refusal; a
+       * close that threw here would never let the project go (D28). */
+    }
     if (refused !== undefined) {
       throw refused;
     }

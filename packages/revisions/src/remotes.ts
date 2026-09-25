@@ -17,7 +17,7 @@
 import { isCeilingRefusal } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
-import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.machine.js';
+import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 
 /** Which of the two remote kinds a project's remote is. @public */
 export type RemoteKind = 'tau' | 'git';
@@ -456,10 +456,10 @@ const gitStderrRefusal = (stderr: string): RemoteRefusal => {
  * server's or git's own words, and a sideband line beside one of those is
  * progress rather than a refusal.
  *
+ * @internal
  * @param reported - What the per-ref status said.
  * @param said - The remote's sideband lines, git's own restatements included.
  * @returns The sentence to show.
- * @internal
  */
 export const remoteRefusalSaid = (reported: string, said: readonly string[]): string => {
   const sentence = said

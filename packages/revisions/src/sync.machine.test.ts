@@ -49,7 +49,7 @@
  * | 42 | a queue entry naming another remote is not offered | **C12**: disconnect pauses that destination's queue |
  */
 
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -61,10 +61,9 @@ import type {
   SyncMachineEmitted,
   SyncMergeActorOutput,
   SyncPushActorOutput,
-  SyncQueueRecord,
   SyncReadRemoteActorOutput,
-  SyncRefOutcome,
 } from '#sync.machine.js';
+import type { SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
@@ -1027,18 +1026,24 @@ describe('syncMachine', () => {
      * reads what the first life wrote, and nothing else (D29). */
     const store = { current: emptyQueue };
     const actors = (): SyncActors => ({
-      readPending: fromPromise(async () => {
-        await Promise.resolve();
-        return store.current;
+      readPending: createAsyncLogic({
+        run: async () => {
+          await Promise.resolve();
+          return store.current;
+        },
       }),
-      writePending: fromPromise(async ({ input }) => {
-        await Promise.resolve();
-        store.current = (input as { record: SyncQueueRecord }).record;
-        recorded.push(store.current);
+      writePending: createAsyncLogic({
+        run: async ({ input }) => {
+          await Promise.resolve();
+          store.current = (input as { record: SyncQueueRecord }).record;
+          recorded.push(store.current);
+        },
       }),
-      readRemote: fromPromise<SyncReadRemoteActorOutput, Readonly<{ projectId: string }>>(async () => {
-        await Promise.resolve();
-        return { remote: 'tau' };
+      readRemote: createAsyncLogic<SyncReadRemoteActorOutput, Readonly<{ projectId: string }>>({
+        run: async () => {
+          await Promise.resolve();
+          return { remote: 'tau' };
+        },
       }),
       push: effects.actor('push'),
       fetch: effects.actor('fetch'),

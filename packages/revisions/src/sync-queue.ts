@@ -4,7 +4,7 @@
  * Moved out of `createRevisionActors` unchanged (W10.4): the queue needs only
  * the records filesystem and the single-writer chain it owns itself.
  */
-import type { SyncQueueEntry, SyncQueueRecord } from '#sync.machine.js';
+import type { SyncQueueEntry, SyncQueueRecord } from '#sync.types.js';
 import type { RevisionFileSystem } from '#revision-effects.js';
 
 /**

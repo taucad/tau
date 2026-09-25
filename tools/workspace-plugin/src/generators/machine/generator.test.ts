@@ -52,7 +52,7 @@ describe('machine generator', () => {
       import: './dist/camera.machine.mjs',
       default: './dist/camera.machine.mjs',
     });
-    expect(manifest.peerDependencies['xstate']).toBe('^5.0.0');
+    expect(manifest.peerDependencies['xstate']).toBe('^6.0.0-alpha.59');
     expect(manifest.devDependencies['xstate']).toBe('catalog:');
     expect(readText(tree, 'packages/camera/tsdown.config.ts')).toContain(
       "entry: ['src/index.ts', 'src/camera.machine.ts']",

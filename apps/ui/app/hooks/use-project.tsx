@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, InputFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
@@ -16,6 +16,7 @@ import type { ProjectManifest } from '@taucad/types';
 import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { MachineActors } from '#lib/xstate.lib.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { projectMachine } from '#machines/project.machine.js';
@@ -243,9 +244,10 @@ export function ProjectProvider({
   readonly requestedChatId?: string;
   readonly createdChatId?: string;
   readonly onFocusedChatResolved?: (chatId: string) => void;
-  readonly provide?: Parameters<typeof projectMachine.provide>[0];
+  /* Replaces this provider's actors wholesale: a project that is not on disk loads from its own source. */
+  readonly provide?: { readonly actors: Pick<MachineActors<typeof projectMachine>, 'loadProjectActor'> };
   readonly input?: Omit<
-    Parameters<typeof useActorRef<typeof projectMachine>>[1]['input'],
+    NonNullable<InputFrom<typeof projectMachine>>,
     'projectId' | 'fileManagerRef' | 'fileSystemRoot' | 'kernelOptionsFactory'
   >;
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
@@ -292,46 +294,42 @@ export function ProjectProvider({
     })();
   }, [parameterService]);
 
-  const actorRef = useActorRef(
-    projectMachine.provide({
-      actors: {
-        loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
-          const readySnapshot = await waitFor(fileManager.fileManagerRef, (state) => state.matches('ready'));
+  const projectActors = {
+    loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
+      const readySnapshot = await waitFor(fileManager.fileManagerRef, (state) => state.matches('ready'));
 
-          const { contentService } = readySnapshot.context;
-          if (!contentService) {
-            throw new Error(`Project content service is unavailable for ${input.projectId}`);
-          }
-          const project = await resolveScopedProjectManifest({
-            contentService,
-            projectId: input.projectId,
-          });
-          return {
-            type: 'projectRetrieved',
-            project,
-          };
-        }),
-        writeProjectActor: fromSafeAsync(async ({ input }) => {
-          const { contentService } = fileManager.fileManagerRef.getSnapshot().context;
-          if (!contentService) {
-            throw new Error('File manager content service is not ready');
-          }
-          await contentService.write('tau.json', serializeProjectManifest(projectToManifest(input.project)), 'machine');
-        }),
-      },
-      ...provide,
+      const { contentService } = readySnapshot.context;
+      if (!contentService) {
+        throw new Error(`Project content service is unavailable for ${input.projectId}`);
+      }
+      const project = await resolveScopedProjectManifest({
+        contentService,
+        projectId: input.projectId,
+      });
+      return {
+        type: 'projectRetrieved',
+        project,
+      };
     }),
-    {
-      input: {
-        projectId,
-        fileManagerRef: fileManager.fileManagerRef,
-        fileSystemRoot,
-        kernelOptionsFactory: resolvedKernelOptionsFactory,
-        ...input,
-      },
-      inspect,
+    writeProjectActor: fromSafeAsync(async ({ input }) => {
+      const { contentService } = fileManager.fileManagerRef.getSnapshot().context;
+      if (!contentService) {
+        throw new Error('File manager content service is not ready');
+      }
+      await contentService.write('tau.json', serializeProjectManifest(projectToManifest(input.project)), 'machine');
+    }),
+  } satisfies Partial<MachineActors<typeof projectMachine>>;
+
+  const actorRef = useActorRef(projectMachine.provide({ actors: provide?.actors ?? projectActors }), {
+    input: {
+      projectId,
+      fileManagerRef: fileManager.fileManagerRef,
+      fileSystemRoot,
+      kernelOptionsFactory: resolvedKernelOptionsFactory,
+      ...input,
     },
-  );
+    inspect,
+  });
 
   useEffect(
     () => () => {
@@ -404,7 +402,7 @@ export function ProjectProvider({
             },
           });
         }),
-      },
+      } satisfies Partial<MachineActors<typeof editorMachine>>,
     }),
     {
       input: { projectId, requestedChatId },

@@ -1,4 +1,4 @@
-import { createActor, fromCallback } from 'xstate';
+import { createActor, createCallbackLogic } from 'xstate';
 import type { AnyActorRef, EventObject } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -20,7 +20,7 @@ const regions: readonly ProjectSessionRegion[] = ['views', 'runtime', 'agentHost
 const recordingParent = (): { ref: AnyActorRef; received: Array<EventObject & Record<string, unknown>> } => {
   const received: Array<EventObject & Record<string, unknown>> = [];
   const ref = createActor(
-    fromCallback<EventObject>(({ receive }) => {
+    createCallbackLogic<EventObject>(({ receive }) => {
       receive((event) => received.push(event as EventObject & Record<string, unknown>));
     }),
   );
@@ -42,7 +42,7 @@ const harness = (options?: {
   const order: string[] = [];
   const live = new Set<string>();
   const child = (name: string, region?: ProjectSessionRegion) =>
-    fromCallback<EventObject, { projectId: string }>(({ sendBack }) => {
+    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
       order.push(`start:${name}`);
       live.add(name);
       if (region !== undefined && (options?.readyRegions ?? regions).includes(region)) {

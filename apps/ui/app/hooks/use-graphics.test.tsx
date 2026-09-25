@@ -3,8 +3,8 @@ import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createActor, fromPromise } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
+import type { Actor, ActorRefFrom } from 'xstate';
 import type { ThreeCameraRig } from '@taucad/three/camera';
 import type { RenderFrame } from '@taucad/spatial';
 import {
@@ -26,7 +26,7 @@ import {
 import type { ViewCameraFraming, ViewCameraSession } from '#services/graphics-camera-registry.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
-const actors: Array<ActorRefFrom<typeof graphicsMachine>> = [];
+const actors: Array<Actor<typeof graphicsMachine>> = [];
 
 const compiledGraphics = await (async () => {
   const { transformSync } = await import('oxc-transform-react');
@@ -66,9 +66,12 @@ const compiledGraphics = await (async () => {
 })();
 
 const createGraphicsActor = () => {
-  const actor = createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
-    input: {},
-  });
+  const actor = createActor(
+    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    {
+      input: {},
+    },
+  );
   actor.start();
   actors.push(actor);
   return actor;

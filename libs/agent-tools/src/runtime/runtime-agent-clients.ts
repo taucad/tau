@@ -16,7 +16,7 @@ import {
 } from '@taucad/chat/schemas';
 import type { ExportFile, HashedGeometryResult, KernelIssue } from '@taucad/runtime/types';
 import { waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { assertRootedPath } from '@taucad/utils/path';
 
@@ -120,153 +120,156 @@ const unresolvedParameters = (
  * @returns The semantic parameter RPC client.
  * @public
  */
-export const createRuntimeParameterAgentClient = (
-  input: CreateRuntimeParameterAgentClientInput,
-): RpcParameterClient => ({
-  async getParameters(request, context) {
-    try {
-      context?.signal?.throwIfAborted();
-      const targetFile = assertRootedPath(request.targetFile);
-      const actor = await input.parameterActorFor(targetFile);
-      // The actor refreshes bytes for a read in its current mode, so a plan awaiting confirmation survives it.
-      actor.send({
-        type: 'resolve',
-        resolution: request.resolutionMode === undefined ? undefined : { mode: request.resolutionMode },
-      });
-      const result = await waitFor(
-        actor,
-        (snapshot) =>
-          snapshot.matches({ open: 'ready' }) ||
-          snapshot.matches({ open: 'confirmation' }) ||
-          snapshot.matches({ open: 'disconnected' }) ||
-          snapshot.matches({ open: 'uncertain' }) ||
-          snapshot.status === 'done',
-        { signal: context?.signal },
-      );
-      const { current } = result.context;
-      const available = result.matches({ open: 'ready' }) || result.matches({ open: 'confirmation' });
-      if (!available || current === undefined) {
-        return unresolvedParameters(
-          result.context.diagnostic ?? { code: 'SEMANTICS_UNRESOLVED', message: 'Parameter authority is unavailable.' },
-          targetFile,
+export function createRuntimeParameterAgentClient(input: CreateRuntimeParameterAgentClientInput): RpcParameterClient {
+  return {
+    async getParameters(request, context) {
+      try {
+        context?.signal?.throwIfAborted();
+        const targetFile = assertRootedPath(request.targetFile);
+        const actor = await input.parameterActorFor(targetFile);
+        // The actor refreshes bytes for a read in its current mode, so a plan awaiting confirmation survives it.
+        actor.send({
+          type: 'resolve',
+          resolution: request.resolutionMode === undefined ? undefined : { mode: request.resolutionMode },
+        });
+        const result: SnapshotFrom<typeof parameterSetMachine> = await waitFor(
+          actor,
+          (snapshot) =>
+            snapshot.matches({ open: 'ready' }) ||
+            snapshot.matches({ open: 'confirmation' }) ||
+            snapshot.matches({ open: 'disconnected' }) ||
+            snapshot.matches({ open: 'uncertain' }) ||
+            snapshot.status === 'done',
+          { signal: context?.signal },
         );
+        const { current } = result.context;
+        const available = result.matches({ open: 'ready' }) || result.matches({ open: 'confirmation' });
+        if (!available || current === undefined) {
+          return unresolvedParameters(
+            result.context.diagnostic ?? {
+              code: 'SEMANTICS_UNRESOLVED',
+              message: 'Parameter authority is unavailable.',
+            },
+            targetFile,
+          );
+        }
+        if ((current.manifest.identity.resolution.mode ?? 'default') !== (request.resolutionMode ?? 'default')) {
+          return unresolvedParameters(
+            {
+              code: 'RESOLUTION_SUPERSEDED',
+              message: 'A concurrent read changed the admission mode; read again in the mode you need.',
+            },
+            targetFile,
+          );
+        }
+        // The snapshot's manifest was admitted where it entered this process; reading the sidecar
+        // again carries no new semantic evidence, so it is not re-validated per read.
+        const { manifest } = current;
+        context?.signal?.throwIfAborted();
+        return {
+          success: true,
+          ...getParametersOutputSchema.parse({
+            status: 'resolved',
+            manifest: parameterManifestWireSchema.parse(structuredClone(manifest)),
+            current: structuredClone({ entry: current.entry, identity: current.identity }),
+            /* R4/I5: the manifest's own identity already names every source file it was compiled
+             * from, so provenance is that identity lifted to the top level, not a second digest. */
+            sourceRevision: { entry: targetFile, files: { ...manifest.identity.sourceFiles } },
+          }),
+        };
+      } catch (error) {
+        return input.mapRuntimeError(error, request.targetFile);
       }
-      if ((current.manifest.identity.resolution.mode ?? 'default') !== (request.resolutionMode ?? 'default')) {
-        return unresolvedParameters(
-          {
-            code: 'RESOLUTION_SUPERSEDED',
-            message: 'A concurrent read changed the admission mode; read again in the mode you need.',
-          },
-          targetFile,
-        );
-      }
-      // The snapshot's manifest was admitted where it entered this process; reading the sidecar
-      // again carries no new semantic evidence, so it is not re-validated per read.
-      const { manifest } = current;
-      context?.signal?.throwIfAborted();
-      return {
-        success: true,
-        ...getParametersOutputSchema.parse({
-          status: 'resolved',
-          manifest: parameterManifestWireSchema.parse(structuredClone(manifest)),
-          current: structuredClone({ entry: current.entry, identity: current.identity }),
-          /* R4/I5: the manifest's own identity already names every source file it was compiled
-           * from, so provenance is that identity lifted to the top level, not a second digest. */
-          sourceRevision: { entry: targetFile, files: { ...manifest.identity.sourceFiles } },
-        }),
-      };
-    } catch (error) {
-      return input.mapRuntimeError(error, request.targetFile);
-    }
-  },
-  async applyParameterOperation(request, context) {
-    try {
-      context?.signal?.throwIfAborted();
-      const targetFile = assertRootedPath(request.targetFile);
-      const actor = await input.parameterActorFor(targetFile);
-      if (actor.getSnapshot().status !== 'active') {
-        throw new Error('Parameter actor is closed.');
-      }
-      const command =
-        request.action === 'propose'
-          ? {
-              requestId: request.requestId,
-              fingerprint: JSON.stringify({
-                targetFile,
+    },
+    async applyParameterOperation(request, context) {
+      try {
+        context?.signal?.throwIfAborted();
+        const targetFile = assertRootedPath(request.targetFile);
+        const actor = await input.parameterActorFor(targetFile);
+        if (actor.getSnapshot().status !== 'active') {
+          throw new Error('Parameter actor is closed.');
+        }
+        const command =
+          request.action === 'propose'
+            ? {
+                requestId: request.requestId,
+                fingerprint: JSON.stringify({
+                  targetFile,
+                  expected: request.expected,
+                  pressure: request.pressure,
+                  operation: request.operation,
+                }),
                 expected: request.expected,
                 pressure: request.pressure,
                 operation: request.operation,
-              }),
-              expected: request.expected,
-              pressure: request.pressure,
-              operation: request.operation,
+              }
+            : undefined;
+        const outcome = await new Promise<unknown>((resolve, reject) => {
+          const cleanup = () => {
+            settled.unsubscribe();
+            rejectedCommand.unsubscribe();
+            confirmation.unsubscribe();
+            lifecycle.unsubscribe();
+            context?.signal?.removeEventListener('abort', onAbort);
+          };
+          const finish = (value: unknown) => {
+            cleanup();
+            resolve(value);
+          };
+          const settled = actor.on('settled', (event) => {
+            if (
+              event.outcome.requestId === request.requestId &&
+              (command === undefined || event.request.fingerprint === command.fingerprint)
+            ) {
+              finish(event.outcome);
             }
-          : undefined;
-      const outcome = await new Promise<unknown>((resolve, reject) => {
-        const cleanup = () => {
-          settled.unsubscribe();
-          rejectedCommand.unsubscribe();
-          confirmation.unsubscribe();
-          lifecycle.unsubscribe();
-          context?.signal?.removeEventListener('abort', onAbort);
-        };
-        const finish = (value: unknown) => {
-          cleanup();
-          resolve(value);
-        };
-        const settled = actor.on('settled', (event) => {
-          if (
-            event.outcome.requestId === request.requestId &&
-            (command === undefined || event.request.fingerprint === command.fingerprint)
-          ) {
-            finish(event.outcome);
+          });
+          // A confirm or cancel naming no held command is refused without a settlement.
+          const rejectedCommand = actor.on('command-rejected', (event) => {
+            if (command === undefined && event.outcome.requestId === request.requestId) {
+              finish(event.outcome);
+            }
+          });
+          const confirmation = actor.on('confirmation-required', (event) => {
+            if (event.requestId === request.requestId) {
+              finish({ ...event.confirmation, requestId: event.requestId });
+            }
+          });
+          const lifecycle = actor.subscribe({
+            complete: () => {
+              cleanup();
+              reject(new Error('Parameter actor closed before settlement.'));
+            },
+            error: (error) => {
+              cleanup();
+              reject(error instanceof Error ? error : new Error(String(error)));
+            },
+          });
+          const onAbort = () => {
+            actor.send({ type: 'cancel', requestId: request.requestId });
+          };
+          context?.signal?.addEventListener('abort', onAbort, { once: true });
+          if (command !== undefined) {
+            actor.send({ type: 'submit', request: command });
+          } else if (request.action === 'confirm') {
+            actor.send({ type: 'confirm', requestId: request.requestId, fingerprint: request.planFingerprint });
+          } else {
+            actor.send({ type: 'cancel', requestId: request.requestId });
+          }
+          if (context?.signal?.aborted) {
+            onAbort();
           }
         });
-        // A confirm or cancel naming no held command is refused without a settlement.
-        const rejectedCommand = actor.on('command-rejected', (event) => {
-          if (command === undefined && event.outcome.requestId === request.requestId) {
-            finish(event.outcome);
-          }
-        });
-        const confirmation = actor.on('confirmation-required', (event) => {
-          if (event.requestId === request.requestId) {
-            finish({ ...event.confirmation, requestId: event.requestId });
-          }
-        });
-        const lifecycle = actor.subscribe({
-          complete: () => {
-            cleanup();
-            reject(new Error('Parameter actor closed before settlement.'));
-          },
-          error: (error) => {
-            cleanup();
-            reject(error instanceof Error ? error : new Error(String(error)));
-          },
-        });
-        const onAbort = () => {
-          actor.send({ type: 'cancel', requestId: request.requestId });
+        return {
+          success: true,
+          outcome: applyParameterOperationOutputSchema.shape.outcome.parse(structuredClone(outcome)),
         };
-        context?.signal?.addEventListener('abort', onAbort, { once: true });
-        if (command !== undefined) {
-          actor.send({ type: 'submit', request: command });
-        } else if (request.action === 'confirm') {
-          actor.send({ type: 'confirm', requestId: request.requestId, fingerprint: request.planFingerprint });
-        } else {
-          actor.send({ type: 'cancel', requestId: request.requestId });
-        }
-        if (context?.signal?.aborted) {
-          onAbort();
-        }
-      });
-      return {
-        success: true,
-        outcome: applyParameterOperationOutputSchema.shape.outcome.parse(structuredClone(outcome)),
-      };
-    } catch (error) {
-      return input.mapRuntimeError(error, request.targetFile);
-    }
-  },
-});
+      } catch (error) {
+        return input.mapRuntimeError(error, request.targetFile);
+      }
+    },
+  };
+}
 
 const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallback: string): string =>
   issues.map((issue) => issue.message).join('; ') || fallback;

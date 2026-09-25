@@ -19,13 +19,14 @@ import {
 import { readParameterRecord } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
-import { createActor, fromPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import type { ParameterManifest } from '@taucad/parameters';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { describe, expect, it } from 'vitest';
 
 import { build123d } from '#index.js';
+import type { ParameterSetActors } from '@taucad/parameters/set-machine';
 
 type ResourceManifest = {
   readonly target: string;
@@ -343,13 +344,14 @@ describe('Build123d native kernel', () => {
       const actor = createActor(
         parameterSetMachine.provide({
           actors: {
-            loadParameterSet: fromPromise(async ({ signal }) =>
-              loadParameterSnapshot({ target, authority, manifest: async () => admitted, signal }),
-            ),
-            commitParameterSet: fromPromise(async ({ input: change, signal }) =>
-              commitParameterChange({ change, authority, signal }),
-            ),
-          },
+            loadParameterSet: createAsyncLogic({
+              run: async ({ signal }) =>
+                loadParameterSnapshot({ target, authority, manifest: async () => admitted, signal }),
+            }),
+            commitParameterSet: createAsyncLogic({
+              run: async ({ input: change, signal }) => commitParameterChange({ change, authority, signal }),
+            }),
+          } satisfies Partial<ParameterSetActors>,
         }),
         { input: { target } },
       );

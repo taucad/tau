@@ -9,9 +9,11 @@
  * lease still holds (A25, I9).
  */
 
-import { assign, enqueueActions, fromPromise, setup } from 'xstate';
-import type { AnyActorRef, SnapshotFrom } from 'xstate';
+import { createAsyncLogic, setup, types } from 'xstate';
+import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 
+import { eventSchemas } from '#machine-schemas.js';
+import type { MachineActors } from '#machine-schemas.js';
 import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
 import type { TurnSettlement } from '#turn.machine.js';
 
@@ -88,53 +90,173 @@ const describeFailureCode = (error: unknown): RevisionPortErrorCode | undefined 
   return typeof code === 'string' ? (code as RevisionPortErrorCode) : undefined;
 };
 
-/**
- * Headless checkout registry for one project.
- *
- * @public
+type CheckoutsEnqueue = EnqueueObject<CheckoutsMachineEvent, CheckoutsMachineEmitted>;
+
+/* Emit a registry fact and send it to the parent, which routes it to the workbench (R11). */
+const publish = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue, fact: CheckoutsMachineEmitted): void => {
+  enq.emit(fact);
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, fact);
+  }
+};
+
+const announceRegistry = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue): void => {
+  publish(context, enq, { type: 'checkoutsChanged', checkouts: context.checkouts });
+  for (const checkout of context.checkouts) {
+    if (checkout.removable === true) {
+      publish(context, enq, { type: 'removalOffered', checkoutId: checkout.id });
+    }
+  }
+};
+
+const announceFailure = (
+  context: CheckoutsMachineContext,
+  enq: CheckoutsEnqueue,
+  failure: Readonly<{ operation: CheckoutOperation; reason?: string; code?: RevisionPortErrorCode }>,
+): void => {
+  const { operation, reason, code } = failure;
+  /* R11: the root routes this to the workbench; an emit alone never
+   * leaves this actor. */
+  publish(context, enq, {
+    type: 'checkoutFailed',
+    operation,
+    reason: reason ?? context.reason ?? 'The checkout operation failed.',
+    /* A reason this call authored is the guard's own sentence, not the
+       port's, so it never carries the last port code (P4) — it names its
+       own, or the page has nothing to phrase it from (review finding 3). */
+    ...(reason === undefined
+      ? context.reasonCode === undefined
+        ? {}
+        : { code: context.reasonCode }
+      : code === undefined
+        ? {}
+        : { code }),
+  });
+};
+
+/* A failed port call: remember why, then say so with the port's own category. */
+const failOperation = (
+  context: CheckoutsMachineContext,
+  enq: CheckoutsEnqueue,
+  failure: Readonly<{ error: unknown; operation: CheckoutOperation }>,
+): Partial<CheckoutsMachineContext> => {
+  const { error, operation } = failure;
+  const patch = { reason: describeFailure(error), reasonCode: describeFailureCode(error) };
+  announceFailure({ ...context, ...patch }, enq, { operation });
+  return patch;
+};
+
+const queueRetirements = (
+  context: CheckoutsMachineContext,
+  event: CheckoutsMachineEvent,
+): Partial<CheckoutsMachineContext> => {
+  /* R2: `runIds` is the provenance set — every lease the writer saw on
+   * the checkout. Retiring all of them takes the other chat's lease
+   * (AC9), so a settlement retires only its own `runId`. */
+  const runIds =
+    event.type === 'leaseStale' || event.type === 'turnFinalized' || event.type === 'turnReleased' ? [event.runId] : [];
+  const added = runIds.filter((runId) => !context.pendingRetirements.includes(runId));
+  return { pendingRetirements: [...context.pendingRetirements, ...added] };
+};
+
+/*
+ * A lease for a checkout no record names is dropped here, exactly as one
+ * arriving while `ready` always was. R30: a lease whose retirement is
+ * already queued never lands at all — it is cancelled against that
+ * retirement, so no phantom run id can survive on a record.
  */
-export const checkoutsMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as CheckoutsMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as CheckoutsMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    emitted: {} as CheckoutsMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as CheckoutsMachineInput,
+const applyLeases = (context: CheckoutsMachineContext): Partial<CheckoutsMachineContext> => {
+  const retiring = new Set(context.pendingRetirements);
+  const landing = context.pendingLeases.filter((lease) => !retiring.has(lease.runId));
+  const cancelled = new Set(
+    context.pendingLeases.filter((lease) => retiring.has(lease.runId)).map((lease) => lease.runId),
+  );
+  return {
+    checkouts: context.checkouts.map((checkout) => {
+      const added = landing
+        .filter((lease) => lease.checkoutId === checkout.id && !checkout.leaseRunIds.includes(lease.runId))
+        .map((lease) => lease.runId);
+      return added.length === 0 ? checkout : { ...checkout, leaseRunIds: [...checkout.leaseRunIds, ...added] };
+    }),
+    pendingLeases: [],
+    pendingRetirements: context.pendingRetirements.filter((runId) => !cancelled.has(runId)),
+  };
+};
+
+const dropRetiredLease = (context: CheckoutsMachineContext): Partial<CheckoutsMachineContext> => {
+  const runId = context.pendingRetirements[0];
+  return {
+    checkouts:
+      runId === undefined
+        ? context.checkouts
+        : context.checkouts.map((checkout) =>
+            checkout.leaseRunIds.includes(runId)
+              ? { ...checkout, leaseRunIds: checkout.leaseRunIds.filter((held) => held !== runId) }
+              : checkout,
+          ),
+  };
+};
+
+const completeRetirement = (
+  context: CheckoutsMachineContext,
+  enq: CheckoutsEnqueue,
+): Partial<CheckoutsMachineContext> => {
+  const runId = context.pendingRetirements[0];
+  if (runId !== undefined) {
+    publish(context, enq, { type: 'leaseRetired', runId });
+  }
+  return { pendingRetirements: context.pendingRetirements.slice(1) };
+};
+
+const checkoutsMachineDefinition = setup({
+  schemas: {
+    context: types<CheckoutsMachineContext>(),
+    events: eventSchemas<CheckoutsMachineEvent>(),
+    emitted: eventSchemas<CheckoutsMachineEmitted>(),
+    input: types<CheckoutsMachineInput>(),
   },
   actors: {
-    listCheckouts: fromPromise<ListCheckoutsActorOutput, Readonly<{ projectId: string }>>(async () => {
-      throw new Error('checkoutsMachine: the listCheckouts actor was not provided.');
+    listCheckouts: createAsyncLogic<ListCheckoutsActorOutput, Readonly<{ projectId: string }>>({
+      run: async () => {
+        throw new Error('checkoutsMachine: the listCheckouts actor was not provided.');
+      },
     }),
-    addCheckout: fromPromise<AddCheckoutActorOutput, Readonly<{ projectId: string; branch: string; from: string }>>(
-      async () => {
+    addCheckout: createAsyncLogic<
+      AddCheckoutActorOutput,
+      Readonly<{ projectId: string; branch: string; from: string }>
+    >({
+      run: async () => {
         throw new Error('checkoutsMachine: the addCheckout actor was not provided.');
       },
-    ),
-    removeCheckout: fromPromise<void, Readonly<{ projectId: string; id: string }>>(async () => {
-      throw new Error('checkoutsMachine: the removeCheckout actor was not provided.');
     }),
-    sweepLeases: fromPromise<SweepLeasesActorOutput, Readonly<{ projectId: string }>>(async () => {
-      throw new Error('checkoutsMachine: the sweepLeases actor was not provided.');
+    removeCheckout: createAsyncLogic<void, Readonly<{ projectId: string; id: string }>>({
+      run: async () => {
+        throw new Error('checkoutsMachine: the removeCheckout actor was not provided.');
+      },
     }),
-    retireLease: fromPromise<void, Readonly<{ projectId: string; runId: string }>>(async () => {
-      throw new Error('checkoutsMachine: the retireLease actor was not provided.');
+    sweepLeases: createAsyncLogic<SweepLeasesActorOutput, Readonly<{ projectId: string }>>({
+      run: async () => {
+        throw new Error('checkoutsMachine: the sweepLeases actor was not provided.');
+      },
+    }),
+    retireLease: createAsyncLogic<void, Readonly<{ projectId: string; runId: string }>>({
+      run: async () => {
+        throw new Error('checkoutsMachine: the retireLease actor was not provided.');
+      },
     }),
   },
   guards: {
     /* One checkout per branch (I18): a branch that has one cannot get another. */
-    branchIsFree: ({ context }, params: Readonly<{ branch: string }>) =>
-      !context.checkouts.some((checkout) => checkout.branch === params.branch),
+    branchIsFree: (context: CheckoutsMachineContext, branch: string) =>
+      !context.checkouts.some((checkout) => checkout.branch === branch),
     /* A25/I9: a checkout a lease holds is never removed. */
-    checkoutIsFree: ({ context }, params: Readonly<{ id: string }>) =>
-      context.checkouts.some((checkout) => checkout.id === params.id && checkout.leaseRunIds.length === 0),
-    hasPendingRetirement: ({ context }) => context.pendingRetirements.length > 0,
-    hasPendingLease: ({ context }) => context.pendingLeases.length > 0,
+    checkoutIsFree: (context: CheckoutsMachineContext, id: string) =>
+      context.checkouts.some((checkout) => checkout.id === id && checkout.leaseRunIds.length === 0),
+    hasPendingRetirement: (context: CheckoutsMachineContext) => context.pendingRetirements.length > 0,
+    hasPendingLease: (context: CheckoutsMachineContext) => context.pendingLeases.length > 0,
     /* A lease naming no known record — or one whose turn has already ended —
      * changes nothing, so it must not churn the host with a re-announcement. */
-    hasApplicableLease: ({ context }) =>
+    hasApplicableLease: (context: CheckoutsMachineContext) =>
       context.pendingLeases.some(
         (lease) =>
           !context.pendingRetirements.includes(lease.runId) &&
@@ -146,133 +268,12 @@ export const checkoutsMachine = setup({
      * arrive before the registry has records to retire against. The test is
      * therefore made at drain time, against records ∪ the lease buffer, not when
      * the event is received. */
-    hasPhantomRetirement: ({ context }) =>
+    hasPhantomRetirement: (context: CheckoutsMachineContext) =>
       context.pendingRetirements.some(
         (runId) =>
           !context.checkouts.some((checkout) => checkout.leaseRunIds.includes(runId)) &&
           !context.pendingLeases.some((lease) => lease.runId === runId),
       ),
-  },
-  actions: {
-    announceRegistry: enqueueActions(({ context, enqueue }) => {
-      const fact: CheckoutsMachineEmitted = { type: 'checkoutsChanged', checkouts: context.checkouts };
-      enqueue.emit(fact);
-      if (context.parentRef !== undefined) {
-        enqueue.sendTo(context.parentRef, fact);
-      }
-      for (const checkout of context.checkouts) {
-        if (checkout.removable === true) {
-          const offer: CheckoutsMachineEmitted = { type: 'removalOffered', checkoutId: checkout.id };
-          enqueue.emit(offer);
-          if (context.parentRef !== undefined) {
-            enqueue.sendTo(context.parentRef, offer);
-          }
-        }
-      }
-    }),
-    announceFailure: enqueueActions(
-      (
-        { context, enqueue },
-        params: Readonly<{ operation: CheckoutOperation; reason?: string; code?: RevisionPortErrorCode }>,
-      ) => {
-        const fact: CheckoutsMachineEmitted = {
-          type: 'checkoutFailed',
-          operation: params.operation,
-          reason: params.reason ?? context.reason ?? 'The checkout operation failed.',
-          /* A reason this call authored is the guard's own sentence, not the
-             port's, so it never carries the last port code (P4) — it names its
-             own, or the page has nothing to phrase it from (review finding 3). */
-          ...(params.reason === undefined
-            ? context.reasonCode === undefined
-              ? {}
-              : { code: context.reasonCode }
-            : params.code === undefined
-              ? {}
-              : { code: params.code }),
-        };
-        enqueue.emit(fact);
-        /* R11: the root routes this to the workbench; an emit alone never
-         * leaves this actor. */
-        if (context.parentRef !== undefined) {
-          enqueue.sendTo(context.parentRef, fact);
-        }
-      },
-    ),
-    queueRetirements: assign({
-      pendingRetirements: ({ context, event }) => {
-        /* R2: `runIds` is the provenance set — every lease the writer saw on
-         * the checkout. Retiring all of them takes the other chat's lease
-         * (AC9), so a settlement retires only its own `runId`. */
-        const runIds =
-          event.type === 'leaseStale' || event.type === 'turnFinalized' || event.type === 'turnReleased'
-            ? [event.runId]
-            : [];
-        const added = runIds.filter((runId) => !context.pendingRetirements.includes(runId));
-        return [...context.pendingRetirements, ...added];
-      },
-    }),
-    /* R1: a lease written inside a turn is invisible to the `listCheckouts`
-     * output the registry loaded earlier, so the turn reports it. R22: it can
-     * arrive before there is any record to put it on, so it is always buffered
-     * and applied from one place. */
-    bufferLease: assign({
-      pendingLeases: ({ context, event }) =>
-        event.type === 'leaseWritten'
-          ? [...context.pendingLeases, { checkoutId: event.checkoutId, runId: event.runId }]
-          : context.pendingLeases,
-    }),
-    /*
-     * A lease for a checkout no record names is dropped here, exactly as one
-     * arriving while `ready` always was. R30: a lease whose retirement is
-     * already queued never lands at all — it is cancelled against that
-     * retirement, so no phantom run id can survive on a record.
-     */
-    applyLeases: assign(({ context }) => {
-      const retiring = new Set(context.pendingRetirements);
-      const landing = context.pendingLeases.filter((lease) => !retiring.has(lease.runId));
-      const cancelled = new Set(
-        context.pendingLeases.filter((lease) => retiring.has(lease.runId)).map((lease) => lease.runId),
-      );
-      return {
-        checkouts: context.checkouts.map((checkout) => {
-          const added = landing
-            .filter((lease) => lease.checkoutId === checkout.id && !checkout.leaseRunIds.includes(lease.runId))
-            .map((lease) => lease.runId);
-          return added.length === 0 ? checkout : { ...checkout, leaseRunIds: [...checkout.leaseRunIds, ...added] };
-        }),
-        pendingLeases: [],
-        pendingRetirements: context.pendingRetirements.filter((runId) => !cancelled.has(runId)),
-      };
-    }),
-    dropPhantomRetirements: assign({
-      pendingRetirements: ({ context }) =>
-        context.pendingRetirements.filter((runId) =>
-          context.checkouts.some((checkout) => checkout.leaseRunIds.includes(runId)),
-        ),
-    }),
-    dropRetiredLease: assign({
-      checkouts: ({ context }) => {
-        const runId = context.pendingRetirements[0];
-        return runId === undefined
-          ? context.checkouts
-          : context.checkouts.map((checkout) =>
-              checkout.leaseRunIds.includes(runId)
-                ? { ...checkout, leaseRunIds: checkout.leaseRunIds.filter((held) => held !== runId) }
-                : checkout,
-            );
-      },
-    }),
-    completeRetirement: enqueueActions(({ context, enqueue }) => {
-      const runId = context.pendingRetirements[0];
-      if (runId !== undefined) {
-        const fact: CheckoutsMachineEmitted = { type: 'leaseRetired', runId };
-        enqueue.emit(fact);
-        if (context.parentRef !== undefined) {
-          enqueue.sendTo(context.parentRef, fact);
-        }
-      }
-      enqueue.assign({ pendingRetirements: context.pendingRetirements.slice(1) });
-    }),
   },
 }).createMachine({
   id: 'checkouts',
@@ -292,12 +293,21 @@ export const checkoutsMachine = setup({
    * same way, in every state. Anything conditional on being `ready` is dropped
    * in the window between `open` and the first `listCheckouts`, and the two
    * halves have to agree or a run id is left on a record whose turn is gone.
+   *
+   * R1: a lease written inside a turn is invisible to the `listCheckouts`
+   * output the registry loaded earlier, so the turn reports it. R22: it can
+   * arrive before there is any record to put it on, so it is always buffered
+   * and applied from one place.
    */
   on: {
-    leaseWritten: { actions: 'bufferLease' },
-    leaseStale: { actions: 'queueRetirements' },
-    turnFinalized: { actions: 'queueRetirements' },
-    turnReleased: { actions: 'queueRetirements' },
+    leaseWritten: {
+      context: ({ context, event }) => ({
+        pendingLeases: [...context.pendingLeases, { checkoutId: event.checkoutId, runId: event.runId }],
+      }),
+    },
+    leaseStale: { context: ({ context, event }) => queueRetirements(context, event) },
+    turnFinalized: { context: ({ context, event }) => queueRetirements(context, event) },
+    turnReleased: { context: ({ context, event }) => queueRetirements(context, event) },
   },
   states: {
     idle: {
@@ -307,52 +317,35 @@ export const checkoutsMachine = setup({
       invoke: {
         src: 'sweepLeases',
         input: ({ context }) => ({ projectId: context.projectId }),
-        onDone: {
-          target: 'loading',
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            for (const runId of event.output.retiredRunIds) {
-              const fact: CheckoutsMachineEmitted = { type: 'leaseRetired', runId };
-              enqueue.emit(fact);
-              if (context.parentRef !== undefined) {
-                enqueue.sendTo(context.parentRef, fact);
-              }
-            }
-          }),
+        onDone: ({ context, event }, enq) => {
+          for (const runId of event.output.retiredRunIds) {
+            publish(context, enq, { type: 'leaseRetired', runId });
+          }
+          return { target: 'loading' };
         },
-        onError: {
+        onError: ({ context, event }, enq) => ({
           target: 'failed',
-          actions: [
-            assign({
-              reason: ({ event }) => describeFailure(event.error),
-              reasonCode: ({ event }) => describeFailureCode(event.error),
-            }),
-            { type: 'announceFailure', params: { operation: 'open' } },
-          ],
-        },
+          context: failOperation(context, enq, { error: event.error, operation: 'open' }),
+        }),
       },
     },
     loading: {
       invoke: {
         src: 'listCheckouts',
         input: ({ context }) => ({ projectId: context.projectId }),
-        onDone: {
-          target: 'ready',
-          actions: [assign({ checkouts: ({ event }) => event.output.checkouts }), 'announceRegistry'],
+        onDone: ({ context, event }, enq) => {
+          const patch = { checkouts: event.output.checkouts };
+          announceRegistry({ ...context, ...patch }, enq);
+          return { target: 'ready', context: patch };
         },
         /* R2/W6: a registry that could not load used to rest here silently, so
          * a host waiting on the first announcement waited out its whole bound
          * with nothing to show a person. `failed` is still where it rests; it
          * now says so on the way. */
-        onError: {
+        onError: ({ context, event }, enq) => ({
           target: 'failed',
-          actions: [
-            assign({
-              reason: ({ event }) => describeFailure(event.error),
-              reasonCode: ({ event }) => describeFailureCode(event.error),
-            }),
-            { type: 'announceFailure', params: { operation: 'open' } },
-          ],
-        },
+          context: failOperation(context, enq, { error: event.error, operation: 'open' }),
+        }),
       },
     },
     failed: {
@@ -368,50 +361,56 @@ export const checkoutsMachine = setup({
         idle: {
           /* Leases first, so a lease that just landed is not mistaken for a
            * phantom; then the phantoms; then the retirement itself. */
-          always: [
-            { guard: 'hasApplicableLease', actions: ['applyLeases', 'announceRegistry'] },
-            { guard: 'hasPendingLease', actions: 'applyLeases' },
-            { guard: 'hasPhantomRetirement', actions: 'dropPhantomRetirements' },
-            { guard: 'hasPendingRetirement', target: 'retiring' },
-          ],
+          always: ({ context, guards }, enq) => {
+            if (guards.hasApplicableLease(context)) {
+              const patch = applyLeases(context);
+              announceRegistry({ ...context, ...patch }, enq);
+              return { context: patch };
+            }
+            if (guards.hasPendingLease(context)) {
+              return { context: applyLeases(context) };
+            }
+            if (guards.hasPhantomRetirement(context)) {
+              return {
+                context: {
+                  pendingRetirements: context.pendingRetirements.filter((runId) =>
+                    context.checkouts.some((checkout) => checkout.leaseRunIds.includes(runId)),
+                  ),
+                },
+              };
+            }
+            if (guards.hasPendingRetirement(context)) {
+              return { target: 'retiring' };
+            }
+            return undefined;
+          },
           on: {
-            addCheckout: [
-              {
-                guard: { type: 'branchIsFree', params: ({ event }) => ({ branch: event.branch }) },
-                target: 'adding',
-              },
-              {
-                actions: {
-                  type: 'announceFailure',
-                  params: {
-                    operation: 'add',
-                    reason: 'That branch already has a checkout.',
-                    code: 'CHECKOUT_CONFLICT',
-                  },
-                },
-              },
-            ],
-            removeCheckout: [
-              {
-                guard: { type: 'checkoutIsFree', params: ({ event }) => ({ id: event.id }) },
-                target: 'removing',
-                actions: assign({ removingId: ({ event }) => event.id }),
-              },
-              {
-                /* Policy Rule 1: *lease* and *checkout* are engineering terms
-                 * and this sentence reaches a toast and the CLI. What the
-                 * person can act on is which branch is busy. */
-                actions: {
-                  type: 'announceFailure',
-                  params: ({ context, event }) => ({
-                    operation: 'remove',
-                    reason: `An agent is working in ${
-                      context.checkouts.find((checkout) => checkout.id === event.id)?.branch ?? 'this branch'
-                    }.`,
-                  }),
-                },
-              },
-            ],
+            addCheckout: ({ context, event, guards }, enq) => {
+              if (guards.branchIsFree(context, event.branch)) {
+                return { target: 'adding' };
+              }
+              announceFailure(context, enq, {
+                operation: 'add',
+                reason: 'That branch already has a checkout.',
+                code: 'CHECKOUT_CONFLICT',
+              });
+              return {};
+            },
+            removeCheckout: ({ context, event, guards }, enq) => {
+              if (guards.checkoutIsFree(context, event.id)) {
+                return { target: 'removing', context: { removingId: event.id } };
+              }
+              /* Policy Rule 1: *lease* and *checkout* are engineering terms
+               * and this sentence reaches a toast and the CLI. What the
+               * person can act on is which branch is busy. */
+              announceFailure(context, enq, {
+                operation: 'remove',
+                reason: `An agent is working in ${
+                  context.checkouts.find((checkout) => checkout.id === event.id)?.branch ?? 'this branch'
+                }.`,
+              });
+              return {};
+            },
           },
         },
         adding: {
@@ -422,50 +421,33 @@ export const checkoutsMachine = setup({
               branch: event.type === 'addCheckout' ? event.branch : '',
               from: event.type === 'addCheckout' ? event.from : '',
             }),
-            onDone: {
-              target: 'idle',
-              actions: [
-                assign({ checkouts: ({ context, event }) => [...context.checkouts, event.output.checkout] }),
-                'announceRegistry',
-              ],
+            onDone: ({ context, event }, enq) => {
+              const patch = { checkouts: [...context.checkouts, event.output.checkout] };
+              announceRegistry({ ...context, ...patch }, enq);
+              return { target: 'idle', context: patch };
             },
-            onError: {
+            onError: ({ context, event }, enq) => ({
               target: 'idle',
-              actions: [
-                assign({
-                  reason: ({ event }) => describeFailure(event.error),
-                  reasonCode: ({ event }) => describeFailureCode(event.error),
-                }),
-                { type: 'announceFailure', params: { operation: 'add' } },
-              ],
-            },
+              context: failOperation(context, enq, { error: event.error, operation: 'add' }),
+            }),
           },
         },
         removing: {
           invoke: {
             src: 'removeCheckout',
             input: ({ context }) => ({ projectId: context.projectId, id: context.removingId ?? '' }),
-            onDone: {
-              target: 'idle',
-              actions: [
-                assign({
-                  checkouts: ({ context }) =>
-                    context.checkouts.filter((checkout) => checkout.id !== context.removingId),
-                  removingId: undefined,
-                }),
-                'announceRegistry',
-              ],
+            onDone: ({ context }, enq) => {
+              const patch = {
+                checkouts: context.checkouts.filter((checkout) => checkout.id !== context.removingId),
+                removingId: undefined,
+              };
+              announceRegistry({ ...context, ...patch }, enq);
+              return { target: 'idle', context: patch };
             },
-            onError: {
+            onError: ({ context, event }, enq) => ({
               target: 'idle',
-              actions: [
-                assign({
-                  reason: ({ event }) => describeFailure(event.error),
-                  reasonCode: ({ event }) => describeFailureCode(event.error),
-                }),
-                { type: 'announceFailure', params: { operation: 'remove' } },
-              ],
-            },
+              context: failOperation(context, enq, { error: event.error, operation: 'remove' }),
+            }),
           },
         },
         retiring: {
@@ -475,20 +457,23 @@ export const checkoutsMachine = setup({
               projectId: context.projectId,
               runId: context.pendingRetirements[0] ?? '',
             }),
-            onDone: {
-              target: 'idle',
-              actions: ['dropRetiredLease', 'completeRetirement', 'announceRegistry'],
+            onDone: ({ context }, enq) => {
+              const dropped = { ...context, ...dropRetiredLease(context) };
+              const completed = { ...dropped, ...completeRetirement(dropped, enq) };
+              announceRegistry(completed, enq);
+              return {
+                target: 'idle',
+                context: { checkouts: completed.checkouts, pendingRetirements: completed.pendingRetirements },
+              };
             },
-            onError: {
-              target: 'idle',
-              actions: [
-                assign({
-                  reason: ({ event }) => describeFailure(event.error),
-                  reasonCode: ({ event }) => describeFailureCode(event.error),
-                  pendingRetirements: ({ context }) => context.pendingRetirements.slice(1),
-                }),
-                { type: 'announceFailure', params: { operation: 'retire' } },
-              ],
+            onError: ({ context, event }, enq) => {
+              const patch = {
+                reason: describeFailure(event.error),
+                reasonCode: describeFailureCode(event.error),
+                pendingRetirements: context.pendingRetirements.slice(1),
+              };
+              announceFailure({ ...context, ...patch }, enq, { operation: 'retire' });
+              return { target: 'idle', context: patch };
             },
           },
         },
@@ -496,6 +481,23 @@ export const checkoutsMachine = setup({
     },
   },
 });
+
+type CheckoutsMachineDefinition = typeof checkoutsMachineDefinition;
+
+/**
+ * The type of {@link checkoutsMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface CheckoutsMachine extends CheckoutsMachineDefinition {}
+
+/**
+ * Headless checkout registry for one project.
+ *
+ * @public
+ */
+export const checkoutsMachine: CheckoutsMachine = checkoutsMachineDefinition;
 
 /**
  * Selects every checkout the registry knows, in record order.
@@ -530,4 +532,4 @@ export const selectLeaseSet = (
  *
  * @public
  */
-export type CheckoutsActors = NonNullable<Parameters<typeof checkoutsMachine.provide>[0]['actors']>;
+export type CheckoutsActors = MachineActors<typeof checkoutsMachine>;

@@ -2,8 +2,8 @@
 import { useLayoutEffect } from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { createActor, fromPromise } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
+import type { Actor, ActorRefFrom } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentManifest } from '@taucad/types';
 import type { ThreeCameraRig } from '@taucad/three/camera';
@@ -18,6 +18,8 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { deriveModelInteractionUnitId } from '#machines/model-interaction.machine.js';
+import { toSnapshotCallback } from '#lib/xstate-test.utils.js';
+import type { SnapshotListener } from '#lib/xstate-test.utils.js';
 
 const componentId = 'component:Housing';
 const unitId = deriveModelInteractionUnitId({ sourceFile: 'src/main.ts' });
@@ -82,9 +84,10 @@ function createEntryCad(initial: { renderTimeout?: number; format?: 'gltf' | 'sv
   const listeners = new Set<(snapshot: unknown) => void>();
   const actor = {
     getSnapshot: () => ({ context: { renderTimeout, geometry } }),
-    subscribe: (listener: (snapshot: unknown) => void) => {
-      listeners.add(listener);
-      return { unsubscribe: () => listeners.delete(listener) };
+    subscribe: (listener: SnapshotListener<unknown>) => {
+      const callback = toSnapshotCallback(listener);
+      listeners.add(callback);
+      return { unsubscribe: () => listeners.delete(callback) };
     },
     send: vi.fn(),
   };
@@ -114,10 +117,13 @@ function markSeedConsumed(graphicsRef: ActorRefFrom<typeof graphicsMachine>): vo
 }
 
 /** A graphics actor with the WebGPU probe stubbed out, started, ready for events. */
-function createGraphicsActor(): ActorRefFrom<typeof graphicsMachine> {
-  return createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
-    input: {},
-  }).start();
+function createGraphicsActor(): Actor<typeof graphicsMachine> {
+  return createActor(
+    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    {
+      input: {},
+    },
+  ).start();
 }
 
 function SyncHarness({

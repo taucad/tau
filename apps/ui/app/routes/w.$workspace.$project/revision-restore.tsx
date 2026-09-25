@@ -13,7 +13,7 @@ import { useAnalytics } from '#hooks/use-analytics.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import type { RevisionFailureSubject } from '#lib/revision-failure-copy.js';
-import type { BranchOperation } from '@taucad/revisions/branch-machine';
+import type { BranchOperation } from '@taucad/revisions';
 
 /** What the question above a waiting branch verb asks. Document words only (A18, I12). */
 const branchVerbTitle: Readonly<Record<BranchOperation, string>> = {

@@ -1,6 +1,7 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
+import type { Actor } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
@@ -15,6 +16,7 @@ import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatRequest, ChatSessionActorRef, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
+import { spyOnSend } from '#lib/xstate-test.utils.js';
 import {
   chatTurnAdmission,
   chatTurnSettlement,
@@ -650,7 +652,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
     const realSession = (projectId: string) => {
       const heard: Array<{ type: string; chatId?: string }> = [];
-      const chatReferences = new Map<string, ChatSessionActorRef>();
+      const chatReferences = new Map<string, Actor<typeof chatSessionMachine>>();
       const ref = mock<ProjectSessionActorRef>();
       const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>();
       Object.defineProperty(snapshot, 'context', {
@@ -4183,7 +4185,7 @@ describe('ChatSessionStore', () => {
       const store = createStore();
       const session = store.acquire('chat_r6');
       const fake = harness.created.find((entry) => entry.id === 'chat_r6')!;
-      const sendSpy = vi.spyOn(session.persistenceActorRef, 'send');
+      const sendSpy = spyOnSend(session.persistenceActorRef);
 
       const countStreamResumed = (): number =>
         sendSpy.mock.calls.filter((call) => call[0].type === 'streamResumed').length;

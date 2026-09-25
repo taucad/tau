@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Vector3 } from 'three';
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import { controlsListenerMachine, getControlsListenerEventNames } from '#machines/controls-listener.machine.js';
 import type { CameraControlsAdapter } from '#machines/controls-listener.machine.js';
 import type { ControlEventListener } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const createGraphicsActor = () =>
-  createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
+  createActor(graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }), {
     input: {},
   }).start();
 

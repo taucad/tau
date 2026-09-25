@@ -10,8 +10,7 @@
  */
 
 import { onTestFinished, vi } from 'vitest';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
-import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
+import type { RevisionDiffEntry, RevisionRow, RevisionStatusProjection } from '@taucad/revisions';
 import type { BranchCreated, RevisionToast, RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 

@@ -1,4 +1,5 @@
-import { assign, assertEvent, setup } from 'xstate';
+import { setup, types } from 'xstate';
+import { eventSchemas } from '#lib/xstate.lib.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 import type {
   PersistedModelComponentDisplayState,
@@ -353,48 +354,58 @@ function assignUnit({
 }
 
 export const modelInteractionMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as ModelInteractionContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as ModelInteractionEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as ModelInteractionInput,
+  schemas: {
+    context: types<ModelInteractionContext>(),
+    events: eventSchemas<ModelInteractionEvent>(),
+    input: types<ModelInteractionInput>(),
   },
-  actions: {
-    loadManifest: assign(({ context, event }) => {
-      assertEvent(event, 'loadManifest');
+}).createMachine({
+  id: 'modelInteraction',
+  context: ({ input }) => {
+    const hydrated = hydrateUnitsFromComponentDisplay(input.componentDisplay);
+    return {
+      unitsById: hydrated.unitsById,
+      unitOrder: hydrated.unitOrder,
+      revision: 0,
+      displayRevision: 0,
+      lastInteractionSource: 'unknown',
+    };
+  },
+  on: {
+    loadManifest: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (manifestsMatch(unit.manifest, event.manifest)) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: reconcileUnitForManifest(unit, event.manifest),
-        source: event.source,
-      });
-    }),
-    clearManifest: assign(({ context, event }) => {
-      assertEvent(event, 'clearManifest');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: reconcileUnitForManifest(unit, event.manifest),
+          source: event.source,
+        }),
+      };
+    },
+    clearManifest: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (unit.manifest === undefined && unit.hoveredComponentId === undefined) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          manifest: undefined,
-          hoveredComponentId: undefined,
-        },
-        source: event.source,
-        displayChanged: false,
-      });
-    }),
-    restoreComponentDisplay: assign(({ context, event }) => {
-      assertEvent(event, 'restoreComponentDisplay');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            manifest: undefined,
+            hoveredComponentId: undefined,
+          },
+          source: event.source,
+          displayChanged: false,
+        }),
+      };
+    },
+    restoreComponentDisplay: ({ context, event }) => {
       const persistedUnits = event.componentDisplay?.unitsById ?? {};
       const unitOrder = [...new Set([...context.unitOrder, ...Object.keys(persistedUnits)])];
       const unitsById = Object.fromEntries(
@@ -413,13 +424,14 @@ export const modelInteractionMachine = setup({
         return {};
       }
       return {
-        unitsById,
-        unitOrder,
-        ...withRevision({ context, displayChanged }),
+        context: {
+          unitsById,
+          unitOrder,
+          ...withRevision({ context, displayChanged }),
+        },
       };
-    }),
-    rekeySourceUnits: assign(({ context, event }) => {
-      assertEvent(event, 'rekeySourceUnits');
+    },
+    rekeySourceUnits: ({ context, event }) => {
       const movedEntries = context.unitOrder.map((unitId): readonly [string, string] => [
         rewriteSourceUnitId(unitId, event.oldPath, event.newPath),
         unitId,
@@ -442,13 +454,14 @@ export const modelInteractionMachine = setup({
         displayChanged ||= nextUnitId !== unitId && hasDisplayState(unit);
       }
       return {
-        unitsById,
-        unitOrder,
-        ...withRevision({ context, displayChanged }),
+        context: {
+          unitsById,
+          unitOrder,
+          ...withRevision({ context, displayChanged }),
+        },
       };
-    }),
-    pruneSourceUnits: assign(({ context, event }) => {
-      assertEvent(event, 'pruneSourceUnits');
+    },
+    pruneSourceUnits: ({ context, event }) => {
       const removedIds = context.unitOrder.filter((unitId) => matchesSourceUnitPath(unitId, event.path));
       if (removedIds.length === 0) {
         return {};
@@ -458,166 +471,176 @@ export const modelInteractionMachine = setup({
         Object.entries(context.unitsById).filter(([unitId]) => !removed.has(unitId)),
       );
       return {
-        unitsById,
-        unitOrder: context.unitOrder.filter((unitId) => !removed.has(unitId)),
-        ...withRevision({
-          context,
-          displayChanged: removedIds.some((unitId) => hasDisplayState(context.unitsById[unitId] ?? emptyUnitState)),
-        }),
+        context: {
+          unitsById,
+          unitOrder: context.unitOrder.filter((unitId) => !removed.has(unitId)),
+          ...withRevision({
+            context,
+            displayChanged: removedIds.some((unitId) => hasDisplayState(context.unitsById[unitId] ?? emptyUnitState)),
+          }),
+        },
       };
-    }),
-    setHoveredComponent: assign(({ context, event }) => {
-      assertEvent(event, 'setHoveredComponent');
+    },
+    setHoveredComponent: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       const componentId = hasComponent(unit, event.componentId) ? event.componentId : undefined;
       if (componentId === unit.hoveredComponentId) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          hoveredComponentId: componentId,
-        },
-        source: event.source,
-        displayChanged: false,
-      });
-    }),
-    toggleComponentSelection: assign(({ context, event }) => {
-      assertEvent(event, 'toggleComponentSelection');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            hoveredComponentId: componentId,
+          },
+          source: event.source,
+          displayChanged: false,
+        }),
+      };
+    },
+    toggleComponentSelection: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (!hasComponent(unit, event.componentId)) {
         return {};
       }
       const selectedComponentIds = unit.selectedComponentIds.includes(event.componentId) ? [] : [event.componentId];
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          selectedComponentIds,
-        },
-        source: event.source,
-        displayChanged: false,
-      });
-    }),
-    selectComponent: assign(({ context, event }) => {
-      assertEvent(event, 'selectComponent');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            selectedComponentIds,
+          },
+          source: event.source,
+          displayChanged: false,
+        }),
+      };
+    },
+    selectComponent: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (!hasComponent(unit, event.componentId) || arraysEqual(unit.selectedComponentIds, [event.componentId])) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          selectedComponentIds: [event.componentId],
-        },
-        source: event.source,
-        displayChanged: false,
-      });
-    }),
-    clearSelection: assign(({ context, event }) => {
-      assertEvent(event, 'clearSelection');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            selectedComponentIds: [event.componentId],
+          },
+          source: event.source,
+          displayChanged: false,
+        }),
+      };
+    },
+    clearSelection: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (unit.selectedComponentIds.length === 0) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          selectedComponentIds: [],
-        },
-        source: event.source,
-        displayChanged: false,
-      });
-    }),
-    hideComponent: assign(({ context, event }) => {
-      assertEvent(event, 'hideComponent');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            selectedComponentIds: [],
+          },
+          source: event.source,
+          displayChanged: false,
+        }),
+      };
+    },
+    hideComponent: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (!hasComponent(unit, event.componentId) || unit.hiddenComponentIds.includes(event.componentId)) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          hiddenComponentIds: [...unit.hiddenComponentIds, event.componentId],
-        },
-        source: event.source,
-      });
-    }),
-    showComponent: assign(({ context, event }) => {
-      assertEvent(event, 'showComponent');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            hiddenComponentIds: [...unit.hiddenComponentIds, event.componentId],
+          },
+          source: event.source,
+        }),
+      };
+    },
+    showComponent: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (!unit.hiddenComponentIds.includes(event.componentId)) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          hiddenComponentIds: unit.hiddenComponentIds.filter((id) => id !== event.componentId),
-        },
-        source: event.source,
-      });
-    }),
-    showHiddenComponents: assign(({ context, event }) => {
-      assertEvent(event, 'showHiddenComponents');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            hiddenComponentIds: unit.hiddenComponentIds.filter((id) => id !== event.componentId),
+          },
+          source: event.source,
+        }),
+      };
+    },
+    showHiddenComponents: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (unit.hiddenComponentIds.length === 0) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          hiddenComponentIds: [],
-        },
-        source: event.source,
-      });
-    }),
-    isolateComponent: assign(({ context, event }) => {
-      assertEvent(event, 'isolateComponent');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            hiddenComponentIds: [],
+          },
+          source: event.source,
+        }),
+      };
+    },
+    isolateComponent: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (!hasComponent(unit, event.componentId)) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          isolatedComponentIds: [event.componentId],
-        },
-        source: event.source,
-      });
-    }),
-    clearIsolation: assign(({ context, event }) => {
-      assertEvent(event, 'clearIsolation');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            isolatedComponentIds: [event.componentId],
+          },
+          source: event.source,
+        }),
+      };
+    },
+    clearIsolation: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (unit.isolatedComponentIds.length === 0) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          isolatedComponentIds: [],
-        },
-        source: event.source,
-      });
-    }),
-    setComponentOpacity: assign(({ context, event }) => {
-      assertEvent(event, 'setComponentOpacity');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            isolatedComponentIds: [],
+          },
+          source: event.source,
+        }),
+      };
+    },
+    setComponentOpacity: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (!hasComponent(unit, event.componentId)) {
         return {};
@@ -630,95 +653,68 @@ export const modelInteractionMachine = setup({
       if (recordsEqual(unit.opacityByComponentId, opacityByComponentId)) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          opacityByComponentId,
-        },
-        source: event.source,
-      });
-    }),
-    resetComponentOpacities: assign(({ context, event }) => {
-      assertEvent(event, 'resetComponentOpacities');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            opacityByComponentId,
+          },
+          source: event.source,
+        }),
+      };
+    },
+    resetComponentOpacities: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (Object.keys(unit.opacityByComponentId).length === 0) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: { ...unit, opacityByComponentId: {} },
-        source: event.source,
-      });
-    }),
-    focusComponent: assign(({ context, event }) => {
-      assertEvent(event, 'focusComponent');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: { ...unit, opacityByComponentId: {} },
+          source: event.source,
+        }),
+      };
+    },
+    focusComponent: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (!hasComponent(unit, event.componentId)) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          focusedComponentId: event.componentId,
-          selectedComponentIds: [event.componentId],
-        },
-        source: event.source,
-        displayChanged: false,
-      });
-    }),
-    clearFocus: assign(({ context, event }) => {
-      assertEvent(event, 'clearFocus');
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            focusedComponentId: event.componentId,
+            selectedComponentIds: [event.componentId],
+          },
+          source: event.source,
+          displayChanged: false,
+        }),
+      };
+    },
+    clearFocus: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
       if (unit.focusedComponentId === undefined) {
         return {};
       }
-      return assignUnit({
-        context,
-        unitId: event.unitId,
-        unit: {
-          ...unit,
-          focusedComponentId: undefined,
-        },
-        source: event.source,
-        displayChanged: false,
-      });
-    }),
-  },
-}).createMachine({
-  id: 'modelInteraction',
-  context: ({ input }) => {
-    const hydrated = hydrateUnitsFromComponentDisplay(input.componentDisplay);
-    return {
-      unitsById: hydrated.unitsById,
-      unitOrder: hydrated.unitOrder,
-      revision: 0,
-      displayRevision: 0,
-      lastInteractionSource: 'unknown',
-    };
-  },
-  on: {
-    loadManifest: { actions: 'loadManifest' },
-    clearManifest: { actions: 'clearManifest' },
-    restoreComponentDisplay: { actions: 'restoreComponentDisplay' },
-    rekeySourceUnits: { actions: 'rekeySourceUnits' },
-    pruneSourceUnits: { actions: 'pruneSourceUnits' },
-    setHoveredComponent: { actions: 'setHoveredComponent' },
-    toggleComponentSelection: { actions: 'toggleComponentSelection' },
-    selectComponent: { actions: 'selectComponent' },
-    clearSelection: { actions: 'clearSelection' },
-    hideComponent: { actions: 'hideComponent' },
-    showComponent: { actions: 'showComponent' },
-    showHiddenComponents: { actions: 'showHiddenComponents' },
-    isolateComponent: { actions: 'isolateComponent' },
-    clearIsolation: { actions: 'clearIsolation' },
-    setComponentOpacity: { actions: 'setComponentOpacity' },
-    resetComponentOpacities: { actions: 'resetComponentOpacities' },
-    focusComponent: { actions: 'focusComponent' },
-    clearFocus: { actions: 'clearFocus' },
+      return {
+        context: assignUnit({
+          context,
+          unitId: event.unitId,
+          unit: {
+            ...unit,
+            focusedComponentId: undefined,
+          },
+          source: event.source,
+          displayChanged: false,
+        }),
+      };
+    },
   },
 });

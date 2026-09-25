@@ -720,7 +720,12 @@ export const projectAgentHostLiveEvent = (
     return delta
       ? [
           ...start,
-          { type: type === 'text' ? 'text-delta' : 'reasoning-delta', id, delta, ...(resumed ? textStreamState('live') : {}) },
+          {
+            type: type === 'text' ? 'text-delta' : 'reasoning-delta',
+            id,
+            delta,
+            ...(resumed ? textStreamState('live') : {}),
+          },
         ]
       : start;
   }

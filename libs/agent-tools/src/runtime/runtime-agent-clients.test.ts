@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient, RuntimeAgentImageExporter } from '#runtime/runtime-agent-clients.js';
 import type { ExportFile, HashedGeometryResult } from '@taucad/runtime/types';
-import { createActor, fromPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
-import type { ParameterSetLoadInput } from '@taucad/parameters/set-machine';
+import type { ParameterSetActors, ParameterSetLoadInput } from '@taucad/parameters/set-machine';
 import { admitParameterManifest, compileParameterManifest, resolveParameterSnapshot } from '@taucad/parameters';
 import type { ParameterSnapshot } from '@taucad/parameters';
 
@@ -518,12 +518,14 @@ describe('createRuntimeParameterAgentClient', () => {
     const actor = createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise(async () => {
-            loads();
-            return current;
+          loadParameterSet: createAsyncLogic({
+            run: async () => {
+              loads();
+              return current;
+            },
           }),
-          commitParameterSet: fromPromise(async ({ input }) => commit({ input })),
-        },
+          commitParameterSet: createAsyncLogic({ run: async ({ input }) => commit({ input }) }),
+        } satisfies Partial<ParameterSetActors>,
       }),
       { input: { target } },
     );
@@ -739,13 +741,15 @@ describe('createRuntimeParameterAgentClient', () => {
     const actor = createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise<ParameterSnapshot, ParameterSetLoadInput>(async () => {
-            throw Object.assign(new Error('Saved parameter values are not a valid record.'), {
-              code: 'INVALID_RECORD',
-              applicationState: 'known-not-applied',
-            });
+          loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+            run: async () => {
+              throw Object.assign(new Error('Saved parameter values are not a valid record.'), {
+                code: 'INVALID_RECORD',
+                applicationState: 'known-not-applied',
+              });
+            },
           }),
-        },
+        } satisfies Partial<ParameterSetActors>,
       }),
       { input: { target } },
     );

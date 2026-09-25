@@ -30,7 +30,7 @@
 
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { SnapshotFrom } from 'xstate';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ChatSessionActorRef, chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import type { SessionsActorRef } from '#machines/sessions.machine.js';
@@ -41,6 +41,7 @@ import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
+import { actorSessionIdOf } from '#lib/xstate.lib.js';
 
 /**
  * Everything a chat row draws, from that chat's own machine.
@@ -583,7 +584,10 @@ const bindProject = ({
     const key = [
       session === undefined ? 'closed' : 'live',
       peekRevisionClient(projectId) === undefined ? 'no-client' : 'client',
-      ...ids.map((id) => references[id]?.sessionId ?? id),
+      ...ids.map((id) => {
+        const reference = references[id];
+        return reference === undefined ? id : actorSessionIdOf(reference);
+      }),
     ].join(keySeparator);
     if (key === boundKey) {
       return;

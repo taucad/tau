@@ -97,6 +97,9 @@ export const connectPickedFolder = async (session: DesktopSession): Promise<void
     .toBe(`Create in ${basename(session.pickedDirectory)}`);
 };
 
+/** The agents the sheet's Agent row opens. */
+const agentList = (page: Page): Locator => page.locator('[data-slot="agent-list"]');
+
 /**
  * Select a chat model by name through the composer's own selector.
  *
@@ -107,13 +110,15 @@ export const connectPickedFolder = async (session: DesktopSession): Promise<void
 export const selectChatModel = async (page: Page, modelName: string): Promise<void> => {
   await parkPointer(page);
   await composerOf(page).click();
-  /* The shortcut opens the agent sheet; its model row drills into the list. */
+  /* The shortcut opens the agent sheet. With a choice of agents, Tau's models are
+   * reached through its Agent row, from whichever agent the chat is on. */
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Slash' : 'Control+Slash');
-  await page.getByRole('button', { name: /^Model: .*\. Change$/u }).click();
-  /* From an external agent the list opens on that agent's tab. */
-  const tauTab = page.getByRole('tablist', { name: 'Agent' }).getByRole('tab', { name: /^Tau/u });
-  if (await tauTab.isVisible()) {
-    await tauTab.click();
+  const agentRow = page.getByRole('button', { name: /^Agent: .*\. Change$/u });
+  if (await agentRow.isVisible()) {
+    await agentRow.click();
+    await agentList(page).getByRole('option', { name: /^Tau/u }).click();
+  } else {
+    await page.getByRole('button', { name: /^Model: .*\. Change$/u }).click();
   }
   /* The selected row carries its level after the name ("Haiku 4.5High"), so
    * match the name as the option's leading text, not the exact string. */
@@ -126,10 +131,10 @@ export const selectChatModel = async (page: Page, modelName: string): Promise<vo
 };
 
 /**
- * Open the agent sheet's model list and read back the agents it offers.
+ * Open the agent sheet's agent list and read back the agents it offers.
  *
  * @param page - The desktop page.
- * @returns Every agent tab's name, in order — e.g. `Codex` or `Claude Code, unavailable`.
+ * @returns Every agent row's name, in order — e.g. `Codex` or `Claude Code, unavailable`.
  */
 export const openAgentList = async (page: Page): Promise<readonly string[]> => {
   await parkPointer(page);
@@ -137,26 +142,26 @@ export const openAgentList = async (page: Page): Promise<readonly string[]> => {
     .getByRole('button', { name: /^Agent and model: /u })
     .first()
     .click();
-  await page.getByRole('button', { name: /^Model: .*\. Change$/u }).click();
-  const tabs = page.getByRole('tablist', { name: 'Agent' }).getByRole('tab');
-  await expectVisible(tabs.first());
-  return tabs.evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label') ?? ''));
+  await page.getByRole('button', { name: /^Agent: .*\. Change$/u }).click();
+  const rows = agentList(page).getByRole('option');
+  await expectVisible(rows.first());
+  return rows.evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label') ?? ''));
 };
 
 /**
  * Place the chat on one of an agent's models, from the agent sheet.
  *
  * @param page - The desktop page.
- * @param agentName - The agent's tab name, e.g. `Codex`.
+ * @param agentName - The agent's row name, e.g. `Codex`.
  * @param modelName - The agent's own model name; absent takes the agent's first row.
  * @returns The sheet's *Runs on* note for the placed agent, read before the sheet closes.
  */
 export const selectAgent = async (page: Page, agentName: string, modelName?: string): Promise<string> => {
-  const tab = page.getByRole('tablist', { name: 'Agent' }).getByRole('tab', { name: new RegExp(`^${agentName}`, 'u') });
-  if (!(await tab.isVisible())) {
+  const row = agentList(page).getByRole('option', { name: new RegExp(`^${agentName}`, 'u') });
+  if (!(await row.isVisible())) {
     await openAgentList(page);
   }
-  await tab.click();
+  await row.click();
   const options = page.getByRole('option');
   await (modelName === undefined ? options : options.filter({ hasText: modelName })).first().click();
   const runsOn = page.locator('[data-slot="runs-on"]');

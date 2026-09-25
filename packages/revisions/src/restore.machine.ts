@@ -11,8 +11,11 @@
  * serializable and a file set never rides in a machine.
  */
 
-import { assign, emit, enqueueActions, fromPromise, setup } from 'xstate';
+import { createAsyncLogic, setup, types } from 'xstate';
 import type { AnyActorRef, SnapshotFrom } from 'xstate';
+
+import { eventSchemas } from '#machine-schemas.js';
+import type { MachineActors } from '#machine-schemas.js';
 
 /** Target that means "the newest revision on this checkout's branch". @public */
 export const latestRevisionTarget = 'latest';
@@ -103,45 +106,40 @@ export type RestoreApplyPlanActorOutput = Readonly<{
 const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : 'Restore failed.';
 
-/**
- * Headless restore lifecycle for one project's selected checkout.
- *
- * @public
- */
-export const restoreMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as RestoreMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as RestoreMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    emitted: {} as RestoreMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as RestoreMachineInput,
+/* Everything one restore attempt leaves behind, cleared when it settles. */
+const clearTransient = {
+  target: undefined,
+  planId: undefined,
+  revisionId: undefined,
+  revisionNumber: undefined,
+  removedPathCount: 0,
+  dirty: false,
+  unrecoverable: [],
+} satisfies Partial<RestoreMachineContext>;
+
+const restoreMachineDefinition = setup({
+  schemas: {
+    context: types<RestoreMachineContext>(),
+    events: eventSchemas<RestoreMachineEvent>(),
+    emitted: eventSchemas<RestoreMachineEmitted>(),
+    input: types<RestoreMachineInput>(),
   },
   actors: {
-    computePlan: fromPromise<RestoreComputePlanActorOutput, RestoreComputePlanActorInput>(async () => {
-      throw new Error('restoreMachine: the computePlan actor was not provided.');
+    computePlan: createAsyncLogic<RestoreComputePlanActorOutput, RestoreComputePlanActorInput>({
+      run: async () => {
+        throw new Error('restoreMachine: the computePlan actor was not provided.');
+      },
     }),
-    applyPlan: fromPromise<RestoreApplyPlanActorOutput, Readonly<{ checkoutId: string; planId: string }>>(async () => {
-      throw new Error('restoreMachine: the applyPlan actor was not provided.');
+    applyPlan: createAsyncLogic<RestoreApplyPlanActorOutput, Readonly<{ checkoutId: string; planId: string }>>({
+      run: async () => {
+        throw new Error('restoreMachine: the applyPlan actor was not provided.');
+      },
     }),
   },
   guards: {
     /* A restore is risky when it deletes files or the tree has diverged from head. */
-    isRisky: ({ context }) => context.removedPathCount > 0 || context.dirty,
-    canUndo: ({ context }) => context.previousRevisionId !== undefined,
-  },
-  actions: {
-    clearTransient: assign({
-      target: undefined,
-      planId: undefined,
-      revisionId: undefined,
-      revisionNumber: undefined,
-      removedPathCount: 0,
-      dirty: false,
-      unrecoverable: [],
-    }),
+    isRisky: (context: RestoreMachineContext) => context.removedPathCount > 0 || context.dirty,
+    canUndo: (context: RestoreMachineContext) => context.previousRevisionId !== undefined,
   },
 }).createMachine({
   id: 'restore',
@@ -163,9 +161,9 @@ export const restoreMachine = setup({
   initial: 'idle',
   on: {
     selectCheckout: {
-      actions: assign({
-        checkoutId: ({ event }) => event.checkoutId,
-        headRevisionId: ({ event }) => event.headRevisionId,
+      context: ({ event }) => ({
+        checkoutId: event.checkoutId,
+        headRevisionId: event.headRevisionId,
         previousRevisionId: undefined,
       }),
     },
@@ -175,16 +173,17 @@ export const restoreMachine = setup({
       on: {
         restore: {
           target: 'planning',
-          actions: assign({ target: ({ event }) => event.revisionId, reason: undefined }),
+          context: ({ event }) => ({ target: event.revisionId, reason: undefined }),
         },
         returnToLatest: {
           target: 'planning',
-          actions: assign({ target: latestRevisionTarget, reason: undefined }),
+          context: { target: latestRevisionTarget, reason: undefined },
         },
-        undo: {
-          guard: 'canUndo',
-          target: 'planning',
-          actions: assign({ target: ({ context }) => context.previousRevisionId, reason: undefined }),
+        undo: ({ context, guards }) => {
+          if (!guards.canUndo(context)) {
+            return undefined;
+          }
+          return { target: 'planning', context: { target: context.previousRevisionId, reason: undefined } };
         },
       },
     },
@@ -197,83 +196,92 @@ export const restoreMachine = setup({
         }),
         onDone: {
           target: 'planned',
-          actions: assign({
-            planId: ({ event }) => event.output.planId,
-            revisionId: ({ event }) => event.output.revisionId,
-            revisionNumber: ({ event }) => event.output.revisionNumber,
-            removedPathCount: ({ event }) => event.output.removedPathCount,
-            dirty: ({ event }) => event.output.dirty,
-            unrecoverable: ({ event }) => event.output.unrecoverable,
+          context: ({ event }) => ({
+            planId: event.output.planId,
+            revisionId: event.output.revisionId,
+            revisionNumber: event.output.revisionNumber,
+            removedPathCount: event.output.removedPathCount,
+            dirty: event.output.dirty,
+            unrecoverable: event.output.unrecoverable,
           }),
         },
         onError: {
           target: 'failed',
-          actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+          context: ({ event }) => ({ reason: describeFailure(event.error) }),
         },
       },
     },
     planned: {
-      always: [{ guard: 'isRisky', target: 'confirming' }, { target: 'applying' }],
+      always: ({ context, guards }) => (guards.isRisky(context) ? { target: 'confirming' } : { target: 'applying' }),
     },
     confirming: {
       on: {
         confirm: { target: 'applying' },
-        cancel: { target: 'idle', actions: 'clearTransient' },
+        cancel: { target: 'idle', context: clearTransient },
       },
     },
     applying: {
       invoke: {
         src: 'applyPlan',
         input: ({ context }) => ({ checkoutId: context.checkoutId, planId: context.planId ?? '' }),
-        onDone: {
-          target: 'applied',
-          actions: [
-            assign({
-              previousRevisionId: ({ context }) => context.headRevisionId,
-              headRevisionId: ({ event }) => event.output.revisionId,
-            }),
-            enqueueActions(({ context, enqueue, event }) => {
-              const fact: RestoreMachineEmitted = {
-                type: 'checkoutChanged',
-                checkoutId: context.checkoutId,
-                revisionId: event.output.revisionId,
-                treeId: event.output.treeId,
-                branch: event.output.branch,
-              };
-              enqueue.emit(fact);
-              if (context.parentRef !== undefined) {
-                enqueue.sendTo(context.parentRef, fact);
-              }
-            }),
-          ],
+        onDone: ({ context, event }, enq) => {
+          const fact: RestoreMachineEmitted = {
+            type: 'checkoutChanged',
+            checkoutId: context.checkoutId,
+            revisionId: event.output.revisionId,
+            treeId: event.output.treeId,
+            branch: event.output.branch,
+          };
+          enq.emit(fact);
+          if (context.parentRef !== undefined) {
+            enq.sendTo(context.parentRef, fact);
+          }
+          return {
+            target: 'applied',
+            context: { previousRevisionId: context.headRevisionId, headRevisionId: event.output.revisionId },
+          };
         },
         onError: {
           target: 'failed',
-          actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+          context: ({ event }) => ({ reason: describeFailure(event.error) }),
         },
       },
     },
     applied: {
-      entry: emit(
-        ({ context }): RestoreMachineEmitted => ({
+      entry: ({ context }, enq) => {
+        enq.emit({
           type: 'toast.restored',
           revisionNumber: context.revisionNumber ?? 0,
           unrecoverable: context.unrecoverable,
-        }),
-      ),
-      always: { target: 'idle', actions: 'clearTransient' },
+        });
+      },
+      always: { target: 'idle', context: clearTransient },
     },
     failed: {
-      entry: emit(
-        ({ context }): RestoreMachineEmitted => ({
-          type: 'toast.error',
-          message: context.reason ?? 'Restore failed.',
-        }),
-      ),
-      always: { target: 'idle', actions: 'clearTransient' },
+      entry: ({ context }, enq) => {
+        enq.emit({ type: 'toast.error', message: context.reason ?? 'Restore failed.' });
+      },
+      always: { target: 'idle', context: clearTransient },
     },
   },
 });
+
+type RestoreMachineDefinition = typeof restoreMachineDefinition;
+
+/**
+ * The type of {@link restoreMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface RestoreMachine extends RestoreMachineDefinition {}
+
+/**
+ * Headless restore lifecycle for one project's selected checkout.
+ *
+ * @public
+ */
+export const restoreMachine: RestoreMachine = restoreMachineDefinition;
 
 /**
  * Selects whether a restore is waiting for the user to confirm it.
@@ -304,4 +312,4 @@ export const selectRestoreBusy = (snapshot: SnapshotFrom<typeof restoreMachine>)
  *
  * @public
  */
-export type RestoreActors = NonNullable<Parameters<typeof restoreMachine.provide>[0]['actors']>;
+export type RestoreActors = MachineActors<typeof restoreMachine>;

@@ -23,7 +23,7 @@ import type { JsonValue } from '@taucad/agent-host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { HashedGeometryResult } from '@taucad/runtime/types';
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 
 import * as agentToolsRegistry from '@taucad/agent-tools/registry';
@@ -391,8 +391,10 @@ describe('createHostToolRegistry', () => {
     const actor = createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise(async (): Promise<ParameterSnapshot> => {
-            throw Object.assign(new Error('No declared parameter semantics.'), { code: 'SEMANTICS_UNRESOLVED' });
+          loadParameterSet: createAsyncLogic({
+            run: async (): Promise<ParameterSnapshot> => {
+              throw Object.assign(new Error('No declared parameter semantics.'), { code: 'SEMANTICS_UNRESOLVED' });
+            },
           }),
         },
       }),

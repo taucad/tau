@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock `gl` stubs mirror three.js `isWebGPURenderer` spelling */
+import { Suspense } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import type { WebGPURenderer } from 'three/webgpu';
+import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 
 const inspectorHideSpy = vi.fn();
 
@@ -28,12 +30,40 @@ vi.mock('@react-three/fiber', () => ({
   useThree: hoistedMocks.useThreeImplementation,
 }));
 
-describe('three-webgpu-inspector-bootstrap', () => {
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-  });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
+describe('WebGpuInspectorOverlay', () => {
+  it('should keep revealed content visible while the inspector loads', async () => {
+    hoistedMocks.useThreeImplementation.mockReturnValue({ gl: { isWebGPURenderer: true } });
+    const { WebGpuInspectorOverlay } = await import('#components/geometry/graphics/three/webgpu-inspector-overlay.js');
+    const workspace = (withInspector: boolean): React.JSX.Element => (
+      <Suspense fallback='Loading workspace'>
+        <p>Workspace</p>
+        {withInspector ? (
+          <ThreeGraphicsBackendProvider value='webgpu'>
+            <WebGpuInspectorOverlay />
+          </ThreeGraphicsBackendProvider>
+        ) : null}
+      </Suspense>
+    );
+
+    const { rerender } = render(workspace(false));
+    // The canvas mounts the overlay after the workspace is on screen. R3F hands a suspension inside the canvas to
+    // this boundary, and hiding the workspace re-runs its layout effects on reveal, which the workspace Allotment
+    // cannot survive.
+    rerender(workspace(true));
+
+    expect(screen.getByText('Workspace')).toBeVisible();
+    await waitFor(() => {
+      expect(hoistedMocks.inspectorConstructorSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('three-webgpu-inspector-bootstrap', () => {
   it('attaches Inspector to the shared WebGPURenderer and body, then restores on unmount', async () => {
     const previousInspector: WebGPURenderer['inspector'] = {
       kind: 'prior-mock',

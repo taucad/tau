@@ -6,12 +6,13 @@ import { MessageChannel } from 'node:worker_threads';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import { createActor, fromPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { compileParameterManifest, readParameterRecord } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange, refreshParameterSnapshot } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
 import { parameterSetMachine, submitParameterRequest } from '@taucad/parameters/set-machine';
 import { expect, it } from 'vitest';
+import type { ParameterSetActors } from '@taucad/parameters/set-machine';
 
 it('admits one writer across two actual Node transport clients and refreshes the losing actor', async () => {
   const sandbox = mkdtempSync(join(tmpdir(), 'tau-parameter-actor-'));
@@ -66,15 +67,17 @@ it('admits one writer across two actual Node transport clients and refreshes the
     return createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise(async ({ input, signal }) =>
-            input.current === undefined
-              ? loadParameterSnapshot({ target, authority: byteAuthority, manifest: async () => manifest, signal })
-              : refreshParameterSnapshot({ current: input.current, authority: byteAuthority, signal }),
-          ),
-          commitParameterSet: fromPromise(async ({ input: change, signal }) =>
-            commitParameterChange({ change, authority: byteAuthority, signal }),
-          ),
-        },
+          loadParameterSet: createAsyncLogic({
+            run: async ({ input, signal }) =>
+              input.current === undefined
+                ? loadParameterSnapshot({ target, authority: byteAuthority, manifest: async () => manifest, signal })
+                : refreshParameterSnapshot({ current: input.current, authority: byteAuthority, signal }),
+          }),
+          commitParameterSet: createAsyncLogic({
+            run: async ({ input: change, signal }) =>
+              commitParameterChange({ change, authority: byteAuthority, signal }),
+          }),
+        } satisfies Partial<ParameterSetActors>,
       }),
       { input: { target } },
     );

@@ -10,7 +10,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 
 import { revisionId } from '#algorithms/index.js';
 import { sameRevisionStatus, versionedChangePaths } from '#revision-projection.js';
-import type { RevisionStatusProjection } from '#project-revisions.machine.js';
+import type { RevisionStatusProjection } from '#project-revisions.types.js';
 
 describe('the projection comparator (P52, W18 DEF-6)', () => {
   /*

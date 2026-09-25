@@ -1,5 +1,5 @@
-import { assign, assertEvent, fromCallback, sendTo, setup } from 'xstate';
-import type { SnapshotFrom } from 'xstate';
+import { createCallbackLogic, setup, types } from 'xstate';
+import type { ActorRefFrom, EnqueueObject, EventObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import {
   cameraProjectionForVerticalFieldOfView,
   createCameraView,
@@ -7,6 +7,7 @@ import {
   frameCameraBounds,
 } from '#camera-domain.js';
 import type { CameraBounds, CameraProjection, CameraVector, CameraView, CameraViewport } from '#camera-domain.js';
+import { eventSchemas } from '#machine-schemas.js';
 
 /** Input accepted by {@link cameraMachine}. @public */
 export type CameraMachineInput = Readonly<{
@@ -90,10 +91,154 @@ const handoffForView = (
 const updateHandoffForView = (context: CameraMachineContext, view: CameraView): number | undefined =>
   context.view.requestedVerticalFieldOfView === 0 ? handoffForView(context, view) : undefined;
 
-const defaultCameraDriver = fromCallback<CameraDriverEvent, CameraDriverInput>(({ receive }) => {
+const defaultCameraDriver = createCallbackLogic<CameraDriverEvent, CameraDriverInput>(({ receive }) => {
   receive(() => undefined);
   return () => undefined;
 });
+
+type CameraEnqueue = EnqueueObject<
+  CameraMachineEvent,
+  EventObject,
+  SystemRegistry,
+  Readonly<{ cameraDriver: typeof defaultCameraDriver }>,
+  Readonly<{ cameraDriver?: ActorRefFrom<typeof defaultCameraDriver> }>
+>;
+type CameraPatch = Partial<CameraMachineContext>;
+type CameraEvent<EventType extends CameraMachineEvent['type']> = Extract<
+  CameraMachineEvent,
+  Readonly<{ type: EventType }>
+>;
+
+const setVerticalFieldOfView = (
+  context: CameraMachineContext,
+  event: CameraEvent<'setVerticalFieldOfView'>,
+): CameraPatch => {
+  const view = createCameraView({ ...context.view, requestedVerticalFieldOfView: event.verticalFieldOfView });
+  return {
+    view,
+    lastPerspectiveVerticalFieldOfView:
+      event.verticalFieldOfView > 0 ? event.verticalFieldOfView : context.lastPerspectiveVerticalFieldOfView,
+    handoffVerticalFieldOfView: event.verticalFieldOfView === 0 ? handoffForView(context, view) : undefined,
+    revision: context.revision + 1,
+  };
+};
+
+const withView = (context: CameraMachineContext, view: CameraView): CameraPatch => ({
+  view,
+  handoffVerticalFieldOfView: updateHandoffForView(context, view),
+  revision: context.revision + 1,
+});
+
+const setViewport = (context: CameraMachineContext, event: CameraEvent<'setViewport'>): CameraPatch =>
+  withView(context, createCameraView({ ...context.view, viewport: event.viewport }));
+
+const setBounds = (context: CameraMachineContext, event: CameraEvent<'setBounds'>): CameraPatch =>
+  withView(context, createCameraView({ ...context.view, bounds: event.bounds }));
+
+const setView = (context: CameraMachineContext, event: CameraEvent<'setView'>): CameraPatch =>
+  withView(
+    context,
+    createCameraView({
+      ...context.view,
+      target: event.target,
+      direction: event.direction,
+      up: event.up,
+      verticalSpan: event.verticalSpan,
+      perspectiveZoom: event.perspectiveZoom ?? context.view.perspectiveZoom,
+    }),
+  );
+
+const frameBounds = (context: CameraMachineContext, event: CameraEvent<'frame'>): CameraPatch =>
+  withView(
+    context,
+    frameCameraBounds({
+      view: context.view,
+      bounds: event.bounds ?? context.view.bounds,
+      margin: event.margin,
+    }),
+  );
+
+const resetView = (context: CameraMachineContext): CameraPatch => {
+  const viewportChanged =
+    context.initialView.viewport.width !== context.view.viewport.width ||
+    context.initialView.viewport.height !== context.view.viewport.height ||
+    context.initialView.viewport.pixelRatio !== context.view.viewport.pixelRatio;
+  const boundsChanged =
+    context.initialView.bounds.min.some((value, index) => value !== context.view.bounds.min[index]) ||
+    context.initialView.bounds.max.some((value, index) => value !== context.view.bounds.max[index]);
+  const view =
+    viewportChanged || boundsChanged
+      ? frameCameraBounds({
+          view: { ...context.initialView, viewport: context.view.viewport, bounds: context.view.bounds },
+          bounds: context.view.bounds,
+        })
+      : context.initialView;
+  return {
+    view,
+    lastPerspectiveVerticalFieldOfView:
+      view.requestedVerticalFieldOfView > 0
+        ? view.requestedVerticalFieldOfView
+        : context.lastPerspectiveVerticalFieldOfView,
+    handoffVerticalFieldOfView: undefined,
+    revision: context.revision + 1,
+  };
+};
+
+/* Apply one view change, then hand the driver the state it produced. */
+const syncDriver = (context: CameraMachineContext, patch: CameraPatch, enq: CameraEnqueue) => {
+  enq.sendTo('cameraDriver', { type: 'sync', snapshot: driverSnapshot({ ...context, ...patch }) });
+  return { context: patch };
+};
+
+const cameraMachineDefinition = setup({
+  schemas: {
+    context: types<CameraMachineContext>(),
+    events: eventSchemas<CameraMachineEvent>(),
+    input: types<CameraMachineInput>(),
+  },
+  actors: {
+    cameraDriver: defaultCameraDriver,
+  },
+}).createMachine({
+  id: 'camera',
+  context: ({ input }) => {
+    const initialView = createCameraView(input.initialView);
+    const pixelBudget = assertPositive(input.pixelBudget ?? 0.25, 'pixelBudget');
+    return {
+      view: initialView,
+      initialView,
+      lastPerspectiveVerticalFieldOfView:
+        initialView.requestedVerticalFieldOfView > 0 ? initialView.requestedVerticalFieldOfView : 60,
+      pixelBudget,
+      revision: 0,
+    };
+  },
+  invoke: {
+    id: 'cameraDriver',
+    src: 'cameraDriver',
+    input: ({ context }) => ({ snapshot: driverSnapshot(context) }),
+  },
+  on: {
+    setVerticalFieldOfView: ({ context, event }, enq) =>
+      syncDriver(context, setVerticalFieldOfView(context, event), enq),
+    setViewport: ({ context, event }, enq) => syncDriver(context, setViewport(context, event), enq),
+    setBounds: ({ context, event }, enq) => syncDriver(context, setBounds(context, event), enq),
+    setView: ({ context, event }, enq) => syncDriver(context, setView(context, event), enq),
+    frame: ({ context, event }, enq) => syncDriver(context, frameBounds(context, event), enq),
+    saveHome: { context: ({ context }) => ({ initialView: context.view }) },
+    reset: ({ context }, enq) => syncDriver(context, resetView(context), enq),
+  },
+});
+
+type CameraMachineDefinition = typeof cameraMachineDefinition;
+
+/**
+ * The type of {@link cameraMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface CameraMachine extends CameraMachineDefinition {}
 
 /**
  * Headless canonical camera state with a replaceable external driver.
@@ -120,143 +265,7 @@ const defaultCameraDriver = fromCallback<CameraDriverEvent, CameraDriverInput>((
  * actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
  * ```
  */
-export const cameraMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as CameraMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as CameraMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as CameraMachineInput,
-  },
-  actors: {
-    cameraDriver: defaultCameraDriver,
-  },
-  actions: {
-    syncDriver: sendTo('cameraDriver', ({ context }) => ({ type: 'sync', snapshot: driverSnapshot(context) })),
-    setVerticalFieldOfView: assign(({ context, event }) => {
-      assertEvent(event, 'setVerticalFieldOfView');
-      const view = createCameraView({ ...context.view, requestedVerticalFieldOfView: event.verticalFieldOfView });
-      return {
-        ...context,
-        view,
-        lastPerspectiveVerticalFieldOfView:
-          event.verticalFieldOfView > 0 ? event.verticalFieldOfView : context.lastPerspectiveVerticalFieldOfView,
-        handoffVerticalFieldOfView: event.verticalFieldOfView === 0 ? handoffForView(context, view) : undefined,
-        revision: context.revision + 1,
-      };
-    }),
-    setViewport: assign(({ context, event }) => {
-      assertEvent(event, 'setViewport');
-      const view = createCameraView({ ...context.view, viewport: event.viewport });
-      return {
-        ...context,
-        view,
-        handoffVerticalFieldOfView: updateHandoffForView(context, view),
-        revision: context.revision + 1,
-      };
-    }),
-    setBounds: assign(({ context, event }) => {
-      assertEvent(event, 'setBounds');
-      const view = createCameraView({ ...context.view, bounds: event.bounds });
-      return {
-        ...context,
-        view,
-        handoffVerticalFieldOfView: updateHandoffForView(context, view),
-        revision: context.revision + 1,
-      };
-    }),
-    setView: assign(({ context, event }) => {
-      assertEvent(event, 'setView');
-      const view = createCameraView({
-        ...context.view,
-        target: event.target,
-        direction: event.direction,
-        up: event.up,
-        verticalSpan: event.verticalSpan,
-        perspectiveZoom: event.perspectiveZoom ?? context.view.perspectiveZoom,
-      });
-      return {
-        ...context,
-        view,
-        handoffVerticalFieldOfView: updateHandoffForView(context, view),
-        revision: context.revision + 1,
-      };
-    }),
-    frameBounds: assign(({ context, event }) => {
-      assertEvent(event, 'frame');
-      const view = frameCameraBounds({
-        view: context.view,
-        bounds: event.bounds ?? context.view.bounds,
-        margin: event.margin,
-      });
-      return {
-        ...context,
-        view,
-        handoffVerticalFieldOfView: updateHandoffForView(context, view),
-        revision: context.revision + 1,
-      };
-    }),
-    saveHome: assign(({ context }) => ({
-      ...context,
-      initialView: context.view,
-    })),
-    resetView: assign(({ context }) => {
-      const viewportChanged =
-        context.initialView.viewport.width !== context.view.viewport.width ||
-        context.initialView.viewport.height !== context.view.viewport.height ||
-        context.initialView.viewport.pixelRatio !== context.view.viewport.pixelRatio;
-      const boundsChanged =
-        context.initialView.bounds.min.some((value, index) => value !== context.view.bounds.min[index]) ||
-        context.initialView.bounds.max.some((value, index) => value !== context.view.bounds.max[index]);
-      const view =
-        viewportChanged || boundsChanged
-          ? frameCameraBounds({
-              view: { ...context.initialView, viewport: context.view.viewport, bounds: context.view.bounds },
-              bounds: context.view.bounds,
-            })
-          : context.initialView;
-      return {
-        ...context,
-        view,
-        lastPerspectiveVerticalFieldOfView:
-          view.requestedVerticalFieldOfView > 0
-            ? view.requestedVerticalFieldOfView
-            : context.lastPerspectiveVerticalFieldOfView,
-        handoffVerticalFieldOfView: undefined,
-        revision: context.revision + 1,
-      };
-    }),
-  },
-}).createMachine({
-  id: 'camera',
-  context: ({ input }) => {
-    const initialView = createCameraView(input.initialView);
-    const pixelBudget = assertPositive(input.pixelBudget ?? 0.25, 'pixelBudget');
-    return {
-      view: initialView,
-      initialView,
-      lastPerspectiveVerticalFieldOfView:
-        initialView.requestedVerticalFieldOfView > 0 ? initialView.requestedVerticalFieldOfView : 60,
-      pixelBudget,
-      revision: 0,
-    };
-  },
-  invoke: {
-    id: 'cameraDriver',
-    src: 'cameraDriver',
-    input: ({ context }) => ({ snapshot: driverSnapshot(context) }),
-  },
-  on: {
-    setVerticalFieldOfView: { actions: ['setVerticalFieldOfView', 'syncDriver'] },
-    setViewport: { actions: ['setViewport', 'syncDriver'] },
-    setBounds: { actions: ['setBounds', 'syncDriver'] },
-    setView: { actions: ['setView', 'syncDriver'] },
-    frame: { actions: ['frameBounds', 'syncDriver'] },
-    saveHome: { actions: 'saveHome' },
-    reset: { actions: ['resetView', 'syncDriver'] },
-  },
-});
+export const cameraMachine: CameraMachine = cameraMachineDefinition;
 
 /** Public snapshot type for {@link cameraMachine}. @public */
 export type CameraMachineSnapshot = SnapshotFrom<typeof cameraMachine>;

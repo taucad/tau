@@ -13,7 +13,7 @@ import type { LfsQuotaRefusal } from '#lfs-client.js';
 import { remoteTrackingRef } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RemoteStorageRefusal, RevisionPort, RevisionPushRef, RevisionPushRefResult } from '#revision-port.js';
-import type { SyncRefOutcome } from '#sync.machine.js';
+import type { SyncRefOutcome } from '#sync.types.js';
 import type { RevisionActorsOptions, RevisionFileSystem } from '#revision-effects.js';
 
 /**

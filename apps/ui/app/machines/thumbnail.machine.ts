@@ -1,4 +1,7 @@
-import { assign, fromPromise, setup } from 'xstate';
+import { createAsyncLogic, setup, types } from 'xstate';
+import type { EnqueueObject, EventObject } from 'xstate';
+
+import { eventSchemas } from '#lib/xstate.lib.js';
 
 export type ThumbnailKind = 'automatic-thumbnail' | 'manual-thumbnail';
 export type ThumbnailSkipReason = 'svg-source' | 'superseded' | 'locator-changed';
@@ -54,81 +57,64 @@ type ThumbnailContext = Required<Omit<ThumbnailInput, 'debounceDelay'>> & {
 /** Events driving {@link thumbnailMachine}. */
 export type ThumbnailEvent = { type: 'settled'; hash: string } | { type: 'regenerate' };
 
+type ThumbnailEnqueue = EnqueueObject<ThumbnailEvent, EventObject>;
+
+const rememberLatestAutomatic = (
+  context: ThumbnailContext,
+  event: Extract<ThumbnailEvent, { type: 'settled' }>,
+): Partial<ThumbnailContext> =>
+  event.hash === context.activeHash || event.hash === context.lastRenderedHash
+    ? { pendingAutomaticHash: undefined }
+    : { pendingAutomaticHash: event.hash };
+
+const startManual = { activeHash: undefined, activeKind: 'manual-thumbnail' } satisfies Partial<ThumbnailContext>;
+const clearActive = { activeHash: undefined, activeKind: undefined } satisfies Partial<ThumbnailContext>;
+
+const reportManualResult = (context: ThumbnailContext, enq: ThumbnailEnqueue, result: ThumbnailResult): void => {
+  if (result.kind === 'manual-thumbnail') {
+    enq(() => {
+      context.onManualResult(result);
+    });
+  }
+};
+
 /** Milliseconds. */
 const defaultDebounceDelay = 1000;
 
 export const thumbnailMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as ThumbnailInput,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as ThumbnailContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as ThumbnailEvent,
+  schemas: {
+    input: types<ThumbnailInput>(),
+    context: types<ThumbnailContext>(),
+    events: eventSchemas<ThumbnailEvent>(),
   },
   actors: {
-    renderAndStore: fromPromise<
+    renderAndStore: createAsyncLogic<
       Exclude<ThumbnailResult, { readonly status: 'failed' }>,
       Pick<ThumbnailContext, 'render' | 'store' | 'activeKind' | 'activeHash'>
-    >(async ({ input, signal }) => {
-      if (!input.activeKind) {
-        throw new Error('Thumbnail render started without an active kind');
-      }
-      const rendered = await input.render({
-        kind: input.activeKind,
-        signal,
-        ...(input.activeKind === 'automatic-thumbnail' && input.activeHash ? { identity: input.activeHash } : {}),
-      });
-      signal.throwIfAborted();
-      if ('status' in rendered) {
-        return { ...rendered, kind: input.activeKind };
-      }
-      const stored = await input.store(rendered);
-      return stored.status === 'stored'
-        ? { status: 'stored', kind: input.activeKind, identity: rendered.identity }
-        : { status: 'skipped', kind: input.activeKind, identity: rendered.identity, reason: stored.reason };
+    >({
+      run: async ({ input, signal }) => {
+        if (!input.activeKind) {
+          throw new Error('Thumbnail render started without an active kind');
+        }
+        const rendered = await input.render({
+          kind: input.activeKind,
+          signal,
+          ...(input.activeKind === 'automatic-thumbnail' && input.activeHash ? { identity: input.activeHash } : {}),
+        });
+        signal.throwIfAborted();
+        if ('status' in rendered) {
+          return { ...rendered, kind: input.activeKind };
+        }
+        const stored = await input.store(rendered);
+        return stored.status === 'stored'
+          ? { status: 'stored', kind: input.activeKind, identity: rendered.identity }
+          : { status: 'skipped', kind: input.activeKind, identity: rendered.identity, reason: stored.reason };
+      },
     }),
-  },
-  actions: {
-    rememberLatestAutomatic: assign(({ context, event }) => {
-      if (event.type !== 'settled') {
-        return {};
-      }
-      if (event.hash === context.activeHash || event.hash === context.lastRenderedHash) {
-        return { pendingAutomaticHash: undefined };
-      }
-      return { pendingAutomaticHash: event.hash };
-    }),
-    clearAutomatic: assign({ pendingAutomaticHash: undefined }),
-    startAutomatic: assign(({ context }) => ({
-      activeHash: context.pendingAutomaticHash,
-      activeKind: 'automatic-thumbnail',
-      pendingAutomaticHash: undefined,
-    })),
-    startManual: assign({ activeHash: undefined, activeKind: 'manual-thumbnail' }),
-    queueManual: assign(({ context }) => ({ pendingManualCount: context.pendingManualCount + 1 })),
-    startQueuedManual: assign(({ context }) => ({
-      activeHash: undefined,
-      activeKind: 'manual-thumbnail',
-      pendingManualCount: context.pendingManualCount - 1,
-    })),
-    commitRendered: assign((_, params: { readonly identity: string }) => ({
-      activeHash: undefined,
-      activeKind: undefined,
-      lastRenderedHash: params.identity,
-    })),
-    clearActive: assign({ activeHash: undefined, activeKind: undefined }),
-    reportManualResult: ({ context }, params: { readonly result: ThumbnailResult }) => {
-      if (params.result.kind === 'manual-thumbnail') {
-        context.onManualResult(params.result);
-      }
-    },
   },
   guards: {
-    isNewAutomatic: ({ context, event }) => event.type === 'settled' && event.hash !== context.lastRenderedHash,
-    isAlreadyRendered: ({ context, event }) => event.type === 'settled' && event.hash === context.lastRenderedHash,
-    hasPendingManual: ({ context }) => context.pendingManualCount > 0,
-    hasPendingAutomatic: ({ context }) =>
+    hasPendingManual: (context: ThumbnailContext) => context.pendingManualCount > 0,
+    hasPendingAutomatic: (context: ThumbnailContext) =>
       context.pendingAutomaticHash !== undefined && context.pendingAutomaticHash !== context.lastRenderedHash,
   },
   delays: {
@@ -151,38 +137,36 @@ export const thumbnailMachine = setup({
   states: {
     idle: {
       on: {
-        settled: {
-          guard: 'isNewAutomatic',
-          target: 'debouncing',
-          actions: 'rememberLatestAutomatic',
-        },
-        regenerate: { target: 'rendering', actions: 'startManual' },
+        settled: ({ context, event }) =>
+          event.hash === context.lastRenderedHash
+            ? undefined
+            : { target: 'debouncing', context: rememberLatestAutomatic(context, event) },
+        regenerate: { target: 'rendering', context: startManual },
       },
     },
     debouncing: {
       on: {
-        settled: [
-          {
-            guard: 'isAlreadyRendered',
-            target: 'idle',
-            actions: 'clearAutomatic',
-          },
-          {
-            target: 'debouncing',
-            reenter: true,
-            actions: 'rememberLatestAutomatic',
-          },
-        ],
-        regenerate: { target: 'rendering', actions: 'startManual' },
+        settled: ({ context, event }) =>
+          event.hash === context.lastRenderedHash
+            ? { target: 'idle', context: { pendingAutomaticHash: undefined } }
+            : { target: 'debouncing', reenter: true, context: rememberLatestAutomatic(context, event) },
+        regenerate: { target: 'rendering', context: startManual },
       },
       after: {
-        debounce: { target: 'rendering', actions: 'startAutomatic' },
+        debounce: {
+          target: 'rendering',
+          context: ({ context }) => ({
+            activeHash: context.pendingAutomaticHash,
+            activeKind: 'automatic-thumbnail',
+            pendingAutomaticHash: undefined,
+          }),
+        },
       },
     },
     rendering: {
       on: {
-        settled: { actions: 'rememberLatestAutomatic' },
-        regenerate: { actions: 'queueManual' },
+        settled: { context: ({ context, event }) => rememberLatestAutomatic(context, event) },
+        regenerate: { context: ({ context }) => ({ pendingManualCount: context.pendingManualCount + 1 }) },
       },
       invoke: {
         src: 'renderAndStore',
@@ -192,51 +176,42 @@ export const thumbnailMachine = setup({
           activeKind: context.activeKind,
           activeHash: context.activeHash,
         }),
-        onDone: [
-          {
-            guard: ({ event }) => event.output.status === 'stored',
-            target: 'routing',
-            actions: [
-              {
-                type: 'reportManualResult',
-                params: ({ event }) => ({ result: event.output }),
-              },
-              {
-                type: 'commitRendered',
-                params: ({ event }) => ({ identity: event.output.identity }),
-              },
-            ],
-          },
-          {
-            target: 'routing',
-            actions: [
-              {
-                type: 'reportManualResult',
-                params: ({ event }) => ({ result: event.output }),
-              },
-              'clearActive',
-            ],
-          },
-        ],
-        onError: {
-          target: 'routing',
-          actions: [
-            ({ context, event }) => {
-              if (context.activeKind === 'manual-thumbnail') {
-                context.onManualResult({ status: 'failed', kind: 'manual-thumbnail', error: event.error });
+        onDone: ({ context, event }, enq) => {
+          reportManualResult(context, enq, event.output);
+          return event.output.status === 'stored'
+            ? {
+                target: 'routing',
+                context: { activeHash: undefined, activeKind: undefined, lastRenderedHash: event.output.identity },
               }
-            },
-            'clearActive',
-          ],
+            : { target: 'routing', context: clearActive };
+        },
+        onError: ({ context, event }, enq) => {
+          if (context.activeKind === 'manual-thumbnail') {
+            enq(() => {
+              context.onManualResult({ status: 'failed', kind: 'manual-thumbnail', error: event.error });
+            });
+          }
+          return { target: 'routing', context: clearActive };
         },
       },
     },
     routing: {
-      always: [
-        { guard: 'hasPendingManual', target: 'rendering', actions: 'startQueuedManual' },
-        { guard: 'hasPendingAutomatic', target: 'debouncing' },
-        { target: 'idle', actions: 'clearAutomatic' },
-      ],
+      always: ({ context, guards }) => {
+        if (guards.hasPendingManual(context)) {
+          return {
+            target: 'rendering',
+            context: {
+              activeHash: undefined,
+              activeKind: 'manual-thumbnail',
+              pendingManualCount: context.pendingManualCount - 1,
+            },
+          };
+        }
+        if (guards.hasPendingAutomatic(context)) {
+          return { target: 'debouncing' };
+        }
+        return { target: 'idle', context: { pendingAutomaticHash: undefined } };
+      },
     },
   },
 });

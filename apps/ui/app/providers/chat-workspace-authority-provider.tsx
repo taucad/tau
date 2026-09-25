@@ -20,7 +20,7 @@ import { useProject } from '#hooks/use-project.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { getRevisionClient, useRevisionClient } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 import {
   getHostFinalizedTurns,

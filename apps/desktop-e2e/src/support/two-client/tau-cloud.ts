@@ -93,11 +93,11 @@ export const seedProPlan = async (owner: TauCloudOwnerIds): Promise<void> => {
       `ON CONFLICT (id) DO NOTHING;`,
   );
   await psql(
-    `INSERT INTO subscription (id, plan, reference_id, status, account_id, environment, customer_binding_id, ` +
-      `offer_snapshot, request_id, request_hash, slot_state, paid_through, period_start, period_end, updated_at) ` +
-      `VALUES ('${id}', 'pro', '${owner.userId}', 'active', '${owner.accountId}', 'development', '${id}', ` +
-      `'{"plan":"pro"}'::jsonb, '${id}-request', '${id}-hash', 'current', now() + interval '1 hour', now(), ` +
-      `now() + interval '1 hour', now()) ON CONFLICT (id) DO NOTHING;`,
+    `INSERT INTO subscription (id, plan, status, account_id, environment, customer_binding_id, ` +
+      `offer_snapshot, request_id, request_hash, slot_state, paid_through, updated_at) ` +
+      `VALUES ('${id}', 'pro', 'active', '${owner.accountId}', 'development', '${id}', ` +
+      `'{"plan":"pro"}'::jsonb, '${id}-request', '${id}-hash', 'current', now() + interval '1 hour', now()) ` +
+      `ON CONFLICT (id) DO NOTHING;`,
   );
 };
 

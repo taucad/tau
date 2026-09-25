@@ -203,6 +203,9 @@ describe('useThumbnailGenerator integration', () => {
     expect(job.signal?.aborted).toBe(false);
 
     hook.unmount();
+    /* @xstate/react 7 stops an unmounted actor at the next microtask (RB1-1), still before the
+     * late bytes below can arrive. */
+    await Promise.resolve();
     expect(job.signal?.aborted).toBe(true);
     pending.resolve(webpFile(9));
     await advance(0);

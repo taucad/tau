@@ -30,19 +30,19 @@
  * | 19 | the push offers `refs/tags/<name>` with the remote's own value as its lease | **P38**: a re-publish moves the name under a lease, never a force |
  */
 
-import { createActor, fromCallback, fromPromise } from 'xstate';
-import type { Actor, AnyActorRef, AnyEventObject, PromiseActorLogic } from 'xstate';
+import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
+import type { Actor, AnyActorRef, AnyEventObject, AsyncActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#publish.machine.js';
 import { publishMachine, publishPushMilliseconds, selectPublishFacet } from '#publish.machine.js';
 import type {
   PublishActors,
-  PublishDraft,
   PublishMachineEmitted,
   PublishTagActorInput,
   PublishVersionsActorOutput,
 } from '#publish.machine.js';
+import type { PublishDraft } from '#publish.types.js';
 import { revisionId } from '#algorithms/index.js';
 
 import type { RevisionTag } from '#revision-port.js';
@@ -68,22 +68,25 @@ const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
 /** A stub that never settles: the state under test is the one in flight. */
-const pending = <Output, Input>(): PromiseActorLogic<Output, Input> =>
-  fromPromise<Output, Input>(
-    async () =>
+const pending = <Output, Input>(): AsyncActorLogic<Output, Input> =>
+  createAsyncLogic<Output, Input>({
+    run: async () =>
       new Promise<Output>(() => {
         /* Deliberately never settles. */
       }),
-  );
-
-/** A stub that takes its slot's failure edge (I29). */
-const failing = <Output, Input>(message: string): PromiseActorLogic<Output, Input> =>
-  fromPromise<Output, Input>(async () => {
-    await Promise.resolve();
-    throw new Error(message);
   });
 
-const versions = (output: PublishVersionsActorOutput): PublishActors['listVersions'] => fromPromise(async () => output);
+/** A stub that takes its slot's failure edge (I29). */
+const failing = <Output, Input>(message: string): AsyncActorLogic<Output, Input> =>
+  createAsyncLogic<Output, Input>({
+    run: async () => {
+      await Promise.resolve();
+      throw new Error(message);
+    },
+  });
+
+const versions = (output: PublishVersionsActorOutput): PublishActors['listVersions'] =>
+  createAsyncLogic({ run: async () => output });
 
 const head: PublishVersionsActorOutput = {
   tags: [tagV1],
@@ -142,11 +145,13 @@ const start = (
   from?: Parameters<typeof publishMachine.resolveState>[0],
 ): Started => {
   const calls: Array<Readonly<{ name: string; input: unknown }>> = [];
-  const record = <Output, Input>(name: string, answer: (input: Input) => Output): PromiseActorLogic<Output, Input> =>
+  const record = <Output, Input>(name: string, answer: (input: Input) => Output): AsyncActorLogic<Output, Input> =>
     // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- the generic pair is the slot's own.
-    fromPromise<Output, Input>(async ({ input }) => {
-      calls.push({ name, input });
-      return answer(input);
+    createAsyncLogic<Output, Input>({
+      run: async ({ input }) => {
+        calls.push({ name, input });
+        return answer(input);
+      },
     });
 
   const actors: PublishActors = {
@@ -178,7 +183,7 @@ const start = (
    * the double has to answer the actor that asks it. */
   const dialog: { ref: AnyActorRef | undefined } = { ref: undefined };
   const parent = createActor(
-    fromCallback<AnyEventObject>(({ receive }) => {
+    createCallbackLogic<AnyEventObject>(({ receive }) => {
       receive((event) => {
         asked.push(event);
         if (event.type === 'syncNow') {
@@ -526,7 +531,7 @@ describe('publishMachine', () => {
 
   it('17: holds a confirm that arrives before the names have been read', async () => {
     const settler = Promise.withResolvers<PublishVersionsActorOutput>();
-    const { actor, calls } = start({ listVersions: fromPromise(async () => settler.promise) });
+    const { actor, calls } = start({ listVersions: createAsyncLogic({ run: async () => settler.promise }) });
 
     actor.send({ type: 'publish' });
     actor.send({ type: 'confirm', draft });

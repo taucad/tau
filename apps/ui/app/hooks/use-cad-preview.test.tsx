@@ -59,16 +59,15 @@ vi.mock('#machines/cad.machine.js', async () => {
   const xstate = await import('xstate');
   const cadMachine = xstate
     .setup({
-      types: {
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup pattern
-        context: {} as {
+      schemas: {
+        context: xstate.types<{
           geometry: unknown | undefined;
           kernelIssues: Map<string, unknown>;
           defaultParameters: Record<string, unknown>;
           jsonSchema: undefined;
           units: undefined;
           kernelClient: undefined;
-        },
+        }>(),
       },
     })
     .createMachine({

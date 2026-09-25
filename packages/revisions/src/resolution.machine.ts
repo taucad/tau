@@ -26,11 +26,12 @@
  * the effects module, not here.
  */
 
-import { assign, emit, enqueueActions, fromPromise, setup } from 'xstate';
-import type { AnyActorRef, SnapshotFrom } from 'xstate';
+import { createAsyncLogic, setup, types } from 'xstate';
+import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 
-/** Which side of a conflict one file takes. @public */
-export type ResolutionSide = 'mine' | 'theirs' | 'editor';
+import { eventSchemas } from '#machine-schemas.js';
+import type { MachineActors } from '#machine-schemas.js';
+import type { ResolutionSide } from '#resolution.types.js';
 
 /** One conflicted path, and whether it can be opened as text. @public */
 export type ResolutionPath = Readonly<{
@@ -166,45 +167,72 @@ const unopenableMessage = 'That file cannot be opened as text. Keep one side ins
 const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : 'That resolution step failed.';
 
-/**
- * Headless per-file resolution of one conflicted revision.
- *
- * @public
- */
-export const resolutionMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as ResolutionMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as ResolutionMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    emitted: {} as ResolutionMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as ResolutionMachineInput,
+type ResolutionEnqueue = EnqueueObject<ResolutionMachineEvent, ResolutionMachineEmitted>;
+
+const announceChange = (context: ResolutionMachineContext, enq: ResolutionEnqueue): void => {
+  const fact: ResolutionMachineEmitted = { type: 'resolutionChanged', revisionId: context.revisionId };
+  enq.emit(fact);
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, fact);
+  }
+};
+
+const announce = (context: ResolutionMachineContext, enq: ResolutionEnqueue): void => {
+  const fact: ResolutionMachineEmitted = {
+    type: 'conflictResolved',
+    revisionId: context.resolvedRevisionId ?? '',
+    branch: context.branch,
+  };
+  enq.emit(fact);
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, fact);
+  }
+};
+
+const record = (context: ResolutionMachineContext): Partial<ResolutionMachineContext> => ({
+  chosen:
+    context.pending === undefined
+      ? context.chosen
+      : { ...context.chosen, [context.pending.path]: context.pending.side },
+  pending: undefined,
+});
+
+const resolutionMachineDefinition = setup({
+  schemas: {
+    context: types<ResolutionMachineContext>(),
+    events: eventSchemas<ResolutionMachineEvent>(),
+    emitted: eventSchemas<ResolutionMachineEmitted>(),
+    input: types<ResolutionMachineInput>(),
   },
   actors: {
-    loadConflict: fromPromise<ResolutionLoadActorOutput, ResolutionLoadActorInput>(async () => {
-      throw new Error('resolutionMachine: the loadConflict actor was not provided.');
+    loadConflict: createAsyncLogic<ResolutionLoadActorOutput, ResolutionLoadActorInput>({
+      run: async () => {
+        throw new Error('resolutionMachine: the loadConflict actor was not provided.');
+      },
     }),
-    materialize: fromPromise<
+    materialize: createAsyncLogic<
       ResolutionMaterializeActorOutput,
       Readonly<{ projectId: string; revisionId: string; path: string }>
-    >(async () => {
-      throw new Error('resolutionMachine: the materialize actor was not provided.');
+    >({
+      run: async () => {
+        throw new Error('resolutionMachine: the materialize actor was not provided.');
+      },
     }),
-    applyResolution: fromPromise<void, ResolutionApplyActorInput>(async () => {
-      throw new Error('resolutionMachine: the applyResolution actor was not provided.');
+    applyResolution: createAsyncLogic<void, ResolutionApplyActorInput>({
+      run: async () => {
+        throw new Error('resolutionMachine: the applyResolution actor was not provided.');
+      },
     }),
-    finishMerge: fromPromise<ResolutionFinishActorOutput, Readonly<{ projectId: string; revisionId: string }>>(
-      async () => {
+    finishMerge: createAsyncLogic<ResolutionFinishActorOutput, Readonly<{ projectId: string; revisionId: string }>>({
+      run: async () => {
         throw new Error('resolutionMachine: the finishMerge actor was not provided.');
       },
-    ),
-    seedTurn: fromPromise<ResolutionSeedTurnActorOutput, Readonly<{ projectId: string; revisionId: string }>>(
-      async () => {
+    }),
+    seedTurn: createAsyncLogic<ResolutionSeedTurnActorOutput, Readonly<{ projectId: string; revisionId: string }>>({
+      run: async () => {
         throw new Error('resolutionMachine: the seedTurn actor was not provided.');
       },
-    ),
+    }),
   },
   guards: {
     /* Every conflicted path has a side. The guard, not a disabled button, is
@@ -212,39 +240,8 @@ export const resolutionMachine = setup({
     /* `paths.length > 0` as well, so the guard and `selectResolutionFacet`'s
        `ready` are the same question: an empty conflict has nothing to mint and
        `finish` would otherwise be reachable on it (review R12). */
-    everyPathChosen: ({ context }) =>
+    everyPathChosen: (context: ResolutionMachineContext) =>
       context.paths.length > 0 && context.paths.every((entry) => context.chosen[entry.path] !== undefined),
-  },
-  actions: {
-    choose: assign({
-      pending: (_, params: Readonly<{ path: string; side: ResolutionSide }>) => params,
-    }),
-    record: assign({
-      chosen: ({ context }) =>
-        context.pending === undefined
-          ? context.chosen
-          : { ...context.chosen, [context.pending.path]: context.pending.side },
-      pending: undefined,
-    }),
-    failWith: assign({ reason: (_, params: Readonly<{ reason: string }>) => params.reason, pending: undefined }),
-    announceChange: enqueueActions(({ context, enqueue }) => {
-      const fact: ResolutionMachineEmitted = { type: 'resolutionChanged', revisionId: context.revisionId };
-      enqueue.emit(fact);
-      if (context.parentRef !== undefined) {
-        enqueue.sendTo(context.parentRef, fact);
-      }
-    }),
-    announce: enqueueActions(({ context, enqueue }) => {
-      const fact: ResolutionMachineEmitted = {
-        type: 'conflictResolved',
-        revisionId: context.resolvedRevisionId ?? '',
-        branch: context.branch,
-      };
-      enqueue.emit(fact);
-      if (context.parentRef !== undefined) {
-        enqueue.sendTo(context.parentRef, fact);
-      }
-    }),
   },
 }).createMachine({
   id: 'resolution',
@@ -274,36 +271,29 @@ export const resolutionMachine = setup({
           invoke: {
             src: 'loadConflict',
             input: ({ context }) => ({ projectId: context.projectId, revisionId: context.revisionId }),
-            onDone: {
-              target: '#resolution.resolving',
-              actions: [
-                assign({
-                  branch: ({ context, event }) => event.output.branch ?? context.branch,
-                  labels: ({ event }) => event.output.labels,
-                  paths: ({ event }) => event.output.paths,
-                  reason: undefined,
-                }),
-                'announceChange',
-              ],
+            onDone: ({ context, event }, enq) => {
+              const patch = {
+                branch: event.output.branch ?? context.branch,
+                labels: event.output.labels,
+                paths: event.output.paths,
+                reason: undefined,
+              };
+              announceChange({ ...context, ...patch }, enq);
+              return { target: '#resolution.resolving', context: patch };
             },
             onError: {
               target: 'failed',
-              actions: { type: 'failWith', params: { reason: 'This conflict could not be read.' } },
+              context: { reason: 'This conflict could not be read.', pending: undefined },
             },
           },
         },
         /* Not terminal: the store may have been mid-write, and *Retry* is one
            event. The failure edge every invoked effect has (I29). */
         failed: {
-          entry: [
-            emit(
-              ({ context }): ResolutionMachineEmitted => ({
-                type: 'toast.error',
-                message: context.reason ?? 'This conflict could not be read.',
-              }),
-            ),
-            'announceChange',
-          ],
+          entry: ({ context }, enq) => {
+            enq.emit({ type: 'toast.error', message: context.reason ?? 'This conflict could not be read.' });
+            announceChange(context, enq);
+          },
           on: { reload: { target: 'loading' } },
         },
       },
@@ -318,22 +308,23 @@ export const resolutionMachine = setup({
           on: {
             keepMine: {
               target: 'applying',
-              actions: { type: 'choose', params: ({ event }) => ({ path: event.path, side: 'mine' }) },
+              context: ({ event }) => ({ pending: { path: event.path, side: 'mine' } }),
             },
             keepTheirs: {
               target: 'applying',
-              actions: { type: 'choose', params: ({ event }) => ({ path: event.path, side: 'theirs' }) },
+              context: ({ event }) => ({ pending: { path: event.path, side: 'theirs' } }),
             },
             resolvedInEditor: {
               target: 'applying',
-              actions: { type: 'choose', params: ({ event }) => ({ path: event.path, side: 'editor' }) },
+              context: ({ event }) => ({ pending: { path: event.path, side: 'editor' } }),
             },
             openInEditor: {
               target: 'materializing',
-              actions: { type: 'choose', params: ({ event }) => ({ path: event.path, side: 'editor' }) },
+              context: ({ event }) => ({ pending: { path: event.path, side: 'editor' } }),
             },
             askChat: { target: 'seeding' },
-            finish: { guard: 'everyPathChosen', target: '#resolution.finishing' },
+            finish: ({ context, guards }) =>
+              guards.everyPathChosen(context) ? { target: '#resolution.finishing' } : undefined,
           },
         },
         applying: {
@@ -348,10 +339,14 @@ export const resolutionMachine = setup({
                  the bytes reach the effect without passing through context. */
               ...(event.type === 'resolvedInEditor' ? { content: event.content } : {}),
             }),
-            onDone: { target: 'idle', actions: ['record', 'announceChange'] },
+            onDone: ({ context }, enq) => {
+              const patch = record(context);
+              announceChange({ ...context, ...patch }, enq);
+              return { target: 'idle', context: patch };
+            },
             onError: {
               target: 'failed',
-              actions: assign({ reason: ({ event }) => describeFailure(event.error), pending: undefined }),
+              context: ({ event }) => ({ reason: describeFailure(event.error), pending: undefined }),
             },
           },
         },
@@ -363,53 +358,47 @@ export const resolutionMachine = setup({
               revisionId: context.revisionId,
               path: context.pending?.path ?? '',
             }),
-            onDone: {
-              target: 'idle',
-              actions: enqueueActions(({ context, enqueue, event }) => {
-                const fact: ResolutionMachineEmitted =
-                  event.output.text === undefined
-                    ? {
-                        type: 'conflictMaterializationFailed',
-                        path: event.output.path,
-                        reason: unopenableMessage,
-                      }
-                    : {
-                        type: 'conflictMaterialized',
-                        path: event.output.path,
-                        text: event.output.text,
-                        ours: event.output.ours,
-                        theirs: event.output.theirs,
-                      };
-                if (event.output.text === undefined) {
-                  enqueue.emit({ type: 'toast.error', message: unopenableMessage });
-                }
-                enqueue.emit(fact);
-                /* Through the parent as well: the editor that shows this is on
-                 * a page, and a page holds the root and nothing else (A38). */
-                if (context.parentRef !== undefined) {
-                  enqueue.sendTo(context.parentRef, { ...fact, revisionId: context.revisionId });
-                }
-                enqueue.assign({ pending: undefined });
-              }),
+            onDone: ({ context, event }, enq) => {
+              const fact: ResolutionMachineEmitted =
+                event.output.text === undefined
+                  ? {
+                      type: 'conflictMaterializationFailed',
+                      path: event.output.path,
+                      reason: unopenableMessage,
+                    }
+                  : {
+                      type: 'conflictMaterialized',
+                      path: event.output.path,
+                      text: event.output.text,
+                      ours: event.output.ours,
+                      theirs: event.output.theirs,
+                    };
+              if (event.output.text === undefined) {
+                enq.emit({ type: 'toast.error', message: unopenableMessage });
+              }
+              enq.emit(fact);
+              /* Through the parent as well: the editor that shows this is on
+               * a page, and a page holds the root and nothing else (A38). */
+              if (context.parentRef !== undefined) {
+                enq.sendTo(context.parentRef, { ...fact, revisionId: context.revisionId });
+              }
+              return { target: 'idle', context: { pending: undefined } };
             },
             /* C44: the surface that asked for this file hears the refusal for
              * *that path*, rather than inferring one from a timer. The machine
              * still enters `failed` with its reason, which is what the region's
              * own error row renders. */
-            onError: {
-              target: 'failed',
-              actions: enqueueActions(({ context, enqueue, event }) => {
-                const fact: ResolutionMachineEmitted = {
-                  type: 'conflictMaterializationFailed',
-                  path: context.pending?.path ?? '',
-                  reason: describeFailure(event.error),
-                };
-                enqueue.emit(fact);
-                if (context.parentRef !== undefined) {
-                  enqueue.sendTo(context.parentRef, { ...fact, revisionId: context.revisionId });
-                }
-                enqueue.assign({ reason: describeFailure(event.error), pending: undefined });
-              }),
+            onError: ({ context, event }, enq) => {
+              const fact: ResolutionMachineEmitted = {
+                type: 'conflictMaterializationFailed',
+                path: context.pending?.path ?? '',
+                reason: describeFailure(event.error),
+              };
+              enq.emit(fact);
+              if (context.parentRef !== undefined) {
+                enq.sendTo(context.parentRef, { ...fact, revisionId: context.revisionId });
+              }
+              return { target: 'failed', context: { reason: describeFailure(event.error), pending: undefined } };
             },
           },
         },
@@ -417,39 +406,32 @@ export const resolutionMachine = setup({
           invoke: {
             src: 'seedTurn',
             input: ({ context }) => ({ projectId: context.projectId, revisionId: context.revisionId }),
-            onDone: {
-              target: 'idle',
-              actions: enqueueActions(({ context, enqueue, event }) => {
-                const fact: ResolutionMachineEmitted = {
-                  type: 'turnRequested',
-                  revisionId: context.revisionId,
-                  checkoutId: event.output.checkoutId,
-                  paths: event.output.paths,
-                };
-                enqueue.emit(fact);
-                if (context.parentRef !== undefined) {
-                  enqueue.sendTo(context.parentRef, fact);
-                }
-              }),
+            onDone: ({ context, event }, enq) => {
+              const fact: ResolutionMachineEmitted = {
+                type: 'turnRequested',
+                revisionId: context.revisionId,
+                checkoutId: event.output.checkoutId,
+                paths: event.output.paths,
+              };
+              enq.emit(fact);
+              if (context.parentRef !== undefined) {
+                enq.sendTo(context.parentRef, fact);
+              }
+              return { target: 'idle' };
             },
             onError: {
               target: 'failed',
-              actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+              context: ({ event }) => ({ reason: describeFailure(event.error) }),
             },
           },
         },
         /* Every choice a person already made is still recorded, so the next one
            carries on from here rather than starting over. */
         failed: {
-          entry: [
-            emit(
-              ({ context }): ResolutionMachineEmitted => ({
-                type: 'toast.error',
-                message: context.reason ?? 'That resolution step failed.',
-              }),
-            ),
-            'announceChange',
-          ],
+          entry: ({ context }, enq) => {
+            enq.emit({ type: 'toast.error', message: context.reason ?? 'That resolution step failed.' });
+            announceChange(context, enq);
+          },
           always: { target: 'idle' },
         },
       },
@@ -460,9 +442,9 @@ export const resolutionMachine = setup({
         input: ({ context }) => ({ projectId: context.projectId, revisionId: context.revisionId }),
         onDone: {
           target: 'resolved',
-          actions: assign({
-            resolvedRevisionId: ({ event }) => event.output.revisionId,
-            branch: ({ context, event }) => event.output.branch ?? context.branch,
+          context: ({ context, event }) => ({
+            resolvedRevisionId: event.output.revisionId,
+            branch: event.output.branch ?? context.branch,
           }),
         },
         /* `resolving.failed`, not `resolving`: the sibling already emits the
@@ -471,19 +453,38 @@ export const resolutionMachine = setup({
            nothing (review R3). */
         onError: {
           target: 'resolving.failed',
-          actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+          context: ({ event }) => ({ reason: describeFailure(event.error) }),
         },
       },
     },
     resolved: {
       type: 'final',
-      entry: 'announce',
+      entry: ({ context }, enq) => {
+        announce(context, enq);
+      },
     },
     /* The conflicted revision stays: it is the only record of what collided,
        and Restore-by-id still reaches it (A25). */
     abandoned: { type: 'final' },
   },
 });
+
+type ResolutionMachineDefinition = typeof resolutionMachineDefinition;
+
+/**
+ * The type of {@link resolutionMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface ResolutionMachine extends ResolutionMachineDefinition {}
+
+/**
+ * Headless per-file resolution of one conflicted revision.
+ *
+ * @public
+ */
+export const resolutionMachine: ResolutionMachine = resolutionMachineDefinition;
 
 /**
  * Selects the facet the *Needs resolution* rows render.
@@ -530,4 +531,4 @@ export const selectResolutionFacet = (
  *
  * @public
  */
-export type ResolutionActors = NonNullable<Parameters<typeof resolutionMachine.provide>[0]['actors']>;
+export type ResolutionActors = MachineActors<typeof resolutionMachine>;

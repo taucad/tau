@@ -1,9 +1,10 @@
-import { assertEvent, fromCallback, sendTo, setup } from 'xstate';
+import { createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Vector3 } from 'three';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { getControlsListenerEventNames as resolveControlsListenerEventNames } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 import type { ControlEventListener } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
+import { eventSchemas } from '#lib/xstate.lib.js';
 
 export type CameraControlsAdapter = {
   addEventListener: (type: string, listener: ControlEventListener) => void;
@@ -26,7 +27,7 @@ type ControlsListenerEvent =
   | { type: 'controlsInteractionMoved' }
   | { type: 'controlsInteractionEnd' };
 
-const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListenerInput>(
+const controlsListenerLogic = createCallbackLogic<ControlsListenerEvent, ControlsListenerInput>(
   ({ input, sendBack, receive }) => {
     const { controls } = input;
     let isListening = true;
@@ -82,31 +83,12 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
 );
 
 export const controlsListenerMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as ControlsListenerInput,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as ControlsListenerEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as ControlsListenerInput,
+  schemas: {
+    input: types<ControlsListenerInput>(),
+    events: eventSchemas<ControlsListenerEvent>(),
+    context: types<ControlsListenerInput>(),
   },
   actors: { controlsMonitor: controlsListenerLogic },
-  actions: {
-    stopControlsMonitoring: sendTo('controlsMonitor', { type: 'stopListening' }),
-    sendControlsInteractionStart: sendTo(({ context }) => context.graphicsActorRef, {
-      type: 'controlsInteractionStart',
-    }),
-    sendControlsInteractionMoved: sendTo(({ context }) => context.graphicsActorRef, {
-      type: 'controlsInteractionMoved',
-    }),
-    sendControlsInteractionEnd: sendTo(
-      ({ context }) => context.graphicsActorRef,
-      ({ event }) => {
-        assertEvent(event, 'controlsInteractionEnd');
-        return { type: 'controlsInteractionEnd' };
-      },
-    ),
-  },
 }).createMachine({
   id: 'controlsListener',
   context: ({ input }) => input,
@@ -118,11 +100,22 @@ export const controlsListenerMachine = setup({
         src: 'controlsMonitor',
         input: ({ context }) => ({ graphicsActorRef: context.graphicsActorRef, controls: context.controls }),
       },
-      exit: 'stopControlsMonitoring',
+      exit: (_, enq) => {
+        enq.sendTo('controlsMonitor', { type: 'stopListening' });
+      },
       on: {
-        controlsInteractionStart: { actions: 'sendControlsInteractionStart' },
-        controlsInteractionMoved: { actions: 'sendControlsInteractionMoved' },
-        controlsInteractionEnd: { actions: 'sendControlsInteractionEnd' },
+        controlsInteractionStart: ({ context }, enq) => {
+          enq.sendTo(context.graphicsActorRef, { type: 'controlsInteractionStart' });
+          return {};
+        },
+        controlsInteractionMoved: ({ context }, enq) => {
+          enq.sendTo(context.graphicsActorRef, { type: 'controlsInteractionMoved' });
+          return {};
+        },
+        controlsInteractionEnd: ({ context }, enq) => {
+          enq.sendTo(context.graphicsActorRef, { type: 'controlsInteractionEnd' });
+          return {};
+        },
       },
     },
   },

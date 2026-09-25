@@ -65,4 +65,23 @@ describe('createLfsClient batch validation', () => {
       createLfsClient({ url: 'https://github.com/a/b.git', http }).download({ oid, size: 3 }),
     ).rejects.toThrow(/did not hash to its own id/u);
   });
+
+  /* D53: a renamed GitHub repository serves git at its old path but redirects
+   * LFS, so the batch is where the move surfaces. */
+  it('should classify a refused batch as the git leg does, so a moved repository reads as moved', async () => {
+    const refusing = (statusCode: number, answer: string): RevisionHttpClient => ({
+      request: async () => ({ ...response(answer), statusCode, statusMessage: 'Refused' }),
+    });
+    const upload = async (http: RevisionHttpClient): Promise<readonly string[]> =>
+      createLfsClient({ url: 'https://github.com/a/b.git', http, remote: 'origin' }).upload(
+        new Map([['c'.repeat(64), encoder.encode('x')]]),
+      );
+
+    const moved = 'The repository moved; confirm its new location before sending the credential there';
+    await expect(
+      upload(refusing(409, JSON.stringify({ code: 'GIT_PROXY_REDIRECTED_CREDENTIAL', error: moved }))),
+    ).rejects.toMatchObject({ code: 'REMOTE_MOVED', message: moved });
+    await expect(upload(refusing(401, '{}'))).rejects.toMatchObject({ code: 'REMOTE_REAUTHORIZATION_REQUIRED' });
+    await expect(upload(refusing(404, '{}'))).rejects.toMatchObject({ code: 'REMOTE_NOT_FOUND' });
+  });
 });

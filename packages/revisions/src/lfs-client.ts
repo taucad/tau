@@ -27,6 +27,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- the git-lfs batch body (`hash_algo`) and HTTP header names (`Accept`) are spelled by their own specifications, not by ours. */
 
 import { lfsPointerFor } from '#lfs.js';
+import { remoteTransportError } from '#remotes.js';
 import type { LfsPointer } from '#lfs.js';
 import type { RevisionHttpClient, RevisionHttpResponse } from '#http-client.js';
 import { z } from 'zod';
@@ -75,6 +76,8 @@ export type LfsClientOptions = Readonly<{
   http: RevisionHttpClient;
   /** Injected in tests; the transfers do not go through the Tau client. */
   fetch?: typeof globalThis.fetch;
+  /** The remote's name, so a batch refusal is classified exactly as the git leg's (D53). */
+  remote?: string;
 }>;
 
 /** One project's LFS transport. @public */
@@ -265,7 +268,16 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       throw new LfsQuotaError(quotaRefusal(body));
     }
     if (response.statusCode >= 400) {
-      throw new Error(`The remote refused the LFS batch request (${String(response.statusCode)}).`);
+      /* D53: a status is the remote answering. A renamed GitHub repository still
+       * serves git at its old path but redirects LFS, so this is often the only
+       * request that learns it moved — the proxy's typed 409 has to read as
+       * `REMOTE_MOVED`, not as an opaque refusal. */
+      throw remoteTransportError(
+        Object.assign(new Error(`The remote refused the LFS batch request (${String(response.statusCode)}).`), {
+          data: { statusCode: response.statusCode, response: body },
+        }),
+        options.remote === undefined ? {} : { remote: options.remote },
+      );
     }
     const answers: readonly BatchObject[] = batchResponseSchema.parse(JSON.parse(body)).objects;
     const requested = new Map(objects.map((pointer) => [pointer.oid, pointer.size] as const));

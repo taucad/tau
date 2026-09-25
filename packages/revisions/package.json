@@ -146,6 +146,7 @@
     "xstate": "^6.0.0-alpha.59"
   },
   "devDependencies": {
+    "@taucad/formal": "workspace:*",
     "@taucad/utils": "workspace:*",
     "xstate": "catalog:"
   },

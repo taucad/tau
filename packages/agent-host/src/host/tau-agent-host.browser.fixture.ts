@@ -70,7 +70,10 @@ globalThis.addEventListener('message', async () => {
     const reopened = await createOpfsEventLog({ fileHandle });
     const events = await reopened.read();
     await reopened.close();
+    const file = await fileHandle.getFile();
+    const log = await file.text();
     globalThis.postMessage({
+      log,
       origin: location.origin,
       eventTypes: events.map((event) => event.type),
       final: messages.findLast((message) => message.role === 'assistant')?.content,

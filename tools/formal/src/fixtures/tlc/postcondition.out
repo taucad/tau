@@ -1,0 +1,7 @@
+<<"parsed", <<[event |-> "a"], [event |-> "z"], [event |-> "c"]>>>>
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 12:12:30.
+<<"TraceAccepted failed at row", 2, [event |-> "z"]>>  FALSE
+Error: Postcondition TraceAccepted at line 18, col 3 to line 20, col 68 of module ProbeTrace is false.
+2 states generated, 2 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 2.

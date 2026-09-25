@@ -29,6 +29,12 @@ export type RevisionRow = Readonly<{
   revisionNumber: number | undefined;
   revisionId: string;
   changeId: string;
+  /**
+   * Object id of the tree it carries, for engineering details. Optional like
+   * the other fields added after the row: a fixture that predates it is still
+   * a row; every port read carries it.
+   */
+  treeId?: string;
   /** Who made it: the model id for an agent turn, the user's actor otherwise. */
   actor: string;
   source: RevisionProvenance['source'];
@@ -102,6 +108,13 @@ export type RevisionLogRequest = Readonly<{
    * walk itself, not only the rows returned (E6).
    */
   limit?: number | undefined;
+  /**
+   * Start from this revision instead of the branch's head: `{ from, limit: 1 }`
+   * is one revision's row, wherever it sits, for a surface that holds only a
+   * page of the history. `Rev N` is then the ordinal on that revision's own
+   * first-parent line, which is its line's number whenever it lies on the line.
+   */
+  from?: string | undefined;
 }>;
 
 /**
@@ -131,23 +144,37 @@ const firstParentChain = (head: RevisionId, entries: ReadonlyMap<string, Revisio
  * rather than from a count of the whole chain (E6, L4-F5).
  *
  * @param port - The store to read.
- * @param branch - The branch to read, or the live tree's when absent.
- * @param limit - How many rows, newest first; the whole history when absent.
+ * @param request - The branch to read (the live tree's when absent), how many
+ *   rows newest first (the whole history when absent), and a revision to start
+ *   from instead of the branch's head.
  * @returns The branch, its head, and the entries read, by id, in the port's order.
  */
 const readGraph = async (
   port: RevisionPort,
-  branch: string | undefined,
-  limit?: number,
+  {
+    branch,
+    limit,
+    from,
+  }: Readonly<{ branch: string | undefined; limit: number | undefined; from: string | undefined }>,
 ): Promise<
   Readonly<{ branch: string | undefined; head: RevisionId | undefined; entries: ReadonlyMap<string, RevisionLogEntry> }>
 > => {
-  const live = await port.readHead();
+  const live = from === undefined ? await port.readHead() : undefined;
   const name = branch ?? live?.branch;
-  const head = name === undefined ? undefined : name === live?.branch ? live.head : await port.readRef(name);
+  const head =
+    from === undefined
+      ? name === undefined
+        ? undefined
+        : name === live?.branch
+          ? live.head
+          : await port.readRef(name)
+      : revisionId(from);
   const entries = new Map<string, RevisionLogEntry>();
   if (head !== undefined) {
-    for (const entry of await port.log(limit === undefined ? { heads: [head] } : { heads: [head], limit })) {
+    /* B5: bounded once the table can number the page, else the whole line once. */
+    const bounded = seededPorts.has(port) || ordinals.has(head) ? limit : undefined;
+    seededPorts.add(port);
+    for (const entry of await port.log(bounded === undefined ? { heads: [head] } : { heads: [head], limit: bounded })) {
       entries.set(entry.id, entry);
     }
   }
@@ -168,6 +195,19 @@ const readGraph = async (
  */
 const ordinals = new Map<string, number>();
 const maximumOrdinals = 4096;
+
+/*
+ * Ports whose first read has walked a whole line (B5).
+ *
+ * Until a port has read, the table cannot number anything on its lines, so a
+ * bounded first page would be followed by the whole walk anyway: two walks
+ * (on disk, two `rev-list` and two `cat-file --batch`) where one does. A
+ * port's first read is therefore the whole line, which numbers itself and
+ * seeds the table, unless the table already knows its head; every later read
+ * is bounded. A host keeps one port per project for its lifetime, so this is
+ * at most once per project per process.
+ */
+const seededPorts = new WeakSet<RevisionPort>();
 
 const rememberOrdinal = (id: string, ordinal: number): void => {
   ordinals.delete(id);
@@ -234,6 +274,7 @@ const rowOf = (
     revisionNumber,
     revisionId: entry.id,
     changeId: entry.changeId,
+    treeId: entry.treeId,
     actor: entry.provenance.actorId,
     source: entry.provenance.source,
     createdAt: entry.provenance.createdAt,
@@ -273,7 +314,7 @@ export const readRevisionLog = async (
   if (limit === 0) {
     return Object.freeze([]);
   }
-  const { head, entries } = await readGraph(port, request.branch, limit);
+  const { head, entries } = await readGraph(port, { branch: request.branch, limit, from: request.from });
   if (head === undefined) {
     return Object.freeze([]);
   }

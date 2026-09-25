@@ -329,4 +329,40 @@ describe('versionedChangePaths', () => {
       ),
     ).toEqual([]);
   });
+
+  it('should name the root when the scope of a change is unknown, so the next capture reads everything (E1)', () => {
+    expect(versionedChangePaths({ type: 'backendChanged', backend: 'opfs' }, '/projects/alpha', tauPathPolicy)).toEqual(
+      [''],
+    );
+    /* A tree copied over the project names no path inside it. */
+    expect(
+      versionedChangePaths(
+        { type: 'directoryCopied', sourcePath: '/archive/alpha', targetPath: '/projects/alpha', backend: 'opfs' },
+        '/projects/alpha',
+        tauPathPolicy,
+      ),
+    ).toEqual(['']);
+    expect(
+      versionedChangePaths(
+        { type: 'directoryChanged', path: '/projects', backend: 'opfs' },
+        '/projects/alpha',
+        tauPathPolicy,
+      ),
+    ).toEqual(['']);
+    /* The project removed is not a change to record, and a sibling's route is not an ancestor. */
+    expect(
+      versionedChangePaths(
+        { type: 'directoryDeleted', path: '/projects/alpha', backend: 'opfs' },
+        '/projects/alpha',
+        tauPathPolicy,
+      ),
+    ).toEqual([]);
+    expect(
+      versionedChangePaths(
+        { type: 'directoryCreated', path: '/projects/alp', backend: 'opfs' },
+        '/projects/alpha',
+        tauPathPolicy,
+      ),
+    ).toEqual([]);
+  });
 });

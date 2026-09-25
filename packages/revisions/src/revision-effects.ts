@@ -40,6 +40,8 @@ import { caseCollisions } from '#case-collisions.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { createHandles } from '#handle-table.js';
+import { createTreeIdMemo } from '#tree-id-memo.js';
+import type { TreeIdMemo } from '#tree-id-memo.js';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import type { RevisionConflictTerms } from '#revision-conflict.js';
 import { integrationOf, mergeBaseHeads, mergeBaseOf } from '#revision-log-order.js';
@@ -453,6 +455,17 @@ export type RevisionActorsOptions = Readonly<{
    */
   onChatsProjected?: (chatIds: readonly string[]) => void;
   /**
+   * Whether this host's `changed` feed is complete (NS15, E1).
+   *
+   * A host that promises it reports every write to a checkout — its own
+   * applies included — before any request that follows the write, and reports
+   * a change it lost track of as the path `''`. Its cuts then re-read only the
+   * paths written since the previous cut. A host that cannot promise it (a
+   * watcher that coalesces, drops or is absent) leaves it unset and every
+   * capture walks the checkout through the EQ7 memo.
+   */
+  completeChanges?: boolean;
+  /**
    * Brackets tree materialization so a disk host can ignore its own watcher
    * events instead of reporting them as editor changes.
    */
@@ -671,17 +684,41 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const fences = new Map<string, Promise<void>>();
   const activeOperations = new Set<Promise<unknown>>();
   /**
-   * What each open checkout's captures may reuse instead of reading (EQ7).
+   * What each open checkout's captures may reuse instead of reading or hashing.
    *
-   * One memo per checkout, because `(path, size, mtimeMs)` only identifies bytes
-   * within one tree; it is dropped when the checkout is, and with this closure.
+   * One record per checkout, because `(path, size, mtimeMs)` only identifies
+   * bytes within one tree (EQ7), and each checkout's tree ids stay warm in its
+   * own memo (E3); it is dropped when the checkout is, and with this closure.
+   * `last` is the newest whole observation of the files, which a cut that names
+   * its changed paths starts from (E1): `lastCapture` orders captures by when
+   * they began, so a slow capture never replaces a newer one. `basis` is the
+   * head's tree, whose modes a capture inherits where the provider has none.
    */
-  const captureMemos = new Map<string, CaptureMemo>();
-  const memoOf = (checkoutId: string): CaptureMemo => {
-    const memo = captureMemos.get(checkoutId) ?? createCaptureMemo();
-    captureMemos.set(checkoutId, memo);
-    return memo;
+  type CheckoutMemos = {
+    readonly capture: CaptureMemo;
+    readonly treeIds: TreeIdMemo;
+    last: ImmutableRevisionTree | undefined;
+    lastCapture: number;
+    basis: Readonly<{ revisionId: string; tree: ImmutableRevisionTree }> | undefined;
   };
+  const checkoutMemos = new Map<string, CheckoutMemos>();
+  const memosOf = (checkoutId: string): CheckoutMemos => {
+    const memos = checkoutMemos.get(checkoutId) ?? {
+      capture: createCaptureMemo(),
+      treeIds: createTreeIdMemo(),
+      last: undefined,
+      lastCapture: 0,
+      basis: undefined,
+    };
+    checkoutMemos.set(checkoutId, memos);
+    return memos;
+  };
+  /* Captures begin in this order; `last` only moves forward along it. */
+  let captureSequence = 0;
+  /* ponytail: one bound for `last` and `basis` each; above it a capture walks and reads the head, as before E1. */
+  const heldTreeBytes = 256 * 1024 * 1024;
+  const heldTree = (tree: ImmutableRevisionTree): ImmutableRevisionTree | undefined =>
+    tree.byteLength <= heldTreeBytes ? tree : undefined;
   /** Checkouts this process has already swept the litter of an interrupted apply from. */
   const swept = new Set<string>();
 
@@ -933,32 +970,59 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /**
    * Capture one already-open checkout filesystem.
    *
+   * With `changed`, and a feed the host promised complete, the capture starts
+   * from this checkout's `last` and re-reads only the named paths (E1). A walk,
+   * or a cut's capture of the paths it took, becomes the new `last`; a
+   * comparison's capture of paths it did not take does not, because a cut may
+   * take them before it finishes.
+   *
    * @param rooted - The checkout tree.
-   * @param basis - Recorded modes to inherit where the provider has none.
-   * @param captureOptions - This checkout's memo and whether reuse is safe.
+   * @param basisOf - Recorded modes to inherit where the provider has none, read only for a walk.
+   * @param captureOptions - This checkout's memos, whether reuse is safe, and the paths written since `last`.
    * @returns The complete versioned tree.
    */
   const captureFileSystem = async (
     rooted: RevisionFileSystem,
-    basis: ImmutableRevisionTree | undefined,
-    captureOptions: Readonly<{ memo: CaptureMemo; bypassMemo: boolean }>,
+    basisOf: () => Promise<ImmutableRevisionTree | undefined>,
+    captureOptions: Readonly<{
+      memos: CheckoutMemos;
+      bypassMemo: boolean;
+      changed?: Readonly<{ paths: readonly string[] | undefined; taken: boolean }>;
+    }>,
   ): Promise<ImmutableRevisionTree> => {
-    /* The reading comes first, so a file whose timestamp the stats then report
-     * as this recent is racily clean and is read rather than trusted (EQ7).
-     * The raw clock, not the monotonic `now()`: after a clock step back the
-     * high-water mark lies in the future of every fresh write, and a file
-     * written moments ago would read as old enough to trust (RV-W4W5a #5). */
-    const observedAt = clock();
-    const memoOptions = captureOptions.memo.unchanged(
-      await rooted.statTree?.('', { admits: (path) => policy.classify(path).versioned }),
-      observedAt,
-    );
-    const tree = await captureRevisionTree(rooted, {
-      exclude: (path) => !policy.classify(path).versioned || parseTemporarySibling(path) !== undefined,
-      inheritedMode: (path) => basis?.mode(path),
-      reuse: captureOptions.bypassMemo ? undefined : memoOptions.reuse,
-      onRead: memoOptions.onRead,
-    });
+    const { memos, bypassMemo, changed } = captureOptions;
+    const started = ++captureSequence;
+    const exclude = (path: string): boolean =>
+      !policy.classify(path).versioned || parseTemporarySibling(path) !== undefined;
+    const since = options.completeChanges === true && changed?.paths !== undefined ? memos.last : undefined;
+    const tree =
+      since === undefined || changed?.paths === undefined
+        ? await (async () => {
+            /* The reading comes first, so a file whose timestamp the stats then report
+             * as this recent is racily clean and is read rather than trusted (EQ7).
+             * The raw clock, not the monotonic `now()`: after a clock step back the
+             * high-water mark lies in the future of every fresh write, and a file
+             * written moments ago would read as old enough to trust (RV-W4W5a #5). */
+            const observedAt = clock();
+            const memoOptions = memos.capture.unchanged(
+              await rooted.statTree?.('', { admits: (path) => policy.classify(path).versioned }),
+              observedAt,
+            );
+            const basis = await basisOf();
+            return captureRevisionTree(rooted, {
+              exclude,
+              inheritedMode: (path) => basis?.mode(path),
+              reuse: bypassMemo ? undefined : memoOptions.reuse,
+              onRead: memoOptions.onRead,
+            });
+          })()
+        : /* `last` carries the modes it inherited, and a moved head empties
+           * the paths, so it is still the head's (I6). */
+          await captureRevisionTree(rooted, {
+            exclude,
+            inheritedMode: (path) => since.mode(path),
+            changedSince: { tree: since, paths: changed.paths },
+          });
     const collisions = caseCollisions(tree);
     if (collisions.length > 0) {
       throw new RevisionPortError(
@@ -966,36 +1030,63 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         `These paths cannot be checked out together on every computer (they differ only by letter case or accents, or one names a file another needs as a folder): ${collisions.join(', ')}`,
       );
     }
+    if (
+      options.completeChanges === true &&
+      (since === undefined || changed?.taken === true) &&
+      started > memos.lastCapture
+    ) {
+      memos.lastCapture = started;
+      memos.last = heldTree(tree);
+    }
+    return tree;
+  };
+
+  /* The head's tree for its modes, read once per head rather than once per capture. */
+  const headBasis = async (place: Checkout, memos: CheckoutMemos): Promise<ImmutableRevisionTree | undefined> => {
+    const head = await headOf(place);
+    if (head === undefined) {
+      return undefined;
+    }
+    if (memos.basis?.revisionId === head) {
+      return memos.basis.tree;
+    }
+    const tree = await port.readTree(revisionId(head));
+    const held = tree === undefined ? undefined : heldTree(tree);
+    memos.basis = held === undefined ? undefined : { revisionId: head, tree: held };
     return tree;
   };
 
   const captureCheckout = async (
     place: Checkout,
-    modeBasis: ImmutableRevisionTree | undefined,
-    bypassMemo: boolean,
+    captureOptions: Readonly<{
+      modeBasis?: ImmutableRevisionTree | undefined;
+      bypassMemo: boolean;
+      changed?: Readonly<{ paths: readonly string[] | undefined; taken: boolean }>;
+    }>,
   ): Promise<ImmutableRevisionTree> =>
     useFileSystem(place, async (rooted) => {
       await sweepTemporarySiblings(place, rooted);
-      return captureFileSystem(
-        rooted,
-        modeBasis ??
-          (await (async () => {
-            const head = await headOf(place);
-            return head === undefined ? undefined : port.readTree(revisionId(head));
-          })()),
-        { memo: memoOf(place.id), bypassMemo },
-      );
+      const { modeBasis, bypassMemo, changed } = captureOptions;
+      const memos = memosOf(place.id);
+      return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
+        memos,
+        bypassMemo,
+        ...(changed === undefined ? {} : { changed }),
+      });
     });
+  /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */
+  const checkoutTreeId = async (checkoutId: string, tree: ImmutableRevisionTree): Promise<string> =>
+    memosOf(checkoutId).treeIds.treeId(await recordedTree(tree), await formatOf());
   /* The versioned tree of one checkout: every path the registry versions. */
   const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
-    captureCheckout(place, modeBasis, false);
+    captureCheckout(place, { modeBasis, bypassMemo: false });
   /* A decision that discards or replaces a working copy on the strength of
    * "nothing here is unrevisioned" never trusts metadata an external replacement
    * can preserve (same size, restored mtime). The turn's own captures keep the
    * memo: that is git's racy-index limit, and re-reading every file twice a turn
    * is what the memo exists to stop. */
   const captureFresh = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
-    captureCheckout(place, modeBasis, true);
+    captureCheckout(place, { modeBasis, bypassMemo: true });
 
   /* The tree object id of one revision, as the store recorded it. */
   const treeIdOf = async (revision: string | undefined): Promise<string | undefined> => {
@@ -1012,8 +1103,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     onApplyingTree: options.onApplyingTree,
     policy,
     withCheckoutFence,
-    recordedTree,
-    formatOf,
+    checkoutTreeId,
     temporarySibling,
     unlinkIfPresent,
   });
@@ -1382,6 +1472,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
+  const ordinalPage = 50;
   /**
    * One revision's first-parent ordinal on a checkout's line (D5).
    *
@@ -1390,6 +1481,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @returns `Rev N`'s `N`, or `undefined` when the revision is not on that line (A9).
    */
   const ordinalOnLine = async (place: Checkout, revision: string): Promise<number | undefined> => {
+    /* ponytail: the page History reads first, then the whole line; a restore
+     * reaches for a recent revision, and the page's numbers come from the
+     * ordinal memo (E5, E6). A per-revision lookup is the upgrade path. */
+    const page = await readRevisionLog(port, { branch: place.branch, limit: ordinalPage });
+    const found = page.find((row) => row.revisionId === revision);
+    if (found !== undefined || page.length < ordinalPage) {
+      return found?.revisionNumber;
+    }
     const rows = await readRevisionLog(port, { branch: place.branch });
     return rows.find((row) => row.revisionId === revision)?.revisionNumber;
   };
@@ -1470,14 +1569,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const live = await captureFresh(target);
     const headTreeId = await treeIdOf(await headOf(target));
-    if (headTreeId !== revisionTreeId(await recordedTree(live), await formatOf())) {
+    if (headTreeId !== (await checkoutTreeId(target.id, live))) {
       throw new RevisionPortError(
         'UNSUPPORTED_OPERATION',
         'The files you have open have changes that are not in a revision yet. Save a revision before merging.',
       );
     }
     const validateTarget = async (current: ImmutableRevisionTree): Promise<void> => {
-      const currentTreeId = revisionTreeId(await recordedTree(current), await formatOf());
+      const currentTreeId = await checkoutTreeId(target.id, current);
       if (currentTreeId !== headTreeId) {
         throw new RevisionPortError(
           'CHECKOUT_CONFLICT',
@@ -1559,8 +1658,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     checkout: {
       cut: fromAuthorityPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async ({ input }) => {
         const place = await placeOf(input.checkoutId);
-        const tree = await capture(place);
-        const treeId = revisionTreeId(await recordedTree(tree), await formatOf());
+        const tree = await captureCheckout(place, {
+          bypassMemo: false,
+          changed: { paths: input.changedPaths, taken: true },
+        });
+        const treeId = await checkoutTreeId(place.id, tree);
         return { treeId, cutId: cuts.put(input.checkoutId, { tree, treeId }) };
       }),
 
@@ -1568,8 +1670,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * reads, so that cut re-reads only what changed after it. */
       captureTree: fromAuthorityPromise<CheckoutCaptureTreeActorOutput, CheckoutCaptureTreeActorInput>(
         async ({ input }) => {
-          const tree = await capture(await placeOf(input.checkoutId));
-          return { treeId: revisionTreeId(await recordedTree(tree), await formatOf()) };
+          const place = await placeOf(input.checkoutId);
+          const tree = await captureCheckout(place, {
+            bypassMemo: false,
+            changed: { paths: input.changedPaths, taken: false },
+          });
+          return { treeId: await checkoutTreeId(place.id, tree) };
         },
       ),
 
@@ -1612,6 +1718,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               `The store recorded tree ${String(recorded)} for a cut computed as ${input.treeId}.`,
             );
           }
+          /* The revision's tree is the one just cut, so the next walk inherits
+           * its modes without reading it back from the store. */
+          const basis = heldTree(held.tree);
+          memosOf(input.checkoutId).basis =
+            basis === undefined ? undefined : { revisionId: receipt.commitId, tree: basis };
           return { revisionId: receipt.commitId };
         },
       ),
@@ -1693,9 +1804,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * own — ponytail: reusing this one needs an invalidation the seam does
            * not have yet, and `changed` is the upgrade path (W6). */
           const tree = await capture(place);
-          const format = await formatOf();
           const dirty =
-            headTreeId === undefined ? tree.size > 0 : headTreeId !== revisionTreeId(await recordedTree(tree), format);
+            headTreeId === undefined ? tree.size > 0 : headTreeId !== (await checkoutTreeId(place.id, tree));
           const leases = await readLeases();
           const staleRunIds = leases
             .filter((lease) => lease.authorityEpoch !== authorityEpoch)
@@ -1808,7 +1918,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (tree === undefined) {
             throw new RevisionPortError('UNKNOWN_REVISION', `No recorded revision to restore: ${target}`);
           }
-          const live = await captureFresh(place);
+          /* E5: the memoised capture, not a fresh one. Step 1 already minted
+           * what the checkout had (D1), so `dirty` here only asks for a
+           * confirmation; what protects the bytes is `applyPlan`'s `validate`,
+           * which proves the head again inside the fence before one is written. */
+          const live = await capture(place);
           const removed = live.entries().filter(({ path }) => !tree.has(path));
           const headTreeId = await treeIdOf(head);
           return {
@@ -1816,7 +1930,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             revisionId: target,
             revisionNumber: await ordinalOnLine(place, target),
             removedPathCount: removed.length,
-            dirty: headTreeId !== revisionTreeId(await recordedTree(live), await formatOf()),
+            dirty: headTreeId !== (await checkoutTreeId(place.id, live)),
           };
         },
       ),
@@ -1839,7 +1953,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             validate: async (before) => {
               const head = await headOf(await placeOf(place.id));
               const headTreeId = await treeIdOf(head);
-              if (headTreeId !== revisionTreeId(await recordedTree(before), await formatOf())) {
+              if (headTreeId !== (await checkoutTreeId(place.id, before))) {
                 throw new RevisionPortError(
                   'CHECKOUT_CONFLICT',
                   'These files changed while the restore was being prepared. Try again.',
@@ -1896,7 +2010,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
         const place = await placeOf(input.id);
         const headTreeId = await treeIdOf(await headOf(place));
-        if (headTreeId !== revisionTreeId(await recordedTree(await captureFresh(place)), await formatOf())) {
+        if (headTreeId !== (await checkoutTreeId(place.id, await captureFresh(place)))) {
           throw new RevisionPortError(
             'CHECKOUT_CONFLICT',
             'This branch has changes that are not in a revision yet. Save a revision before discarding it.',
@@ -1905,7 +2019,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         await port.removeCheckout(input.id);
         /* The bytes a closed checkout's captures could reuse describe a tree
          * this process can no longer reach (EQ7). */
-        captureMemos.delete(input.id);
+        checkoutMemos.delete(input.id);
         swept.delete(input.id);
       }),
 
@@ -1950,7 +2064,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           return { needsConfirmation: false };
         }
         const headTreeId = await treeIdOf(await headOf(live));
-        const dirty = headTreeId !== revisionTreeId(await recordedTree(await captureFresh(live)), await formatOf());
+        const dirty = headTreeId !== (await checkoutTreeId(live.id, await captureFresh(live)));
         return dirty
           ? {
               needsConfirmation: true,
@@ -2957,7 +3071,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               }
               signal.throwIfAborted();
               const expectedTreeId = await treeIdOf(expected);
-              const beforeTreeId = revisionTreeId(await recordedTree(before), await formatOf());
+              const beforeTreeId = await checkoutTreeId(place.id, before);
               const pristineTreeId = revisionTreeId(generatedSetupTree, await formatOf());
               const dirty =
                 expectedTreeId === undefined ? beforeTreeId !== pristineTreeId : expectedTreeId !== beforeTreeId;

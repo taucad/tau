@@ -911,3 +911,93 @@ describe('checkoutMachine', () => {
     expect([...generated].filter((value) => !exercised.has(value))).toEqual([]);
   });
 });
+
+describe('checkoutMachine changed paths (E1)', () => {
+  type PathsInput = Readonly<{ changedPaths?: readonly string[] | undefined }>;
+  const pathsOf = (harness: Harness, name: 'cut' | 'captureTree'): ReadonlyArray<readonly string[] | undefined> =>
+    (harness.promises.inputsFor(name) as readonly PathsInput[]).map((input) => input.changedPaths);
+
+  /* Spawn, answer D4's comparison with the head, and run one cut the tree gate settles. */
+  const startSettled = async (): Promise<Harness> => {
+    const harness = start();
+    harness.promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+    harness.actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    harness.promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-0' } });
+    await flush();
+    return harness;
+  };
+
+  it('should hand a cut every path written since the previous cut took them, and unknown before the first', async () => {
+    const harness = await startSettled();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'changed', paths: ['b.ts'], generation: 1 });
+    actor.send({ type: 'changed', paths: ['c.ts', 'b.ts'], generation: 2 });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    /* A write that lands while the cut runs is the next cut's (F4). */
+    actor.send({ type: 'changed', paths: ['d.ts'], generation: 3 });
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
+    await flush();
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+    expect(pathsOf(harness, 'cut')).toEqual([undefined, ['b.ts', 'c.ts'], ['d.ts']]);
+    actor.stop();
+  });
+
+  it('should give a failed cut’s paths back to the next cut', async () => {
+    const harness = await startSettled();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'changed', paths: ['x.ts'], generation: 1 });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { error: new Error('disk full') });
+    await flush();
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+    actor.send({ type: 'changed', paths: ['y.ts'], generation: 2 });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+    expect(pathsOf(harness, 'cut').at(-1)).toEqual(['x.ts', 'y.ts']);
+    actor.stop();
+  });
+
+  it('should forget the paths when the head moves, so the comparison and the next cut read everything (I6)', async () => {
+    const harness = await startSettled();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
+    expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
+    promises.settle('captureTree', { output: { treeId: 'tree-other' } });
+    await flush();
+    actor.send({ type: 'changed', paths: ['b.ts'], generation: 2 });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+    expect(pathsOf(harness, 'captureTree')).toEqual([undefined, undefined]);
+    expect(pathsOf(harness, 'cut').at(-1)).toBeUndefined();
+    actor.stop();
+  });
+
+  it('should read everything once more paths were written than a list is worth', async () => {
+    const harness = await startSettled();
+    const { actor } = harness;
+
+    actor.send({
+      type: 'changed',
+      paths: Array.from({ length: 1025 }, (_, index) => `f${String(index)}.ts`),
+      generation: 1,
+    });
+    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+    expect(pathsOf(harness, 'cut').at(-1)).toBeUndefined();
+    expect(actor.getSnapshot().context.changedPaths).toEqual([]);
+    actor.stop();
+  });
+});

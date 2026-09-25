@@ -1407,7 +1407,7 @@ export const selectRevisionStatus = (
     attention:
       Object.values(context.checkoutStatus).filter((entry) => entry.status === 'failed' || entry.status === 'stale')
         .length + selectConflicts(snapshot).length,
-    restore: selectRestoreFacet(snapshot),
+    restore: selectRestoreFacet(snapshot, headRevisionId),
     remote: selectRemoteFacetOf(snapshot),
     publish: selectPublishFacetOf(snapshot),
     sync: selectSyncFacetOf(snapshot),
@@ -1572,21 +1572,35 @@ const selectPublishFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMach
  * because a copy would be a second truth to keep in step.
  *
  * @param snapshot - Current root snapshot.
- * @returns The facts the restore confirmation renders.
+ * @param headRevisionId - The selected checkout's head, which an undo must still be on.
+ * @returns The facts the restore confirmation and *Undo restore* render.
  */
 const selectRestoreFacet = (
   snapshot: SnapshotFrom<typeof projectRevisionsMachine>,
+  headRevisionId: string | undefined,
 ): RevisionStatusProjection['restore'] => {
   const restore = snapshot.children.restore?.getSnapshot();
   if (restore === undefined) {
-    return { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined };
+    return {
+      asking: false,
+      busy: false,
+      removedPathCount: 0,
+      dirty: false,
+      revisionNumber: undefined,
+      undoable: false,
+    };
   }
+  const undoTarget = restore.context.restoredRevisionId;
   return {
     asking: selectRestoreNeedsConfirmation(restore),
     busy: selectRestoreBusy(restore),
     removedPathCount: restore.context.removedPathCount,
     dirty: restore.context.dirty,
     revisionNumber: restore.context.revisionNumber,
+    /* The machine's own undo target, and only while it is still the line's
+     * head: a reload, another device's restore and a save on top all read
+     * false, so no surface offers an Undo the machine would refuse (M1). */
+    undoable: undoTarget !== undefined && undoTarget === headRevisionId,
   };
 };
 

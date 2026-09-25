@@ -55,6 +55,13 @@ export type RevisionStatusProjection = Readonly<{
     removedPathCount: number;
     dirty: boolean;
     revisionNumber: number | undefined;
+    /**
+     * Whether *Undo restore* has something to undo: this checkout's head is the
+     * restore row this root minted on the selected line (W0's undo target).
+     * Absent reads as false — nothing is offered — so a projection fixture
+     * written before it never offers an undo the machine would refuse.
+     */
+    undoable?: boolean;
   }>;
   /** Which remote this project has, and what it costs (S26 *Sync*, S35). */
   remote: RemoteFacet;

@@ -34,8 +34,13 @@ type CheckoutsMachineContextFields = Readonly<{
   pendingRetirements: readonly string[];
   /** Leases reported before the registry had records to put them on (R22). */
   pendingLeases: ReadonlyArray<Readonly<{ checkoutId: string | undefined; runId: string }>>;
-  /** The checkout `removing` is dropping. */
-  removingId: string | undefined;
+  /**
+   * `addCheckout`/`removeCheckout` in arrival order; the head is the one
+   * `adding` or `removing` runs. A verb that arrives before the records load,
+   * or while another verb or a retirement runs, waits here rather than being
+   * dropped, so no caller waits out its bound for a busy registry (W4 a3c).
+   */
+  pendingVerbs: ReadonlyArray<Extract<CheckoutsMachineEvent, { type: 'addCheckout' | 'removeCheckout' }>>;
   reason: string | undefined;
   /** The refusal's stable category, when the port named one (P4). */
   reasonCode: RevisionPortErrorCode | undefined;
@@ -150,6 +155,38 @@ const failOperation = (
   return patch;
 };
 
+/* The checkout `removing` drops: the head verb's. */
+const removingId = (context: CheckoutsMachineContext): string => {
+  const verb = context.pendingVerbs[0];
+  return verb?.type === 'removeCheckout' ? verb.id : '';
+};
+
+/* A verb the registry's own guards refuse: one checkout per branch (I18), and
+ * never a checkout a lease holds (A25/I9). */
+const refuseVerb = (
+  context: CheckoutsMachineContext,
+  enq: CheckoutsEnqueue,
+  verb: CheckoutsMachineContext['pendingVerbs'][number],
+): void => {
+  if (verb.type === 'addCheckout') {
+    announceFailure(context, enq, {
+      operation: 'add',
+      reason: 'That branch already has a checkout.',
+      code: 'CHECKOUT_CONFLICT',
+    });
+    return;
+  }
+  /* Policy Rule 1: *lease* and *checkout* are engineering terms and this
+   * sentence reaches a toast and the CLI. What the person can act on is
+   * which branch is busy. */
+  announceFailure(context, enq, {
+    operation: 'remove',
+    reason: `An agent is working in ${
+      context.checkouts.find((checkout) => checkout.id === verb.id)?.branch ?? 'this branch'
+    }.`,
+  });
+};
+
 const queueRetirements = (
   context: CheckoutsMachineContext,
   event: CheckoutsMachineEvent,
@@ -261,6 +298,15 @@ const checkoutsMachineDefinition = setup({
     /* One checkout per branch (I18): a branch that has one cannot get another. */
     branchIsFree: (context: CheckoutsMachineContext, branch: string) =>
       !context.checkouts.some((checkout) => checkout.branch === branch),
+    /* The checkout this add asks for is already on disk: an `open` cancelled
+     * the add after it landed. A checkout's id is its branch's, so the same
+     * branch at the same base is that very checkout; the live one never is. */
+    alreadyAdded: (context: CheckoutsMachineContext, verb: Readonly<{ branch: string; from: string }>) =>
+      verb.from !== '' &&
+      context.checkouts.some(
+        (checkout) =>
+          checkout.kind === 'linked' && checkout.branch === verb.branch && checkout.headRevisionId === verb.from,
+      ),
     /* A25/I9: a checkout a lease holds is never removed. */
     checkoutIsFree: (context: CheckoutsMachineContext, id: string) =>
       context.checkouts.some((checkout) => checkout.id === id && checkout.leaseRunIds.length === 0),
@@ -294,7 +340,7 @@ const checkoutsMachineDefinition = setup({
     checkouts: [],
     pendingRetirements: [],
     pendingLeases: [],
-    removingId: undefined,
+    pendingVerbs: [],
     reason: undefined,
     reasonCode: undefined,
     parentRef: input.parentRef,
@@ -320,6 +366,8 @@ const checkoutsMachineDefinition = setup({
     leaseStale: { context: ({ context, event }) => queueRetirements(context, event) },
     turnFinalized: { context: ({ context, event }) => queueRetirements(context, event) },
     turnReleased: { context: ({ context, event }) => queueRetirements(context, event) },
+    addCheckout: { context: ({ context, event }) => ({ pendingVerbs: [...context.pendingVerbs, event] }) },
+    removeCheckout: { context: ({ context, event }) => ({ pendingVerbs: [...context.pendingVerbs, event] }) },
   },
   states: {
     idle: {
@@ -337,7 +385,7 @@ const checkoutsMachineDefinition = setup({
         },
         onError: ({ context, event }, enq) => ({
           target: 'failed',
-          context: failOperation(context, enq, { error: event.error, operation: 'open' }),
+          context: { ...failOperation(context, enq, { error: event.error, operation: 'open' }), pendingVerbs: [] },
         }),
       },
     },
@@ -356,12 +404,24 @@ const checkoutsMachineDefinition = setup({
          * now says so on the way. */
         onError: ({ context, event }, enq) => ({
           target: 'failed',
-          context: failOperation(context, enq, { error: event.error, operation: 'open' }),
+          context: { ...failOperation(context, enq, { error: event.error, operation: 'open' }), pendingVerbs: [] },
         }),
       },
     },
+    /* A registry that could not open answers each verb with that refusal at
+     * once; a verb queued before the open failed was answered by the open's own. */
     failed: {
-      on: { open: { target: 'recovering' } },
+      on: {
+        open: { target: 'recovering' },
+        addCheckout: ({ context }, enq) => {
+          announceFailure(context, enq, { operation: 'add' });
+          return {};
+        },
+        removeCheckout: ({ context }, enq) => {
+          announceFailure(context, enq, { operation: 'remove' });
+          return {};
+        },
+      },
     },
     ready: {
       initial: 'idle',
@@ -394,71 +454,73 @@ const checkoutsMachineDefinition = setup({
             if (guards.hasPendingRetirement(context)) {
               return { target: 'retiring' };
             }
-            return undefined;
-          },
-          on: {
-            addCheckout: ({ context, event, guards }, enq) => {
-              if (guards.branchIsFree(context, event.branch)) {
-                return { target: 'adding' };
-              }
-              announceFailure(context, enq, {
-                operation: 'add',
-                reason: 'That branch already has a checkout.',
-                code: 'CHECKOUT_CONFLICT',
-              });
-              return {};
-            },
-            removeCheckout: ({ context, event, guards }, enq) => {
-              if (guards.checkoutIsFree(context, event.id)) {
-                return { target: 'removing', context: { removingId: event.id } };
-              }
-              /* Policy Rule 1: *lease* and *checkout* are engineering terms
-               * and this sentence reaches a toast and the CLI. What the
-               * person can act on is which branch is busy. */
-              announceFailure(context, enq, {
-                operation: 'remove',
-                reason: `An agent is working in ${
-                  context.checkouts.find((checkout) => checkout.id === event.id)?.branch ?? 'this branch'
-                }.`,
-              });
-              return {};
-            },
+            /* Then the verbs, one at a time: a removal queued behind a
+             * retirement sees the lease that retirement dropped. */
+            const verb = context.pendingVerbs[0];
+            if (verb === undefined) {
+              return undefined;
+            }
+            if (verb.type === 'addCheckout' && guards.alreadyAdded(context, verb)) {
+              /* Done, not refused: the announcement is what settles the asker. */
+              announceRegistry(context, enq);
+              return { context: { pendingVerbs: context.pendingVerbs.slice(1) } };
+            }
+            if (verb.type === 'addCheckout' && guards.branchIsFree(context, verb.branch)) {
+              return { target: 'adding' };
+            }
+            if (verb.type === 'removeCheckout' && guards.checkoutIsFree(context, verb.id)) {
+              return { target: 'removing' };
+            }
+            refuseVerb(context, enq, verb);
+            return { context: { pendingVerbs: context.pendingVerbs.slice(1) } };
           },
         },
         adding: {
           invoke: {
             src: 'addCheckout',
-            input: ({ context, event }) => ({
-              projectId: context.projectId,
-              branch: event.type === 'addCheckout' ? event.branch : '',
-              from: event.type === 'addCheckout' ? event.from : '',
-            }),
-            onDone: ({ context, event }, enq) => {
-              const patch = { checkouts: [...context.checkouts, event.output.checkout] };
-              announceRegistry({ ...context, ...patch }, enq);
-              return { target: 'idle', context: patch };
+            input: ({ context }) => {
+              const verb = context.pendingVerbs[0];
+              return {
+                projectId: context.projectId,
+                branch: verb?.type === 'addCheckout' ? verb.branch : '',
+                from: verb?.type === 'addCheckout' ? verb.from : '',
+              };
             },
-            onError: ({ context, event }, enq) => ({
-              target: 'idle',
-              context: failOperation(context, enq, { error: event.error, operation: 'add' }),
-            }),
-          },
-        },
-        removing: {
-          invoke: {
-            src: 'removeCheckout',
-            input: ({ context }) => ({ projectId: context.projectId, id: context.removingId ?? '' }),
-            onDone: ({ context }, enq) => {
+            onDone: ({ context, event }, enq) => {
               const patch = {
-                checkouts: context.checkouts.filter((checkout) => checkout.id !== context.removingId),
-                removingId: undefined,
+                checkouts: [...context.checkouts, event.output.checkout],
+                pendingVerbs: context.pendingVerbs.slice(1),
               };
               announceRegistry({ ...context, ...patch }, enq);
               return { target: 'idle', context: patch };
             },
             onError: ({ context, event }, enq) => ({
               target: 'idle',
-              context: failOperation(context, enq, { error: event.error, operation: 'remove' }),
+              context: {
+                ...failOperation(context, enq, { error: event.error, operation: 'add' }),
+                pendingVerbs: context.pendingVerbs.slice(1),
+              },
+            }),
+          },
+        },
+        removing: {
+          invoke: {
+            src: 'removeCheckout',
+            input: ({ context }) => ({ projectId: context.projectId, id: removingId(context) }),
+            onDone: ({ context }, enq) => {
+              const patch = {
+                checkouts: context.checkouts.filter((checkout) => checkout.id !== removingId(context)),
+                pendingVerbs: context.pendingVerbs.slice(1),
+              };
+              announceRegistry({ ...context, ...patch }, enq);
+              return { target: 'idle', context: patch };
+            },
+            onError: ({ context, event }, enq) => ({
+              target: 'idle',
+              context: {
+                ...failOperation(context, enq, { error: event.error, operation: 'remove' }),
+                pendingVerbs: context.pendingVerbs.slice(1),
+              },
             }),
           },
         },

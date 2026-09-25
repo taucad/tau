@@ -196,6 +196,82 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
+  /* No verb may wait out its caller's bound because the registry was busy or
+   * not loaded yet: it is queued and run, in order, as the registry goes idle (W4 a3c). */
+  it('queues verbs that arrive before it loaded or while it is busy, and runs them in order', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'addCheckout', branch: 'agent/c', from: 'rev-1' });
+    actor.send({ type: 'removeCheckout', id: 'checkout-live' });
+    await toReady(harness);
+
+    expect(promises.inputsFor('addCheckout')).toEqual([{ projectId: 'project-1', branch: 'agent/c', from: 'rev-1' }]);
+    expect(promises.inputsFor('removeCheckout')).toEqual([]);
+    promises.settle('addCheckout', { output: { checkout: { ...live, id: 'checkout-c', branch: 'agent/c' } } });
+    await flush();
+
+    expect(promises.inputsFor('removeCheckout')).toEqual([{ projectId: 'project-1', id: 'checkout-live' }]);
+    promises.settle('removeCheckout', { output: undefined });
+    await flush();
+    expect(actor.getSnapshot().context.pendingVerbs).toEqual([]);
+
+    actor.stop();
+  });
+
+  /* An `open` cancels a running add; the add may still have landed, and its
+   * rerun then finds that very checkout (W4 a3d). */
+  it.each([
+    ['counts the rerun as done when the checkout it asked for is already there', 'rev-1', undefined],
+    ['still refuses when another checkout holds that branch', 'rev-other', 'CHECKOUT_CONFLICT'],
+  ])('%s', async (_label, head, refusal) => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    await toReady(harness);
+    actor.send({ type: 'addCheckout', branch: 'agent/c', from: 'rev-1' });
+    actor.send({ type: 'open' });
+    const landed: CheckoutRecord = {
+      ...linked,
+      id: 'checkout-c',
+      branch: 'agent/c',
+      leaseRunIds: [],
+      headRevisionId: head,
+    };
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked, landed] } });
+    await flush();
+
+    expect(promises.inputsFor('addCheckout')).toHaveLength(1);
+    expect(actor.getSnapshot().context.pendingVerbs).toEqual([]);
+    expect(parent.events.find((event) => event.type === 'checkoutFailed')).toEqual(
+      refusal === undefined ? undefined : expect.objectContaining({ operation: 'add', code: refusal }),
+    );
+
+    actor.stop();
+  });
+
+  it('refuses verbs at once after a failed open, and never runs one queued before it', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'open' });
+    actor.send({ type: 'addCheckout', branch: 'agent/c', from: 'rev-1' });
+    promises.settle('sweepLeases', { error: new Error('no runs directory') });
+    await flush();
+    const failures = parent.events.filter((event) => event.type === 'checkoutFailed').length;
+
+    actor.send({ type: 'removeCheckout', id: 'checkout-live' });
+
+    expect(parent.events.filter((event) => event.type === 'checkoutFailed')).toHaveLength(failures + 1);
+    expect(parent.events.at(-1)).toMatchObject({ type: 'checkoutFailed', operation: 'remove' });
+
+    /* The open's own refusal answered the queued add; a later open must not replay it. */
+    await toReady(harness);
+    expect(promises.inputsFor('addCheckout')).toEqual([]);
+    expect(promises.inputsFor('removeCheckout')).toEqual([]);
+
+    actor.stop();
+  });
+
   it('refuses a second checkout on one branch', async () => {
     const harness = start();
     const { actor, promises, emitted } = harness;

@@ -52,6 +52,8 @@ import type {
   RevisionConflict,
   RevisionDiffEntry,
   RevisionDiffInput,
+  RevisionDivergence,
+  RevisionDivergenceInput,
   RevisionEngineDescriptor,
   RevisionHead,
   RevisionLogEntry,
@@ -489,6 +491,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       id,
       changeId: commit.changeId ?? '',
       parents: Object.freeze(commit.parents.map((parent) => revisionId(parent))),
+      treeId: commit.tree,
       summary: trailer?.summary ?? { generated: commit.message.split('\n')[0] ?? '' },
       provenance: trailer?.provenance ?? unattributed,
       conflicted: commit.conflictedTrees !== undefined,
@@ -1317,6 +1320,14 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           input?.limit,
         ),
       );
+    },
+
+    /* Git's own merge-base walk: one process, and neither history is listed. */
+    divergence: async (input: RevisionDivergenceInput): Promise<RevisionDivergence> => {
+      await Promise.all([requireCommit(input.head), requireCommit(input.base)]);
+      const counts = await text(['rev-list', '--left-right', '--count', `${input.head}...${input.base}`]);
+      const [ahead, behind] = counts.split(/\s+/u).map(Number);
+      return Object.freeze({ ahead: ahead ?? 0, behind: behind ?? 0 });
     },
 
     diff: async (input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]> => {

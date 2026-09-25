@@ -103,6 +103,50 @@
     },
     "nx-release-publish": {
       "dependsOn": ["pkgcheck"]
+    },
+    "formal": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/formal/src/cli.ts check --tier pr {projectRoot}"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/specs/**/*",
+        "!{projectRoot}/specs/lean/**/*",
+        "{projectRoot}/src/**/*.legality.json",
+        "{workspaceRoot}/tools/formal/src/**/*",
+        "{workspaceRoot}/tools/formal/toolchain.lock",
+        { "runtime": "node tools/formal/src/cli.ts toolchain-id" }
+      ],
+      "outputs": ["{workspaceRoot}/out/reports/formal/{projectRoot}/pr"]
+    },
+    "formal:lean": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/formal/src/cli.ts check --tier lean {projectRoot}"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/specs/lean/**/*",
+        "{workspaceRoot}/tools/formal/src/**/*",
+        "{workspaceRoot}/tools/formal/toolchain.lock",
+        { "runtime": "node tools/formal/src/cli.ts toolchain-id" }
+      ],
+      "outputs": ["{workspaceRoot}/out/reports/formal/{projectRoot}/lean"]
+    },
+    "formal:nightly": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/formal/src/cli.ts nightly {projectRoot}"
+      },
+      "cache": false
+    },
+    "formal:logs": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/formal/src/cli.ts logs {projectName}"
+      },
+      "cache": false
     }
   },
   "generators": {
@@ -128,7 +172,8 @@
       "!{projectRoot}/**/*.spec.*",
       "!{projectRoot}/**/*.test-d.*",
       "!{projectRoot}/vitest.config.*",
-      "!{projectRoot}/**/*.md"
+      "!{projectRoot}/**/*.md",
+      "!{projectRoot}/specs/**/*"
     ]
   },
   "release": {

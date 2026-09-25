@@ -1,0 +1,31 @@
+{
+  "java": { "ci": "25", "minimum": 21 },
+  "tlc": {
+    "build": "2026.09.23.154203-4260e47",
+    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar",
+    "sha256": "32d64fbbc464559fc7192341b27b885fa4eb6b92d1648d2b49fb9cdcb7aacf81"
+  },
+  "community": {
+    "url": "https://github.com/tlaplus/CommunityModules/releases/download/202609120237/CommunityModules-deps-202609120237.jar",
+    "sha256": "3d9a282c360e90d55e9bbe99caa2987d508fef1556d652760b4af4455e283733"
+  },
+  "apalache": {
+    "version": "0.62.2",
+    "url": "https://github.com/apalache-mc/apalache/releases/download/v0.62.2/apalache-0.62.2.tgz",
+    "sha256": "765f610537281a0f25b8c30f2554f19523e2859c824e80e62276653ee23c10e2",
+    "jarSha256": "079b6c2320252469dcf79afec6886b8255d3dd1b34a9484433c88986752efaa8"
+  },
+  "lean": {
+    "version": "4.34.1",
+    "assets": {
+      "linux-x64": {
+        "url": "https://github.com/leanprover/lean4/releases/download/v4.34.1/lean-4.34.1-linux.tar.zst",
+        "sha256": "47bf4bbd78f70c2e9670598ab7124d92b6efb7330ff33e5fbb4030f6fd72e4e4"
+      },
+      "darwin-arm64": {
+        "url": "https://github.com/leanprover/lean4/releases/download/v4.34.1/lean-4.34.1-darwin_aarch64.tar.zst",
+        "sha256": "65f22a4f047738ec742667b3247e836a86ebf06eabc12655c3dee00637e37866"
+      }
+    }
+  }
+}

@@ -1,0 +1,612 @@
+{
+  "configs": {
+    "CrossDevice.ledger-OneLiveRunMerged.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "OneLiveRunMerged"
+      },
+      "kind": "limit",
+      "ref": "EQ3 I8: both devices admit while partitioned; limit until a blueprint adopts a repair rule (RV3-F5)"
+    },
+    "CrossDevice.ledger-SettledOnceMerged.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "SettledOnceMerged"
+      },
+      "kind": "limit",
+      "ref": "EQ3 I9: both devices settle one run while partitioned; limit until a blueprint adopts a repair rule (RV3-F5)"
+    },
+    "CrossDevice.liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "EQ3: EventuallyConverged under weak fairness on Sync, W3's merge, at MaxRows 2 and MaxSyncs 4 (27 s)"
+    },
+    "CrossDevice.merge-MergedPrefixStable.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "MergedPrefixStable"
+      },
+      "kind": "limit",
+      "ref": "EQ3; S5 t7_merge_not_prefix_stable: cursors index segments, never a merged view"
+    },
+    "CrossDevice.merge.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "EQ3: ViewsConverge and OwnFileOrder under W3's merge, at MaxRows 3 and MaxSyncs 2 against the blueprint's 6 and 3: this run takes 218 s (590,815 states) of the 5-minute budget"
+    },
+    "CrossDevice.repair.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "EQ3: the candidate read-side rule keeps I8 and I9, agrees across devices and drops no settlement"
+    },
+    "CrossDevice.today-EventuallyConverged.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "EventuallyConverged"
+      },
+      "kind": "defect",
+      "ref": "EQ3; S5 D5: views never converge under today's merge",
+      "fixedBy": "W3"
+    },
+    "CrossDevice.today-OwnFileOrder.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "OwnFileOrder"
+      },
+      "kind": "defect",
+      "ref": "EQ3; S5 D5 (Lean T7): a device's own terms reorder after a clock step",
+      "fixedBy": "W3"
+    },
+    "CrossDevice.today-ViewsConverge.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "ViewsConverge"
+      },
+      "kind": "defect",
+      "ref": "EQ3; S5 D5 at protocol level: a segment read twice undoes holdFileOrder",
+      "fixedBy": "W3"
+    },
+    "LogLeadership.steal-first-append-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (steal, firstAppend fence)"
+    },
+    "LogLeadership.steal-first-append.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.5 (steal, firstAppend fence; 11 s)"
+    },
+    "LogLeadership.steal-local-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (steal, local fence)"
+    },
+    "LogLeadership.steal-local-EpochsMonotone.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EpochsMonotone"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (steal, local fence)"
+    },
+    "LogLeadership.target-RowEpochIsLockEpoch.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "RowEpochIsLockEpoch"
+      },
+      "kind": "limit",
+      "ref": "S4 3.5 (target); D5: the store fences, not the lock"
+    },
+    "LogLeadership.target-any-heartbeat-EveryCommandAnswered.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryCommandAnswered"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (target, any-heartbeat wait)"
+    },
+    "LogLeadership.target-drop-stale.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "S4 3.5 (target, stale frames dropped; 23 s)"
+    },
+    "LogLeadership.target-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "S4 3.5 (target; 141 s)"
+    },
+    "LogLeadership.target-unkeyed-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (target, unkeyed)"
+    },
+    "LogLeadership.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.5 (target; 12-13 s)"
+    },
+    "LogLeadership.today-EveryCommandAnswered.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryCommandAnswered"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (today; W0.14 lands first, RV6-F3)"
+    },
+    "LogLeadership.today-unkeyed-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "S4 3.5 (today, unkeyed)"
+    },
+    "LogLeadership.today.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.5 (today)"
+    },
+    "TurnSettlement.lease-first-AtMostOneRevisionPerTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneRevisionPerTurn"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (IntentFirst=FALSE)"
+    },
+    "TurnSettlement.lease-first-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (IntentFirst=FALSE)"
+    },
+    "TurnSettlement.lease-first.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "S4 3.3 (IntentFirst=FALSE: only these fail)"
+    },
+    "TurnSettlement.liveness-CompletedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.3 (one turn)"
+    },
+    "TurnSettlement.liveness-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.3 (one turn)"
+    },
+    "TurnSettlement.liveness-LeasesEventuallyRetired.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.3 (one turn)"
+    },
+    "TurnSettlement.on-view-CompletedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CompletedRunEventuallySettled"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (ReconcileOnView=TRUE)"
+    },
+    "TurnSettlement.on-view-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (ReconcileOnView=TRUE)"
+    },
+    "TurnSettlement.on-view-LeasesEventuallyRetired.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeasesEventuallyRetired"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (ReconcileOnView=TRUE)"
+    },
+    "TurnSettlement.on-view.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "S4 3.3 (ReconcileOnView=TRUE: only these fail)"
+    },
+    "TurnSettlement.retire-first-AgentBytesAttributedToTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AgentBytesAttributedToTurn"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (LeaseUntilRow=FALSE)"
+    },
+    "TurnSettlement.retire-first.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "S4 3.3 (LeaseUntilRow=FALSE: only these fail)"
+    },
+    "TurnSettlement.safety.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.3 (one turn)"
+    },
+    "TurnSettlement.two-turns-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "S4 3.3 (two turns, 209 s)"
+    },
+    "TurnSettlement.two-turns.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "S4 3.3 (two turns, 29 s)"
+    },
+    "TurnSettlementToday.base-AgentBytesAttributedToTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AgentBytesAttributedToTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (base)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.base-AtMostOneRevisionPerTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneRevisionPerTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (base)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.base-CompletedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CompletedRunEventuallySettled"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (base)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.base-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (base)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.base-SettlementRowNamesNewestRevision.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SettlementRowNamesNewestRevision"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (base)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.base.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.1 (base)"
+    },
+    "TurnSettlementToday.idle-edits-AtMostOneRevisionPerTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneRevisionPerTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.2 (lease retired before the row)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.o2-AtMostOneRevisionPerTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneRevisionPerTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.2 O2 (browser-agent-host-transport.ts:207-212)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1-AgentBytesAttributedToTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AgentBytesAttributedToTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1-AtMostOneRevisionPerTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneRevisionPerTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1-CompletedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CompletedRunEventuallySettled"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1-SettlementRowNamesNewestRevision.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SettlementRowNamesNewestRevision"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.1 (w1)"
+    },
+    "TurnSettlementToday.w1s2-AgentBytesAttributedToTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AgentBytesAttributedToTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1s2)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1s2-AtMostOneRevisionPerTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneRevisionPerTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1s2)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1s2-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1s2)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1s2-SettlementRowNamesNewestRevision.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SettlementRowNamesNewestRevision"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1s2)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1s2.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.1 (w1s2)"
+    },
+    "TurnSettlementToday.w1s2s3-AgentBytesAttributedToTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AgentBytesAttributedToTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1s2s3)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1s2s3-AtMostOneRevisionPerTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneRevisionPerTurn"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1s2s3)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1s2s3-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1s2s3)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1s2s3-NoSettlementOverUncommittedWork.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoSettlementOverUncommittedWork"
+      },
+      "kind": "defect",
+      "ref": "S4 3.1 (w1s2s3)",
+      "fixedBy": "W8"
+    },
+    "TurnSettlementToday.w1s2s3.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "S4 3.1 (w1s2s3)"
+    }
+  },
+  "apalache": [
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "S4 3.4 (IndInv holds initially)",
+      "args": ["check", "--cinit=ConstInit", "--init=Init", "--inv=IndInv", "--length=0", "MC_TurnSettlement.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "S4 3.4 (IndInv is inductive)",
+      "args": ["check", "--cinit=ConstInit", "--init=IndInv", "--inv=IndInv", "--length=1", "MC_TurnSettlement.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "S4 3.4 (IntentFirst=FALSE breaks conjunct 36)",
+      "args": [
+        "check",
+        "--cinit=ConstInitLeaseFirst",
+        "--init=IndInv",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_TurnSettlement.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "S4 3.4 (LeaseUntilRow=FALSE breaks conjunct 50)",
+      "args": [
+        "check",
+        "--cinit=ConstInitRetireFirst",
+        "--init=IndInv",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_TurnSettlement.tla"
+      ]
+    }
+  ],
+  "logs": {
+    "ChatLog": {
+      "ChatLog/recorded/in-project-ping-pong-turn.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "apps/ui fixture (S6)"
+      },
+      "ChatLog/recorded/daemon-reattach-hexnut.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "apps/ui fixture (S6)"
+      },
+      "ChatLog/recorded/daemon-reattach-hexnut-4runs.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "apps/ui fixture (S6)"
+      },
+      "ChatLog/seeded/sequence-gap.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 3,
+            "rules": ["SequenceContiguous"]
+          }
+        },
+        "kind": "witness",
+        "ref": "SequenceContiguous: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/epoch-not-from-zero.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 3,
+            "rules": ["EpochStartsAtZero"]
+          }
+        },
+        "kind": "witness",
+        "ref": "EpochStartsAtZero: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/epoch-reopened.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["EpochNotReopened"]
+          }
+        },
+        "kind": "witness",
+        "ref": "EpochNotReopened: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/admitted-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["AdmittedOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "AdmittedOnce: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/second-run-while-live.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 2,
+            "rules": ["OneRunAtATime"]
+          }
+        },
+        "kind": "witness",
+        "ref": "OneRunAtATime: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/reopen-not-running.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": ["ReopenOnlyByRunning"]
+          }
+        },
+        "kind": "witness",
+        "ref": "ReopenOnlyByRunning: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/settlement-without-run.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 2,
+            "rules": ["SettlementNeedsRun"]
+          }
+        },
+        "kind": "witness",
+        "ref": "SettlementNeedsRun: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/settled-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": ["SettledOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "SettledOnce: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/row-without-run.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 2,
+            "rules": ["RowsNeedRun"]
+          }
+        },
+        "kind": "witness",
+        "ref": "RowsNeedRun: one seeded log per rule (FM-A6)"
+      }
+    }
+  }
+}

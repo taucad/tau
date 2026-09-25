@@ -5,6 +5,7 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "formal": {},
     "test:acp-live": {
       "executor": "nx:run-commands",
       "cache": false,

@@ -1,0 +1,66 @@
+[
+  {
+    "id": "M1",
+    "drift": "settlement keeps last, not first (??= becomes =)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | some s, _ => some s\n",
+    "replace": "  | some _, e => some e\n"
+  },
+  {
+    "id": "M2",
+    "drift": "no reopen clause",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "settle := if s = .running then none else (L.entry e.run).settle",
+    "replace": "settle := (L.entry e.run).settle"
+  },
+  {
+    "id": "M3",
+    "drift": "closed epochs may reopen",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "else if L.active.isSome ∧ e.epoch ∈ L.closed then .error .closedEpoch",
+    "replace": "else if False then .error .closedEpoch"
+  },
+  {
+    "id": "M4",
+    "drift": "no holdFileOrder",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  clamp st.2 st.1\n",
+    "replace": "  st.1\n"
+  },
+  {
+    "id": "M5",
+    "drift": "readBatch does not clamp",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "let c := min cursor physical.length",
+    "replace": "let c := cursor"
+  },
+  {
+    "id": "M6",
+    "drift": "settled before unadmitted",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "if hstate en.life = .none then .unadmitted\n  else if en.settle.isSome then .settled",
+    "replace": "if en.settle.isSome then .settled\n  else if hstate en.life = .none then .unadmitted"
+  },
+  {
+    "id": "M7",
+    "drift": "byte budget excludes the first row",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "if total' > maxBytes ∧ taken ≠ [] then",
+    "replace": "if total' > maxBytes then"
+  },
+  {
+    "id": "M8",
+    "drift": "duplicate check after sequence check",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | some f => if f = e then .ok true else .error .mutated\n  | none =>",
+    "replace": "  | some f => if f = e ∧ L.last = some e.seq then .ok true else .error .mutated\n  | none =>"
+  },
+  {
+    "id": "undefined-key-skip",
+    "drift": "S5 D1 (RV6-F2): the appender's canonical JSON keeps undefined-valued keys again (W0.1 reverted)",
+    "file": "src/log/event-sequence.ts",
+    "test": "src/log/chat-ledger.differential.test.ts",
+    "find": "    .filter((key) => object[key] !== undefined)\n",
+    "replace": ""
+  }
+]

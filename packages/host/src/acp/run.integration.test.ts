@@ -18,6 +18,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
+
 import { ClientSideConnection } from '@agentclientprotocol/sdk';
 import type { Client, SessionConfigOption, SessionUpdate, StopReason } from '@agentclientprotocol/sdk';
 
@@ -93,6 +95,9 @@ afterEach(async () => {
     // oxlint-disable-next-line no-await-in-loop -- teardown order is the invariant under test.
     await close();
   }
+  /* Field trace validation: keep each chat log before its root goes (formal:nightly). */
+  const chatLogs = chatLogDestination('host', expect.getState().testPath);
+  await Promise.all(roots.map(async (root) => captureChatLogs(root, chatLogs)));
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 

@@ -300,6 +300,7 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/formal": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/nx": "workspace:*",
     "@taucad/oxlint": "workspace:*",

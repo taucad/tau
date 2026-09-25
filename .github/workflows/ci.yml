@@ -37,6 +37,7 @@ jobs:
       api: ${{ steps.plan.outputs.api }}
       e2e: ${{ steps.plan.outputs.e2e }}
       size: ${{ steps.plan.outputs.size }}
+      formal: ${{ steps.plan.outputs.formal }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -54,16 +55,18 @@ jobs:
           api=$(pnpm nx show projects --affected --projects tag:scope:api --json | tail -1)
           e2e=$(pnpm nx show projects --affected --projects tag:type:e2e --json | tail -1)
           size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
+          formal=$(pnpm nx show projects --affected --with-target formal --json | tail -1)
           echo "Affected apps: $apps"
           echo "Affected tag:scope:api: $api"
           echo "Affected tag:type:e2e: $e2e"
           echo "Affected with a size target: $size"
+          echo "Affected with a formal target: $formal"
           {
             echo "apps<<EOF"
             echo "$apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          for lane in "api=$api" "e2e=$e2e" "size=$size"; do
+          for lane in "api=$api" "e2e=$e2e" "size=$size" "formal=$formal"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
             else
@@ -149,6 +152,52 @@ jobs:
         if: always()
         run: pnpm nx run scripts:validate-workspace-root
 
+  # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
+  # of every affected project with a `formal` target. A known counterexample is an
+  # expected verdict and never turns this red; a changed verdict, a stale generated
+  # file, a missing tool or a watchdog does. Toolchains come from setup-formal,
+  # pinned by sha256 in tools/formal/toolchain.lock, never from `pnpm install`.
+  formal:
+    name: Formal models
+    runs-on: ubuntu-latest
+    needs: [plan]
+    if: needs.plan.outputs.formal == 'true'
+    timeout-minutes: 15
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Setup formal toolchains
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc,lean
+
+      - name: Run affected formal tiers
+        # FM-R15: at most two JVMs at once. The runner caps them per process, so one project at a time.
+        run: pnpm nx affected -t formal formal:lean --parallel=1
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
+      - name: Upload formal reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: formal-reports
+          path: out/reports/formal
+          if-no-files-found: ignore
+          retention-days: 14
+
   # Browser lane: every `type:e2e` project's Vitest Browser matrices and
   # development-server qualifications. `nx affected` picks the projects — their
   # `implicitDependencies` make the selection correct — and target existence
@@ -165,8 +214,8 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
-      - name: Install Chromium for Vitest Browser
-        run: pnpm exec playwright install --with-deps chromium
+      - name: Install Chromium, Firefox and WebKit for Vitest Browser
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
 
       # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
       # `BILLING_*` development values; without them it refuses to start. Same
@@ -181,7 +230,19 @@ jobs:
       - name: Run affected end-to-end suites
         env:
           TAU_E2E_WEBGPU_PROFILE: software
-        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development
+        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host
+
+      # Field trace validation: every events.jsonl the suites above captured at
+      # teardown is validated against ChatLog.tla, including after a failed suite.
+      - name: Setup formal toolchains
+        if: always()
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc
+
+      - name: Validate captured chat logs
+        if: always()
+        run: pnpm nx affected -t formal:logs
 
       - name: Check workspace root hygiene
         if: always()
@@ -195,6 +256,8 @@ jobs:
           path: |
             out/test-results/vitest-browser
             out/test-results/desktop-e2e
+            out/test-results/chat-logs
+            out/reports/formal
           if-no-files-found: ignore
           retention-days: 7
 

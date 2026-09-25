@@ -1,0 +1,17 @@
+{
+  "configs": {
+    "AttachGeneration.reuse.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "NoReuseOfClosingLauncher" },
+      "kind": "witness",
+      "ref": "L6 N2; FixUtil guards it (W0.11, RV6-F3)"
+    },
+    "AttachGeneration.aba-deadline.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "NoStaleReleaseDeletesNewEpoch" },
+      "kind": "witness",
+      "ref": "L6 N3; FixMain guards it (W0.11, RV6-F3)"
+    },
+    "AttachGeneration.fixed.cfg": { "tier": "pr", "expect": "pass", "ref": "W0.11" }
+  }
+}

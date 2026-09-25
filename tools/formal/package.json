@@ -1,0 +1,25 @@
+{
+  "name": "@taucad/formal",
+  "version": "0.0.1",
+  "description": "Pinned TLA+, Apalache and Lean toolchains, the formal runner and conformance library",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "exports": {
+    "./capture": "./src/capture.ts",
+    "./drift": "./src/drift.ts",
+    "./graph": "./src/graph.ts",
+    "./replay": "./src/replay.ts",
+    "./seam": "./src/seam/simulator.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@taucad/xstate-testing": "workspace:*",
+    "fast-check": "catalog:",
+    "xstate": "catalog:"
+  }
+}

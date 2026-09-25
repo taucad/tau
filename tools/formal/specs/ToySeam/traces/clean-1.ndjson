@@ -1,0 +1,12 @@
+{"t":1,"kind":"send","actor":"client","id":"r1"}
+{"t":1,"kind":"send","actor":"client","id":"r2"}
+{"t":2,"kind":"serve","actor":"server","id":"r2","effect":true}
+{"t":3,"kind":"serve","actor":"server","id":"r1","effect":true}
+{"t":5,"kind":"receive","actor":"client","id":"r1"}
+{"t":6,"kind":"retry","actor":"client","id":"r2"}
+{"t":7,"kind":"retry","actor":"client","id":"r2"}
+{"t":8,"kind":"serve","actor":"server","id":"r2","effect":false}
+{"t":9,"kind":"retry","actor":"client","id":"r2"}
+{"t":10,"kind":"serve","actor":"server","id":"r2","effect":false}
+{"t":11,"kind":"receive","actor":"client","id":"r2"}
+{"t":12,"kind":"done","actor":"env"}

@@ -63,6 +63,12 @@ export type RevisionStatusProjection = Readonly<{
    */
   checkoutRoot: string | undefined;
   branch: string | undefined;
+  /**
+   * Whether the checkout registry has answered once. Before it has, a checkout
+   * named here has no root yet; that is not the same as a checkout that is
+   * gone (D41).
+   */
+  registrySettled: boolean;
   /** Whether any checkout has work that is not safely recorded. */
   projectDirty: boolean;
   dirty: boolean;
@@ -1317,6 +1323,7 @@ export const selectRevisionStatus = (
     checkoutId: context.selectedCheckoutId,
     checkoutRoot: selected?.root,
     branch: selected?.branch,
+    registrySettled: context.registrySettled,
     projectDirty: Object.values(context.checkoutStatus).some((entry) => entry.status !== 'clean'),
     dirty: status !== undefined && status.status !== 'clean',
     minting: status?.status === 'minting',

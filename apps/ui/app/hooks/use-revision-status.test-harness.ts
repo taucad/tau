@@ -20,6 +20,7 @@ const emptyStatus = (): RevisionStatusProjection => ({
   checkoutId: 'live',
   checkoutRoot: '/projects/p',
   branch: 'main',
+  registrySettled: true,
   projectDirty: false,
   dirty: false,
   minting: false,

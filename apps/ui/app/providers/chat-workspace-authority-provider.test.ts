@@ -73,6 +73,7 @@ const revisionRoot = vi.hoisted(() => ({
   /** Set by a test while the root has not yet answered its first projection. */
   unanswered: false,
   absent: false,
+  unsettled: false,
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
@@ -112,11 +113,15 @@ vi.mock('#hooks/use-revision-status.js', () => {
       status: () =>
         revisionRoot.unanswered
           ? undefined
-          : {
-              checkoutId: 'checkout-durable',
-              checkoutRoot: '/projects/project_test',
-              branches: revisionRoot.branches,
-            },
+          : revisionRoot.unsettled
+            ? /* The root's first projections name the checkout before the registry says where it is. */
+              { checkoutId: 'checkout-durable', checkoutRoot: undefined, branches: [], registrySettled: false }
+            : {
+                checkoutId: 'checkout-durable',
+                checkoutRoot: '/projects/project_test',
+                branches: revisionRoot.branches,
+                registrySettled: true,
+              },
       subscribe: (listener: () => void) => {
         revisionRoot.statusListeners.add(listener);
         return () => revisionRoot.statusListeners.delete(listener);
@@ -281,6 +286,7 @@ beforeEach(() => {
   revisionRoot.placement = undefined;
   revisionRoot.unanswered = false;
   revisionRoot.absent = false;
+  revisionRoot.unsettled = false;
   revisionRoot.branches = [
     {
       name: 'main',
@@ -390,6 +396,27 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
         globalThis.setTimeout(resolve, 0);
       });
       revisionRoot.unanswered = false;
+      for (const listener of revisionRoot.statusListeners) {
+        listener();
+      }
+    });
+
+    const attached = await attaching;
+    expect(attached?.execution.workspaceId).toBe('checkout-durable');
+  });
+
+  it('should wait for the checkout registry rather than read an unsettled root as no checkout (D41)', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    revisionRoot.unsettled = true;
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const attaching = result.current.attachment('chat_1');
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 0);
+      });
+      revisionRoot.unsettled = false;
       for (const listener of revisionRoot.statusListeners) {
         listener();
       }

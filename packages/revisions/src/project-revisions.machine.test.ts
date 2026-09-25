@@ -680,6 +680,7 @@ describe('projectRevisionsMachine', () => {
       checkoutId: 'checkout-b',
       checkoutRoot: '/checkouts/checkout-b',
       branch: 'agent/b',
+      registrySettled: true,
       projectDirty: true,
       dirty: true,
       minting: false,
@@ -1231,6 +1232,16 @@ describe('projectRevisionsMachine', () => {
       { projectId: 'project-1', branch: 'isolated-run', from: 'rev-1' },
     ]);
 
+    harness.actor.stop();
+  });
+
+  it('says whether the checkout registry has answered, so a rootless first projection is not read as no checkout (D41)', async () => {
+    const harness = start();
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).registrySettled).toBe(false);
+
+    await readyRegistry(harness, [live]);
+
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).registrySettled).toBe(true);
     harness.actor.stop();
   });
 

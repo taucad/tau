@@ -120,6 +120,8 @@ export type ChatLedger = Readonly<{
   }>;
   /** `false` once a history row cannot be interpreted: the chat reads, and the host refuses to run it. */
   historyIntact: boolean;
+  /** `true` once a newer build's history row is folded (D16): the host answers `RUN_UNREADABLE`, in any run. */
+  newerHistory: boolean;
   anomalies: readonly LedgerAnomaly[];
 }>;
 
@@ -132,6 +134,7 @@ export const emptyChatLedger: ChatLedger = Object.freeze({
   applied: Object.freeze({}),
   invocations: Object.freeze({}),
   historyIntact: true,
+  newerHistory: false,
   anomalies: Object.freeze([]),
 });
 
@@ -532,6 +535,7 @@ const createFold = (ledger: ChatLedger) => {
       draft.anomalies.push({ kind: 'opaque', row: key });
       if (historyRowTypes.has(event.type)) {
         draft.historyIntact = false;
+        draft.newerHistory = true;
       }
     } else {
       known(event, key);
@@ -688,15 +692,16 @@ export const unresolvedInvocations = (ledger: ChatLedger): readonly string[] =>
   );
 
 /**
- * Whether the chat's current run has a row this build cannot read, or the history cannot be replayed: a command on
- * such a run is refused (CL-R2, read tolerantly, execute strictly).
+ * Whether the chat's current run has a row this build cannot read, or its history holds a newer build's row
+ * (`RUN_UNREADABLE`, answered with an update), or the history cannot be replayed (`HISTORY_INVALID`): a command on such
+ * a chat is refused (CL-R2, read tolerantly, execute strictly; D16).
  *
  * @internal
  * @param ledger - The chat's ledger.
  * @returns The refusal code, or `undefined` when the run can be executed.
  */
 export const executionRefusal = (ledger: ChatLedger): 'RUN_UNREADABLE' | 'HISTORY_INVALID' | undefined => {
-  if (ledger.currentRunId !== undefined && ledger.runs[ledger.currentRunId]?.opaque === true) {
+  if (ledger.newerHistory || (ledger.currentRunId !== undefined && ledger.runs[ledger.currentRunId]?.opaque === true)) {
     return 'RUN_UNREADABLE';
   }
   return ledger.historyIntact ? undefined : 'HISTORY_INVALID';

@@ -91,12 +91,9 @@ const openLock = async (path: string): Promise<FileHandle | undefined> => {
 };
 
 /* The legacy pid marker, kept as a courtesy for builds that honour only it until the desktop support window ends
- * (CL-S11). Under the kernel lock two current writers never race for it, so a stale marker is simply taken over;
- * without one (`fenced` false) the marker is the only fence and a takeover is verified after a settle window. */
-const acquireWriterLock = async (
-  filePath: string,
-  fenced: boolean,
-): Promise<{ readonly handle: FileHandle; readonly path: string }> => {
+ * (CL-S11). Every takeover of a stale marker is verified after a settle window: a writer holding the kernel lock can
+ * still race one that holds none (a Darwin worker thread, an unsupported platform, an older build). */
+const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: FileHandle; readonly path: string }> => {
   const path = `${filePath}.lock`;
   const logPath = await resolveLogPath(filePath);
   const locked = (): EventLogError =>
@@ -121,7 +118,7 @@ const acquireWriterLock = async (
     await unlink(path).catch(() => undefined);
     throw error;
   }
-  if (tookOver && !fenced) {
+  if (tookOver) {
     // Two takers can both unlink one stale lock, so both `wx` creates succeed and the earlier file is gone. Only the
     // handle whose inode the path still names holds the lock; the other stands down without unlinking.
     // ponytail: verify-after-settle narrows the race to sub-millisecond straggling (0/40 measured), not a proof; the
@@ -203,7 +200,7 @@ const openWriter = async (filePath: string): Promise<EventLogAppender> => {
   const releaseKernelLock = async (): Promise<void> => kernelLock?.release();
   let lock: { readonly handle: FileHandle; readonly path: string };
   try {
-    lock = await acquireWriterLock(filePath, kernelLock !== undefined);
+    lock = await acquireWriterLock(filePath);
   } catch (error) {
     await releaseKernelLock();
     throw error;

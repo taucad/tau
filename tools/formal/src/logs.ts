@@ -7,8 +7,11 @@ import { runTlcCase } from '#tlc.js';
 import type { FormalContext, LocatedTools } from '#toolchain.js';
 import { cacheDirectory, locateTools, missingTools } from '#toolchain.js';
 
-/** Validates one sanitized log; the default runs `ChatLog.tla` through TLC. */
-export type LogValidator = (sanitized: string) => Promise<{ readonly outcome: Outcome; readonly seconds: number }>;
+/** Validates one sanitized log, with `waived` rules unchecked; the default runs `ChatLog.tla` through TLC. */
+export type LogValidator = (
+  sanitized: string,
+  waived?: readonly string[],
+) => Promise<{ readonly outcome: Outcome; readonly seconds: number }>;
 
 export type LogVerdict = {
   readonly accepted: boolean;
@@ -69,13 +72,13 @@ const knownDefectsOf = (
 
 const tlcValidator =
   (context: FormalContext, tools: Required<Pick<LocatedTools, 'java' | 'tlc'>>): LogValidator =>
-  async (sanitized) => {
+  async (sanitized, waived = []) => {
     const { outcome, result } = await runTlcCase(context, {
       tools,
       directory: chatLogSpecs(context),
       module: 'ChatLog.tla',
       config: 'ChatLog.validate.cfg',
-      env: context.env,
+      env: { ...context.env, ...Object.fromEntries(waived.map((rule) => [`FORMAL_WAIVE_${rule}`, '1'])) },
       timeoutSeconds: 300,
       traceFile: sanitized,
     });
@@ -124,23 +127,48 @@ export const validateCapturedLogs = async (context: FormalContext, options: Logs
     files.map(async (file) => {
       const sanitized = path.join(cacheDirectory(context), 'captured', options.project, file);
       sanitizeLog(path.join(directory, file), sanitized);
-      const { outcome, seconds } = validate
-        ? await validate(sanitized)
-        : { outcome: { error: 'no validator' }, seconds: 0 };
-      const known = knownDefectsOf(outcome, defects);
-      for (const defect of known ?? []) {
-        occurred.add(defect.rule);
+      if (!validate) {
+        return;
       }
-      const knownDefect = known?.map((defect) => `${defect.rule} (fixed by ${defect.fixedBy})`).join(', ');
+      const first = await validate(sanitized);
+      let { outcome, seconds } = first;
+      /* TLC stops at the first rejected row, so a rejection made only of listed defect rules is rerun with those rules
+       * waived; the log is accepted only if a rerun passes to the end. Each rerun waives at least one more rule. */
+      const waived: string[] = [];
+      let known = knownDefectsOf(outcome, defects);
+      while (known?.some((defect) => !waived.includes(defect.rule))) {
+        waived.push(...known.map((defect) => defect.rule).filter((rule) => !waived.includes(rule)));
+        // oxlint-disable-next-line no-await-in-loop -- each rerun depends on the last one's rejection.
+        const rerun = await validate(sanitized, waived);
+        ({ outcome } = rerun);
+        seconds += rerun.seconds;
+        known = knownDefectsOf(outcome, defects);
+      }
+      const accepted = outcome === 'pass';
+      const knownDefect =
+        accepted && waived.length > 0
+          ? defects
+              .filter((defect) => waived.includes(defect.rule))
+              .map((defect) => `${defect.rule} (fixed by ${defect.fixedBy})`)
+              .join(', ')
+          : undefined;
+      if (knownDefect !== undefined) {
+        for (const rule of waived) {
+          occurred.add(rule);
+        }
+      }
+      const verdict =
+        waived.length === 0 || accepted
+          ? describeOutcome(first.outcome)
+          : `${describeOutcome(outcome)} (with ${waived.join(', ')} waived)`;
       verdicts[file] = {
-        accepted: outcome === 'pass' || known !== undefined,
-        verdict: describeOutcome(outcome),
+        accepted,
+        verdict,
         ...(knownDefect === undefined ? {} : { knownDefect }),
         seconds: Math.round(seconds * 100) / 100,
       };
-      const mark = outcome === 'pass' ? 'ok  ' : known === undefined ? 'FAIL' : 'ok  ';
       log(
-        `${mark} ${options.project}/${file}: ${describeOutcome(outcome)}${knownDefect ? `; known defect ${knownDefect}` : ''}`,
+        `${accepted ? 'ok  ' : 'FAIL'} ${options.project}/${file}: ${verdict}${knownDefect ? `; known defect ${knownDefect}` : ''}`,
       );
     }),
   );

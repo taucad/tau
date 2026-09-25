@@ -187,15 +187,23 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
     ];
   };
 
+  /* A lost line answers HISTORY_INVALID; a newer build's history row (D16), in any run, answers RUN_UNREADABLE, so the
+   * person is offered the update rather than told the chat is corrupt. */
   it.each([
-    ['a garbage message.appended line', () => '{"type":"message.appended","message":{"id":"turn-2"}\n', false],
-    [
-      'an opaque message.appended row',
-      (sequence: number) =>
+    {
+      name: 'a garbage message.appended line',
+      middle: () => '{"type":"message.appended","message":{"id":"turn-2"}\n',
+      counted: false,
+      code: 'HISTORY_INVALID',
+    },
+    {
+      name: 'an opaque message.appended row',
+      middle: (sequence: number) =>
         line({ ...envelope(sequence), runId: 'run-0', type: 'message.appended', message: { id: 'turn-2' } }),
-      true,
-    ],
-  ])('should read a chat with %s but refuse to start or resume it', async (_name, middle, counted) => {
+      counted: true,
+      code: 'RUN_UNREADABLE',
+    },
+  ])('should read a chat with $name but refuse to start or resume it', async ({ middle, counted, code }) => {
     const log = await logOf(brokenHistoryLines(middle, counted));
     const host = hostOver(log);
 
@@ -208,8 +216,8 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
         trigger: 'submit',
         message: { id: 'turn-3', role: 'user', content: 'Go.' },
       }),
-    ).rejects.toMatchObject({ code: 'HISTORY_INVALID' });
-    await expect(host.resume('chat-1')).rejects.toMatchObject({ code: 'HISTORY_INVALID' });
+    ).rejects.toMatchObject({ code });
+    await expect(host.resume('chat-1')).rejects.toMatchObject({ code });
     await host.close();
   });
 

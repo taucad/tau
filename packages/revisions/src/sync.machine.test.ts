@@ -559,6 +559,37 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /* D49: large files on a remote without LFS are refused before any network
+   * call, so a retry can never succeed; only a new revision (the file removed)
+   * or the person tries again. */
+  it('row 43c (D49): a large-file refusal fails with its own class instead of retrying on backoff', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      error: Object.assign(new Error('Large files cannot be backed up to a Git remote: part.step.'), {
+        code: 'LFS_REMOTE_UNSUPPORTED',
+      }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+
+    expect(selectSyncFacet(harness.actor.getSnapshot()).reason).toBe('largeFiles');
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r-without-part' });
+    expect(harness.actor.getSnapshot().matches('failed')).toBe(false);
+
+    harness.stop();
+  });
+
   it('row 38 (C15): a pull that finds this device ahead pushes instead of saying Backed up', async () => {
     const harness = start();
 

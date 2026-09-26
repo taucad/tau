@@ -45,11 +45,31 @@ certificate trust, sockets, and device lifetime; importing this package does not
 
 One preset, `default`, selecting `machines.default`.
 
+### Build plate models (`@taucad/bambu/plate`)
+
+| Export                 | Kind       | Use                                                                        |
+| ---------------------- | ---------- | -------------------------------------------------------------------------- |
+| `bambuX1cPlates`       | descriptor | the four X1C plates: GLB URL, bounds, surface colour and finish, bed names |
+| `bambuPlateForBedType` | function   | map a sliced file's `curr_bed_type`, `plate_N.json` `bed_type` or Tau id   |
+| `bambuX1cHotend`       | descriptor | the hotend tip GLB, with the nozzle tip at its origin                      |
+
+```typescript
+import { bambuPlateForBedType } from '@taucad/bambu/plate';
+
+const plate = bambuPlateForBedType('Textured PEI Plate');
+```
+
+The GLBs are glTF (Y-up, metres). Rotate +90° about X and scale by 1000 to place one in the plate frame: millimetres,
+X right, Y toward the rear, Z up, origin at the printable area's front-left corner, Z = 0 on the print surface. They are
+clean-room models built from public product facts in `models/x1c`; regenerate them with
+`pnpm nx run bambu:render-plates`. They carry no Bambu Lab logo or real plate-detection code.
+
 ## Environment
 
 | Host                               | Supported | Notes                                                          |
 | ---------------------------------- | --------- | -------------------------------------------------------------- |
 | Browser worker                     | No        | `taucad.hostTarget: daemon` — this package is not browser-safe |
+| Browser (`./plate` only)           | Yes       | data and asset URLs; no protocol code                          |
 | Node.js daemon or Electron utility | Yes       | `>=24`; Developer LAN mode only                                |
 
 ## Supervised X1C qualification

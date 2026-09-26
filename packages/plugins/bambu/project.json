@@ -5,6 +5,13 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "render-plates": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["cli"], "target": "build" }],
+      "options": {
+        "command": "node --import @oxc-node/core/register packages/plugins/bambu/scripts/render-plates.mts"
+      }
+    },
     "qualify-x1c": {
       "executor": "nx:run-commands",
       "options": {

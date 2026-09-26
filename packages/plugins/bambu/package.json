@@ -34,6 +34,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./plate": "./src/bambu.plate.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -43,6 +44,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./plate": {
+        "types": "./dist/bambu.plate.d.mts",
+        "import": "./dist/bambu.plate.mjs",
+        "default": "./dist/bambu.plate.mjs"
       },
       "./package.json": "./package.json"
     },

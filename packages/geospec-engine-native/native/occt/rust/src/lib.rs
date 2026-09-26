@@ -141,6 +141,11 @@ impl Document {
         unsafe { ffi::geospec_occt_report_generation_builds(self.raw.as_ptr()) }
     }
 
+    /// Diagnostic count of admitted faces that carry a triangulation; 0 for a BRep.
+    pub fn triangulated_faces(&self) -> usize {
+        unsafe { ffi::geospec_occt_triangulated_face_count(self.raw.as_ptr()) }
+    }
+
     pub fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
         if let Some(facts) = self.facts.get() {
             return Ok(Rc::clone(facts));
@@ -4279,6 +4284,7 @@ mod ffi {
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_release(document: *mut Document);
+        pub fn geospec_occt_triangulated_face_count(document: *const Document) -> usize;
         pub fn geospec_occt_document_facts(
             document: *const Document,
             shape: *mut ShapeFacts,

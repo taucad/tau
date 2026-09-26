@@ -585,9 +585,10 @@ int geospec_occt_selected_continuous_domain(
     geospec_occt_selected_continuous_domain_result* output,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
-// STEP read and XDE transfer run under one process-wide lock. A document is
-// thread-confined: its const getters fill lazy slots and transfer buffers, so
-// only one thread at a time may use it (the Rust owner is !Send and !Sync).
+// STEP admissions may run concurrently on different threads; the bytes are
+// borrowed until the call returns. A document is thread-confined: its const
+// getters fill lazy slots and transfer buffers, so only one thread at a time
+// may use it (the Rust owner is !Send and !Sync).
 int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                            geospec_occt_document** out_document,
                            geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
@@ -596,6 +597,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
 int geospec_occt_thread_pool_width(int requested, int* actual,
                                    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_release(geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
+// Diagnostic count of admitted faces carrying a triangulation. The read
+// profile keeps a file's tessellation off exact faces, so a BRep admits 0.
+size_t geospec_occt_triangulated_face_count(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 
 // Admission keeps source identity and addresses only. Source shape, occurrence
 // bounds, occurrence face/edge and whole-face numerics are computed on first

@@ -22,6 +22,7 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <DESTEP_Parameters.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom2dAdaptor_Curve.hxx>
@@ -48,6 +49,7 @@
 #include <StepGeom_CartesianPoint.hxx>
 #include <StepGeom_Direction.hxx>
 #include <StepGeom_Plane.hxx>
+#include <StepBasic_ApplicationContext.hxx>
 #include <StepBasic_Product.hxx>
 #include <StepBasic_ProductDefinition.hxx>
 #include <StepBasic_ProductDefinitionFormation.hxx>
@@ -1583,7 +1585,7 @@ struct geospec_occt_document {
   // from this admitted source shape on first demand and stored only after it
   // succeeds; common_volume completes all of them before it may modify inputs.
   // Const getters write these unsynchronized slots: the document is confined
-  // to one thread at a time (see geospec_occt_open_step).
+  // to one thread at a time (its Rust owner is neither Send nor Sync).
   mutable std::optional<geospec_occt_shape_facts> shape_facts;
   // The shape_facts validity check alone, for a validity demand that comes
   // before any source shape facts.
@@ -5864,6 +5866,64 @@ static int dedicated_pool_scope(
   return GEOSPEC_OCCT_OK;
 }
 
+// The STEP read profile, pinned field by field to the Interface_Static values
+// admission read before, so a header-default change cannot move bytes. Never
+// default-construct it: ReadSubshapeNames is false there and drops subshape
+// names. OnNoBRep keeps a file's tessellation off exact faces (policy §16).
+// The XCAF mode fields are inert on this reader; the reader setters govern.
+static DESTEP_Parameters step_read_parameters() {
+  DESTEP_Parameters p;
+  p.ReadBSplineContinuity = DESTEP_Parameters::ReadMode_BSplineContinuity_C0;
+  p.ReadPrecisionMode = DESTEP_Parameters::ReadMode_Precision_File;
+  p.ReadPrecisionVal = 1.e-3;  // used when a file has no length uncertainty
+  p.ReadMaxPrecisionMode = DESTEP_Parameters::ReadMode_MaxPrecision_Preferred;
+  p.ReadMaxPrecisionVal = 1.0;
+  p.ReadSameParamMode = false;
+  p.ReadSurfaceCurveMode = DESTEP_Parameters::ReadMode_SurfaceCurve_Default;
+  p.EncodeRegAngle = 0.57295779513082323;  // 0.01 rad in degrees; unread on STEP
+  p.AngleUnit = DESTEP_Parameters::AngleUnitMode_File;
+  p.ReadProductMode = true;
+  p.ReadProductContext = DESTEP_Parameters::ReadMode_ProductContext_All;
+  p.ReadShapeRepr = DESTEP_Parameters::ReadMode_ShapeRepr_All;
+  p.ReadTessellated = DESTEP_Parameters::RWMode_Tessellated_OnNoBRep;
+  p.ReadAssemblyLevel = DESTEP_Parameters::ReadMode_AssemblyLevel_All;
+  p.ReadRelationship = true;
+  p.ReadShapeAspect = true;
+  p.ReadConstrRelation = false;
+  p.ReadSubshapeNames = true;
+  p.ReadCodePage = Resource_FormatType_UTF8;
+  p.ReadNonmanifold = false;
+  p.ReadIdeas = false;
+  p.ReadAllShapes = false;
+  p.ReadRootTransformation = true;
+  return p;
+}
+
+// OCCT initializes its data-exchange globals (controllers, LibCtl libraries,
+// Interface_Static standards, XSAlgo and ShapeProcess operators) unsynchronized
+// on first use. One reader construction does it before admissions may overlap;
+// nothing writes Interface_Static afterwards, so the three statics without a
+// DESTEP_Parameters field stay process constants.
+static void step_reader_warmup() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    const STEPCAFControl_Reader warmup;
+    // No edge-continuity consumer reads the regularity flags: skip encoding.
+    Interface_Static::SetRVal("read.encoderegularity.angle", 0.0);
+  });
+}
+
+// ReadStream's SetModel -> ComputeGraph runs the semantic ComputeCheck, which
+// nothing reads, unless the session has finished one. A finished ComputeGraph
+// on a one-entity seed leaves it finished; the real SetModel re-arms it.
+static void skip_semantic_check(STEPCAFControl_Reader& reader) {
+  const occ::handle<XSControl_WorkSession> session = reader.ChangeReader().WS();
+  const occ::handle<StepData_StepModel> seed = new StepData_StepModel;
+  seed->AddEntity(new StepBasic_ApplicationContext);
+  session->SetModel(seed);
+  session->ComputeGraph(true);
+}
+
 int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                            geospec_occt_document** output,
                            geospec_occt_string* error) noexcept {
@@ -5879,21 +5939,22 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
         geospec_occt_thread_pool_width(1, &pool_width, nullptr);
     if (pool_status != GEOSPEC_OCCT_OK && pool_status != GEOSPEC_OCCT_UNSUPPORTED)
       return pool_status;
-    // The reader writes process-global Interface_Static options, and its
-    // read/transfer state is not proven safe beside another reader. Serialize
-    // the reader's whole lifetime; the lock is declared first so it is
-    // released after the reader is destroyed.
-    // ponytail: one process-wide lock serializes concurrent admissions; a
-    // parameter-local ReadStream needs its own whole-configuration parity.
-    static std::mutex step_reader_lock;
-    const std::lock_guard<std::mutex> step_reader_guard(step_reader_lock);
+    // Each admission owns its reader, session, model and document, and reads
+    // its parameters from the model, so admissions need no process lock.
+    step_reader_warmup();
     STEPCAFControl_Reader reader;
-    // Reader construction registers and resets this option on first use.
-    Interface_Static::SetIVal("read.stepcaf.subshapes.name", 1);
     reader.SetNameMode(true);
+    // GDT and layer reading create consumed subshape labels, so they stay on.
     reader.SetGDTMode(true);
+    // No reader of these XCAF attributes: re-enable a mode when one exists.
+    reader.SetPropsMode(false);
+    reader.SetMatMode(false);
+    reader.SetViewMode(false);
+    reader.SetMetaMode(false);
+    reader.SetColorMode(false);
+    skip_semantic_check(reader);
     std::istringstream stream(std::string(reinterpret_cast<const char*>(bytes), length));
-    if (reader.ReadStream("memory.step", stream) != IFSelect_RetDone) {
+    if (reader.ReadStream("memory.step", step_read_parameters(), stream) != IFSelect_RetDone) {
       return fail(GEOSPEC_OCCT_READ_FAILED, "STEP read failed.", error);
     }
 
@@ -6036,6 +6097,17 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
 }
 
 void geospec_occt_release(geospec_occt_document* document) noexcept { delete document; }
+
+size_t geospec_occt_triangulated_face_count(
+    const geospec_occt_document* document) noexcept {
+  if (document == nullptr) return 0;
+  size_t count = 0;
+  for (const FaceFacts& face : document->faces) {
+    TopLoc_Location location;
+    if (!BRep_Tool::Triangulation(face.shape, location).IsNull()) ++count;
+  }
+  return count;
+}
 
 int geospec_occt_document_facts(const geospec_occt_document* document,
                                 geospec_occt_shape_facts* shape,

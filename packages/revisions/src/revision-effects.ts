@@ -4222,7 +4222,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * has written the tracking ref, and native `git push` writes none for a
          * ref outside `refs/heads/*`. Operation logs are never pulled (RV-W7 #1).
          * A ref without a head — an older server, a removal — pulls, as does
-         * any read that fails.
+         * any read that fails. A skipped echo can delay an integration a
+         * backoff was waiting for until the next move or retry: a delay, not a loss.
          */
         const holdsEveryHead = async (remote: string, move: RevisionStreamMove): Promise<boolean> => {
           const { heads } = move;

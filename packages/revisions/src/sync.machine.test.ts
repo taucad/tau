@@ -69,6 +69,9 @@
  * | 63 | `pushing / opening --429--> queued --Retry-After--> opening` | **W13d**: a rate limit waits the remote's own wait, a remote move does not cut it short, and it does not advance the doubling |
  * | 64 | `pushing --onDone[updated]--> parent pushed` | **RV-W8 F9**: a push that moved a ref tells `remote.machine` its stored figure is stale; a refused one does not |
  * | 65 | `pushing / recording --syncNow { pushId }--> … → pushing → recording` + `pushSettled` | **W15 F1**: a correlated request is answered by a push that starts after it, so it carries the head current at the request |
+ * | 66 | `pushing --syncNow { pushId }, open--> opening → pushing` + one `pushSettled` | **RV-W15**: a request parked behind a push that `open` abandons is not stranded |
+ * | 67 | `pushing --syncNow { pushId }, remoteDisconnected--> noRemote` + one `pushSettled { failed }` | **RV-W15**: the disconnect answers a parked request exactly once |
+ * | 68 | `pushing --syncNow { pushId }--> onError → recording → queued → opening → pushing` + one `pushSettled` | **RV-W15**: a push that throws hands its parked request to the retry, answered once |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -1485,6 +1488,77 @@ describe('syncMachine', () => {
       ]);
     });
     expect(harness.effects.inputsFor('push')).toHaveLength(4);
+
+    harness.stop();
+  });
+
+  /** Park a correlated request behind a running, uncorrelated push. */
+  const parkBehindPush = async (harness: Harness): Promise<void> => {
+    await openCleanly(harness);
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.actor.send({ type: 'syncNow', pushId: 'save-1' });
+  };
+
+  it('row 66 (RV-W15): a request parked behind a push that `open` abandons is answered once, by the reopened push', async () => {
+    const harness = start();
+    await parkBehindPush(harness);
+
+    harness.actor.send({ type: 'open' });
+    /* The abandoned push's answer reaches a stopped child and changes nothing. */
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }) });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+    expect(settledPushes(harness)).toEqual([{ type: 'pushSettled', pushId: 'save-1', outcome: 'backedUp' }]);
+
+    harness.stop();
+  });
+
+  it('row 67 (RV-W15): a request parked behind a push is answered failed once when the remote is disconnected', async () => {
+    const harness = start();
+    await parkBehindPush(harness);
+
+    harness.actor.send({ type: 'remoteDisconnected' });
+
+    await vi.waitFor(() => {
+      expect(settledPushes(harness)).toEqual([{ type: 'pushSettled', pushId: 'save-1', outcome: 'failed' }]);
+    });
+    expect(harness.actor.getSnapshot().matches('noRemote')).toBe(true);
+    expect(harness.actor.getSnapshot().context.nextPushId).toBeUndefined();
+
+    harness.stop();
+  });
+
+  it('row 68 (RV-W15): a request parked behind a push that throws is answered once, by the retry', async () => {
+    const harness = start();
+    await parkBehindPush(harness);
+
+    harness.effects.settle('push', { error: new Error('network down') });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    /* The redelivered request retries at once rather than waiting out the backoff. */
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+    expect(settledPushes(harness)).toEqual([{ type: 'pushSettled', pushId: 'save-1', outcome: 'backedUp' }]);
 
     harness.stop();
   });

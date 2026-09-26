@@ -710,7 +710,7 @@ const flushesNow = (trigger: string): boolean => trigger === 'close' || trigger 
 /*
  * `pushing` and `recording` hold a push that was built before this request, so
  * it waits for the next one (W15 F1). An uncorrelated ask falls through to the
- * root, as before.
+ * root, as before. Both states re-deliver it on exit (`redeliverPush`).
  */
 const deferPush = ({ event }: Readonly<{ event: Readonly<{ pushId?: string }> }>) =>
   event.pushId === undefined ? undefined : { context: { nextPushId: event.pushId } };
@@ -1352,6 +1352,10 @@ const syncMachineDefinition = setup({
 
     pushing: {
       entry: () => ({ context: { pendingMint: false, pendingFlush: false, ahead: false } }),
+      /* Every way out, as `recording`: the root `open` re-enters `opening` and
+       * never passes through `recording` (RV-W15). The exit patch clears the
+       * request before `noRemote`'s entry reads it, so it is raised once. */
+      exit: ({ context }, enq) => ({ context: redeliverPush(context, enq) }),
       invoke: {
         src: 'push',
         input: ({ context }) => {

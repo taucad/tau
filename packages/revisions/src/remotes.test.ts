@@ -69,6 +69,15 @@ describe('remotes', () => {
     expect(tauRemoteUrl('https://api.tau.new///', 'p1')).toBe('https://api.tau.new/v1/git/p1.git');
   });
 
+  it('refuses a project id that could leave the repository path', () => {
+    for (const projectId of ['../x', 'a/b', 'p1?x=1', '']) {
+      expect(() => tauRemoteUrl('https://api.tau.new', projectId)).toThrow(
+        expect.objectContaining({ code: 'INVALID_TRANSPORT' }),
+      );
+    }
+    expect(tauRemoteUrl('https://api.tau.new', 'proj_A-1')).toBe('https://api.tau.new/v1/git/proj_A-1.git');
+  });
+
   it('never offers a host-local ref to a remote (W3a R4)', () => {
     for (const ref of [
       'refs/tau/owners/o1',

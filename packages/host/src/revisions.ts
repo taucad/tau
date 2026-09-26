@@ -26,8 +26,9 @@ import { basename, dirname, join, sep } from 'node:path';
 import { z } from 'zod';
 import { chatRecordSchema } from '@taucad/chat';
 
-import { emptyChatLedger, foldChatLedger, jsonValueSchema, unsettledAttempts } from '@taucad/agent-host';
-import type { AgentChannelRevisionEvent, ChatLedger, JsonValue } from '@taucad/agent-host';
+import { followChat, jsonValueSchema, unsettledAttempts } from '@taucad/agent-host';
+import type { ChatLedger, JsonValue } from '@taucad/agent-host';
+import type { AgentChannelRevisionEvent } from '@taucad/agent-host/wire';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId } from '@taucad/revisions/algorithms';
@@ -1622,60 +1623,80 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       appendToChatLog = async (chatId, event) => launcher.append(chatId, event);
       const watching = new AbortController();
       let watchFailure: unknown;
-      /* One chat ledger per chat, over the rows this stream delivers (W3 CL-S8): a row delivered twice folds once. */
-      const ledgers = new Map<string, ChatLedger>();
-      const watch = (async (): Promise<void> => {
-        try {
-          for await (const { chatId, event } of launcher.events(watching.signal)) {
-            const before = ledgers.get(chatId) ?? emptyChatLedger;
-            const ledger = foldChatLedger(before, [event]);
-            const current = ledger.currentRunId === undefined ? undefined : ledger.runs[ledger.currentRunId];
-            // A chat whose run ended and settled is done with its ledger; a late redelivery finds no turn to settle.
-            const done =
-              current?.lifecycle !== undefined &&
-              terminalStates.has(current.lifecycle) &&
-              unsettledAttempts(ledger).length === 0;
-            if (done) {
-              ledgers.delete(chatId);
-            } else {
-              ledgers.set(chatId, ledger);
-            }
-            const lifecycle = ledger.runs[event.runId]?.lifecycle;
-            // The run's attempt just ended with no settlement row: the turn is the machine's to settle (D10).
-            if (
-              ledger === before ||
-              event.type !== 'run.lifecycle' ||
-              lifecycle === undefined ||
-              !terminalStates.has(lifecycle) ||
-              !unsettledAttempts(ledger).some((attempt) => attempt.runId === event.runId)
-            ) {
-              continue;
-            }
-            const key = turns.get(event.runId);
-            if (key === undefined) {
-              continue;
-            }
-            /* Sent straight through: `turn.machine` buffers a completion that
-             * arrives while it is still `preparing` and replays it on
-             * `leased.held`, so the host holds nothing (W6). */
-            actor.send({ type: 'turnCompleted', key, legacy: true });
+      /* Ended attempts already handed to the machine, so a later batch does not complete one twice.
+       * ponytail: one entry per ended attempt for the life of the host; prune on settlement if that ever matters. */
+      const completed = new Set<string>();
+      // The run's attempt ended with no settlement row: the turn is the machine's to settle (D10).
+      const settleEnded = (ledger: ChatLedger): void => {
+        for (const { runId, attempt } of unsettledAttempts(ledger)) {
+          const key = turns.get(runId);
+          const lifecycle = ledger.runs[runId]?.lifecycle;
+          const ended = `${runId}:${attempt}`;
+          if (key === undefined || lifecycle === undefined || !terminalStates.has(lifecycle) || completed.has(ended)) {
+            continue;
           }
-        } catch (error) {
-          /* A durable subscription can *error* — the launcher's fan-out drops
-           * one that fell behind — and nothing awaits this promise until
-           * `close()`. An unhandled rejection ends the process on Node 24 long
-           * before that, so the failure is kept and re-raised where a caller
-           * sees it. */
-          watchFailure = error;
+          completed.add(ended);
+          /* Sent straight through: `turn.machine` buffers a completion that
+           * arrives while it is still `preparing` and replays it on
+           * `leased.held`, so the host holds nothing (W6). */
+          actor.send({ type: 'turnCompleted', key, legacy: true });
         }
-      })();
+      };
+      /* One pull per chat this wrapper admitted a turn on, folded into that chat's ledger (W3 CL-S8, SC-R14). A pull
+       * ends once the chat's current run is terminal and settled, and leaves the map; the next start re-watches. */
+      const watches = new Map<string, Promise<void>>();
+      const settledIn = (ledger: ChatLedger, runId: string | undefined): boolean => {
+        const lifecycle = runId === undefined ? undefined : ledger.runs[runId]?.lifecycle;
+        return (
+          lifecycle !== undefined &&
+          terminalStates.has(lifecycle) &&
+          !unsettledAttempts(ledger).some((attempt) => attempt.runId === runId)
+        );
+      };
+      const watch = (chatId: string): void => {
+        if (watches.has(chatId)) {
+          return;
+        }
+        /* Done once the current run is terminal and settled and no turn this wrapper admitted on the chat is still
+         * open: a second start that lands while the first run's pull is ending keeps the pull. */
+        const done = (ledger: ChatLedger): boolean =>
+          settledIn(ledger, ledger.currentRunId) &&
+          [...turns.values()].every((key) => key.chatId !== chatId || settledIn(ledger, key.runId));
+        const pull = async (): Promise<void> => {
+          try {
+            for await (const { ledger } of followChat(launcher.read, chatId, {
+              signal: watching.signal,
+              until: done,
+            })) {
+              settleEnded(ledger);
+            }
+            // A refused read (the chat was fenced or unreadable) ends this pull; the owner reports it, not `close()`.
+          } catch (error) {
+            /* Nothing awaits this pull until `close()`, and an unhandled
+             * rejection ends the process on Node 24 long before that, so the
+             * failure is kept and re-raised where a caller sees it. */
+            watchFailure ??= error;
+          }
+          // An ended pull leaves the map, so the chat's next start watches it again.
+          if (watches.get(chatId) === pulling) {
+            watches.delete(chatId);
+          }
+        };
+        // Awaited by `close()`, which re-raises a failure that is not a refusal.
+        const pulling = pull();
+        watches.set(chatId, pulling);
+      };
+      /* Chats whose pull was still open at close: settled from their final ledger, since rows written while the
+       * launcher shuts down cannot be read after it closes. */
+      const open = new Set<string>();
 
       return {
         ...launcher,
         execute: async (command) => {
-          if (command.type !== 'start' || turns.has(command.runId)) {
+          if (command.type !== 'start' || turns.has(command.payload.runId)) {
             return launcher.execute(command);
           }
+          const { payload } = command;
           const filesystem = await filesystems({
             id: actor.getSnapshot().context.liveCheckoutId ?? 'live',
             projectId,
@@ -1684,51 +1705,70 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             branch: undefined,
             baseRevisionId: undefined,
           });
-          const bytes = await readChatRecord(filesystem, command.chatId);
+          const bytes = await readChatRecord(filesystem, payload.chatId);
           const chat = bytes === undefined ? undefined : chatRecordSchema.parse(JSON.parse(bytes));
-          if (chat !== undefined && chat.id !== command.chatId) {
+          if (chat !== undefined && chat.id !== payload.chatId) {
             throw new Error('The chat record does not match the admitted chat.');
           }
           const snapshot = actor.getSnapshot().context;
           // The durable picker selection outranks a previous turn's cached placement.
-          const checkoutId = chat?.checkoutId ?? snapshot.chatCheckouts[command.chatId] ?? snapshot.selectedCheckoutId;
+          const checkoutId = chat?.checkoutId ?? snapshot.chatCheckouts[payload.chatId] ?? snapshot.selectedCheckoutId;
           await admit({
-            runId: command.runId,
-            chatId: command.chatId,
+            runId: payload.runId,
+            chatId: payload.chatId,
             /* The stable user-message id the client keys its own turn on: the
              * settlement has to name the same turn the transcript does, or the
              * graph node it becomes belongs to nothing on screen. */
-            turnId: command.message.id,
+            turnId: payload.message.id,
             ...(checkoutId === undefined ? {} : { checkoutId }),
           });
-          try {
-            return await launcher.execute(command);
-          } catch (error) {
-            /* `acknowledge` only throws when nothing of ours was admitted, so
-             * the turn never reached the tool loop and wrote nothing. The turn
-             * actor retires its lease and drops out; a refused admission must
-             * not hold one for the life of the host. */
-            const key = turns.get(command.runId);
+          watch(payload.chatId);
+          /* A refusal that left no record means nothing of ours was admitted, so
+           * the turn never reached the tool loop and wrote nothing. The turn
+           * actor retires its lease and drops out; a refused admission must
+           * not hold one for the life of the host. */
+          const abandon = (): void => {
+            const key = turns.get(payload.runId);
             if (key !== undefined) {
               /* Named by attempt: an edit reuses the message id the previous
                * run leased, so the verb must not end whichever run holds that
                * turn id now (D14). */
               actor.send({ type: 'turnAbandoned', key, legacy: true });
-              turns.delete(command.runId);
+              turns.delete(payload.runId);
             }
-            options.checkouts?.delete(command.runId);
+            options.checkouts?.delete(payload.runId);
+          };
+          let answer: Awaited<ReturnType<NodeAgentLauncher['execute']>>;
+          try {
+            answer = await launcher.execute(command);
+          } catch (error) {
+            abandon();
             throw error;
           }
+          /* This call admitted the turn, so an answer that ran nothing of ours retires it: a refusal that left no
+           * record, or a replay of a start whose turn already ran (W4.r1). */
+          if (answer.status === 'replayed' || (answer.status === 'refused' && answer.effect === 'not-applied')) {
+            abandon();
+          }
+          return answer;
         },
         close: async () => {
-          /* The launcher first: closing it drains every background run, so the
-           * terminal markers this wrapper settles on are published before the
-           * fan-out ends the watch. */
+          /* The launcher first: closing it drains every background run. Its
+           * close ends the pulls, so the terminal markers the drain wrote are
+           * settled from each chat's final ledger. */
+          for (const chatId of watches.keys()) {
+            open.add(chatId);
+          }
           await launcher.close();
-          await watch;
+          watching.abort();
+          await Promise.all(watches.values());
+          for (const chatId of open) {
+            // oxlint-disable-next-line no-await-in-loop -- one cached ledger per watched chat.
+            settleEnded(await launcher.host.ledger(chatId));
+          }
           await release();
           if (watchFailure !== undefined) {
-            // oxlint-disable-next-line @typescript-eslint/only-throw-error -- re-raising exactly what the launcher's stream threw.
+            // oxlint-disable-next-line @typescript-eslint/only-throw-error -- re-raising exactly what a chat's pull threw.
             throw watchFailure;
           }
         },

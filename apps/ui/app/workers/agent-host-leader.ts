@@ -23,7 +23,7 @@ export type ChatLeaderLease =
  * chat share its lock and its channel, and the leader answers a frame of
  * another version with a coded refusal instead of silence (W0.17, I32).
  */
-export const agentHostProtocolVersion = 2;
+export const agentHostProtocolVersion = 3;
 
 export type FollowerStaleReason = 'heartbeat' | 'tail';
 

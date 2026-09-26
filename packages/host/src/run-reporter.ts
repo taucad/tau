@@ -1,4 +1,7 @@
-import type { AgentChannelEvent } from '@taucad/agent-host';
+import { followChat } from '@taucad/agent-host';
+import type { AgentLogEvent, ChatLedger, ChatRead } from '@taucad/agent-host';
+import { commandPayloads } from '@taucad/agent-host/wire';
+import type { CommandVerb } from '@taucad/agent-host/wire';
 
 import type { HostControlOutbound, HostRunState } from '#host.schemas.js';
 
@@ -20,14 +23,22 @@ const directoryState: Readonly<Record<string, HostRunState>> = {
 
 /** Options for {@link startRunReporter}. @public */
 export type RunReporterOptions = {
-  /** The launcher's durable event stream for every chat it owns. */
-  readonly events: (signal: AbortSignal) => AsyncIterable<AgentChannelEvent>;
+  /** The launcher's long-poll read of one chat's durable rows. */
+  readonly read: ChatRead;
   /** Put one frame on the control socket. May throw when the socket is gone. */
   readonly send: (frame: HostControlOutbound) => void;
 };
 
 /** A running reporter. @public */
 export type RunReporter = {
+  /**
+   * Follow one chat's runs, from the start of its log. Idempotent per chat.
+   *
+   * Called for every chat a command names. A replayed prefix
+   * re-reports only the states the directory already holds, and the directory
+   * keeps the newer `updatedAt`.
+   */
+  watch(chatId: string): void;
   /**
    * Re-send every state whose frame did not reach the relay.
    *
@@ -43,8 +54,8 @@ export type RunReporter = {
 /**
  * Report this host's run lifecycle to the API's run directory.
  *
- * The launcher's durable stream is the only input, because it is the same
- * stream the log is written from: a state that reaches a client has, by
+ * The launcher's durable rows are the only input, pulled per chat with the
+ * same `read` a client uses: a state that reaches a client has, by
  * construction, already reached the disk. Nothing but `run.lifecycle` is read,
  * so no message, tool call or transcript can leak into a control frame even by
  * accident (PH19: the API keeps a directory, never content).
@@ -54,8 +65,8 @@ export type RunReporter = {
  * *directory* could not be updated; the next transition re-reports, and a
  * missing row is recoverable while a stalled run is not.
  *
- * @param options - The event stream and the control-socket sender.
- * @returns A handle that stops reporting.
+ * @param options - The chat read and the control-socket sender.
+ * @returns A handle that follows chats and stops reporting.
  * @public
  *
  * @example <caption>Report a daemon's runs</caption>
@@ -65,7 +76,8 @@ export type RunReporter = {
  *
  * declare const launcher: NodeAgentLauncher;
  * declare const send: (frame: unknown) => void;
- * const reporter = startRunReporter({ events: (signal) => launcher.events(signal), send });
+ * const reporter = startRunReporter({ read: launcher.read, send });
+ * reporter.watch('chat-1');
  * reporter.close();
  * ```
  */
@@ -74,7 +86,7 @@ export const startRunReporter = (options: RunReporterOptions): RunReporter => {
   /* Last reported state per run: a reconnecting client replays the log from its
    * cursor, and a directory that re-reported every replayed prefix would write
    * one row per reader rather than one per transition. */
-  const reported = new Map<string, HostRunState>();
+  const reported = new Map<string, Readonly<{ state: HostRunState; at: string }>>();
   /** Frames the control socket did not take, kept until it does. */
   const undelivered = new Map<string, Extract<HostControlOutbound, { readonly type: 'run' }>>();
   const deliver = (frame: Extract<HostControlOutbound, { readonly type: 'run' }>): void => {
@@ -85,28 +97,47 @@ export const startRunReporter = (options: RunReporterOptions): RunReporter => {
       undelivered.set(frame.runId, frame);
     }
   };
-  const pump = async (): Promise<void> => {
-    for await (const { chatId, event } of options.events(controller.signal)) {
-      if (event.type !== 'run.lifecycle') {
-        continue;
+  const watched = new Set<string>();
+  const pump = async (chatId: string): Promise<void> => {
+    // A chat's pull ends once its current run is terminal; the next command that names the chat watches it again.
+    const until = (ledger: ChatLedger): boolean => {
+      const lifecycle = ledger.currentRunId === undefined ? undefined : ledger.runs[ledger.currentRunId]?.lifecycle;
+      return lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled';
+    };
+    for await (const { events } of followChat(options.read, chatId, { signal: controller.signal, until })) {
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- in-process rows are the launcher's own log events.
+      for (const event of events as readonly AgentLogEvent[]) {
+        if (event.type !== 'run.lifecycle') {
+          continue;
+        }
+        const state = directoryState[event.state];
+        const prior = reported.get(event.runId);
+        // A re-followed chat replays from row 0: a transition at or before the last one reported is not news.
+        if (!state || (prior !== undefined && (prior.state === state || prior.at >= event.recordedAt))) {
+          continue;
+        }
+        reported.set(event.runId, { state, at: event.recordedAt });
+        deliver({ v: 1, type: 'run', runId: event.runId, chatId, state, updatedAt: event.recordedAt });
       }
-      const state = directoryState[event.state];
-      if (!state || reported.get(event.runId) === state) {
-        continue;
-      }
-      reported.set(event.runId, state);
-      deliver({ v: 1, type: 'run', runId: event.runId, chatId, state, updatedAt: event.recordedAt });
     }
   };
-  // async-iife: bootstrap -- the stream ends with the launcher; `close()` is the only settlement a caller has.
-  void (async (): Promise<void> => {
-    try {
-      await pump();
-    } catch {
-      /* The stream ends with the launcher; there is nothing left to report to. */
-    }
-  })();
   return {
+    watch(chatId: string): void {
+      if (watched.has(chatId)) {
+        return;
+      }
+      watched.add(chatId);
+      // async-iife: bootstrap -- the pull ends with the run or the launcher; `close()` is the only settlement a caller has.
+      void (async (): Promise<void> => {
+        try {
+          await pump(chatId);
+        } catch {
+          /* The launcher closed under the read; there is nothing left to report to. */
+        } finally {
+          watched.delete(chatId);
+        }
+      })();
+    },
     flush(): void {
       const pending = [...undelivered.values()];
       for (const frame of pending) {
@@ -117,4 +148,21 @@ export const startRunReporter = (options: RunReporterOptions): RunReporter => {
       controller.abort();
     },
   };
+};
+
+/**
+ * The chat a command names, when the reporter should follow it: a command whose payload parses, other than `attach`,
+ * which only reads (W4.r1).
+ *
+ * @param command - The command as the daemon received it, not yet parsed.
+ * @returns The chat to watch, if any.
+ * @public
+ */
+export const chatToReport = (command: Readonly<{ type: string; payload?: unknown }>): string | undefined => {
+  if (command.type === 'attach' || !Object.hasOwn(commandPayloads, command.type)) {
+    return undefined;
+  }
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowed by the hasOwn check above.
+  const parsed = commandPayloads[command.type as CommandVerb].safeParse(command.payload);
+  return parsed.success ? parsed.data.chatId : undefined;
 };

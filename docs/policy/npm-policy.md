@@ -201,7 +201,7 @@ Use a single regex per package that names every private workspace dep explicitly
 CORRECT:
 
 ```typescript
-const TAU_WORKSPACE_BUNDLE = /^@taucad\/(events|filesystem|fs-bridge|json-schema|memory|rpc|types|utils)(\/|$)/;
+const TAU_WORKSPACE_BUNDLE = /^@taucad\/(events|filesystem|fs-bridge|json-schema|memory|types|utils)(\/|$)/;
 
 export default defineConfig({
   // ...

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Chat } from '@ai-sdk/react';
 import type { UIMessageChunk } from 'ai';
 import { parseLogEvent } from '@taucad/agent-host';
+import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
+import { agentWireLimits } from '@taucad/agent-host/wire';
 import type { MyUIMessage } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import { AgentHostWorkerError } from '#services/agent-host-client.js';
@@ -21,13 +23,22 @@ import {
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
-import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
-type AgentLogEvent = Parameters<Parameters<AgentHostClient['subscribe']>[0]>[1];
-type AgentLiveEvent = Parameters<Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0]>[1];
+/** One read page, as the host answers it. */
+const page = <Fields extends { readonly cursor: number; readonly nextCursor: number; readonly endCursor: number }>(
+  fields: Fields,
+): Fields & { readonly status: 'batch'; readonly chatId: string } => ({
+  status: 'batch',
+  chatId: 'chat-test',
+  ...fields,
+});
+
+/** The follow's arguments: where it starts, and who hears each row. */
+type Follow = Parameters<AgentHostClient['subscribe']>;
+type LiveListener = Parameters<NonNullable<AgentHostClient['subscribeLive']>>[1];
 
 const snapshot = (chatId: string, runId: string, state: 'running' | 'completed' | 'cancelled' = 'completed') =>
   ({
@@ -39,7 +50,7 @@ const snapshot = (chatId: string, runId: string, state: 'running' | 'completed' 
   }) satisfies Awaited<ReturnType<AgentHostClient['start']>>;
 
 const clientFor = (chatId: string, runId: string, overrides: Partial<AgentHostClient> = {}) => {
-  let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+  let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
   return {
     start: vi.fn(async () => {
       listener?.(chatId, {
@@ -96,9 +107,23 @@ const clientFor = (chatId: string, runId: string, overrides: Partial<AgentHostCl
       return snapshot(chatId, runId);
     }),
     resolveInterrupt: vi.fn(async () => snapshot(chatId, runId)),
-    attach: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
-    tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
-    subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+    attach: vi.fn(async () =>
+      page({
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+      }),
+    ),
+    read: vi.fn(async () =>
+      page({
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+      }),
+    ),
+    subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
       listener = next;
       return () => {
         listener = undefined;
@@ -254,7 +279,7 @@ describe('BrowserPlacementChatTransport', () => {
     installBrowserGlobals();
     const chatId = 'chat-cleared-run';
     const runId = 'run-cleared-run';
-    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     const lifecycleOnly = clientFor(chatId, runId, {
       start: vi.fn(async () => {
         listener?.(chatId, {
@@ -268,7 +293,7 @@ describe('BrowserPlacementChatTransport', () => {
         });
         return snapshot(chatId, runId);
       }),
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         listener = next;
         return () => {
           listener = undefined;
@@ -393,8 +418,8 @@ describe('BrowserPlacementChatTransport', () => {
     const chatId = 'chat-external-tools';
     const runId = 'run-external-tools';
     const toolCallId = 'call-external-tools';
-    let durableListener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
-    let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0] | undefined;
+    let durableListener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
+    let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[1] | undefined;
     const start = vi.fn(async () => {
       liveListener?.(chatId, {
         type: 'tool-input-start',
@@ -494,13 +519,13 @@ describe('BrowserPlacementChatTransport', () => {
     });
     const client = clientFor(chatId, runId, {
       start,
-      subscribe: vi.fn((listener: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], listener: Follow[1]) => {
         durableListener = listener;
         return () => {
           durableListener = undefined;
         };
       }),
-      subscribeLive: vi.fn((listener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0]) => {
+      subscribeLive: vi.fn((_chatId: string, listener: LiveListener) => {
         liveListener = listener;
         return () => {
           liveListener = undefined;
@@ -573,9 +598,9 @@ describe('BrowserPlacementChatTransport', () => {
         trigger: 'turn',
         runIds: [runId],
       });
-    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     const client = clientFor(chatId, runId, {
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         listener = next;
         return () => {
           listener = undefined;
@@ -681,13 +706,15 @@ describe('BrowserPlacementChatTransport', () => {
       observed.push({ type: event.type, runState: getBrowserAgentHostRun(chatId)?.state });
     });
     const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: events.length,
-        endCursor: events.length,
-        events,
-        snapshot: snapshot(chatId, runId),
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: events.length,
+          endCursor: events.length,
+          events,
+          snapshot: snapshot(chatId, runId),
+        }),
+      ),
     });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => {
@@ -716,7 +743,7 @@ describe('BrowserPlacementChatTransport', () => {
     installBrowserGlobals();
     const chatId = 'chat-late-turn-settlement';
     const runId = 'run-late-turn-settlement';
-    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     const recordSettlement = vi.fn(async () => undefined);
     const client = clientFor(chatId, runId, {
       recordSettlement,
@@ -732,7 +759,7 @@ describe('BrowserPlacementChatTransport', () => {
         });
         return snapshot(chatId, runId);
       }),
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         listener = next;
         return () => {
           listener = undefined;
@@ -794,10 +821,9 @@ describe('BrowserPlacementChatTransport', () => {
     }
   });
 
-  /* G-REV-MODE: the host that runs the turn is the host that records it, so
-     the composer's revision selection has to leave the page with the admission.
-     The body's `execution` is where `createRunBody` puts it. */
-  it("carries the turn's revision mode from the durable body to the host's start command", async () => {
+  /* Drift 4: no host reads `mode` or `baseRevisionId`, and the wire's start payload is strict, so a body that still
+     carries them must not put them on the command (the owner would refuse it COMMAND_UNREADABLE). */
+  it("keeps the body's dead revision mode off the host's start command", async () => {
     installBrowserGlobals();
     const chatId = 'chat-revision-mode';
     const runId = 'run-revision-mode';
@@ -824,12 +850,10 @@ describe('BrowserPlacementChatTransport', () => {
     });
     await drain(stream.getReader());
 
-    expect(commands.find((command) => command['type'] === 'start')).toMatchObject({
-      type: 'start',
-      runId,
-      mode: 'candidate',
-      baseRevisionId: 'rev:base-1',
-    });
+    const start = commands.find((command) => command['type'] === 'start');
+    expect(start).toMatchObject({ type: 'start', runId });
+    expect(start).not.toHaveProperty('mode');
+    expect(start).not.toHaveProperty('baseRevisionId');
     unregister();
   });
 
@@ -948,19 +972,21 @@ describe('BrowserPlacementChatTransport', () => {
     ] satisfies AgentLogEvent[];
     const markRunId = vi.fn(async () => undefined);
     const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 4,
-        endCursor: 4,
-        events,
-        snapshot: {
-          chatId,
-          runId,
-          turnId: 'user-reload-failed',
-          state: 'failed',
-          messages: [{ id: 'user-reload-failed', role: 'user', content: 'Build it.' }],
-        } as const,
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 4,
+          endCursor: 4,
+          events,
+          snapshot: {
+            chatId,
+            runId,
+            turnId: 'user-reload-failed',
+            state: 'failed',
+            messages: [{ id: 'user-reload-failed', role: 'user', content: 'Build it.' }],
+          } as const,
+        }),
+      ),
     });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({
@@ -1065,7 +1091,15 @@ describe('BrowserPlacementChatTransport', () => {
       },
     } as const;
     const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () => ({ cursor: 0, nextCursor: 4, endCursor: 4, events, snapshot: refusedSnapshot })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 4,
+          endCursor: 4,
+          events,
+          snapshot: refusedSnapshot,
+        }),
+      ),
     });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({
@@ -1094,7 +1128,7 @@ describe('BrowserPlacementChatTransport', () => {
     requestBrowserAgentHostResume(chatId);
     await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
 
-    expect(client.resume).toHaveBeenCalledWith(chatId);
+    expect(client.resume).toHaveBeenCalledWith(chatId, runId);
     // The turn is continued, never re-admitted: `start` is what rewinds history.
     expect(client.start).not.toHaveBeenCalled();
     // One-shot: the next reattach this caller did not ask for spends nothing.
@@ -1145,7 +1179,15 @@ describe('BrowserPlacementChatTransport', () => {
       failure: detail,
     } as const;
     const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () => ({ cursor: 0, nextCursor: 4, endCursor: 4, events, snapshot: refusedSnapshot })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 4,
+          endCursor: 4,
+          events,
+          snapshot: refusedSnapshot,
+        }),
+      ),
     });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({
@@ -1179,7 +1221,7 @@ describe('BrowserPlacementChatTransport', () => {
     requestBrowserAgentHostResume(chatId);
     const resumed = await chunksOf();
 
-    expect(client.resume).toHaveBeenCalledWith(chatId);
+    expect(client.resume).toHaveBeenCalledWith(chatId, runId);
     expect(resumed.filter((chunk) => chunk.type === 'error')).toEqual([]);
     expect(resumed.at(-1)).toMatchObject({ type: 'finish' });
 
@@ -1224,19 +1266,21 @@ describe('BrowserPlacementChatTransport', () => {
       revisionId: 'rev-unsettled-return',
     } as const satisfies HostTurnSettlement;
     const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 4,
-        endCursor: 4,
-        events,
-        snapshot: {
-          chatId,
-          runId,
-          turnId,
-          state: 'completed',
-          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
-        } as const,
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 4,
+          endCursor: 4,
+          events,
+          snapshot: {
+            chatId,
+            runId,
+            turnId,
+            state: 'completed',
+            messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+          } as const,
+        }),
+      ),
       recordSettlement: vi.fn(async () => undefined),
     });
     const unregister = registerAgentHost(chatId, {
@@ -1285,19 +1329,21 @@ describe('BrowserPlacementChatTransport', () => {
     ] satisfies AgentLogEvent[];
     const closing = Promise.withResolvers<void>();
     const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 3,
-        endCursor: 3,
-        events,
-        snapshot: {
-          chatId,
-          runId,
-          turnId,
-          state: 'completed',
-          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
-        } as const,
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 3,
+          endCursor: 3,
+          events,
+          snapshot: {
+            chatId,
+            runId,
+            turnId,
+            state: 'completed',
+            messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+          } as const,
+        }),
+      ),
       recordSettlement: vi.fn(async () => undefined),
       close: vi.fn(async () => closing.promise),
     });
@@ -1439,21 +1485,23 @@ describe('BrowserPlacementChatTransport', () => {
       { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
       { ...base, sequence: 3, type: 'run.lifecycle', state: 'failed', detail: first },
     ] satisfies AgentLogEvent[];
-    let notify: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let notify: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     const client = clientFor(chatId, runId, {
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         notify = next;
         return () => {
           notify = undefined;
         };
       }),
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 3,
-        endCursor: 3,
-        events,
-        snapshot: { chatId, runId, turnId, state: 'failed', messages: [], failure: first } as const,
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 3,
+          endCursor: 3,
+          events,
+          snapshot: { chatId, runId, turnId, state: 'failed', messages: [], failure: first } as const,
+        }),
+      ),
       resume: vi.fn(async (resumedChat: string) => {
         notify?.(resumedChat, {
           ...base,
@@ -1546,32 +1594,34 @@ describe('BrowserPlacementChatTransport', () => {
       revisionId: 'rev-resume-settlement',
     } as const satisfies HostTurnSettlement;
     let persistedByThisStream: boolean | undefined;
-    let notify: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let notify: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     const settleAfterTheStream = async (): Promise<void> => {
       persistedByThisStream = await persistBrowserTurnSettlement(finalized);
       recordHostTurnSettlement(finalized);
     };
     const client = clientFor(chatId, runId, {
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         notify = next;
         return () => {
           notify = undefined;
         };
       }),
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 5,
-        endCursor: 5,
-        events,
-        snapshot: {
-          chatId,
-          runId,
-          turnId,
-          state: 'failed',
-          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
-          failure: { message: 'Refused once.', code: 'INVALID_REQUEST', status: 400 },
-        } as const,
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 5,
+          endCursor: 5,
+          events,
+          snapshot: {
+            chatId,
+            runId,
+            turnId,
+            state: 'failed',
+            messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+            failure: { message: 'Refused once.', code: 'INVALID_REQUEST', status: 400 },
+          } as const,
+        }),
+      ),
       recordSettlement: vi.fn(async () => undefined),
       resume: vi.fn(async (resumedChat: string) => {
         notify?.(resumedChat, {
@@ -1663,28 +1713,30 @@ describe('BrowserPlacementChatTransport', () => {
       runIds: [runId],
       revisionId: 'rev-resume-open',
     } as const satisfies HostTurnSettlement;
-    let notify: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let notify: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     const client = clientFor(chatId, runId, {
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         notify = next;
         return () => {
           notify = undefined;
         };
       }),
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 4,
-        endCursor: 4,
-        events,
-        snapshot: {
-          chatId,
-          runId,
-          turnId,
-          state: 'failed',
-          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
-          failure: refusal,
-        } as const,
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 4,
+          endCursor: 4,
+          events,
+          snapshot: {
+            chatId,
+            runId,
+            turnId,
+            state: 'failed',
+            messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+            failure: refusal,
+          } as const,
+        }),
+      ),
       recordSettlement: vi.fn(async () => undefined),
       resume: vi.fn(async (resumedChat: string) => {
         /* The host's own ordering: the reopened attempt is already running and
@@ -1764,9 +1816,9 @@ describe('BrowserPlacementChatTransport', () => {
       recordedAt: '2026-09-01T00:00:01.000Z',
       runId,
     } as const;
-    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     const client = clientFor(chatId, runId, {
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         listener = next;
         return () => {
           listener = undefined;
@@ -1833,20 +1885,22 @@ describe('BrowserPlacementChatTransport', () => {
     const chatId = 'chat-refused-catalog';
     const runId = 'run-refused-catalog';
     const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 0,
-        endCursor: 0,
-        events: [],
-        snapshot: {
-          chatId,
-          runId,
-          turnId: 'user-refused-catalog',
-          state: 'failed',
-          messages: [],
-          failure: { code: 'MODEL_NOT_IN_CATALOG', message: 'That model is not in the catalog.', status: 400 },
-        } as const,
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+          snapshot: {
+            chatId,
+            runId,
+            turnId: 'user-refused-catalog',
+            state: 'failed',
+            messages: [],
+            failure: { code: 'MODEL_NOT_IN_CATALOG', message: 'That model is not in the catalog.', status: 400 },
+          } as const,
+        }),
+      ),
     });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({
@@ -1893,19 +1947,28 @@ describe('BrowserPlacementChatTransport', () => {
       message: { id: 'user-reload-running', role: 'user', content: 'Build it.' },
     } satisfies AgentLogEvent;
     const completed = { ...running, sequence: 3, state: 'completed' } satisfies AgentLogEvent;
-    const attach = vi.fn(async () => ({
-      cursor: 0,
-      nextCursor: 1,
-      endCursor: 2,
-      events: [running],
-      snapshot: { chatId, runId, turnId: `message-${chatId}`, state: 'running', messages: [] } as const,
-    }));
-    const tail = vi.fn(async () => ({ cursor: 1, nextCursor: 2, endCursor: 2, events: [appended] }));
-    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const attach = vi.fn(async () =>
+      page({
+        cursor: 0,
+        nextCursor: 1,
+        endCursor: 2,
+        events: [running],
+        snapshot: { chatId, runId, turnId: `message-${chatId}`, state: 'running', messages: [] } as const,
+      }),
+    );
+    const read = vi.fn(async () =>
+      page({
+        cursor: 1,
+        nextCursor: 2,
+        endCursor: 2,
+        events: [appended],
+      }),
+    );
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     const client = clientFor(chatId, runId, {
       attach,
-      tail,
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      read,
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         listener = next;
         return () => {
           listener = undefined;
@@ -1928,14 +1991,21 @@ describe('BrowserPlacementChatTransport', () => {
     // The log tail is non-terminal: the resume stays attached to the live run
     // (the host takes leadership over and resumes it) instead of ending here.
     await vi.waitFor(() => {
-      expect(tail).toHaveBeenCalledOnce();
+      expect(listener).toBeDefined();
     });
+    expect(read).toHaveBeenCalledOnce();
+    expect(client.subscribe).toHaveBeenCalledWith({ chatId, cursor: 2 }, expect.any(Function));
     expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'running' });
     listener!(chatId, completed);
     await drain(reader);
 
-    expect(attach).toHaveBeenCalledWith({ chatId, cursor: 0, limit: 16 });
-    expect(tail).toHaveBeenCalledWith({ chatId, cursor: 1, limit: 16 });
+    expect(attach).toHaveBeenCalledWith({ chatId, cursor: 0 });
+    // The next page names the row it follows, so an owner on another history refuses it (SC-R11).
+    expect(read).toHaveBeenCalledWith({
+      chatId,
+      cursor: 1,
+      last: { leaderEpoch: 'leader-reload-running', sequence: 1 },
+    });
     expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'completed' });
     unregister();
   });
@@ -2050,7 +2120,7 @@ describe('BrowserPlacementChatTransport', () => {
     retryRegistration();
   });
 
-  it('maps continue to subscribe-first bounded follower attach without executing resume', async () => {
+  it('maps continue to a bounded follower attach, then follows from its end, without executing resume', async () => {
     installBrowserGlobals();
     const chatId = 'chat-follower';
     const runId = 'run-follower';
@@ -2064,15 +2134,24 @@ describe('BrowserPlacementChatTransport', () => {
       state: 'completed',
     } satisfies AgentLogEvent;
     const running = { ...completed, sequence: 1, state: 'running' } satisfies AgentLogEvent;
-    const attach = vi.fn(async () => ({
-      cursor: 0,
-      nextCursor: 1,
-      endCursor: 2,
-      events: [running],
-    }));
-    const tail = vi.fn(async () => ({ cursor: 1, nextCursor: 2, endCursor: 2, events: [completed] }));
+    const attach = vi.fn(async () =>
+      page({
+        cursor: 0,
+        nextCursor: 1,
+        endCursor: 2,
+        events: [running],
+      }),
+    );
+    const read = vi.fn(async () =>
+      page({
+        cursor: 1,
+        nextCursor: 2,
+        endCursor: 2,
+        events: [completed],
+      }),
+    );
     const subscribe = vi.fn(() => () => undefined);
-    const client = clientFor(chatId, runId, { attach, tail, subscribe });
+    const client = clientFor(chatId, runId, { attach, read, subscribe });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({
         projectId: 'project-follower',
@@ -2090,9 +2169,12 @@ describe('BrowserPlacementChatTransport', () => {
     const reader = stream!.getReader();
     await drain(reader);
 
-    expect(subscribe.mock.invocationCallOrder[0]).toBeLessThan(attach.mock.invocationCallOrder[0]!);
-    expect(attach).toHaveBeenCalledWith({ chatId, cursor: 0, limit: 16 });
-    expect(tail).toHaveBeenCalledWith({ chatId, cursor: 1, limit: 16 });
+    /* Rows are pulled, not pushed (SC-R14): the follow starts after the replay, from the cursor it ended on, so nothing
+     * between the two is lost and nothing is delivered twice. */
+    expect(attach.mock.invocationCallOrder[0]).toBeLessThan(subscribe.mock.invocationCallOrder[0]!);
+    expect(subscribe).toHaveBeenCalledWith({ chatId, cursor: 2 }, expect.any(Function));
+    expect(attach).toHaveBeenCalledWith({ chatId, cursor: 0 });
+    expect(read).toHaveBeenCalledWith({ chatId, cursor: 1, last: { leaderEpoch: 'leader-1', sequence: 1 } });
     expect(client.resume).not.toHaveBeenCalled();
     unregister();
   });
@@ -2103,8 +2185,8 @@ describe('BrowserPlacementChatTransport', () => {
       installBrowserGlobals();
       const chatId = 'chat-attach-race';
       const runId = 'run-attach-race';
-      let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0] | undefined;
-      let durableListener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+      let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[1] | undefined;
+      let durableListener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
       const base = { version: 1, leaderEpoch: 'leader', recordedAt: '2026-09-01T00:00:00.000Z', runId } as const;
       const events: AgentLogEvent[] = [
         { ...base, sequence: 0, type: 'run.lifecycle', state: 'admitted' },
@@ -2124,13 +2206,20 @@ describe('BrowserPlacementChatTransport', () => {
         { ...base, sequence: 3, type: 'run.lifecycle', state: 'completed' },
       ];
       const client = clientFor(chatId, runId, {
-        subscribe: (listener) => {
+        /* The follow pulls from where the replay ended (SC-R14): a row the log gained while the attach was in flight
+         * arrives through it, not pushed into the gap. */
+        subscribe: ({ cursor }, listener) => {
           durableListener = listener;
+          queueMicrotask(() => {
+            for (const event of events.slice(cursor)) {
+              durableListener?.(chatId, event);
+            }
+          });
           return () => {
             durableListener = undefined;
           };
         },
-        subscribeLive: (listener) => {
+        subscribeLive: (_chatId, listener) => {
           liveListener = listener;
           return () => {
             liveListener = undefined;
@@ -2146,17 +2235,14 @@ describe('BrowserPlacementChatTransport', () => {
             delta: 'Later',
             offset: 0,
           });
-          if (snapshotState === 'running') {
-            durableListener?.(chatId, events[3]!);
-          }
           const attachedEvents = snapshotState === 'running' ? events.slice(0, 3) : events;
-          return {
+          return page({
             cursor: 0,
             nextCursor: attachedEvents.length,
             endCursor: attachedEvents.length,
             events: attachedEvents,
             snapshot: { ...snapshot(chatId, runId), state: snapshotState },
-          };
+          });
         },
       });
       const unregister = registerAgentHost(chatId, {
@@ -2192,8 +2278,8 @@ describe('BrowserPlacementChatTransport', () => {
     const chatId = 'chat-live';
     const runId = 'run-live';
     const startGate = Promise.withResolvers<void>();
-    let durableListener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
-    let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0] | undefined;
+    let durableListener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
+    let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[1] | undefined;
     const start = vi.fn(async () => {
       liveListener?.(chatId, {
         type: 'text-delta',
@@ -2226,13 +2312,13 @@ describe('BrowserPlacementChatTransport', () => {
     });
     const client = clientFor(chatId, runId, {
       start,
-      subscribe: vi.fn((listener: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], listener: Follow[1]) => {
         durableListener = listener;
         return () => {
           durableListener = undefined;
         };
       }),
-      subscribeLive: vi.fn((listener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0]) => {
+      subscribeLive: vi.fn((_chatId: string, listener: LiveListener) => {
         liveListener = listener;
         return () => {
           liveListener = undefined;
@@ -2291,18 +2377,20 @@ describe('BrowserPlacementChatTransport', () => {
     const runId = 'run-snapshot-terminal';
     const turnId = `message-${chatId}`;
     const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 0,
-        endCursor: 0,
-        events: [],
-        snapshot: {
-          ...snapshot(chatId, runId),
-          messages: [{ id: turnId, role: 'user', content: 'Restore this turn.' }] satisfies Awaited<
-            ReturnType<AgentHostClient['start']>
-          >['messages'],
-        },
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+          snapshot: {
+            ...snapshot(chatId, runId),
+            messages: [{ id: turnId, role: 'user', content: 'Restore this turn.' }] satisfies Awaited<
+              ReturnType<AgentHostClient['start']>
+            >['messages'],
+          },
+        }),
+      ),
     });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({
@@ -2375,13 +2463,15 @@ describe('BrowserPlacementChatTransport', () => {
       { ...base, sequence: 6, type: 'run.lifecycle', state: 'completed' },
     ];
     const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: events.length,
-        endCursor: events.length,
-        events,
-        snapshot: snapshot(chatId, runId),
-      })),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: events.length,
+          endCursor: events.length,
+          events,
+          snapshot: snapshot(chatId, runId),
+        }),
+      ),
     });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({
@@ -2426,8 +2516,22 @@ describe('BrowserPlacementChatTransport', () => {
     } satisfies AgentLogEvent;
     const attach = vi
       .fn<AgentHostClient['attach']>()
-      .mockResolvedValueOnce({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })
-      .mockResolvedValueOnce({ cursor: 0, nextCursor: 1, endCursor: 1, events: [completed] });
+      .mockResolvedValueOnce({
+        status: 'batch',
+        chatId: 'chat-test',
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+      })
+      .mockResolvedValueOnce({
+        status: 'batch',
+        chatId: 'chat-test',
+        cursor: 0,
+        nextCursor: 1,
+        endCursor: 1,
+        events: [completed],
+      });
     const client = clientFor(chatId, runId, {
       start: vi.fn(async () => snapshot(chatId, runId)),
       attach,
@@ -2630,7 +2734,7 @@ describe('BrowserPlacementChatTransport', () => {
     installBrowserGlobals();
     const chatId = 'chat-live-refusal';
     const runId = 'run-live-refusal';
-    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     let refusals = 0;
     const client = clientFor(chatId, runId, {
       start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
@@ -2649,14 +2753,16 @@ describe('BrowserPlacementChatTransport', () => {
         });
         return snapshot(chatId, input.runId);
       }),
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 0,
-        endCursor: 0,
-        events: [],
-        snapshot: snapshot(chatId, 'run-previous', 'running'),
-      })),
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+          snapshot: snapshot(chatId, 'run-previous', 'running'),
+        }),
+      ),
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         listener = next;
         /* The run this page never attached to ends on its own. */
         globalThis.setTimeout(() => {
@@ -2720,14 +2826,16 @@ describe('BrowserPlacementChatTransport', () => {
       start: vi.fn(async () => {
         throw new AgentHostWorkerError('CHAT_RUN_LIVE', `Chat ${chatId} has a running run; admit the next turn.`);
       }),
-      attach: vi.fn(async () => ({
-        cursor: 0,
-        nextCursor: 0,
-        endCursor: 0,
-        events: [],
-        snapshot: snapshot(chatId, 'run-orphan', 'running'),
-      })),
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+          snapshot: snapshot(chatId, 'run-orphan', 'running'),
+        }),
+      ),
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         globalThis.setTimeout(() => {
           next(chatId, {
             version: 1,
@@ -2781,7 +2889,7 @@ describe('BrowserPlacementChatTransport', () => {
     const chatId = 'chat-browser-approval';
     const runId = 'run-browser-approval';
     const completion = Promise.withResolvers<Awaited<ReturnType<AgentHostClient['start']>>>();
-    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     const resolveInterrupt = vi.fn(async () => {
       listener?.(chatId, {
         version: 1,
@@ -2799,7 +2907,7 @@ describe('BrowserPlacementChatTransport', () => {
     const client = clientFor(chatId, runId, {
       start: vi.fn(async () => completion.promise),
       resolveInterrupt,
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         listener = next;
         return () => {
           listener = undefined;
@@ -2868,13 +2976,15 @@ describe('BrowserPlacementChatTransport', () => {
       },
       createClient: async () =>
         clientFor(chatId, runId, {
-          attach: vi.fn(async () => ({
-            cursor: 0,
-            nextCursor: events.length,
-            endCursor: events.length,
-            events,
-            snapshot: snapshot(chatId, runId),
-          })),
+          attach: vi.fn(async () =>
+            page({
+              cursor: 0,
+              nextCursor: events.length,
+              endCursor: events.length,
+              events,
+              snapshot: snapshot(chatId, runId),
+            }),
+          ),
         }),
       markRunId: async () => undefined,
     });
@@ -2910,18 +3020,19 @@ describe('BrowserPlacementChatTransport', () => {
     const chatId = 'chat-daemon-reattach-clamped';
     const events = hexagonalNutFourRunEvents();
     const streamingRunId = [...new Set(events.map((event) => event.runId))].at(-1)!;
-    const batchFrom = (cursor: number) => ({
-      cursor,
-      nextCursor: Math.min(cursor + agentHostTailBatchLimit, events.length),
-      endCursor: events.length,
-      events: events.slice(cursor, cursor + agentHostTailBatchLimit),
-      snapshot: snapshot(chatId, streamingRunId),
-    });
+    const batchFrom = (cursor: number) =>
+      page({
+        cursor,
+        nextCursor: Math.min(cursor + agentWireLimits.batchRows, events.length),
+        endCursor: events.length,
+        events: events.slice(cursor, cursor + agentWireLimits.batchRows),
+        snapshot: snapshot(chatId, streamingRunId),
+      });
     let clamped = false;
-    const tail = vi.fn(async (input: { readonly cursor: number }) => {
+    const read = vi.fn(async (input: { readonly cursor: number }) => {
       if (!clamped && input.cursor > 0) {
         clamped = true;
-        return { cursor: 10, nextCursor: 10, endCursor: 10, events: [] };
+        return page({ cursor: 10, nextCursor: 10, endCursor: 10, events: [] });
       }
       return batchFrom(input.cursor);
     });
@@ -2930,7 +3041,7 @@ describe('BrowserPlacementChatTransport', () => {
       projectStorage: async () => {
         throw new Error('A daemon-placed turn reads its workspace from the daemon.');
       },
-      createClient: async () => clientFor(chatId, streamingRunId, { attach: vi.fn(async () => batchFrom(0)), tail }),
+      createClient: async () => clientFor(chatId, streamingRunId, { attach: vi.fn(async () => batchFrom(0)), read }),
       markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
@@ -2939,7 +3050,7 @@ describe('BrowserPlacementChatTransport', () => {
 
     await chat.resumeStream();
 
-    expect(tail.mock.calls.slice(0, 2).map(([input]) => input.cursor)).toEqual([agentHostTailBatchLimit, 0]);
+    expect(read.mock.calls.slice(0, 2).map(([input]) => input.cursor)).toEqual([agentWireLimits.batchRows, 0]);
     expect(assistantTexts(chat.messages)).toEqual(durableTexts(events));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('clamped'), chatId);
     warn.mockRestore();
@@ -2963,13 +3074,14 @@ describe('BrowserPlacementChatTransport', () => {
     const runIds = [...new Set(events.map((event) => event.runId))];
     const streamingRunId = runIds.at(-1)!;
     // Paged exactly as the host pages it: 157 events at 16 per batch.
-    const batchFrom = (cursor: number) => ({
-      cursor,
-      nextCursor: Math.min(cursor + agentHostTailBatchLimit, events.length),
-      endCursor: events.length,
-      events: events.slice(cursor, cursor + agentHostTailBatchLimit),
-      snapshot: snapshot(chatId, streamingRunId),
-    });
+    const batchFrom = (cursor: number) =>
+      page({
+        cursor,
+        nextCursor: Math.min(cursor + agentWireLimits.batchRows, events.length),
+        endCursor: events.length,
+        events: events.slice(cursor, cursor + agentWireLimits.batchRows),
+        snapshot: snapshot(chatId, streamingRunId),
+      });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => {
         throw new Error('A daemon-placed turn reads its workspace from the daemon.');
@@ -2977,7 +3089,7 @@ describe('BrowserPlacementChatTransport', () => {
       createClient: async () =>
         clientFor(chatId, streamingRunId, {
           attach: vi.fn(async () => batchFrom(0)),
-          tail: vi.fn(async (input: { readonly cursor: number }) => batchFrom(input.cursor)),
+          read: vi.fn(async (input: { readonly cursor: number }) => batchFrom(input.cursor)),
         }),
       markRunId: async () => undefined,
     });
@@ -3091,7 +3203,7 @@ describe('BrowserPlacementChatTransport', () => {
     vi.useFakeTimers();
     try {
       const chatId = 'chat-settlement-never-arrives';
-      let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+      let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
       /* The run completes and the stream closes — the turn looks done on screen
          — but no `turn.finalized` ever lands, so the late-settlement wait keeps
          this chat's settlement and every later submit behind it. */
@@ -3108,7 +3220,7 @@ describe('BrowserPlacementChatTransport', () => {
           });
           return snapshot(chatId, input.runId);
         }),
-        subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
           listener = next;
           return () => {
             listener = undefined;
@@ -3325,7 +3437,7 @@ describe('BrowserPlacementChatTransport attachments', () => {
     installBrowserGlobals();
     const chatId = 'chat-errored-writer-close';
     const runId = 'run-errored-writer-close';
-    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
     /* Held open so the cancel lands while the stream body is still running,
        which is the field ordering: the SDK reads the error chunk and drops the
        reader long before the body reaches its close. */
@@ -3349,7 +3461,7 @@ describe('BrowserPlacementChatTransport attachments', () => {
         await started.promise;
         return { chatId, runId, turnId: `message-${chatId}`, state: 'failed', messages: [] } as const;
       }),
-      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
         listener = next;
         return () => {
           listener = undefined;

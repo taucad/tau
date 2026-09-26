@@ -161,14 +161,12 @@ describe('validateTags()', () => {
 });
 
 describe('bundledLibraries()', () => {
-  it("derives the runtime owner's eight direct bundle candidates", () => {
+  it("derives the runtime owner's six direct bundle candidates", () => {
     expect(bundledLibraries(live, 'runtime')).toEqual([
       '@taucad/events',
-      '@taucad/filesystem',
       '@taucad/fs-bridge',
       '@taucad/json-schema',
       '@taucad/memory',
-      '@taucad/rpc',
       '@taucad/types',
       '@taucad/utils',
     ]);

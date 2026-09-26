@@ -196,6 +196,45 @@
       "expect": "pass",
       "ref": "S4 3.5 (today)"
     },
+    "SeamDelivery.clamp-ProjectionIsPrefix.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ProjectionIsPrefix"
+      },
+      "kind": "witness",
+      "ref": "SC T13 (CheckCursor = FALSE): a reconnect to a zombie with an empty view clamps the cursor to 0 and row 1 is applied again (L2a D24; L2b HD-1); 16-state trace"
+    },
+    "SeamDelivery.no-floor-Resolved.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "Resolved"
+      },
+      "kind": "witness",
+      "ref": "SC T13 (Floor = FALSE): a zombie answers fenced and the client addresses it again, forever (SC-R10); 9-state lasso"
+    },
+    "SeamDelivery.target-live.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "SC T13 (target, 1 key): the invariants, AnsweredOrPeerDead and Resolved (3,042 states, 1 s)"
+    },
+    "SeamDelivery.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "SC T13 (target, 2 keys, 2 generations): AtMostOneEffectPerKey, AnswerAfterDurable, ProjectionIsPrefix (531,158 states, 9 s)"
+    },
+    "SeamDelivery.today-answered.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "SC T13 (today, daemon non-start verbs): AnsweredOrPeerDead holds"
+    },
+    "SeamDelivery.unkeyed-AtMostOneEffectPerKey.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneEffectPerKey"
+      },
+      "kind": "witness",
+      "ref": "SC T13 (Keyed = FALSE): after a false suspicion a re-send to the same generation appends k1 twice, so keys land before replay (SC-S5 before SC-S6); 6-state trace"
+    },
     "TurnSettlement.lease-first-AtMostOneRevisionPerTurn.cfg": {
       "tier": "pr",
       "expect": {
@@ -797,6 +836,24 @@
         },
         "kind": "witness",
         "ref": "W3 CL-S9 PrepareOnlyWhenResolved (gateCode, EQ1, RV1-F3): the compaction prepare is exempt and history.compacted closes it, but the generation it interrupted is still unresolved, so the next generation prepare is refused"
+      }
+    },
+    "SeamDeliveryTrace": {
+      "SeamDelivery/seeded/crash-after-append.ndjson": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "SC T15 C1: the owner dies after the append and before answering; generation 2 claims, the re-send by key answers replayed, one row"
+      },
+      "SeamDelivery/seeded/duplicate-append.ndjson": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": []
+          }
+        },
+        "kind": "witness",
+        "ref": "SC T15 N1 control: a re-send after a false suspicion appends k1 a second time (AtMostOneEffectPerKey)"
       }
     }
   }

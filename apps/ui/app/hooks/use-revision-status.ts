@@ -275,24 +275,15 @@ export const createHostRevisionClient = (input: {
         throw staleConnection();
       }
       channel = next;
-      const initial = await next.execute({
-        type: 'revision',
-        request: { command: 'status' },
-      });
+      const initial = await next.revision({ command: 'status' });
       if (generation !== connectionGeneration) {
         throw staleConnection();
-      }
-      if (initial.type !== 'revision') {
-        throw new Error('The host answered a revision request with an agent response.');
       }
       applyStatus(initial.status);
       /* The desktop host keeps this project's root alive across renderer
        * reloads. Reattaching is therefore the open signal that makes the
        * retained scheduler fetch again before the client reads remote work. */
-      await next.execute({
-        type: 'revision',
-        request: { command: 'open' },
-      });
+      await next.revision({ command: 'open' });
       const abort = new AbortController();
       streamAbort = abort;
       // async-iife: bootstrap -- the stream lives for the connection and reports through Topics.
@@ -339,10 +330,7 @@ export const createHostRevisionClient = (input: {
   };
   const ask = async (request: JsonValue): Promise<JsonValue> => {
     const connected = await opened();
-    const response = await connected.execute({ type: 'revision', request });
-    if (response.type !== 'revision') {
-      throw new Error('The host answered a revision request with an agent response.');
-    }
+    const response = await connected.revision(request);
     applyStatus(response.status);
     return response.result;
   };

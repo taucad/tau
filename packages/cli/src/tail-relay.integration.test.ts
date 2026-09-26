@@ -19,10 +19,10 @@
  *     what a load balancer does to a browser: the session record, the route
  *     markers and the relay streams all live in Redis, so either replica admits
  *     either leg.
- *   - **Viewers tail; only the owner attaches** (W5-TAIL ruling 1). The viewer
+ *   - **Viewers read; only the owner attaches** (W5-TAIL ruling 1). The viewer
  *     never sends `attach` — that command recovers a non-terminal run and
- *     reports leadership — so no new client option was needed: `tail` already
- *     *is* the read-only window, and `createAgentChannelClient` speaks it.
+ *     reports leadership — so no new client option was needed: the long-poll
+ *     `read` *is* the read-only window, and `createAgentChannelClient` speaks it.
  *
  * Gated behind `TAU_DS3_TAIL_RELAY=1` so `cli:test` stays a unit suite: this one
  * spawns two API processes, a daemon and a stub gateway, and runs for minutes.
@@ -43,9 +43,11 @@ import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
-import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
+import { agentChannelPort, createAgentChannelClient } from '@taucad/agent-host/channel-client';
+import { agentWireLimits } from '@taucad/agent-host/wire';
+import type { ReadAnswer } from '@taucad/agent-host/wire';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
-import type { AgentChannelClient, AgentLogEvent, EventLogBatch } from '@taucad/agent-host';
+import type { AgentChannelClient, AgentLogEvent } from '@taucad/agent-host';
 
 const execFileAsync = promisify(execFile);
 
@@ -66,8 +68,8 @@ const forcedDisconnects = 100;
 const reconnectBudget = 250;
 /** DS-3's floor on the log the viewer has to reassemble. */
 const minimumEvents = 200;
-/** `agentChannelTailBatchLimit`; the wire refuses anything larger. */
-const tailLimit = 16;
+/** `agentWireLimits.batchRows`; the wire refuses anything larger. */
+const tailLimit = agentWireLimits.batchRows;
 /** Tool-calling turns the fixture gateway answers before its closing text. */
 const gatewayTurns = 140;
 /** How long each gateway answer is held, so the log grows over a wide window. Milliseconds. */
@@ -539,8 +541,10 @@ const dialViewer = async (placement: Placement, viewerOrigin: string): Promise<D
     firstFrame.resolve(performance.now());
   });
   /* Wrapped before `open`, deliberately: the daemon posts its channel hello the
-   * instant its own upgrade completes, and `ws` drops a frame nobody listens for. */
-  const client = createAgentChannelClient(socket, { sessionKey: 'tau-agent' });
+   * instant its own upgrade completes, and `ws` drops a frame nobody listens for.
+   * One wire per client: this test re-dials by hand, so it can time each one. */
+  const port = agentChannelPort(socket);
+  const client = createAgentChannelClient({ connect: () => port, sessionKey: 'tau-agent' });
   await new Promise<void>((resolve, reject) => {
     socket.once('open', resolve);
     socket.once('error', reject);
@@ -627,12 +631,12 @@ const measureTail = async (input: {
   const residual: number[] = [];
   const usable: number[] = [];
 
-  const accept = (batch: EventLogBatch): void => {
-    if (batch.cursor !== progress.cursor) {
+  const accept = (batch: ReadAnswer): void => {
+    if (batch.status !== 'batch' || batch.cursor !== progress.cursor) {
       counters.cursorViolations += 1;
       return;
     }
-    for (const event of batch.events) {
+    for (const event of batch.events as readonly AgentLogEvent[]) {
       const identity = identityOf(event);
       if (seen.has(identity)) {
         counters.duplicated += 1;
@@ -650,17 +654,18 @@ const measureTail = async (input: {
   let channel = await dialViewer(placement, replicaB);
   await channel.firstFrameAt;
 
+  /** One long-poll read; a settled, drained log has no next row to wait for. */
+  const readWindow = (): Parameters<AgentChannelClient['read']>[0] => ({
+    chatId,
+    cursor: progress.cursor,
+    limit: tailLimit,
+    maxBytes: agentWireLimits.batchBytes,
+  });
   const tailOnce = async (): Promise<void> => {
-    const answer = await channel.client.execute({
-      type: 'tail',
-      chatId,
-      cursor: progress.cursor,
-      limit: tailLimit,
-    });
-    if (answer.type !== 'tail') {
-      throw new Error(`tail answered ${answer.type}`);
+    if (progress.complete && progress.cursor === progress.endCursor) {
+      return;
     }
-    accept(answer.batch);
+    accept(await channel.client.read(readWindow()));
   };
 
   const redial = async (destroyedAt: number, crossing: boolean): Promise<void> => {
@@ -686,28 +691,22 @@ const measureTail = async (input: {
   while (counters.disconnects < forcedDisconnects && Date.now() < deadline) {
     const rounds = 1 + Math.floor(random() * 3);
     for (let round = 0; round < rounds; round++) {
-      // oxlint-disable-next-line no-await-in-loop -- a cursored tail is sequential by definition.
+      // oxlint-disable-next-line no-await-in-loop -- a cursored read is sequential by definition; it waits for the next append.
       await tailOnce();
-      if (progress.cursor === progress.endCursor) {
-        // oxlint-disable-next-line no-await-in-loop -- let the daemon append before asking again.
-        await sleep(20 + Math.floor(random() * 40));
-      }
     }
     const growing = !progress.complete;
     let pending: Promise<void> | undefined;
     let answeredBeforeKill = false;
     if (random() < 0.5) {
-      /* Destroyed with a `tail` outstanding: the answer never lands, the cursor
+      /* Destroyed with a `read` outstanding: the answer never lands, the cursor
        * never advances, and the same window is re-issued on the replacement
        * wire. This is the case that can duplicate. */
       pending = channel.client
-        .execute({ type: 'tail', chatId, cursor: progress.cursor, limit: tailLimit })
+        .read(readWindow())
         // oxlint-disable-next-line promise/prefer-await-to-then -- the request must stay in flight while the socket dies.
         .then((answer) => {
           answeredBeforeKill = true;
-          if (answer.type === 'tail') {
-            accept(answer.batch);
-          }
+          accept(answer);
         })
         // oxlint-disable-next-line promise/prefer-await-to-then -- a killed wire rejects it; that is the point.
         .catch(() => undefined);
@@ -739,12 +738,8 @@ const measureTail = async (input: {
   // Drain to the end of the log on the last wire.
   const drainDeadline = Date.now() + 300_000;
   while (Date.now() < drainDeadline && !(progress.complete && progress.cursor === progress.endCursor)) {
-    // oxlint-disable-next-line no-await-in-loop -- a cursored tail is sequential by definition.
+    // oxlint-disable-next-line no-await-in-loop -- a cursored read is sequential by definition; it waits for the next append.
     await tailOnce();
-    if (progress.cursor === progress.endCursor && !progress.complete) {
-      // oxlint-disable-next-line no-await-in-loop -- wait for the next append.
-      await sleep(50);
-    }
   }
   channel.client.close('ds3-done');
   channel.socket.close();
@@ -823,12 +818,15 @@ describe.skipIf(!enabled)('DS-3: the cursored tail over the relay replaces durab
       const owner = await dialViewer(placement, replicaA);
       const started = await owner.client.execute({
         type: 'start',
-        trigger: 'submit',
-        chatId,
-        runId: 'ds3-run',
-        message: { id: 'ds3-user-1', role: 'user', content: 'Write the DS-3 fixture steps.' },
+        commandId: 'ds3-start',
+        payload: {
+          chatId,
+          runId: 'ds3-run',
+          trigger: 'submit',
+          message: { id: 'ds3-user-1', role: 'user', content: 'Write the DS-3 fixture steps.' },
+        },
       });
-      expect(started.type).toBe('result');
+      expect(started).toMatchObject({ status: 'applied', effect: 'durable' });
       owner.client.close('owner-done');
       owner.socket.close();
 

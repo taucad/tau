@@ -261,22 +261,23 @@ const raiseInterrupt = async (input: {
   readonly runId: string;
   readonly interruptId: string;
 }): Promise<void> => {
-  const socket = new WebSocket(new URL('/agent', input.origin).href.replace('http:', 'ws:'), {
-    headers: { authorization: `Bearer ${agentToken}` },
-  });
-  const client = createAgentChannelClient(socket, { sessionKey: 'tau-agent' });
-  await new Promise<void>((resolve, reject) => {
-    socket.once('open', resolve);
-    socket.once('error', reject);
+  const client = createAgentChannelClient({
+    connect: () =>
+      new WebSocket(new URL('/agent', input.origin).href.replace('http:', 'ws:'), {
+        headers: { authorization: `Bearer ${agentToken}` },
+      }),
   });
   try {
     await client.execute({
       type: 'interrupt',
-      chatId: input.chatId,
-      runId: input.runId,
-      interruptId: input.interruptId,
-      kind: 'approval',
-      prompt: 'May I write the plate?',
+      commandId: `raise-${input.interruptId}`,
+      payload: {
+        chatId: input.chatId,
+        runId: input.runId,
+        interruptId: input.interruptId,
+        kind: 'approval',
+        prompt: 'May I write the plate?',
+      },
     });
   } finally {
     client.close('interrupt raised');
@@ -422,7 +423,7 @@ describe('tau agent (scripted command projections)', () => {
     // --- run, tail, steer, cancel -----------------------------------------
     const started = await tau({ args: ['agent', 'run', 'chat-1', 'hello daemon', '--detach'], origin });
     expect(started.code).toBe(0);
-    expect(started.stdout).toMatch(/^operation\tstart\nrun\t[\w-]+\nstate\t(admitted|running)\n$/u);
+    expect(started.stdout).toMatch(/^operation\tstart\nrun\t[\w-]+\nstatus\tapplied\ncursor\t\d+\n$/u);
     const runId = runIdOf(started);
 
     const tailing = tailInBackground(origin, 'chat-1');
@@ -433,9 +434,8 @@ describe('tau agent (scripted command projections)', () => {
 
     const cancelled = await tau({ args: ['agent', 'cancel', 'chat-1', runId, '--json'], origin });
     const [cancelRecord] = jsonRecords(cancelled.stdout);
-    expect(cancelRecord).toMatchObject({ v: 1, kind: 'agent', operation: 'cancel', run: runId });
-    /* D12: the label is the daemon's, never this command's assumption. */
-    expect(['completed', 'failed', 'cancelled']).toContain(cancelRecord?.['state']);
+    /* D12: the answer is the daemon's, never this command's assumption: the terminal row is durable at `cursor`. */
+    expect(cancelRecord).toMatchObject({ v: 1, kind: 'agent', operation: 'cancel', run: runId, status: 'applied' });
     expect(cancelled.code).toBe(0);
 
     // --- a followed run that is cancelled underneath it exits 4 --------------
@@ -532,15 +532,20 @@ describe('tau agent (scripted command projections)', () => {
     );
     const stderr: string[] = [];
     piped.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(Buffer.from(chunk).toString('utf8')));
+    /* A follow parked in a long poll learns its reader is gone at the chat's next row, so the held turn is let go
+     * whenever it reaches the gateway. */
+    const releasing = setInterval(() => {
+      gateway.release();
+    }, 100);
     const code = await new Promise<number>((resolve) => {
       piped.once('exit', (exit) => {
         resolve(exit ?? 1);
       });
     });
+    clearInterval(releasing);
 
     expect(stderr.join('')).not.toContain('EPIPE');
     expect(code).toBe(0);
-    gateway.release();
   }, 180_000);
 
   it('should record an external run whose daemon died mid-turn as abandoned', async () => {
@@ -579,7 +584,7 @@ describe('tau agent (scripted command projections)', () => {
     // The killed daemon's `<log>.lock` stays on disk; the next writer takes it over by pid liveness.
 
     /* A fresh daemon over the same workspace holds no run at all: only an
-     * `attach` recovers one, and `tail` is the command that sends it. */
+     * `attach` recovers one, and every replay opens with it. */
     const second = await startServe({ workspace, configDirectory, relayUrl, gatewayUrl: gateway.url });
     const tailed = await tau({ args: ['agent', 'tail', 'chat-acp'], origin: second.url });
     expect(tailed.code).toBe(3);
@@ -621,7 +626,7 @@ describe('external-agent refusal rendering', () => {
   it('should name every VSC4 code and what the user can do about it', async () => {
     /* Imported here, not at module scope: `@taucad/agent-host` is lazy-loaded on
      * this package's own first-paint path, and the boundary rule enforces it. */
-    const { externalAgentRefusalCodes } = await import('@taucad/agent-host');
+    const { externalAgentRefusalCodes } = await import('@taucad/agent-host/wire');
     expect(externalAgentRefusalCodes.length).toBeGreaterThan(0);
     for (const code of externalAgentRefusalCodes) {
       expect(refusalText({ code, message: 'The agent said no.' })).toBe(`${code}: The agent said no.`);

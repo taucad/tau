@@ -1,28 +1,48 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import type { ChannelServerHandle, HostRunSnapshot } from '@taucad/agent-host';
+import type { AgentLiveEvent, AgentLogEvent, ChannelServerHandle, HostRunSnapshot } from '@taucad/agent-host';
 import { serveAgentWorkerChannel } from '@taucad/agent-host/channel-client';
+import { agentWireVersion } from '@taucad/agent-host/wire';
+import type { CommandAnswer, ReadAnswer, ReadRequest } from '@taucad/agent-host/wire';
 import {
   createBrowserAgentHostClient,
   getBrowserAgentHostCapability,
   probeBrowserAgentHostCapability,
 } from '#services/agent-host-client.js';
-import type {
-  AgentHostWorkerCallRequest,
-  AgentHostWorkerEvent,
-  AgentHostWorkerLiveEvent,
-  AgentHostWorkerProtocol,
-} from '#workers/agent-host.contract.js';
+import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import {
-  agentHostWorkerCommandSchema,
+  agentHostSettlementRecordSchema,
   agentHostWorkerProtocolSchemas,
   parseAgentHostWorkerConnect,
-  readCommandReturnAddress,
 } from '#workers/agent-host.contract.js';
 
 type ErrorListener = (event: ErrorEvent) => void;
 
+type FakeRequest = { readonly name: string; readonly args: Record<string, unknown> };
+
+const hang = async (signal: AbortSignal, what: string): Promise<never> =>
+  new Promise((_resolve, reject) => {
+    signal.addEventListener(
+      'abort',
+      () => {
+        reject(signal.reason instanceof Error ? signal.reason : new Error(`${what} aborted.`));
+      },
+      { once: true },
+    );
+  });
+
+const lifecycleRow = (sequence: number, runId: string, state: HostRunSnapshot['state']): AgentLogEvent => ({
+  version: 1,
+  type: 'run.lifecycle',
+  leaderEpoch: 'epoch-1',
+  sequence,
+  recordedAt: '2026-09-01T00:00:00.000Z',
+  runId,
+  state,
+});
+
+/** A worker speaking the keyed page↔worker protocol: verbs answer by key, rows are read, never pushed. */
 class FakeAgentHostWorker {
   public dropCommands = false;
   public dropClose = false;
@@ -30,139 +50,25 @@ class FakeAgentHostWorker {
   public dropStartResponse = false;
   public deferRunCompletion = false;
   public closeError: Error | undefined;
-  public readonly requests: AgentHostWorkerCallRequest[] = [];
+  public readonly refusals = new Map<
+    string,
+    { readonly code: string; readonly message: string; readonly details?: Record<string, unknown> }
+  >();
+  public readonly requests: FakeRequest[] = [];
   public readonly postMessage = vi.fn((value: unknown, _transfer?: Transferable[]) => {
     const connection = parseAgentHostWorkerConnect(value);
     this.server = serveAgentWorkerChannel<AgentHostWorkerProtocol>(connection.port, {
       sessionKey: connection.sessionId,
       protocolSchemas: agentHostWorkerProtocolSchemas,
+      hello: { wire: agentWireVersion, build: 'fake' },
       impl: {
         // oxlint-disable-next-line eslint/max-params -- @taucad/rpc ChannelServer callback contract.
-        call: async (_context, _name, request, signal) => {
-          this.requests.push(request);
-          if (request.type === 'capabilities') {
-            return {
-              type: 'capabilities',
-              report: {
-                supported: true,
-                checks: {
-                  worker: true,
-                  webLocks: true,
-                  broadcastChannel: true,
-                  opfs: true,
-                  syncAccessHandle: true,
-                },
-              },
-            };
-          }
-          if (request.type === 'initialize') {
-            return { type: 'initialized' };
-          }
-          if (request.type === 'close') {
-            if (this.closeError) {
-              throw this.closeError;
-            }
-            if (this.dropClose) {
-              return new Promise((_resolve, reject) => {
-                signal.addEventListener(
-                  'abort',
-                  () => {
-                    reject(signal.reason instanceof Error ? signal.reason : new Error('Close aborted.'));
-                  },
-                  { once: true },
-                );
-              });
-            }
-            return { type: 'closed' };
-          }
-          if (this.dropCommands) {
-            return new Promise((_resolve, reject) => {
-              signal.addEventListener(
-                'abort',
-                () => {
-                  reject(signal.reason instanceof Error ? signal.reason : new Error('Command aborted.'));
-                },
-                { once: true },
-              );
-            });
-          }
-          if (request.type === 'tail' || request.type === 'attach') {
-            const batch = { cursor: request.cursor, nextCursor: request.cursor, endCursor: request.cursor, events: [] };
-            const snapshot = this.snapshots.get(request.chatId);
-            if (request.type === 'attach' && this.dropRunningAttach && snapshot?.state === 'running') {
-              return new Promise((_resolve, reject) => {
-                signal.addEventListener(
-                  'abort',
-                  () => {
-                    reject(signal.reason instanceof Error ? signal.reason : new Error('Attach aborted.'));
-                  },
-                  { once: true },
-                );
-              });
-            }
-            return request.type === 'attach'
-              ? {
-                  type: 'attach',
-                  chatId: request.chatId,
-                  batch,
-                  leadership: { role: 'leader', generation: 'generation-1' },
-                  ...(snapshot ? { snapshot } : {}),
-                  takeover: false,
-                }
-              : { type: 'tail', chatId: request.chatId, batch };
-          }
-          const runId =
-            request.type === 'resume'
-              ? 'resumed-run'
-              : request.type === 'record-settlement'
-                ? request.event.runId
-                : request.runId;
-          const state = request.type === 'cancel' ? 'cancelled' : this.deferRunCompletion ? 'running' : 'completed';
-          const snapshot: HostRunSnapshot = {
-            chatId: request.chatId,
-            runId,
-            turnId: `turn-${runId}`,
-            state,
-            messages: [],
-          };
-          this.snapshots.set(request.chatId, snapshot);
-          this.emit({
-            type: 'event',
-            chatId: request.chatId,
-            event: {
-              version: 1,
-              type: 'run.lifecycle',
-              leaderEpoch: 'epoch-1',
-              sequence: 0,
-              recordedAt: '2026-09-01T00:00:00.000Z',
-              runId,
-              state,
-            },
-          });
-          if (request.type === 'start' && this.dropStartResponse) {
-            return new Promise((_resolve, reject) => {
-              signal.addEventListener(
-                'abort',
-                () => {
-                  reject(signal.reason instanceof Error ? signal.reason : new Error('Start response aborted.'));
-                },
-                { once: true },
-              );
-            });
-          }
-          return {
-            type: 'result',
-            operation: request.type,
-            snapshot,
-          };
+        call: async (_context, name, args, signal) => {
+          const result = await this.answer(name, args as unknown as Record<string, unknown>, signal);
+          return result as AgentHostWorkerProtocol['calls'][typeof name]['result'];
         },
         // oxlint-disable-next-line eslint/max-params -- @taucad/rpc ChannelServer callback contract.
-        listen: (_context, name, _args, signal) =>
-          (name === 'events'
-            ? this.listenTo(this.eventControllers, this.pendingEvents, signal)
-            : this.listenTo(this.liveEventControllers, this.pendingLiveEvents, signal)) as AsyncIterable<
-            AgentHostWorkerProtocol['listens'][typeof name]['event']
-          >,
+        listen: (_context, _name, args, signal) => this.listenLive(args.chatId, signal),
       },
     });
   });
@@ -170,10 +76,13 @@ class FakeAgentHostWorker {
   public readonly terminate = vi.fn(() => this.server?.dispose());
   private errorListener: ErrorListener | undefined;
   private server: ChannelServerHandle<AgentHostWorkerProtocol> | undefined;
-  private readonly eventControllers = new Set<ReadableStreamDefaultController<AgentHostWorkerEvent>>();
-  private readonly liveEventControllers = new Set<ReadableStreamDefaultController<AgentHostWorkerLiveEvent>>();
-  private readonly pendingEvents: AgentHostWorkerEvent[] = [];
-  private readonly pendingLiveEvents: AgentHostWorkerLiveEvent[] = [];
+  private readonly rows = new Map<string, AgentLogEvent[]>();
+  private readonly waiters = new Set<() => void>();
+  private readonly liveControllers = new Set<{
+    readonly chatId: string;
+    readonly controller: ReadableStreamDefaultController<AgentLiveEvent>;
+  }>();
+  private readonly pendingLive: AgentLiveEvent[] = [];
   private readonly snapshots = new Map<string, HostRunSnapshot>();
 
   public addEventListener(type: 'error', listener: ErrorListener): void;
@@ -188,28 +97,13 @@ class FakeAgentHostWorker {
     }
   }
 
-  public emit(
-    response:
-      | ({ readonly type: 'event' } & AgentHostWorkerEvent)
-      | ({ readonly type: 'live-event' } & AgentHostWorkerLiveEvent),
-  ): void {
-    if (response.type === 'event') {
-      const event: AgentHostWorkerEvent = { chatId: response.chatId, event: response.event };
-      if (this.eventControllers.size === 0) {
-        this.pendingEvents.push(event);
-        return;
-      }
-      for (const controller of this.eventControllers) {
-        controller.enqueue(event);
-      }
+  public emitLive(event: AgentLiveEvent): void {
+    const listening = [...this.liveControllers].filter((entry) => entry.chatId === event.chatId);
+    if (listening.length === 0) {
+      this.pendingLive.push(event);
       return;
     }
-    const event: AgentHostWorkerLiveEvent = { chatId: response.chatId, event: response.event };
-    if (this.liveEventControllers.size === 0) {
-      this.pendingLiveEvents.push(event);
-      return;
-    }
-    for (const controller of this.liveEventControllers) {
+    for (const { controller } of listening) {
       controller.enqueue(event);
     }
   }
@@ -218,45 +112,123 @@ class FakeAgentHostWorker {
     this.errorListener?.({ message } as ErrorEvent);
   }
 
-  public complete(chatId: string, emit = true): void {
+  public complete(chatId: string, append = true): void {
     const current = this.snapshots.get(chatId);
     if (!current) {
       throw new Error(`No fake run exists for ${chatId}.`);
     }
-    const snapshot: HostRunSnapshot = { ...current, state: 'completed' };
-    this.snapshots.set(chatId, snapshot);
-    if (emit) {
-      this.emit({
-        type: 'event',
-        chatId,
-        event: {
-          version: 1,
-          type: 'run.lifecycle',
-          leaderEpoch: 'epoch-1',
-          sequence: 1,
-          recordedAt: '2026-09-01T00:00:01.000Z',
-          runId: snapshot.runId,
-          state: 'completed',
-        },
-      });
+    this.snapshots.set(chatId, { ...current, state: 'completed' });
+    if (append) {
+      this.append(chatId, current.runId, 'completed');
     }
   }
 
-  private listenTo<Event>(
-    controllers: Set<ReadableStreamDefaultController<Event>>,
-    pending: Event[],
-    signal: AbortSignal,
-  ): AsyncIterable<Event> {
-    return new ReadableStream<Event>({
+  private append(chatId: string, runId: string, state: HostRunSnapshot['state']): number {
+    const rows = this.rows.get(chatId) ?? [];
+    this.rows.set(chatId, rows);
+    const cursor = rows.length;
+    rows.push(lifecycleRow(cursor, runId, state));
+    for (const wake of this.waiters) {
+      wake();
+    }
+    return cursor;
+  }
+
+  private async answer(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    this.requests.push({ name, args });
+    if (name === 'capabilities') {
+      return {
+        supported: true,
+        checks: { worker: true, webLocks: true, broadcastChannel: true, opfs: true, syncAccessHandle: true },
+      };
+    }
+    if (name === 'initialize' || name === 'record-settlement') {
+      return null;
+    }
+    if (name === 'close') {
+      if (this.closeError) {
+        throw this.closeError;
+      }
+      return this.dropClose ? hang(signal, 'Close') : null;
+    }
+    if (this.dropCommands) {
+      return hang(signal, 'Command');
+    }
+    if (name === 'read') {
+      return this.read(args as unknown as ReadRequest, signal);
+    }
+    const commandId = args['commandId'] as string;
+    const payload = args['payload'] as { readonly chatId: string; readonly runId?: string };
+    const refusal = this.refusals.get(name);
+    if (refusal) {
+      return { commandId, generation: 1, status: 'refused', effect: 'not-applied', ...refusal } satisfies CommandAnswer;
+    }
+    const snapshot = this.snapshots.get(payload.chatId);
+    if (name === 'attach') {
+      if (this.dropRunningAttach && snapshot?.state === 'running') {
+        return hang(signal, 'Attach');
+      }
+      return {
+        commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'not-applied',
+        details: {
+          ...(snapshot ? { snapshot } : {}),
+          takeover: false,
+          endCursor: this.rows.get(payload.chatId)?.length ?? 0,
+        },
+      } satisfies CommandAnswer;
+    }
+    const runId = payload.runId ?? 'resumed-run';
+    const state = name === 'cancel' ? 'cancelled' : this.deferRunCompletion ? 'running' : 'completed';
+    this.snapshots.set(payload.chatId, { chatId: payload.chatId, runId, turnId: `turn-${runId}`, state, messages: [] });
+    const cursor = this.append(payload.chatId, runId, state);
+    if (name === 'start' && this.dropStartResponse) {
+      return hang(signal, 'Start response');
+    }
+    return { commandId, generation: 1, status: 'applied', effect: 'durable', cursor } satisfies CommandAnswer;
+  }
+
+  /** A long poll: parked until a row exists past the cursor, or the reader lets go. */
+  private async read(request: ReadRequest, signal: AbortSignal): Promise<ReadAnswer> {
+    const rowsOf = (): AgentLogEvent[] => this.rows.get(request.chatId) ?? [];
+    while (rowsOf().length <= request.cursor && !signal.aborted) {
+      // oxlint-disable-next-line no-await-in-loop -- one park per append.
+      await new Promise<void>((resolve) => {
+        const wake = (): void => {
+          this.waiters.delete(wake);
+          resolve();
+        };
+        this.waiters.add(wake);
+        signal.addEventListener('abort', wake, { once: true });
+      });
+    }
+    const rows = rowsOf();
+    const events = rows.slice(request.cursor, request.cursor + request.limit);
+    return {
+      status: 'batch',
+      chatId: request.chatId,
+      cursor: request.cursor,
+      nextCursor: request.cursor + events.length,
+      endCursor: rows.length,
+      events,
+    };
+  }
+
+  private listenLive(chatId: string, signal: AbortSignal): AsyncIterable<AgentLiveEvent> {
+    return new ReadableStream<AgentLiveEvent>({
       start: (controller) => {
-        controllers.add(controller);
-        for (const event of pending.splice(0)) {
+        const entry = { chatId, controller };
+        this.liveControllers.add(entry);
+        for (const event of this.pendingLive.filter((pending) => pending.chatId === chatId)) {
+          this.pendingLive.splice(this.pendingLive.indexOf(event), 1);
           controller.enqueue(event);
         }
         signal.addEventListener(
           'abort',
           () => {
-            controllers.delete(controller);
+            this.liveControllers.delete(entry);
             controller.close();
           },
           { once: true },
@@ -266,6 +238,15 @@ class FakeAgentHostWorker {
     });
   }
 }
+
+const liveDelta = (chatId: string, runId: string, delta: string): AgentLiveEvent => ({
+  type: 'text-delta',
+  chatId,
+  runId,
+  messageId: `message-${runId}`,
+  contentIndex: 0,
+  delta,
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -278,12 +259,12 @@ const createTestClient = (
   vi.stubGlobal('Worker', vi.fn());
   vi.stubGlobal('BroadcastChannel', vi.fn());
   vi.stubGlobal('navigator', { locks: {}, storage: { getDirectory: vi.fn() } });
-  const channel = new MessageChannel();
-  const projectRootChannel = new MessageChannel();
+  // A bridge is opened per worker, so a replacement worker gets fresh ports.
+  const openBridge = (): FileSystemBridgeConnection =>
+    ({ port: new MessageChannel().port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection;
   return createBrowserAgentHostClient({
-    openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
-    openProjectRootBridge: () =>
-      ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+    openFileSystemBridge: openBridge,
+    openProjectRootBridge: openBridge,
     projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
     durability: 'exclusive-append',
     authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
@@ -432,12 +413,9 @@ describe('createBrowserAgentHostClient', () => {
     expect(worker.postMessage.mock.calls[0]?.[0]).toMatchObject({ type: 'agent-host/connect' });
     expect(worker.postMessage.mock.calls[0]?.[1]).toHaveLength(1);
     const initializeRequest = worker.requests[0];
-    expect(initializeRequest?.type).toBe('initialize');
-    if (initializeRequest?.type !== 'initialize') {
-      throw new Error('Expected initialize request.');
-    }
-    expect(initializeRequest.fileSystemPort).toBeInstanceOf(MessagePort);
-    expect(initializeRequest.projectRootPort).toBeInstanceOf(MessagePort);
+    expect(initializeRequest?.name).toBe('initialize');
+    expect(initializeRequest?.args['fileSystemPort']).toBeInstanceOf(MessagePort);
+    expect(initializeRequest?.args['projectRootPort']).toBeInstanceOf(MessagePort);
   });
 
   it('transfers workspace and project-root ports and drives start, steer, cancel, resume, events, and close', async () => {
@@ -473,26 +451,15 @@ describe('createBrowserAgentHostClient', () => {
       createWorker: () => worker as unknown as Worker,
     });
     const liveEvents: unknown[] = [];
-    const unsubscribe = client.subscribe((_chatId, event) => {
+    const unsubscribe = client.subscribe({ chatId: 'chat-1', cursor: 0 }, (_chatId, event) => {
       events.push(event);
     });
-    const unsubscribeLive = client.subscribeLive?.((_chatId, event) => {
+    const unsubscribeLive = client.subscribeLive?.('chat-1', (_chatId, event) => {
       liveEvents.push(event);
     });
     expect(unsubscribeLive).toBeDefined();
 
-    worker.emit({
-      type: 'live-event',
-      chatId: 'chat-1',
-      event: {
-        type: 'text-delta',
-        chatId: 'chat-1',
-        runId: 'run-1',
-        messageId: 'message-1',
-        contentIndex: 0,
-        delta: 'live',
-      },
-    });
+    worker.emitLive(liveDelta('chat-1', 'run-1', 'live'));
 
     await expect(
       client.start({
@@ -515,52 +482,59 @@ describe('createBrowserAgentHostClient', () => {
     ).resolves.toMatchObject({ chatId: 'chat-1', runId: 'run-1', state: 'completed' });
     await expect(client.steer('run-1', 'Use 20 mm.')).resolves.toMatchObject({ runId: 'run-1' });
     await expect(client.cancel('run-1')).resolves.toMatchObject({ state: 'cancelled' });
-    await expect(client.resume('chat-1')).resolves.toMatchObject({ runId: 'resumed-run' });
-    await expect(client.attach({ chatId: 'chat-1', cursor: 0, limit: 16 })).resolves.toMatchObject({
+    await expect(client.resume('chat-1', 'resumed-run')).resolves.toMatchObject({ runId: 'resumed-run' });
+    await expect(client.attach({ chatId: 'chat-1', cursor: 0 })).resolves.toMatchObject({
+      status: 'batch',
       cursor: 0,
-      leadership: { role: 'leader', generation: 'generation-1' },
+      nextCursor: 4,
       takeover: false,
-    });
-    await expect(client.tail({ chatId: 'chat-1', cursor: 0, limit: 17 })).rejects.toMatchObject({
-      code: 'TAIL_WINDOW_INVALID',
+      snapshot: { runId: 'resumed-run' },
     });
 
-    // Assertions follow protocol meaning: application requests are Channel calls, while Worker.postMessage
-    // is now reserved for the one bootstrap transfer.
-    const initialize = worker.requests[0];
-    const start = worker.requests[1];
+    // Every application request is a Channel call by verb; Worker.postMessage carries only the bootstrap transfer.
+    const [initialize, start] = worker.requests;
     expect(initialize).toMatchObject({
-      type: 'initialize',
-      computeMode: 'off',
-      projectStorage: { providerBasePath: 'project-one' },
-      authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
-      model: { providerKind: 'openai' },
-      systemPromptBlocks: [{ text: 'static' }, { text: 'workspace' }, { text: 'dynamic' }],
+      name: 'initialize',
+      args: {
+        computeMode: 'off',
+        projectStorage: { providerBasePath: 'project-one' },
+        authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
+        model: { providerKind: 'openai' },
+        systemPromptBlocks: [{ text: 'static' }, { text: 'workspace' }, { text: 'dynamic' }],
+      },
     });
-    if (initialize?.type !== 'initialize') {
-      throw new Error('Expected initialize request.');
-    }
-    expect(initialize.fileSystemPort).toBeInstanceOf(MessagePort);
-    expect(initialize.projectRootPort).toBeInstanceOf(MessagePort);
-    expect(initialize.computeStorePort).toBeUndefined();
+    expect(initialize?.args['fileSystemPort']).toBeInstanceOf(MessagePort);
+    expect(initialize?.args['projectRootPort']).toBeInstanceOf(MessagePort);
+    expect(initialize?.args['computeStorePort']).toBeUndefined();
     expect(openComputeStorePort).not.toHaveBeenCalled();
     expect(start).toMatchObject({
-      type: 'start',
-      chatId: 'chat-1',
-      runId: 'run-1',
-      config: { model: { id: 'retry-model' }, toolChoice: 'none', allowedTools: [] },
-    });
-    expect(events).toHaveLength(4);
-    expect(liveEvents).toEqual([
-      {
-        type: 'text-delta',
-        chatId: 'chat-1',
-        runId: 'run-1',
-        messageId: 'message-1',
-        contentIndex: 0,
-        delta: 'live',
+      name: 'start',
+      args: {
+        /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.stringMatching` is typed `any` by vitest. */
+        commandId: expect.stringMatching(/^req_/u),
+        payload: {
+          chatId: 'chat-1',
+          runId: 'run-1',
+          config: { model: { id: 'retry-model' }, toolChoice: 'none', allowedTools: [] },
+        },
       },
+    });
+    // One key per gesture (SC-R6), and every command answer is followed by one attach for the snapshot.
+    const commands = worker.requests.filter((request) => request.name !== 'read' && request.name !== 'initialize');
+    expect(commands.map((request) => request.name)).toEqual([
+      'start',
+      'attach',
+      'steer',
+      'attach',
+      'cancel',
+      'attach',
+      'resume',
+      'attach',
+      'attach',
     ]);
+    expect(new Set(commands.map((request) => request.args['commandId'])).size).toBe(commands.length);
+    await expect.poll(() => events).toHaveLength(4);
+    expect(liveEvents).toEqual([liveDelta('chat-1', 'run-1', 'live')]);
 
     unsubscribe();
     unsubscribeLive?.();
@@ -570,90 +544,84 @@ describe('createBrowserAgentHostClient', () => {
     expect(projectRootDispose).toHaveBeenCalledOnce();
   });
 
-  it('bounds a command response deadline when the worker stops answering', async () => {
-    vi.stubGlobal('Worker', vi.fn());
-    vi.stubGlobal('BroadcastChannel', vi.fn());
-    vi.stubGlobal('navigator', { locks: {}, storage: { getDirectory: vi.fn() } });
+  it('reads with the wire bounds and never asks a worker for more than one page', async () => {
     const worker = new FakeAgentHostWorker();
-    const channel = new MessageChannel();
-    const projectRootChannel = new MessageChannel();
-    const client = createBrowserAgentHostClient({
-      openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
-      openProjectRootBridge: () =>
-        ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
-      projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
-      durability: 'exclusive-append',
-      authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
-      gatewayBaseUrl: 'https://api.tau.test',
-      systemPrompt: 'Build CAD.',
-      systemPromptBlocks: [
-        { type: 'text', text: 'static' },
-        { type: 'text', text: 'workspace' },
-        { type: 'text', text: 'dynamic' },
-      ],
-      model: { id: 'fixture-model', providerKind: 'openai', contextWindow: 200_000 },
-      runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      createWorker: () => worker as unknown as Worker,
-      commandTimeout: 5,
-    });
-    // Register a run first so a control command can target it.
-    const started = await client.start({
-      chatId: 'chat-timeout',
-      runId: 'run-registered',
-      trigger: 'submit',
-      message: 'Register.',
-    });
-    worker.dropCommands = true;
+    const client = createTestClient(worker);
+    await client.start({ chatId: 'chat-bounds', runId: 'run-bounds', trigger: 'submit', message: 'Build.' });
 
-    // Control commands stay deadline-bounded.
-    await expect(client.steer(started.runId, 'nudge')).rejects.toMatchObject({
-      code: 'COMMAND_TIMEOUT',
+    await expect(client.read({ chatId: 'chat-bounds', cursor: 0 })).resolves.toMatchObject({
+      status: 'batch',
+      events: [{ runId: 'run-bounds', state: 'completed' }],
     });
-    const startAttempt = client.start({
-      chatId: 'chat-timeout-two',
-      runId: 'run-timeout',
-      trigger: 'submit',
-      message: 'Build it.',
-    });
-    const attachAttempt = client.attach({ chatId: 'chat-timeout-two', cursor: 0, limit: 16 });
-    const outcomes = await Promise.all(
-      [startAttempt, attachAttempt].map(async (attempt) =>
-        Promise.race([
-          attempt.then(
-            () => 'resolved',
-            (error: unknown) => (error instanceof Error && 'code' in error ? error.code : 'rejected'),
-          ),
-          new Promise<'pending'>((resolve) => {
-            globalThis.setTimeout(() => {
-              resolve('pending');
-            }, 50);
-          }),
-        ]),
-      ),
-    );
-    expect(outcomes).toEqual(['COMMAND_TIMEOUT', 'COMMAND_TIMEOUT']);
-    worker.dropCommands = false;
+    const reads = worker.requests.filter((request) => request.name === 'read').map((request) => request.args);
+    expect(reads.at(-1)).toEqual({ chatId: 'chat-bounds', cursor: 0, limit: 16, maxBytes: 1_048_576 });
     await client.close();
-    await startAttempt.catch(() => undefined);
-    await attachAttempt.catch(() => undefined);
   });
 
-  it('settles from durable replay when the admission response is lost', async () => {
-    const worker = new FakeAgentHostWorker();
-    worker.dropStartResponse = true;
-    const client = createTestClient(worker, { commandTimeout: 5 });
+  /* D2's command deadline is gone: an unanswered command is not guessed at, it is re-sent by its key to the worker that
+   * replaces a dead one, whose applied set answers a re-send that already landed (SC-R6, SC-R7). */
+  it('re-sends an unanswered command by its key to the worker that replaces a crashed one', async () => {
+    const crashed = new FakeAgentHostWorker();
+    crashed.dropStartResponse = true;
+    const replacement = new FakeAgentHostWorker();
+    const workers = [crashed, replacement];
+    const client = createTestClient(crashed, { createWorker: () => workers.shift() as unknown as Worker });
 
-    await expect(
-      client.start({ chatId: 'chat-lost-response', runId: 'run-lost-response', trigger: 'submit', message: 'Build.' }),
-    ).resolves.toMatchObject({ runId: 'run-lost-response', state: 'completed' });
-    expect(worker.requests.filter((request) => request.type === 'attach')).not.toHaveLength(0);
+    const completion = client.start({
+      chatId: 'chat-lost-response',
+      runId: 'run-lost-response',
+      trigger: 'submit',
+      message: 'Build.',
+    });
+    await vi.waitFor(() => {
+      expect(crashed.requests.some((request) => request.name === 'start')).toBe(true);
+    });
+    crashed.crash();
+
+    await expect(completion).resolves.toMatchObject({ runId: 'run-lost-response', state: 'completed' });
+    const keyOf = (worker: FakeAgentHostWorker): unknown =>
+      worker.requests.find((request) => request.name === 'start')?.args['commandId'];
+    expect(keyOf(replacement)).toBe(keyOf(crashed));
+    expect(crashed.terminate).toHaveBeenCalled();
     await client.close();
+  });
+
+  it('throws a refusal with its code and details', async () => {
+    const worker = new FakeAgentHostWorker();
+    worker.refusals.set('resume', {
+      code: 'RESUME_UNAVAILABLE',
+      message: 'Run run-9 is not this chat’s current run.',
+      details: { currentRunId: 'run-1' },
+    });
+    const client = createTestClient(worker);
+
+    await expect(client.resume('chat-1', 'run-9')).rejects.toMatchObject({
+      name: 'AgentHostWorkerError',
+      code: 'RESUME_UNAVAILABLE',
+      details: { currentRunId: 'run-1' },
+    });
+    await client.close();
+  });
+
+  it('fails a command still waiting on the worker when the client closes', async () => {
+    const worker = new FakeAgentHostWorker();
+    const client = createTestClient(worker, { closeTimeout: 5 });
+    await client.start({ chatId: 'chat-closing', runId: 'run-closing', trigger: 'submit', message: 'Build.' });
+    worker.dropCommands = true;
+
+    const steering = client.steer('run-closing', 'nudge');
+    await vi.waitFor(() => {
+      expect(worker.requests.some((request) => request.name === 'steer')).toBe(true);
+    });
+    await client.close();
+
+    await expect(steering).rejects.toMatchObject({ code: 'CLIENT_CLOSED' });
   });
 
   it('renews the run idle lease from live activity and settles through terminal replay', async () => {
     const worker = new FakeAgentHostWorker();
     worker.deferRunCompletion = true;
-    const client = createTestClient(worker, { commandTimeout: 10, runIdleTimeout: 30 });
+    const client = createTestClient(worker, { runIdleTimeout: 30 });
     const completion = client.start({
       chatId: 'chat-live-lease',
       runId: 'run-live-lease',
@@ -669,22 +637,11 @@ describe('createBrowserAgentHostClient', () => {
     };
     const completionOutcome = observeCompletion();
     await vi.waitFor(() => {
-      expect(worker.requests.some((request) => request.type === 'attach')).toBe(true);
+      expect(worker.requests.some((request) => request.name === 'attach')).toBe(true);
     });
     worker.dropRunningAttach = true;
     const heartbeatId = globalThis.setInterval(() => {
-      worker.emit({
-        type: 'live-event',
-        chatId: 'chat-live-lease',
-        event: {
-          type: 'text-delta',
-          chatId: 'chat-live-lease',
-          runId: 'run-live-lease',
-          messageId: 'message-live-lease',
-          contentIndex: 0,
-          delta: '.',
-        },
-      });
+      worker.emitLive(liveDelta('chat-live-lease', 'run-live-lease', '.'));
     }, 5);
     await new Promise<void>((resolve) => {
       globalThis.setTimeout(resolve, 80);
@@ -699,7 +656,7 @@ describe('createBrowserAgentHostClient', () => {
   it('finds a terminal durable snapshot after the terminal stream event is lost', async () => {
     const worker = new FakeAgentHostWorker();
     worker.deferRunCompletion = true;
-    const client = createTestClient(worker, { commandTimeout: 5, runIdleTimeout: 5 });
+    const client = createTestClient(worker, { runIdleTimeout: 5 });
     const completion = client.start({
       chatId: 'chat-lost-terminal',
       runId: 'run-lost-terminal',
@@ -707,12 +664,12 @@ describe('createBrowserAgentHostClient', () => {
       message: 'Build quietly.',
     });
     await vi.waitFor(() => {
-      expect(worker.requests.some((request) => request.type === 'attach')).toBe(true);
+      expect(worker.requests.some((request) => request.name === 'attach')).toBe(true);
     });
     worker.complete('chat-lost-terminal', false);
 
     await expect(completion).resolves.toMatchObject({ runId: 'run-lost-terminal', state: 'completed' });
-    expect(worker.requests.filter((request) => request.type === 'attach').length).toBeGreaterThan(1);
+    expect(worker.requests.filter((request) => request.name === 'attach').length).toBeGreaterThan(1);
     await client.close();
   });
 
@@ -830,37 +787,14 @@ describe('createBrowserAgentHostClient', () => {
   });
 });
 
-describe('the browser worker command contract', () => {
-  /* The commands are `strictObject`s and the resolution is spread verbatim into
-   * one (`createAgentHostClient`), so a field the Node wire carries and this
-   * twin does not is not ignored — it rejects the whole command, and the user
-   * sees "The host did not accept that decision." (4-review S1). */
-  it('accepts the option a human chose, exactly as the Node wire does', () => {
-    const resolution = {
-      type: 'resolve-interrupt',
-      chatId: 'chat-1',
-      runId: 'run-1',
-      interruptId: 'interrupt-1',
-      outcome: 'approved',
-      optionId: 'allow-always',
-      requestId: 'req-1',
-      sessionId: 'session-1',
-    };
-
-    expect(agentHostWorkerCommandSchema.safeParse(resolution)).toMatchObject({ success: true });
-    expect(agentHostWorkerCommandSchema.safeParse({ ...resolution, optionId: '' }).success).toBe(false);
-  });
-
+describe('the browser worker settlement contract', () => {
   /* A failed turn names why with a code as well as a sentence (blueprint P4);
      the settlement schema is strict, so a field it does not know refuses the
      whole durable write — and a refused settlement is a turn that never
      settles. */
   it('accepts a failed-turn settlement that carries its code', () => {
     const settlement = {
-      type: 'record-settlement',
       chatId: 'chat-1',
-      requestId: 'req-1',
-      sessionId: 'session-1',
       event: {
         type: 'turn.failed',
         turnId: 'turn-1',
@@ -871,34 +805,6 @@ describe('the browser worker command contract', () => {
       },
     };
 
-    expect(agentHostWorkerCommandSchema.safeParse(settlement)).toMatchObject({ success: true });
-  });
-
-  /* A follower's forwarding wait is bounded only by the leader's liveness, so a
-   * live leader that drops a command it cannot read wedges that request for the
-   * life of the tab. The return address is what makes the refusal possible. */
-  it('salvages the return address of a command frame this protocol cannot read', () => {
-    const unreadable = {
-      version: 2,
-      projectId: 'project-1',
-      workspaceId: 'workspace-1',
-      chatId: 'chat-1',
-      type: 'command',
-      senderId: 'tab-follower',
-      // A command shape from a build this one does not know: the frame fails the
-      // strict broadcast schema, and only the envelope survives it.
-      command: { type: 'teleport', chatId: 'chat-1', requestId: 'req-1', sessionId: 'session-1' },
-    };
-
-    expect(readCommandReturnAddress(unreadable)).toEqual({ senderId: 'tab-follower', requestId: 'req-1' });
-  });
-
-  it('leaves nobody to answer when the sender or the request id is the unreadable part', () => {
-    const base = { type: 'command', senderId: 'tab-follower', command: { requestId: 'req-1' } };
-
-    expect(readCommandReturnAddress({ ...base, senderId: '' })).toBeUndefined();
-    expect(readCommandReturnAddress({ ...base, command: {} })).toBeUndefined();
-    expect(readCommandReturnAddress({ ...base, type: 'response' })).toBeUndefined();
-    expect(readCommandReturnAddress('not a frame')).toBeUndefined();
+    expect(agentHostSettlementRecordSchema.safeParse(settlement)).toMatchObject({ success: true });
   });
 });

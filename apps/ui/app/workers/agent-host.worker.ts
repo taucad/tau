@@ -1,13 +1,10 @@
 /** Browser agent-host bootstrap: one raw port transfer, then validated @taucad/rpc frames only. */
 import type { ChannelServer } from '@taucad/agent-host';
 import { serveAgentWorkerChannel } from '@taucad/agent-host/channel-client';
-import type {
-  AgentHostWorkerCallRequest,
-  AgentHostWorkerProtocol,
-  AgentHostWorkerEvent,
-  AgentHostWorkerLiveEvent,
-} from '#workers/agent-host.contract.js';
+import { agentWireVersion } from '@taucad/agent-host/wire';
+import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import {
+  agentHostWorkerBuild,
   agentHostWorkerProtocolSchemas,
   createAgentHostCapabilityReport,
   parseAgentHostWorkerConnect,
@@ -20,8 +17,11 @@ type WorkerScope = {
 
 const workerScope = globalThis as unknown as WorkerScope;
 
+/** The keepalive this worker sends so the page can tell slow from dead (T9 E3). Milliseconds. */
+const keepaliveInterval = 1000;
+
 const probeCapabilities = async (
-  durability: Extract<AgentHostWorkerCallRequest, { readonly type: 'capabilities' }>['durability'],
+  durability: AgentHostWorkerProtocol['calls']['capabilities']['args']['durability'],
 ): Promise<ReturnType<typeof createAgentHostCapabilityReport>> => {
   const checks = {
     worker: true,
@@ -73,19 +73,19 @@ workerScope.addEventListener('message', (event) => {
   connected = true;
   const server: ChannelServer<AgentHostWorkerProtocol> = {
     // oxlint-disable-next-line eslint/max-params -- @taucad/rpc ChannelServer callback contract.
-    call: async (_context, _name, request) => {
-      if (request.type === 'capabilities') {
-        return { type: 'capabilities', report: await probeCapabilities(request.durability) };
+    call: async (_context, name, args, signal) => {
+      if (name === 'capabilities') {
+        return probeCapabilities((args as AgentHostWorkerProtocol['calls']['capabilities']['args']).durability);
       }
       const loaded = await loadImplementation();
-      return loaded.handleAgentHostWorkerRequest(request, connection.sessionId);
+      const result = await loaded.handleAgentHostWorkerCall(name, args, { sessionId: connection.sessionId, signal });
+      // The handler answers each call with its own result; the protocol schemas validate it on the way out.
+      return result as AgentHostWorkerProtocol['calls'][typeof name]['result'];
     },
     // oxlint-disable-next-line eslint/max-params -- @taucad/rpc ChannelServer callback contract.
-    listen: async (_context, name, _args, signal) => {
+    listen: async (_context, _name, args, signal) => {
       const loaded = await loadImplementation();
-      return (
-        name === 'events' ? loaded.listenAgentHostWorkerEvents(signal) : loaded.listenAgentHostWorkerLiveEvents(signal)
-      ) as AsyncIterable<AgentHostWorkerEvent & AgentHostWorkerLiveEvent>;
+      return loaded.listenAgentHostWorkerLiveEvents(args.chatId, signal);
     },
   };
   serveAgentWorkerChannel<AgentHostWorkerProtocol>(connection.port, {
@@ -93,5 +93,7 @@ workerScope.addEventListener('message', (event) => {
     protocolSchemas: agentHostWorkerProtocolSchemas,
     impl: server,
     label: 'agent-host-worker',
+    hello: { wire: agentWireVersion, build: agentHostWorkerBuild },
+    keepaliveInterval,
   });
 });

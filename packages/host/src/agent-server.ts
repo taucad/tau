@@ -29,11 +29,12 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 
+import { packageVersion } from '@taucad/runtime/metadata';
 import { isOriginAllowed } from '@taucad/runtime/transport/websocket-host';
 import { serveAgentChannel } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher, ServeAgentChannelOptions } from '@taucad/agent-host/node-launcher';
 
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import type { ComputeStoreControl } from '@taucad/runtime/types';
 import { isolationHeaders, serveStaticUi } from '#static-ui.js';
 import type { StaticUiHandler } from '#static-ui.js';
@@ -215,7 +216,10 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     /* The binding lives in the launcher, not here: the Electron services
      * utility hands the same launcher a `MessagePortMain` and gets the same
      * channel, so launcher 2 consumes this host rather than forking it. */
-    const channel = serveAgentChannel(socket, options.launcher, { revisions: options.revisions });
+    const channel = serveAgentChannel(socket, options.launcher, {
+      build: packageVersion,
+      revisions: options.revisions,
+    });
     channels.add(channel);
     socket.on('close', () => {
       sockets.delete(socket);

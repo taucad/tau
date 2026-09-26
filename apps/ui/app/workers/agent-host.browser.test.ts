@@ -1,9 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { DirectIdbProvider, OPFSProvider } from '@taucad/filesystem/backend';
+import type { AgentLogEvent, HostRunSnapshot } from '@taucad/agent-host';
+import { agentWireLimits } from '@taucad/agent-host/wire';
+import type { CommandAnswer, CommandVerb, ReadAnswer } from '@taucad/agent-host/wire';
 import { createBrowserAgentHostClient } from '#services/agent-host-client.js';
-import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
+import type { AgentHostWorkerInitializeRequest } from '#workers/agent-host.contract.js';
 import { agentHostAuthorityName, agentHostProtocolVersion } from '#workers/agent-host-leader.js';
-import { handleAgentHostWorkerRequest } from '#workers/agent-host.impl.js';
+import { handleAgentHostWorkerCall } from '#workers/agent-host.impl.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- The browser vitest config reads this same composed source fixture until FIX-PROJ adds the UI package dependency.
 import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-host/src/transport/gateway-wire.fixture.js';
@@ -41,6 +44,65 @@ afterEach(() => {
   provider?.dispose();
   provider = undefined;
 });
+
+let keys = 0;
+
+/** One keyed command to this module's worker session, as the page's channel delivers it; a new key unless named. */
+const command = async (
+  sessionId: string,
+  input: { readonly type: CommandVerb; readonly payload: unknown; readonly commandId?: string },
+): Promise<CommandAnswer> => {
+  keys += 1;
+  const commandId = input.commandId ?? `req_browser-test-${String(keys)}`;
+  const answer = await handleAgentHostWorkerCall(input.type, { commandId, payload: input.payload }, { sessionId });
+  return answer as CommandAnswer;
+};
+
+/** Every durable row of a chat, read page by page without parking at the end. */
+const readAll = async (sessionId: string, chatId: string): Promise<AgentLogEvent[]> => {
+  const events: AgentLogEvent[] = [];
+  for (let cursor = 0; ; ) {
+    // oxlint-disable-next-line no-await-in-loop -- pages are read in order.
+    const answer = (await handleAgentHostWorkerCall(
+      'read',
+      { chatId, cursor, limit: agentWireLimits.batchRows, maxBytes: agentWireLimits.batchBytes },
+      { sessionId, signal: AbortSignal.abort() },
+    )) as ReadAnswer;
+    if (answer.status !== 'batch') {
+      throw new Error(`The read of chat ${chatId} was refused (${answer.reason}).`);
+    }
+    events.push(...(answer.events as AgentLogEvent[]));
+    if (answer.nextCursor >= answer.endCursor) {
+      return events;
+    }
+    cursor = answer.nextCursor;
+  }
+};
+
+type Attached = {
+  readonly answer: CommandAnswer;
+  readonly snapshot?: HostRunSnapshot;
+  readonly takeover?: boolean;
+  readonly events: AgentLogEvent[];
+};
+
+/** The page's reattach: the `attach` command, then the chat's rows. */
+const attach = async (sessionId: string, chatId: string): Promise<Attached> => {
+  const answer = await command(sessionId, { type: 'attach', payload: { chatId } });
+  const details = answer.status === 'applied' && answer.effect === 'not-applied' ? answer.details : {};
+  return { answer, ...(details as Omit<Attached, 'answer' | 'events'>), events: await readAll(sessionId, chatId) };
+};
+
+const initializeSession = async (
+  sessionId: string,
+  request: Omit<AgentHostWorkerInitializeRequest, 'computeMode' | 'computeStorePort'>,
+): Promise<void> => {
+  await handleAgentHostWorkerCall('initialize', request, { sessionId });
+};
+
+const closeSession = async (sessionId: string): Promise<void> => {
+  await handleAgentHostWorkerCall('close', undefined, { sessionId });
+};
 
 it('runs a gateway turn in the dedicated launcher and commits its OPFS event log', async () => {
   const fileSystemProvider = new OPFSProvider();
@@ -237,7 +299,7 @@ it('reclaims an abandoned transactional writer lock after winning attach takeove
   });
 
   try {
-    await expect(client.attach({ chatId, cursor: 0, limit: 16 })).resolves.toMatchObject({
+    await expect(client.attach({ chatId, cursor: 0 })).resolves.toMatchObject({
       snapshot: { chatId, runId, state: 'completed' },
     });
   } finally {
@@ -283,9 +345,8 @@ it('detects a dead leader, takes its log over and records the run it left as aba
   const follower = createBrowserAgentHostClient({ ...clientOptions, createWorker: () => followerWorker });
 
   try {
-    await expect(leader.attach({ chatId, cursor: 0, limit: 16 })).resolves.toMatchObject({
-      leadership: { role: 'leader' },
-    });
+    // The first attach makes this context the chat's leader; the wire does not name roles.
+    await expect(leader.attach({ chatId, cursor: 0 })).resolves.toMatchObject({ status: 'batch', takeover: false });
     const event = (sequence: number, value: Readonly<Record<string, unknown>>): string =>
       `${JSON.stringify({
         version: 1,
@@ -316,15 +377,14 @@ it('detects a dead leader, takes its log over and records the run it left as aba
     );
     // The live leader is the canonical writer; the out-of-band seed above is
     // invisible to it by design. Only the post-takeover replay must see it.
-    await expect(follower.attach({ chatId, cursor: 0, limit: 16 })).resolves.toMatchObject({
-      leadership: { role: 'follower' },
-    });
+    // Forwarded to the live leader, which never saw the out-of-band seed.
+    await expect(follower.attach({ chatId, cursor: 0 })).resolves.toMatchObject({ status: 'batch', takeover: false });
     /* I4: the follower takes the log over and *records* what it found. It never
      * drives the dead leader's run — that would ask the provider again for a
      * turn nobody asked to repeat — so the run ends `failed`/`RUN_ABANDONED`
      * and waits for the person's Resume. */
     const terminal = Promise.withResolvers<void>();
-    const unsubscribe = follower.subscribe((eventChatId, eventItem) => {
+    const unsubscribe = follower.subscribe({ chatId, cursor: 0 }, (eventChatId, eventItem) => {
       if (
         eventChatId === chatId &&
         eventItem.runId === runId &&
@@ -346,8 +406,7 @@ it('detects a dead leader, takes its log over and records the run it left as aba
     ]);
     unsubscribe();
     expect(outcome).toBe('abandoned');
-    await expect(follower.attach({ chatId, cursor: 0, limit: 16 })).resolves.toMatchObject({
-      leadership: { role: 'leader' },
+    await expect(follower.attach({ chatId, cursor: 0 })).resolves.toMatchObject({
       snapshot: { runId, state: 'failed', failure: { code: 'RUN_ABANDONED' } },
     });
   } finally {
@@ -361,7 +420,7 @@ it('detects a dead leader, takes its log over and records the run it left as aba
  * The worker's own tool path, driven in the page: the config's gateway
  * middleware answers every call with the same single-turn script, so a
  * multi-tool turn has to script the wire per call — done here by swapping
- * `fetch` around this module's real `handleAgentHostWorkerRequest`.
+ * `fetch` around this module's real `handleAgentHostWorkerCall`.
  *
  * `export_geometry` stays out: it connects the runtime worker, whose
  * shared-memory transport needs a cross-origin-isolated page, and those headers
@@ -391,43 +450,36 @@ it('runs the file tools over the one relayed workspace provider and refuses a no
   };
 
   try {
-    await handleAgentHostWorkerRequest(
-      {
-        type: 'initialize',
-        fileSystemPort: createFileSystemBridgePort(workspace).port,
-        projectRootPort: createFileSystemBridgePort(workspace).port,
-        projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
-        authority: { projectId: providerBasePath, workspaceId: providerBasePath },
-        gatewayBaseUrl: location.origin,
-        systemPrompt: 'Browser file-tool fixture.',
-        systemPromptBlocks: [
-          { type: 'text', text: 'Browser file-tool fixture.' },
-          { type: 'text', text: 'Dynamic fixture.' },
-        ],
-        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
-        runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      },
-      sessionId,
-    );
-    await handleAgentHostWorkerRequest(
-      {
+    await initializeSession(sessionId, {
+      fileSystemPort: createFileSystemBridgePort(workspace).port,
+      projectRootPort: createFileSystemBridgePort(workspace).port,
+      projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
+      authority: { projectId: providerBasePath, workspaceId: providerBasePath },
+      gatewayBaseUrl: location.origin,
+      systemPrompt: 'Browser file-tool fixture.',
+      systemPromptBlocks: [
+        { type: 'text', text: 'Browser file-tool fixture.' },
+        { type: 'text', text: 'Dynamic fixture.' },
+      ],
+      model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+      runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+    });
+    await expect(
+      command(sessionId, {
         type: 'start',
-        chatId: 'chat-file-tools',
-        runId: 'run-file-tools',
-        trigger: 'submit',
-        message: { id: 'user-file-tools', role: 'user', content: 'Exercise the file tools.' },
-      },
-      sessionId,
-    );
-    // `start` returns at admission; the run settles asynchronously, exactly as
+        payload: {
+          chatId: 'chat-file-tools',
+          runId: 'run-file-tools',
+          trigger: 'submit',
+          message: { id: 'user-file-tools', role: 'user', content: 'Exercise the file tools.' },
+        },
+      }),
+    ).resolves.toMatchObject({ status: 'applied', effect: 'durable' });
+    // `start` answers at admission; the run settles asynchronously, exactly as
     // the client's own `waitForRunCompletion` observes it.
     const snapshot = await vi.waitFor(
       async () => {
-        const attached = await handleAgentHostWorkerRequest(
-          { type: 'attach', chatId: 'chat-file-tools', cursor: 0, limit: agentHostTailBatchLimit },
-          sessionId,
-        );
-        const settled = attached.type === 'attach' ? attached.snapshot : undefined;
+        const { snapshot: settled } = await attach(sessionId, 'chat-file-tools');
         if (settled?.state !== 'completed') {
           throw new Error(`Run is ${settled?.state ?? 'unknown'}.`);
         }
@@ -452,7 +504,7 @@ it('runs the file tools over the one relayed workspace provider and refuses a no
     expect(await fileSystemProvider.readFile(`${providerBasePath}/doomed/child.ts`, 'utf8')).toBe('keep me\n');
   } finally {
     globalThis.fetch = realFetch;
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+    await closeSession(sessionId);
   }
 });
 
@@ -472,126 +524,39 @@ it('refuses a start that names an external agent instead of running it on Tau', 
   const sessionId = `session-${crypto.randomUUID()}`;
 
   try {
-    await handleAgentHostWorkerRequest(
-      {
-        type: 'initialize',
-        fileSystemPort: createFileSystemBridgePort(workspace).port,
-        projectRootPort: createFileSystemBridgePort(workspace).port,
-        projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
-        authority: { projectId: providerBasePath, workspaceId: providerBasePath },
-        gatewayBaseUrl: location.origin,
-        systemPrompt: 'Browser external-agent fixture.',
-        systemPromptBlocks: [
-          { type: 'text', text: 'Browser external-agent fixture.' },
-          { type: 'text', text: 'Dynamic fixture.' },
-        ],
-        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
-        runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      },
-      sessionId,
-    );
+    await initializeSession(sessionId, {
+      fileSystemPort: createFileSystemBridgePort(workspace).port,
+      projectRootPort: createFileSystemBridgePort(workspace).port,
+      projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
+      authority: { projectId: providerBasePath, workspaceId: providerBasePath },
+      gatewayBaseUrl: location.origin,
+      systemPrompt: 'Browser external-agent fixture.',
+      systemPromptBlocks: [
+        { type: 'text', text: 'Browser external-agent fixture.' },
+        { type: 'text', text: 'Dynamic fixture.' },
+      ],
+      model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+      runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+    });
 
+    // Drift 2: the selector rides in `config.agent`.
     await expect(
-      handleAgentHostWorkerRequest(
-        {
-          type: 'start',
+      command(sessionId, {
+        type: 'start',
+        payload: {
           chatId: 'chat-external-agent',
           runId: 'run-external-agent',
           trigger: 'submit',
           message: { id: 'user-external-agent', role: 'user', content: 'Run this on Codex.' },
-          agent: { kind: 'acp', id: 'codex' },
+          config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
         },
-        sessionId,
-      ),
-    ).rejects.toMatchObject({ code: 'EXTERNAL_AGENT_UNAVAILABLE' });
+      }),
+    ).resolves.toMatchObject({ status: 'refused', effect: 'not-applied', code: 'EXTERNAL_AGENT_UNAVAILABLE' });
 
     // The refusal is durable-free: nothing was admitted for the refused run.
-    await expect(
-      handleAgentHostWorkerRequest(
-        { type: 'attach', chatId: 'chat-external-agent', cursor: 0, limit: agentHostTailBatchLimit },
-        sessionId,
-      ),
-    ).resolves.toMatchObject({ type: 'attach', batch: { endCursor: 0 } });
+    await expect(readAll(sessionId, 'chat-external-agent')).resolves.toEqual([]);
   } finally {
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
-  }
-});
-
-/*
- * V9: the run id is the admission idempotency key, so the *same* key arriving
- * twice is a duplicate dispatch — a retried post, a double-fired effect — not a
- * second turn. The worker consulted its durable log only when it knew it had
- * replayed the command, so an ordinary duplicate reached `admit` and came back
- * as a refused admission, which the page surfaces as a failed turn even though
- * the first copy ran to completion.
- */
-it('answers a duplicate start under a settled run id with that run, not a conflict', async () => {
-  const fileSystemProvider = new OPFSProvider();
-  provider = fileSystemProvider;
-  await fileSystemProvider.initialize();
-  const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
-  const providerBasePath = `agent-host-duplicate-${crypto.randomUUID()}`;
-  const workspace = rootedProvider(fileSystemProvider, providerBasePath);
-  const sessionId = `session-${crypto.randomUUID()}`;
-  const start = {
-    type: 'start',
-    chatId: 'chat-duplicate-start',
-    runId: 'run-duplicate-start',
-    trigger: 'submit',
-    message: { id: 'user-duplicate-start', role: 'user', content: 'Answer once.' },
-  } as const;
-
-  try {
-    await handleAgentHostWorkerRequest(
-      {
-        type: 'initialize',
-        fileSystemPort: createFileSystemBridgePort(workspace).port,
-        projectRootPort: createFileSystemBridgePort(workspace).port,
-        projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
-        authority: { projectId: providerBasePath, workspaceId: providerBasePath },
-        gatewayBaseUrl: location.origin,
-        systemPrompt: 'Browser duplicate-start fixture.',
-        systemPromptBlocks: [
-          { type: 'text', text: 'Browser duplicate-start fixture.' },
-          { type: 'text', text: 'Dynamic fixture.' },
-        ],
-        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
-        runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
-      },
-      sessionId,
-    );
-    await handleAgentHostWorkerRequest(start, sessionId);
-    await vi.waitFor(
-      async () => {
-        const attached = await handleAgentHostWorkerRequest(
-          { type: 'attach', chatId: start.chatId, cursor: 0, limit: agentHostTailBatchLimit },
-          sessionId,
-        );
-        const settled = attached.type === 'attach' ? attached.snapshot : undefined;
-        if (settled?.state !== 'completed') {
-          throw new Error(`Run is ${settled?.state ?? 'unknown'}.`);
-        }
-      },
-      { timeout: 20_000, interval: 50 },
-    );
-
-    await expect(handleAgentHostWorkerRequest(start, sessionId)).resolves.toMatchObject({
-      type: 'result',
-      operation: 'start',
-      snapshot: { runId: start.runId, state: 'completed' },
-    });
-
-    // The duplicate appended no second turn under the same key.
-    const attached = await handleAgentHostWorkerRequest(
-      { type: 'attach', chatId: start.chatId, cursor: 0, limit: agentHostTailBatchLimit },
-      sessionId,
-    );
-    const committed = (attached.type === 'attach' ? attached.batch.events : []).filter(
-      (event) => event.type === 'turn.history-projection-committed' && event.runId === start.runId,
-    );
-    expect(committed).toHaveLength(1);
-  } finally {
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+    await closeSession(sessionId);
   }
 });
 
@@ -634,7 +599,7 @@ const seedChatLog = async (
  *
  * @param fileSystemProvider - The provider the session is opened over.
  * @param input - The project root and the session key to initialize under.
- * @returns Resolves once `handleAgentHostWorkerRequest` will answer commands.
+ * @returns Resolves once `handleAgentHostWorkerCall` will answer commands.
  */
 const initializeSeededSession = async (
   fileSystemProvider: FileSystemProvider,
@@ -642,28 +607,24 @@ const initializeSeededSession = async (
 ): Promise<void> => {
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
   const workspace = rootedProvider(fileSystemProvider, input.providerBasePath);
-  await handleAgentHostWorkerRequest(
-    {
-      type: 'initialize',
-      fileSystemPort: createFileSystemBridgePort(workspace).port,
-      projectRootPort: createFileSystemBridgePort(workspace).port,
-      projectStorage: {
-        projectId: input.providerBasePath,
-        backend: 'indexeddb',
-        providerBasePath: input.providerBasePath,
-      },
-      authority: { projectId: input.providerBasePath, workspaceId: input.providerBasePath },
-      gatewayBaseUrl: location.origin,
-      systemPrompt: 'Browser takeover fixture.',
-      systemPromptBlocks: [
-        { type: 'text', text: 'Browser takeover fixture.' },
-        { type: 'text', text: 'Dynamic fixture.' },
-      ],
-      model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
-      runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+  await initializeSession(input.sessionId, {
+    fileSystemPort: createFileSystemBridgePort(workspace).port,
+    projectRootPort: createFileSystemBridgePort(workspace).port,
+    projectStorage: {
+      projectId: input.providerBasePath,
+      backend: 'indexeddb',
+      providerBasePath: input.providerBasePath,
     },
-    input.sessionId,
-  );
+    authority: { projectId: input.providerBasePath, workspaceId: input.providerBasePath },
+    gatewayBaseUrl: location.origin,
+    systemPrompt: 'Browser takeover fixture.',
+    systemPromptBlocks: [
+      { type: 'text', text: 'Browser takeover fixture.' },
+      { type: 'text', text: 'Dynamic fixture.' },
+    ],
+    model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+    runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+  });
 };
 
 /*
@@ -707,23 +668,18 @@ it('records an attached run whose driver is gone as abandoned instead of resumin
 
   try {
     await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
-    const attached = await handleAgentHostWorkerRequest(
-      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
-      sessionId,
-    );
+    const attached = await attach(sessionId, chatId);
 
     expect(attached).toMatchObject({
-      type: 'attach',
       takeover: true,
       snapshot: { chatId, runId, state: 'failed', failure: { code: 'RUN_ABANDONED' } },
     });
-    const events = attached.type === 'attach' ? attached.batch.events : [];
     // Nothing was re-asked: no second committed turn, no assistant message.
-    expect(events.filter((event) => event.type === 'turn.history-projection-committed')).toHaveLength(1);
-    expect(events.filter((event) => event.type === 'message.appended')).toHaveLength(0);
-    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'failed' });
+    expect(attached.events.filter((event) => event.type === 'turn.history-projection-committed')).toHaveLength(1);
+    expect(attached.events.filter((event) => event.type === 'message.appended')).toHaveLength(0);
+    expect(attached.events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'failed' });
   } finally {
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+    await closeSession(sessionId);
   }
 });
 
@@ -778,28 +734,24 @@ it('leaves an attached paused run paused and republishes its pending interrupt',
 
   try {
     await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
-    const attached = await handleAgentHostWorkerRequest(
-      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
-      sessionId,
-    );
+    const attached = await attach(sessionId, chatId);
 
-    expect(attached).toMatchObject({ type: 'attach', takeover: true, snapshot: { runId, state: 'paused' } });
-    const events = attached.type === 'attach' ? attached.batch.events : [];
-    expect(events.filter((event) => event.type === 'interrupt.recorded')).toMatchObject([
+    expect(attached).toMatchObject({ takeover: true, snapshot: { runId, state: 'paused' } });
+    expect(attached.events.filter((event) => event.type === 'interrupt.recorded')).toMatchObject([
       { interruptId: 'interrupt-paused', phase: 'requested' },
     ]);
     // Left paused: no terminal record was invented for a run awaiting a person.
-    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'paused' });
+    expect(attached.events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'paused' });
   } finally {
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+    await closeSession(sessionId);
   }
 });
 
 /*
  * T4-08 / T2-D8. `snapshot`'s `NO_RUN_ADMITTED` escaped into `attach`, so a
  * chat whose log holds records but no run could never be opened again — the
- * same permanent wedge, re-armed from the other side. `attach` answers with the
- * transcript it was asked for and no snapshot.
+ * same permanent wedge, re-armed from the other side. `attach` answers with no
+ * snapshot, and the rows stay readable.
  */
 it('attaches to a chat whose log holds records but no admitted run', async () => {
   const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
@@ -825,28 +777,21 @@ it('attaches to a chat whose log holds records but no admitted run', async () =>
 
   try {
     await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
-    const attached = await handleAgentHostWorkerRequest(
-      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
-      sessionId,
-    );
+    const attached = await attach(sessionId, chatId);
 
-    expect(attached).toMatchObject({ type: 'attach', takeover: false });
-    expect(attached.type === 'attach' ? attached.snapshot : 'missing').toBeUndefined();
-    expect(attached.type === 'attach' ? attached.batch.events : []).toHaveLength(1);
+    expect(attached).toMatchObject({ answer: { status: 'applied' }, takeover: false });
+    expect(attached.snapshot).toBeUndefined();
+    expect(attached.events).toHaveLength(1);
   } finally {
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+    await closeSession(sessionId);
   }
 });
 
 /*
- * W10 finding 3. The follower's forwarding wait is bounded by the leader's
- * heartbeat alone (T4-11 removed the fixed 2 s deadline, which was a *work*
- * bound on someone else's command). A leader that drops a command in silence
- * therefore wedges that request for the life of the tab: it keeps heartbeating,
- * the wait never expires, `forwardCommand`'s re-address is unreachable, and the
- * composer sits on the send with no banner. Both silent drops answer now.
- *
- * UNRUN: browser tier, machine gate (W6/W10 hold).
+ * W10 finding 3, I15. The follower's forwarding wait is bounded by the
+ * leader's heartbeat alone, so a leader that drops a command in silence wedges
+ * that request for the life of the tab. Every command it declines is answered:
+ * a stale generation, and a frame of this protocol it cannot read.
  */
 it('answers every command it declines: a stale generation and a frame it cannot read', async () => {
   const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
@@ -870,12 +815,18 @@ it('answers every command it declines: a stale generation and a frame it cannot 
     const frame = event.data as {
       readonly type?: string;
       readonly targetId?: string;
-      readonly response?: { readonly type: string; readonly requestId: string; readonly code: string };
+      readonly response?: {
+        readonly type: string;
+        readonly requestId: string;
+        readonly code?: string;
+        readonly answer?: { readonly code?: string };
+      };
     };
-    if (frame.type !== 'response' || frame.response?.type !== 'error') {
+    if (frame.type !== 'response' || frame.response === undefined) {
       return;
     }
-    refusals.set(frame.response.requestId, { code: frame.response.code, targetId: frame.targetId });
+    const code = frame.response.code ?? frame.response.answer?.code ?? '';
+    refusals.set(frame.response.requestId, { code, targetId: frame.targetId });
     if (refusals.size === 2) {
       answered.resolve();
     }
@@ -884,10 +835,7 @@ it('answers every command it declines: a stale generation and a frame it cannot 
   try {
     await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
     // This context takes leadership of the chat; the frames below address it.
-    await handleAgentHostWorkerRequest(
-      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
-      sessionId,
-    );
+    await attach(sessionId, chatId);
     const binding = {
       version: agentHostProtocolVersion,
       projectId: providerBasePath,
@@ -900,7 +848,7 @@ it('answers every command it declines: a stale generation and a frame it cannot 
       type: 'command',
       senderId: 'tab-follower',
       targetGeneration: 'generation-that-has-rolled-over',
-      command: { type: 'tail', chatId, cursor: 0, limit: agentHostTailBatchLimit, requestId: 'req-stale', sessionId },
+      command: { type: 'attach', commandId: 'req_stale', payload: { chatId }, requestId: 'req-stale', sessionId },
     });
     // A command frame this protocol cannot read, whose envelope still survives.
     followerChannel.postMessage({
@@ -912,10 +860,10 @@ it('answers every command it declines: a stale generation and a frame it cannot 
 
     await answered.promise;
     expect(refusals.get('req-stale')).toEqual({ code: 'LEADER_GENERATION_STALE', targetId: 'tab-follower' });
-    expect(refusals.get('req-unreadable')).toEqual({ code: 'LEADER_COMMAND_UNREADABLE', targetId: 'tab-follower' });
+    expect(refusals.get('req-unreadable')).toEqual({ code: 'COMMAND_UNREADABLE', targetId: 'tab-follower' });
   } finally {
     followerChannel.close();
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+    await closeSession(sessionId);
   }
 });
 
@@ -923,9 +871,11 @@ type LeaderFrame = Readonly<Record<string, unknown>> & {
   readonly type?: string;
   readonly senderId?: string;
   readonly targetId?: string;
-  readonly cursor?: number;
-  readonly command?: { readonly type: string; readonly requestId: string };
+  readonly requestId?: string;
+  readonly read?: { readonly cursor: number };
+  readonly command?: { readonly type: string; readonly requestId: string; readonly commandId?: string };
   readonly response?: { readonly type: string; readonly requestId: string; readonly code?: string };
+  readonly answer?: Readonly<Record<string, unknown>>;
 };
 
 /** Collects the frames a channel hears and waits for the first one a predicate accepts. */
@@ -966,9 +916,7 @@ const frameLog = (channel: BroadcastChannel) => {
  * W0.17 (L2b HD-2, O3). The channel was keyed on the protocol version and the
  * checkout while the lock was keyed on the project and chat, so a follower of
  * another build or checkout lost the lock race to a leader it could never hear,
- * and failed `LEADER_RESPONSE_TIMEOUT` about seven seconds later.
- *
- * UNRUN until the load gate allows the browser tier.
+ * and timed out about seven seconds later.
  */
 it('should refuse a follower of another build within one heartbeat and answer one on another checkout', async () => {
   const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
@@ -989,11 +937,8 @@ it('should refuse a follower of another build within one heartbeat and answer on
 
   try {
     await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
-    await handleAgentHostWorkerRequest(
-      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
-      sessionId,
-    );
-    const tail = { type: 'tail', chatId, cursor: 0, limit: agentHostTailBatchLimit, sessionId } as const;
+    await attach(sessionId, chatId);
+    const attachCommand = { type: 'attach', commandId: 'req_keys', payload: { chatId }, sessionId } as const;
 
     followerChannel.postMessage({
       version: agentHostProtocolVersion + 1,
@@ -1002,7 +947,7 @@ it('should refuse a follower of another build within one heartbeat and answer on
       chatId,
       type: 'command',
       senderId: 'tab-next-build',
-      command: { ...tail, requestId: 'req-next-build' },
+      command: { ...attachCommand, requestId: 'req-next-build' },
     });
     const refused = await heard.next((frame) => frame.response?.requestId === 'req-next-build', 1000);
     expect(refused).toMatchObject({
@@ -1017,10 +962,13 @@ it('should refuse a follower of another build within one heartbeat and answer on
       chatId,
       type: 'command',
       senderId: 'tab-other-checkout',
-      command: { ...tail, requestId: 'req-other-checkout' },
+      command: { ...attachCommand, requestId: 'req-other-checkout' },
     });
     const answered = await heard.next((frame) => frame.response?.requestId === 'req-other-checkout', 1000);
-    expect(answered).toMatchObject({ targetId: 'tab-other-checkout', response: { type: 'tail', chatId } });
+    expect(answered).toMatchObject({
+      targetId: 'tab-other-checkout',
+      response: { type: 'answer', answer: { status: 'applied', commandId: 'req_keys' } },
+    });
 
     // One writer: the lease is still this context's.
     await expect(
@@ -1028,19 +976,17 @@ it('should refuse a follower of another build within one heartbeat and answer on
     ).resolves.toBe(false);
   } finally {
     followerChannel.close();
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+    await closeSession(sessionId);
   }
 });
 
 /*
- * W0.13 (L2b HD-1). `forwardCommand` set the follower's replication cursor from
- * whatever window the page asked for: a re-attach at cursor 0 pulled it back
- * into a full re-tail, and a window past it skipped rows this worker's
- * listeners never received. This context follows; the test plays the leader.
- *
- * UNRUN until the load gate allows the browser tier.
+ * SC-R12, replacing W0.13. A follower keeps no replication cursor: each page
+ * read goes to the leader from the reader's own cursor, and the leader's answer
+ * comes back as it was given — a refusal is handed to the reader to reset on,
+ * never clamped into a short batch. This context follows; the test leads.
  */
-it('should not move the replication cursor when serving a forwarded window', async () => {
+it('should forward a page read from its own cursor and hand the leader’s refusal back unclamped', async () => {
   const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
   provider = fileSystemProvider;
   await fileSystemProvider.initialize();
@@ -1057,22 +1003,6 @@ it('should not move the replication cursor when serving a forwarded window', asy
     workspaceId: providerBasePath,
     chatId,
   };
-  const rows = (from: number, to: number) =>
-    Array.from({ length: to - from }, (_, index) => ({
-      version: 1,
-      leaderEpoch: generation,
-      sequence: from + index,
-      recordedAt: '2026-09-01T00:00:00.000Z',
-      runId: 'run-cursor',
-      type: 'run.lifecycle',
-      state: 'running',
-    }));
-  const batch = (cursor: number, nextCursor: number, endCursor: number) => ({
-    cursor,
-    nextCursor,
-    endCursor,
-    events: rows(cursor, nextCursor),
-  });
   const held = Promise.withResolvers<void>();
   const leased = Promise.withResolvers<void>();
   const lease = navigator.locks.request(name, { mode: 'exclusive' }, async () => {
@@ -1080,134 +1010,34 @@ it('should not move the replication cursor when serving a forwarded window', asy
     await held.promise;
   });
   await leased.promise;
-  /* Run one page command, answering the frame it forwards with the window the test chooses. */
-  const forwardAnswering = async (
-    request: Parameters<typeof handleAgentHostWorkerRequest>[0],
-    window: Readonly<Record<string, unknown>>,
-  ): Promise<void> => {
-    const forwarded = heard.next((frame) => frame.type === 'command', 2000);
-    const answered = handleAgentHostWorkerRequest(request, sessionId);
-    const frame = await forwarded;
-    leaderChannel.postMessage({
-      ...binding,
-      type: 'response',
-      targetId: frame.senderId,
-      generation,
-      response: { requestId: frame.command!.requestId, chatId, ...window },
-    });
-    await answered;
-  };
-  /* Whether this context asks to re-tail within `within` ms. */
-  const tailRequestWithin = async (within: number): Promise<LeaderFrame | undefined> => {
-    try {
-      return await heard.next((frame) => frame.type === 'tail-request', within);
-    } catch {
-      return undefined;
-    }
-  };
 
   try {
     await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
-    /* A worker opens a chat's channel on its first command for that chat, so
-     * the page's first attach is what makes this context a listening follower.
-     * Its window covers the whole log and must not count as replicated. */
-    await forwardAnswering(
-      { type: 'attach', chatId, cursor: 0, limit: 4 },
-      { type: 'attach', batch: batch(0, 4, 4), leadership: { role: 'leader', generation }, takeover: false },
-    );
-    // Replication starts from its own cursor, 0, and reaches 4.
-    const replicated = heard.next((frame) => frame.type === 'tail-request', 1000);
-    leaderChannel.postMessage({ ...binding, type: 'cursor', senderId: 'tab-test-leader', generation, endCursor: 4 });
-    const tailRequest = await replicated;
-    expect(tailRequest.cursor).toBe(0);
+    const read = async (cursor: number): Promise<unknown> =>
+      handleAgentHostWorkerCall(
+        'read',
+        { chatId, cursor, limit: agentWireLimits.batchRows, maxBytes: agentWireLimits.batchBytes },
+        { sessionId },
+      );
+
+    const forwarded = heard.next((frame) => frame.type === 'tail-request', 2000);
+    const reading = read(7);
+    const request = await forwarded;
+    expect(request.read).toMatchObject({ chatId, cursor: 7, limit: agentWireLimits.batchRows });
+    const refusal = { status: 'refused', chatId, reason: 'cursor-ahead', expected: { endCursor: 4 } } as const;
     leaderChannel.postMessage({
       ...binding,
       type: 'tail',
-      targetId: tailRequest.senderId,
+      targetId: request.senderId,
       generation,
-      batch: batch(0, 4, 4),
+      requestId: request.requestId,
+      answer: refusal,
     });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
-
-    // The page re-attaches at cursor 0; the answered window ends at 2.
-    await forwardAnswering(
-      { type: 'attach', chatId, cursor: 0, limit: 2 },
-      { type: 'attach', batch: batch(0, 2, 4), leadership: { role: 'leader', generation }, takeover: false },
-    );
-    const pulledBack = tailRequestWithin(300);
-    leaderChannel.postMessage({ ...binding, type: 'cursor', senderId: 'tab-test-leader', generation, endCursor: 4 });
-    expect(await pulledBack).toBeUndefined();
-
-    // A window past the cursor: rows 4..6 went to the page, not to replication.
-    await forwardAnswering({ type: 'tail', chatId, cursor: 4, limit: 2 }, { type: 'tail', batch: batch(4, 6, 6) });
-    const resumed = tailRequestWithin(1000);
-    leaderChannel.postMessage({ ...binding, type: 'cursor', senderId: 'tab-test-leader', generation, endCursor: 6 });
-    const resumedFrame = await resumed;
-    expect(resumedFrame?.cursor).toBe(4);
+    await expect(reading).resolves.toEqual(refusal);
   } finally {
     held.resolve();
     await lease;
     leaderChannel.close();
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
-  }
-});
-
-/*
- * T4-07. The start pre-check's `try` spanned the resume and the snapshot, so a
- * resume that failed for its own reason was discarded, fell through to `admit`,
- * and came back as "this run id is already taken" — the real reason gone. Only
- * the log read is forgiven now.
- */
-it('surfaces a failed resume of a duplicate start as itself, not as an admission refusal', async () => {
-  const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
-  provider = fileSystemProvider;
-  await fileSystemProvider.initialize();
-  const providerBasePath = `agent-host-resume-failure-${crypto.randomUUID()}`;
-  const chatId = 'chat-resume-failure';
-  const runId = 'run-resume-failure';
-  const sessionId = `session-${crypto.randomUUID()}`;
-  // A paused run whose interrupt carries no durable W5 payload: `resume` cannot
-  // build the request it must wait on, and says so.
-  await seedChatLog(fileSystemProvider, {
-    providerBasePath,
-    chatId,
-    runId,
-    rows: [
-      { type: 'run.lifecycle', state: 'admitted' },
-      {
-        type: 'turn.history-projection-committed',
-        retainedMessageIds: [],
-        message: { id: 'user-resume-failure', role: 'user', content: 'Ask me first.' },
-        context: {
-          version: 1,
-          systemPrompt: 'Browser takeover fixture.',
-          initialMessages: [],
-          postCompactionMessages: [],
-        },
-      },
-      { type: 'run.lifecycle', state: 'running' },
-      { type: 'interrupt.recorded', interruptId: 'interrupt-resume-failure', phase: 'requested', reason: 'Approve?' },
-      { type: 'run.lifecycle', state: 'paused' },
-    ],
-  });
-
-  try {
-    await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
-    await expect(
-      handleAgentHostWorkerRequest(
-        {
-          type: 'start',
-          chatId,
-          runId,
-          trigger: 'submit',
-          message: { id: 'user-resume-failure', role: 'user', content: 'Ask me first.' },
-        },
-        sessionId,
-      ),
-    ).rejects.toThrow(/has no durable W5 request payload/u);
-  } finally {
-    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+    await closeSession(sessionId);
   }
 });

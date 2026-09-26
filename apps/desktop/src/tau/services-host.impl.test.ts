@@ -7,7 +7,7 @@ import { MessageChannel } from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
-import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
+import type { AgentChannelClient, AgentChannelEndpoint } from '@taucad/agent-host/channel-client';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -799,16 +799,24 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   const startExternal = async (client: AgentChannelClient, agentId: string): Promise<unknown> =>
     client.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId: `chat-${agentId}`,
-      runId: `run-${agentId}`,
-      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
-      config: {
-        agent: { kind: 'acp', id: agentId },
-        systemPrompt: 'You are Tau.',
-        toolChoice: 'auto',
+      commandId: `start-${agentId}`,
+      payload: {
+        trigger: 'submit',
+        chatId: `chat-${agentId}`,
+        runId: `run-${agentId}`,
+        message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+        config: {
+          agent: { kind: 'acp', id: agentId },
+          systemPrompt: 'You are Tau.',
+          toolChoice: 'auto',
+        },
       },
     });
+
+  /** Attach to a chat nothing wrote: an open launcher answers at once, with nothing to take over. */
+  const attachUnwritten = async (client: AgentChannelClient, chatId: string): Promise<unknown> =>
+    client.execute({ type: 'attach', commandId: `attach-${chatId}`, payload: { chatId } });
+  const unwrittenAttach = { status: 'applied', effect: 'not-applied', details: { takeover: false, endCursor: 0 } };
 
   /**
    * Hand the host one leg of a `worker_threads` channel and dial the other.
@@ -837,7 +845,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
         [channel.port1 as unknown as UtilityPort],
       ),
     );
-    const client = createAgentChannelClient(channel.port2 as unknown as Parameters<typeof createAgentChannelClient>[0]);
+    const client = createAgentChannelClient({ connect: () => channel.port2 as unknown as AgentChannelEndpoint });
     clients.push(client);
     return client;
   };
@@ -847,12 +855,9 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     const client = connect(host, workspaceRoot);
 
     /* An empty workspace has no `.tau/chats/<id>/events.jsonl`, so the honest
-     * answer is an empty batch rather than a failure. */
-    await expect(client.execute({ type: 'tail', chatId: 'chat-1', cursor: 0, limit: 8 })).resolves.toEqual({
-      type: 'tail',
-      chatId: 'chat-1',
-      batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
-    });
+     * answer is an empty chat rather than a failure, and opening it creates nothing. */
+    await expect(attachUnwritten(client, 'chat-1')).resolves.toMatchObject(unwrittenAttach);
+    expect(existsSync(join(workspaceRoot, '.tau', 'chats', 'chat-1'))).toBe(false);
   });
 
   /**
@@ -1133,9 +1138,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
           [channel.port1 as unknown as UtilityPort],
         ),
       );
-      const client = createAgentChannelClient(
-        channel.port2 as unknown as Parameters<typeof createAgentChannelClient>[0],
-      );
+      const client = createAgentChannelClient({ connect: () => channel.port2 as unknown as AgentChannelEndpoint });
       clients.push(client);
       return client;
     };
@@ -1163,9 +1166,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       { timeout: 10_000 },
     );
 
-    await expect(remount.execute({ type: 'tail', chatId: 'chat-1', cursor: 0, limit: 8 })).resolves.toMatchObject({
-      type: 'tail',
-    });
+    await expect(attachUnwritten(remount, 'chat-1')).resolves.toMatchObject(unwrittenAttach);
     expect(
       log.mock.calls.filter(([event]) => event === 'agent-host-served').map(([, detail]) => detail as unknown),
     ).toMatchObject([{ reused: false }, { reused: false }]);
@@ -1222,7 +1223,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     /* The honest empty list, not a refusal: a machine without the pinned
      * adapters — or without their CLIs — is simply a Tau-runs-only host. */
     const { host, workspaceRoot } = await configuredHost();
-    await expect(startExternal(connect(host, workspaceRoot), 'codex')).rejects.toThrow(/runs no acp agents/u);
+    await expect(startExternal(connect(host, workspaceRoot), 'codex')).resolves.toMatchObject({
+      status: 'refused',
+      message: expect.stringMatching(/runs no acp agents/u) as unknown as string,
+    });
   });
 
   it('wires the agents main discovered into launcher 2, and only those', async () => {
@@ -1244,7 +1248,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     /* The port's own inventory answers — a different refusal from the "runs no
      * acp agents" above, and the only way to reach it is a wired port whose
      * list is exactly what main discovered. */
-    await expect(startExternal(client, 'codex')).rejects.toThrow(/cannot start the codex agent/u);
+    await expect(startExternal(client, 'codex')).resolves.toMatchObject({
+      status: 'refused',
+      message: expect.stringMatching(/cannot start the codex agent/u) as unknown as string,
+    });
   });
 
   it('serves its own MCP endpoint to the agents it wires (V7)', async () => {
@@ -1300,17 +1307,20 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
        failed turn already made are exactly what would otherwise be unrecorded. */
     await client.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId: 'chat-revision',
-      runId: 'run-revision',
-      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
-      config: {
-        systemPrompt: 'You are Tau.',
-        toolChoice: 'auto',
-        model: {
-          id: 'fixture-model',
-          providerKind: 'vertexai',
-          contextWindow: 200_000,
+      commandId: 'cmd-revision',
+      payload: {
+        trigger: 'submit',
+        chatId: 'chat-revision',
+        runId: 'run-revision',
+        message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+        config: {
+          systemPrompt: 'You are Tau.',
+          toolChoice: 'auto',
+          model: {
+            id: 'fixture-model',
+            providerKind: 'vertexai',
+            contextWindow: 200_000,
+          },
         },
       },
     });
@@ -1329,21 +1339,17 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     };
     await expect.poll(head, { timeout: 10_000 }).toMatch(/^[\da-f]{40}$/u);
     const finalized = async (): Promise<unknown> => {
-      const result = await client.execute({
-        type: 'tail',
-        chatId: 'chat-revision',
-        cursor: 0,
-        limit: 16,
-      });
-      return result.type === 'tail' ? result.batch.events.find((event) => event.type === 'turn.finalized') : undefined;
+      const result = await client.read({ chatId: 'chat-revision', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+      return result.status === 'batch'
+        ? result.events.find(
+            (event) =>
+              typeof event === 'object' && event !== null && 'type' in event && event.type === 'turn.finalized',
+          )
+        : undefined;
     };
     await expect.poll(finalized, { timeout: 10_000 }).toMatchObject({ type: 'turn.finalized', projectId });
-    const nativeHistory = await client.execute({
-      type: 'revision',
-      request: { command: 'log', limit: 8 },
-    });
+    const nativeHistory = await client.revision({ command: 'log', limit: 8 });
     expect(nativeHistory).toMatchObject({
-      type: 'revision',
       status: { projectId, branch: 'main' },
       result: [expect.objectContaining({ revisionNumber: 1 })],
     });
@@ -1438,17 +1444,20 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
     await client.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId: 'chat-direct',
-      runId: 'run-direct',
-      message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
-      config: {
-        systemPrompt: 'You are Tau.',
-        toolChoice: 'auto',
-        model: {
-          id: 'fixture-model',
-          providerKind: 'vertexai',
-          contextWindow: 200_000,
+      commandId: 'cmd-direct',
+      payload: {
+        trigger: 'submit',
+        chatId: 'chat-direct',
+        runId: 'run-direct',
+        message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
+        config: {
+          systemPrompt: 'You are Tau.',
+          toolChoice: 'auto',
+          model: {
+            id: 'fixture-model',
+            providerKind: 'vertexai',
+            contextWindow: 200_000,
+          },
         },
       },
     });
@@ -1502,11 +1511,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
     harness.host.handleMessage(frame({ type: 'agentHost', config }));
 
-    await expect(client.execute({ type: 'tail', chatId: 'chat-early', cursor: 0, limit: 8 })).resolves.toEqual({
-      type: 'tail',
-      chatId: 'chat-early',
-      batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
-    });
+    await expect(attachUnwritten(client, 'chat-early')).resolves.toMatchObject(unwrittenAttach);
     expect(harness.log).not.toHaveBeenCalledWith('agent-host.not-configured', expect.anything());
   }, 20_000);
 

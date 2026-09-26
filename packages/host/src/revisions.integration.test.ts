@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { ToolRegistry } from '@taucad/agent-host';
+import type { CommandAnswer } from '@taucad/agent-host/wire';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { createNativeGitRevisionPort } from '@taucad/revisions/node';
 import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
@@ -232,20 +233,22 @@ const harness = async (
 const startTurn = async (
   launcher: NodeAgentLauncher,
   turn: { readonly chatId: string; readonly runId: string },
-): Promise<void> => {
-  await launcher.execute({
+): Promise<CommandAnswer> =>
+  launcher.execute({
     type: 'start',
-    trigger: 'submit',
-    chatId: turn.chatId,
-    runId: turn.runId,
-    message: {
-      id: `message-${turn.runId}`,
-      role: 'user',
-      content: 'Double the size.',
+    commandId: `start-${turn.runId}`,
+    payload: {
+      trigger: 'submit',
+      chatId: turn.chatId,
+      runId: turn.runId,
+      message: {
+        id: `message-${turn.runId}`,
+        role: 'user',
+        content: 'Double the size.',
+      },
+      config: { systemPrompt: 'You are Tau.', toolChoice: 'auto', model },
     },
-    config: { systemPrompt: 'You are Tau.', toolChoice: 'auto', model },
   });
-};
 
 const ports = [
   {
@@ -396,6 +399,19 @@ for (const row of ports) {
       const base = revision?.parents[0];
       const baseTree = base === undefined ? undefined : await held.port.readTree(base);
       expect(new TextDecoder().decode(baseTree?.get('main.ts'))).toBe('export const size = 1;\n');
+    }, 30_000);
+
+    // W4.r1: a start re-sent under its key after the turn settled is `replayed`; the lease this call took is retired.
+    it('retires the lease a replayed start admitted', async () => {
+      const held = await harness(row.create);
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      await held.settlementFor('run-1');
+      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
+
+      const replay = await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+
+      expect(replay.status).toBe('replayed');
+      await expect.poll(async () => held.leaseIds(), { timeout: 5000 }).toEqual([]);
     }, 30_000);
 
     it('serves the same revision graph and branch verbs over the host channel', async () => {

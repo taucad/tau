@@ -29,12 +29,8 @@ const secret = randomBytes(32).toString('base64url');
 
 const stubLauncher = (): NodeAgentLauncher =>
   ({
-    execute: async () => ({
-      type: 'tail',
-      chatId: 'chat-1',
-      batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
-    }),
-    events: () => ({ [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }) }),
+    execute: async () => ({ commandId: 'cmd-1', generation: 0, status: 'applied', effect: 'not-applied', details: {} }),
+    read: async () => ({ status: 'batch', chatId: 'chat-1', cursor: 0, nextCursor: 0, endCursor: 0, events: [] }),
     liveEvents: () => ({ [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }) }),
     pendingInterrupts: async () => [],
     host: undefined,

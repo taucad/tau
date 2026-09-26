@@ -22,20 +22,37 @@ import type { FsLike } from '@taucad/runtime/filesystem';
 import { parameterEntryPath } from '@taucad/types';
 import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
+import { Topic } from '@taucad/events';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
-import { createTauAgentHost, emptyChatLedger, foldChatLedger, replayedStartOutcome } from '@taucad/agent-host';
+import { createCommandOwner, createTauAgentHost } from '@taucad/agent-host';
 import type {
   AgentLiveEvent,
-  AgentLogEvent,
   DurableEventLog,
-  EventLogBatch,
   HostRunSnapshot,
   InterruptRequest,
   InterruptResolution,
   StorageDurabilityClass,
   TauAgentHost,
 } from '@taucad/agent-host';
+import {
+  agentLiveEventSchema,
+  commandAnswerSchema,
+  commandPayloads,
+  readAnswerSchema,
+  readRequestSchema,
+} from '@taucad/agent-host/wire';
+import type {
+  CommandAnswer,
+  CommandPayload,
+  CommandVerb,
+  HostCommand,
+  ReadAnswer,
+  ReadInput,
+  ReadRequest,
+  RefusalCode,
+} from '@taucad/agent-host/wire';
+import { isRecord } from '@taucad/utils/schema';
 import { createOpfsEventLog, createProviderAttachmentReader, createProviderEventLog } from '@taucad/agent-host/browser';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
@@ -45,25 +62,11 @@ import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import type {
-  AgentHostWorkerAttachResponse,
-  AgentHostWorkerCallRequest,
-  AgentHostWorkerCallResponse,
-  AgentHostWorkerCommand,
-  AgentHostWorkerEvent,
   AgentHostWorkerInitializeRequest,
-  AgentHostWorkerLiveEvent,
-  AgentHostWorkerResultResponse,
-  AgentHostWorkerTailResponse,
-  ForwardedAgentHostResponse,
+  AgentHostWorkerProtocol,
+  AgentHostWorkerSettlementRecord,
 } from '#workers/agent-host.contract.js';
-import {
-  agentHostTailBatchLimit,
-  agentHostWorkerCommandSchema,
-  agentLiveEventSchema,
-  eventLogBatchSchema,
-  forwardedAgentHostResponseSchema,
-  readCommandReturnAddress,
-} from '#workers/agent-host.contract.js';
+import { agentHostSettlementRecordSchema } from '#workers/agent-host.contract.js';
 import {
   acquireChatLeaderLease,
   agentHostAuthorityName,
@@ -97,78 +100,80 @@ type ProjectFileSystemBridge = Pick<
   | 'dispose'
 >;
 
-type LeaderBroadcast =
+type BroadcastBinding = {
+  readonly version: typeof agentHostProtocolVersion;
+  readonly projectId: string;
+  readonly workspaceId: string;
+  readonly chatId: string;
+};
+
+/**
+ * One command a follower forwards to its chat's leader: the page's key and payload, answered by the leader's own
+ * command owner, so a local and a forwarded duplicate dedupe by key (S4 finding 3). `requestId` is the forward's own
+ * correlation, where every build reads a return address (I32).
+ */
+type ForwardedCommand =
   | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'command';
-      readonly senderId: string;
-      readonly targetGeneration?: string | undefined;
-      readonly command: AgentHostWorkerCommand;
+      readonly requestId: string;
+      readonly sessionId: string;
+      readonly commandId: string;
+      readonly type: CommandVerb;
+      readonly payload: unknown;
     }
   | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'response';
-      readonly targetId: string;
-      readonly generation: string;
-      readonly response: ForwardedResponse;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'leader';
-      readonly senderId: string;
-      readonly generation: string;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'cursor';
-      readonly senderId: string;
-      readonly generation: string;
-      readonly endCursor: number;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'tail-request' | 'tail-ack';
-      readonly senderId: string;
-      readonly targetGeneration: string;
-      readonly cursor: number;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'tail';
-      readonly targetId: string;
-      readonly generation: string;
-      readonly batch: EventLogBatch;
-    }
-  | {
-      readonly version: typeof agentHostProtocolVersion;
-      readonly projectId: string;
-      readonly workspaceId: string;
-      readonly chatId: string;
-      readonly type: 'live-event';
-      readonly senderId: string;
-      readonly generation: string;
-      readonly event: AgentLiveEvent;
+      readonly requestId: string;
+      readonly sessionId: string;
+      readonly commandId: string;
+      readonly type: 'record-settlement';
+      readonly payload: AgentHostWorkerSettlementRecord;
     };
 
-type ForwardedResponse = ForwardedAgentHostResponse;
+/**
+ * A leader's answer to a forwarded command. `error` is the refusal shape every protocol version reads (W0.17, I32):
+ * another build's refusal, and a leader fault the follower raises as a coded error. Every command it decided is an
+ * `answer` (drift 9).
+ */
+type ForwardedResponse =
+  | { readonly type: 'answer'; readonly requestId: string; readonly answer: CommandAnswer }
+  | { readonly type: 'error'; readonly requestId: string; readonly code: string; readonly message: string };
+
+type LeaderBroadcast = BroadcastBinding &
+  (
+    | {
+        readonly type: 'command';
+        readonly senderId: string;
+        readonly targetGeneration?: string | undefined;
+        readonly command: ForwardedCommand;
+      }
+    | {
+        readonly type: 'response';
+        readonly targetId: string;
+        readonly generation: string;
+        readonly response: ForwardedResponse;
+      }
+    | { readonly type: 'leader'; readonly senderId: string; readonly generation: string }
+    | { readonly type: 'cursor'; readonly senderId: string; readonly generation: string; readonly endCursor: number }
+    | {
+        readonly type: 'tail-request';
+        readonly senderId: string;
+        readonly targetGeneration?: string | undefined;
+        readonly requestId: string;
+        readonly read: ReadRequest;
+      }
+    | {
+        readonly type: 'tail';
+        readonly targetId: string;
+        readonly generation: string;
+        readonly requestId: string;
+        readonly answer: ReadAnswer;
+      }
+    | {
+        readonly type: 'live-event';
+        readonly senderId: string;
+        readonly generation: string;
+        readonly event: AgentLiveEvent;
+      }
+  );
 
 type LeadershipState = {
   readonly lease: Extract<ChatLeaderLease, { readonly isLeader: true }>;
@@ -184,6 +189,8 @@ type WorkerSession = {
   /** Backend of the project's own storage — the only authority for log placement. */
   readonly storageBackend: string;
   readonly host: TauAgentHost;
+  /** Answers every keyed command this worker leads, local or forwarded, from the chat's applied set (SC-R7). */
+  readonly owner: (command: HostCommand) => Promise<CommandAnswer>;
   readonly runtimeClient: AppRuntimeClient;
   readonly parameterActors: ReadonlyMap<string, Promise<ParameterActor>>;
   readonly imageService: HeadlessImageService;
@@ -306,49 +313,54 @@ export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge):
   };
 };
 
-/** Read every event of one chat in a single batch; the log slices to its own length. */
-const wholeLogLimit = Number.MAX_SAFE_INTEGER;
-
 const channels = new Map<string, BroadcastChannel>();
 const leadership = new Map<string, LeadershipState>();
 const leadershipAttempts = new Map<string, Promise<boolean>>();
 const takeoverAttempts = new Map<string, Promise<HostRunSnapshot | undefined>>();
+/** Chats this worker leads whose first attach has not run yet: that attach is the takeover (I4, I7). */
+const takeovers = new Set<string>();
 const forwarded = new Map<string, ReturnType<typeof Promise.withResolvers<ForwardedResponse>>>();
+const forwardedReads = new Map<string, ReturnType<typeof Promise.withResolvers<ReadAnswer>>>();
+/**
+ * Wakes follower reads parked until the leader's cursor moves, the leader changes, or this worker leads (SC-R14):
+ * the chat whose reads wake, or every chat.
+ */
+const readWakes = new Topic<string | undefined>({ name: 'agent-host:read-wakes' });
 const leaderGenerations = new Map<string, string>();
-const followerCursors = new Map<string, number>();
 const followerMonitors = new Map<string, ReturnType<typeof createFollowerRecoveryMonitor>>();
 const followerRecoveries = new Set<string>();
 const followerRetryIds = new Map<string, ReturnType<typeof globalThis.setTimeout>>();
-const tailInFlight = new Set<string>();
 const backgroundTasks = new Set<Promise<void>>();
-const eventStreams = new Set<ReadableStreamDefaultController<AgentHostWorkerEvent>>();
-const liveEventStreams = new Set<ReadableStreamDefaultController<AgentHostWorkerLiveEvent>>();
+const liveEventStreams = new Set<{
+  readonly chatId: string;
+  readonly controller: ReadableStreamDefaultController<AgentLiveEvent>;
+}>();
 let session: WorkerSession | undefined;
 let closing = false;
 
 const leaderHeartbeatInterval = 1000;
 const followerHeartbeatTimeout = 3500;
+// ponytail: T9 C3, the forwarded read's answer bound; W6 deletes it with this carrier.
 const followerTailTimeout = 2000;
 
-const listenTo = <Event>(
-  controllers: Set<ReadableStreamDefaultController<Event>>,
-  signal: AbortSignal,
-): AsyncIterable<Event> => {
+/** One chat's live deltas, consumed by the worker's @taucad/rpc listen handler (SC-R15). */
+export const listenAgentHostWorkerLiveEvents = (chatId: string, signal: AbortSignal): AsyncIterable<AgentLiveEvent> => {
   let cleanup = (): void => undefined;
-  return new ReadableStream<Event>({
+  return new ReadableStream<AgentLiveEvent>({
     start(controller) {
+      const entry = { chatId, controller };
       let active = true;
       const close = (): void => {
         if (!active) {
           return;
         }
         active = false;
-        controllers.delete(controller);
+        liveEventStreams.delete(entry);
         controller.close();
         signal.removeEventListener('abort', close);
       };
       cleanup = close;
-      controllers.add(controller);
+      liveEventStreams.add(entry);
       if (signal.aborted) {
         close();
       } else {
@@ -361,13 +373,13 @@ const listenTo = <Event>(
   });
 };
 
-/** Durable event stream consumed by the worker's @taucad/rpc listen handler. */
-export const listenAgentHostWorkerEvents = (signal: AbortSignal): AsyncIterable<AgentHostWorkerEvent> =>
-  listenTo(eventStreams, signal);
-
-/** Ephemeral delta stream consumed by the worker's @taucad/rpc listen handler. */
-export const listenAgentHostWorkerLiveEvents = (signal: AbortSignal): AsyncIterable<AgentHostWorkerLiveEvent> =>
-  listenTo(liveEventStreams, signal);
+const enqueueLiveEvent = (event: AgentLiveEvent): void => {
+  for (const stream of liveEventStreams) {
+    if (stream.chatId === event.chatId) {
+      stream.controller.enqueue(event);
+    }
+  }
+};
 
 const codedErrorSchema = z.object({ code: z.string() });
 const errorCode = (error: unknown): string => codedErrorSchema.safeParse(error).data?.code ?? 'AGENT_HOST_ERROR';
@@ -379,14 +391,28 @@ const errorCode = (error: unknown): string => codedErrorSchema.safeParse(error).
  * re-address safe: unlike `LEADERSHIP_LOST`, which a leader raises partway
  * through work it may already have done, nothing has happened here.
  */
-const leaderGenerationStaleCode = 'LEADER_GENERATION_STALE';
+const leaderGenerationStaleCode = 'LEADER_GENERATION_STALE' satisfies RefusalCode;
 
-const errorResponse = (requestId: string, error: unknown): ForwardedAgentHostResponse & { readonly type: 'error' } => ({
+const refusedAnswer = (commandId: string, code: RefusalCode, message: string): CommandAnswer => ({
+  commandId,
+  generation: 0,
+  status: 'refused',
+  effect: 'not-applied',
+  code,
+  message,
+});
+
+const faultResponse = (requestId: string, error: unknown): ForwardedResponse => ({
   type: 'error',
   requestId,
   code: errorCode(error),
   message: error instanceof Error ? error.message : String(error),
 });
+
+const chatIdOf = (payload: unknown): string | undefined => {
+  const chatId = isRecord(payload) ? payload['chatId'] : undefined;
+  return typeof chatId === 'string' && chatId.length > 0 ? chatId : undefined;
+};
 
 const broadcastBaseSchema = {
   version: z.literal(agentHostProtocolVersion),
@@ -394,20 +420,39 @@ const broadcastBaseSchema = {
   workspaceId: z.string().min(1),
   chatId: z.string().min(1),
 };
+const commandVerbs = Object.keys(commandPayloads) as [CommandVerb, ...CommandVerb[]];
+const forwardEnvelope = { requestId: z.string().min(1), sessionId: z.string().min(1), commandId: z.string().min(1) };
+/* The payload is the command owner's to read: an unreadable one is answered `COMMAND_UNREADABLE` (SC-R4). */
+const forwardedCommandSchema = z.union([
+  z.strictObject({ ...forwardEnvelope, type: z.enum(commandVerbs), payload: z.unknown() }),
+  z.strictObject({
+    ...forwardEnvelope,
+    type: z.literal('record-settlement'),
+    payload: agentHostSettlementRecordSchema,
+  }),
+]);
 const leaderBroadcastSchema = z.union([
   z.strictObject({
     ...broadcastBaseSchema,
     type: z.literal('command'),
     senderId: z.string().min(1),
     targetGeneration: z.string().optional(),
-    command: agentHostWorkerCommandSchema,
+    command: forwardedCommandSchema,
   }),
   z.strictObject({
     ...broadcastBaseSchema,
     type: z.literal('response'),
     targetId: z.string().min(1),
     generation: z.string().min(1),
-    response: forwardedAgentHostResponseSchema,
+    response: z.union([
+      z.strictObject({ type: z.literal('answer'), requestId: z.string().min(1), answer: commandAnswerSchema }),
+      z.strictObject({
+        type: z.literal('error'),
+        requestId: z.string().min(1),
+        code: z.string().min(1),
+        message: z.string(),
+      }),
+    ]),
   }),
   z.strictObject({
     ...broadcastBaseSchema,
@@ -424,17 +469,19 @@ const leaderBroadcastSchema = z.union([
   }),
   z.strictObject({
     ...broadcastBaseSchema,
-    type: z.enum(['tail-request', 'tail-ack']),
+    type: z.literal('tail-request'),
     senderId: z.string().min(1),
-    targetGeneration: z.string().min(1),
-    cursor: z.number().int().nonnegative(),
+    targetGeneration: z.string().optional(),
+    requestId: z.string().min(1),
+    read: readRequestSchema,
   }),
   z.strictObject({
     ...broadcastBaseSchema,
     type: z.literal('tail'),
     targetId: z.string().min(1),
     generation: z.string().min(1),
-    batch: eventLogBatchSchema,
+    requestId: z.string().min(1),
+    answer: readAnswerSchema,
   }),
   z.strictObject({
     ...broadcastBaseSchema,
@@ -444,16 +491,6 @@ const leaderBroadcastSchema = z.union([
     event: agentLiveEventSchema,
   }),
 ]);
-
-const responseBelongsToChat = (response: ForwardedResponse, chatId: string): boolean => {
-  if (response.type === 'tail') {
-    return response.chatId === chatId;
-  }
-  if (response.type === 'attach') {
-    return response.chatId === chatId && (response.snapshot?.chatId ?? chatId) === chatId;
-  }
-  return response.type === 'result' ? response.snapshot.chatId === chatId : true;
-};
 
 /** What every build's frame keeps, whatever its protocol version (I32). */
 const frameEnvelopeSchema = z.object({ version: z.number(), projectId: z.string(), chatId: z.string() });
@@ -470,6 +507,13 @@ const refusalFrameSchema = z.object({
   }),
 });
 
+/** Who a command frame of another build is from, read loosely: every build nests `command.requestId` (W0.17, I32). */
+const commandReturnAddressSchema = z.object({
+  type: z.literal('command'),
+  senderId: z.string().min(1),
+  command: z.object({ requestId: z.string().min(1) }),
+});
+
 const validatedBroadcast = (
   value: unknown,
   active: WorkerSession,
@@ -480,13 +524,15 @@ const validatedBroadcast = (
     /* The channel is the chat's lock identity, shared by every build: a frame
      * of another protocol version is answered, not dropped (W0.17, I32). */
     const envelope = frameEnvelopeSchema.safeParse(value).data;
-    if (envelope !== undefined && envelope.version !== agentHostProtocolVersion) {
-      return envelope.projectId === active.projectId && envelope.chatId === chatId ? 'foreign' : undefined;
+    if (envelope === undefined || envelope.projectId !== active.projectId || envelope.chatId !== chatId) {
+      return undefined;
     }
-    /* A frame claiming *this* protocol and failing its schema is a real
-     * defect, not a deploy skew. Dropping it in silence burned the forwarding
-     * wait instead, and the page saw a bare timeout. */
-    console.error('[agentHost] dropped a leader frame this protocol cannot read', chatId, parsed.error.issues);
+    if (envelope.version !== agentHostProtocolVersion) {
+      return 'foreign';
+    }
+    /* A frame claiming *this* protocol and failing its schema is a defect; a command in it is still answered (I15),
+     * since the follower's wait is bounded only by this leader's heartbeat (W10 finding 3). */
+    console.error('[agentHost] a leader frame this protocol cannot read', chatId, parsed.error.issues);
     return 'unreadable';
   }
   const message = parsed.data as LeaderBroadcast;
@@ -495,28 +541,10 @@ const validatedBroadcast = (
   if (message.projectId !== active.projectId || message.chatId !== chatId) {
     return undefined;
   }
-  switch (message.type) {
-    case 'command': {
-      return message.command.chatId === chatId ? message : undefined;
-    }
-    case 'response': {
-      return responseBelongsToChat(message.response, chatId) ? message : undefined;
-    }
-    case 'leader':
-    case 'cursor': {
-      return message;
-    }
-    case 'live-event': {
-      return message.event.chatId === chatId ? message : undefined;
-    }
-    case 'tail-request':
-    case 'tail-ack': {
-      return message;
-    }
-    case 'tail': {
-      return message;
-    }
+  if (message.type === 'live-event') {
+    return message.event.chatId === chatId ? message : undefined;
   }
+  return message;
 };
 
 const requireStoragePathSegment = (value: string, label: string): string => {
@@ -580,14 +608,12 @@ const broadcastBinding = (active: WorkerSession, chatId: string) =>
     chatId,
   }) as const;
 
-const publishEvent = async (active: WorkerSession, chatId: string, event: AgentLogEvent): Promise<void> => {
-  for (const controller of eventStreams) {
-    controller.enqueue({ chatId, event });
-  }
+const publishEvent = async (active: WorkerSession, chatId: string): Promise<void> => {
   const state = leadership.get(chatId);
   if (!state) {
     return;
   }
+  // ponytail: one read per append for the end cursor (HD-12); W6's carrier publishes it from the append.
   const { endCursor } = await active.host.readEvents({
     chatId,
     cursor: Number.MAX_SAFE_INTEGER,
@@ -607,9 +633,7 @@ const publishLiveEvent = (active: WorkerSession, event: AgentLiveEvent): void =>
   if (!state) {
     return;
   }
-  for (const controller of liveEventStreams) {
-    controller.enqueue({ chatId: event.chatId, event });
-  }
+  enqueueLiveEvent(event);
   channelFor(event.chatId).postMessage({
     ...broadcastBinding(active, event.chatId),
     type: 'live-event',
@@ -682,7 +706,7 @@ const openProjectEventLog = async (active: WorkerSession, chatId: string): Promi
           : event;
       const outcome = await log.append(durableEvent);
       if (outcome.appended) {
-        await publishEvent(active, chatId, durableEvent);
+        await publishEvent(active, chatId);
       }
       return outcome;
     },
@@ -741,318 +765,233 @@ const acknowledgeRun = async (
   return admitted;
 };
 
-const executeCommand = async (
-  command: AgentHostWorkerCommand,
-  takeover = false,
-): Promise<AgentHostWorkerResultResponse | AgentHostWorkerTailResponse | AgentHostWorkerAttachResponse> => {
+const requireSession = (): WorkerSession => {
   const active = session;
   if (!active) {
     throw Object.assign(new Error('Agent host worker session is not initialized.'), {
-      code: 'SESSION_NOT_INITIALIZED',
+      code: 'SESSION_NOT_INITIALIZED' satisfies RefusalCode,
     });
   }
-  if (command.type === 'tail') {
-    return {
-      type: 'tail',
-      requestId: command.requestId,
-      chatId: command.chatId,
-      batch: await active.host.readEvents(command),
-    };
-  }
-  if (command.type === 'attach') {
-    const chatPath = requireStoragePathSegment(command.chatId, 'chatId');
-    const abandonedLock = `.tau/chats/${chatPath}/events.jsonl.lock`;
-    // Winning this workspace's native Web Lock proves its prior worker is gone;
-    // only the provider advisory marker can have survived the abrupt reload.
-    if (takeover && active.durability !== 'exclusive-append' && (await active.projectRoot.exists(abandonedLock))) {
-      await active.projectRoot.unlink(abandonedLock);
-    }
-    const firstBatch = await active.host.readEvents(command);
-    let batch = firstBatch;
-    let snapshot: HostRunSnapshot | undefined;
-    if (firstBatch.endCursor > 0) {
-      if (takeover) {
-        /* I4: a takeover *records* what it found, it never drives it. Resuming
-         * here re-asked the provider for a turn the person had already paid
-         * for, on a run no page owned — no lease, no revision, no settlement —
-         * and it fired on the next gesture's attach, not on any decision. The
-         * host decides what the record is: an abandoned run fails with
-         * `RUN_ABANDONED` so the saved-turn card can offer Resume, a paused run
-         * is left paused for the interrupt this batch republishes, and a run
-         * this host is still driving is left alone. */
-        const current = takeoverAttempts.get(command.chatId);
-        const attempt = current ?? active.host.markAbandoned(command.chatId);
-        takeoverAttempts.set(command.chatId, attempt);
-        try {
-          snapshot = await attempt;
-        } catch (error) {
-          /* A run that cannot be recorded must not make the chat unopenable:
-           * the client still needs the transcript it attached for. The
-           * leadership check below turns a lost lease into its own refusal. */
-          console.error('[agentHost] could not record an abandoned run', command.chatId, error);
-          snapshot = await active.host.describeRun(command.chatId);
-        } finally {
-          if (takeoverAttempts.get(command.chatId) === attempt) {
-            takeoverAttempts.delete(command.chatId);
-          }
-        }
-        batch = await active.host.readEvents(command);
-      } else {
-        /* Non-throwing: `snapshot`'s `NO_RUN_ADMITTED` escaping here made a chat
-         * whose log holds records but no run impossible to open at all. */
-        snapshot = await active.host.describeRun(command.chatId);
-      }
-    }
-    const state = leadership.get(command.chatId);
-    if (!state) {
-      throw Object.assign(new Error(`This tab lost leadership while attaching ${command.chatId}.`), {
-        code: 'LEADERSHIP_LOST',
-      });
-    }
-    return {
-      type: 'attach',
-      requestId: command.requestId,
-      chatId: command.chatId,
-      batch,
-      leadership: { role: 'leader', generation: state.lease.generation },
-      ...(snapshot ? { snapshot } : {}),
-      /* This attach took the chat over from a dead driver *and* the run it
-       * found still wants the attaching page: one it has just recorded as
-       * abandoned, or one left non-terminal (paused on a person, or still
-       * driven by this host). The page rebuilds from the log either way. */
-      takeover:
-        takeover &&
-        snapshot !== undefined &&
-        (snapshot.failure?.code === 'RUN_ABANDONED' ||
-          (snapshot.state !== 'completed' && snapshot.state !== 'failed' && snapshot.state !== 'cancelled')),
-    };
-  }
-  if (command.type === 'start') {
-    let outcome: ReturnType<typeof replayedStartOutcome> = 'admit';
-    try {
-      /* The whole log, because the fact that decides this is a record anywhere
-       * in it — the run's committed turn — not the state of its tail.
-       *
-       * V9: the run id *is* the admission idempotency key, so every `start` is
-       * checked, not only a replayed one. A duplicate dispatch under a key the
-       * log already carries is the same turn arriving twice — it attaches or
-       * answers as settled — and only the worker's own log can tell it apart
-       * from a new turn. ponytail: one whole-log read per start; the ceiling is
-       * the log's size, and the upgrade path is the host's own ledger exposed as a
-       * cached read. */
-      const batch = await active.host.readEvents({ chatId: command.chatId, cursor: 0, limit: wholeLogLimit });
-      outcome = replayedStartOutcome(foldChatLedger(emptyChatLedger, batch.events), command.runId);
-    } catch {
-      // The log could not be read, so nothing proves this command was already
-      // admitted; replay it below. Only this read is forgiven — a resume or a
-      // snapshot that fails is reported as itself, not as an admission conflict.
-      outcome = 'admit';
-    }
-    // ponytail: `recover` (an admission a dead leader never committed) is admitted as before; W7's orphan state owns it.
-    if (outcome !== 'admit' && outcome !== 'recover') {
-      if (outcome === 'resume') {
-        /* A duplicate `start` for a run this worker is *still executing* has
-         * nothing to resume: the host would refuse the reservation as a live
-         * chat, and the duplicate — a re-broadcast forward, a double-fired
-         * effect — would surface as a failed turn beside a turn that is running
-         * fine. Answer it with the admission it already has. */
-        const running = await active.host.waitForAdmission(command.chatId, command.runId);
-        if (!running) {
-          await acknowledgeRun(
-            active,
-            { chatId: command.chatId, runId: command.runId },
-            active.host.resume(command.chatId),
-          );
-        }
-      }
-      return {
-        type: 'result',
-        requestId: command.requestId,
-        operation: command.type,
-        snapshot: await active.host.snapshot(command.chatId),
-      };
-    }
-  }
-  switch (command.type) {
-    case 'start': {
-      if (command.agent) {
-        /* An external agent is a *daemon* placement (W4-ACP): this worker
-         * registers no external runner, so running the turn on Tau instead
-         * would silently answer with a model and tools the user did not pick. */
-        throw Object.assign(new Error(`This browser host runs no ${command.agent.kind} agents.`), {
-          code: 'EXTERNAL_AGENT_UNAVAILABLE',
-        });
-      }
-      const config = command.config
-        ? {
-            systemPrompt: command.config.systemPrompt,
-            systemPromptBlocks: command.config.systemPromptBlocks,
-            model: command.config.model,
-            toolChoice: command.config.toolChoice,
-            allowedTools: command.config.allowedTools,
-            ...(command.config.snapshot === undefined ? {} : { snapshot: command.config.snapshot }),
-            ...(command.config.contextPayload ? { clientContext: command.config.contextPayload } : {}),
-            ...(command.config.contextMessages ? { contextMessages: command.config.contextMessages } : {}),
-          }
-        : undefined;
-      /* `mode` and `baseRevisionId` are deliberately dropped: on this
-       * placement the *page* owns the revision — `ChatWorkspaceAuthorityProvider`
-       * prepares the turn's workspace in the selected mode and finalizes it —
-       * so the worker would be recording a second, competing one. They ride the
-       * command only because one client object is sent to both transports. */
-      const base = {
-        chatId: command.chatId,
-        runId: command.runId,
-        message: command.message,
-        ...(config ? { config } : {}),
-      };
-      const completion = active.host.admit(
-        command.trigger === 'submit'
-          ? { ...base, trigger: 'submit' }
-          : {
-              ...base,
-              trigger: command.trigger,
-              retainedMessageIds: command.retainedMessageIds,
-            },
-      );
-      return {
-        type: 'result',
-        requestId: command.requestId,
-        operation: command.type,
-        snapshot: await acknowledgeRun(active, { chatId: command.chatId, runId: command.runId }, completion),
-      };
-    }
-    case 'resume': {
-      return {
-        type: 'result',
-        requestId: command.requestId,
-        operation: command.type,
-        /* A `resume` command names no run: the host continues whatever the
-         * chat's ledger ends on, so the chat is the key this one waits by. */
-        snapshot: await acknowledgeRun(active, { chatId: command.chatId }, active.host.resume(command.chatId)),
-      };
-    }
-    case 'record-settlement': {
-      await active.host.recordSettlement({
-        chatId: command.chatId,
-        runId: command.event.runId,
-        event: command.event,
-      });
-      break;
-    }
-    case 'steer': {
-      await active.host.steer({
-        runId: command.runId,
-        message: command.message,
-      });
-      break;
-    }
-    case 'cancel': {
-      await active.host.cancel({ runId: command.runId });
-      break;
-    }
-    case 'resolve-interrupt': {
-      await active.host.resolveInterrupt(command);
-      break;
-    }
-  }
-  const snapshot: HostRunSnapshot = await active.host.snapshot(command.chatId);
-  return {
-    type: 'result',
-    requestId: command.requestId,
-    operation: command.type,
-    snapshot,
-  };
+  return active;
 };
 
-const postForwardedResponse = async (options: {
-  readonly channel: BroadcastChannel;
-  readonly senderId: string;
-  /** The generation this command was accepted under, for the answer it is owed. */
-  readonly generation: string;
-  readonly command: AgentHostWorkerCommand;
-}): Promise<void> => {
-  const { channel, senderId, generation, command } = options;
-  const active = session;
-  if (!active) {
-    /* The whole worker session is gone and every chat's heartbeat with it, so
-     * the follower's liveness bound expires and recovers. There is no session
-     * binding left to address a frame with in any case. */
-    return;
-  }
-  const state = leadership.get(command.chatId);
-  if (!state) {
-    /* Leadership ended between accepting this command and running it — a close
-     * clears the heartbeat and releases the lease, so another tab can already
-     * be leading and heartbeating, which keeps the follower's liveness bound
-     * from ever firing. Nothing ran here, so it is re-addressable. */
-    refuseCommand({
-      channel,
-      active,
-      chatId: command.chatId,
-      generation,
-      targetId: senderId,
-      requestId: command.requestId,
-      error: Object.assign(new Error(`Chat ${command.chatId} changed leader before this command ran.`), {
-        code: leaderGenerationStaleCode,
-      }),
-    });
-    return;
-  }
-  let response: ForwardedResponse;
-  try {
-    response = await executeCommand(command);
-  } catch (error) {
-    response = errorResponse(command.requestId, error);
-  }
-  channel.postMessage({
-    ...broadcastBinding(active, command.chatId),
-    type: 'response',
-    targetId: senderId,
-    generation: state.lease.generation,
-    response,
-  } satisfies LeaderBroadcast);
+/** The run's state after a verb, for an answer that recorded nothing. */
+const stateOf = async (active: WorkerSession, chatId: string): Promise<Readonly<Record<string, unknown>>> => {
+  const run = await active.host.describeRun(chatId);
+  return run ? { state: run.state, runId: run.runId } : { state: 'none' };
 };
 
 /**
- * Answer a command this leader will not execute.
- *
- * The follower's wait is bounded by this leader's heartbeat, so every command
- * it declines is declined out loud; the alternative is a pending request that
- * outlives the turn with nothing on screen.
- *
- * @param options - The refusing leader, the follower to answer and the reason.
+ * The attach answer: the chat's run, whether this attach took it over from a
+ * dead driver, and the log's end *before* the run was read, so a reader
+ * following from it misses no row.
  */
-const refuseCommand = (options: {
+const attachDetails = async (active: WorkerSession, chatId: string): Promise<Readonly<Record<string, unknown>>> => {
+  const takeover = takeovers.delete(chatId);
+  const chatPath = requireStoragePathSegment(chatId, 'chatId');
+  const abandonedLock = `.tau/chats/${chatPath}/events.jsonl.lock`;
+  // Winning this workspace's native Web Lock proves its prior worker is gone;
+  // only the provider advisory marker can have survived the abrupt reload.
+  if (takeover && active.durability !== 'exclusive-append' && (await active.projectRoot.exists(abandonedLock))) {
+    await active.projectRoot.unlink(abandonedLock);
+  }
+  const { position } = await active.host.ledger(chatId);
+  let snapshot: HostRunSnapshot | undefined;
+  if (position.cursor > 0) {
+    if (takeover) {
+      /* I4: a takeover *records* what it found, it never drives it. Resuming
+       * here re-asked the provider for a turn the person had already paid
+       * for, on a run no page owned — no lease, no revision, no settlement —
+       * and it fired on the next gesture's attach, not on any decision. The
+       * host decides what the record is: an abandoned run fails with
+       * `RUN_ABANDONED` so the saved-turn card can offer Resume, a paused run
+       * is left paused for the interrupt this batch republishes, and a run
+       * this host is still driving is left alone. */
+      const current = takeoverAttempts.get(chatId);
+      const attempt = current ?? active.host.markAbandoned(chatId);
+      takeoverAttempts.set(chatId, attempt);
+      try {
+        snapshot = await attempt;
+      } catch (error) {
+        /* A run that cannot be recorded must not make the chat unopenable:
+         * the client still needs the transcript it attached for. The
+         * leadership check below turns a lost lease into its own refusal. */
+        console.error('[agentHost] could not record an abandoned run', chatId, error);
+        snapshot = await active.host.describeRun(chatId);
+      } finally {
+        if (takeoverAttempts.get(chatId) === attempt) {
+          takeoverAttempts.delete(chatId);
+        }
+      }
+    } else {
+      /* Non-throwing: `snapshot`'s `NO_RUN_ADMITTED` escaping here made a chat
+       * whose log holds records but no run impossible to open at all. */
+      snapshot = await active.host.describeRun(chatId);
+    }
+  }
+  if (!leadership.has(chatId)) {
+    throw Object.assign(new Error(`This tab lost leadership while attaching ${chatId}.`), {
+      code: 'LEADERSHIP_LOST' satisfies RefusalCode,
+    });
+  }
+  return {
+    ...(snapshot ? { snapshot } : {}),
+    /* This attach took the chat over from a dead driver *and* the run it
+     * found still wants the attaching page: one it has just recorded as
+     * abandoned, or one left non-terminal (paused on a person, or still
+     * driven by this host). The page rebuilds from the log either way. */
+    takeover:
+      takeover &&
+      snapshot !== undefined &&
+      (snapshot.failure?.code === 'RUN_ABANDONED' ||
+        (snapshot.state !== 'completed' && snapshot.state !== 'failed' && snapshot.state !== 'cancelled')),
+    endCursor: position.cursor,
+  };
+};
+
+/**
+ * Narrow the wire's admission onto the host's. The browser host configures its
+ * own prompt and model at initialization, so an admission that names neither
+ * runs on them.
+ */
+const admissionConfig = (
+  config: NonNullable<CommandPayload<'start'>['config']>,
+): NonNullable<Parameters<TauAgentHost['admit']>[0]['config']> => ({
+  systemPrompt: config.systemPrompt,
+  ...(config.systemPromptBlocks ? { systemPromptBlocks: config.systemPromptBlocks } : {}),
+  ...(config.model ? { model: config.model } : {}),
+  toolChoice: config.toolChoice,
+  ...(config.allowedTools ? { allowedTools: config.allowedTools } : {}),
+  ...(config.snapshot === undefined ? {} : { snapshot: config.snapshot }),
+  ...(config.contextPayload ? { clientContext: config.contextPayload } : {}),
+  ...(config.contextMessages ? { contextMessages: config.contextMessages } : {}),
+});
+
+/**
+ * Today's command logic per verb, behind the command owner: the owner answers a
+ * key the chat's log already applied before this runs, and turns a coded throw
+ * into a refusal (SC-R7–SC-R9). `commandId` is stamped on each verb's decision
+ * row, so a re-send finds it.
+ */
+const executeCommand = async (
+  active: WorkerSession,
+  command: HostCommand,
+): Promise<Readonly<Record<string, unknown>> | undefined> => {
+  const { chatId } = command.payload;
+  const { commandId } = command;
+  switch (command.type) {
+    case 'attach': {
+      return attachDetails(active, chatId);
+    }
+    case 'start': {
+      const { payload } = command;
+      if (payload.config?.agent) {
+        /* An external agent is a *daemon* placement (W4-ACP): this worker
+         * registers no external runner, so running the turn on Tau instead
+         * would silently answer with a model and tools the user did not pick. */
+        throw Object.assign(new Error(`This browser host runs no ${payload.config.agent.kind} agents.`), {
+          code: 'EXTERNAL_AGENT_UNAVAILABLE' satisfies RefusalCode,
+        });
+      }
+      /* Only the command id replays, and the owner answers it before this runs: a run id the log already holds
+       * under another key is the host's to refuse (`RUN_ID_TAKEN`, or `CHAT_RUN_LIVE` while it runs). */
+      const base = {
+        chatId,
+        runId: payload.runId,
+        message: payload.message,
+        commandId,
+        ...(payload.config ? { config: admissionConfig(payload.config) } : {}),
+      };
+      const completion = active.host.admit(
+        payload.trigger === 'submit'
+          ? { ...base, trigger: 'submit' }
+          : { ...base, trigger: payload.trigger, retainedMessageIds: payload.retainedMessageIds ?? [] },
+      );
+      await acknowledgeRun(active, { chatId, runId: payload.runId }, completion);
+      return undefined;
+    }
+    case 'resume': {
+      await acknowledgeRun(active, { chatId }, active.host.resume(chatId, { commandId }));
+      return undefined;
+    }
+    case 'steer': {
+      await active.host.steer({ runId: command.payload.runId, message: command.payload.message });
+      // ponytail: a steer is delivered to the live session, not recorded; W7 writes its row (I18).
+      return { delivery: 'queued' };
+    }
+    case 'cancel': {
+      await active.host.cancel({ runId: command.payload.runId, commandId });
+      return stateOf(active, chatId);
+    }
+    case 'interrupt': {
+      // Drift 6: one verb on both legs; the browser raises no interrupt until M1 (W7).
+      throw Object.assign(new Error('This browser host does not raise interrupts.'), {
+        code: 'COMMAND_UNSUPPORTED' satisfies RefusalCode,
+      });
+    }
+    case 'resolve-interrupt': {
+      const { payload } = command;
+      await active.host.resolveInterrupt({
+        runId: payload.runId,
+        interruptId: payload.interruptId,
+        outcome: payload.outcome,
+        commandId,
+        ...(payload.optionId === undefined ? {} : { optionId: payload.optionId }),
+        ...(payload.payload === undefined ? {} : { payload: payload.payload }),
+      });
+      return stateOf(active, chatId);
+    }
+  }
+};
+
+/** Answer one command this worker leads: a verb through the owner, a settlement through the host. */
+const leaderAnswer = async (
+  active: WorkerSession,
+  chatId: string,
+  command: ForwardedCommand,
+): Promise<CommandAnswer> => {
+  if (chatIdOf(command.payload) !== chatId) {
+    return refusedAnswer(command.commandId, 'COMMAND_UNREADABLE', `The command does not address chat ${chatId}.`);
+  }
+  if (command.type === 'record-settlement') {
+    await active.host.recordSettlement({ chatId, runId: command.payload.event.runId, event: command.payload.event });
+    return { commandId: command.commandId, generation: 0, status: 'applied', effect: 'not-applied', details: {} };
+  }
+  return active.owner({ type: command.type, commandId: command.commandId, payload: command.payload } as HostCommand);
+};
+
+const postResponse = (options: {
   readonly channel: BroadcastChannel;
   readonly active: WorkerSession;
   readonly chatId: string;
   readonly generation: string;
   readonly targetId: string;
-  readonly requestId: string;
-  readonly error: unknown;
+  readonly response: ForwardedResponse;
 }): void => {
   options.channel.postMessage({
     ...broadcastBinding(options.active, options.chatId),
     type: 'response',
     targetId: options.targetId,
     generation: options.generation,
-    response: errorResponse(options.requestId, options.error),
+    response: options.response,
   } satisfies LeaderBroadcast);
 };
 
 /**
- * Answer a frame of another protocol version (W0.17, I32).
+ * Answer a frame of another protocol version (W0.17, I32), or a command frame of this one it cannot read (I15).
  *
  * A refusal addressed to this tab settles the command it answers; a command
- * this tab leads for is refused with `LEADER_VERSION_MISMATCH`, so a follower
- * on another build learns it within one round trip instead of timing out.
+ * this tab leads for is refused with `LEADER_VERSION_MISMATCH` (or
+ * `COMMAND_UNREADABLE`), so its follower learns it within one round trip
+ * instead of waiting on a leader that stays alive.
  */
 const answerForeignFrame = (options: {
   readonly channel: BroadcastChannel;
   readonly active: WorkerSession;
   readonly chatId: string;
   readonly frame: unknown;
+  /** The frame claims this protocol and fails it: its command is refused unreadable, not version-mismatched. */
+  readonly unreadable?: boolean;
 }): void => {
   const refusal = refusalFrameSchema.safeParse(options.frame).data;
   if (refusal !== undefined) {
@@ -1064,76 +1003,30 @@ const answerForeignFrame = (options: {
     return;
   }
   const state = leadership.get(options.chatId);
-  const address = readCommandReturnAddress(options.frame);
+  const address = commandReturnAddressSchema.safeParse(options.frame).data;
   if (!state || !address) {
     return;
   }
-  refuseCommand({
+  postResponse({
     channel: options.channel,
     active: options.active,
     chatId: options.chatId,
     generation: state.lease.generation,
     targetId: address.senderId,
-    requestId: address.requestId,
-    error: Object.assign(
-      new Error(
-        `Chat ${options.chatId} is led by a tab running another version of Tau (protocol ${String(agentHostProtocolVersion)}). Reload this tab.`,
-      ),
-      { code: 'LEADER_VERSION_MISMATCH' },
-    ),
+    response: {
+      type: 'error',
+      requestId: address.command.requestId,
+      ...(options.unreadable === true
+        ? {
+            code: 'COMMAND_UNREADABLE' satisfies RefusalCode,
+            message: `The leader of chat ${options.chatId} could not read that command.`,
+          }
+        : {
+            code: 'LEADER_VERSION_MISMATCH' satisfies RefusalCode,
+            message: `Chat ${options.chatId} is led by a tab running another version of Tau (protocol ${String(agentHostProtocolVersion)}). Reload this tab.`,
+          }),
+    },
   });
-};
-
-/** Refuse a `command` frame the strict broadcast schema rejected, when its envelope survives. */
-const refuseUnreadableCommand = (options: {
-  readonly channel: BroadcastChannel;
-  readonly active: WorkerSession;
-  readonly chatId: string;
-  readonly frame: unknown;
-}): void => {
-  const state = leadership.get(options.chatId);
-  const address = readCommandReturnAddress(options.frame);
-  if (!state || !address) {
-    // Not this chat's leader, or nothing left to address: the console record above stands alone.
-    return;
-  }
-  refuseCommand({
-    channel: options.channel,
-    active: options.active,
-    chatId: options.chatId,
-    generation: state.lease.generation,
-    targetId: address.senderId,
-    requestId: address.requestId,
-    error: Object.assign(new Error(`The leader of ${options.chatId} could not read that command frame.`), {
-      code: 'LEADER_COMMAND_UNREADABLE',
-    }),
-  });
-};
-
-const sendTailBatch = async (options: {
-  readonly channel: BroadcastChannel;
-  readonly targetId: string;
-  readonly chatId: string;
-  readonly cursor: number;
-}): Promise<void> => {
-  const { channel, targetId, chatId, cursor } = options;
-  const active = session;
-  const state = leadership.get(chatId);
-  if (!active || !state) {
-    return;
-  }
-  const batch = await active.host.readEvents({
-    chatId,
-    cursor,
-    limit: agentHostTailBatchLimit,
-  });
-  channel.postMessage({
-    ...broadcastBinding(active, chatId),
-    type: 'tail',
-    targetId,
-    generation: state.lease.generation,
-    batch,
-  } satisfies LeaderBroadcast);
 };
 
 const followerMonitorFor = (chatId: string) => {
@@ -1145,14 +1038,19 @@ const followerMonitorFor = (chatId: string) => {
     heartbeatTimeout: followerHeartbeatTimeout,
     tailTimeout: followerTailTimeout,
     onStale: () => {
-      tailInFlight.delete(chatId);
       leaderGenerations.delete(chatId);
+      wakeReads(chatId);
       scheduleFollowerRecovery(chatId);
     },
   });
   followerMonitors.set(chatId, monitor);
   return monitor;
 };
+
+/** Wake every read parked on this chat; each re-decides who answers it and reads again. */
+function wakeReads(chatId: string | undefined): void {
+  readWakes.emit(chatId);
+}
 
 const observeFollowerLeader = (chatId: string, generation: string): void => {
   if (leadership.has(chatId)) {
@@ -1164,22 +1062,9 @@ const observeFollowerLeader = (chatId: string, generation: string): void => {
     followerRetryIds.delete(chatId);
   }
   if (followerMonitorFor(chatId).observeLeader(generation)) {
-    tailInFlight.delete(chatId);
+    wakeReads(chatId);
   }
   leaderGenerations.set(chatId, generation);
-};
-
-const beginFollowerTail = (chatId: string, generation: string): void => {
-  tailInFlight.add(chatId);
-  followerMonitorFor(chatId).beginTail(generation);
-};
-
-const settleFollowerTail = (chatId: string, generation: string): boolean => {
-  if (!followerMonitorFor(chatId).settleTail(generation)) {
-    return false;
-  }
-  tailInFlight.delete(chatId);
-  return true;
 };
 
 function channelFor(chatId: string): BroadcastChannel {
@@ -1198,12 +1083,8 @@ function channelFor(chatId: string): BroadcastChannel {
       return;
     }
     const message = validatedBroadcast(event.data, current, chatId);
-    if (message === 'foreign') {
-      answerForeignFrame({ channel, active: current, chatId, frame: event.data });
-      return;
-    }
-    if (message === 'unreadable') {
-      refuseUnreadableCommand({ channel, active: current, chatId, frame: event.data });
+    if (message === 'foreign' || message === 'unreadable') {
+      answerForeignFrame({ channel, active: current, chatId, frame: event.data, unreadable: message === 'unreadable' });
       return;
     }
     if (!message) {
@@ -1237,20 +1118,9 @@ function channelFor(chatId: string): BroadcastChannel {
       return;
     }
     if (message.type === 'cursor') {
-      if (message.senderId === current.tabId) {
-        return;
-      }
-      observeFollowerLeader(chatId, message.generation);
-      const cursor = followerCursors.get(chatId) ?? 0;
-      if (cursor < message.endCursor && !tailInFlight.has(chatId)) {
-        beginFollowerTail(chatId, message.generation);
-        channel.postMessage({
-          ...broadcastBinding(current, chatId),
-          type: 'tail-request',
-          senderId: current.tabId,
-          targetGeneration: message.generation,
-          cursor,
-        } satisfies LeaderBroadcast);
+      if (message.senderId !== current.tabId) {
+        observeFollowerLeader(chatId, message.generation);
+        wakeReads(chatId);
       }
       return;
     }
@@ -1259,33 +1129,22 @@ function channelFor(chatId: string): BroadcastChannel {
         observeFollowerLeader(chatId, message.generation);
       }
       if (message.senderId !== current.tabId && leaderGenerations.get(chatId) === message.generation) {
-        for (const controller of liveEventStreams) {
-          controller.enqueue({ chatId, event: message.event });
-        }
+        enqueueLiveEvent(message.event);
       }
       return;
     }
     if (message.type === 'tail') {
-      if (message.targetId !== current.tabId || leaderGenerations.get(chatId) !== message.generation) {
+      if (message.targetId !== current.tabId) {
         return;
       }
-      observeFollowerLeader(chatId, message.generation);
-      settleFollowerTail(chatId, message.generation);
-      for (const eventItem of message.batch.events) {
-        for (const controller of eventStreams) {
-          controller.enqueue({ chatId, event: eventItem });
-        }
+      if (leaderGenerations.get(chatId) === message.generation) {
+        observeFollowerLeader(chatId, message.generation);
+        followerMonitorFor(chatId).settleTail(message.generation);
       }
-      followerCursors.set(chatId, message.batch.nextCursor);
-      if (message.batch.nextCursor < message.batch.endCursor) {
-        beginFollowerTail(chatId, message.generation);
-        channel.postMessage({
-          ...broadcastBinding(current, chatId),
-          type: 'tail-ack',
-          senderId: current.tabId,
-          targetGeneration: message.generation,
-          cursor: message.batch.nextCursor,
-        } satisfies LeaderBroadcast);
+      const pending = forwardedReads.get(message.requestId);
+      if (pending) {
+        forwardedReads.delete(message.requestId);
+        pending.resolve(message.answer);
       }
       return;
     }
@@ -1293,82 +1152,97 @@ function channelFor(chatId: string): BroadcastChannel {
     if (!state) {
       return;
     }
-    if (message.type === 'tail-request' || message.type === 'tail-ack') {
-      if (message.targetGeneration === state.lease.generation) {
-        trackTask(
-          async () =>
-            sendTailBatch({
-              channel,
-              targetId: message.senderId,
-              chatId,
-              cursor: message.cursor,
-            }),
-          () => undefined,
-        );
+    if (message.type === 'tail-request') {
+      if (message.targetGeneration !== undefined && message.targetGeneration !== state.lease.generation) {
+        return;
       }
+      trackTask(
+        async () => {
+          /* Answered at once: the follower parks on this leader's cursor frames,
+           * so a long poll here would only hold a request the leader cannot see
+           * abandoned (SC-R14 on the forwarding leg). Refused, never clamped. */
+          const answer = await current.host.read({ ...message.read, signal: AbortSignal.abort() });
+          channel.postMessage({
+            ...broadcastBinding(current, chatId),
+            type: 'tail',
+            targetId: message.senderId,
+            generation: state.lease.generation,
+            requestId: message.requestId,
+            answer,
+          } satisfies LeaderBroadcast);
+        },
+        (error) => {
+          console.error('[agentHost] could not answer a forwarded read', chatId, error);
+        },
+      );
       return;
     }
     // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Re-state the discriminant so the async callbacks retain the command member instead of widening it to any.
     if (message.type !== 'command') {
       return;
     }
+    const { command, senderId } = message;
+    const respond = (answer: CommandAnswer): void => {
+      postResponse({
+        channel,
+        active: current,
+        chatId,
+        generation: state.lease.generation,
+        targetId: senderId,
+        response: { type: 'answer', requestId: command.requestId, answer },
+      });
+    };
     if (message.targetGeneration !== undefined && message.targetGeneration !== state.lease.generation) {
       /* Leadership rolled over between the follower's last heartbeat and its
-       * send. Dropping the frame left that follower waiting on a leader it can
-       * still see heartbeating, so its liveness bound never fired and the
-       * composer sat on the request for the life of the tab. Nothing has run
-       * yet — the refusal is decided before any work — so the follower can
-       * re-learn the leader and broadcast this same command once more. */
-      refuseCommand({
-        channel,
-        active: current,
-        chatId,
-        generation: state.lease.generation,
-        targetId: message.senderId,
-        requestId: message.command.requestId,
-        error: Object.assign(new Error(`Chat ${chatId} is led by a newer generation; re-address this command.`), {
-          code: leaderGenerationStaleCode,
-        }),
-      });
+       * send. Nothing has run yet — the refusal is decided before any work —
+       * so the follower can re-learn the leader and send this same command,
+       * with its same key, once more. */
+      respond(
+        refusedAnswer(
+          command.commandId,
+          leaderGenerationStaleCode,
+          `Chat ${chatId} is led by a newer generation; re-address this command.`,
+        ),
+      );
       return;
     }
-    if (
-      message.workspaceId !== current.workspaceId &&
-      (message.command.type === 'start' || message.command.type === 'resume')
-    ) {
+    if (message.workspaceId !== current.workspaceId && (command.type === 'start' || command.type === 'resume')) {
       /* One chat log, but this worker's files are its own checkout's: a turn
        * placed on another checkout cannot run here (W0.17). */
-      refuseCommand({
-        channel,
-        active: current,
-        chatId,
-        generation: state.lease.generation,
-        targetId: message.senderId,
-        requestId: message.command.requestId,
-        error: Object.assign(
-          new Error(`Chat ${chatId} is running on another checkout in another tab. Finish or stop it there first.`),
-          { code: 'LEADER_WORKSPACE_MISMATCH' },
+      respond(
+        refusedAnswer(
+          command.commandId,
+          'LEADER_WORKSPACE_MISMATCH',
+          `Chat ${chatId} is running on another checkout in another tab. Finish or stop it there first.`,
         ),
-      });
+      );
       return;
     }
-    const commandMessage = message;
     trackTask(
-      async () =>
-        postForwardedResponse({
-          channel,
-          senderId: commandMessage.senderId,
-          generation: state.lease.generation,
-          command: commandMessage.command,
-        }),
+      async () => {
+        if (!leadership.has(chatId)) {
+          /* Leadership ended between accepting this command and running it: nothing ran here, so it is
+           * re-addressable. */
+          respond(
+            refusedAnswer(
+              command.commandId,
+              leaderGenerationStaleCode,
+              `Chat ${chatId} changed leader before this command ran.`,
+            ),
+          );
+          return;
+        }
+        respond(await leaderAnswer(current, chatId, command));
+      },
       (error) => {
-        channel.postMessage({
-          ...broadcastBinding(current, chatId),
-          type: 'response',
-          targetId: commandMessage.senderId,
+        postResponse({
+          channel,
+          active: current,
+          chatId,
           generation: state.lease.generation,
-          response: errorResponse(commandMessage.command.requestId, error),
-        } satisfies LeaderBroadcast);
+          targetId: senderId,
+          response: faultResponse(command.requestId, error),
+        });
       },
     );
   });
@@ -1404,7 +1278,6 @@ const ensureLeadership = async (chatId: string): Promise<boolean> => {
     }
     followerMonitors.get(chatId)?.stop();
     followerMonitors.delete(chatId);
-    tailInFlight.delete(chatId);
     active.host.assumeLeadership(chatId, lease.generation);
     const announce = (): void => {
       channelFor(chatId).postMessage({
@@ -1420,7 +1293,10 @@ const ensureLeadership = async (chatId: string): Promise<boolean> => {
     };
     leadership.set(chatId, state);
     leaderGenerations.set(chatId, lease.generation);
+    takeovers.add(chatId);
     announce();
+    // Parked follower reads of this chat are this worker's to answer now.
+    wakeReads(chatId);
     trackTask(
       async () => {
         try {
@@ -1434,6 +1310,7 @@ const ensureLeadership = async (chatId: string): Promise<boolean> => {
         globalThis.clearInterval(state.heartbeatId);
         leadership.delete(chatId);
         leaderGenerations.delete(chatId);
+        takeovers.delete(chatId);
         await active.host.relinquish(chatId);
       },
       () => undefined,
@@ -1449,28 +1326,30 @@ const ensureLeadership = async (chatId: string): Promise<boolean> => {
   }
 };
 
-const waitForForwardedResponse = async (
+/** Forward one command to the chat's leader and wait while the leader it addressed lives (T9 C4, W0.14). */
+const forwardOnce = async (
   active: WorkerSession,
-  command: AgentHostWorkerCommand,
+  chatId: string,
+  command: ForwardedCommand,
 ): Promise<ForwardedResponse | undefined> => {
   const pending = Promise.withResolvers<ForwardedResponse>();
   forwarded.set(command.requestId, pending);
-  const targetGeneration = leaderGenerations.get(command.chatId);
-  channelFor(command.chatId).postMessage({
-    ...broadcastBinding(active, command.chatId),
+  const targetGeneration = leaderGenerations.get(chatId);
+  channelFor(chatId).postMessage({
+    ...broadcastBinding(active, chatId),
     type: 'command',
     senderId: active.tabId,
     targetGeneration,
     command,
   } satisfies LeaderBroadcast);
   /* Liveness, not a work bound: a `start` is answered at admission time, which
-   * includes preparing the turn, so a constant deadline re-broadcast a command
-   * the leader was still working on — and the leader then executed it twice.
-   * Only the addressed generation's liveness counts (W0.14). */
+   * includes preparing the turn, so a constant deadline re-sent a command the
+   * leader was still working on. Only the addressed generation's liveness
+   * counts (W0.14). */
   const response = await awaitWhileLeaderLives({
     response: pending.promise,
     generation: targetGeneration,
-    lastSeen: () => followerMonitors.get(command.chatId)?.lastSeen(),
+    lastSeen: () => followerMonitors.get(chatId)?.lastSeen(),
     heartbeatTimeout: followerHeartbeatTimeout,
   });
   if (forwarded.get(command.requestId) === pending) {
@@ -1479,93 +1358,144 @@ const waitForForwardedResponse = async (
   return response;
 };
 
-const forwardCommand = async (command: AgentHostWorkerCommand): Promise<ForwardedResponse> => {
-  const active = session;
-  if (!active) {
-    throw Object.assign(new Error('Agent host worker is not initialized.'), {
-      code: 'SESSION_NOT_INITIALIZED',
-    });
+const isStaleRefusal = (response: ForwardedResponse): boolean =>
+  response.type === 'answer'
+    ? response.answer.status === 'refused' && response.answer.code === leaderGenerationStaleCode
+    : response.code === leaderGenerationStaleCode;
+
+const forwardedAnswer = (response: ForwardedResponse): CommandAnswer => {
+  if (response.type === 'answer') {
+    return response.answer;
   }
-  const first = await waitForForwardedResponse(active, command);
-  /* A stale-generation refusal takes the same recovery as no answer at all: the
-   * leader ran nothing, and the re-broadcast below carries no target generation
-   * (or the one just learned), which the current leader accepts. */
-  /* A window the page asked for is a plain read: it never moves this
-   * follower's replication cursor, which only replication advances (W0.13,
-   * L2b HD-1). A re-attach at cursor 0 pulled it back into a full re-tail; a
-   * window past it skipped rows this worker's listeners never received. */
-  if (first && !(first.type === 'error' && first.code === leaderGenerationStaleCode)) {
-    return first.type === 'attach'
-      ? {
-          ...first,
-          leadership: {
-            role: 'follower',
-            generation: first.leadership.generation,
-          },
-          takeover: false,
-        }
-      : first;
-  }
-  leaderGenerations.delete(command.chatId);
-  if (await ensureLeadership(command.chatId)) {
-    return executeCommand(command, command.type === 'attach');
-  }
-  const replay = await waitForForwardedResponse(active, command);
-  if (!replay) {
-    throw Object.assign(new Error(`No chat leader answered command ${command.requestId} before its deadline.`), {
-      code: 'LEADER_RESPONSE_TIMEOUT',
-    });
-  }
-  return replay.type === 'attach'
-    ? {
-        ...replay,
-        leadership: {
-          role: 'follower',
-          generation: replay.leadership.generation,
-        },
-        takeover: false,
-      }
-    : replay;
+  throw Object.assign(new Error(response.message), { code: response.code });
 };
 
-const replayRecoveredBatch = async (options: {
-  readonly active: WorkerSession;
-  readonly chatId: string;
-  readonly initial: EventLogBatch;
-  readonly followerGeneration?: string;
-}): Promise<void> => {
-  const { active, chatId, followerGeneration } = options;
-  let batch = options.initial;
-  for (;;) {
-    for (const eventItem of batch.events) {
-      for (const controller of eventStreams) {
-        controller.enqueue({ chatId, event: eventItem });
+/**
+ * Hand one command to the chat's leader, or lead the chat and answer it here.
+ *
+ * Every re-address carries the same key, so the leader's owner answers a
+ * command that already landed `replayed` instead of running it twice.
+ */
+const forwardCommand = async (
+  active: WorkerSession,
+  chatId: string,
+  command: ForwardedCommand,
+): Promise<CommandAnswer> => {
+  const first = await forwardOnce(active, chatId, command);
+  /* A stale-generation refusal takes the same recovery as no answer at all: the
+   * leader ran nothing, and the re-send below carries no target generation (or
+   * the one just learned), which the current leader accepts. */
+  if (first && !isStaleRefusal(first)) {
+    return forwardedAnswer(first);
+  }
+  leaderGenerations.delete(chatId);
+  if (await ensureLeadership(chatId)) {
+    return leaderAnswer(active, chatId, command);
+  }
+  const replay = await forwardOnce(active, chatId, { ...command, requestId: randomUuid() });
+  if (!replay) {
+    // The leader may have run it before it went silent: the effect is unknown, and the re-send is by key.
+    return {
+      commandId: command.commandId,
+      generation: 0,
+      status: 'refused',
+      effect: 'unknown',
+      code: 'PEER_UNRESPONSIVE' satisfies RefusalCode,
+      message: `No leader of chat ${chatId} answered before it went silent; re-send this command.`,
+    };
+  }
+  return forwardedAnswer(replay);
+};
+
+/** Park one follower read until something could change its answer (SC-R14). */
+const parkRead = (chatId: string, signal: AbortSignal | undefined): { promise: Promise<void>; cancel(): void } => {
+  const woken = Promise.withResolvers<void>();
+  const stop = new AbortController();
+  const wake = (): void => {
+    stop.abort();
+    signal?.removeEventListener('abort', wake);
+    woken.resolve();
+  };
+  readWakes.subscribe(
+    (woke) => {
+      if (woke === undefined || woke === chatId) {
+        wake();
       }
+    },
+    { signal: stop.signal },
+  );
+  signal?.addEventListener('abort', wake, { once: true });
+  return { promise: woken.promise, cancel: wake };
+};
+
+/** Forward one read to the leader over the tail frames: refused or batched there, never clamped (SC-R12). */
+const forwardRead = async (active: WorkerSession, request: ReadRequest): Promise<ReadAnswer | undefined> => {
+  const { chatId } = request;
+  const requestId = randomUuid();
+  const pending = Promise.withResolvers<ReadAnswer>();
+  forwardedReads.set(requestId, pending);
+  const targetGeneration = leaderGenerations.get(chatId);
+  if (targetGeneration !== undefined) {
+    followerMonitorFor(chatId).beginTail(targetGeneration);
+  }
+  channelFor(chatId).postMessage({
+    ...broadcastBinding(active, chatId),
+    type: 'tail-request',
+    senderId: active.tabId,
+    targetGeneration,
+    requestId,
+    read: request,
+  } satisfies LeaderBroadcast);
+  try {
+    return await awaitWhileLeaderLives({
+      response: pending.promise,
+      generation: targetGeneration,
+      lastSeen: () => followerMonitors.get(chatId)?.lastSeen(),
+      heartbeatTimeout: followerHeartbeatTimeout,
+    });
+  } finally {
+    forwardedReads.delete(requestId);
+  }
+};
+
+/**
+ * One long-poll read (SC-R14): the leader's own host parks it until the next
+ * durable row; a follower forwards it and parks until the leader's cursor
+ * frames show a row past it, the leader changes, or the reader lets go.
+ */
+const readChat = async ({ signal, ...request }: ReadInput): Promise<ReadAnswer> => {
+  const { chatId } = request;
+  const stopped = (): boolean => signal?.aborted === true || closing;
+  for (;;) {
+    const active = requireSession();
+    // oxlint-disable-next-line no-await-in-loop -- leadership is re-decided on every wake.
+    if (await ensureLeadership(chatId)) {
+      // oxlint-disable-next-line no-await-in-loop -- the host's long poll.
+      const answer = await active.host.read({ ...request, ...(signal === undefined ? {} : { signal }) });
+      if (answer.status === 'refused' && answer.reason === 'owner-fenced' && !stopped()) {
+        // The lease was let go under this read: whoever leads now answers it.
+        continue;
+      }
+      return answer;
     }
-    followerCursors.set(chatId, batch.nextCursor);
-    if (batch.nextCursor >= batch.endCursor) {
-      return;
-    }
-    if (leadership.has(chatId)) {
-      // oxlint-disable-next-line no-await-in-loop -- Durable cursor windows must be replayed in order.
-      batch = await active.host.readEvents({
-        chatId,
-        cursor: batch.nextCursor,
-        limit: agentHostTailBatchLimit,
-      });
+    // Parked before the forward, so a cursor frame between its answer and the park is not lost.
+    const parked = parkRead(chatId, signal);
+    // oxlint-disable-next-line no-await-in-loop -- one forwarded read at a time per reader.
+    const answer = await forwardRead(active, request);
+    if (answer === undefined) {
+      parked.cancel();
+      leaderGenerations.delete(chatId);
       continue;
     }
-    if (followerGeneration) {
-      beginFollowerTail(chatId, followerGeneration);
-      channelFor(chatId).postMessage({
-        ...broadcastBinding(active, chatId),
-        type: 'tail-ack',
-        senderId: active.tabId,
-        targetGeneration: followerGeneration,
-        cursor: batch.nextCursor,
-      } satisfies LeaderBroadcast);
+    if (answer.status === 'refused' || answer.events.length > 0 || stopped()) {
+      parked.cancel();
+      return answer;
     }
-    return;
+    // oxlint-disable-next-line no-await-in-loop -- the park is the long poll.
+    await parked.promise;
+    if (stopped()) {
+      return answer;
+    }
   }
 };
 
@@ -1574,34 +1504,12 @@ const recoverFollower = async (chatId: string): Promise<void> => {
   if (!active || closing || leadership.has(chatId)) {
     return;
   }
-  tailInFlight.delete(chatId);
   leaderGenerations.delete(chatId);
-  const command: AgentHostWorkerCommand = {
-    type: 'attach',
-    chatId,
-    cursor: followerCursors.get(chatId) ?? 0,
-    limit: agentHostTailBatchLimit,
-    requestId: randomUuid(),
-    sessionId: active.sessionId,
-  };
-  const becameLeader = await ensureLeadership(chatId);
-  const response = becameLeader ? await executeCommand(command, true) : await forwardCommand(command);
-  if (response.type === 'error') {
-    throw Object.assign(new Error(response.message), { code: response.code });
+  if (await ensureLeadership(chatId)) {
+    // The takeover is recorded now, not on the next page gesture (I4); pages read the result themselves.
+    await active.owner({ type: 'attach', commandId: randomUuid(), payload: { chatId } });
   }
-  if (response.type !== 'attach') {
-    throw new Error(`Follower recovery for ${chatId} returned ${response.type}.`);
-  }
-  const followerGeneration = response.leadership.role === 'follower' ? response.leadership.generation : undefined;
-  if (followerGeneration) {
-    observeFollowerLeader(chatId, followerGeneration);
-  }
-  await replayRecoveredBatch({
-    active,
-    chatId,
-    initial: response.batch,
-    followerGeneration,
-  });
+  wakeReads(chatId);
 };
 
 function scheduleFollowerRecovery(chatId: string): void {
@@ -1921,7 +1829,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
         const waiter = interruptWaiters.get(resolution.interruptId);
         if (!waiter) {
           throw Object.assign(new Error(`Interrupt ${resolution.interruptId} is not pending.`), {
-            code: 'INTERRUPT_NOT_FOUND',
+            code: 'INTERRUPT_NOT_PENDING' satisfies RefusalCode,
           });
         }
         interruptWaiters.delete(resolution.interruptId);
@@ -1960,6 +1868,10 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     durability,
     storageBackend,
     host,
+    owner: createCommandOwner({
+      ledger: async (chatId) => host.ledger(chatId),
+      effect: async (command) => executeCommand(active, command),
+    }),
     runtimeClient,
     parameterActors,
     imageService,
@@ -2037,9 +1949,13 @@ const releaseSession = async (): Promise<void> => {
       pending.reject(new Error('Agent host worker closed.'));
     }
     forwarded.clear();
+    for (const pending of forwardedReads.values()) {
+      pending.reject(new Error('Agent host worker closed.'));
+    }
+    forwardedReads.clear();
+    wakeReads(undefined);
+    takeovers.clear();
     followerRecoveries.clear();
-    followerCursors.clear();
-    tailInFlight.clear();
     leaderGenerations.clear();
   }
   if (failures.length > 0) {
@@ -2066,43 +1982,74 @@ const close = async (): Promise<void> => {
   }
 };
 
-const withoutRequestId = (
-  response: Exclude<ForwardedResponse, { readonly type: 'error' }>,
-): AgentHostWorkerCallResponse => {
-  const { requestId: _requestId, ...result } = response;
-  return result;
+/** Answer one keyed command from the page: here when this worker leads its chat, else through the leader. */
+const commandFromPage = async (active: WorkerSession, command: HostCommand): Promise<CommandAnswer> => {
+  const chatId = chatIdOf(command.payload);
+  if (chatId === undefined) {
+    // No chat to lead: the owner reads the payload and refuses it (SC-R4).
+    return active.owner(command);
+  }
+  if (await ensureLeadership(chatId)) {
+    return active.owner(command);
+  }
+  return forwardCommand(active, chatId, {
+    requestId: randomUuid(),
+    sessionId: active.sessionId,
+    commandId: command.commandId,
+    type: command.type,
+    payload: command.payload,
+  });
+};
+
+/** Record one settlement in the chat's log, here or through its leader. ponytail: W8 deletes the verb (drift 7). */
+const recordSettlementFromPage = async (
+  active: WorkerSession,
+  record: AgentHostWorkerSettlementRecord,
+): Promise<void> => {
+  const command = {
+    requestId: randomUuid(),
+    sessionId: active.sessionId,
+    commandId: randomUuid(),
+    type: 'record-settlement',
+    payload: record,
+  } as const;
+  const answer = (await ensureLeadership(record.chatId))
+    ? await leaderAnswer(active, record.chatId, command)
+    : await forwardCommand(active, record.chatId, command);
+  if (answer.status === 'refused') {
+    throw Object.assign(new Error(answer.message), { code: answer.code });
+  }
 };
 
 /** Handle one validated Channel call after the lightweight worker bootstrap loads. */
-export const handleAgentHostWorkerRequest = async (
-  request: Exclude<AgentHostWorkerCallRequest, { readonly type: 'capabilities' }>,
-  sessionId: string,
-): Promise<AgentHostWorkerCallResponse> => {
-  if (request.type === 'initialize') {
-    await initialize(request, sessionId);
-    return { type: 'initialized' };
+export const handleAgentHostWorkerCall = async (
+  name: Exclude<keyof AgentHostWorkerProtocol['calls'], 'capabilities'>,
+  args: unknown,
+  caller: { readonly sessionId: string; readonly signal?: AbortSignal | undefined },
+): Promise<unknown> => {
+  const { sessionId, signal } = caller;
+  if (name === 'initialize') {
+    await initialize(args as AgentHostWorkerInitializeRequest, sessionId);
+    return undefined;
   }
-  if (request.type === 'close') {
+  if (name === 'close') {
     await close();
-    return { type: 'closed' };
+    return undefined;
   }
-  if (!session || session.sessionId !== sessionId) {
+  const active = session;
+  if (!active || active.sessionId !== sessionId) {
     throw Object.assign(new Error('Agent host worker session is not initialized.'), {
-      code: 'SESSION_NOT_INITIALIZED',
+      code: 'SESSION_NOT_INITIALIZED' satisfies RefusalCode,
     });
   }
-  const command: AgentHostWorkerCommand = {
-    ...request,
-    requestId: randomUuid(),
-    sessionId,
-  };
-  const alreadyLeader = leadership.has(request.chatId);
-  const isLeader = await ensureLeadership(request.chatId);
-  const response = isLeader
-    ? await executeCommand(command, request.type === 'attach' && !alreadyLeader)
-    : await forwardCommand(command);
-  if (response.type === 'error') {
-    throw Object.assign(new Error(response.message), { code: response.code });
+  if (name === 'read') {
+    return readChat({ ...(args as ReadRequest), ...(signal === undefined ? {} : { signal }) });
   }
-  return withoutRequestId(response);
+  if (name === 'record-settlement') {
+    await recordSettlementFromPage(active, args as AgentHostWorkerSettlementRecord);
+    return undefined;
+  }
+  const { commandId, payload } = args as { readonly commandId: string; readonly payload: unknown };
+  // The method name is the verb; the owner parses the payload strictly (SC-R1, SC-R4).
+  return commandFromPage(active, { type: name, commandId, payload } as HostCommand);
 };

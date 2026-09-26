@@ -21,8 +21,9 @@ import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 
 import {
+  answerLine,
+  attachChat,
   eventLine,
-  expectResult,
   externalAgentOf,
   externalLoginOf,
   externalRefusalOf,
@@ -30,17 +31,15 @@ import {
   isSettled,
   oneLine,
   openAgentChannel,
-  readPage,
+  readNext,
   refusalText,
+  sendCommand,
 } from '#commands/agent/client.js';
 import type { ExternalAgentFacts, ExternalRefusal } from '#commands/agent/client.js';
 import { sanitize } from '#output.js';
 
 /** Most transcript rows kept in memory; the oldest are dropped (P5). */
 const rowLimit = 2000;
-
-/** How long the follow waits before asking for the next page. Milliseconds. */
-const pollInterval = 200;
 
 /** Rows the chrome occupies: status, approval, prompt, and hint lines. */
 const chromeRows = 5;
@@ -253,49 +252,45 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
   const [notice, setNotice] = useState(`Connecting to ${origin}…`);
   const [rows, setRows] = useState(stdout.rows > 0 ? stdout.rows : fallbackRows);
 
-  /* One follow, restarted from its own cursor. Unlike `tau agent tail` this
-   * never stops at settlement: the next prompt starts the next run in the same
-   * chat, and the operator is still watching. */
+  /* One follow from its own cursor, one long-poll read at a time (SC-R14).
+   * Unlike `tau agent tail` this never stops at settlement: the next prompt
+   * starts the next run in the same chat, and the operator is still watching. */
   useEffect(() => {
     if (client === undefined) {
       return undefined;
     }
     setNotice(`Following ${chatId}.`);
-    let stopped = false;
-    let cursor = from;
-    /* The first page arrives through `attach`, which is what recovers a run a
-     * daemon restart left hanging; every page after it is an ordinary `tail`. */
-    let attach = true;
+    const stop = new AbortController();
     const follow = async (): Promise<void> => {
       try {
+        const { emptyChatLedger } = await import('@taucad/agent-host');
+        // `attach` records a run a daemon restart left hanging; rows come only from `read`.
+        await attachChat(client, chatId);
+        let ledger = { ...emptyChatLedger, position: { cursor: from } };
         for (;;) {
           // oxlint-disable-next-line no-await-in-loop -- a cursored replay is sequential by definition.
-          const batch = await readPage({ client, chatId, cursor, attach });
-          attach = false;
-          if (stopped) {
+          const page = await readNext({ client, chatId, ledger, signal: stop.signal });
+          ledger = page.ledger;
+          if (stop.signal.aborted) {
             return;
           }
-          cursor = batch.nextCursor;
-          if (batch.events.length > 0) {
-            setSession((current) => applyPage(current, batch.events));
-          }
-          if (cursor >= batch.endCursor) {
-            // oxlint-disable-next-line no-await-in-loop -- let the daemon append before asking again.
-            await new Promise((resolve) => {
-              setTimeout(resolve, pollInterval);
-            });
+          if (page.reset) {
+            // The log is not the one this view was reading: refold it from cursor 0 (W3 CL-R13).
+            setSession(emptySession);
+          } else if (page.events.length > 0) {
+            setSession((current) => applyPage(current, page.events));
           }
         }
       } catch (error) {
-        if (!stopped) {
+        if (!stop.signal.aborted) {
           setNotice(`The channel stopped: ${oneLine(error instanceof Error ? error.message : String(error))}`);
         }
       }
     };
-    // async-iife: bootstrap -- an effect body cannot await; its cleanup stops the loop.
+    // async-iife: bootstrap -- an effect body cannot await; its cleanup ends the outstanding read.
     void follow();
     return () => {
-      stopped = true;
+      stop.abort();
     };
   }, [client, chatId, from]);
 
@@ -366,42 +361,51 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
     }
     setDraft('');
     const started = randomUUID();
-    act(running === undefined ? 'start' : 'steer', async () => {
-      const answer = expectResult(
+    // One key per keystroke: the channel re-sends it after a redial, never a second one (SC-R6).
+    const commandId = randomUUID();
+    const label = running === undefined ? 'start' : 'steer';
+    act(label, async () => {
+      const answer = await sendCommand(
+        client,
         running === undefined
-          ? await client.execute({
+          ? {
               type: 'start',
-              trigger: 'submit',
-              chatId,
-              runId: started,
-              message: { id: randomUUID(), role: 'user', content: prompt },
-              /* The same literal `tau agent run --agent` sends: the host routes
-               * on `agent` before it composes anything, so the two Tau fields
-               * beside it are inert for this turn. */
-              ...(agent === undefined
-                ? {}
-                : {
-                    config: {
-                      agent: {
-                        kind: 'acp',
-                        id: agent.id,
-                        ...(agent.model === undefined ? {} : { model: agent.model }),
-                      },
-                      systemPrompt: '',
-                      toolChoice: 'auto',
-                    } as const,
-                  }),
-            })
-          : await client.execute({ type: 'steer', chatId, runId: running, message: prompt }),
+              commandId,
+              payload: {
+                chatId,
+                runId: started,
+                trigger: 'submit',
+                message: { id: randomUUID(), role: 'user', content: prompt },
+                /* The same literal `tau agent run --agent` sends: the host routes
+                 * on `agent` before it composes anything, so the two Tau fields
+                 * beside it are inert for this turn. */
+                ...(agent === undefined
+                  ? {}
+                  : {
+                      config: {
+                        agent: {
+                          kind: 'acp',
+                          id: agent.id,
+                          ...(agent.model === undefined ? {} : { model: agent.model }),
+                        },
+                        systemPrompt: '',
+                        toolChoice: 'auto',
+                      } as const,
+                    }),
+              },
+            }
+          : { type: 'steer', commandId, payload: { chatId, runId: running, message: prompt } },
       );
-      /* The first page of a new run is up to one poll away, and `c` in the
-       * meantime must cancel the run this keystroke started — not report that
-       * no run exists. The snapshot is the daemon's own, so this is its answer
-       * arriving early rather than an assumption. */
+      /* The admission row may reach this view's read after the answer does, and
+       * `c` in the meantime must cancel the run this keystroke started — not
+       * report that no run exists. An applied start is a durable admission; rows
+       * the view already read for this run are newer than that. */
       if (running === undefined) {
-        setSession((current) => ({ ...current, runId: started, state: answer.snapshot.state }));
+        setSession((current) =>
+          current.runId === started ? current : { ...current, runId: started, state: 'admitted' },
+        );
       }
-      return `${answer.operation}: ${answer.snapshot.state}`;
+      return `${label}: ${answerLine(answer)}`;
     });
   }, [act, agent, chatId, client, draft, session.agent, session.runId, session.state]);
 
@@ -412,8 +416,8 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
       return;
     }
     act('cancel', async () => {
-      const answer = expectResult(await client.execute({ type: 'cancel', chatId, runId }));
-      return `${answer.operation}: ${answer.snapshot.state}`;
+      const answer = await sendCommand(client, { type: 'cancel', commandId: randomUUID(), payload: { chatId, runId } });
+      return `cancel: ${answerLine(answer)}`;
     });
   }, [act, chatId, client]);
 
@@ -424,18 +428,20 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
         return;
       }
       const option = chosenOption(approval, approved);
-      act(approved ? 'approve' : 'deny', async () => {
-        const answer = expectResult(
-          await client.execute({
-            type: 'resolve-interrupt',
+      const label = approved ? 'approve' : 'deny';
+      act(label, async () => {
+        const answer = await sendCommand(client, {
+          type: 'resolve-interrupt',
+          commandId: randomUUID(),
+          payload: {
             chatId,
             runId: approval.runId,
             interruptId: approval.interruptId,
             outcome: approved ? 'approved' : 'denied',
             ...(option === undefined ? {} : { optionId: option.optionId }),
-          }),
-        );
-        return `${answer.operation}: ${answer.snapshot.state}`;
+          },
+        });
+        return `${label}: ${answerLine(answer)}`;
       });
     },
     [act, chatId, client],

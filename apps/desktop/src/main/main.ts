@@ -29,7 +29,7 @@ import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@tau
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import { defaultConfigDirectory, discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 
 import kernelUtilityEntry from '#tau/kernel-host.entry?modulePath';
 import servicesUtilityEntry from '#tau/services-host.entry?modulePath';

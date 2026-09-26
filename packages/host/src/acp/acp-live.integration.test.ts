@@ -24,7 +24,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import { reduceEventLog } from '@taucad/agent-host';
-import type { AgentChannelLiveEvent, AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
+import type { AgentLiveEvent, AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
 import { createAcpExternalAgentPort } from '#acp/run.js';
 import { discoverAcpAgents } from '#acp/registry.js';
@@ -212,10 +212,10 @@ describe.skipIf(!liveEnabled)('a live ACP turn', () => {
       const runId = `run-live-${agentId}`;
       const started = Date.now();
       const liveAbort = new AbortController();
-      const live: AgentChannelLiveEvent[] = [];
+      const live: AgentLiveEvent[] = [];
       const liveDone = (async () => {
-        for await (const event of launcher.liveEvents(liveAbort.signal)) {
-          if (event.event.runId === runId) {
+        for await (const event of launcher.liveEvents({ chatId, signal: liveAbort.signal })) {
+          if (event.runId === runId) {
             live.push(event);
           }
         }
@@ -223,21 +223,24 @@ describe.skipIf(!liveEnabled)('a live ACP turn', () => {
 
       const accepted = await launcher.execute({
         type: 'start',
-        trigger: 'submit',
-        chatId,
-        runId,
-        message: { id: `user-${agentId}`, role: 'user', content: prompt },
-        config: {
-          agent: {
-            kind: 'acp',
-            id: agentId,
-            ...(selectedModel(agentId) === undefined ? {} : { model: selectedModel(agentId) }),
+        commandId: `start-${runId}`,
+        payload: {
+          trigger: 'submit',
+          chatId,
+          runId,
+          message: { id: `user-${agentId}`, role: 'user', content: prompt },
+          config: {
+            agent: {
+              kind: 'acp',
+              id: agentId,
+              ...(selectedModel(agentId) === undefined ? {} : { model: selectedModel(agentId) }),
+            },
+            systemPrompt: '',
+            toolChoice: 'auto',
           },
-          systemPrompt: '',
-          toolChoice: 'auto',
         },
       });
-      expect(accepted).toMatchObject({ type: 'result', operation: 'start' });
+      expect(accepted).toMatchObject({ status: 'applied', effect: 'durable' });
 
       const state = await settled(async () => readLog(workspaceRoot, chatId));
       liveAbort.abort();
@@ -268,7 +271,7 @@ describe.skipIf(!liveEnabled)('a live ACP turn', () => {
       }
       expect(toolMessages.some((message) => message.role === 'tool-input')).toBe(true);
       expect(toolMessages.some((message) => message.role === 'tool-output')).toBe(true);
-      const liveTypes = live.map(({ event }) => event.type);
+      const liveTypes = live.map((event) => event.type);
       expect(liveTypes).not.toContain('tool-input-start');
       expect(liveTypes).not.toContain('tool-input-end');
       expect(liveTypes.some((type) => type === 'thinking-delta' || type === 'text-delta')).toBe(true);
@@ -542,18 +545,21 @@ describe.skipIf(!liveEnabled || codexAdapter === undefined)('a live ACP chat acr
     const turn = async (runId: string, text: string): Promise<string> => {
       await launcher.execute({
         type: 'start',
-        trigger: 'submit',
-        chatId,
-        runId,
-        message: { id: `user-${runId}`, role: 'user', content: text },
-        config: {
-          agent: {
-            kind: 'acp',
-            id: agentId,
-            ...(selectedModel(agentId) === undefined ? {} : { model: selectedModel(agentId) }),
+        commandId: `start-${runId}`,
+        payload: {
+          trigger: 'submit',
+          chatId,
+          runId,
+          message: { id: `user-${runId}`, role: 'user', content: text },
+          config: {
+            agent: {
+              kind: 'acp',
+              id: agentId,
+              ...(selectedModel(agentId) === undefined ? {} : { model: selectedModel(agentId) }),
+            },
+            systemPrompt: '',
+            toolChoice: 'auto',
           },
-          systemPrompt: '',
-          toolChoice: 'auto',
         },
       });
       return settled(async () => {

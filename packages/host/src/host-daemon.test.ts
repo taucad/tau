@@ -864,57 +864,6 @@ describe('startHostDaemon', () => {
   }, 20_000);
 
   /*
-   * PH19 ruling 2 keeps the API's run directory free of content, so nothing it
-   * receives may wait on a revision. The recorder's stream holds a terminal
-   * marker until the turn's whole-tree capture is durable — a guarantee clients
-   * need — and a reporter riding it both delays every directory update and
-   * queues events for the length of the capture, past which the launcher's
-   * fan-out errors the subscriber and the reporter never resubscribes.
-   */
-  it('reports runs from the launcher itself, never from the stream that waits for a revision', async () => {
-    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-reporter-stream-'));
-    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
-    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
-    const relay = await startRelay();
-    const subscriptions = { launcher: 0, recorded: 0 };
-    revisionsSpy.mockImplementationOnce((options) => {
-      const tree = realCreateProjectRevisions(options);
-      return {
-        ...tree,
-        record: (launcher) => {
-          const events = launcher.events.bind(launcher);
-          /* Patched in place, not wrapped: the daemon holds this very object,
-           * and counting subscriptions on a copy would not see the ones it
-           * makes. */
-          Object.assign(launcher, {
-            events: (signal: AbortSignal) => {
-              subscriptions.launcher += 1;
-              return events(signal);
-            },
-          });
-          const recorded = tree.record(launcher);
-          return {
-            ...recorded,
-            events: (signal: AbortSignal) => {
-              subscriptions.recorded += 1;
-              return recorded.events(signal);
-            },
-          };
-        },
-      };
-    });
-
-    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
-    await daemon.ready;
-    /* Two on the launcher — the revision tree's own terminal-marker watch and
-     * the run reporter — and none on the wrapper, which no client is listening
-     * to yet. */
-    expect(subscriptions).toEqual({ launcher: 2, recorded: 0 });
-
-    await daemon.close();
-  }, 20_000);
-
-  /*
    * C67: a project `tau serve --ui` serves shows the Sync region, so *Connect
    * Tau Cloud* must be able to take. The daemon is already talking to the Tau
    * API — the relay it paired against — and that is the origin this project's

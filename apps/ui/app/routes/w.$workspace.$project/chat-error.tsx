@@ -20,7 +20,8 @@ import { ChatErrorRateLimit } from '#routes/w.$workspace.$project/chat-error-rat
 import { ChatErrorTool } from '#routes/w.$workspace.$project/chat-error-tool.js';
 import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
 import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
-import { externalAgentStopCodes, externalAgentStopSchema, isResumableRunFailure } from '@taucad/agent-host';
+import { isResumableRunFailure } from '@taucad/agent-host';
+import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
 
 /**
  * Model-call failures that leave the turn whole.
@@ -40,7 +41,6 @@ const pausedTurnCodes = new Set([
   'PROVIDER_UNAVAILABLE',
   'MALFORMED_RESPONSE',
   'UPSTREAM_REJECTED',
-  'WORKER_CRASHED',
 ]);
 
 /**
@@ -111,6 +111,40 @@ function codedErrorCard({
         guidance='Resume to continue without losing your work.'
         canTryAgain
         {...raw}
+      />
+    );
+  }
+
+  /* The host went silent: a browser worker that died and could not be replaced (was `WORKER_CRASHED`, T3), or a
+   * daemon past the channel's liveness bound. The command's effect is unknown — the start may never have been
+   * admitted — so the card claims no run and promises nothing. */
+  if (code === 'PEER_UNRESPONSIVE') {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        title='Tau stopped responding'
+        reason='Tau cannot tell whether this turn started.'
+        resumable={false}
+        {...raw}
+      />
+    );
+  }
+
+  // The host's hello names a wire this page cannot speak; only updating Tau there helps.
+  if (code === 'WIRE_VERSION_UNSUPPORTED') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='warning'
+        icon={CircleAlert}
+        title='Update Tau on this host'
+        description='This host runs a version of Tau this page cannot talk to. Update Tau there, then try again.'
+        actions={
+          <Button variant='outline' size='sm' onClick={onTryAgain}>
+            <RefreshCcw className='size-3.5' />
+            Try again
+          </Button>
+        }
       />
     );
   }

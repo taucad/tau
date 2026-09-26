@@ -380,6 +380,49 @@ describe('ChatError', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  /* A silent peer (a crashed worker, or a daemon past its liveness bound) leaves the command's effect unknown: the
+   * start may never have been admitted, so the card claims no run and promises nothing. */
+  it('should not claim a turn exists when its host stopped responding', async () => {
+    const user = userEvent.setup();
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'No leader of chat chat-1 answered before it went silent; re-send this command.',
+      code: 'PEER_UNRESPONSIVE',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Tau stopped responding')).toBeInTheDocument();
+    expect(screen.getByText('Tau cannot tell whether this turn started.')).toBeInTheDocument();
+    expect(screen.queryByText('Tau paused this turn')).not.toBeInTheDocument();
+    expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+  });
+
+  /* A host whose hello names a wire this page cannot speak: nothing here can fix it, the host's Tau must change. */
+  it('should ask for an update on a host that speaks another wire version', async () => {
+    const user = userEvent.setup();
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The agent owner speaks another wire version; update Tau on that host.',
+      code: 'WIRE_VERSION_UNSUPPORTED',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Update Tau on this host')).toBeInTheDocument();
+    expect(
+      screen.getByText('This host runs a version of Tau this page cannot talk to. Update Tau there, then try again.'),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+  });
+
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {
     const quota: ChatErrorPayload = {
       category: errorCategory.rateLimit,

@@ -122,11 +122,14 @@ describe('an approval nobody answers', () => {
 
     await launcher.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId,
-      runId,
-      message: { id: 'user-1', role: 'user', content: 'abandon this turn' },
-      config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      commandId: 'cmd-1',
+      payload: {
+        trigger: 'submit',
+        chatId,
+        runId,
+        message: { id: 'user-1', role: 'user', content: 'abandon this turn' },
+        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      },
     });
     await until(
       async () => lifecycleOf(await readLog(workspaceRoot, chatId)).some((state) => state === 'failed'),
@@ -160,11 +163,14 @@ describe('an approval nobody answers', () => {
 
     await launcher.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId,
-      runId,
-      message: { id: 'user-1', role: 'user', content: 'write the file please' },
-      config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      commandId: 'cmd-1',
+      payload: {
+        trigger: 'submit',
+        chatId,
+        runId,
+        message: { id: 'user-1', role: 'user', content: 'write the file please' },
+        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      },
     });
     await until(
       async () => {
@@ -179,7 +185,10 @@ describe('an approval nobody answers', () => {
      * the runner's turn stays suspended inside `approve`, and `cancel` — which
      * observes settlement (D12) — never returns at all. */
     await expect(
-      Promise.race([launcher.execute({ type: 'cancel', chatId, runId }).then(() => 'settled'), delay(15_000, 'hung')]),
+      Promise.race([
+        launcher.execute({ type: 'cancel', commandId: 'cmd-2', payload: { chatId, runId } }).then(() => 'settled'),
+        delay(15_000, 'hung'),
+      ]),
     ).resolves.toBe('settled');
 
     const events = await readLog(workspaceRoot, chatId);

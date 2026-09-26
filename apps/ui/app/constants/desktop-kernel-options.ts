@@ -1,7 +1,5 @@
-import type { ElectronUtilityTransportOptions } from '@taucad/runtime/electron/renderer';
 import { ENV } from '#environment.config.js';
 import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
-import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
@@ -14,31 +12,6 @@ export const desktopProjectRoot = async (projectId: string): Promise<string> => 
     throw new Error(`Project ${projectId} is not on disk, so no host path can root the desktop kernel.`);
   }
   return `${config.path ?? nodeHomeRoot()}/${config.providerBasePath}`;
-};
-
-/**
- * The machines facet the desktop transport carries beside the kernel port (D9).
- *
- * The port is brokered up front because the transport's `connect` is
- * synchronous; the channel itself is dialled on first use. A refused or failed
- * broker leaves the CAD kernel untouched: the client then negotiates
- * `machines: { available: false, reason: 'unsupported' }`, which is the truth.
- *
- * @param bridge - The desktop seam.
- * @param projectRoot - Host path the machines session is scoped to.
- * @returns The transport option, or `undefined` when the shell refused.
- */
-const desktopMachinesOption = async (
-  bridge: DesktopBridge,
-  projectRoot: string,
-): Promise<ElectronUtilityTransportOptions['machines']> => {
-  try {
-    const port = await bridge.machines.connect(projectRoot);
-    const { connectMachineChannel } = await import('@taucad/runtime/machine');
-    return { available: true, connect: () => connectMachineChannel(port) };
-  } catch {
-    return undefined;
-  }
 };
 
 /**
@@ -67,14 +40,12 @@ export const desktopKernelOptions =
     if (nativeKernelId && !bridge?.runtimeKernelIds.includes(nativeKernelId)) {
       throw new Error(`${nativeKernelId} is not available in this desktop runtime.`);
     }
-    const machines = bridge === undefined ? undefined : await desktopMachinesOption(bridge, projectRoot);
     // Dynamic so the electron renderer module never enters the web bundle's
     // eager graph, the way every other preset defers its heavy import.
     const { createElectronClientOptions } = await import('@taucad/runtime/electron/renderer');
     const provideClientOptions = createElectronClientOptions<typeof runtime>({
       config: createUiRuntimeConfig(ENV),
       context: { projectRoot, definition: 'default', computeMode },
-      ...(machines === undefined ? {} : { machines }),
     });
     const clientOptions = await provideClientOptions();
     return () => clientOptions;

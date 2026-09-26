@@ -159,14 +159,15 @@ describe('desktopBridge', () => {
     });
   });
 
-  it('should connect machines by naming the workspace root main must vouch for', async () => {
+  it('should connect machines without naming a root, since printers belong to the computer', async () => {
     const { port, requestServicesPort } = installShellGlobal();
     const { desktopBridge } = await loadBridge();
 
-    await expect(desktopBridge()?.machines.connect('/Users/tester/Projects/widget')).resolves.toBe(port);
-    expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'machines', {
-      workspaceRoot: '/Users/tester/Projects/widget',
-    });
+    await expect(desktopBridge()?.machines.connect()).resolves.toBe(port);
+    expect(requestServicesPort).toHaveBeenCalledOnce();
+    const [, concern, context] = requestServicesPort.mock.calls[0] as [string, string, unknown];
+    expect(concern).toBe('machines');
+    expect(context).toBeUndefined();
   });
 
   it('should complete a binding through preload and accept only the host outcome shape', async () => {

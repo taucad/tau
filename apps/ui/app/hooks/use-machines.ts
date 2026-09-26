@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useSelector } from '@xstate/react';
 import type {
+  MachineChannelClient,
   MachineClient,
   MachineDirectoryFrame,
   MachineDirectorySnapshot,
   MachineProvider,
 } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
-import { useProject } from '#hooks/use-project.js';
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
 
 /**
  * Reduce one admitted directory frame without introducing a second machine state authority.
@@ -23,13 +23,6 @@ export const projectMachineDirectoryFrame = (
 ): MachineDirectorySnapshot => {
   if (frame.type === 'snapshot' || frame.type === 'resync-required') {
     return frame.snapshot;
-  }
-  if (frame.event.type === 'machine-directory-stale') {
-    return {
-      ...current,
-      cursor: frame.cursor,
-      entries: current.entries.map((entry) => ({ ...entry, freshness: 'stale' })),
-    };
   }
   if (frame.event.type === 'machine-directory-removed') {
     const { machineId } = frame.event;
@@ -47,7 +40,7 @@ export const projectMachineDirectoryFrame = (
   };
 };
 
-/** What the Print pane reads from the workspace machine directory. @public */
+/** What the Print pane and Settings read from this computer's machine directory. @public */
 export type MachineDirectoryView = Readonly<{
   snapshot: MachineDirectorySnapshot | undefined;
   providers: readonly MachineProvider[];
@@ -56,9 +49,9 @@ export type MachineDirectoryView = Readonly<{
 }>;
 
 /**
- * Subscribe to the workspace machine directory and the admitted providers.
+ * Subscribe to this computer's machine directory and the admitted providers.
  *
- * The host journal is the only authority: the initial list seeds the
+ * The host's store is the only authority: the initial list seeds the
  * projection and every later frame folds into it through
  * {@link projectMachineDirectoryFrame}. Unmount aborts the watch.
  *
@@ -70,13 +63,14 @@ export const useMachineDirectory = (client: MachineClient): MachineDirectoryView
   const [generation, setGeneration] = useState(0);
   const [snapshot, setSnapshot] = useState<MachineDirectorySnapshot>();
   const [providers, setProviders] = useState<readonly MachineProvider[]>([]);
-  const [error, setError] = useState<string>();
+  /* Kept with the observation that failed, so Refresh starts a new one and clears it at once (P66: the
+   * effect reads `generation`, which a dependency array alone would not make it do). */
+  const [failure, setFailure] = useState<Readonly<{ client: MachineClient; generation: number; message: string }>>();
 
   useEffect(() => {
     const abort = new AbortController();
     const observe = async (): Promise<void> => {
       try {
-        setError(undefined);
         const [initial, availableProviders] = await Promise.all([
           client.list({ signal: abort.signal }),
           client.listProviders({ signal: abort.signal }),
@@ -91,7 +85,7 @@ export const useMachineDirectory = (client: MachineClient): MachineDirectoryView
         }
       } catch (error) {
         if (!abort.signal.aborted) {
-          setError(error instanceof Error ? error.message : String(error));
+          setFailure({ client, generation, message: error instanceof Error ? error.message : String(error) });
         }
       }
     };
@@ -106,19 +100,131 @@ export const useMachineDirectory = (client: MachineClient): MachineDirectoryView
     setGeneration((current) => current + 1);
   }, []);
 
+  const error = failure?.client === client && failure.generation === generation ? failure.message : undefined;
   return { snapshot, providers, error, refresh };
 };
 
-const unavailableFacet: RuntimeTransportFacet<MachineClient> = { available: false, reason: 'unsupported' };
+/** What a person reads when another Tau app on this computer holds the printers (blueprint D6). @public */
+export const printersInUseElsewhere =
+  'Printers are in use by another Tau app on this computer. Quit it to use them here.';
+
+/* The host's name for a machine store another process holds, and the lock's own code it wraps. */
+const inUseElsewhereCodes = ['MACHINE_STORE_OWNED_ELSEWHERE', 'AUTHORITY_ALREADY_OWNED'];
+
+/** The channel carries a refusal's code in its message; this one becomes words, every other failure passes. */
+const explain = (error: unknown): unknown => {
+  const message = error instanceof Error ? error.message : String(error);
+  return inUseElsewhereCodes.some((code) => message.includes(code))
+    ? new Error(printersInUseElsewhere, { cause: error })
+    : error;
+};
+
+/** How a machines facet reaches the host: a port to it, and the channel over that port. @public */
+export type MachinesConnection = Readonly<{
+  dial: () => Promise<MessagePort>;
+  connect: (port: MessagePort) => Promise<MachineChannelClient>;
+}>;
 
 /**
- * The machines facet the main geometry unit's runtime negotiated.
+ * A machines facet over one channel at a time. The channel is dialled on the first call and
+ * shared by every caller; once its port closes, or opening it fails, the next call dials again.
  *
- * @returns The facet, or an `unsupported` refusal while no runtime is connected.
+ * @param connection - The port and the channel over it.
+ * @returns The facet.
+ * @public
+ */
+export const createMachinesFacet = ({ dial, connect }: MachinesConnection): RuntimeTransportFacet<MachineClient> => {
+  let current: Promise<MachineChannelClient> | undefined;
+  const open = async (): Promise<MachineChannelClient> => {
+    const port = await dial();
+    const client = await connect(port);
+    await client.ready;
+    // Nothing replaces an opening channel before it fails, so this is the promise that resolves to `client`.
+    const opened = current;
+    port.addEventListener(
+      'close',
+      () => {
+        if (current === opened) {
+          current = undefined;
+        }
+      },
+      { once: true },
+    );
+    return client;
+  };
+  const channel = async (): Promise<MachineChannelClient> => {
+    current ??= open();
+    const opening = current;
+    try {
+      return await opening;
+    } catch (error) {
+      // It never opened: the next call dials again.
+      if (current === opening) {
+        current = undefined;
+      }
+      throw error;
+    }
+  };
+  const call = async <Result>(use: (client: MachineClient) => Promise<Result>): Promise<Result> => {
+    try {
+      return await use(await channel());
+    } catch (error) {
+      throw explain(error);
+    }
+  };
+  const stream = async function* <Frame>(use: (client: MachineClient) => AsyncIterable<Frame>): AsyncGenerator<Frame> {
+    try {
+      yield* use(await channel());
+    } catch (error) {
+      throw explain(error);
+    }
+  };
+  return {
+    available: true,
+    listProviders: async (input) => call(async (client) => client.listProviders(input)),
+    discover: (input) => stream((client) => client.discover(input)),
+    beginBinding: async (input) => call(async (client) => client.beginBinding(input)),
+    removeBinding: async (input) => call(async (client) => client.removeBinding(input)),
+    preparePrint: async (input) => call(async (client) => client.preparePrint(input)),
+    uploadPrint: async (input) => call(async (client) => client.uploadPrint(input)),
+    startPrint: async (input) => call(async (client) => client.startPrint(input)),
+    reconcileOperation: async (input) => call(async (client) => client.reconcileOperation(input)),
+    controlRun: async (input) => call(async (client) => client.controlRun(input)),
+    captureStill: async (input) => call(async (client) => client.captureStill(input)),
+    list: async (input) => call(async (client) => client.list(input)),
+    get: async (input) => call(async (client) => client.get(input)),
+    watch: (input) => stream((client) => client.watch(input)),
+    requestPrint: async (input) => call(async (client) => client.requestPrint(input)),
+    listPrintRequests: async (input) => call(async (client) => client.listPrintRequests(input)),
+    watchPrintRequests: (input) => stream((client) => client.watchPrintRequests(input)),
+    resolvePrintRequest: async (input) => call(async (client) => client.resolvePrintRequest(input)),
+    withdrawPrintRequest: async (input) => call(async (client) => client.withdrawPrintRequest(input)),
+  };
+};
+
+const unsupportedFacet: RuntimeTransportFacet<MachineClient> = { available: false, reason: 'unsupported' };
+let documentFacet: RuntimeTransportFacet<MachineClient> | undefined;
+
+/**
+ * This computer's machines facet (blueprint D6): one per document, whichever project is open or
+ * none, reached through the desktop bridge. Settings, the Print pane and the printer viewer share
+ * it. The web build has no machine host, so there it is `unsupported`.
+ *
+ * @returns The facet.
  * @public
  */
 export const useMachinesFacet = (): RuntimeTransportFacet<MachineClient> => {
-  const { geometryUnits, mainEntryPath } = useProject();
-  const machines = useSelector(geometryUnits.get(mainEntryPath), (state) => state?.context.kernelClient?.machines);
-  return machines ?? unavailableFacet;
+  const bridge = desktopBridge();
+  if (bridge === undefined) {
+    return unsupportedFacet;
+  }
+  documentFacet ??= createMachinesFacet({
+    dial: async () => bridge.machines.connect(),
+    connect: async (port) => {
+      // Dynamic so the machine channel never enters the web bundle's eager graph.
+      const { connectMachineChannel } = await import('@taucad/runtime/machine');
+      return connectMachineChannel(port);
+    },
+  });
+  return documentFacet;
 };

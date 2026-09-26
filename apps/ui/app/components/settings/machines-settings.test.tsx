@@ -19,33 +19,25 @@ import {
   workshopEntry,
   x1cProvider,
 } from '#components/settings/machine-details.fixture.js';
+import { createMachinesFacet, printersInUseElsewhere } from '#hooks/use-machines.js';
+import type * as UseMachines from '#hooks/use-machines.js';
 
 const state = vi.hoisted(() => ({
-  project: undefined as unknown,
+  facet: undefined as unknown,
   completeBinding: vi.fn(
     async (_input: unknown): Promise<MachineBindingOutcome> => ({ status: 'bound', machineId: 'bambu:sim' }),
   ),
 }));
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => state.project }));
+/* This computer's facet, with no project anywhere: printers are set up from Home as well. */
+vi.mock('#hooks/use-machines.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof UseMachines>()),
+  useMachinesFacet: () => state.facet ?? { available: false, reason: 'unsupported' },
+}));
 vi.mock('#filesystem/desktop-bridge.js', () => ({
   desktopBridge: () => ({ machines: { completeBinding: state.completeBinding } }),
 }));
 
 const { MachinesSettings } = await import('./machines-settings.js');
-
-/** The smallest actor `useSelector` reads: a snapshot whose kernel client carries the facet. */
-const projectWith = (machines: unknown) => ({
-  mainEntryPath: 'main.ts',
-  geometryUnits: new Map([
-    [
-      'main.ts',
-      {
-        subscribe: () => ({ unsubscribe: () => undefined }),
-        getSnapshot: () => ({ context: { kernelClient: { machines } } }),
-      },
-    ],
-  ]),
-});
 
 const candidate: MachineCandidate = {
   id: 'bambu:simulated-x1c',
@@ -70,7 +62,6 @@ const snapshotOf = (entries: readonly MachineDirectoryEntry[]): MachineDirectory
   cursor: {
     hostId: 'host',
     authorityId: 'authority',
-    workspaceId: 'workspace',
     generation: 'g1',
     position: 0,
     revision: 0,
@@ -110,17 +101,17 @@ const renderSettings = (): ReturnType<typeof render> =>
   );
 
 afterEach(() => {
-  state.project = undefined;
+  state.facet = undefined;
   state.completeBinding.mockClear();
 });
 
 describe('MachinesSettings', () => {
-  it('should add the simulated X1C through discovery, binding and the native ceremony without a code', async () => {
+  it('should add the simulated X1C with no project open, through discovery, binding and the native ceremony', async () => {
     const facet = facetWith([]);
-    state.project = projectWith(facet);
+    state.facet = facet;
     renderSettings();
     /* Printers belong to the computer, not the project that happens to be open. */
-    expect(screen.getByText('No printers yet.')).toBeInTheDocument();
+    expect(await screen.findByText('No printers yet.')).toBeInTheDocument();
     expect(
       screen.getByText(
         'Printers set up here are available in every project on this computer. Their access codes are kept in your Keychain.',
@@ -139,9 +130,10 @@ describe('MachinesSettings', () => {
       expect(screen.getByRole('status')).toHaveTextContent('Simulated X1C is bound as bambu:sim.');
     });
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ providerId: 'bambu-simulator', configuration: { logicalId: 'simulated-x1c' } }),
+      expect.objectContaining({ providerId: 'bambu-simulator', configuration: { logicalId: 'Simulated X1C' } }),
     );
-    expect(facet.beginBinding).toHaveBeenCalledExactlyOnceWith({ candidate, name: 'simulated-x1c' });
+    /* The display name; the host slugs it to the id `simulated-x1c`. */
+    expect(facet.beginBinding).toHaveBeenCalledExactlyOnceWith({ candidate, name: 'Simulated X1C' });
     /* No address, no secret: the simulator's ceremony carries the id alone. */
     expect(state.completeBinding).toHaveBeenCalledExactlyOnceWith({ ceremonyId: 'ceremony-1' });
     /* The directory is re-read after the ceremony so the new entry shows. */
@@ -150,7 +142,7 @@ describe('MachinesSettings', () => {
 
   it("should offer the simulator's demo speed from its binding declaration and bind with the chosen speed", async () => {
     const facet = facetWith([]);
-    state.project = projectWith(facet);
+    state.facet = facet;
     renderSettings();
     const simulator = screen.getByRole('region', { name: 'Simulated X1C' });
     expect(simulator).toHaveTextContent('Its settings only change the simulation; they are not printer settings.');
@@ -180,14 +172,14 @@ describe('MachinesSettings', () => {
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         providerId: 'bambu-simulator',
-        configuration: { speed: 60, logicalId: 'simulated-x1c' },
+        configuration: { speed: 60, logicalId: 'Simulated X1C' },
       }),
     );
   });
 
   it('should bind an X1C from the form and hand the access code to the shell, never keeping it', async () => {
     const facet = facetWith([]);
-    state.project = projectWith(facet);
+    state.facet = facet;
     renderSettings();
     const bind = screen.getByRole('button', { name: 'Bind' });
     await waitFor(() => {
@@ -234,7 +226,7 @@ describe('MachinesSettings', () => {
       yield { type: 'found', candidate: heard('00M2', 'Office X1C', '192.168.0.113') };
       yield { type: 'updated', candidate: heard('00M1', 'Workshop X1C', '192.168.0.112') };
     });
-    state.project = projectWith(facet);
+    state.facet = facet;
     renderSettings();
     const find = screen.getByRole('button', { name: 'Find on network' });
     await waitFor(() => {
@@ -274,7 +266,7 @@ describe('MachinesSettings', () => {
       };
       await passEnds;
     });
-    state.project = projectWith(facet);
+    state.facet = facet;
     renderSettings();
     const find = screen.getByRole('button', { name: 'Find on network' });
     await waitFor(() => {
@@ -298,8 +290,8 @@ describe('MachinesSettings', () => {
     expect(screen.getByRole('status')).toHaveTextContent('');
   });
 
-  it('should list bound machines as one line each, marking the simulator, and explain a missing project or facet', async () => {
-    state.project = projectWith(facetWith([simulatedEntry]));
+  it('should list bound machines as one line each, marking the simulator, and explain a missing facet', async () => {
+    state.facet = facetWith([simulatedEntry]);
     const { unmount } = renderSettings();
     const list = await screen.findByRole('list', { name: 'Bound machines' });
     const rows = within(list).getAllByRole('listitem');
@@ -312,18 +304,13 @@ describe('MachinesSettings', () => {
     );
     unmount();
 
-    state.project = projectWith({ available: false, reason: 'unsupported' });
-    const unavailable = renderSettings();
-    expect(screen.getByText('Machines are unavailable in this runtime (unsupported).')).toBeInTheDocument();
-    unavailable.unmount();
-
-    state.project = undefined;
+    state.facet = undefined;
     renderSettings();
-    expect(screen.getByText("Open any project to manage this computer's printers.")).toBeInTheDocument();
+    expect(screen.getByText('Machines are unavailable in this runtime (unsupported).')).toBeInTheDocument();
   });
 
   it('should open a bound machine onto its provider manifest and fold it away again', async () => {
-    state.project = projectWith(facetWith([simulatedEntry]));
+    state.facet = facetWith([simulatedEntry]);
     renderSettings();
     const row = await screen.findByRole('button', { name: 'Simulated X1C Bambu Lab X1C · Simulated' });
     expect(row).toHaveAttribute('aria-expanded', 'false');
@@ -352,7 +339,7 @@ describe('MachinesSettings', () => {
       name: 'Old printer',
       firmware: '1.0',
     });
-    state.project = projectWith(facetWith([orphan]));
+    state.facet = facetWith([orphan]);
     renderSettings();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Old printer Bambu Lab X1C' }));
@@ -362,6 +349,21 @@ describe('MachinesSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('should say another Tau app holds the printers when the machine store is owned elsewhere', async () => {
+    const client = facetWith([]);
+    client.list.mockRejectedValue(new Error('MACHINE_STORE_OWNED_ELSEWHERE'));
+    state.facet = createMachinesFacet({
+      dial: async () => new MessageChannel().port1,
+      connect: async () => Object.assign(client, { ready: Promise.resolve(), close: () => undefined }),
+    });
+
+    renderSettings();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(printersInUseElsewhere);
+    // The list is unknown, not empty.
+    expect(screen.queryByText('No printers yet.')).not.toBeInTheDocument();
+  });
+
   describe('saved access codes', () => {
     /** Render with every discovery answering `heard`, then find it on the network. */
     const findSaved = async (heard: MachineCandidate = savedCandidate) => {
@@ -369,7 +371,7 @@ describe('MachinesSettings', () => {
       facet.discover.mockImplementation(async function* () {
         yield { type: 'found', candidate: heard };
       });
-      state.project = projectWith(facet);
+      state.facet = facet;
       renderSettings();
       const find = screen.getByRole('button', { name: 'Find on network' });
       await waitFor(() => {
@@ -410,7 +412,7 @@ describe('MachinesSettings', () => {
 
     it('should ask for the code before any ceremony when none is typed and none is saved', async () => {
       const facet = facetWith([]);
-      state.project = projectWith(facet);
+      state.facet = facet;
       renderSettings();
       const bind = screen.getByRole('button', { name: 'Bind' });
       await waitFor(() => {
@@ -480,7 +482,7 @@ describe('MachinesSettings', () => {
   describe('removing a printer', () => {
     const renderWith = async (entries: readonly MachineDirectoryEntry[]) => {
       const facet = facetWith(entries);
-      state.project = projectWith(facet);
+      state.facet = facet;
       renderSettings();
       const remove = await screen.findByRole('button', { name: 'Remove Workshop X1C' });
       /* From here on the host lists nothing: the removal, or the earlier one, took the printer away. */

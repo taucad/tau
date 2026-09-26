@@ -333,6 +333,8 @@ impl PreparedPlan {
             if claim.refusal.is_some() {
                 continue;
             }
+            // C8: each claim phase is accounted alone, whatever earlier claims retained.
+            subject.begin_demand_phase();
             let demand = claim.payload.demand();
             if subject.brep.is_some() && (demand.selectors || demand.csg) {
                 if let Err(error) = claim.execution_budget.charge(1) {
@@ -414,6 +416,7 @@ impl ResolvedPlan {
             let evaluation = if let Some(refusal) = claim.refusal {
                 refusal
             } else {
+                subject.begin_demand_phase();
                 let payload = claim.payload.normalized();
                 let subjects = [subject];
                 let scope = if claim.payload.demand().csg {

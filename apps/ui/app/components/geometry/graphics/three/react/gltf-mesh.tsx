@@ -1149,6 +1149,13 @@ export function GltfMesh({
     // false to stop Three's descendant walk after the clipping-aware BVH query.
     // oxlint-disable-next-line react/immutability -- This presentation owns the external Three.js scene and restores its imperative raycast hook on teardown.
     scene.raycast = (raycaster, intersections): false => {
+      // A section gizmo drag owns the pointer and suppresses model hover, so its moves skip the model query.
+      // The model handles only secondary presses, which never start that drag, and the release's click
+      // raycasts after pointer-up has lifted the suppression.
+      if (graphicsActor.getSnapshot().context.viewerHoverSuppressionReasons.includes('sectionViewTransform')) {
+        return false;
+      }
+
       const hit = raycastFirstVisibleMeshHit({
         raycaster,
         meshes: getModelPickableMeshes(),
@@ -1162,7 +1169,7 @@ export function GltfMesh({
     return () => {
       scene.raycast = previousRaycast;
     };
-  }, [getModelPickableMeshes, modelRaycastClipState, scene]);
+  }, [getModelPickableMeshes, graphicsActor, modelRaycastClipState, scene]);
 
   // Update resolution when size changes. Deferred via requestAnimationFrame
   // so that rapid resize events (e.g. dragging a Dockview divider) batch into

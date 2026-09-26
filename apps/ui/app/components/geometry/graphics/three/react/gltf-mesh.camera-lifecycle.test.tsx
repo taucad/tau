@@ -63,6 +63,7 @@ const mocks = vi.hoisted(() => {
         context: {
           modelPointerClickSuppressionReasons: [],
           suppressNextModelPointerClick: false,
+          viewerHoverSuppressionReasons: [],
         },
       }),
     },

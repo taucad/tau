@@ -37,6 +37,7 @@ import type {
 } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import {
+  ceilingRefusalMarker,
   hydratesFromOthersPerOwnerPerDay,
   hydratesPerCallerPerDay,
   incompleteRepositoryMarker,
@@ -1239,9 +1240,11 @@ export class GitRepositoryService implements OnModuleDestroy {
            is larger than the sum the hook measured (review F12). Nothing is
            durable either way — the assertion runs before the first upload. */
         this.#logger.log({ message: error.message }, 'The D20 ceiling was reached past the pre-receive hook');
+        /* Opens with the hook's marker so a client files it as the ceiling,
+           which no plan clears (RV-W8 F2), whichever gate refused it. */
         return new PayloadTooLargeException({
           code: 'GIT_REPOSITORY_CEILING_EXCEEDED',
-          message: error.message,
+          message: `${ceilingRefusalMarker} — ${error.message}`,
         });
       }
       case 'loose-objects':

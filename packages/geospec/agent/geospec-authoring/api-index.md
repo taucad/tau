@@ -1,6 +1,6 @@
 # geospec API index
 
-geospec 0.1.0-beta.1 · 364 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.1 · 366 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -46,6 +46,7 @@ discoverGeoSpecFiles (function) — Discover GeoSpec test files from exact files
 isGeoSpecTestFile (function) — Return true when a project-relative path names a GeoSpec test…
 runGeoSpecModule (function) — Execute an ESM GeoSpec module using the shared Tau VM…
 createNativeGeoSpecRunner (function) — Create an opt-in native runner using the SDK's existing serial…
+allocateNativePoolGrants (function) — Assign a bounded CPU budget across already-selected worker isolates
 createGeoSpecNativeModelLoader (function) — Create a native model loader that admits actual STEP/GLB bytes…
 loadNativeModel (function) — Load a model through the active native runner VM binding
 createGeoSpecNodeRunner (function) — Create a GeoSpec runner for Node.js and CLI environments
@@ -358,6 +359,7 @@ GeoSpecPmiInventory (type) — Positive-only inventory value inside the ordinary
 GeoSpecPmiQueryPayload (type) — Strict inventory output limits
 GeoSpecPmiQueryValue (type) — Complete inventory value
 GeoSpecCanonicalClaimReport (type) — Full native assertion result with the exact core-owned bytes retained
+GeoSpecNativeClaimEvaluation (type) — Exact core bytes of one claim evaluated in one engine…
 GeoSpecNativeEngine (type) — Byte-only engine surface consumed by the runner-independent assertion client
 GeoSpecNativeSubject (type) — Content-addressed subject accepted by a protocol-3 assertion plan
 GeoSpecFixedNativeMatcherDescriptor (type) — A fixed-contract matcher available only through native clients

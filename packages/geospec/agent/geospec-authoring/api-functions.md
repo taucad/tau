@@ -1,6 +1,6 @@
 # geospec — Functions
 
-72 top-level symbols. Signatures are verbatim typescript.
+73 top-level symbols. Signatures are verbatim typescript.
 
 // Create a GeoSpec instance
 export declare function createGeoSpec(): GeoSpec;
@@ -154,6 +154,14 @@ export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Prom
 // Create an opt-in native runner using the SDK's existing serial lifecycle
 (options: GeoSpecNativeRunnerOptions) => GeoSpecRunner
 //   options: VM filesystem, native engine/client options and model defaults
+
+// Assign a bounded CPU budget across already-selected worker isolates
+(options: {
+    workers: number;
+    budget?: number;
+    hostCap: number;
+}) => readonly number[]
+//   options: Worker count, optional total budget, and host CPU cap
 
 // Create a native model loader that admits actual STEP/GLB bytes and retains generation-checked handles until the owning runner finishes
 (defaults: CreateGeoSpecNativeModelLoaderOptions) => ManagedGeoSpecNativeModelLoader

@@ -1,6 +1,6 @@
 # geospec — Types
 
-273 top-level symbols. Signatures are verbatim typescript.
+274 top-level symbols. Signatures are verbatim typescript.
 
 // Stateful GeoSpec API created by {@link createGeoSpec}
 GeoSpec: {
@@ -1638,7 +1638,7 @@ GeoSpecNativeRunnerAssertions: Omit<GeoSpecAssertionClientOptions, 'engine'> & {
 
 // Options for the native serial runner
 GeoSpecNativeRunnerOptions: Omit<GeoSpecRunnerOptions, 'modelLoader' | 'nativeAssertions' | 'nativeModelLoader' | 'stepLoader'> & {
-    /** Actual protocol-3 engine and canonicalizer used by authored assertions. */
+    /** Actual protocol-3 engine used by authored assertions. */
     readonly nativeAssertions: GeoSpecNativeRunnerAssertions;
     /** Optional managed loader; the runner releases its subjects after every run. */
     readonly nativeModelLoader?: ManagedGeoSpecNativeModelLoader;
@@ -1654,6 +1654,14 @@ CreateGeoSpecNativeModelLoaderOptions: {
     readonly readSource?: GeoSpecNativeSourceReader;
     readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
     readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
+    /**
+     * Subject handles carried between the release scopes of loaders that share one engine, keyed by
+     * subjectHash. With a carrier, `releaseAll` keeps this scope's subjects for the next scope and
+     * releases only the previous scope's subjects this scope did not load again, so reloading
+     * unchanged bytes in the next scope is digest-only. Share one carrier per engine and run its
+     * scopes one at a time: a scope's release touches only subjects whose scope has settled.
+     */
+    readonly carried?: Map<string, unknown>;
 }
 
 // Native additions accepted by the injected `geospec/runner/native` loader
@@ -1692,7 +1700,8 @@ GeoSpecNativeSourceReader: (source: LoadModelSourceOptions['source']) => Promise
 ManagedGeoSpecNativeModelLoader: GeoSpecNativeModelLoader & {
     /**
      * Drain registered admissions, including additions while drainage awaits,
-     * then release this scope's subjects and owned Runtime clients.
+     * then release this scope's subjects (with a carrier: the previous scope's
+     * subjects this scope did not load again) and owned Runtime clients.
      *
      * Await the intended complete load chain before final release, and await
      * this method before closing the caller-owned engine. Calls after it returns
@@ -1757,6 +1766,10 @@ GeoSpecPoolWorkerHostOptions: {
     filesystem: RunGeoSpecModuleOptions['filesystem'];
     /** Model loader exposed to authored tests through `geospec/model`. */
     modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
+    /** Native assertion client shared with this worker's model admissions. */
+    nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions'];
+    /** Managed native admissions, released after every shard and collection pass and before shutdown. */
+    nativeModelLoader?: ManagedGeoSpecNativeModelLoader;
     /** STEP loader exposed to authored tests through `geospec/step`. */
     stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
     /** Additional in-memory modules made available to the VM. */
@@ -2520,7 +2533,6 @@ GeoSpecAssertionClient: {
 
 // Flat construction options for a runner-independent native assertion client
 GeoSpecAssertionClientOptions: {
-    readonly canonicalize: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
     readonly claimId?: (matcher: GeoSpecNativeMatcherName, sequence: number) => string;
     readonly engine: GeoSpecNativeEngine;
     readonly subjectSlot?: string;
@@ -2678,10 +2690,16 @@ GeoSpecCanonicalClaimReport: {
     readonly status: GeoSpecCanonicalClaimStatus;
 }
 
+// Exact core bytes of one claim evaluated in one engine call
+GeoSpecNativeClaimEvaluation: {
+    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
+    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
+    readonly canonicalResult: Uint8Array<ArrayBuffer>;
+}
+
 // Byte-only engine surface consumed by the runner-independent assertion client
 GeoSpecNativeEngine: {
-    canonicalPlan(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
-    evaluatePlan(plan: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
+    evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
     processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
 }
 

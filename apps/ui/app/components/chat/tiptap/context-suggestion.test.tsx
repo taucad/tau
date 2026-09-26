@@ -324,6 +324,30 @@ describe('ContextSuggestionDropdown', () => {
       expect(within(dropdown).getByText(filesFoldersGroup)).toBeInTheDocument();
     });
 
+    it('should go back to root on Backspace when drilled with an empty query', async () => {
+      const user = userEvent.setup();
+      const { keydownRef } = renderDropdown();
+
+      const dropdown = screen.getByTestId('context-suggestion-dropdown');
+      await user.click(within(dropdown).getByText(filesFoldersGroup));
+
+      let consumed = false;
+      act(() => {
+        consumed = keydownRef.current!(new KeyboardEvent('keydown', { key: 'Backspace' }));
+      });
+
+      expect(consumed).toBe(true);
+      expect(within(dropdown).getByText(pastChatsGroup)).toBeInTheDocument();
+    });
+
+    it('should NOT consume Backspace at root level (lets the editor delete the trigger)', () => {
+      const { keydownRef } = renderDropdown();
+
+      const consumed = keydownRef.current!(new KeyboardEvent('keydown', { key: 'Backspace' }));
+
+      expect(consumed).toBe(false);
+    });
+
     it('should NOT consume Escape when at root level (allows popup to close)', () => {
       const { keydownRef } = renderDropdown();
 

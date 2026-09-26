@@ -248,12 +248,10 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
         selectEntry(selectedIndex);
         return true;
       }
-      if (event.key === 'Escape') {
-        if (drilledCategory) {
-          handleDrillBack();
-          return true;
-        }
-        return false;
+      /* Escape, or Backspace before anything is typed, steps out of a category. */
+      if (drilledCategory && (event.key === 'Escape' || (event.key === 'Backspace' && !hasQuery))) {
+        handleDrillBack();
+        return true;
       }
       return false;
     };
@@ -261,7 +259,7 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
     return () => {
       keydownHandlerRef.current = undefined;
     };
-  }, [navigableEntries, selectedIndex, selectEntry, keydownHandlerRef, drilledCategory, handleDrillBack]);
+  }, [navigableEntries, selectedIndex, selectEntry, keydownHandlerRef, drilledCategory, handleDrillBack, hasQuery]);
 
   const rect = clientRect?.();
   if (!rect) {
@@ -387,16 +385,13 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
       <div className='sticky -top-1 z-10 -mt-1 bg-popover pt-1 pb-0.5'>
         <button
           type='button'
-          className={cn(
-            menuItemVariants({ highlight: 'selected' }),
-            'w-full gap-1.5 px-2 py-1.5 text-xs font-medium text-muted-foreground',
-          )}
+          className={cn(menuItemVariants({ highlight: 'selected' }), 'h-7 w-full gap-1.5 px-2 text-left text-sm')}
           onMouseDown={(event) => {
             event.preventDefault();
           }}
           onClick={handleDrillBack}
         >
-          <ChevronLeft className='size-3 shrink-0' />
+          <ChevronLeft className='size-3 shrink-0 text-muted-foreground' />
           <Icon className='size-3 shrink-0' />
           {drilledCategory}
         </button>

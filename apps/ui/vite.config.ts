@@ -22,6 +22,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
 const uiReactCompilerPluginName = 'vite:react-compiler';
 const streamdownShikiFacade = path.resolve(__dirname, 'app/lib/streamdown-shiki.ts');
+/** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases and Streamdown's `shiki`. */
+const uiSourceAliasIdFilter = /^#|^shiki$/u;
 
 const toOriginOrRaw = (value: string | undefined): string | undefined => {
   if (!value) {
@@ -99,6 +101,7 @@ const desktopSourceOverrides = new Map([
   ['#runtime/demo-client-options.js', '#runtime/demo-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
+  ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#components/layout/route-footer.js', '#components/layout/route-footer.desktop.js'],
 ]);
 
@@ -144,68 +147,73 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
     configResolved(config) {
       viteRoot = config.root;
     },
-    resolveId(source, importer) {
-      if (
-        source === 'shiki' &&
-        (importer?.includes('/@streamdown/code/') === true ||
-          (importer?.includes('/streamdown/') === true && importer.includes('/code-block-')))
-      ) {
-        return streamdownShikiFacade;
-      }
-      if (!source.startsWith('#')) {
-        return null;
-      }
-
-      const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
-      const designSystemRoot = `${path.resolve(__dirname, '../../packages/ui/src')}${path.sep}`;
-      const resolvedImporter = importer === undefined ? undefined : path.resolve(importer);
-      if (
-        resolvedImporter !== undefined &&
-        !resolvedImporter.startsWith(uiRoot) &&
-        !resolvedImporter.startsWith(designSystemRoot)
-      ) {
-        return null;
-      }
-
-      const [requestedSpecifier, query] = source.split('?', 2);
-      const hostSpecifier =
-        options.target === 'desktop' && requestedSpecifier
-          ? (desktopSourceOverrides.get(requestedSpecifier) ?? requestedSpecifier)
-          : requestedSpecifier;
-      const targetSpecifier =
-        options.tauCloudEnabled === false && hostSpecifier
-          ? (selfHostSourceOverrides.get(hostSpecifier) ?? hostSpecifier)
-          : hostSpecifier;
-      const specifier =
-        targetSpecifier && cloudBoundarySpecifiers.has(targetSpecifier)
-          ? targetSpecifier.replace(/\.js$/u, options.tauCloudEnabled ? '.cloud.js' : '.self-host.js')
-          : targetSpecifier;
-      if (specifier === undefined) {
-        return null;
-      }
-
-      const sourceRoot = resolvedImporter?.startsWith(designSystemRoot)
-        ? designSystemRoot
-        : path.resolve(__dirname, 'app');
-      const sourcePath = path.resolve(sourceRoot, specifier.slice(1));
-      const candidatePaths = [sourcePath];
-      if (specifier.endsWith('.js')) {
-        const sourceBasePath = sourcePath.slice(0, -'.js'.length);
-        candidatePaths.push(
-          `${sourceBasePath}.ts`,
-          `${sourceBasePath}.tsx`,
-          `${sourceBasePath}.js`,
-          `${sourceBasePath}.jsx`,
-        );
-      }
-
-      for (const candidatePath of candidatePaths) {
-        if (existsSync(candidatePath)) {
-          return query === undefined ? candidatePath : `${candidatePath}?${query}`;
+    resolveId: {
+      // Rolldown skips the JS call for every other specifier; the handler keeps
+      // its own checks for hosts that ignore hook filters.
+      filter: { id: uiSourceAliasIdFilter },
+      handler(source, importer) {
+        if (
+          source === 'shiki' &&
+          (importer?.includes('/@streamdown/code/') === true ||
+            (importer?.includes('/streamdown/') === true && importer.includes('/code-block-')))
+        ) {
+          return streamdownShikiFacade;
         }
-      }
+        if (!source.startsWith('#')) {
+          return null;
+        }
 
-      return null;
+        const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
+        const designSystemRoot = `${path.resolve(__dirname, '../../packages/ui/src')}${path.sep}`;
+        const resolvedImporter = importer === undefined ? undefined : path.resolve(importer);
+        if (
+          resolvedImporter !== undefined &&
+          !resolvedImporter.startsWith(uiRoot) &&
+          !resolvedImporter.startsWith(designSystemRoot)
+        ) {
+          return null;
+        }
+
+        const [requestedSpecifier, query] = source.split('?', 2);
+        const hostSpecifier =
+          options.target === 'desktop' && requestedSpecifier
+            ? (desktopSourceOverrides.get(requestedSpecifier) ?? requestedSpecifier)
+            : requestedSpecifier;
+        const targetSpecifier =
+          options.tauCloudEnabled === false && hostSpecifier
+            ? (selfHostSourceOverrides.get(hostSpecifier) ?? hostSpecifier)
+            : hostSpecifier;
+        const specifier =
+          targetSpecifier && cloudBoundarySpecifiers.has(targetSpecifier)
+            ? targetSpecifier.replace(/\.js$/u, options.tauCloudEnabled ? '.cloud.js' : '.self-host.js')
+            : targetSpecifier;
+        if (specifier === undefined) {
+          return null;
+        }
+
+        const sourceRoot = resolvedImporter?.startsWith(designSystemRoot)
+          ? designSystemRoot
+          : path.resolve(__dirname, 'app');
+        const sourcePath = path.resolve(sourceRoot, specifier.slice(1));
+        const candidatePaths = [sourcePath];
+        if (specifier.endsWith('.js')) {
+          const sourceBasePath = sourcePath.slice(0, -'.js'.length);
+          candidatePaths.push(
+            `${sourceBasePath}.ts`,
+            `${sourceBasePath}.tsx`,
+            `${sourceBasePath}.js`,
+            `${sourceBasePath}.jsx`,
+          );
+        }
+
+        for (const candidatePath of candidatePaths) {
+          if (existsSync(candidatePath)) {
+            return query === undefined ? candidatePath : `${candidatePath}?${query}`;
+          }
+        }
+
+        return null;
+      },
     },
     generateBundle(_outputOptions, bundle) {
       if (options.emitModuleGraph !== true || this.environment.config.consumer !== 'client') {

@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@taucad/json-schema": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/units": "workspace:*"
   },
   "devDependencies": {

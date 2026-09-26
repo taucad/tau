@@ -1,3 +1,4 @@
+import type { Mechanism } from '@taucad/kinematics';
 import type { ExportFidelity } from '#types/cad.types.js';
 import type { JSONObject } from '#types/json-value.types.js';
 
@@ -165,4 +166,6 @@ export type GeometryComponentManifest = {
   nodesById: Record<string, GeometryComponentNode>;
   capabilities: GeometryComponentCapabilities;
   extensionUsed?: string;
+  /** Admitted mechanism from the `TAU_cad_topology` payload, in glTF space with component ids as link members. */
+  mechanism?: Mechanism;
 };

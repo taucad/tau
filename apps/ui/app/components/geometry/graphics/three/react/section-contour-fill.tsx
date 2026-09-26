@@ -21,7 +21,6 @@ import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/util
 import type { ModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import {
   buildSectionCapPolygon,
-  collectSectionCapWorldPoints,
   createSectionCutPlaneBasis,
 } from '#components/geometry/graphics/three/utils/section-cap-region.js';
 import type {
@@ -684,19 +683,25 @@ export function writeBorderSegments(
     return;
   }
 
-  const existingGeometry = helper.borderSegments?.geometry;
-  // WebGL caps an instanced geometry's draws at the instance count of its first draw
-  // (`_maxInstanceCount`, cleared only on dispose), so an outline that gains segments on a reused
-  // geometry silently drops the extra edges. Reuse only while the outline does not grow.
+  const segmentCount = parameters.positions.length / 6;
+  const existingSegments = helper.borderSegments;
+  const instanceStart = existingSegments?.geometry.getAttribute('instanceStart');
+  // WebGL caps an instanced geometry's draws at the size of its instance buffer when it is first
+  // drawn (`_maxInstanceCount`, cleared only on dispose), so an outline is written into its buffer
+  // while it fits, and a larger one gets a new geometry rather than a larger buffer.
   if (
-    helper.borderSegments &&
+    existingSegments &&
     helper.borderBackend === parameters.backend &&
-    existingGeometry?.setPositions &&
-    parameters.positions.length / 6 <= existingGeometry.instanceCount
+    instanceStart instanceof THREE.InterleavedBufferAttribute &&
+    segmentCount <= instanceStart.data.count
   ) {
-    existingGeometry.setPositions(parameters.positions);
-    (helper.borderSegments as unknown as { material: GltfFatLineMaterial }).material = parameters.material;
-    helper.borderSegments.renderOrder = parameters.renderOrder;
+    instanceStart.data.array.set(parameters.positions);
+    instanceStart.data.addUpdateRange(0, parameters.positions.length);
+    instanceStart.data.needsUpdate = true;
+    // ponytail: the bounds stay those of the outline the geometry was created with. The outline is
+    // never culled or picked, so they only order its opaque draws.
+    existingSegments.geometry.instanceCount = segmentCount;
+    assignBorderMaterial(helper, parameters.material, parameters.renderOrder);
     return;
   }
 
@@ -759,6 +764,15 @@ export function SectionContourFills({
   const workerErrorCountRef = React.useRef(0);
   const reportedTopologyKeysRef = React.useRef(new Set<string>());
   const reportedFailureKeyRef = React.useRef<string | undefined>(undefined);
+  // What the drawn caps were built from; a frame with the same inputs leaves them as they are.
+  const appliedFrameRef = React.useRef<
+    | Readonly<{
+        key: string;
+        workerResponse: SectionCapWorkerSuccessResponse | undefined;
+        submittedWorkerRequestKey: string | undefined;
+      }>
+    | undefined
+  >(undefined);
 
   const reportFailure = (status: 'unsupported' | 'failed', failure: SectionTopologyFailure): void => {
     const key = `${failure.sourceKey}|${failure.code}|${failure.message}`;
@@ -823,6 +837,7 @@ export function SectionContourFills({
       lastAppliedTopologyKeyRef.current = undefined;
       lastAppliedStyleKeyRef.current = undefined;
       reportedFailureKeyRef.current = undefined;
+      appliedFrameRef.current = undefined;
       resetSectionViewSafeSnapshot(snapshotRef.current);
       root.userData[sectionViewSafeSnapshotDebugUserDataKey] = getSectionViewSafeSnapshotDebugState(
         snapshotRef.current,
@@ -851,7 +866,35 @@ export function SectionContourFills({
       )
       .join(';');
     const candidateIdentity = `${planeKey(plane)}|${sourceIdentity}`;
+    const modelInteractionContext = modelInteractionRef.getSnapshot().context;
+    // Everything else the caps are drawn from: each source's emphasis (its fill tint, outline colour and
+    // render order), the transform the helpers are placed under, and the fill and outline styles.
+    const frameKey = [
+      candidateIdentity,
+      sourceRecords.map((record) => resolveSectionSourceEmphasis(record, modelInteractionContext)).join(','),
+      matrixKey(root.matrixWorld),
+      backend,
+      edgeColor,
+      resolution.x,
+      resolution.y,
+      stripeFrequency,
+      stripeWidth,
+      isTauDebugEnabled,
+    ].join('|');
     endSectionCapPhase(performanceFrame, 'sourceCollection', sourceCollectionStartedAt);
+    const appliedFrame = appliedFrameRef.current;
+    if (
+      appliedFrame?.key === frameKey &&
+      appliedFrame.workerResponse === currentWorkerResponseRef.current &&
+      appliedFrame.submittedWorkerRequestKey === submittedWorkerRequestKeyRef.current &&
+      snapshotRef.current.committed?.identity === candidateIdentity
+    ) {
+      if (performanceFrame) {
+        performanceFrame.counters.skippedFrameCount = 1;
+      }
+      finishSectionCapPerformanceFrame(root, performanceFrame, frameStartedAt);
+      return;
+    }
     if (performanceFrame) {
       performanceFrame.counters.sourceCount = sourceRecords.length;
       performanceFrame.counters.admittedSourceCount = sourceRecords.length;
@@ -875,10 +918,8 @@ export function SectionContourFills({
         }
       }
     }
-    const modelInteractionContext = modelInteractionRef.getSnapshot().context;
     const seen = new Set<string>();
     const frameSources: SectionFrameSource[] = [];
-    const worldPoints: THREE.Vector3[] = [];
     const candidateBuilds = new Map<string, Readonly<{ geometryKey: string; capBuild: SectionSourceCapBuild }>>();
     let candidateFailure: Readonly<{ status: 'unsupported' | 'failed'; failure: SectionTopologyFailure }> | undefined;
 
@@ -937,6 +978,7 @@ export function SectionContourFills({
     }
 
     if (candidateFailure) {
+      appliedFrameRef.current = undefined;
       rejectSectionViewSafeSnapshot(snapshotRef.current, {
         identity: candidateIdentity,
         sourceIdentity,
@@ -979,19 +1021,14 @@ export function SectionContourFills({
         performanceFrame.counters.changedGeometryKeyCount++;
       }
 
-      const { capBuild } = candidate;
-      frameSources.push({ record, helper, geometryKey: candidate.geometryKey, capBuild });
-      const worldPointStartedAt = startSectionCapPhase(performanceFrame);
-      const capWorldPoints = collectSectionCapWorldPoints({
-        contours: capBuild.closedContours,
-        meshWorldMatrix: capBuild.meshWorldMatrix,
-      });
-      worldPoints.push(...capWorldPoints);
-      endSectionCapPhase(performanceFrame, 'worldPointBasis', worldPointStartedAt);
+      frameSources.push({ record, helper, geometryKey: candidate.geometryKey, capBuild: candidate.capBuild });
     }
 
     const basisStartedAt = startSectionCapPhase(performanceFrame);
-    const planeBasis = createSectionCutPlaneBasis({ worldPlane: plane, worldPoints });
+    const planeBasis = createSectionCutPlaneBasis({
+      worldPlane: plane,
+      sources: frameSources.map(({ capBuild }) => capBuild),
+    });
     endSectionCapPhase(performanceFrame, 'worldPointBasis', basisStartedAt);
     const capPolygonBuildStartedAt = startSectionCapPhase(performanceFrame);
     const capBuildResults: SectionCapBuildResult[] = frameSources.map(({ record, geometryKey, capBuild }) =>
@@ -1030,6 +1067,7 @@ export function SectionContourFills({
         code: 'slice-invariant',
         message: `Section topology ${sourceKey}: did not produce a complete cap polygon`,
       };
+      appliedFrameRef.current = undefined;
       rejectSectionViewSafeSnapshot(snapshotRef.current, { identity: candidateIdentity, sourceIdentity, failure });
       reportFailure('failed', failure);
       root.visible = Boolean(snapshotRef.current.committed);
@@ -1055,7 +1093,8 @@ export function SectionContourFills({
           bbox: capPolygon.bbox,
           area: capPolygon.area,
           trueCut: capBuild.trueCut,
-          meshWorldInverse: [...capBuild.meshWorldInverse.elements],
+          // Read only when a request is encoded, which copies it; the build's matrix is never mutated.
+          meshWorldInverse: capBuild.meshWorldInverse.elements,
         };
       },
     );
@@ -1209,6 +1248,7 @@ export function SectionContourFills({
         code: 'slice-invariant',
         message: `Section topology ${sourceKey}: complete contours did not produce renderable cap geometry`,
       };
+      appliedFrameRef.current = undefined;
       rejectSectionViewSafeSnapshot(snapshotRef.current, { identity: candidateIdentity, sourceIdentity, failure });
       reportFailure('failed', failure);
       root.visible = Boolean(snapshotRef.current.committed);
@@ -1251,9 +1291,12 @@ export function SectionContourFills({
         closedContours: [],
         openPolylines: capBuild.openPolylines,
       });
-      const borderPositions = new Float32Array(boundary.positions.length + geometricEvidence.length);
-      borderPositions.set(boundary.positions);
-      borderPositions.set(geometricEvidence, boundary.positions.length);
+      let borderPositions = boundary.positions;
+      if (geometricEvidence.length > 0) {
+        borderPositions = new Float32Array(boundary.positions.length + geometricEvidence.length);
+        borderPositions.set(boundary.positions);
+        borderPositions.set(geometricEvidence, boundary.positions.length);
+      }
       if (performanceFrame) {
         performanceFrame.counters.baseBoundarySegmentCount += boundary.stats.segmentCount;
         performanceFrame.counters.rawOpenPolylineSegmentCount += countOpenPolylineSegments(capBuild.openPolylines);
@@ -1314,6 +1357,12 @@ export function SectionContourFills({
       kind: trueCutComponentCount > 0 ? 'complete' : 'uncut',
       plane,
     });
+    // Recorded after this frame's own worker post or synchronous result, so only a later change re-applies.
+    appliedFrameRef.current = {
+      key: frameKey,
+      workerResponse: currentWorkerResponseRef.current,
+      submittedWorkerRequestKey: submittedWorkerRequestKeyRef.current,
+    };
     reportedFailureKeyRef.current = undefined;
     root.userData['sectionCapCompleteness'] = {
       status: 'complete',

@@ -26,7 +26,13 @@ import {
   describeTurnSettlement,
   syncQuiesceMilliseconds,
 } from '@taucad/revisions/revision-effects';
-import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
+import type {
+  EditorConflictInput,
+  EditorConflictOutcome,
+  TurnConflictedEvent,
+  TurnFailedEvent,
+  TurnFinalizedEvent,
+} from '@taucad/revisions/revision-effects';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import {
   sameRevisionStatus,
@@ -190,6 +196,13 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'finishResolution'; revisionId: string }>
   | Readonly<{ command: 'abandonResolution'; revisionId: string }>
   | Readonly<{ command: 'askChatToResolve'; revisionId: string }>
+  /*
+   * An editor's overlapping edit, recorded as a conflicted revision on the live
+   * line's conflict line (D14, RV-W5b2 R2-1): the *Needs your decision* card is
+   * then the one surface, and it survives a reload and travels. A question: the
+   * editor waits for the record before it lets go of its text.
+   */
+  | (Readonly<{ command: 'recordEditorConflict' }> & EditorConflictInput)
 
   /* The three graph reads. The page never holds a port (A38), and `Rev N`,
    * "Current" and *Compare* are all derived from the graph at read time (I3),
@@ -417,6 +430,8 @@ export type WorkerProjectRevisions = Readonly<{
    * the guarantee and the next open retries (D28).
    */
   saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
+  /** Record an editor's overlapping edit as a conflicted revision, and wait for it (D14). */
+  recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
   /** Name one revision, or re-point an existing name (S31). */
@@ -651,7 +666,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const events = new Topic<WorkerRevisionEvent>({ name: 'WorkerProjectRevisionEvents' });
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
 
-  const { actor, settled } = createProjectRevisionsActor({
+  const { actor, settled, recordEditorConflict } = createProjectRevisionsActor({
     port: options.port,
     projectId,
     authorityEpoch: options.authorityEpoch,
@@ -1407,7 +1422,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'log':
         case 'divergence':
         case 'diff':
-        case 'compare': {
+        case 'compare':
+        case 'recordEditorConflict': {
           break;
         }
         default: {
@@ -1489,6 +1505,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       };
     },
     saveRevision,
+    recordEditorConflict,
     createBranch,
     release: async () => {
       /*
@@ -1601,6 +1618,8 @@ export type WorkerRevisionResult =
    * permission for `pagehide` to run.
    */
   | Readonly<{ kind: 'saved' }>
+  /** What recording an editor's overlapping edit did (D14). */
+  | Readonly<{ kind: 'editorConflict'; outcome: EditorConflictOutcome }>
   /**
    * The branch a `createBranch` asked for exists, on the checkout named here.
    *
@@ -1767,6 +1786,12 @@ const answerOf = (
      * takes the same path and its answer is simply dropped. */
     case 'saveRevision': {
       return tree.saveRevision(request.trigger).then(() => ({ kind: 'saved' }) as const);
+    }
+    case 'recordEditorConflict': {
+      const { path, base, mine } = request;
+      return tree
+        .recordEditorConflict({ path, base, mine })
+        .then((outcome) => ({ kind: 'editorConflict', outcome }) as const);
     }
     /* A question now too: the page that made the branch places a chat on it, so
      * it needs the checkout rather than a projection diff to guess from. */

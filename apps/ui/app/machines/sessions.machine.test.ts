@@ -165,7 +165,7 @@ describe('sessionsMachine', async () => {
     actor.stop();
   });
 
-  it('never evicts a project whose editor holds a decision, and refuses when every one does (RV-W5b2 R2-1)', async () => {
+  it('never evicts a project whose editor conflict is being recorded, and refuses when every one is (RV-W5b2 R2-1)', async () => {
     const { actor, emitted, stopped } = harness();
     for (let index = 0; index < browserLiveProjectBudget; index += 1) {
       await openIdle(actor, `proj${index}`);
@@ -173,16 +173,16 @@ describe('sessionsMachine', async () => {
     for (let index = 1; index < browserLiveProjectBudget; index += 1) {
       actor.send({ type: 'touch', projectId: `proj${index}` });
     }
-    const deciding = (projectId: string): void => {
+    const recording = (projectId: string): void => {
       actor.getSnapshot().context.refs[projectId]?.send({
         type: 'revisionState',
         dirty: false,
         pushed: true,
-        deciding: true,
+        recording: true,
       });
     };
-    /* The least recently touched project is the one holding a decision. */
-    deciding('proj0');
+    /* The least recently touched project is the one recording. */
+    recording('proj0');
 
     actor.send({ type: 'open', projectId: 'projNinth' });
     await settle();
@@ -191,7 +191,7 @@ describe('sessionsMachine', async () => {
     expect(actor.getSnapshot().context.refs['proj0']).toBeDefined();
 
     for (const projectId of Object.keys(actor.getSnapshot().context.refs)) {
-      deciding(projectId);
+      recording(projectId);
     }
     actor.send({ type: 'open', projectId: 'projTenth' });
     await settle();

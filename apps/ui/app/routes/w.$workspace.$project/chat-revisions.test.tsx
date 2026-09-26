@@ -225,6 +225,8 @@ describe('Revisions pane', () => {
         {
           revisionId: 'rev-c',
           branch: 'bracket-fillet',
+          into: 'main',
+          foreign: false,
           labels: { ours: 'main', theirs: 'bracket-fillet' },
           paths: [
             { path: 'src/bracket.ts', openable: true, side: undefined },
@@ -271,6 +273,8 @@ describe('Revisions pane', () => {
         {
           revisionId: 'rev-c',
           branch: 'bracket-fillet',
+          into: 'main',
+          foreign: false,
           labels: { ours: 'main', theirs: 'bracket-fillet' },
           paths: [{ path: 'src/bracket.ts', openable: true, side: 'theirs' }],
           busy: false,
@@ -280,7 +284,7 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    expect(await screen.findByRole('button', { name: 'Keep bracket-fillet in src/bracket.ts' })).toHaveAttribute(
+    expect(await screen.findByRole('button', { name: 'Keep theirs in src/bracket.ts' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -311,6 +315,8 @@ describe('Revisions pane', () => {
         {
           revisionId: 'rev-c',
           branch: 'bracket-fillet',
+          into: 'main',
+          foreign: false,
           labels: { ours: 'main', theirs: 'bracket-fillet' },
           paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
           busy: false,
@@ -320,7 +326,7 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    await user.click(await screen.findByRole('button', { name: 'Keep main in src/bracket.ts' }));
+    await user.click(await screen.findByRole('button', { name: 'Keep mine in src/bracket.ts' }));
 
     expect(revisionStatusHarness.commands.resolveFile).toHaveBeenCalledWith('rev-c', 'src/bracket.ts', 'mine');
   });
@@ -348,6 +354,8 @@ describe('Revisions pane', () => {
         {
           revisionId: 'rev-c',
           branch: 'bracket-fillet',
+          into: 'main',
+          foreign: false,
           labels: { ours: 'main', theirs: 'bracket-fillet' },
           paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
           busy: false,
@@ -423,6 +431,8 @@ describe('Revisions pane', () => {
         {
           revisionId: 'rev-c',
           branch: 'bracket-fillet',
+          into: 'main',
+          foreign: false,
           labels: { ours: 'main', theirs: 'bracket-fillet' },
           paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
           busy: false,
@@ -748,6 +758,8 @@ describe('Revisions pane closeout', () => {
         {
           revisionId: 'rev-c',
           branch: 'main',
+          into: 'main',
+          foreign: false,
           labels: { ours: 'main', theirs: 'origin/main' },
           paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
           busy: false,
@@ -758,8 +770,8 @@ describe('Revisions pane closeout', () => {
 
     renderPane();
 
-    expect(await screen.findByRole('button', { name: 'Keep main in src/bracket.ts' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Keep origin/main in src/bracket.ts' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Keep mine in src/bracket.ts' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep theirs in src/bracket.ts' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ask chat to resolve' })).toBeInTheDocument();
   });
 
@@ -1023,6 +1035,8 @@ describe('Revisions pane vocabulary and History', () => {
   const conflicted = {
     revisionId: 'rev-c',
     branch: 'bracket-fillet',
+    into: 'main',
+    foreign: false,
     labels: { ours: 'main', theirs: 'bracket-fillet' },
     paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
     busy: false,

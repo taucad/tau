@@ -198,18 +198,16 @@ const backupAsk = ({ sync, remote }: RevisionStatusProjection): string | undefin
 };
 
 /**
- * The line a conflict is decided on (HQ2): the line the resolution lands on,
- * which is the branch merged into, or the line both devices changed.
+ * The line a conflict is decided on (HQ2, D14): the line the resolution lands
+ * on, which every device names the same, however the conflict reached it.
  *
  * @param status - The revision status projection.
  * @param where - Where the checkout is.
  * @returns The line's name, when one is known.
  * @public
  */
-export const conflictLine = (status: RevisionStatusProjection, where: RevisionWhere): string | undefined => {
-  const conflict = status.conflicts[0];
-  return conflict?.labels?.ours ?? where.branch ?? conflict?.branch;
-};
+export const conflictLine = (status: RevisionStatusProjection, where: RevisionWhere): string | undefined =>
+  status.conflicts[0]?.into ?? where.branch;
 
 /** Failed, then needs you: the two tiers that interrupt. */
 const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWhere): RevisionFacts | undefined => {

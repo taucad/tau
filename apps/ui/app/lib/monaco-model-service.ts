@@ -25,8 +25,8 @@ import type {
 } from '@taucad/fs-client/file-content-service';
 import { ImmutableRevisionTree, mergeRevisionTrees } from '@taucad/revisions/algorithms';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
-import { closeEditorDecision, openEditorDecision } from '#lib/editor-decisions.js';
-import type { EditorDecision } from '#lib/editor-decisions.js';
+import { Topic } from '@taucad/events';
+import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type { MonacoWorkspaceFs } from '#lib/monaco-workspace-fs/monaco-workspace-fs.types.js';
 import { canonicalWorkspacePath } from '#lib/monaco-workspace-fs/workspace-file-system-provider.js';
 import { workspaceRelativePathFromFileUri } from '#lib/monaco-workspace-fs/workspace-path-from-uri.js';
@@ -38,8 +38,70 @@ export type ModelServiceConfig = {
   workspaceFs: MonacoWorkspaceFs;
   contentService: FileContentService;
   markerService: MonacoMarkerService;
-  /** Whose files these are: an open *Needs your decision* is the project's (RV-W5b2 R2-1). */
+  /** Whose files these are: a conflict being recorded holds the project's close (RV-W5b2 R2-1). */
   projectId?: string;
+  /**
+   * Records an edit that can be neither saved nor merged as a conflicted
+   * revision (charter D14): the *Needs your decision* card is then its one
+   * surface, durable across a reload and on every device. The project's
+   * revision client answers it.
+   */
+  recordEditorConflict?: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
+};
+
+/* Projects with an editor conflict being recorded: until it is in the graph, only the model holds the text. */
+const recordingProjects = new Map<string, number>();
+const recordingChanges = new Topic<void>({ name: 'EditorConflictRecords' });
+
+/**
+ * Whether an editor's overlapping edit is being recorded in this project right now.
+ *
+ * @param projectId - The project.
+ * @returns `true` while a record is in flight.
+ */
+export const isRecordingEditorConflict = (projectId: string): boolean => (recordingProjects.get(projectId) ?? 0) > 0;
+
+/**
+ * Hear when a record starts or settles, for a surface that holds a close while one is in flight.
+ *
+ * @param listener - Called on every change.
+ * @returns The unsubscribe.
+ */
+export const subscribeEditorConflictRecords = (listener: () => void): (() => void) =>
+  recordingChanges.subscribe(listener);
+
+/**
+ * Refuse to close a project while an editor's edit is still only in memory
+ * (RV-W5b2 R2-1): the record takes one round trip, and a close inside it would
+ * drop the text before the graph holds it.
+ *
+ * @param projectId - The project being closed.
+ * @throws Error While a record is in flight.
+ */
+export const refuseCloseWhileRecording = (projectId: string): void => {
+  if (isRecordingEditorConflict(projectId)) {
+    throw new Error('An edit that overlapped another change is still being recorded. Try again in a moment.');
+  }
+};
+
+/**
+ * Count one record in flight for a project; the model service's own, and a test's stand-in for one.
+ *
+ * @param projectId - The project.
+ * @returns Its release.
+ */
+export const holdEditorConflictRecord = (projectId: string): (() => void) => {
+  recordingProjects.set(projectId, (recordingProjects.get(projectId) ?? 0) + 1);
+  recordingChanges.emit();
+  return () => {
+    const remaining = (recordingProjects.get(projectId) ?? 1) - 1;
+    if (remaining > 0) {
+      recordingProjects.set(projectId, remaining);
+    } else {
+      recordingProjects.delete(projectId);
+    }
+    recordingChanges.emit();
+  };
 };
 
 export type ServiceDiagnostics = {
@@ -78,17 +140,15 @@ type EditorModelSave = {
  * A refused editor save waiting to be put back on the file (RV-W5b F4, RV-W5b2 N1).
  *
  * `settled` is what every keystroke save it refused resolves with: the merged
- * text's save, a person's choice, or that save's failure — so a failure reaches
- * the same reporter a keystroke's does (N3).
+ * text's save, the recorded conflict, or that step's failure — so a failure
+ * reaches the same reporter a keystroke's does (N3).
  */
 type PendingRebase = {
   // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
   readonly base: Uint8Array<ArrayBuffer> | null;
   readonly settled: PromiseWithResolvers<void>;
-  /** The choice a person is asked, while the two cannot be merged. */
-  decision?: EditorDecision;
-  /** The model's text when last asked: what *Keep mine* keeps once the model is gone. */
-  mine?: Uint8Array<ArrayBuffer>;
+  /** The edit is being recorded as a conflict; nothing else may act on it until that settles. */
+  recording?: boolean;
 };
 
 const textEncoder = new TextEncoder();
@@ -131,6 +191,7 @@ export class MonacoModelService {
   private contentService: FileContentService | undefined;
   private markerService: MonacoMarkerService | undefined;
   private projectId = '';
+  private recordEditorConflict: ModelServiceConfig['recordEditorConflict'];
 
   /** Session epoch -- incremented on each project session change */
   private epoch = 0;
@@ -181,6 +242,7 @@ export class MonacoModelService {
     this.contentService = config.contentService;
     this.markerService = config.markerService;
     this.projectId = config.projectId ?? '';
+    this.recordEditorConflict = config.recordEditorConflict;
 
     this.abortController = new AbortController();
   }
@@ -460,7 +522,7 @@ export class MonacoModelService {
         this.applyOutcomeChange({ path: currentPath, result: contentService.peekOutcome(currentPath) });
       }
     }
-    /* The caller owns persistence errors; a refusal is not one — the edit is merged or a person chooses. */
+    /* The caller owns persistence errors; a refusal is not one — the edit is merged or recorded for a person. */
     if (failed && !(failure instanceof EditorSaveConflictError)) {
       // oxlint-disable-next-line @typescript-eslint/only-throw-error -- Preserve the exact rejection from the filesystem client.
       throw failure;
@@ -497,10 +559,11 @@ export class MonacoModelService {
    * A sync merge's own per-file merge, with the parameter codec (D12): when it
    * merges, the model takes the merged text and saves it, checked against the
    * file's bytes. When it cannot, nothing is written — marker bytes never reach
-   * the files (I7) — the text stays in the model, and the person chooses
-   * (RV-W5b2 N1). Until the file has bytes again (mid-apply it is moved aside)
-   * this waits; a file back on the bytes the edit was made from — an apply that
-   * rolled back — has its edit saved again (N3).
+   * the files (I7) — and the edit is recorded as a conflicted revision, whose
+   * *Needs your decision* card is the one place a person decides it (D14).
+   * Until the file has bytes again (mid-apply it is moved aside) this waits; a
+   * file back on the bytes the edit was made from — an apply that rolled back —
+   * has its edit saved again (N3).
    *
    * @param path - Workspace-relative path; its model holds the refused edit.
    * @param outcome - The file's content now.
@@ -509,142 +572,125 @@ export class MonacoModelService {
   private rebaseOnto(path: string, outcome: FileContentResult, changed: boolean): void {
     const pending = this.rebases.get(path);
     const model = this.monaco?.editor.getModel(this.createUri(path));
-    if (pending === undefined || !model || outcome.kind !== 'text') {
+    if (pending === undefined || pending.recording === true || !model || outcome.kind !== 'text') {
       return;
     }
     const theirs = outcome.content;
     if (pending.base !== null && sameBytes(pending.base, theirs)) {
       if (changed) {
-        this.settleRebase(path, pending, this.saveEditor(path, textEncoder.encode(model.getValue())));
+        this.settleRebase(pending, this.saveEditor(path, textEncoder.encode(model.getValue())));
       }
       return;
     }
     const ours = textEncoder.encode(model.getValue());
     const merged = mergeOneFile({ path, base: pending.base, ours, theirs });
     if (merged === undefined) {
-      pending.mine = ours;
-      this.askToChoose(path, pending, theirs);
+      this.recordConflict(path, pending, model.getValue());
       return;
     }
     this.bases.set(path, theirs);
     this.setModelText(path, model, decodeTextFile(merged));
-    this.settleRebase(path, pending, this.saveEditor(path, merged));
+    this.settleRebase(pending, this.saveEditor(path, merged));
   }
 
   /**
-   * Retire a pending rebase into one save, whose outcome its refused keystrokes share.
+   * Retire a pending rebase into one step, whose outcome its refused keystrokes share.
    *
-   * @param path - Workspace-relative path.
-   * @param pending - The rebase being settled.
-   * @param save - The save that settles it.
+   * @param pending - The rebase being settled, under whichever path it now has.
+   * @param step - The save or record that settles it.
    */
-  private settleRebase(path: string, pending: PendingRebase, save: Promise<void>): void {
-    if (this.rebases.get(path) === pending) {
+  private settleRebase(pending: PendingRebase, step: Promise<void>): void {
+    const path = this.pathOf(pending);
+    if (path !== undefined) {
       this.rebases.delete(path);
     }
-    if (pending.decision !== undefined) {
-      closeEditorDecision(pending.decision);
-    }
-    // async-iife: bootstrap -- the save's outcome is handed to the promise the refused keystrokes already hold.
     // oxlint-disable-next-line promise/prefer-await-to-then -- forwarding one settlement to another.
-    save.then(pending.settled.resolve).catch(pending.settled.reject);
+    step.then(pending.settled.resolve).catch(pending.settled.reject);
+  }
+
+  /** Where a pending rebase now is: a rename carries it (`rekey`). */
+  private pathOf(pending: PendingRebase): string | undefined {
+    return [...this.rebases].find(([, candidate]) => candidate === pending)?.[0];
   }
 
   /**
-   * Ask which side to keep when the two cannot be merged (RV-W5b2 N1).
+   * Record an edit that can be neither saved nor merged as a conflicted
+   * revision (D14, RV-W5b2 R2-1, R2-3).
    *
-   * The *Needs your decision* words and the *Keep mine* / *Keep theirs* choice
-   * are the conflict card's; the toast is the surface an unsaved editor has
-   * until W6 records the conflict durably. Keep mine saves the model's text
-   * checked against the arrived bytes; keep theirs takes the arrived bytes into
-   * the model. Each refused keystroke asks again, with the newest text.
+   * The model keeps the text until the graph holds it; then it takes the file
+   * as it stands, and the *Needs your decision* card decides the rest — after a
+   * reload and on every device. A record that fails leaves the text in the
+   * model and rejects the refused keystrokes, so the failure is reported and
+   * the next keystroke tries again. Keystrokes refused meanwhile join this
+   * rebase, and the project's close waits for it.
+   *
+   * Keys typed during a record's own round trip are recorded too: while the
+   * model's text differs from what the last record carried, it is recorded
+   * again, chained onto the first on the same line, so no keystroke is dropped
+   * when the model takes the file's bytes (RV-W6 F3).
    *
    * @param path - Workspace-relative path.
    * @param pending - The refused edit.
-   * @param theirs - The bytes that arrived.
+   * @param mine - The editor's text.
    */
-  private askToChoose(path: string, pending: PendingRebase, theirs: Uint8Array<ArrayBuffer>): void {
-    if (pending.decision !== undefined) {
-      pending.decision.theirs = theirs;
-      openEditorDecision(pending.decision);
+  private recordConflict(path: string, pending: PendingRebase, mine: string): void {
+    const record = this.recordEditorConflict;
+    if (record === undefined) {
+      const name = path.split('/').pop() ?? path;
+      this.settleRebase(
+        pending,
+        Promise.reject(new Error(`${name} changed while you were editing it, and this project cannot record both.`)),
+      );
       return;
     }
-    const decision: EditorDecision = {
-      projectId: this.projectId,
-      path,
-      theirs,
-      keep: (side) => {
-        this.choose(decision, side);
-      },
+    pending.recording = true;
+    const release = holdEditorConflictRecord(this.projectId);
+    const finish = (step: Promise<void>): void => {
+      pending.recording = false;
+      release();
+      this.settleRebase(pending, step);
     };
-    pending.decision = decision;
-    openEditorDecision(decision);
-  }
-
-  private choose(decision: EditorDecision, side: 'mine' | 'theirs'): void {
-    const { path, theirs } = decision;
-    const pending = this.rebases.get(path);
-    const model = this.monaco?.editor.getModel(this.createUri(path));
-    if (pending?.decision !== decision || !model) {
-      return;
-    }
-    this.bases.set(path, theirs);
-    if (side === 'mine') {
-      this.settleRebase(path, pending, this.saveEditor(path, textEncoder.encode(model.getValue())));
-      return;
-    }
-    this.setModelText(path, model, decodeTextFile(theirs));
-    this.settleRebase(path, pending, Promise.resolve());
-  }
-
-  /**
-   * Hand an open decision to the file itself when its model goes away.
-   *
-   * Switching project, closing the editor or disposing this service must not
-   * drop text only the model held (RV-W5b2 R2-1): *Keep mine* then writes the
-   * last asked text, checked against the arrived bytes, and asks again if the
-   * file moved on.
-   *
-   * ponytail: a file deleted meanwhile leaves *Keep mine* refused until the
-   * person keeps theirs; W6's durable record replaces this.
-   *
-   * @param pending - The refused edit whose model is going away.
-   */
-  private detach(pending: PendingRebase): void {
-    const { decision, mine } = pending;
-    const { contentService } = this;
-    if (decision === undefined || mine === undefined || !contentService) {
-      return;
-    }
-    pending.decision = undefined;
-    decision.keep = (side) => {
-      if (side === 'theirs') {
-        closeEditorDecision(decision);
+    const input = { path, base: pending.base === null ? null : decodeTextFile(pending.base), mine };
+    // async-iife: bootstrap -- the record settles the pending rebase, not this call.
+    void (async (): Promise<void> => {
+      const modelNow = () => this.monaco?.editor.getModel(this.createUri(this.pathOf(pending) ?? path));
+      let outcome: EditorConflictOutcome;
+      try {
+        outcome = await record(input);
+        let carried = mine;
+        let typed = modelNow()?.getValue();
+        while (outcome.status === 'recorded' && typed !== undefined && typed !== carried) {
+          carried = typed;
+          // oxlint-disable-next-line no-await-in-loop -- each record carries the text typed during the one before.
+          outcome = await record({ ...input, mine: carried });
+          typed = modelNow()?.getValue();
+        }
+      } catch (error) {
+        finish(Promise.reject(error instanceof Error ? error : new Error(String(error))));
         return;
       }
-      // async-iife: bootstrap -- a toast button cannot await its write.
-      void (async (): Promise<void> => {
-        try {
-          await contentService.saveEditor(decision.path, mine, decision.theirs);
-          closeEditorDecision(decision);
-        } catch (error) {
-          const now = contentService.peekOutcome(decision.path);
-          if (error instanceof EditorSaveConflictError && now.kind === 'text') {
-            decision.theirs = now.content;
-            openEditorDecision(decision);
-          }
-        }
-      })();
-    };
+      const current = this.pathOf(pending) ?? path;
+      const model = modelNow();
+      if (outcome.status === 'unchanged') {
+        /* The file is back on the bytes the edit was made from: save it as usual. */
+        finish(model ? this.saveEditor(current, textEncoder.encode(model.getValue())) : Promise.resolve());
+        return;
+      }
+      const now = this.contentService?.peekOutcome(current);
+      if (model && now?.kind === 'text') {
+        this.bases.set(current, now.content);
+        this.setModelText(current, model, decodeTextFile(now.content));
+      }
+      finish(Promise.resolve());
+    })();
   }
 
   /** Drop what this service knew about one path's model: its bytes and any refused edit. */
   private forget(path: string): void {
     this.bases.delete(path);
     const pending = this.rebases.get(path);
-    if (pending !== undefined) {
-      this.detach(pending);
-      this.settleRebase(path, pending, Promise.resolve());
+    if (pending !== undefined && pending.recording !== true) {
+      this.settleRebase(pending, Promise.resolve());
     }
   }
 
@@ -666,9 +712,6 @@ export class MonacoModelService {
     this.rebases.delete(oldPath);
     if (pending !== undefined) {
       this.rebases.set(newPath, pending);
-      if (pending.decision !== undefined) {
-        pending.decision.path = newPath;
-      }
     }
   }
 
@@ -721,7 +764,13 @@ export class MonacoModelService {
       }
       case 'deleted': {
         const uri = this.createUri(event.path);
-        this.monaco.editor.getModel(uri)?.dispose();
+        /* A refused edit whose file was deleted is a keep-or-let-go decision (RV-W5b2 R2-3). */
+        const pending = this.rebases.get(event.path);
+        const held = this.monaco.editor.getModel(uri);
+        if (pending !== undefined && pending.recording !== true && held) {
+          this.recordConflict(event.path, pending, held.getValue());
+        }
+        held?.dispose();
         this.editorHolds.delete(event.path);
         this.backgroundAccessTimes.delete(event.path);
         this.syncedPaths.delete(event.path);

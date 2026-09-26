@@ -50,9 +50,10 @@ const revisionFailureEvent: Readonly<Record<RevisionFailureSubject, string>> = {
   /* Not raised here: a turn announces its own failure through `turn.failed`,
    * which `revision-outcomes.tsx` phrases from the same table (W9). */
   turn: 'revision_turn_failed',
-  /* Not raised here either: the Sync line and the name-removal dialog own their own. */
+  /* Not raised here either: the Sync line and the two removal dialogs own their own. */
   backup: 'revision_backup_failed',
   removeName: 'revision_remove_name_failed',
+  removeConflictLine: 'revision_remove_conflict_line_failed',
 };
 
 /**

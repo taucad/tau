@@ -38,6 +38,12 @@ describe('describeRevisionFailure', () => {
     });
   });
 
+  it('says why the name conflicts is refused (D14)', () => {
+    expect(describeRevisionFailure('branch', 'BRANCH_NAME_RESERVED').description).toBe(
+      '“conflicts” is kept for decisions that travel between devices. Choose another name.',
+    );
+  });
+
   it('names the branch a person already has, when the refusal came with one', () => {
     expect(describeRevisionFailure('branch', 'CHECKOUT_CONFLICT', 'bracket-fillet').description).toBe(
       'bracket-fillet already exists. Pick another name.',

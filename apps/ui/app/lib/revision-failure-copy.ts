@@ -17,10 +17,17 @@
 /**
  * The three verbs whose refusals reach the tree's one error channel, the turn,
  * which announces its own (`turn.failed`), the backup, whose terminal refusal
- * the Sync line says, and removing a version name, which the Hosted Remote's
- * audited verb answers (D24).
+ * the Sync line says, and removing a version name or another device's
+ * decision, which the Hosted Remote's audited verb answers (D24, D14).
  */
-export type RevisionFailureSubject = 'restore' | 'branch' | 'save' | 'turn' | 'backup' | 'removeName';
+export type RevisionFailureSubject =
+  | 'restore'
+  | 'branch'
+  | 'save'
+  | 'turn'
+  | 'backup'
+  | 'removeName'
+  | 'removeConflictLine';
 
 /** What Tau Cloud's own budgets answer (D22, I11): one sentence each, each saying when to try again. */
 const hostedRemoteCopy: ReadonlyArray<readonly [string, string]> = [
@@ -90,6 +97,8 @@ export const revisionFailureCopy: Readonly<
       ...engineCopy,
       /* A fresh project: nothing recorded, and nothing unrecorded to record. */
       ['BRANCH_NEEDS_REVISION', 'There is nothing to branch from yet. Add a file, then try again.'],
+      /* D14: the name decisions travel under; the page shows the reason, not the generic refusal. */
+      ['BRANCH_NAME_RESERVED', '“conflicts” is kept for decisions that travel between devices. Choose another name.'],
       /* The verb was dropped or nothing answered it inside its bound. */
       ['BRANCH_UNANSWERED', 'This project did not answer in time. Try making that branch again.'],
       /* Made, with nowhere for a chat to work in it. */
@@ -131,6 +140,15 @@ export const revisionFailureCopy: Readonly<
       ...hostedRemoteCopy,
       ['GIT_REF_REMOVAL_OWNER_ONLY', 'Only the project’s owner can remove a version name.'],
       ['GIT_REF_NOT_REMOVABLE', 'Only a version name can be removed.'],
+    ]),
+  },
+  removeConflictLine: {
+    title: 'That decision was not removed',
+    fallback: 'Tau Cloud could not remove that decision. Try again.',
+    codes: new Map([
+      ...hostedRemoteCopy,
+      ['GIT_REF_REMOVAL_OWNER_ONLY', 'Only the project’s owner can remove another device’s decision.'],
+      ['GIT_REF_NOT_REMOVABLE', 'Tau Cloud cannot remove that decision.'],
     ]),
   },
   turn: {

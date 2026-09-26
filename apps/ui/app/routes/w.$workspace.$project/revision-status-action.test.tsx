@@ -101,6 +101,8 @@ describe('selectRevisionFacts', () => {
   const conflict: RevisionStatusProjection['conflicts'][number] = {
     revisionId: 'rev-13',
     branch: 'main',
+    into: 'main',
+    foreign: false,
     labels: undefined,
     paths: [],
     busy: false,
@@ -409,6 +411,8 @@ describe('RevisionStatusAction', () => {
         {
           revisionId: 'rev-c',
           branch: 'bracket-fillet',
+          into: 'main',
+          foreign: false,
           labels: { ours: 'main', theirs: 'bracket-fillet' },
           paths: [],
           busy: false,

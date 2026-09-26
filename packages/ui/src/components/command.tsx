@@ -81,12 +81,15 @@ function CommandDialog({
   title = 'Command Palette',
   description = 'Search for a command to run...',
   contentClassName,
+  shouldFilter,
   children,
   ...properties
 }: React.ComponentProps<typeof Dialog> & {
   readonly title?: string;
   readonly description?: string;
   readonly contentClassName?: string;
+  /** Pass `false` when the caller filters and ranks items itself, such as a virtualized list. */
+  readonly shouldFilter?: boolean;
 }): React.JSX.Element {
   return (
     <Dialog {...properties}>
@@ -100,7 +103,10 @@ function CommandDialog({
           contentClassName,
         )}
       >
-        <Command className='[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4'>
+        <Command
+          shouldFilter={shouldFilter}
+          className='[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4'
+        >
           {children}
         </Command>
       </DialogContent>

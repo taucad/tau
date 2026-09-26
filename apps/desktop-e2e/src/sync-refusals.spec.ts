@@ -1,28 +1,43 @@
 /* oxlint-disable no-await-in-loop -- Each refusal class drives one client after another on purpose. */
 import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
-import { desktopE2EApiUrl } from '#support/config.js';
-import { openBackupChooser } from '#support/revisions-pane.js';
+import { desktopE2EApiUrl, desktopE2EFreeTierSyncEnabled } from '#support/config.js';
+import { launchDesktopApp } from '#support/desktop-app.js';
+import type { DesktopSession } from '#support/desktop-app.js';
+import {
+  backupByDefaultLine,
+  connectTauCloud,
+  openBackupChooser,
+  revisionStatus,
+  revisionStrip,
+} from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
-import { launchBrowserClient } from '#support/two-client/browser-client.js';
+import { launchBrowserClient, openCloudOnlyProject, uploadFileInPage } from '#support/two-client/browser-client.js';
 import type { BrowserClient } from '#support/two-client/browser-client.js';
 import { routeGitRefusal } from '#support/two-client/git-faults.js';
 import type { GitRefusal } from '#support/two-client/git-faults.js';
 import {
+  addProjectCollaborator,
   basicAuthorization,
   forgetSeededProjects,
+  projectLfsBytes,
   mintOneTimeToken,
+  readStorageUsage,
   runGit,
   seedProPlan,
+  setProjectLfsBytes,
+  spendProjectStorage,
   tauCloudOwnerIds,
 } from '#support/two-client/tau-cloud.js';
-import type { TauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
+import type { StorageUsage, TauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
 import { startUiServer } from '#support/two-client/ui-server.js';
 import type { UiServer } from '#support/two-client/ui-server.js';
 
@@ -108,19 +123,26 @@ const createProject = async (client: BrowserClient, name: string): Promise<strin
   }, slug);
 };
 
-/** Open Revisions and its Sync region through the product's own offer. */
-const openSync = async (client: BrowserClient): Promise<void> => {
-  const { page } = client;
-  await page
+type PageClient = Pick<BrowserClient, 'page'>;
+type GitIn = (...args: readonly string[]) => ReturnType<typeof runGit>;
+
+/** Open the Revisions pane through the header's own chip. */
+const openRevisions = async (client: PageClient): Promise<void> => {
+  await client.page
     .getByRole('button', { name: /^Open Revisions\./u })
     .first()
     .click({ timeout: 120_000 });
-  await openBackupChooser(page);
 };
 
-const backupStatus = (client: BrowserClient) => client.page.getByRole('status', { name: 'Backup status' }).first();
+/** Open Revisions and its Sync region through the product's own offer. */
+const openSync = async (client: PageClient): Promise<void> => {
+  await openRevisions(client);
+  await openBackupChooser(client.page);
+};
 
-const backupText = async (client: BrowserClient): Promise<string> =>
+const backupStatus = (client: PageClient) => client.page.getByRole('status', { name: 'Backup status' }).first();
+
+const backupText = async (client: PageClient): Promise<string> =>
   // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's locator method keeps rendered line breaks.
   (await backupStatus(client).count()) === 0 ? '' : backupStatus(client).innerText();
 
@@ -128,8 +150,7 @@ const backupText = async (client: BrowserClient): Promise<string> =>
 const connectAndBackUp = async (client: BrowserClient, name: string): Promise<string> => {
   const projectId = await createProject(client, name);
   await openSync(client);
-  await client.page.getByRole('radio', { name: 'Tau Cloud' }).first().click();
-  await client.page.getByRole('button', { name: 'Connect backup', exact: true }).first().click();
+  await connectTauCloud(client.page);
   await expect.poll(async () => backupText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
   return projectId;
 };
@@ -152,6 +173,20 @@ const mintRevision = async (client: BrowserClient, filename: string): Promise<vo
     .first()
     .click();
   await page.keyboard.press(`${modifier}+KeyS`);
+};
+
+/** Wait for the refusal's sentence, then read the actions the row offers. */
+const refusedRow = async (client: PageClient, sentence: string, name: string): Promise<readonly string[]> => {
+  await expect
+    .poll(async () => backupText(client), {
+      message: `${name}: the server's sentence must reach the Sync row`,
+      timeout: 180_000,
+    })
+    .toContain(sentence);
+  const status = backupStatus(client);
+  const buttons = await status.getByRole('button').allInnerTexts();
+  const links = await status.getByRole('link').allInnerTexts();
+  return [...buttons, ...links].map((text) => text.trim());
 };
 
 beforeAll(async () => {
@@ -181,7 +216,7 @@ afterEach(async ({ task }) => {
   }
 }, 120_000);
 
-describe('a free-tier owner', () => {
+describe.skipIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner', () => {
   /* Row 2 (C5, C11, N5): the plan gate is the client's, and nothing may be
    * registered before the plan admits it — so the table is asserted, not only
    * the pane. */
@@ -209,9 +244,35 @@ describe('a free-tier owner', () => {
     expect(await countRows(ownedRows)).toBe(before);
     expect(await countRows(`SELECT count(*) FROM project WHERE id = '${projectId}';`)).toBe(0);
   }, 900_000);
+
+  /* W11 row 5 (D19 under D23): backup by default follows the entitlement, so a
+   * Free account with the gate closed is offered no line, keeps its first
+   * revision on this device, and registers nothing. */
+  it('should keep a new project on this device, with no backup line and no registration', async () => {
+    const { client } = required(free);
+    const registrations: string[] = [];
+    client.page.on('request', (request) => {
+      if (['POST', 'PUT'].includes(request.method()) && request.url().includes('/v1/projects/')) {
+        registrations.push(request.url());
+      }
+    });
+    const projectId = await createProject(client, 'W11 Free Local');
+    await openRevisions(client);
+    await client.page.keyboard.press(`${modifier}+KeyS`);
+    await expect
+      .poll(async () => revisionStatus(client.page).textContent(), { timeout: 120_000 })
+      .toBe('Saved on this device');
+    /* The intent is forgotten once the plan answers, so nothing is left to connect later. */
+    await expect
+      .poll(async () => client.page.evaluate((id) => localStorage.getItem(`tau:tau-cloud-intent:${id}`), projectId))
+      .toBeNull();
+    expect(await backupByDefaultLine(client.page).count(), 'D19: no line for an account the gate refuses').toBe(0);
+    expect(registrations, 'D19/D23: a free owner must never register a project').toEqual([]);
+    expect(await countRows(`SELECT count(*) FROM project WHERE id = '${projectId}';`)).toBe(0);
+  }, 900_000);
 });
 
-describe('a Pro owner whose pushes are refused', () => {
+describe.skipIf(desktopE2EFreeTierSyncEnabled)('a Pro owner whose pushes are refused', () => {
   /* Row 3 (C1, C4; rule 19): each class renders the server's own sentence
    * with its one action. The browser receives the JSON envelope (N6: Playwright
    * sends `Origin`), whose sentence is in `error`. Every sentence below differs
@@ -269,20 +330,6 @@ describe('a Pro owner whose pushes are refused', () => {
       action: /^Retry$/u,
     },
   ];
-
-  /** Wait for the refusal's sentence, then read the actions the row offers. */
-  const refusedRow = async (client: BrowserClient, sentence: string, name: string): Promise<readonly string[]> => {
-    await expect
-      .poll(async () => backupText(client), {
-        message: `${name}: the server's sentence must reach the Sync row`,
-        timeout: 180_000,
-      })
-      .toContain(sentence);
-    const status = backupStatus(client);
-    const buttons = await status.getByRole('button').allInnerTexts();
-    const links = await status.getByRole('link').allInnerTexts();
-    return [...buttons, ...links].map((text) => text.trim());
-  };
 
   it.each(refusals)(
     'should name a $name server refusal as its own reason in the Sync row',
@@ -396,7 +443,7 @@ describe('a Pro owner whose pushes are refused', () => {
 /* D14 (charter W6): a decision travels only on `refs/heads/conflicts/`. The
  * hook refuses a conflicted revision anywhere else with a sentence a person can
  * act on, and the name `conflicts` is kept for those lines. */
-describe('a Pro owner and a decision that travels (D14)', () => {
+describe.skipIf(desktopE2EFreeTierSyncEnabled)('a Pro owner and a decision that travels (D14)', () => {
   it('should refuse a conflicted revision pushed to main, in words, and admit it on a conflict line', async () => {
     const { client, bearer } = required(pro);
     const projectId = await connectAndBackUp(client, 'W6 Conflicted Push');
@@ -460,5 +507,298 @@ describe('a Pro owner and a decision that travels (D14)', () => {
       })
       .toBeGreaterThan(0);
     expect(await page.getByRole('list', { name: 'Branches' }).getByText('conflicts', { exact: true }).count()).toBe(0);
+  }, 900_000);
+});
+
+/*
+ * W8's rows with charter D23's free-tier sync gate open (D16, D17, D18). They
+ * run only in the target's second pass, whose API boots with
+ * `TAU_FREE_TIER_SYNC_ENABLED=true`; every describe above runs only in the
+ * first, so `a free-tier owner` still sees the gate closed.
+ *
+ * Not here: W8's self-host row (`… of 10 GB`, no plan action). It needs a
+ * self-host UI build and an API with `TAU_CLOUD_ENABLED=false`, and this tier's
+ * build and API are the cloud variant by design (see `test:e2e:two-client`).
+ */
+describe.runIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner with the free-sync gate open (W8)', () => {
+  const ownerSentence = 'This push needs more room than your 1 GB storage plan has left, so it was not backed up.';
+  const figure = /\bof 1 GB\b/u;
+  const allowanceName = 'W8 Free Allowance';
+  let desktop: DesktopSession | undefined;
+  let collaborator: Seeded | undefined;
+  let allowanceProjectId = '';
+  let desktopRoot = '';
+
+  const regionText = async (client: PageClient): Promise<string> =>
+    // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's locator method keeps rendered line breaks.
+    client.page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).first().innerText();
+
+  /** A stock-git clone of the project as the owner, for pushes a client would not make. */
+  const clonePeer = async (projectId: string, label: string): Promise<Readonly<{ directory: string; git: GitIn }>> => {
+    const directory = await mkdtemp(join(tmpdir(), `tau-w8-${label}-`));
+    const authorization = `http.extraHeader=Authorization: ${basicAuthorization(required(free).bearer)}`;
+    const git: GitIn = async (...args) => runGit(['-c', authorization, ...args], directory);
+    const cloned = await git('clone', '--quiet', `${desktopE2EApiUrl}/v1/git/${projectId}.git`, '.');
+    expect(cloned.code, cloned.stderr).toBe(0);
+    for (const [key, value] of [
+      ['user.email', 'w8@example.test'],
+      ['user.name', 'W8'],
+    ] as const) {
+      await git('config', key, value);
+    }
+    return { directory, git };
+  };
+
+  /**
+   * Leave `remaining` bytes of the owner's allowance, charged to one project's
+   * LFS figure. The quota is account-wide (D16), so the other projects' bytes —
+   * including a refused push that a later retry lands — count too.
+   */
+  const leaveAccountHeadroom = async (projectId: string, remaining: number): Promise<void> => {
+    const { usage } = await readStorageUsage(projectId, required(free).bearer);
+    const figures = required(usage);
+    const others = figures.storageBytes + figures.lfsBytes - (await projectLfsBytes(projectId));
+    await setProjectLfsBytes(projectId, Math.max(0, figures.storageLimitBytes - others - remaining));
+  };
+
+  /** Incompressible text, so a pack is as large as the file (base64 of random bytes). */
+  const incompressible = (bytes: number): string => randomBytes(bytes).toString('base64');
+
+  beforeAll(async () => {
+    desktop = await launchDesktopApp({ token: required(free).bearer });
+    collaborator = await seed('sync-collaborator', 'free');
+  }, 900_000);
+
+  afterAll(async () => {
+    await desktop?.close();
+    if (collaborator !== undefined) {
+      await collaborator.client.close();
+      await deleteTauTestUser(collaborator.email);
+    }
+  }, 900_000);
+
+  afterEach(async ({ task }) => {
+    if (task.result?.state === 'fail') {
+      const label = task.name.replaceAll(/[^a-zA-Z0-9]+/gu, '-');
+      await Promise.allSettled([
+        desktop?.capture(`sync-refusals-desktop-${label}`),
+        collaborator?.client.capture(`sync-refusals-collaborator-${label}`),
+      ]);
+    }
+  }, 120_000);
+
+  /* Row 1 (D16, D18). D19 now connects a new project by itself once the plan
+   * allows it, so the chooser is reached the way a person keeps a project
+   * local first: *Turn off backup* on the line D19 shows, then *Back up*. */
+  it('should include 1 GB of Tau Cloud, connect, and read the figure on both clients after a reopen', async () => {
+    const { client } = required(free);
+    const b = required(desktop);
+    allowanceProjectId = await createProject(client, allowanceName);
+    await openRevisions(client);
+    const line = backupByDefaultLine(client.page);
+    await line.getByRole('button', { name: 'Turn off backup', exact: true }).click({ timeout: 120_000 });
+    await line.waitFor({ state: 'hidden', timeout: 60_000 });
+
+    await openBackupChooser(client.page);
+    const region = client.page.getByRole('region', { name: 'Sync' }).filter({ visible: true }).first();
+    const choice = region.getByRole('radio', { name: 'Tau Cloud' });
+    await expect.poll(async () => choice.isEnabled(), { timeout: 60_000 }).toBe(true);
+    expect(await regionText(client), 'D16: the chooser says what Free includes').toContain('1 GB included');
+    await choice.click();
+    await region.getByRole('button', { name: 'Connect backup', exact: true }).click();
+    await expect.poll(async () => backupText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
+    await expect.poll(async () => regionText(client), { message: 'D18: x of 1 GB', timeout: 120_000 }).toMatch(figure);
+
+    await client.page.reload({ waitUntil: 'domcontentloaded' });
+    await openSync(client);
+    await expect
+      .poll(async () => regionText(client), { message: 'D18: the figure after a reopen', timeout: 120_000 })
+      .toMatch(figure);
+
+    const slug = await openCloudOnlyProject(b.page, {
+      projectsUrl: 'app://tau/projects',
+      name: allowanceName,
+      message: 'W8 row 1 desktop',
+    });
+    desktopRoot = join(b.homeRoot, slug);
+    await openSync(b);
+    await expect
+      .poll(async () => regionText(b), { message: 'D18: the desktop reads the figure', timeout: 180_000 })
+      .toMatch(figure);
+    await b.page.reload({ waitUntil: 'domcontentloaded' });
+    await openSync(b);
+    await expect
+      .poll(async () => regionText(b), { message: 'D18: the desktop figure after a reopen', timeout: 180_000 })
+      .toMatch(figure);
+  }, 900_000);
+
+  /* Row 4 (D17, L6-F2): a pack over the allowance meets the pre-receive hook,
+   * whose refusal stock git prints and the desktop's native push files as quota. */
+  it('should refuse a non-LFS push over the allowance on the wire and on the desktop as quota', async () => {
+    const b = required(desktop);
+    expect(allowanceProjectId, 'row 1 must have connected the project').not.toBe('');
+    await leaveAccountHeadroom(allowanceProjectId, 128 * 1024);
+    const peer = await clonePeer(allowanceProjectId, 'hook');
+    try {
+      await writeFile(join(peer.directory, 'big.scad'), `// ${incompressible(384 * 1024)}\n`, 'utf8');
+      await peer.git('add', 'big.scad');
+      await peer.git('commit', '--quiet', '-m', 'Over the allowance');
+      const pushed = await peer.git('push', 'origin', 'HEAD:main');
+      expect(pushed.code, 'D17: the hook must refuse the pack').not.toBe(0);
+      expect(pushed.stderr).toContain('Tau: storage quota exceeded');
+      expect(pushed.stderr).toContain(ownerSentence);
+      expect(pushed.stderr).toContain('the largest files it adds are:');
+      expect(pushed.stderr).toContain('big.scad');
+
+      await writeFile(join(desktopRoot, 'desktop-big.scad'), `// ${incompressible(384 * 1024)}\n`, 'utf8');
+      await openRevisions(b);
+      await b.page.keyboard.press(`${modifier}+KeyS`);
+      const actions = await refusedRow(b, ownerSentence, 'W8 row 4 desktop');
+      /* ponytail: this tier's desktop UI is the self-host build (ui:build:desktop
+       * without TAU_CLOUD_ENABLED, so canUpgradePlan is false) and offers no
+       * Upgrade; row 2 proves Upgrade on the cloud web build. Filed as quota
+       * here means no retry verb and the strip's quota ask. */
+      expect(actions, 'D17: filed as quota, so no Sync now or Retry').toEqual([]);
+      await expect
+        .poll(async () => revisionStrip(b.page).textContent(), { timeout: 30_000 })
+        .toContain('Over your plan');
+    } finally {
+      await spendProjectStorage(allowanceProjectId, 0);
+      await rm(peer.directory, { recursive: true, force: true });
+    }
+  }, 900_000);
+
+  /* Row 2 (D17): the LFS batch refusal names the allowance to its owner, lists
+   * the file, and offers the one plan action, on the row and on the strip. */
+  it('should refuse an over-allowance push to its owner with the file named and Upgrade alone', async () => {
+    const { client } = required(free);
+    const projectId = await connectAndBackUp(client, 'W8 Free Over Allowance');
+    /* Room for the revision's pack and trailing chat refs, never for the file
+     * (the Pro row's reasoning; the quota is account-wide). */
+    await leaveAccountHeadroom(projectId, 512 * 1024);
+    try {
+      await uploadFileInPage(client.page, 'over-allowance.step', Buffer.alloc(1024 * 1024 + 1, 1));
+      await openRevisions(client);
+      await client.page.keyboard.press(`${modifier}+KeyS`);
+      const actions = await refusedRow(client, ownerSentence, 'W8 row 2');
+      expect(actions, 'D17: the owner gets exactly one action').toHaveLength(1);
+      expect(actions[0]).toMatch(/Upgrade/u);
+      const listed = await regionText(client);
+      expect(listed).toContain('These files are over your plan and were not backed up:');
+      expect(listed).toContain('over-allowance.step');
+      const strip = revisionStrip(client.page);
+      expect(await strip.getByRole('button', { name: /Upgrade/u }).count(), 'D17: the strip offers Upgrade').toBe(1);
+      expect(await strip.getByRole('button', { name: 'Sync now', exact: true }).count()).toBe(0);
+    } finally {
+      await spendProjectStorage(projectId, 0);
+    }
+  }, 900_000);
+
+  /* Row 3 (D17, D18): a write collaborator's push draws on the owner's plan, so
+   * the sentence points at the owner, no plan action is offered, and the owner's
+   * figures are not theirs to read. */
+  it('should tell a write collaborator to ask the owner, with no plan action and no figure', async () => {
+    const owner = required(free);
+    const guest = required(collaborator);
+    const name = 'W8 Free Shared';
+    const projectId = await connectAndBackUp(owner.client, name);
+    await addProjectCollaborator({ projectId, collaborator: guest.owner, role: 'write', invitedBy: owner.owner });
+    await openCloudOnlyProject(guest.client.page, { projectsUrl: '/projects', name, message: 'W8 row 3' });
+    await openSync(guest.client);
+    await expect.poll(async () => backupText(guest.client), { timeout: 180_000 }).toMatch(/Backed up/u);
+
+    await leaveAccountHeadroom(projectId, 512 * 1024);
+    try {
+      await uploadFileInPage(guest.client.page, 'shared-over.step', Buffer.alloc(1024 * 1024 + 1, 1));
+      await openRevisions(guest.client);
+      await guest.client.page.keyboard.press(`${modifier}+KeyS`);
+      const actions = await refusedRow(
+        guest.client,
+        "This push needs more room than the project owner's storage plan has left, so it was not backed up. Ask the owner to make room.",
+        'W8 row 3',
+      );
+      expect(
+        actions.filter((action) => /Upgrade/u.test(action)),
+        'D17: no plan action for a collaborator',
+      ).toEqual([]);
+      const listed = await regionText(guest.client);
+      expect(listed).toContain('These files did not fit in the project owner’s plan and were not backed up:');
+      expect(listed).toContain('shared-over.step');
+      expect(listed, 'D18: a collaborator draws no figure').not.toMatch(figure);
+      expect(
+        await revisionStrip(guest.client.page)
+          .getByRole('button', { name: /Upgrade/u })
+          .count(),
+      ).toBe(0);
+      const guestUsage = await readStorageUsage(projectId, guest.bearer);
+      expect(guestUsage.status, 'D18: usage is the owner’s').toBe(403);
+    } finally {
+      await spendProjectStorage(projectId, 0);
+    }
+  }, 900_000);
+
+  /* Row 6 (D18, L6-F5): the ninth live pack makes the committer compact; the
+   * packs it retires stay inside the retention window and are reported beside
+   * the charged figure, never in it. */
+  it('should show packs a compaction retired beside the figure, never inside it', async () => {
+    const { client, bearer } = required(free);
+    const projectId = await connectAndBackUp(client, 'W8 Free Retained');
+    const peer = await clonePeer(projectId, 'retained');
+    const usage = async (): Promise<StorageUsage | undefined> => {
+      const answer = await readStorageUsage(projectId, bearer);
+      return answer.usage;
+    };
+    try {
+      let before: StorageUsage | undefined;
+      let after: StorageUsage | undefined;
+      /* The usage route is budgeted per caller (30 a minute, shared with the
+       * clients' own reads), so a refused read is simply read again later. */
+      const observe = async (): Promise<Readonly<{ before?: StorageUsage; after?: StorageUsage }>> => {
+        const read = await usage();
+        return read === undefined ? {} : read.retainedBytes > 0 ? { after: read } : { before: read };
+      };
+      /* One pack per push; the bound is eight live packs (`livePackBound`), and
+       * the browser's own backup already holds some, so twelve always crosses it. */
+      for (let push = 1; push <= 12 && after === undefined; push += 1) {
+        await writeFile(join(peer.directory, `pack-${String(push)}.scad`), `// ${incompressible(4096)}\n`, 'utf8');
+        await peer.git('add', '.');
+        await peer.git('commit', '--quiet', '-m', `Pack ${String(push)}`);
+        const pushed = await peer.git('push', 'origin', 'HEAD:main');
+        expect(pushed.code, pushed.stderr).toBe(0);
+        if (push >= 5) {
+          /* The sweep runs after the reply, off the request path. */
+          await delay(3000);
+          const seen = await observe();
+          before = seen.before ?? before;
+          after = seen.after;
+        }
+      }
+      for (let waited = 0; after === undefined && waited < 90_000; waited += 5000) {
+        await delay(5000);
+        const seen = await observe();
+        before = seen.before ?? before;
+        after = seen.after;
+      }
+      if (after === undefined || before === undefined) {
+        throw new Error(
+          `D18: no compaction was observed (before ${JSON.stringify(before)}, after ${JSON.stringify(after)}).`,
+        );
+      }
+      const retained: StorageUsage = after;
+      const charged: StorageUsage = before;
+      /* Retired packs counted as live would add their bytes to `storageBytes` on
+       * top of the new pack; kept apart, the charged figure only moves by that pack. */
+      expect(retained.storageBytes, 'D18: retained bytes are never charged').toBeLessThan(
+        charged.storageBytes + retained.retainedBytes,
+      );
+
+      await client.page.reload({ waitUntil: 'domcontentloaded' });
+      await openSync(client);
+      await expect
+        .poll(async () => regionText(client), { message: 'D18: the retained column after a reopen', timeout: 120_000 })
+        .toMatch(/of 1 GB[\s\S]*kept for recovery, not counted/u);
+    } finally {
+      await rm(peer.directory, { recursive: true, force: true });
+    }
   }, 900_000);
 });

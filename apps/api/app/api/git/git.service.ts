@@ -47,6 +47,7 @@ import {
 import type { GitService as GitSmartService, QuotaAudience } from '#api/git/git.constants.js';
 import { commitLease } from '#api/git/store/commit.js';
 import type { MovedRef } from '#api/git/store/commit.js';
+import type { SweepOutcome } from '#api/git/store/sweep.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import type { FaultInjector } from '#api/git/store/fault-points.js';
 import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
@@ -435,11 +436,11 @@ export class GitRepositoryService implements OnModuleDestroy {
    * same allowance `authorize` enforces.
    *
    * @param ownerId - The account whose allowance is asked about.
-   * @returns Live pack bytes, LFS bytes and the allowance, all account-wide.
+   * @returns Live pack bytes, LFS bytes, retained bytes (never charged) and the allowance, all account-wide.
    */
   public async readStorageAllowance(
     ownerId: string,
-  ): Promise<{ storageBytes: number; lfsBytes: number; storageLimitBytes: number }> {
+  ): Promise<{ storageBytes: number; lfsBytes: number; retainedBytes: number; storageLimitBytes: number }> {
     const [entitlements, usage] = await Promise.all([
       this.entitlementsService.getEntitlements(ownerId),
       this.readOwnerUsage(ownerId),
@@ -447,12 +448,18 @@ export class GitRepositoryService implements OnModuleDestroy {
     return { ...usage, storageLimitBytes: storageLimitOf(entitlements) };
   }
 
-  /** Account-wide usage; one plan allowance is shared by all owned projects. */
-  public async readOwnerUsage(ownerId: string): Promise<{ storageBytes: number; lfsBytes: number }> {
+  /**
+   * Account-wide usage; one plan allowance is shared by all owned projects.
+   * `retainedBytes` is reported beside it and never charged (D18).
+   */
+  public async readOwnerUsage(
+    ownerId: string,
+  ): Promise<{ storageBytes: number; lfsBytes: number; retainedBytes: number }> {
     const rows = await this.databaseService.database
       .select({
         storageBytes: sql<number>`coalesce(sum(${projectGit.storageBytes}), 0)`,
         lfsBytes: sql<number>`coalesce(sum(${projectGit.lfsBytes}), 0)`,
+        retainedBytes: sql<number>`coalesce(sum(${projectGit.retainedBytes}), 0)`,
       })
       .from(project)
       .leftJoin(projectGit, eq(projectGit.projectId, project.id))
@@ -461,6 +468,7 @@ export class GitRepositoryService implements OnModuleDestroy {
     return {
       storageBytes: Number(row?.storageBytes ?? 0),
       lfsBytes: Number(row?.lfsBytes ?? 0),
+      retainedBytes: Number(row?.retainedBytes ?? 0),
     };
   }
 
@@ -973,7 +981,10 @@ export class GitRepositoryService implements OnModuleDestroy {
    * to the next, which only delays a deletion, because a sweep deletes only
    * keys the manifest it was handed does not list.
    */
-  private sweepAfterReply(projectId: string, result: { compacted: boolean; sweep: () => Promise<unknown> }): void {
+  private sweepAfterReply(
+    projectId: string,
+    result: { compacted: boolean; sweep: () => Promise<SweepOutcome | undefined> },
+  ): void {
     if (!result.compacted || this.#sweeping.has(projectId)) {
       return;
     }
@@ -981,7 +992,16 @@ export class GitRepositoryService implements OnModuleDestroy {
     this.track(
       (async (): Promise<void> => {
         try {
-          await result.sweep();
+          const swept = await result.sweep();
+          /* D18: the retired bytes the store still keeps, as this listing saw
+             them. ponytail: two workers' sweeps of one project may land out of
+             order, leaving the older listing's figure until the next sweep. */
+          if (swept !== undefined) {
+            await this.databaseService.database
+              .update(projectGit)
+              .set({ retainedBytes: swept.retainedBytes })
+              .where(eq(projectGit.projectId, projectId));
+          }
         } finally {
           this.#sweeping.delete(projectId);
         }

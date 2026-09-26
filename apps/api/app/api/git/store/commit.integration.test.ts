@@ -211,7 +211,7 @@ const rateLimitedStore = (inner: RepositoryStore, times: number, calls: { count:
 
 /** What the write path does once it has replied: run the commit's sweep. */
 const sweepAfter = async (outcome: CommitResult): Promise<readonly string[]> =>
-  outcome.committed ? outcome.sweep() : [];
+  (outcome.committed ? await outcome.sweep() : undefined)?.deleted ?? [];
 
 // === suite ===============================================================
 

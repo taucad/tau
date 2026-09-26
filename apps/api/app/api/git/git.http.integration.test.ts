@@ -354,7 +354,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     repositories = app.get(GitRepositoryService);
     vi.spyOn(repositories, 'readOwnerUsage').mockImplementation(async () => {
       queries.usage += 1;
-      return { storageBytes: state.storageBytes, lfsBytes: state.lfsBytes };
+      return { storageBytes: state.storageBytes, lfsBytes: state.lfsBytes, retainedBytes: 0 };
     });
     vi.spyOn(repositories, 'readLfsObjects').mockImplementation(async (_project, oids) =>
       oids.flatMap((oid) => {

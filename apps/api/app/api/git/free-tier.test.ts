@@ -52,7 +52,11 @@ const hostedRemote = ({
     mock<PublicationRateLimiterService>(),
     mock<DurableEventsService>(),
   );
-  vi.spyOn(repositories, 'readOwnerUsage').mockResolvedValue({ storageBytes: usedBytes, lfsBytes: 0 });
+  vi.spyOn(repositories, 'readOwnerUsage').mockResolvedValue({
+    storageBytes: usedBytes,
+    lfsBytes: 0,
+    retainedBytes: 0,
+  });
   return { access, repositories };
 };
 
@@ -199,12 +203,31 @@ describe('usage route (D18)', () => {
     vi.spyOn(repositories, 'readOwnerUsage').mockResolvedValue({
       storageBytes: 300 * 1024 ** 2,
       lfsBytes: 40 * 1024 ** 2,
+      retainedBytes: 12 * 1024 ** 2,
     });
 
     const usage = await new UsageController(access, repositories).usage(projectId, ownerId);
 
-    expect(usage).toStrictEqual({ storageBytes: 300 * 1024 ** 2, lfsBytes: 40 * 1024 ** 2, storageLimitBytes: gib });
+    expect(usage).toStrictEqual({
+      storageBytes: 300 * 1024 ** 2,
+      lfsBytes: 40 * 1024 ** 2,
+      retainedBytes: 12 * 1024 ** 2,
+      storageLimitBytes: gib,
+    });
     expect(access.authorize).toHaveBeenCalledWith(projectId, ownerId, 'owner');
+  });
+
+  it('should never charge retained packs against the allowance', async () => {
+    const { repositories } = hostedRemote({ entitlements: openTier('free') });
+    vi.spyOn(repositories, 'readOwnerUsage').mockResolvedValue({
+      storageBytes: 100 * 1024 ** 2,
+      lfsBytes: 0,
+      retainedBytes: 5 * gib,
+    });
+
+    const access = await repositories.authorize({ projectId, userId: ownerId, mode: 'write' });
+
+    expect(access.remainingBytes).toBe(gib - 100 * 1024 ** 2);
   });
 
   it('should answer an allowance of 0 while the plan cannot sync', async () => {

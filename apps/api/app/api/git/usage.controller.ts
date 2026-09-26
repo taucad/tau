@@ -10,6 +10,12 @@ export type StorageUsage = {
   readonly storageBytes: number;
   /** Large-object bytes of every repository the account owns, reservations included. */
   readonly lfsBytes: number;
+  /**
+   * Retired pack bytes the store keeps inside the retention window (D18,
+   * L6-F5): reported beside the charged figure, never counted against
+   * `storageLimitBytes`.
+   */
+  readonly retainedBytes: number;
   /** The account's allowance; `0` when the plan does not sync. */
   readonly storageLimitBytes: number;
 };

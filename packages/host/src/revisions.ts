@@ -726,7 +726,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     options.filesystem ??
     ((checkout: Parameters<NonNullable<ProjectRevisionsOptions['filesystem']>>[0]) =>
       new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root));
-  const { actor, settled } = createProjectRevisionsActor({
+  const { actor, settled, recordEditorConflict } = createProjectRevisionsActor({
     port,
     projectId,
     authorityEpoch: projectAuthorityEpoch(options.workspaceRoot, options.authorityEpoch ?? processAuthorityEpoch),
@@ -1709,6 +1709,17 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           },
         });
         break;
+      /* An editor's edit that neither saved nor merged, recorded as a conflict (D14). */
+      case 'recordEditorConflict': {
+        const base = request['base'];
+        const mine = optionalText(request, 'mine');
+        if ((base !== null && typeof base !== 'string') || mine === undefined) {
+          throw Object.assign(new Error('Revision request requires base and mine.'), {
+            code: 'INVALID_REVISION_REQUEST',
+          });
+        }
+        return revisionJson(await recordEditorConflict({ path: text('path'), base, mine }));
+      }
       case 'finishResolution':
       case 'abandonResolution':
       case 'askChatToResolve':

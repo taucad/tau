@@ -95,8 +95,9 @@ contextBridge.exposeInMainWorld('tau', {
     },
   },
   machines: {
-    /* The one route a secret takes: invoke → main → utility store. The port
-     * relay above carries the non-secret half of the same ceremony. */
+    /* The one route a secret takes: invoke → main → the utility's ceremony,
+     * which saves it once the printer accepts it. Omit `accessCode` to reuse
+     * a saved one. The port relay above carries the non-secret half. */
     completeBinding: async (input: { ceremonyId: string; address?: string; accessCode?: string }): Promise<unknown> =>
       ipcRenderer.invoke(machinesChannels.completeBinding, input),
   },

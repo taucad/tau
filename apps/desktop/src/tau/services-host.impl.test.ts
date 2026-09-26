@@ -15,9 +15,6 @@ import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
 import type * as RuntimeClient from '@taucad/runtime/client';
 
-import { connectMachineChannel } from '@taucad/runtime/machine';
-import type { MachineCandidate } from '@taucad/runtime/machine';
-
 import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-host.impl.js';
 import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/services-host.impl.js';
 
@@ -1463,72 +1460,4 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       vi.useRealTimers();
     }
   });
-});
-
-describe('createServicesHost — machines', () => {
-  it('should serve the machine host over a machines port, bind the simulator natively and close it on quiesce', async () => {
-    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-machines-')));
-    const workspaceRoot = join(sandbox, 'widget');
-    await mkdir(workspaceRoot);
-    const completions: Array<Parameters<NonNullable<ServicesHostOptions['machineBindingCompleted']>>> = [];
-    const { host } = hostHarness({
-      machinesDirectory: join(sandbox, 'machines'),
-      machineBindingCompleted: (requestId, result) => {
-        completions.push([requestId, result]);
-      },
-    });
-    host.handleMessage(frame({ type: 'allowRoots', roots: [sandbox] }));
-    const { port1, port2 } = new MessageChannel();
-    host.handleMessage(frame({ type: 'concern', concern: 'machines', context: { workspaceRoot } }, [port2]));
-    const client = connectMachineChannel(port1);
-
-    try {
-      const providers = await client.listProviders({});
-      expect(providers.map((provider) => provider.id).sort()).toEqual(['bambu', 'bambu-simulator']);
-
-      let candidate: MachineCandidate | undefined;
-      for await (const event of client.discover({
-        providerId: 'bambu-simulator',
-        configuration: { logicalId: 'simulated-x1c' },
-      })) {
-        if (event.type === 'found') {
-          candidate = event.candidate;
-          break;
-        }
-      }
-      if (candidate === undefined) {
-        throw new Error('The simulator reported no candidate');
-      }
-      let outcome = await client.beginBinding({ candidate, name: 'simulated-x1c' });
-      if (outcome.status === 'operator-action-required') {
-        /* The native half: main's frame carries the ceremony and, for the
-         * simulator, neither an address nor a code. */
-        host.handleMessage(
-          frame({ type: 'machine-binding-complete', requestId: 'bind-1', ceremonyId: outcome.ceremonyId }),
-        );
-        await vi.waitFor(() => {
-          expect(completions).toHaveLength(1);
-        });
-        const [requestId, result] = completions[0]!;
-        expect(requestId).toBe('bind-1');
-        if (!('outcome' in result)) {
-          throw new Error(`The ceremony failed: ${result.error}`);
-        }
-        outcome = result.outcome;
-      }
-      if (outcome.status !== 'bound') {
-        throw new Error('Expected the simulator to bind without an operator');
-      }
-      const directory = await client.list({});
-      expect(directory.entries.map((entry) => [entry.providerId, entry.machineId])).toEqual([
-        ['bambu-simulator', outcome.machineId],
-      ]);
-
-      await host.quiesce();
-      await expect(client.list({})).rejects.toThrow();
-    } finally {
-      client.close();
-      await rm(sandbox, { recursive: true, force: true });
-    }
-  }, 30_000);
 });

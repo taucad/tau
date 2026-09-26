@@ -45,58 +45,33 @@ const conflictLinePrefix = 'conflicts';
 export const isReservedBranchName = (name: string): boolean =>
   name === conflictLinePrefix || name.startsWith(`${conflictLinePrefix}/`);
 
-/* Bytes a segment keeps as they are; everything else is escaped. */
-const plainSegmentByte = /^[a-z0-9-]$/u;
-
-/**
- * One device's id as a ref-name segment (D14, RV-W6 F7).
- *
- * An escape encoding, not a hash, so an engineer can still read whose line it
- * is: lowercase letters, digits and `-` stay; every other UTF-8 byte — `_`,
- * uppercase, `.`, `:` and anything a ref forbids — becomes `_` and two
- * lowercase hex digits. Distinct ids give distinct segments (`_` is itself
- * escaped), the result is always a valid ref component (no `.`, so no `..`,
- * leading dot or `.lock`), and it has no case for a case-insensitive disk to
- * fold. `host:user` reads `host_3auser`.
- *
- * @param deviceId - The host's device id.
- * @returns The segment, stable for one id.
- */
-const deviceSegment = (deviceId: string): string => {
-  if (deviceId === '') {
-    /* Not an escape any id produces, so it cannot collide. */
-    return '_';
-  }
-  let segment = '';
-  for (const byte of new TextEncoder().encode(deviceId)) {
-    const character = String.fromCodePoint(byte);
-    segment += plainSegmentByte.test(character) ? character : `_${byte.toString(16).padStart(2, '0')}`;
-  }
-  return segment;
-};
-
 /**
  * The conflict line one device records its decisions about `branch` on (D14).
  *
+ * The last segment is a record device id (`OpsLog.deviceFor`) — a random UUID
+ * per device and actor form, already a valid ref component — never the host's
+ * own device id, so a pushed conflict line names no machine or account and no
+ * one name joins a pseudonym to an account (EQ10(a)).
+ *
  * @param branch - The line the decision lands on, e.g. `main`.
- * @param deviceId - The recording device.
+ * @param device - The recording device's record device id.
  * @returns The branch name, without `refs/heads/`.
  * @public
  */
-export const conflictLineOf = (branch: string, deviceId: string): string =>
-  `${conflictLinePrefix}/${branch}/${deviceSegment(deviceId)}`;
+export const conflictLineOf = (branch: string, device: string): string => `${conflictLinePrefix}/${branch}/${device}`;
 
 /**
  * What a conflict line is about, or `undefined` for any other branch.
  *
  * @param line - A branch name, with or without `refs/heads/`.
- * @param deviceId - This host's device id, to say whether the line is its own.
+ * @param own - Every record device id this host has recorded under, to say
+ *   whether the line is its own; `undefined` reads every line as foreign.
  * @returns The line the decision lands on, and whether another device recorded it.
  * @public
  */
 export const parseConflictLine = (
   line: string,
-  deviceId: string | undefined,
+  own: ReadonlySet<string> | undefined,
 ): Readonly<{ into: string; foreign: boolean }> | undefined => {
   const name = line.startsWith('refs/heads/') ? line.slice('refs/heads/'.length) : line;
   const segments = name.split('/');
@@ -105,7 +80,7 @@ export const parseConflictLine = (
   }
   return {
     into: segments.slice(1, -1).join('/'),
-    foreign: deviceId === undefined || segments.at(-1) !== deviceSegment(deviceId),
+    foreign: own?.has(segments.at(-1) ?? '') !== true,
   };
 };
 

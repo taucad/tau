@@ -210,7 +210,17 @@ export type CheckoutCaptureTreeActorOutput = Readonly<{ treeId: string }>;
  *
  * @public
  */
-export type CheckoutCutActorOutput = Readonly<{ treeId: string; cutId: string }>;
+export type CheckoutCutActorOutput = Readonly<{
+  treeId: string;
+  cutId: string;
+  /**
+   * The host found nothing of this checkout's own to record: an unborn line
+   * whose files are only generated setup or the bytes its open is about to
+   * bring (E2E-D defect A). Minted, they would be a root the pull then merges
+   * as unrelated history.
+   */
+  nothingToSave?: boolean;
+}>;
 
 /** Input of the injected `writeRevision` actor. @public */
 export type CheckoutWriteRevisionActorInput = Readonly<{
@@ -729,7 +739,7 @@ const checkoutMachineDefinition = setup({
               changedPaths: context.cutPaths,
             }),
             onDone: ({ context, event, guards }, enq) => {
-              if (guards.treeUnchanged(context, event.output.treeId)) {
+              if (event.output.nothingToSave === true || guards.treeUnchanged(context, event.output.treeId)) {
                 announce(context, enq, { type: 'nothingToSave' });
                 return { target: 'settled' };
               }

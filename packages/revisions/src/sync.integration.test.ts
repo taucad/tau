@@ -104,6 +104,24 @@ type Device = Readonly<{
 }>;
 
 /**
+ * The record device (R1, EQ10(a)) a device's unattributed form names its
+ * segments and conflict lines by, once it has minted one.
+ *
+ * @param of - The device.
+ * @returns Its `host` form's record device id.
+ */
+const recordDeviceOf = async (of: Device): Promise<string> => {
+  const stored = JSON.parse(await of.filesystem.readFile('.git/ops-devices.json', 'utf8')) as {
+    devices: Record<string, string>;
+  };
+  const device = stored.devices['host'];
+  if (device === undefined) {
+    throw new Error('This device has not minted a record device yet.');
+  }
+  return device;
+};
+
+/**
  * One device: a project directory, a port over it, and the sync effects.
  *
  * @param input - Which port this device speaks through, the label that names its
@@ -460,7 +478,10 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         '{"name":"Bracket"}\n',
       );
       expect(
-        await two.filesystem.readFile(`${chatRecordsPath(chatId)}/${chatSegmentPath('device-a-remote-only')}`, 'utf8'),
+        await two.filesystem.readFile(
+          `${chatRecordsPath(chatId)}/${chatSegmentPath(await recordDeviceOf(one))}`,
+          'utf8',
+        ),
       ).toBe('{"type":"turn.start"}\n');
       expect(projectedChats).toEqual([[chatId]]);
 
@@ -885,15 +906,18 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     await save(two, 'B edits a', base);
 
     /* B meets the divergence, records it on its own line, and that line travels. */
-    const line = `conflicts/main/device-b-${suffix}`;
+    /* Named by B's record device (R1), which B mints when it records. */
+    const lineOf = async (): Promise<string> => `conflicts/main/${await recordDeviceOf(two)}`;
     schedulers[1].send({ type: 'remoteMoved', generation: 2, refs: [mainRef] });
     await vi.waitFor(
       async () => {
         expect(schedulers[1].getSnapshot().matches('conflicted')).toBe(true);
-        expect(await remote.git(['rev-parse', `refs/heads/${line}`])).toBe(await two.port.readRef(line));
+        const pending = await lineOf();
+        expect(await remote.git(['rev-parse', `refs/heads/${pending}`])).toBe(await two.port.readRef(pending));
       },
       { timeout: 30_000 },
     );
+    const line = await lineOf();
     const recorded = (await two.port.readRef(line)) ?? '';
     expect(await remote.git(['rev-parse', mainRef])).toBe(aHead);
     return { one, two, schedulers, conflictsOf, aHead, line, recorded };
@@ -1074,6 +1098,75 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         { timeout: 30_000 },
       );
       opened.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
+   * W13c chat-ref C (a, b): the desktop two-client rows' shape. Device B only
+   * *received* the chat, so it has nothing of its own to add: its first write
+   * builds on the fetched head rather than minting a root chain of its own,
+   * nothing about the chat is refused, and B's next revision reaches `main`.
+   */
+  it('row 14 (W13c C): a device that only received a chat never offers a root chain for it', async () => {
+    const remoteRoot = await temporaryRoot('remote-received-chat');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({
+        leg,
+        label: 'a-received-chat',
+        remoteUrl: remote.url,
+        files: {
+          'bracket.scad': 'cube([3, 3, 3]);\n',
+          [`${chatRecordsPath(chatId)}/chat.json`]: '{"name":"Bracket"}\n',
+          [`${chatRecordsPath(chatId)}/events.jsonl`]: '{"type":"turn.start"}\n',
+        },
+      });
+      const head = await record({ device: one, files: { 'bracket.scad': 'cube([3, 3, 3]);\n' }, summary: 'A' });
+      const first = one.scheduler();
+      first.start();
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      first.stop();
+      const chatHead = await remote.git(['rev-parse', chatRef]);
+
+      const two = await device({ leg, label: 'b-received-chat', remoteUrl: remote.url });
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      const next = await record({
+        device: two,
+        files: { 'bracket.scad': 'cube([4, 4, 4]);\n' },
+        summary: 'B',
+        parent: head,
+      });
+      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: next });
+      await vi.waitFor(
+        async () => {
+          expect(await remote.git(['rev-parse', mainRef])).toBe(next);
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+
+      /* The chat is exactly A's: B neither rewound it nor queued a refusal of it. */
+      expect(await remote.git(['rev-parse', chatRef])).toBe(chatHead);
+      const queue = await queueOf(two);
+      expect(queue.entries).toEqual([]);
+      const local = await two.port.readRef(chatRef);
+      expect(local === undefined || local === chatHead).toBe(true);
+      second.stop();
     } finally {
       await remote.close();
     }

@@ -1252,12 +1252,11 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
-  it('row 34 (review 2 R9): a throw during a narrowed retry records only what it offered', async () => {
+  it('row 34 (review 2 R9, W13c C-c): a refused chat ref never narrows history away, and a throw records only what is owed', async () => {
     const harness = start();
     await openCleanly(harness);
 
-    /* One refused chat ref, so the queue holds that ref and the next offer is
-     * narrowed to it. */
+    /* One refused chat ref, so the queue holds that ref. */
     harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
     await settleWhenRunning(harness.effects, 'push', {
       output: pushResult(
@@ -1270,24 +1269,29 @@ describe('syncMachine', () => {
       expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
     });
 
+    /* A revision minted while the chat ref is still owed. */
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
     harness.clock.advance(5000);
     await settleWhenRunning(harness.effects, 'fetch', {
-      output: { leases: {}, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+      output: { leases: { [mainRef]: 'r1' }, integration: 'ahead' } satisfies SyncFetchActorOutput,
     });
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
     });
-    expect(harness.effects.inputsFor('push').at(-1)).toMatchObject({ refs: [chatRef] });
+    /* The retry offers both sets: a refused record never keeps `main` from the remote (rule 10). */
+    expect(harness.effects.inputsFor('push').at(-1)).not.toHaveProperty('refs');
 
-    /* A transport throw reports no refs at all, so the outcome is synthesised —
-     * from what this push offered, never from `refs/heads/main` by reflex. */
+    /* A transport throw reports no refs at all, so the outcome is synthesised
+     * from what is owed: the unsent `main` and the chat ref, nothing else. */
     harness.effects.settle('push', { error: new Error('the network is unreachable') });
     await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
     await vi.waitFor(() => {
       expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
     });
-    expect(harness.actor.getSnapshot().context.pending.map((entry) => entry.ref)).toEqual([chatRef]);
-    expect(selectSyncFacet(harness.actor.getSnapshot()).pendingCount).toBe(1);
+    expect(harness.actor.getSnapshot().context.pending.map((entry) => [entry.ref, entry.head])).toEqual([
+      [chatRef, undefined],
+      [mainRef, 'r2'],
+    ]);
 
     harness.stop();
   });

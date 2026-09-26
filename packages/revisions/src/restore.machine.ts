@@ -1,5 +1,5 @@
 /**
- * `restore.machine` — the *Restore* and *Undo restore* verbs.
+ * `restore.machine` — the *Restore*, *Undo restore* and *Undo* verbs.
  *
  * A restore is a revision, never a detached head (D1). It is three steps, in
  * this order, each answered before the next starts:
@@ -18,7 +18,9 @@
  * parent, with one addition: each carries a `requestId` the checkout echoes, so
  * an answer is matched to the cut that asked for it and never to a later one
  * (N2). *Undo restore* acts only where its restore landed: the checkout and the
- * line it minted on (M1). `computePlan` and
+ * line it minted on (M1). *Undo* (D15) runs the same three steps with a plan the
+ * host derives from its operation log: the scoped inverse of this form's newest
+ * operation on the line, never a whole earlier tree. `computePlan` and
  * `applyPlan` stay injected actors, and the plan itself never enters context:
  * `computePlan` returns the facts the guards need plus an opaque `planId` the
  * host holds, so the snapshot stays serializable.
@@ -47,7 +49,13 @@ export type RestoreFailureCode =
   /** The files are the target's, but the restore cut did not land, so no *Restored* row exists (N1). */
   | 'RESTORE_UNRECORDED'
   /** *Undo restore* asked where no restore of this selection's line is left to undo (M1). */
-  | 'UNDO_UNAVAILABLE';
+  | 'UNDO_UNAVAILABLE'
+  /** *Undo* found nothing of this device's on the line left to undo (D15). */
+  | 'NOTHING_TO_UNDO'
+  /** *Undo*'s inverse overlaps a later revision's changes, so it refused rather than revert them (D15). */
+  | 'UNDO_CONFLICT'
+  /** *Undo* reached a merge this host made, which it never reaches past (D15, RV-W7 #7). */
+  | 'UNDO_PAST_MERGE';
 
 /**
  * How long one of a restore's cuts waits for the checkout's answer.
@@ -68,6 +76,14 @@ const unrecordedMessage =
 
 /** The diagnostic for an *Undo restore* with nothing of this line's to undo (M1). */
 const undoUnavailableMessage = 'There is no restore on this line to undo.';
+
+/**
+ * Which verb a run of the machine is: a *Restore*, D2's *Undo restore* (a
+ * restore of the restore row's first parent) or D15's *Undo*.
+ *
+ * @public
+ */
+export type RestoreMode = 'restore' | 'undoRestore' | 'undo';
 
 /** Input accepted when creating the restoreMachine actor. @public */
 export type RestoreMachineInput = Readonly<{
@@ -97,10 +113,14 @@ export type RestoreMachineContext = Readonly<{
   requestId: string | undefined;
   /** How many cuts this actor has asked for, so each `requestId` is new. */
   cutCount: number;
-  /** The requested target: a revision id. */
+  /** The requested target: a revision id; unused by *Undo*, whose plan chooses one. */
   target: string | undefined;
-  /** Whether the target is the first parent of {@link RestoreMachineContext.target} — *Undo restore* (D2). */
-  firstParent: boolean;
+  /** Which verb is running. */
+  mode: RestoreMode;
+  /** What the running verb's own pre-cut minted: the person's work, never what *Undo* reverses. */
+  recordedRevisionId: string | undefined;
+  /** Whether *Undo* has an operation of this device's to reverse on the selected line (D15). */
+  canUndo: boolean;
   /**
    * The last restore row minted on the selected checkout and line; what *Undo restore* reverses.
    *
@@ -157,6 +177,10 @@ export type RestoreMachineEvent =
   | Readonly<{ type: 'restore'; revisionId: string }>
   /** Restore the first parent of the last restore this machine minted on the selection's line (D2, M1). */
   | Readonly<{ type: 'undo' }>
+  /** Reverse this device's newest operation on the selection's line (D15). */
+  | Readonly<{ type: 'undoOperation' }>
+  /** The selected checkout minted, so whether *Undo* has something to reverse may have changed. */
+  | Readonly<{ type: 'lineMinted' }>
   | Readonly<{ type: 'confirm' }>
   | Readonly<{ type: 'cancel' }>
   /** The root re-roots the workbench, or its line moved; the next restore applies to whatever it selected (F10). */
@@ -166,7 +190,10 @@ export type RestoreMachineEvent =
 /** Facts restoreMachine emits. @public */
 export type RestoreMachineEmitted =
   | Readonly<{ type: 'toast.restored'; revisionNumber: number | undefined }>
-  | Readonly<{ type: 'toast.error'; message: string; code?: RestoreFailureCode }>;
+  /** *Undo* landed; the number is the revision it undid. */
+  | Readonly<{ type: 'toast.undone'; revisionNumber: number | undefined }>
+  /** `revisionNumber` names the revision an `UNDO_CONFLICT` could not undo, when it is on the line. */
+  | Readonly<{ type: 'toast.error'; message: string; code?: RestoreFailureCode; revisionNumber?: number }>;
 
 /**
  * What the parent hears from restoreMachine: the cuts it asks for, and when a
@@ -187,12 +214,20 @@ export type RestoreMachineParentEvent =
   | Readonly<{ type: 'restoreSettled'; checkoutId: string }>;
 
 /** Input of the injected `computePlan` actor. @public */
-export type RestoreComputePlanActorInput = Readonly<{
-  checkoutId: string;
-  target: string;
-  /** Plan the first parent of `target` instead of `target` itself (D2). */
-  firstParent?: true;
-}>;
+export type RestoreComputePlanActorInput =
+  | Readonly<{
+      checkoutId: string;
+      target: string;
+      /** Plan the first parent of `target` instead of `target` itself (D2). */
+      firstParent?: true;
+    }>
+  | Readonly<{
+      checkoutId: string;
+      /** Plan *Undo*: the scoped inverse of this form's newest operation on the line (D15). */
+      undo: true;
+      /** The revision the verb's own pre-cut minted, which *Undo* passes over. */
+      skip?: string;
+    }>;
 
 /**
  * Output of the injected `computePlan` actor.
@@ -223,12 +258,16 @@ const describeFailure = (error: unknown): string =>
 /* An effect's refusal, with the port's code when the port named one (A3) — read
  * structurally, as the branch child reads it, because a machine imports no class. */
 const failFromError = (error: unknown): Partial<RestoreMachineContext> => {
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a rejection is `unknown` until read.
-  const code = typeof error === 'object' && error !== null ? (error as Readonly<{ code?: unknown }>).code : undefined;
+  const field = (name: string): unknown =>
+    typeof error === 'object' && error !== null ? Reflect.get(error, name) : undefined;
+  const code = field('code');
+  const revisionNumber = field('revisionNumber');
   return {
     reason: describeFailure(error),
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowed to the refusals an effect names.
     reasonCode: typeof code === 'string' ? (code as RestoreFailureCode) : undefined,
+    /* An undo that refused names the revision it could not undo (RV-W7 #13). */
+    ...(typeof revisionNumber === 'number' ? { revisionNumber } : {}),
   };
 };
 
@@ -238,7 +277,8 @@ const clearTransient = {
   restoringBranch: undefined,
   requestId: undefined,
   target: undefined,
-  firstParent: false,
+  mode: 'restore',
+  recordedRevisionId: undefined,
   planId: undefined,
   revisionId: undefined,
   revisionNumber: undefined,
@@ -313,10 +353,18 @@ const restoreMachineDefinition = setup({
         throw new Error('restoreMachine: the applyPlan actor was not provided.');
       },
     }),
+    /* Whether the operation log holds something *Undo* could reverse on the checkout's line (D15). */
+    readUndoable: createAsyncLogic<boolean, Readonly<{ checkoutId: string }>>({
+      run: async () => {
+        throw new Error('restoreMachine: the readUndoable actor was not provided.');
+      },
+    }),
   },
   guards: {
-    /* A restore is risky when it deletes files or the tree has diverged from head. */
-    isRisky: (context: RestoreMachineContext) => context.removedPathCount > 0 || context.dirty,
+    /* A restore is risky when it deletes files or the tree has diverged from head.
+     * *Undo* never asks: it reverses one operation, and what it removes stays in History. */
+    isRisky: (context: RestoreMachineContext) =>
+      context.mode !== 'undo' && (context.removedPathCount > 0 || context.dirty),
     /* The answer to the cut this verb is waiting on, by the id it sent (N2). */
     answersOurCut: (context: RestoreMachineContext, event: RestoreCutAnswer) =>
       event.requestId !== undefined && event.requestId === context.requestId,
@@ -332,7 +380,9 @@ const restoreMachineDefinition = setup({
     requestId: undefined,
     cutCount: 0,
     target: undefined,
-    firstParent: false,
+    mode: 'restore',
+    recordedRevisionId: undefined,
+    canUndo: false,
     restoredRevisionId: undefined,
     planId: undefined,
     revisionId: undefined,
@@ -354,18 +404,46 @@ const restoreMachineDefinition = setup({
   },
   states: {
     idle: {
+      /* Re-read on every return to idle, so a settled verb answers whether one more *Undo* has anything (D15). */
+      invoke: {
+        src: 'readUndoable',
+        input: ({ context }) => ({ checkoutId: context.checkoutId }),
+        onDone: { context: ({ event }) => ({ canUndo: event.output }) },
+        onError: { context: { canUndo: false } },
+      },
       on: {
+        /* A new selection, or a mint on it, can change what *Undo* would reverse. */
+        selectCheckout: ({ context, event }) =>
+          event.checkoutId === context.checkoutId && event.branch === context.branch
+            ? undefined
+            : {
+                target: 'idle',
+                reenter: true,
+                context: { checkoutId: event.checkoutId, branch: event.branch, restoredRevisionId: undefined },
+              },
+        lineMinted: { target: 'idle', reenter: true },
         restore: {
           target: 'recording',
           context: ({ context, event }) => ({
             restoringCheckoutId: context.checkoutId,
             restoringBranch: context.branch,
             target: event.revisionId,
-            firstParent: false,
+            mode: 'restore',
             reason: undefined,
             reasonCode: undefined,
           }),
         },
+        /* D15: the plan chooses the operation; the verb only pins where it runs. */
+        undoOperation: ({ context }) => ({
+          target: 'recording',
+          context: {
+            restoringCheckoutId: context.checkoutId,
+            restoringBranch: context.branch,
+            mode: 'undo',
+            reason: undefined,
+            reasonCode: undefined,
+          },
+        }),
         /* Where its restore landed or nowhere, and said either way (M1, I12). */
         undo: ({ context }, enq) => {
           const target = context.restoredRevisionId;
@@ -379,7 +457,7 @@ const restoreMachineDefinition = setup({
               restoringCheckoutId: context.checkoutId,
               restoringBranch: context.branch,
               target,
-              firstParent: true,
+              mode: 'undoRestore',
               reason: undefined,
               reasonCode: undefined,
             },
@@ -393,7 +471,9 @@ const restoreMachineDefinition = setup({
       after: { [restoreCutMilliseconds]: timedOut },
       on: {
         revisionMinted: ({ context, event, guards }) =>
-          guards.answersOurCut(context, event) ? { target: 'planning' } : undefined,
+          guards.answersOurCut(context, event)
+            ? { target: 'planning', context: { recordedRevisionId: event.revisionId } }
+            : undefined,
         nothingToSave: ({ context, event, guards }) =>
           guards.answersOurCut(context, event) ? { target: 'planning' } : undefined,
         cutFailed: ({ context, event, guards }) =>
@@ -405,11 +485,21 @@ const restoreMachineDefinition = setup({
     planning: {
       invoke: {
         src: 'computePlan',
-        input: ({ context }) => ({
-          checkoutId: context.restoringCheckoutId ?? context.checkoutId,
-          target: context.target ?? '',
-          ...(context.firstParent ? { firstParent: true } : {}),
-        }),
+        input: ({ context }): RestoreComputePlanActorInput => {
+          const checkoutId = context.restoringCheckoutId ?? context.checkoutId;
+          if (context.mode === 'undo') {
+            return {
+              checkoutId,
+              undo: true,
+              ...(context.recordedRevisionId === undefined ? {} : { skip: context.recordedRevisionId }),
+            };
+          }
+          return {
+            checkoutId,
+            target: context.target ?? '',
+            ...(context.mode === 'undoRestore' ? { firstParent: true } : {}),
+          };
+        },
         onDone: {
           target: 'planned',
           context: ({ event }) => ({
@@ -452,14 +542,20 @@ const restoreMachineDefinition = setup({
     },
     /* Step 3: the checkout mints the applied tree; the line fast-forwards (A4). */
     minting: {
-      entry: ({ context }, enq) => ({ context: askCut(context, enq, context.revisionId) }),
+      /* An undo row is not a restore row: it names what it undid, in the host's summary (D15). */
+      entry: ({ context }, enq) => ({
+        context: askCut(context, enq, context.mode === 'undo' ? undefined : context.revisionId),
+      }),
       after: { [restoreCutMilliseconds]: timedOut },
       on: {
         revisionMinted: ({ context, event, guards }) =>
           guards.answersOurCut(context, event)
             ? {
                 target: 'applied',
-                context: { restoredRevisionId: selectionUnmoved(context) ? event.revisionId : undefined },
+                context: {
+                  restoredRevisionId:
+                    context.mode !== 'undo' && selectionUnmoved(context) ? event.revisionId : undefined,
+                },
               }
             : undefined,
         /* The tree already was the target's: a restore to where you are is nothing (A8). */
@@ -474,7 +570,7 @@ const restoreMachineDefinition = setup({
     applied: {
       entry: ({ context }, enq) => {
         enq.emit({
-          type: 'toast.restored',
+          type: context.mode === 'undo' ? 'toast.undone' : 'toast.restored',
           revisionNumber: context.revisionNumber,
         });
       },
@@ -486,6 +582,9 @@ const restoreMachineDefinition = setup({
           type: 'toast.error',
           message: context.reason ?? 'Restore failed.',
           ...(context.reasonCode === undefined ? {} : { code: context.reasonCode }),
+          ...(context.reasonCode === 'UNDO_CONFLICT' && context.revisionNumber !== undefined
+            ? { revisionNumber: context.revisionNumber }
+            : {}),
         });
       },
       always: { target: 'settled' },

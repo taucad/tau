@@ -708,6 +708,13 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
     }
     return answer !== undefined;
   }, `${set}: the close revision`);
+  /* *Undo*'s availability is re-read from the operation log once a revision is
+   * minted on the line (D15): the close revision added `late.ts`, so its
+   * inverse is not empty and *Undo* is offered — a moment after the mint. */
+  await until(
+    () => selectRevisionStatus(actor.getSnapshot()).restore.canUndo === true,
+    `${set}: the operation log to offer Undo`,
+  );
 
   const status = selectRevisionStatus(actor.getSnapshot());
   const closeRevisionId = status.headRevisionId;
@@ -737,6 +744,12 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
   await until(
     () => rehydrated.actor.getSnapshot().context.registrySettled,
     `${set}: the replacement registry to settle`,
+  );
+  /* *Undo*'s availability is read from the operation log after the registry
+   * settles (D15): a record like the rest, answered a moment later. */
+  await until(
+    () => selectRevisionStatus(rehydrated.actor.getSnapshot()).restore.canUndo === true,
+    `${set}: the replacement to read the operation log`,
   );
   const rehydratedStatus = selectRevisionStatus(rehydrated.actor.getSnapshot());
   rehydrated.actor.stop();

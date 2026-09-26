@@ -126,6 +126,7 @@ import type { RemoteStorageSupplier } from '#remote.types.js';
 import { isHostLocalRef, remoteKindOf, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { createSyncQueue } from '#sync-queue.js';
+import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import { syncMachine, syncPullDeadlineMilliseconds } from '#sync.machine.js';
@@ -151,7 +152,7 @@ import type {
   SyncRemoteMovesActorInput,
   SyncWritePendingActorInput,
 } from '#sync.machine.js';
-import type { SyncFacet, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
+import type { SyncFacet, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 import type {
   RestoreActors,
   RestoreApplyPlanActorOutput,
@@ -169,8 +170,12 @@ import type {
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionPort,
+  RevisionReceipt,
   RevisionRecord,
   RevisionTag,
+  UpdateRevisionRefInput,
+  UpdateRevisionRefResult,
+  WriteRevisionInput,
 } from '#revision-port.js';
 import { turnCutSettlementMilliseconds, turnMachine } from '#turn.machine.js';
 import type {
@@ -527,13 +532,12 @@ export type RevisionActorsOptions = Readonly<{
   /**
    * This host's stable identity among the devices writing one chat (W13, W17).
    *
-   * It names a *log segment* — `events/<deviceId>.jsonl` inside the chat ref's
-   * tree — so it must be stable across reloads of one profile and different
-   * between two. In the browser it is `apps/ui/app/lib/device-id.ts` and
-   * nothing else; on a disk host the host's own machine identity. Without it
-   * this module writes **no** chat refs at all, because a host that cannot say
-   * which device it is cannot write a per-device segment without risking
-   * overwriting another's.
+   * It gates chat refs and never leaves the host: a segment, an ops ref and a
+   * conflict line are named by a record device id per actor form
+   * (`.git/ops-devices.json`, EQ10(a)), so no pushed name carries it. In the
+   * browser it is `apps/ui/app/lib/device-id.ts` and nothing else; on a disk
+   * host the host's own machine identity. Without it this module writes **no**
+   * chat refs at all.
    *
    * A reader rather than a value, because the browser's id lives in
    * `localStorage`, which a worker cannot see: the page sends it once the port
@@ -734,6 +738,26 @@ const sameBytes = (left: Uint8Array<ArrayBuffer> | undefined, right: Uint8Array<
     : left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 
 /**
+ * Whether an unborn line's files hold no work of their own: every file is
+ * either setup Tau generated or already in the arriving tree with the same
+ * bytes. An opener writes the remote's own `tau.json` before the open pull
+ * (E2E-D defect A), and minting that as a root revision merged the remote in
+ * as unrelated history. A file the arriving tree does not hold, or holds
+ * differently, is still work (rule 6).
+ *
+ * @param files - The checkout's captured tree.
+ * @param arriving - What the open pull brings, when a fetch has named it.
+ * @returns `true` when there is nothing here to record.
+ */
+const holdsNoWork = (files: ImmutableRevisionTree, arriving: ImmutableRevisionTree | undefined): boolean =>
+  files
+    .entries()
+    .every(
+      ({ path, content }) =>
+        sameBytes(content, arriving?.get(path)) || sameBytes(content, generatedSetupTree.get(path)),
+    );
+
+/**
  * Build one project's actor implementations over a port and its checkouts.
  *
  * @param options - The store, how to open a checkout, and the host's identity.
@@ -762,7 +786,45 @@ const sameBytes = (left: Uint8Array<ArrayBuffer> | undefined, right: Uint8Array<
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's port; splitting it would thread the same six values through every half.
 export const createRevisionActors = (options: RevisionActorsOptions): RevisionActors => {
-  const { port, filesystem, projectId, authorityEpoch } = options;
+  const { filesystem, projectId, authorityEpoch } = options;
+  /*
+   * Every head this closure moves goes through one `updateRef`, so that is where
+   * the operation log is written (D15, rule 10): queued after the move settles
+   * and before the caller — and so any machine — hears of it (I5). Queued, not
+   * awaited: one log commit costs ~60 ms on isomorphic-git and ~97 ms (8–10
+   * spawns) on native git, which alone would spend B1's 100 ms on every save.
+   * The log's own reads wait behind the queue, so no reader misses the entry.
+   *
+   * ponytail: a crash inside that ~0.1 s loses the entry, and with it *Undo*
+   * of that operation; the owed push is still derived from the heads
+   * themselves (`withOwedPushes`). Upgrade path: write the log commit before
+   * the head moves and publish both in one ref transaction.
+   */
+  /* The newest queued log commit: appends run in order, so it settles last. */
+  let loggedOperation: Promise<void> = Promise.resolve();
+  const port: RevisionPort = Object.freeze({
+    ...options.port,
+    /* A revision this host writes with two parents is a merge — a merge, a
+     * sync's auto-merge, a conflict decision — which *Undo* never reaches past
+     * (D15). A cut's own kind, recorded after this, replaces it. */
+    writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
+      const receipt = await options.port.writeRevision(input);
+      if (input.parents.length > 1) {
+        const actor = options.actor?.({ runId: undefined, trigger: 'merge' });
+        mintedOperations.set(receipt.commitId, { kind: 'merge', actor, actorId: input.provenance.actorId });
+      }
+      return receipt;
+    },
+    updateRef: async (input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult> => {
+      const result = await options.port.updateRef(input);
+      if (result.status === 'updated') {
+        /* Held, so `settled()` — and a host removing the project — waits for it;
+         * `recordOperation` never rejects. */
+        loggedOperation = recordOperation(input.name, result.previousHead, result.head);
+      }
+      return result;
+    },
+  });
   const policy = options.policy ?? tauRevisionPolicy.policy;
   const useFileSystem: UseCheckoutFileSystem =
     options.useFileSystem ?? (async (checkout, operation) => operation(await filesystem(checkout)));
@@ -799,7 +861,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    */
   const resolutions = new Map<string, Map<string, ChosenSide>>();
   const captures = createHandles<ImmutableRevisionTree>('capture');
-  const plans = createHandles<{ checkoutId: string; revisionId: string; tree: ImmutableRevisionTree }>('plan');
+  const plans = createHandles<{
+    checkoutId: string;
+    revisionId: string;
+    tree: ImmutableRevisionTree;
+    /** The operation this plan reverses, when it is an undo (D15) or D2's *Undo restore*. */
+    undoes?: string;
+  }>('plan');
   const fences = new Map<string, Promise<void>>();
   const activeOperations = new Set<Promise<unknown>>();
   /**
@@ -896,8 +964,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     await opened;
   };
 
-  /* The store's creation is the only effect that can outlive a stopped actor
-   * tree: every other one is awaited inside the actor that started it. */
+  /* The store's creation and a queued operation-log commit are the effects that
+   * can outlive a stopped actor tree: every other one is awaited inside the
+   * actor that started it. */
   const settled = async (): Promise<void> => {
     try {
       await opened;
@@ -909,6 +978,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       // oxlint-disable-next-line no-await-in-loop -- operations may admit another tracked authority operation before settling.
       await Promise.allSettled(activeOperations);
     }
+    await loggedOperation;
   };
 
   /* One id per push this process makes, so a settlement can name exactly one. */
@@ -1008,6 +1078,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   const headOf = async (place: Checkout): Promise<string | undefined> =>
     place.baseRevisionId ?? (place.branch === undefined ? undefined : await port.readRef(place.branch));
+
+  /**
+   * What an open pull would bring to an unborn checkout.
+   *
+   * @param place - The checkout.
+   * @returns Its remote's fetched head's tree, when a fetch has named one.
+   */
+  const arrivingTree = async (place: Checkout): Promise<ImmutableRevisionTree | undefined> => {
+    const [remote] = await port.listRemotes();
+    const head =
+      remote === undefined || place.branch === undefined
+        ? undefined
+        : await port.readRef(remoteTrackingRef(remote.name, `refs/heads/${place.branch}`));
+    return head === undefined ? undefined : port.readTree(head);
+  };
 
   /* Tau-owned siblings carry their role in the reserved name, so recovery can
    * distinguish unpublished staging bytes from the only copy of a backup. */
@@ -1422,18 +1507,210 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return filesystem(live);
   };
 
-  const { chatContext, offerOf, outcomeOf, pushRecordRef, recordChats, refusedAll, replayRejectedChat, staysPerRef } =
-    createChatEffects({
-      port,
-      recordsFileSystem,
-      deviceId: options.deviceId,
-      actor: options.actor,
-      onChatsProjected: options.onChatsProjected,
-      actorId,
-      now,
-    });
+  /* The unwrapped store: an ops ref is not a head, and its own writes are not operations. */
+  const opsLog = createOpsLog({ port: options.port, recordsFileSystem, now, actorId });
+
+  const {
+    chatContext,
+    offerOf,
+    outcomeOf,
+    pushRecordRef,
+    pushRecordSet,
+    recordChats,
+    refusedAll,
+    replayRejectedChat,
+    staysPerRef,
+  } = createChatEffects({
+    port,
+    recordsFileSystem,
+    deviceId: options.deviceId,
+    recordDevices: opsLog,
+    actor: options.actor,
+    onChatsProjected: options.onChatsProjected,
+    actorId,
+    now,
+  });
 
   const { readPendingQueue, writePendingQueue } = createSyncQueue({ recordsFileSystem });
+
+  /**
+   * What the cut that minted a revision said about it, taken when a head moves
+   * to that revision. A revision whose CAS lost leaves its entry behind.
+   *
+   * ponytail: unbounded by lost CASes, which are rare and each a few bytes; drop
+   * entries by age if a host ever loses thousands in one session.
+   */
+  const mintedOperations = new Map<
+    string,
+    Readonly<{ kind: CheckoutCutTrigger; undoes?: string; actor: RevisionActor | undefined; actorId: string }>
+  >();
+
+  /**
+   * Whether the push offers a branch: not host-local, and not another device's
+   * conflict line, which is that device's to push (D14).
+   *
+   * @param name - The branch, in full.
+   * @param own - This host's record devices.
+   * @returns `true` when the push offers it.
+   */
+  const pushOffers = (name: string, own: ReadonlySet<string>): boolean =>
+    !isHostLocalRef(name) && parseConflictLine(name, own)?.foreign !== true;
+
+  /**
+   * This host's record devices, or none when the device file cannot be read:
+   * a broken file must never stop history from being offered (I8).
+   *
+   * @param read - Which set: every own device, or the current ones.
+   * @returns The set; empty after reporting a read failure.
+   */
+  const devicesOrNone = async (
+    read: () => Promise<ReadonlySet<string>> = opsLog.ownDevices,
+  ): Promise<ReadonlySet<string>> => {
+    try {
+      return await read();
+    } catch (error) {
+      console.error('[revisions] record devices', error);
+      return new Set();
+    }
+  };
+
+  /**
+   * An own operation log a remote refused as a rewrite, offered again under a
+   * new record device (RV-W7 #11).
+   *
+   * Only another host holding the same record device — a copied `.git` — makes
+   * a remote refuse this host's log as not fast-forwarding: neither log can
+   * ever fast-forward the other's, so the refusal would be owed forever. The
+   * form moves to a new device carrying the log, and the old id stays this
+   * host's own.
+   *
+   * @param input - The record, what the remote answered, and the push's remote and leases.
+   * @returns The new log's outcome, or `undefined` when the record is not an
+   *   own log refused as a rewrite.
+   */
+  const reofferRefusedLog = async (
+    input: Readonly<{
+      name: string;
+      outcome: SyncRefOutcome;
+      remote: string;
+      leases: Readonly<Record<string, string>>;
+    }>,
+  ): Promise<SyncRefOutcome | undefined> => {
+    if (
+      !input.name.startsWith(`${opsRefPrefix}/`) ||
+      input.outcome.status !== 'rejected' ||
+      !/fast-forward|only grows|fetch first|stale info/iu.test(input.outcome.reason ?? '')
+    ) {
+      return undefined;
+    }
+    const successor = await opsLog.retire(input.name.slice(`${opsRefPrefix}/`.length));
+    const name = successor === undefined ? undefined : opsRefName(successor);
+    const head = name === undefined ? undefined : await port.readRef(name);
+    if (name === undefined || head === undefined) {
+      return undefined;
+    }
+    const { outcome } = await pushRecordRef({
+      name,
+      remote: input.remote,
+      leases: input.leases,
+      offered: new Map([[name, String(head)]]),
+    });
+    return outcome;
+  };
+
+  /**
+   * The durable queue, plus every branch the push would offer that holds work
+   * its push remote has not taken (D15): a crash between a mint and its push
+   * leaves no queue entry, and the heads themselves still say the push is owed.
+   *
+   * @param record - The queue as it was written.
+   * @returns The queue with the owed branches appended; the record unchanged
+   *   when the heads cannot be read, because that must never stop the scheduler
+   *   that reads it.
+   */
+  const withOwedPushes = async (record: SyncQueueRecord): Promise<SyncQueueRecord> => {
+    try {
+      /* The remote `readRemote` answers with: the first, unless it only fetches. */
+      const [first] = await port.listRemotes();
+      const remote = first?.fetchOnly === true ? undefined : first?.name;
+      if (remote === undefined) {
+        return record;
+      }
+      const queued = new Set(record.entries.map((entry) => entry.ref));
+      const [heads, own] = await Promise.all([port.listRefs('refs/heads'), devicesOrNone()]);
+      const owed = await Promise.all(
+        heads
+          .filter((entry) => !queued.has(entry.name) && pushOffers(entry.name, own))
+          .map(async ({ name, head }): Promise<readonly SyncQueueEntry[]> => {
+            const tracked = await port.readRef(remoteTrackingRef(remote, name));
+            /* Owed only when the branch holds revisions the remote lacks: one
+             * that is merely behind has nothing to push. */
+            const divergence =
+              tracked === undefined || tracked === head ? undefined : await port.divergence({ head, base: tracked });
+            const ahead = tracked === undefined ? 1 : (divergence?.ahead ?? 0);
+            return ahead === 0
+              ? []
+              : [
+                  {
+                    ref: name,
+                    operation: 'push',
+                    remote,
+                    head: String(head),
+                    expected: tracked === undefined ? undefined : String(tracked),
+                    reason: 'Not backed up yet.',
+                    recordedAt: now(),
+                  },
+                ];
+          }),
+      );
+      return { ...record, entries: [...record.entries, ...owed.flat()] };
+    } catch {
+      return record;
+    }
+  };
+
+  /* An undo's plan, by checkout, waiting for the `restore` cut that mints its tree (D15). */
+  const pendingUndos = new Map<string, Readonly<{ treeId: string; undoes: string }>>();
+
+  /**
+   * Append one head move to the log of the form that made it (D15, I5).
+   *
+   * @param name - The ref as the caller named it: a branch, or a ref in full.
+   * @param from - Where it stood.
+   * @param to - Where it stands; `undefined` when it was removed.
+   */
+  const recordOperation = async (
+    name: string,
+    from: RevisionId | undefined,
+    to: RevisionId | undefined,
+  ): Promise<void> => {
+    const ref = name.startsWith('refs/') ? name : `refs/heads/${name}`;
+    if (!ref.startsWith('refs/heads/')) {
+      return;
+    }
+    const minted = to === undefined ? undefined : mintedOperations.get(to);
+    if (to !== undefined) {
+      mintedOperations.delete(to);
+    }
+    const actor = minted === undefined ? options.actor?.({ runId: undefined, trigger: 'save' }) : minted.actor;
+    try {
+      await opsLog.append(actor, {
+        v: 1,
+        ref,
+        ...(from === undefined ? {} : { from: String(from) }),
+        ...(to === undefined ? {} : { to: String(to) }),
+        kind: minted?.kind ?? 'move',
+        ...(minted?.undoes === undefined ? {} : { undoes: minted.undoes }),
+        actor: minted?.actorId ?? actor?.id ?? actorId,
+        at: now(),
+      });
+    } catch (error) {
+      /* Reported, never thrown: the head has moved, and failing the caller would
+       * report a landed revision as lost. Only this operation is missing from
+       * *Undo*; the push is still derived from the head (`withOwedPushes`). */
+      console.error('[revisions] operation log', error);
+    }
+  };
 
   /*
    * Every lease on disk.
@@ -1551,13 +1828,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * @returns One record per unresolved conflicted revision, newest first per line.
    */
   const listConflicts = async (): Promise<readonly ConflictRecord[]> => {
-    const device = options.deviceId?.();
+    const own = await devicesOrNone();
     const records: ConflictRecord[] = [];
     lineOf.clear();
     const tracking = await port.listRefs('refs/remotes');
     for (const reference of await port.listRefs('refs/heads/conflicts')) {
       const line = reference.name.replace(/^refs\/heads\//u, '');
-      const parsed = parseConflictLine(line, device);
+      const parsed = parseConflictLine(line, own);
       if (parsed === undefined) {
         continue;
       }
@@ -1635,7 +1912,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       await listConflicts();
     }
     const line = lineOf.get(revision);
-    const parsed = line === undefined ? undefined : parseConflictLine(line, options.deviceId?.());
+    const parsed = line === undefined ? undefined : parseConflictLine(line, await devicesOrNone());
     if (line === undefined || parsed === undefined) {
       return undefined;
     }
@@ -1706,15 +1983,100 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   /* A cut's generated title; a restore row reads `Restored Rev N`, never an invented number (A9). */
-  const summaryOf = async (input: CheckoutWriteRevisionActorInput): Promise<string> => {
+  const summaryOf = async (input: CheckoutWriteRevisionActorInput, undoes?: string): Promise<string> => {
     if (input.turnId !== undefined) {
       return `Agent turn ${input.turnId}`;
     }
     if (input.restoredFrom === undefined) {
-      return `Saved changes (${input.trigger})`;
+      if (undoes === undefined) {
+        return `Saved changes (${input.trigger})`;
+      }
+      /* D15: an undo row names the revision it undid, as a restore row names its source. */
+      const undone = await ordinalOnLine(await placeOf(input.checkoutId), undoes);
+      return undone === undefined ? 'Undid an earlier revision' : `Undid Rev ${String(undone)}`;
     }
     const number = await ordinalOnLine(await placeOf(input.checkoutId), input.restoredFrom);
     return number === undefined ? 'Restored an earlier revision' : `Restored Rev ${String(number)}`;
+  };
+
+  /**
+   * *Undo* (D15): the scoped inverse of this form's newest undoable operation on
+   * the checkout's line, as a plan the restore pipeline applies and mints.
+   *
+   * The inverse is a three-way merge of that operation's own delta onto the
+   * head: `base` is what the operation made, `theirs` what it started from,
+   * `ours` the line as it is now. Paths nobody touched since come back; paths a
+   * later revision also changed merge, and an overlap refuses, so another
+   * device's revision is never reverted by content. An operation whose changes
+   * are already gone is passed over for the next older one.
+   *
+   * @param checkoutId - The checkout the verb pinned.
+   * @param skip - The revision the verb's own pre-cut minted, which is the
+   *   person's work rather than what they asked to undo.
+   * @returns The plan the restore pipeline applies and mints.
+   * @throws Error With `NOTHING_TO_UNDO` or `UNDO_CONFLICT`.
+   */
+  const planUndo = async (checkoutId: string, skip: string | undefined): Promise<RestoreComputePlanActorOutput> => {
+    const place = await placeOf(checkoutId);
+    const head = await headOf(place);
+    const empty = new ImmutableRevisionTree([]);
+    const ours = head === undefined ? undefined : await port.readTree(revisionId(head));
+    const entries = await opsLog.read(options.actor?.({ runId: undefined, trigger: 'restore' }));
+    const candidates =
+      place.branch === undefined || ours === undefined
+        ? []
+        : undoCandidates(entries, `refs/heads/${place.branch}`, skip);
+    const headTreeId = await treeIdOf(head);
+    for (const operation of candidates) {
+      // oxlint-disable-next-line no-await-in-loop -- newest first; almost always the first candidate answers.
+      const [base, theirs] = await Promise.all([
+        port.readTree(revisionId(operation.to ?? '')),
+        operation.from === undefined ? empty : port.readTree(revisionId(operation.from)),
+      ]);
+      if (base === undefined || theirs === undefined || ours === undefined) {
+        continue;
+      }
+      /* A merge this host made ends the walk: Undo never reaches past it (RV-W7 #7). */
+      if (operation.kind === 'merge') {
+        const code: RestoreFailureCode = 'UNDO_PAST_MERGE';
+        throw Object.assign(
+          new Error('Your last change on this branch was a merge. Restore an earlier revision instead.'),
+          { code },
+        );
+      }
+      const merged = mergeRevisionTrees(base, ours, theirs, mergeOptions);
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      const number = await ordinalOnLine(place, operation.to ?? '');
+      if (merged.status === 'conflicted') {
+        const code: RestoreFailureCode = 'UNDO_CONFLICT';
+        const name = number === undefined ? 'that revision' : `Rev ${String(number)}`;
+        throw Object.assign(
+          new Error(
+            `A later revision changed the same lines, so ${name} can’t be undone. Restore an earlier revision instead.`,
+          ),
+          { code, ...(number === undefined ? {} : { revisionNumber: number }) },
+        );
+      }
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      if ((await checkoutTreeId(place.id, merged.tree)) === headTreeId) {
+        continue;
+      }
+      return {
+        planId: plans.put(checkoutId, {
+          checkoutId,
+          revisionId: operation.to ?? '',
+          tree: merged.tree,
+          undoes: operation.to ?? '',
+        }),
+        revisionId: operation.to ?? '',
+        revisionNumber: number,
+        /* Step 1 minted the files, so the head's tree is what they are. */
+        removedPathCount: ours.entries().filter(({ path }) => !merged.tree.has(path)).length,
+        dirty: false,
+      };
+    }
+    const code: RestoreFailureCode = 'NOTHING_TO_UNDO';
+    throw Object.assign(new Error('Nothing you did on this branch is left to undo.'), { code });
   };
 
   const provenanceOf = (
@@ -1777,23 +2139,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   }>;
 
   /**
-   * This device's conflict line for decisions landing on `into` (charter D14).
+   * This device's conflict line for decisions landing on `into` (charter D14),
+   * named by the record device of the actor form a merge records as (EQ10(a)).
    *
    * @param into - The line the decision lands on.
-   * @returns `conflicts/<into>/<device>`.
-   * @throws RevisionPortError Before the host knows which device it is: a line
-   *   named for no device could collide with another's.
+   * @returns `conflicts/<into>/<record device>`.
    */
-  const ownConflictLine = (into: string): string => {
-    const device = options.deviceId?.();
-    if (device === undefined) {
-      throw new RevisionPortError(
-        'UNSUPPORTED_OPERATION',
-        'This device is not identified yet, so the decision cannot be recorded. Try again in a moment.',
-      );
-    }
-    return conflictLineOf(into, device);
-  };
+  const ownConflictLine = async (into: string): Promise<string> =>
+    conflictLineOf(into, await opsLog.deviceFor(options.actor?.({ runId: undefined, trigger: 'merge' })));
 
   /**
    * The one conflict write (charter D14): sync, a branch merge and an editor all
@@ -1818,7 +2171,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       summary: string;
     }>,
   ): Promise<Readonly<{ revisionId: string; line: string }>> => {
-    const line = ownConflictLine(input.into);
+    const line = await ownConflictLine(input.into);
     const tip = await port.readRef(line);
     if (tip !== undefined) {
       const previous = await port.readRevision(revisionId(tip));
@@ -2108,6 +2461,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           changed: { paths: input.changedPaths, taken: true },
         });
         const treeId = await checkoutTreeId(place.id, tree);
+        /* A cut taken before the open pull lands — a close, a hidden tab —
+         * follows the same rule as the pull (W13c). Only when a fetch has
+         * named what arrives: with no remote head there is no pull to merge a
+         * root into, and an unborn line's first cut is an ordinary one. */
+        if ((await headOf(place)) === undefined) {
+          const arriving = await arrivingTree(place);
+          if (arriving !== undefined && holdsNoWork(tree, arriving)) {
+            return { treeId, cutId: '', nothingToSave: true };
+          }
+        }
         return { treeId, cutId: cuts.put(input.checkoutId, { tree, treeId }) };
       }),
 
@@ -2141,16 +2504,29 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             input.leaseIds.length > 0
               ? input.leaseIds
               : heldLeases.filter((lease) => lease.checkoutId === input.checkoutId).map((lease) => lease.runId);
+          /* The `restore` cut that mints an undo's planned tree is that undo (D15). */
+          const pendingUndo = input.trigger === 'restore' ? pendingUndos.get(input.checkoutId) : undefined;
+          const undoes = pendingUndo?.treeId === input.treeId ? pendingUndo.undoes : undefined;
+          if (undoes !== undefined) {
+            pendingUndos.delete(input.checkoutId);
+          }
+          const provenance = provenanceOf(input.trigger, leaseIds, {
+            turnId: input.turnId,
+            restoredFrom: input.restoredFrom,
+          });
           const receipt = await port.writeRevision({
             parents: input.parents.map((parent) => revisionId(parent)),
             tree: held.tree,
-            provenance: provenanceOf(input.trigger, leaseIds, {
-              turnId: input.turnId,
-              restoredFrom: input.restoredFrom,
-            }),
+            provenance,
             summary: Object.freeze({
-              generated: await summaryOf(input),
+              generated: await summaryOf(input, undoes),
             }),
+          });
+          mintedOperations.set(receipt.commitId, {
+            kind: input.trigger,
+            ...(undoes === undefined ? {} : { undoes }),
+            actor: provenance.actor,
+            actorId: provenance.actorId,
           });
           /* The claim {@link revisionTreeId} makes, checked where it is cheap:
            * a tree id this host computed differently from the engine's would
@@ -2348,9 +2724,23 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     },
 
     restore: {
+      readUndoable: fromAuthorityPromise<boolean, Readonly<{ checkoutId: string }>>(async ({ input }) => {
+        await ensureStore();
+        const place = await placeOf(input.checkoutId);
+        if (place.branch === undefined) {
+          return false;
+        }
+        const entries = await opsLog.read(options.actor?.({ runId: undefined, trigger: 'restore' }));
+        return undoCandidates(entries, `refs/heads/${place.branch}`).length > 0;
+      }),
+
       computePlan: fromAuthorityPromise<RestoreComputePlanActorOutput, RestoreComputePlanActorInput>(
         async ({ input }) => {
           await ensureStore();
+          pendingUndos.delete(input.checkoutId);
+          if ('undo' in input) {
+            return planUndo(input.checkoutId, input.skip);
+          }
           const place = await placeOf(input.checkoutId);
           const head = await headOf(place);
           /* *Undo restore* is a restore of the restore row's first parent (D2). */
@@ -2371,7 +2761,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const removed = live.entries().filter(({ path }) => !tree.has(path));
           const headTreeId = await treeIdOf(head);
           return {
-            planId: plans.put(input.checkoutId, { checkoutId: input.checkoutId, revisionId: target, tree }),
+            /* D2's undo also records which restore it undid, so *Undo* (D15) passes over both. */
+            planId: plans.put(input.checkoutId, {
+              checkoutId: input.checkoutId,
+              revisionId: target,
+              tree,
+              ...(input.firstParent === true ? { undoes: input.target } : {}),
+            }),
             revisionId: target,
             revisionNumber: await ordinalOnLine(place, target),
             removedPathCount: removed.length,
@@ -2416,8 +2812,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               }
             },
           });
-          const treeId = await treeIdOf(plan.revisionId);
-          return { revisionId: plan.revisionId, treeId: treeId ?? '' };
+          if (plan.undoes === undefined) {
+            const treeId = await treeIdOf(plan.revisionId);
+            return { revisionId: plan.revisionId, treeId: treeId ?? '' };
+          }
+          /* The next `restore` cut of exactly this tree is the undo (D15). */
+          const treeId = await checkoutTreeId(place.id, plan.tree);
+          pendingUndos.set(place.id, { treeId, undoes: plan.undoes });
+          return { revisionId: plan.revisionId, treeId };
         },
       ),
     },
@@ -3112,7 +3514,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     sync: {
       /* The record, not a snapshot: this is the whole of what "retried on the
        * next open of the project on that device" reads (D28, D29). */
-      readPending: fromAuthorityPromise<SyncQueueRecord, SyncReadPendingActorInput>(async () => readPendingQueue()),
+      readPending: fromAuthorityPromise<SyncQueueRecord, SyncReadPendingActorInput>(async () =>
+        withOwedPushes(await readPendingQueue()),
+      ),
 
       writePending: fromAuthorityPromise<void, SyncWritePendingActorInput>(async ({ input }) => {
         await writePendingQueue(input.record);
@@ -3134,10 +3538,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        *
        * The history set (`refs/heads/*`, `refs/tags/*`) goes **atomic**, so
        * `main` and its tags land together or not at all. The record set
-       * (`refs/tau/chats/*`) goes **one push per ref**, so a chat the server
-       * refuses fails only itself and never blocks a branch — which is also why
-       * a rejected chat ref is replayed here rather than left to a retry that
-       * would be refused for the same reason forever (W17 contract 1/4/5).
+       * (`refs/tau/chats/*`, `refs/tau/evidence/*`) goes as **one non-atomic
+       * push** after it, so a chat the server refuses fails only itself and
+       * never blocks a branch; a set the server refused whole is offered again
+       * one ref at a time (W13c). A rejected chat ref is replayed here rather
+       * than left to a retry that would be refused for the same reason forever
+       * (W17 contract 1/4/5).
+       *
+       * Two receive-packs, not one: `atomic` is a whole-push capability, so one
+       * push carrying both sets either sinks history with a refused chat or
+       * drops history's atomicity on every remote that is not Tau's.
        */
       push: fromAuthorityPromise<SyncPushActorOutput, SyncPushActorInput>(async ({ input, signal }) => {
         await ensureStore();
@@ -3149,7 +3559,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * hashing the whole evidence tree for a push that is not offering the
          * evidence ref is work nothing reads (C23). */
         const preparedRecords = [
-          ...(await recordChats(syncChats)),
+          ...(await recordChats(syncChats, input.remote)),
           ...(offered(evidenceRefName) ? await recordEvidence(syncLargeExports, input.leases[evidenceRefName]) : []),
         ];
         signal.throwIfAborted();
@@ -3160,29 +3570,33 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * the vocabulary it was asked in, and a bare call lists *branch names*
          * — which would offer `main` instead of `refs/heads/main` and would not
          * see a chat ref at all. */
-        const [heads, tags, chats, evidence] = await Promise.all([
+        /* First: they answer once every queued log commit has landed. */
+        const own = await devicesOrNone();
+        const current = await devicesOrNone(opsLog.currentDevices);
+        const [heads, tags, chats, evidence, logs] = await Promise.all([
           port.listRefs('refs/heads'),
           port.listRefs('refs/tags'),
           syncChats ? port.listRefs(chatRefPrefix) : Promise.resolve([]),
           syncLargeExports ? port.listRefs('refs/tau/evidence') : Promise.resolve([]),
+          port.listRefs(opsRefPrefix),
         ]);
+        /* This host's own operation logs ride the record set (D15): pushed
+         * beside history, never able to block it (I8). */
+        const ops = logs.filter((entry) => current.has(entry.name.slice(`${opsRefPrefix}/`.length)));
         /* Another device's conflict line is that device's to push: offering a
          * copy this host fetched earlier would only sink the atomic set when
          * the owner has moved it on since (D14). */
-        const device = options.deviceId?.();
         const history = [...heads, ...tags]
           .map((entry) => entry.name)
-          .filter(
-            (name) => !isHostLocalRef(name) && offered(name) && parseConflictLine(name, device)?.foreign !== true,
-          );
-        const records = [...chats, ...evidence]
+          .filter((name) => offered(name) && pushOffers(name, own));
+        const records = [...chats, ...evidence, ...ops]
           .map((entry) => entry.name)
           .filter((name) => offered(name) && !failedPreparation.has(name));
         /* What this push offers, by name: a refused ref reports no head of its
          * own, and "which local revision is unsent" is the whole of what the
          * queue entry is for (review 2 R8). */
         const localHeads = new Map(
-          [...heads, ...tags, ...chats, ...evidence].map((entry) => [entry.name, String(entry.head)] as const),
+          [...heads, ...tags, ...chats, ...evidence, ...ops].map((entry) => [entry.name, String(entry.head)] as const),
         );
         const results: SyncRefOutcome[] = preparedRecords.filter((entry) => entry.status === 'rejected');
         let overQuota: readonly string[] | undefined;
@@ -3223,23 +3637,39 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
         }
 
+        signal.throwIfAborted();
+        const together =
+          records.length > 1
+            ? await pushRecordSet({ names: records, remote: input.remote, leases: input.leases, offered: localHeads })
+            : undefined;
         for (const name of records) {
           signal.throwIfAborted();
           const chatId = chatIdOfRef(name);
-          // oxlint-disable-next-line no-await-in-loop -- one push per record ref is the point: a refused chat must fail only itself.
-          const offered_ = await pushRecordRef({
-            name,
-            remote: input.remote,
-            leases: input.leases,
-            offered: localHeads,
-          });
+          const joint = together?.get(name);
+          const offered_: Awaited<ReturnType<typeof pushRecordRef>> =
+            joint === undefined
+              ? // oxlint-disable-next-line no-await-in-loop -- alone, so a refused record fails only itself.
+                await pushRecordRef({
+                  name,
+                  remote: input.remote,
+                  leases: input.leases,
+                  offered: localHeads,
+                })
+              : { outcome: joint };
           const { outcome } = offered_;
           if (offered_.overQuota !== undefined) {
             overQuota = [...(overQuota ?? []), ...offered_.overQuota];
             quotaMessage = offered_.quotaMessage;
             quotaStorage = offered_.quotaStorage ?? quotaStorage;
           }
-          if (outcome.status !== 'rejected' || chatId === undefined) {
+          if (chatId === undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- a refused log is re-offered before its result is recorded.
+            results.push(
+              (await reofferRefusedLog({ name, outcome, remote: input.remote, leases: input.leases })) ?? outcome,
+            );
+            continue;
+          }
+          if (outcome.status !== 'rejected') {
             results.push(outcome);
             continue;
           }
@@ -3331,10 +3761,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           port.listRefs(`refs/remotes/${input.remote}`),
           listPlaces(),
         ]);
+        /* Operation logs are pushed, never pulled: *Undo* reads only this host's
+         * own, and fetching every device's on every pull is two requests each,
+         * forever (RV-W7 #1). */
         const wanted = advertised
           .map((entry) => entry.name)
           .filter(
             (name) =>
+              !name.startsWith(`${opsRefPrefix}/`) &&
               (!name.startsWith(`${chatRefPrefix}/`) || syncChats) &&
               (!name.startsWith('refs/tau/evidence/') || syncLargeExports),
           );
@@ -3405,12 +3839,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
           }
         }
-        const device = options.deviceId?.();
+        const own = await devicesOrNone();
         for (const [branch, prior] of priorByBranch) {
           /* This device's own conflict line is its record of a decision, not a
            * copy of the remote's: another device's *Remove* drops only the
            * tracking ref, so the next push offers the line again (D14, RV-W6 F2). */
-          if (!advertisedBranches.has(branch) && parseConflictLine(branch, device)?.foreign === false) {
+          if (!advertisedBranches.has(branch) && parseConflictLine(branch, own)?.foreign === false) {
             // oxlint-disable-next-line no-await-in-loop -- paired cleanup for one remote branch.
             await port.updateRef({ name: remoteTrackingRef(input.remote, branch), expectedHead: revisionId(prior) });
             continue;
@@ -3458,11 +3892,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
             recordTasks.push(
               (async (): Promise<SyncRefOutcome> => {
+                /* Every chat whose files changed is announced, a conflicted record
+                 * included: its segments were written (RV-W7 #5). */
+                const written: string[] = [];
                 try {
-                  const projected = await projectChats({ ...context, refs: [ref], signal });
-                  if (projected.length > 0) {
-                    options.onChatsProjected?.(projected);
-                  }
+                  const projected = await projectChats({
+                    ...context,
+                    refs: [ref],
+                    signal,
+                    onWritten: (id) => written.push(id),
+                  });
                   return {
                     name: chatRefName(chatId),
                     status: projected.length > 0 ? 'updated' : 'upToDate',
@@ -3475,6 +3914,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                     head: ref.head,
                     reason: error instanceof Error ? error.message : 'This chat could not be restored.',
                   };
+                } finally {
+                  if (written.length > 0) {
+                    options.onChatsProjected?.(written);
+                  }
                 }
               })(),
             );
@@ -3634,23 +4077,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 }
                 signal.throwIfAborted();
                 const expectedTreeId = await treeIdOf(expected);
-                /*
-                 * An unborn line holds no work of its own when every file is
-                 * either setup Tau generated or already in the arriving tree with
-                 * the same bytes: an opener writes the remote's own `tau.json`
-                 * before this pull (E2E-D defect A). Minting that as a root
-                 * revision merged the remote in as unrelated history. A file
-                 * the remote does not hold, or holds differently, is still work
-                 * and is minted first (rule 6).
-                 */
+                /* An unborn line is dirty only when it holds work of its own (E2E-D defect A). */
                 const dirty =
                   expectedTreeId === undefined
-                    ? !before
-                        .entries()
-                        .every(
-                          ({ path, content }) =>
-                            sameBytes(content, target.get(path)) || sameBytes(content, generatedSetupTree.get(path)),
-                        )
+                    ? !holdsNoWork(before, target)
                     : expectedTreeId !== (await checkoutTreeId(place.id, before));
                 const leases = await readLeases();
                 const leased = leases.some((lease) => lease.checkoutId === place.id);

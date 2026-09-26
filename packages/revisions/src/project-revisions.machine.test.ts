@@ -978,6 +978,7 @@ describe('projectRevisionsMachine', () => {
         dirty: false,
         revisionNumber: undefined,
         undoable: false,
+        canUndo: false,
       },
       /* Same rule for the remote child: the facet is read from it, and it is
          still reading git's remotes list here (S26 shows *Sync* only once a

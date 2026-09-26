@@ -170,6 +170,9 @@ const clientFixture = (input: { readonly entries?: readonly MachineDirectoryEntr
       };
     },
     beginBinding: async () => ({ status: 'operator-action-required', ceremonyId: 'ceremony-1' }),
+    removeBinding: async () => {
+      throw new Error('not used');
+    },
     preparePrint: async () => {
       throw new Error('not used');
     },

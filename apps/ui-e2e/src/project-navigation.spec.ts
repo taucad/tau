@@ -508,6 +508,10 @@ test('chat navigation preserves ordering until an accepted user submit advances 
 });
 
 test('project and chat rows reveal their actions over a dissolving name', async () => {
+  /* Opening the project attaches its chat to the agent host, whose client needs the model catalog.
+   * Only this fixture serves `GET /v1/models`; without it the attach fails and the row reads
+   * `Failed`, which is a status sentence and so a tooltip. */
+  await target.installAgentHostGatewayFixture([]);
   await target.setViewport({ width: 1024, height: 900 });
   await target.navigate('/__e2e/project-navigation');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);

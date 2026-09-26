@@ -2718,7 +2718,6 @@ mod tests {
                 },
             },
             faces: Vec::new(),
-            pmi: Vec::new(),
             subshapes: Vec::new(),
             datum_placements: Vec::new(),
             semantic_datums: Vec::new(),

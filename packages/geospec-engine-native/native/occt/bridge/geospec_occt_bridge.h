@@ -38,12 +38,6 @@ enum geospec_occt_surface_type {
   GEOSPEC_OCCT_SURFACE_OTHER = 10
 };
 
-enum geospec_occt_pmi_kind {
-  GEOSPEC_OCCT_PMI_DIMENSION = 0,
-  GEOSPEC_OCCT_PMI_GEOMETRIC_TOLERANCE = 1,
-  GEOSPEC_OCCT_PMI_DATUM = 2
-};
-
 enum geospec_occt_entity_kind {
   GEOSPEC_OCCT_ENTITY_WHOLE = 0,
   GEOSPEC_OCCT_ENTITY_OCCURRENCE = 1,
@@ -219,12 +213,6 @@ typedef struct geospec_occt_face_facts {
   int u_rational;
   int v_rational;
 } geospec_occt_face_facts;
-
-typedef struct geospec_occt_pmi_facts {
-  int kind;
-  size_t association_count;
-  size_t first_association_count;
-} geospec_occt_pmi_facts;
 
 typedef struct geospec_occt_subshape_facts {
   int64_t occurrence;
@@ -585,9 +573,10 @@ int geospec_occt_selected_continuous_domain(
     geospec_occt_selected_continuous_domain_result* output,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
-// STEP read and XDE transfer run under one process-wide lock. A document is
-// thread-confined: its const getters fill lazy slots and transfer buffers, so
-// only one thread at a time may use it (the Rust owner is !Send and !Sync).
+// STEP admissions may run concurrently on different threads; the bytes are
+// borrowed until the call returns. A document is thread-confined: its const
+// getters fill lazy slots and transfer buffers, so only one thread at a time
+// may use it (the Rust owner is !Send and !Sync).
 int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                            geospec_occt_document** out_document,
                            geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
@@ -596,6 +585,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
 int geospec_occt_thread_pool_width(int requested, int* actual,
                                    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_release(geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
+// Diagnostic count of admitted faces carrying a triangulation. The read
+// profile keeps a file's tessellation off exact faces, so a BRep admits 0.
+size_t geospec_occt_triangulated_face_count(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 
 // Admission keeps source identity and addresses only. Source shape, occurrence
 // bounds, occurrence face/edge and whole-face numerics are computed on first
@@ -712,16 +705,6 @@ int geospec_occt_face_label(const geospec_occt_document* document,
                             size_t index, geospec_occt_string* shape_label,
                             geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
-size_t geospec_occt_pmi_count(const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_pmi(const geospec_occt_document* document, size_t index,
-                     geospec_occt_pmi_facts* out_pmi,
-                     geospec_occt_string* label, geospec_occt_string* name,
-                     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_pmi_association(const geospec_occt_document* document,
-                                 size_t pmi_index, size_t association_index,
-                                 geospec_occt_string* shape_label,
-                                 geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-
 size_t geospec_occt_subshape_count(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_subshape(
@@ -773,8 +756,10 @@ int geospec_occt_occurrence_face_edge(
     size_t edge_index, uint32_t* out_edge,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
-size_t geospec_occt_occurrence_edge_count(
-    const geospec_occt_document* document, uint32_t occurrence) GEOSPEC_OCCT_NOEXCEPT;
+// Maps the occurrence's edge addresses on first demand, so it can fail.
+int geospec_occt_occurrence_edge_count(
+    const geospec_occt_document* document, uint32_t occurrence,
+    size_t* out_count, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_occurrence_edge(
     const geospec_occt_document* document, uint32_t occurrence, size_t index,
     geospec_occt_edge_facts* out_edge,

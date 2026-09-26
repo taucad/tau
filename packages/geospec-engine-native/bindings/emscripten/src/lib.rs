@@ -329,7 +329,7 @@ pub extern "C" fn geospec_engine_native_ingest_subject(
             let Some(engine) = engines.get_mut(engine) else {
                 return failure("invalid-request", "GeoSpec engine handle is missing.");
             };
-            result(engine.ingest_subject(request, primary, resources))
+            result(engine.ingest_subject(request, &primary, resources))
         })
     })
     .unwrap_or_else(|| {

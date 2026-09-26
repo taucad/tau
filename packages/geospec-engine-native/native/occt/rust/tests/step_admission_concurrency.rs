@@ -1,5 +1,6 @@
 //! Concurrent STEP admissions on separate documents return the serial bytes.
-//! The bridge serializes the process-global STEP reader and its static options.
+//! No process lock: a one-time reader warm-up initializes OCCT's data-exchange
+//! globals, and each admission reads its parameters from its own model.
 
 use geospec_engine_native_occt::{BrepSubject, Document};
 use std::{
@@ -40,8 +41,8 @@ fn admitted(bytes: &[u8]) -> String {
 fn concurrent_admissions_return_the_serial_bytes() {
     let inputs: Arc<Vec<Vec<u8>>> = Arc::new(FIXTURES.iter().map(|name| fixture(name)).collect());
     // The first admissions race too: no serial read happens before the threads.
-    let barrier = Arc::new(Barrier::new(2));
-    let threads: Vec<_> = (0..2)
+    let barrier = Arc::new(Barrier::new(4));
+    let threads: Vec<_> = (0..4)
         .map(|thread| {
             let inputs = Arc::clone(&inputs);
             let barrier = Arc::clone(&barrier);

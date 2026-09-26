@@ -1,0 +1,43 @@
+{
+  "schema": "read-profile-test-fixtures-v1",
+  "attribution": "OCCT reader controls from GeoSpec substrate lane O1 (run 2026-09-26-occt-substrate) plus one displaced-line control derived from ap242-box.step.",
+  "runtimeDependency": "All runtime inputs are files in this directory or its parent. Provenance locators are historical attribution only and are never read by the test.",
+  "bytePolicy": "Byte-locked assets: do not reformat, regenerate, or alter expectations.",
+  "files": [
+    {
+      "file": "box-brep-plus-tessellation.step",
+      "sha256": "8740c1de0a2e1bc3bf90d0b166b1afe3bf7409cc8f2cd6aa2d06a763d1dc5aa8",
+      "bytes": 17476,
+      "description": "A 10 x 20 x 30 box whose BRep representation also lists a TESSELLATED_SOLID with TRIANGULATED_FACEs linked to the six ADVANCED_FACEs; ReadTessellated On and Off both put the file mesh on all six exact faces, OnNoBRep on none.",
+      "provenance": "docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-occt-substrate/lanes/o1-data-exchange-a1/evidence/runs/controls/box-brep-plus-tessellation.step (written by evidence/probe/tess_control.cpp)"
+    },
+    {
+      "file": "box-brep-only.step",
+      "sha256": "f457b7062678409de0572b780a75a62ab22ba93412b943ee81613cf1aa73c586",
+      "bytes": 17471,
+      "description": "The same file with the tessellated solid dropped from the BRep representation items.",
+      "provenance": "docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-occt-substrate/lanes/o1-data-exchange-a1/evidence/runs/controls/box-brep-only.step"
+    },
+    {
+      "file": "ap242-radius1-height10-no-uncertainty.step",
+      "sha256": "f022d82b661ee150ad09752bf0f70a51eeb2526ea571337aef862192049921a5",
+      "bytes": 5580,
+      "description": "../ap242-radius1-height10.step without GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT, so the reader takes ReadPrecisionVal.",
+      "provenance": "docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-occt-substrate/lanes/o1-data-exchange-a1/evidence/runs/controls/ap242-radius1-height10-no-uncertainty.step"
+    },
+    {
+      "file": "06-full-cylinder-no-uncertainty.step",
+      "sha256": "2bd7bfe4934224ba463511c89bfb6f538e9cea131f7566a3d6dfd0204ced67dd",
+      "bytes": 7176,
+      "description": "../edge-treatments/06-full-cylinder.step without GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT, so the reader takes ReadPrecisionVal.",
+      "provenance": "docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-occt-substrate/lanes/o1-data-exchange-a1/evidence/runs/controls/06-full-cylinder-no-uncertainty.step"
+    },
+    {
+      "file": "box-line-offset-no-uncertainty.step",
+      "sha256": "7f40bfc034aa3bdc80f1f6514c14c8b8d34adfcc02cb9772914953117da44ee4",
+      "bytes": 15425,
+      "description": "../ap242-box.step without GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT and with LINE #27's point moved 5e-4 mm in x off its edge's vertices. Within ReadPrecisionVal 1e-3 the vertices absorb the offset; at the DESTEP_Parameters default 1e-4 the reader shifts the line, so the admitted tolerances differ.",
+      "provenance": "Derived for GeoSpec native close-out lane W1-ADM (run 2026-09-26-implementation): sed on ap242-box.step (#28 (-5,-10,-15) -> (-4.9995,-10,-15); uncertainty context removed). The M0 probe rows (prod == pinned profile, default profile differs) are in lanes/w1-adm-a2/evidence/read-profile-controls.m0-probe.jsonl."
+    }
+  ]
+}

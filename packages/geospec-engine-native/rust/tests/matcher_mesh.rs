@@ -182,7 +182,6 @@ fn subject_with_brep(record: MeshAnalysisRecord) -> Rc<Subject> {
             },
         },
         faces: Vec::new(),
-        pmi: Vec::new(),
         subshapes: Vec::new(),
         datum_placements: Vec::new(),
         semantic_datums: Vec::new(),

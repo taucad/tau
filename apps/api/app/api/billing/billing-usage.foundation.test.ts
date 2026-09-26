@@ -339,6 +339,11 @@ describe('BillingUsageService PostgreSQL foundation', () => {
       }),
     ).rejects.toThrow('exceeds original charge');
     for (const { key, admitted } of later) {
+      if (key !== 'later-released' && key !== 'later-absorbed') {
+        // GI-R2: only a dispatched call settles (the credit_operation_dispatch CHECK).
+        // oxlint-disable-next-line eslint/no-await-in-loop -- sequential like the terminalization it precedes
+        await secondLedger.markDispatchIntent(admitted.operationId, admitted.generation);
+      }
       // oxlint-disable-next-line eslint/no-await-in-loop -- second connection commits distinct post-snapshot terminal revisions
       await secondLedger.terminalizeOperation({
         operationId: admitted.operationId,

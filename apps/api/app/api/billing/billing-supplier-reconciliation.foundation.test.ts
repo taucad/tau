@@ -236,6 +236,8 @@ const terminalOperation = async (
     meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 1n }],
     normalizationEvidence: { version: 'test-v1', providerRequestId: `request-${key}`, fields: { input: '1' } },
   } as const;
+  // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
+  await ledger.markDispatchIntent(admitted.operationId, admitted.generation);
   // A pinned invocation makes durable invocation evidence a terminalization precondition.
   await ledger.recordInvocationEvidence({
     operationId: admitted.operationId,

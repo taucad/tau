@@ -684,6 +684,8 @@ describe('retained obligations after closure and auth deletion', () => {
     }
     const [held] = await database.select().from(schema.creditAccount).where(eq(schema.creditAccount.id, accountId));
     expect(held?.purchasedHeldAtoms).toBe(100_000n);
+    // GI-R2: the call was dispatched before closure; only a recorded intent lets it settle.
+    expect(await lateLedger.markDispatchIntent(admitted.operationId, admitted.generation)).toBe(true);
     const tombstone = await closeAndDeleteOwner({ authUserId, accountId, expectedCancellations: 0 });
     const receipt = await lateLedger.terminalizeOperation({
       operationId: admitted.operationId,

@@ -191,6 +191,11 @@ export const refusals = {
   UPSTREAM_REJECTED: { owner: 'gateway', retry: 'resume' },
   /** The gateway voided a key it never admitted (HTTP 409); the host continues under a new key (W11). */
   ATTEMPT_VOIDED: { owner: 'gateway', retry: 'never' },
+  /**
+   * The account an attempt lookup names is closing, closed or restricted (HTTP 403), so the attempt cannot be resolved
+   * and nothing new can be charged to it. Signing in again does not change it; the card points to account support (W11).
+   */
+  BILLING_ACCOUNT_CLOSED: { owner: 'gateway', retry: 'never' },
 
   // ── transport: the host's gateway client ────────────────────────────────────────────────────
   MODEL_PROVIDER_UNSUPPORTED: { owner: 'transport', retry: 'never' },

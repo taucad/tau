@@ -1180,11 +1180,12 @@ describe('the focus frame through the worker registry (RV-W5b2 N4)', () => {
       expect(polls.size, 'an unfocused project holds no long poll').toBe(0);
 
       alpha.send({ command: 'focus', focused: true });
+      /* The stream opens once the open pull's tail is read, a real-store fetch. */
       await vi.waitFor(
         () => {
           expect(polls.size).toBe(1);
         },
-        { timeout: 10_000 },
+        { timeout: 15_000 },
       );
       alpha.send({ command: 'focus', focused: true });
       await alpha.settle();
@@ -1211,7 +1212,7 @@ describe('the focus frame through the worker registry (RV-W5b2 N4)', () => {
     } finally {
       globalThis.fetch = original;
     }
-  }, 20_000);
+  }, 40_000);
 });
 
 /*

@@ -1,9 +1,10 @@
 /* oxlint-disable no-await-in-loop -- Each negative case temporarily withholds one payload and must restore it before the next. */
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
-import { constants } from 'node:fs';
-import { cp, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
+import { promisify } from 'node:util';
 
 import { _electron as electron } from 'playwright';
 import { expect, test } from 'vitest';
@@ -66,7 +67,9 @@ test('[completed-artifact] loads native esbuild and nanoraster inside an Electro
   const app = join(runRoot, 'Tau.app');
   const utilityEntry = join(runRoot, 'native-payload-probe.mjs');
   const fixture = await readFile(join(workspaceRoot, 'packages/plugins/gltf/src/fixtures/cube.glb'));
-  await cp(sourceApp, app, { mode: constants.COPYFILE_FICLONE, recursive: true, verbatimSymlinks: true });
+  /* APFS clones through BSD `cp -c`, as `copyTree` in apps/desktop/scripts/runtime-closure.mts does:
+   * `fs.cp` with COPYFILE_FICLONE byte-copies the whole 1.3 GB bundle on macOS. */
+  await promisify(execFile)('/bin/cp', ['-c', '-R', `${sourceApp}/`, app]);
 
   const asarRoot = join(app, 'Contents/Resources/app.asar/node_modules');
   const esbuildEntry = join(asarRoot, 'esbuild/lib/main.js');

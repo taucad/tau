@@ -772,7 +772,7 @@ mod tests {
             record.positions[1],
             [10_000.0, (21.0 + f64::from(0.1_f32)) * 1_000.0, 30_000.0]
         );
-        let size = analyze(&Rc::new(record)).unwrap().bounding_box().size;
+        let size = analyze(&Rc::new(record)).bounding_box().size;
         assert!(size.into_iter().all(|axis| (axis - 9_000.0).abs() < 1e-10));
     }
 
@@ -824,7 +824,7 @@ mod tests {
                 [16_777_218.0, 2.0, 0.0],
             ]
         );
-        let analysis = analyze(&Rc::new(decoded.record)).unwrap();
+        let analysis = analyze(&Rc::new(decoded.record));
         let bounds = analysis.bounding_box();
         assert_eq!(bounds.size, [4.0, 2.0, 0.0]);
         assert_eq!(bounds.center, [16_777_219.0, 1.0, 0.0]);

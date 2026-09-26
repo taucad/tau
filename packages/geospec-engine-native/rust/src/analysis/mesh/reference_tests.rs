@@ -574,7 +574,7 @@ fn assert_matches_reference(record: MeshAnalysisRecord, label: &str) {
         .collect();
     assert_eq!(actual, expected, "{label}: edges");
 
-    let analysis = analyze(&record).unwrap();
+    let analysis = analyze(&record);
     assert_eq!(
         text(&*analysis.watertight()),
         text(&watertight(&record, &canonical)),

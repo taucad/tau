@@ -258,7 +258,7 @@ mod tests {
                 });
             }
         }
-        analyze(&Rc::new(record)).unwrap()
+        analyze(&Rc::new(record))
     }
 
     fn batch(max_mesh_bytes: u64) -> BatchAnalysis {

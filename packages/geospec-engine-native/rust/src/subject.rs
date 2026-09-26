@@ -1004,9 +1004,9 @@ impl Subject {
             message: "The retained subject has no materialized mesh analysis record.".into(),
         })?;
         let analysis = Rc::new(if self.format == SubjectFormat::MeshBufferV1 {
-            analyze_indexed(record)?
+            analyze_indexed(record)
         } else {
-            analyze(record)?
+            analyze(record)
         });
         // ST owner execution has no intervening concurrent materialization.
         self.observations.add(WorkCounter::MeshBuilds, 1);

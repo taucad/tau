@@ -414,16 +414,29 @@ export type CheckoutRecord = Readonly<Omit<Checkout, 'baseRevisionId'>> &
     leaseChatIds: readonly string[];
     /** Set when the host's policy would offer this checkout for removal (A25). */
     removable?: boolean;
-    /**
-     * Set when this branch's head is a conflicted revision (A22, W10).
-     *
-     * The head *is* the conflicted revision — a conflicted merge mints it on the
-     * branch a person merged from — so there is no second id to carry. One
-     * commit read per checkout answers it, and it is record-derived like every
-     * other field here, so *Needs resolution* survives a reload (I3).
-     */
-    conflicted?: boolean;
   }>;
+
+/**
+ * One conflicted revision no decision has landed yet (charter D14).
+ *
+ * Read from the conflict lines themselves, `refs/heads/conflicts/<into>/<device>`,
+ * on every host that holds them — recorded here or fetched from another device —
+ * so *Needs your decision* survives a reload and appears on every device (I3).
+ * A revision the line it decides already contains is resolved and is never
+ * listed.
+ *
+ * @public
+ */
+export type ConflictRecord = Readonly<{
+  /** The conflicted revision. */
+  revisionId: string;
+  /** Its conflict line, `conflicts/<into>/<device>`. */
+  line: string;
+  /** The line the decision lands on. */
+  into: string;
+  /** Whether another device recorded it. */
+  foreign: boolean;
+}>;
 
 /**
  * One named version: an annotated tag on a revision (S31, A21).
@@ -580,6 +593,8 @@ export type RemoteStorageRefusal = Readonly<{
 export type RevisionPortErrorCode =
   /** A branch was asked of a checkout that has no revision and nothing to record. */
   | 'BRANCH_NEEDS_REVISION'
+  /** A branch name conflict lines own: `conflicts` or a name under it (charter D14). */
+  | 'BRANCH_NAME_RESERVED'
   /** The requested branch already has a checkout, or the id names no checkout. */
   | 'CHECKOUT_CONFLICT'
   | 'ENGINE_FAILED'

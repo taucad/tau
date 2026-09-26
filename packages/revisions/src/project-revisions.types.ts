@@ -140,15 +140,25 @@ export type RevisionBranchFacet = Readonly<{
   leaseChatIds: readonly string[];
 }>;
 
-/** One conflicted branch as the *Needs resolution* card renders it. @public */
+/** One undecided conflicted revision as the *Needs your decision* card renders it (D14). @public */
 export type RevisionConflictFacet = Readonly<{
-  /** The conflicted revision, which is that branch's head. */
+  /** The conflicted revision. */
   revisionId: string;
+  /** Its conflict line, `conflicts/<into>/<device>`. */
   branch: string | undefined;
+  /** The line the decision lands on — what *Needs your decision on …* names (HQ2). */
+  into: string;
+  /** Whether another device recorded it; only such a line is offered for removal (D24). */
+  foreign: boolean;
   /** The two side labels the markers carry, once its child has read them. */
   labels: Readonly<{ ours: string; theirs: string }> | undefined;
-  /** One row per file, with the side chosen for it so far. */
-  paths: ReadonlyArray<Readonly<{ path: string; openable: boolean; side: ResolutionSide | undefined }>>;
+  /**
+   * One row per file, with the side chosen for it so far; `keys` names the
+   * parameter keys both sides changed, for a parameter record.
+   */
+  paths: ReadonlyArray<
+    Readonly<{ path: string; openable: boolean; keys?: readonly string[]; side: ResolutionSide | undefined }>
+  >;
   /** A resolution effect is running. */
   busy: boolean;
   /** Every file has a side, so *Merge into `<current>`* can be asked for again. */

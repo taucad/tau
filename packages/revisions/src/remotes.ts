@@ -91,7 +91,8 @@ export const remoteOf = (
  * module both legs' transports read (W3a R4; architecture "Ref allow-list").
  *
  * `refs/tau/{chats,evidence,artifacts}` are deliberately absent: they are the
- * record set the design pushes (D14, A15, A30, review 3 F13).
+ * record set the design pushes (D14, A15, A30, review 3 F13). So are conflict
+ * lines, `refs/heads/conflicts/*`: a conflicted revision travels (charter D14).
  */
 const hostLocalRefPrefixes: readonly string[] = Object.freeze([
   'refs/tau/owners',
@@ -104,9 +105,6 @@ const hostLocalRefPrefixes: readonly string[] = Object.freeze([
   /* Fetch's own half of the store: a remote-tracking ref is what this host
    * last saw *of* a remote, so offering one back is meaningless. */
   'refs/remotes',
-  /* Where an unresolved sync conflict lands (A22). It is evidence for the
-   * person at this host, never a branch anybody else should see. */
-  'refs/heads/sync',
 ]);
 
 /**
@@ -122,23 +120,15 @@ export const isHostLocalRef = (ref: string): boolean =>
 /**
  * The refs a *refspec* may never name, on either side.
  *
- * Narrower than {@link isHostLocalRef} by exactly two entries, and both for the
- * same reason: a refspec is written in *patterns*, so a prefix that shares a
- * namespace with legitimate refs cannot be blocked at the prefix.
- *
- * - `refs/remotes/*` never leaves this host, but it is precisely where a fetch
- *   writes, so a refspec naming it is correct rather than an attack.
- * - `refs/heads/sync` is a branch. Blocking it here would refuse
- *   `+refs/heads/*:refs/remotes/tau/*` — the ordinary fetch refspec — because
- *   that pattern can expand to it. It is still never *offered* to a remote,
- *   which is {@link isHostLocalRef}'s job and is enforced per ref in both legs'
- *   `push`, where the name is known exactly.
+ * Narrower than {@link isHostLocalRef} by `refs/remotes/*`: it never leaves this
+ * host, but it is precisely where a fetch writes, so a refspec naming it is
+ * correct rather than an attack.
  *
  * What remains is `refs/tau/*`'s host-local half: namespaces no refspec has any
  * business naming, in either direction.
  */
 const managedRefPrefixes: readonly string[] = Object.freeze(
-  hostLocalRefPrefixes.filter((prefix) => prefix !== 'refs/remotes' && prefix !== 'refs/heads/sync'),
+  hostLocalRefPrefixes.filter((prefix) => prefix !== 'refs/remotes'),
 );
 
 /**

@@ -27,7 +27,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
-import type { RevisionPort } from '#revision-port.js';
+import type { ConflictRecord, RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { selectRevisionStatus } from '#project-revisions.machine.js';
@@ -1140,6 +1140,48 @@ for (const actorSet of actorSets) {
       return { ...context, base, baseTree, remote, remoteTree };
     };
 
+    it('fast-forwards an unborn checkout that holds only files the remote already has (E2E-D defect A)', async () => {
+      const unborn = async (localProject: string) => {
+        const context = await fixture({ 'tau.json': localProject }, (filesystem) => filesystem, {
+          actorSet: actorSet.name,
+        });
+        await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+        await context.port.setHead('main');
+        const remoteReceipt = await context.port.writeRevision({
+          parents: [],
+          tree: new ImmutableRevisionTree([
+            ['tau.json', '{"id":"project-1"}\n'],
+            ['main.scad', 'cube(1);\n'],
+          ]),
+          provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 8, 13) },
+          summary: { generated: 'Remote' },
+        });
+        const remote = revisionId(remoteReceipt.commitId);
+        await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+        return { ...context, remote };
+      };
+
+      /* The opener's `tau.json` is the remote's own: nothing here is work, so the pull lands as is. */
+      const opened = await unborn('{"id":"project-1"}\n');
+      await expect(run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toStrictEqual({
+        checkoutId: 'live',
+        revisionId: opened.remote,
+        treeId: expect.any(String) as string,
+      });
+      expect(await opened.port.readRef('main')).toBe(opened.remote);
+      expect(await opened.filesystem.readFile('main.scad', 'utf8')).toBe('cube(1);\n');
+
+      /* A file the remote holds differently is still work: minted first (rule 6), never overwritten. */
+      const edited = await unborn('{"id":"project-1","name":"mine"}\n');
+      await expect(run(edited.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+        status: 'held',
+        hold: 'dirty',
+        revisionId: edited.remote,
+      });
+      expect(await edited.port.readRef('main')).toBeUndefined();
+      expect(await edited.filesystem.readFile('tau.json', 'utf8')).toBe('{"id":"project-1","name":"mine"}\n');
+    }, 30_000);
+
     it('preserves dirty and leased files, and rejects protected target paths before writing', async () => {
       const context = await synchronized();
       await context.filesystem.writeFile('main.ts', 'unsaved\n');
@@ -1382,7 +1424,11 @@ for (const actorSet of actorSets) {
       }>,
       extra: FixtureOptions = {},
     ) => {
-      const context = await fixture(lines.base, (filesystem) => filesystem, { actorSet: actorSet.name, ...extra });
+      const context = await fixture(lines.base, (filesystem) => filesystem, {
+        actorSet: actorSet.name,
+        deviceId: () => 'device-a',
+        ...extra,
+      });
       const { port, filesystem } = context;
       await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
       const capture = async () => captureRevisionTree(filesystem, { exclude: (path) => !classify(path).versioned });
@@ -1868,8 +1914,22 @@ for (const actorSet of actorSets) {
       /* `theirs: undefined` is a delete on the feature side — the other half of a
        modify-delete, which a resolution has to be able to answer (review R7). */
       sides: Readonly<{ ours: string; theirs: string | undefined; extra?: Readonly<Record<string, string>> }>,
-    ): Promise<Fixture & { readonly base: string; readonly ours: string; readonly theirs: string }> => {
-      const context = await fixture({ 'a.txt': 'base\n' }, (filesystem) => filesystem, { actorSet: actorSet.name });
+    ): Promise<
+      Fixture & {
+        readonly base: string;
+        readonly ours: string;
+        readonly theirs: string;
+        readonly write: (
+          content: Readonly<Record<string, string>>,
+          parents: readonly string[],
+          summary: string,
+        ) => Promise<string>;
+      }
+    > => {
+      const context = await fixture({ 'a.txt': 'base\n' }, (filesystem) => filesystem, {
+        actorSet: actorSet.name,
+        deviceId: () => 'device-a',
+      });
       const { port, filesystem } = context;
       await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
       await port.setHead('main');
@@ -1908,10 +1968,23 @@ for (const actorSet of actorSets) {
       await port.updateRef({ name: 'main', expectedHead: revisionId(base), head: revisionId(ours) });
       /* The live tree is on `main` and clean, which is the state the verb needs. */
       await filesystem.writeFile('a.txt', sides.ours);
-      return { ...context, base, ours, theirs };
+      return { ...context, base, ours, theirs, write };
     };
 
-    it('mints a conflicted revision on the source branch and leaves the target untouched', async () => {
+    /** This device's conflict line for `main` (D14). */
+    const line = 'conflicts/main/device-a';
+
+    const listed = async (context: Fixture): Promise<readonly ConflictRecord[]> => {
+      const { conflicts } = await run<{ conflicts: readonly ConflictRecord[] }>(
+        context.actors.checkouts.listCheckouts,
+        {
+          projectId: 'project-1',
+        },
+      );
+      return conflicts;
+    };
+
+    it('records a conflicted revision on main’s conflict line and leaves both branches untouched (D14)', async () => {
       const { port, actors, filesystem, ours, theirs } = await twoLines({
         ours: 'mine\n',
         theirs: 'theirs\n',
@@ -1930,9 +2003,12 @@ for (const actorSet of actorSets) {
       expect(before.head).toBe(ours);
       expect(before.tree).toBeDefined();
       expect(await captureMainAndLiveTrees(port, filesystem)).toStrictEqual(before);
+      /* The source branch no longer moves, and no checkout is made for the line. */
+      expect(await port.readRef('feature')).toBe(theirs);
+      const checkouts = await port.listCheckouts?.();
+      expect(checkouts?.map((checkout) => checkout.branch)).not.toContain(line);
 
-      const head = await port.readRef('feature');
-      expect(head).not.toBe(theirs);
+      const head = await port.readRef(line);
       const conflicted = await port.readRevision(revisionId(head ?? ''));
       expect(conflicted?.receipt.conflicted).toBe(true);
       expect(conflicted?.parents).toStrictEqual([theirs, ours]);
@@ -1944,7 +2020,7 @@ for (const actorSet of actorSets) {
       );
     }, 30_000);
 
-    it('loads a sync conflict from its dedicated branch', async () => {
+    it('records a sync conflict on the conflict line and loads it from there (D14)', async () => {
       const { port, actors, theirs } = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
       await port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: revisionId(theirs) });
 
@@ -1953,20 +2029,86 @@ for (const actorSet of actorSets) {
         remote: 'tau',
         branch: 'main',
       });
-      expect(outcome).toStrictEqual({
-        status: 'conflicted',
-        branch: 'sync/tau/main',
-        into: 'main',
-        paths: ['a.txt'],
-      });
+      expect(outcome).toStrictEqual({ status: 'conflicted', branch: line, into: 'main', paths: ['a.txt'] });
 
-      const conflict = await port.readRef('sync/tau/main');
+      const conflict = await port.readRef(line);
       await expect(
         run<{ paths: ReadonlyArray<{ path: string }> }>(actors.resolution.loadConflict, {
           projectId: 'project-1',
           revisionId: conflict,
         }),
       ).resolves.toMatchObject({ paths: [{ path: 'a.txt' }] });
+    }, 30_000);
+
+    it('lands a sync decision on main, so the next sync merge has nothing left to compose (E2E-D defect B)', async () => {
+      const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+      const { port, actors, filesystem, theirs } = context;
+      await port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: revisionId(theirs) });
+      const sync = async (): Promise<SyncMergeActorOutput> =>
+        run<SyncMergeActorOutput>(actors.sync.merge, { projectId: 'project-1', remote: 'tau', branch: 'main' });
+
+      await expect(sync()).resolves.toMatchObject({ status: 'conflicted', branch: line, into: 'main' });
+      const revision = (await port.readRef(line)) ?? '';
+      await run(actors.resolution.applyResolution, {
+        projectId: 'project-1',
+        revisionId: revision,
+        path: 'a.txt',
+        side: 'theirs',
+      });
+      const finished = await run<{ revisionId: string }>(actors.resolution.finishMerge, {
+        projectId: 'project-1',
+        revisionId: revision,
+      });
+
+      /* The decision is on main itself, not on a branch with its own checkout. */
+      expect(await port.readRef('main')).toBe(finished.revisionId);
+      expect(await filesystem.readFile('a.txt', 'utf8')).toBe('theirs\n');
+      const checkouts = await port.listCheckouts?.();
+      expect(checkouts?.map((checkout) => checkout.branch)).not.toContain(line);
+      /* The re-pull that follows composes nothing and refuses nothing. */
+      await expect(sync()).resolves.toMatchObject({ status: 'merged' });
+      expect(await port.readRef('main')).toBe(finished.revisionId);
+      expect(await listed(context)).toStrictEqual([]);
+    }, 30_000);
+
+    it('parents a second conflict on the line’s tip, re-records nothing, and lists both (D14)', async () => {
+      const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+      const { port, actors, filesystem, ours, theirs } = context;
+      const merge = async (): Promise<unknown> =>
+        run(actors.branch.merge, { projectId: 'project-1', branch: 'feature', into: 'main' });
+
+      await merge();
+      const first = (await port.readRef(line)) ?? '';
+      /* A re-pull of the same divergence reaches the same conflict. */
+      await merge();
+      expect(await port.readRef(line)).toBe(first);
+
+      /* This device keeps working on `main`; the next divergence is a second conflict. */
+      const later = await context.write({ 'a.txt': 'mine, later\n' }, [ours], 'Later');
+      await port.updateRef({ name: 'main', expectedHead: revisionId(ours), head: revisionId(later) });
+      await filesystem.writeFile('a.txt', 'mine, later\n');
+      await merge();
+      const second = (await port.readRef(line)) ?? '';
+      const record = await port.readRevision(revisionId(second));
+      expect(record?.parents).toStrictEqual([theirs, later, first]);
+
+      const both = await listed(context);
+      expect(both.map((conflict) => conflict.revisionId)).toStrictEqual([second, first]);
+      expect(await listed(context)).toContainEqual({ revisionId: first, line, into: 'main', foreign: false });
+    }, 30_000);
+
+    it('refuses a branch named conflicts, at creation and at rename (D14)', async () => {
+      const { actors } = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+
+      await expect(
+        run(actors.checkouts.addCheckout, { projectId: 'project-1', branch: 'conflicts', from: '' }),
+      ).rejects.toMatchObject({
+        code: 'BRANCH_NAME_RESERVED',
+        message: expect.stringContaining('conflicts') as unknown as string,
+      });
+      await expect(
+        run(actors.branch.rename, { projectId: 'project-1', branch: 'feature', name: 'conflicts/mine' }),
+      ).rejects.toMatchObject({ code: 'BRANCH_NAME_RESERVED' });
     }, 30_000);
 
     it('records a merge revision and rewrites the target when the two lines settle', async () => {
@@ -2066,6 +2208,11 @@ for (const actorSet of actorSets) {
     /* The composition `finishMerge` performs is the subtlest code in the lane and
      the machine suite proves none of it — fake actors prove the choreography.
      These run the real effect over a real port (review R7). */
+    const keep = async (
+      context: Fixture,
+      choice: Readonly<{ revisionId: string; path: string; side: string; content?: string }>,
+    ): Promise<void> => run(context.actors.resolution.applyResolution, { projectId: 'project-1', ...choice });
+
     describe('resolving what the merge could not', () => {
       /** Merge `feature` into `main` and answer with the conflicted revision. */
       const conflicted = async (context: Fixture): Promise<string> => {
@@ -2075,22 +2222,17 @@ for (const actorSet of actorSets) {
           into: 'main',
         });
         expect(outcome.status).toBe('conflicted');
-        return (await context.port.readRef('feature')) ?? '';
+        return (await context.port.readRef(line)) ?? '';
       };
 
-      const keep = async (
-        context: Fixture,
-        choice: Readonly<{ revisionId: string; path: string; side: string; content?: string }>,
-      ): Promise<void> => run(context.actors.resolution.applyResolution, { projectId: 'project-1', ...choice });
-
-      it('composes the chosen sides into one revision and moves the branch onto it', async () => {
+      it('lands the decision on main as a merge with the conflicted revision among its parents (D14)', async () => {
         const context = await twoLines({
           ours: 'mine\n',
           theirs: 'theirs\n',
           extra: { 'settled.txt': 'theirs only\n' },
         });
         const revision = await conflicted(context);
-        const before = await captureMainAndLiveTrees(context.port, context.filesystem);
+        expect(await listed(context)).toHaveLength(1);
 
         await keep(context, { revisionId: revision, path: 'a.txt', side: 'mine' });
         const finished = await run<{ revisionId: string; branch?: string }>(context.actors.resolution.finishMerge, {
@@ -2098,18 +2240,155 @@ for (const actorSet of actorSets) {
           revisionId: revision,
         });
 
-        expect(finished.branch).toBe('feature');
-        expect(await context.port.readRef('feature')).toBe(finished.revisionId);
+        expect(finished.branch).toBe(line);
+        expect(await context.port.readRef('main')).toBe(finished.revisionId);
+        const landed = await context.port.readRevision(revisionId(finished.revisionId));
+        expect(landed?.parents).toStrictEqual([context.ours, revision]);
         const resolvedTree = await context.port.readTree(revisionId(finished.revisionId));
         expect(new TextDecoder().decode(resolvedTree?.get('a.txt'))).toBe('mine\n');
         /* Everything that settled rides through untouched, and no marker byte
          reaches the tree (A22). */
         expect(new TextDecoder().decode(resolvedTree?.get('settled.txt'))).toBe('theirs only\n');
         expect(new TextDecoder().decode(resolvedTree?.get('a.txt'))).not.toContain('<<<<<<<');
-        /* And the branch merged into is still exactly where it was (AC14). */
-        expect(before.head).toBe(context.ours);
-        expect(before.tree).toBeDefined();
-        expect(await captureMainAndLiveTrees(context.port, context.filesystem)).toStrictEqual(before);
+        /* The live files carry it, the line never moved, and ancestry hides it. */
+        expect(await context.filesystem.readFile('settled.txt', 'utf8')).toBe('theirs only\n');
+        expect(await context.port.readRef(line)).toBe(revision);
+        expect(await listed(context)).toStrictEqual([]);
+      }, 30_000);
+
+      it('refuses an edited choice whose sides moved since, and a decision whose line is gone (RV-W6 F9, F11)', async () => {
+        const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+        const revision = await conflicted(context);
+        await run(context.actors.resolution.applyResolution, {
+          projectId: 'project-1',
+          revisionId: revision,
+          path: 'a.txt',
+          side: 'editor',
+          content: 'blended\n',
+        });
+        /* The file on main moved after the person edited against it. */
+        const later = await context.write({ 'a.txt': 'mine, later\n' }, [context.ours], 'Later');
+        await context.port.updateRef({ name: 'main', expectedHead: revisionId(context.ours), head: revisionId(later) });
+        await context.filesystem.writeFile('a.txt', 'mine, later\n');
+        await expect(
+          run(context.actors.resolution.finishMerge, { projectId: 'project-1', revisionId: revision }),
+        ).rejects.toThrow(/a\.txt changed since you edited it/u);
+        expect(await context.port.readRef('main')).toBe(later);
+
+        /* The line it decides is gone: nowhere to land, and Remove is the way out. */
+        await context.port.updateRef({ name: 'main', expectedHead: revisionId(later) });
+        await expect(
+          run(context.actors.resolution.finishMerge, { projectId: 'project-1', revisionId: revision }),
+        ).rejects.toThrow(/nowhere to land\. Remove it from Branches/u);
+      }, 30_000);
+
+      it('counts a decision landed on the remote’s main as decided while this main has diverged (RV-W6 F6)', async () => {
+        const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+        const revision = await conflicted(context);
+        expect(await listed(context)).toHaveLength(1);
+
+        /* Another device decided it and pushed; this device's own main moved on elsewhere. */
+        const decided = await context.write({ 'a.txt': 'decided\n' }, [context.ours, revision], 'Decided elsewhere');
+        await context.port.updateRef({
+          name: 'refs/remotes/tau/main',
+          expectedHead: undefined,
+          head: revisionId(decided),
+        });
+        const local = await context.write({ 'a.txt': 'mine\n', 'b.txt': 'later\n' }, [context.ours], 'Later here');
+        await context.port.updateRef({ name: 'main', expectedHead: revisionId(context.ours), head: revisionId(local) });
+
+        expect(await listed(context)).toStrictEqual([]);
+      }, 30_000);
+
+      it('a branch-merge conflict decided on a second device keeps the feature’s hunks (RV-W6 F1)', async () => {
+        const context = await twoLines({
+          ours: 'mine\n',
+          theirs: 'theirs\n',
+          extra: { 'settled.txt': 'theirs only\n' },
+        });
+        const revision = await conflicted(context);
+        /* Another device over the same store: the line is foreign to it, and its `main` is the recorder's. */
+        const second = createRevisionActors({
+          port: context.port,
+          projectId: 'project-1',
+          authorityEpoch: 'epoch-1',
+          deviceId: () => 'device-b',
+          filesystem: async () => context.filesystem,
+        });
+        const loaded = await run<{ paths: ReadonlyArray<{ path: string }> }>(second.resolution.loadConflict, {
+          projectId: 'project-1',
+          revisionId: revision,
+        });
+        expect(loaded.paths.map((entry) => entry.path)).toStrictEqual(['a.txt']);
+
+        await run(second.resolution.applyResolution, {
+          projectId: 'project-1',
+          revisionId: revision,
+          path: 'a.txt',
+          side: 'mine',
+        });
+        const finished = await run<{ revisionId: string }>(second.resolution.finishMerge, {
+          projectId: 'project-1',
+          revisionId: revision,
+        });
+        const landedTree = await context.port.readTree(revisionId(finished.revisionId));
+        expect(new TextDecoder().decode(landedTree?.get('a.txt'))).toBe('mine\n');
+        expect(new TextDecoder().decode(landedTree?.get('settled.txt'))).toBe('theirs only\n');
+      }, 30_000);
+
+      it('keeps the other side’s clean hunks under Keep mine (RV-W5b2 R2-4)', async () => {
+        const context = await twoLines({
+          ours: 'one\nTWO mine\nthree\nfour\nfive\n',
+          theirs: 'one\nTWO theirs\nthree\nfour\nFIVE\n',
+        });
+        /* The base the two sides changed, rather than twoLines' one-line file. */
+        const base = await context.write({ 'a.txt': 'one\ntwo\nthree\nfour\nfive\n' }, [], 'Five lines');
+        const ours = await context.write({ 'a.txt': 'one\nTWO mine\nthree\nfour\nfive\n' }, [base], 'Ours');
+        const theirs = await context.write({ 'a.txt': 'one\nTWO theirs\nthree\nfour\nFIVE\n' }, [base], 'Theirs');
+        await context.port.updateRef({ name: 'main', expectedHead: revisionId(context.ours), head: revisionId(ours) });
+        await context.port.updateRef({
+          name: 'feature',
+          expectedHead: revisionId(context.theirs),
+          head: revisionId(theirs),
+        });
+        const revision = await conflicted(context);
+
+        await keep(context, { revisionId: revision, path: 'a.txt', side: 'mine' });
+        const finished = await run<{ revisionId: string }>(context.actors.resolution.finishMerge, {
+          projectId: 'project-1',
+          revisionId: revision,
+        });
+
+        const resolvedTree = await context.port.readTree(revisionId(finished.revisionId));
+        expect(new TextDecoder().decode(resolvedTree?.get('a.txt'))).toBe('one\nTWO mine\nthree\nfour\nFIVE\n');
+      }, 30_000);
+
+      it('carries work main gained after the conflict, and refuses over unsaved files (D14, I1)', async () => {
+        const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+        const revision = await conflicted(context);
+        /* This device kept working after the conflict was recorded. */
+        const later = await context.write({ 'a.txt': 'mine\n', 'b.txt': 'later\n' }, [context.ours], 'Later');
+        await context.port.updateRef({ name: 'main', expectedHead: revisionId(context.ours), head: revisionId(later) });
+        await context.filesystem.writeFile('b.txt', 'later\n');
+        await keep(context, { revisionId: revision, path: 'a.txt', side: 'theirs' });
+
+        /* A file no revision holds is never overwritten. */
+        await context.filesystem.writeFile('b.txt', 'typed, not saved\n');
+        await expect(
+          run(context.actors.resolution.finishMerge, { projectId: 'project-1', revisionId: revision }),
+        ).rejects.toMatchObject({ message: expect.stringContaining('not in a revision yet') as unknown as string });
+        expect(await context.port.readRef('main')).toBe(later);
+        await context.filesystem.writeFile('b.txt', 'later\n');
+
+        const finished = await run<{ revisionId: string }>(context.actors.resolution.finishMerge, {
+          projectId: 'project-1',
+          revisionId: revision,
+        });
+        const resolvedTree = await context.port.readTree(revisionId(finished.revisionId));
+        expect(new TextDecoder().decode(resolvedTree?.get('a.txt'))).toBe('theirs\n');
+        expect(new TextDecoder().decode(resolvedTree?.get('b.txt'))).toBe('later\n');
+        const landed = await context.port.readRevision(revisionId(finished.revisionId));
+        expect(landed?.parents).toStrictEqual([later, revision]);
       }, 30_000);
 
       it('takes the editor’s bytes when a person composed the two sides by hand', async () => {
@@ -2189,8 +2468,151 @@ for (const actorSet of actorSets) {
         await expect(
           run(context.actors.resolution.finishMerge, { projectId: 'project-1', revisionId: revision }),
         ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
-        /* Refused, and nothing moved: the branch still holds the conflict. */
-        expect(await context.port.readRef('feature')).toBe(revision);
+        /* Refused, and nothing moved: the line still holds the conflict and main is where it was. */
+        expect(await context.port.readRef(line)).toBe(revision);
+        expect(await context.port.readRef('main')).toBe(context.ours);
+      }, 30_000);
+    });
+
+    describe('recording an editor’s overlapping edit (D14, RV-W5b2 R2-1)', () => {
+      /** Another device's revision over `base` was applied to `main` while an editor held `base`. */
+      const applied = async (theirs: string | undefined): Promise<Awaited<ReturnType<typeof twoLines>>> => {
+        const context = await twoLines({ ours: 'base\n', theirs });
+        await context.port.updateRef({
+          name: 'main',
+          expectedHead: revisionId(context.ours),
+          head: revisionId(context.theirs),
+        });
+        await (theirs === undefined
+          ? context.filesystem.unlink('a.txt')
+          : context.filesystem.writeFile('a.txt', theirs));
+        return context;
+      };
+
+      it('records it on the conflict line with the exact three terms, and writes nothing', async () => {
+        const context = await applied('theirs\n');
+
+        const outcome = await context.actors.recordEditorConflict({ path: 'a.txt', base: 'base\n', mine: 'mine\n' });
+
+        expect(outcome).toMatchObject({ status: 'recorded', line, into: 'main' });
+        const revision = outcome.status === 'recorded' ? outcome.revisionId : '';
+        expect(await context.port.readRef(line)).toBe(revision);
+        expect(await context.port.readRef('main')).toBe(context.theirs);
+        expect(await context.filesystem.readFile('a.txt', 'utf8')).toBe('theirs\n');
+        const opened = await run<{ ours: string; theirs: string; text?: string }>(
+          context.actors.resolution.materialize,
+          { projectId: 'project-1', revisionId: revision, path: 'a.txt' },
+        );
+        expect({ ours: opened.ours, theirs: opened.theirs }).toStrictEqual({ ours: 'mine\n', theirs: 'theirs\n' });
+        expect(opened.text).toContain('<<<<<<<');
+
+        /* A reload is a fresh actor set over the same store: the decision is still there. */
+        const reloaded = createRevisionActors({
+          port: context.port,
+          projectId: 'project-1',
+          authorityEpoch: 'epoch-1',
+          deviceId: () => 'device-a',
+          filesystem: async () => context.filesystem,
+        });
+        const relisted = await run<{ conflicts: readonly ConflictRecord[] }>(reloaded.checkouts.listCheckouts, {
+          projectId: 'project-1',
+        });
+        expect(relisted.conflicts).toStrictEqual([{ revisionId: revision, line, into: 'main', foreign: false }]);
+
+        await keep(context, { revisionId: revision, path: 'a.txt', side: 'mine' });
+        const finished = await run<{ revisionId: string }>(context.actors.resolution.finishMerge, {
+          projectId: 'project-1',
+          revisionId: revision,
+        });
+        expect(await context.filesystem.readFile('a.txt', 'utf8')).toBe('mine\n');
+        expect(await context.port.readRef('main')).toBe(finished.revisionId);
+        expect(await listed(context)).toStrictEqual([]);
+      }, 30_000);
+
+      it('lists the decision at once and offers its line to the remote, through the project tree', async () => {
+        const context = await applied('theirs\n');
+        const tree = createProjectRevisionsActor({
+          port: context.port,
+          projectId: 'project-1',
+          authorityEpoch: 'epoch-1',
+          deviceId: () => 'device-a',
+          filesystem: async () => context.filesystem,
+        });
+        tree.actor.start();
+        try {
+          await expect.poll(() => tree.actor.getSnapshot().context.registrySettled, { timeout: 10_000 }).toBe(true);
+          /* Record what the wrapper sends the root; `send` is a prototype getter, so the instance shadows it. */
+          const sent: Array<Readonly<{ type: string }>> = [];
+          const original = tree.actor.send;
+          Object.defineProperty(tree.actor, 'send', {
+            value: (event: Parameters<typeof original>[0]) => {
+              sent.push(event);
+              original(event);
+            },
+          });
+
+          const outcome = await tree.recordEditorConflict({ path: 'a.txt', base: 'base\n', mine: 'mine\n' });
+
+          expect(outcome).toMatchObject({ status: 'recorded', line });
+          /* The card needs no reload, and the line travels now rather than with the next save. */
+          expect(sent.map((event) => event.type)).toStrictEqual(['mergeConflicted', 'syncNow']);
+          await expect
+            .poll(() => tree.actor.getSnapshot().context.conflicts.map((conflict) => conflict.line), {
+              timeout: 10_000,
+            })
+            .toStrictEqual([line]);
+        } finally {
+          tree.actor.stop();
+        }
+      }, 30_000);
+
+      it('keeps the edit a conflict when no revision holds what it was made from (RV-W6 F10)', async () => {
+        const context = await twoLines({ ours: 'base\n', theirs: 'theirs\n' });
+        /* A line whose every revision already holds the arrived text. */
+        const only = await context.write({ 'a.txt': 'theirs\n' }, [], 'Only');
+        await context.port.updateRef({ name: 'main', expectedHead: revisionId(context.ours), head: revisionId(only) });
+        await context.filesystem.writeFile('a.txt', 'theirs\n');
+
+        const outcome = await context.actors.recordEditorConflict({
+          path: 'a.txt',
+          base: 'never saved\n',
+          mine: 'mine\n',
+        });
+        const revision = outcome.status === 'recorded' ? outcome.revisionId : '';
+        const loaded = await run<{ paths: ReadonlyArray<{ path: string }> }>(context.actors.resolution.loadConflict, {
+          projectId: 'project-1',
+          revisionId: revision,
+        });
+        expect(loaded.paths.map((entry) => entry.path)).toStrictEqual(['a.txt']);
+      }, 30_000);
+
+      it('asks keep-or-let-go when the other side deleted the file (R2-3)', async () => {
+        const context = await applied(undefined);
+
+        const outcome = await context.actors.recordEditorConflict({ path: 'a.txt', base: 'base\n', mine: 'mine\n' });
+        const revision = outcome.status === 'recorded' ? outcome.revisionId : '';
+        const loaded = await run<{ paths: ReadonlyArray<{ path: string; openable: boolean }> }>(
+          context.actors.resolution.loadConflict,
+          { projectId: 'project-1', revisionId: revision },
+        );
+        expect(loaded.paths).toStrictEqual([{ path: 'a.txt', openable: false }]);
+
+        await keep(context, { revisionId: revision, path: 'a.txt', side: 'theirs' });
+        const finished = await run<{ revisionId: string }>(context.actors.resolution.finishMerge, {
+          projectId: 'project-1',
+          revisionId: revision,
+        });
+        const landedTree = await context.port.readTree(revisionId(finished.revisionId));
+        expect(landedTree?.has('a.txt')).toBe(false);
+      }, 30_000);
+
+      it('answers unchanged when the file is back on the bytes the edit was made from', async () => {
+        const context = await twoLines({ ours: 'base\n', theirs: 'theirs\n' });
+
+        await expect(
+          context.actors.recordEditorConflict({ path: 'a.txt', base: 'base\n', mine: 'mine\n' }),
+        ).resolves.toStrictEqual({ status: 'unchanged' });
+        expect(await context.port.readRef(line)).toBeUndefined();
       }, 30_000);
     });
   });

@@ -725,8 +725,9 @@ const branchMachineDefinition = setup({
     },
     conflicted: {
       /* The fact goes to the parent as well as out, exactly as `applySwitch`'s
-       * `checkoutChanged` does: a conflicted merge moved the source branch, so
-       * the registry is stale and nothing else would ever say so. Without this
+       * `checkoutChanged` does: a conflicted merge recorded a revision on the
+       * conflict line (D14), so the registry is stale and nothing else would
+       * ever say so. Without this
        * send the conflict is real in the graph and invisible on the screen
        * until the project is reopened (W10 review R1, P41). */
       entry: ({ context }, enq) => {

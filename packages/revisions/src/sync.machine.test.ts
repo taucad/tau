@@ -97,7 +97,8 @@ const isMachine = (value: unknown): boolean =>
 
 const emptyQueue: SyncQueueRecord = { version: 1, entries: [] };
 const mainRef = 'refs/heads/main';
-const syncBranch = 'sync/tau/main';
+/* A divergence is recorded on this device's conflict line for `main` (D14). */
+const syncBranch = 'conflicts/main/device-a';
 const syncRef = `refs/heads/${syncBranch}`;
 const chatRef = 'refs/tau/chats/c1';
 const mergeConflict = {
@@ -1168,6 +1169,47 @@ describe('syncMachine', () => {
     await conflict();
     harness.actor.send({ type: 'conflictResolved', ref: 'refs/heads/other' });
     expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
+
+    harness.stop();
+  });
+
+  it('row 32b (D14): a conflict pushes its line alone, and a remote move pulls the decision in', async () => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
+
+    /* The line travels on its own: the diverged `main` would sink an atomic set. */
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('push').at(-1)).toMatchObject({ refs: [syncRef] });
+    harness.effects.settle('push', { output: pushResult({ name: syncRef, status: 'updated', head: 'c1' }) });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().context.leases[syncRef]).toBe('c1');
+    });
+    expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
+
+    /* Another device landed the decision: this one pulls rather than waiting for *Sync now*. */
+    harness.actor.send({ type: 'remoteMoved', generation: 2, refs: [mainRef] });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+
+    harness.stop();
+  });
+
+  it('row 32c (D14): a decision landed while backed up is pushed like a mint', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    /* A conflict fetched from another device, decided here: the merge is this device's own and unsent. */
+    harness.actor.send({ type: 'conflictResolved', ref: 'refs/heads/conflicts/main/device-b', revisionId: 'r-merge' });
+    harness.clock.advance(2000);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
 
     harness.stop();
   });

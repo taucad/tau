@@ -39,6 +39,7 @@ export type {
   AddCheckoutInput,
   Checkout,
   CheckoutRecord,
+  ConflictRecord,
   CreateRevisionTagInput,
   InitRevisionStoreInput,
   RevisionConflict,
@@ -125,8 +126,15 @@ export type { GitRemoteCredential, Remote, RemoteKind, RemoteReauthorizationCode
 export { watchRevisionStream } from '#revision-stream.js';
 export type { RevisionStreamHandlers } from '#revision-stream.js';
 export type { TauCloudAuth } from '#remotes.js';
-export { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
-export type { RevisionConflictTerms } from '#revision-conflict.js';
+export {
+  conflictLabels,
+  conflictLineOf,
+  isReservedBranchName,
+  materializeConflict,
+  parseConflictLine,
+  readConflictTerms,
+} from '#revision-conflict.js';
+export type { ConflictPerspective, RevisionConflictTerms } from '#revision-conflict.js';
 export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 export type { RevisionLogRequest, RevisionPlace, RevisionRow } from '#revision-verbs.js';
 export {

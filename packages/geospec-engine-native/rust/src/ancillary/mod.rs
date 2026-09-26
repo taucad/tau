@@ -88,17 +88,8 @@ impl PreparedQuery {
 
     pub(crate) fn demand(&self) -> AnalysisDemand {
         match self {
-            Self::Pmi(_) => AnalysisDemand::default(),
-            Self::Mesh => AnalysisDemand {
-                mesh: true,
-                ..AnalysisDemand::default()
-            },
-            Self::Brep => AnalysisDemand {
-                brep: true,
-                ..AnalysisDemand::default()
-            },
+            Self::Pmi(_) | Self::Mesh | Self::Brep => AnalysisDemand::default(),
             Self::Inspection(_) => AnalysisDemand {
-                brep: true,
                 selectors: true,
                 ..AnalysisDemand::default()
             },

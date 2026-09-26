@@ -94,22 +94,11 @@ impl Prepared {
 
     pub(crate) fn demand(&self) -> AnalysisDemand {
         match self {
-            Self::ComponentInterference(_) => AnalysisDemand {
-                mesh: true,
-                brep: true,
+            Self::ComponentInterference(_) | Self::VoidContinuity(_) => AnalysisDemand {
                 csg: true,
                 ..AnalysisDemand::default()
             },
-            Self::MinimumWallThickness(_) => AnalysisDemand {
-                brep: true,
-                wall: true,
-                ..AnalysisDemand::default()
-            },
-            Self::VoidContinuity(_) => AnalysisDemand {
-                brep: true,
-                csg: true,
-                ..AnalysisDemand::default()
-            },
+            Self::MinimumWallThickness(_) => AnalysisDemand::default(),
         }
     }
 

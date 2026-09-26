@@ -30,12 +30,9 @@ pub(crate) fn validate_query_polarity(
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct AnalysisDemand {
-    pub mesh: bool,
     pub connected_components_tolerance_bits: Option<u64>,
-    pub brep: bool,
     pub selectors: bool,
     pub csg: bool,
-    pub wall: bool,
 }
 
 /// Check one supplied payload and lower authored arguments without geometry.

@@ -116,7 +116,6 @@ impl Prepared {
 
     pub(crate) fn demand(&self) -> AnalysisDemand {
         AnalysisDemand {
-            brep: true,
             selectors: true,
             ..AnalysisDemand::default()
         }

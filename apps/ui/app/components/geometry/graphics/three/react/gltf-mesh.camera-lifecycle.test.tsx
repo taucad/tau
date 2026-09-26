@@ -137,8 +137,8 @@ vi.mock('#machines/model-interaction.machine.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/use-section-view.js', () => ({
-  createSectionViewRaycastClipState: () => mocks.raycastClipState,
-  useSectionView: () => mocks.sectionView,
+  resolveSectionViewRaycastClip: () => mocks.raycastClipState,
+  useSectionViewFlags: () => mocks.sectionView,
 }));
 
 vi.mock('#components/geometry/graphics/metadata/gltf-component-manifest.js', () => ({
@@ -601,6 +601,32 @@ describe('GltfMesh camera lifecycle', () => {
 
     view.unmount();
     expect(gltf.scene.raycast).toBe(originalRaycast);
+  });
+
+  it('should clip model hits with the section plane current at raycast time, without re-rendering', async () => {
+    const gltf = createGltf();
+    const near = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
+    const far = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
+    near.position.z = -2;
+    far.position.z = -4;
+    gltf.scene.add(near, far);
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    const view = render(<GltfMesh gltfFile={new Uint8Array([1])} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(view.container.querySelector('primitive')).not.toBeNull();
+    });
+    for (const mesh of [near, far]) {
+      setModelComponentOwner(mesh, { unitId: 'unit:test', componentId: 'root' });
+    }
+    gltf.scene.updateMatrixWorld(true);
+    const raycaster = new Raycaster(new Vector3(), new Vector3(0, 0, -1));
+    expect(raycaster.intersectObject(gltf.scene, true).map((hit) => hit.object)).toEqual([near]);
+
+    // A section drag step moves the cut without re-rendering the model; the next raycast still honours it.
+    mocks.raycastClipState = { enabled: true, planes: [new Plane(new Vector3(0, 0, -1), -3)] };
+    expect(raycaster.intersectObject(gltf.scene, true).map((hit) => hit.object)).toEqual([far]);
+
+    view.unmount();
   });
 
   it('should reuse the authoritative R3F hit for hover, selection and the secondary-pointer menu', async () => {

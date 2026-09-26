@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '#filesystem/handle-store.js';
@@ -289,5 +289,41 @@ describe('FileSystemSettings workspace disconnect', () => {
       expect(mockToastError).toHaveBeenCalledWith('Failed to reconnect workspace.');
     });
     expect(error).toHaveBeenCalled();
+  });
+});
+
+/** D20: materialize on sign-in is off by default and names one workspace when on. */
+describe('FileSystemSettings Tau Cloud projects', () => {
+  const workspace = {
+    workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa',
+    name: 'Parts',
+    lastConnectedAt: 0,
+    slug: 'parts',
+  } satisfies Workspace;
+
+  beforeEach(async () => {
+    const { materializeOnSignIn } = await import('#hooks/use-cloud-projects.js');
+    materializeOnSignIn.set(undefined);
+    stubEstimate(async () => ({ usage: 0, quota: 0 }));
+    mockListWorkspaces.mockResolvedValue([workspace]);
+    mockGetWorkspace.mockResolvedValue(undefined);
+  });
+
+  it('should leave materialize on sign-in off by default', async () => {
+    render(<FileSystemSettings />);
+
+    const group = await screen.findByRole('group', { name: 'Workspace for Tau Cloud projects' });
+    expect(within(group).getByRole('radio', { name: 'Off' })).toBeChecked();
+  });
+
+  it('should remember the one workspace that receives Tau Cloud projects', async () => {
+    const { materializeOnSignIn } = await import('#hooks/use-cloud-projects.js');
+    render(<FileSystemSettings />);
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'Parts' }));
+
+    expect(materializeOnSignIn.get()).toEqual({ kind: 'workspace', workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa' });
+    expect(screen.getByRole('radio', { name: 'Parts' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Off' })).not.toBeChecked();
   });
 });

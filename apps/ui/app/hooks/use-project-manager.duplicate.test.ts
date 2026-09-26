@@ -219,6 +219,17 @@ describe('useProjectManager.duplicateProject', () => {
     expect(mockReadVersionedProjectFiles).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
   });
 
+  /* D19 (W11 a2): a copy has no remote of its own, so it backs up by default. */
+  it('should mark the duplicate for backup by default', async () => {
+    localStorage.clear();
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await act(async () => result.current.duplicateProject(sourceProject.id));
+
+    const targetId = mockDuplicate.mock.calls[0]?.[0].targetManifest.id ?? '';
+    expect(localStorage.getItem(`tau:tau-cloud-intent:${targetId}`)).toBe('default');
+    expect(localStorage.getItem(`tau:tau-cloud-intent:${sourceProject.id}`)).toBeNull();
+  });
+
   it('journals only the project, never the control plane, records or cache beside it', async () => {
     /* The raw directory read this replaced handed the journal every byte in the
      * project directory: the duplicate then carried the source's `.git`, its

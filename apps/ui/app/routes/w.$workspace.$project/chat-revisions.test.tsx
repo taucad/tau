@@ -21,6 +21,7 @@ import type { RevisionCard } from '#hooks/use-revisions.js';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { consumeRevisionReveal, requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
@@ -72,6 +73,11 @@ const chats = [
   { id: 'chat-2', name: 'Sketch lid', checkoutId: undefined },
 ];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+/* D19: the backup-by-default line asks about the account; these rows are signed in and entitled. */
+vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useTauCloudEligibility: () => ({ auth: 'authed', isResolved: true, canSyncFiles: true }),
+}));
 const placeChat = vi.fn(async () => undefined);
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({ placeChat }),
@@ -1222,5 +1228,79 @@ describe('Revisions pane vocabulary and History', () => {
 
     expect(await screen.findByText('Tau agent')).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/claude-opus-4|user_2abc|anon:/u);
+  });
+});
+
+/**
+ * D19: a new project on an entitled account backs up by default, with one line
+ * in *Where you are* and a per-project opt-out. The default connection itself
+ * is the session's (`project-live-sessions.test.tsx`); this is what the person
+ * sees and turns off.
+ */
+describe('Backup by default (D19)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('offers the opt-out before the first revision leaves the device', async () => {
+    const user = userEvent.setup();
+    tauCloudIntent.set('p', 'default');
+
+    renderPane();
+
+    expect(await screen.findByText('Backs up to Tau Cloud automatically.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Turn off backup' }));
+
+    /* Nothing was connected yet, so there is nothing to disconnect; the intent is gone, so a reload stays off. */
+    expect(revisionStatusHarness.commands.disconnectRemote).not.toHaveBeenCalled();
+    expect(localStorage.getItem('tau:tau-cloud-intent:p')).toBeNull();
+    expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
+  });
+
+  it('reads Saved · Backed up after the default connection, with no Connect step, and turns it off', async () => {
+    const user = userEvent.setup();
+    tauCloudIntent.set('p', 'notice');
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-1',
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+      sync: { ...revisionStatusHarness.status.sync, state: 'backedUp' },
+    };
+
+    renderPane();
+
+    await waitFor(() => {
+      expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent('Saved · Backed up');
+    });
+    expect(screen.getByText('Backs up to Tau Cloud automatically.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Turn off backup' }));
+
+    expect(revisionStatusHarness.commands.disconnectRemote).toHaveBeenCalledOnce();
+    expect(tauCloudIntent.get('p')).toBeUndefined();
+  });
+
+  it('dismisses the line and keeps the backup', async () => {
+    const user = userEvent.setup();
+    tauCloudIntent.set('p', 'notice');
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-1',
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    };
+
+    renderPane();
+    const sentence = await screen.findByText('Backs up to Tau Cloud automatically.');
+    const line = sentence.closest('[data-slot="backup-by-default"]');
+    await user.click(within(line as HTMLElement).getByRole('button', { name: 'Dismiss' }));
+
+    expect(revisionStatusHarness.commands.disconnectRemote).not.toHaveBeenCalled();
+    expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
+  });
+
+  it('shows no line for a project nothing is owed on', () => {
+    renderPane();
+
+    expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
   });
 });

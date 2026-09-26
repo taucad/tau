@@ -41,11 +41,15 @@ import {
   reportRegionReady,
 } from '#services/sessions-store.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
+import type { RevisionStatusProjection } from '@taucad/revisions';
+import { useTauCloudIntent, useTauCloudIntentConnection } from '#hooks/use-cloud-projects.js';
+import type { TauCloudIntent } from '#hooks/use-cloud-projects.js';
 import {
   useRevisionClientLifecycle,
   useRevisionClientStatus,
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
+import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { selectProjectKernelRefusal } from '#machines/project.machine.js';
@@ -135,6 +139,7 @@ function ProjectSessionBinding({
   const { parameterService, projectRef, editorRef } = useProject();
   const client = useRevisionClientLifecycle();
   const { connectRemote } = useRevisionCommands();
+  const cloudIntent = useTauCloudIntent(projectId);
   const chatSessions = useChatSessionStore();
   const session = useProjectSession(projectId);
   const viewsReady = useSelector(fileManagerRef, (state) => state.matches('ready'));
@@ -316,7 +321,42 @@ function ProjectSessionBinding({
     [projectId],
   );
 
-  return <UnsavedParameterDraftsDialog projectId={projectId} />;
+  return (
+    <>
+      <UnsavedParameterDraftsDialog projectId={projectId} />
+      {cloudIntent === undefined || cloudIntent === 'notice' || client === undefined ? null : (
+        <TauCloudIntentConnector
+          projectId={projectId}
+          intent={cloudIntent}
+          status={status}
+          connectRemote={connectRemote}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Acts on what this device owes the project's Tau Cloud backup (W11: D19's
+ * backup by default, D20's materialized projects). Mounted only while something
+ * is owed, so a project without an intent never asks for the session or the plan.
+ *
+ * @param props - The project, its intent, its projection and the connect verb.
+ * @returns Nothing; it only acts.
+ */
+function TauCloudIntentConnector({
+  projectId,
+  intent,
+  status,
+  connectRemote,
+}: {
+  readonly projectId: string;
+  readonly intent: TauCloudIntent;
+  readonly status: RevisionStatusProjection | undefined;
+  readonly connectRemote: RevisionCommands['connectRemote'];
+}): undefined {
+  useTauCloudIntentConnection({ projectId, intent, status, connectRemote });
+  return undefined;
 }
 
 function ProjectSession({

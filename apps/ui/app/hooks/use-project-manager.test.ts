@@ -15,7 +15,7 @@ import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project.types.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
-import type { ConnectedWorkspace, ProjectListing } from '#hooks/use-project-manager.js';
+import type { ConnectedWorkspace, CreateProjectOptions, ProjectListing } from '#hooks/use-project-manager.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
@@ -2067,6 +2067,39 @@ describe('useProjectManager.createProject', () => {
     );
 
     expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id).toBe('proj_ccccccccccccccccccccc');
+  });
+
+  /* D19 (W11 a2): a project born with no remote backs up by default; one
+     adopting an identity with a remote of its own does not. */
+  const remotelessCreations: ReadonlyArray<readonly [string, CreateProjectOptions]> = [
+    ['a fork', { project: { ...fakeProject, name: 'Fork of Test Project' }, files: {} }],
+    ['a file or zip import', { project: fakeProject, files: { 'main.ts': { content: new Uint8Array([1]) } } }],
+    ['a template', { kernel: 'openscad', projectName: 'Bracket' }],
+  ];
+  it.each(remotelessCreations)('should mark %s for backup by default', async (_label, options) => {
+    localStorage.clear();
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => result.current.createProject({ ...options, location: { kind: 'home' } }));
+
+    const createdId = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id ?? '';
+    expect(localStorage.getItem(`tau:tau-cloud-intent:${createdId}`)).toBe('default');
+  });
+
+  it('should not mark a project whose id the caller supplies (Tau Cloud open, linked GitHub import)', async () => {
+    localStorage.clear();
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        id: 'proj_ccccccccccccccccccccc',
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    );
+
+    expect(localStorage.getItem('tau:tau-cloud-intent:proj_ccccccccccccccccccccc')).toBeNull();
   });
 
   /* Review R4: *Open* is offered from a 30 s cache against an asynchronous

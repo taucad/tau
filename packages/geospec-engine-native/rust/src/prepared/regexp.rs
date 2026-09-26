@@ -3,7 +3,7 @@
 //! Instances are batch-owned. Matching has no fuel/backtracking bound; the
 //! deterministic claim work ledger must not be presented as such a bound.
 
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::analysis::selection::{EcmaRegexEngine, EcmaRegexError};
 use regress::{Flags, Regex};
@@ -14,17 +14,28 @@ struct CompiledPattern {
     sticky: bool,
 }
 
+/// One pattern's compiles, keyed by the authored flags that compiled.
+type FlagCompiles = Vec<(String, Rc<CompiledPattern>)>;
+
+/// Compiled patterns by pattern text, then by the authored flags. A hit is a
+/// borrowed lookup, so testing a value allocates no key (C11). Only flags that
+/// compiled are stored, so a hit implies they were valid.
 #[derive(Default)]
 pub(crate) struct SelectorRegex {
-    compiled: RefCell<BTreeMap<(String, String), Rc<CompiledPattern>>>,
+    compiled: RefCell<HashMap<String, FlagCompiles>>,
 }
 
 impl SelectorRegex {
     fn compile(&self, pattern: &str, flags: &str) -> Result<Rc<CompiledPattern>, EcmaRegexError> {
-        let key = (pattern.to_owned(), canonical_flags(flags)?);
-        if let Some(compiled) = self.compiled.borrow().get(&key) {
-            return Ok(Rc::clone(compiled));
+        if let Some(compiled) = self.compiled.borrow().get(pattern).and_then(|entries| {
+            entries
+                .iter()
+                .find(|(authored, _)| authored == flags)
+                .map(|(_, compiled)| Rc::clone(compiled))
+        }) {
+            return Ok(compiled);
         }
+        canonical_flags(flags)?;
         if flags.contains('v') {
             return Err(EcmaRegexError::Unsupported("ECMAScript UnicodeSets selectors (v flag) are not qualified by this regex implementation profile.".into()));
         }
@@ -55,7 +66,11 @@ impl SelectorRegex {
             unicode,
             sticky: flags.contains('y'),
         });
-        self.compiled.borrow_mut().insert(key, Rc::clone(&compiled));
+        self.compiled
+            .borrow_mut()
+            .entry(pattern.to_owned())
+            .or_default()
+            .push((flags.to_owned(), Rc::clone(&compiled)));
         Ok(compiled)
     }
 }
@@ -111,6 +126,21 @@ impl EcmaRegexEngine for SelectorRegex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_tests_reuse_one_compile_and_invalid_flags_still_refuse() {
+        let engine = SelectorRegex::default();
+        let first = engine.compile("^a", "i").unwrap();
+        assert!(engine.test("^a", "i", "Abc").unwrap());
+        assert!(Rc::ptr_eq(&first, &engine.compile("^a", "i").unwrap()));
+        assert_eq!(engine.compiled.borrow()["^a"].len(), 1);
+        assert!(matches!(
+            engine.validate("^a", "ii"),
+            Err(EcmaRegexError::InvalidSyntax(_))
+        ));
+        assert!(!engine.test("^a", "", "Abc").unwrap());
+        assert_eq!(engine.compiled.borrow()["^a"].len(), 2);
+    }
 
     #[test]
     fn ordinary_selector_features_match_independently_frozen_js_controls() {

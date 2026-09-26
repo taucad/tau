@@ -7,7 +7,7 @@ import type { RuntimeContentInput } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { getActiveGroupValues } from '@taucad/types';
 import type { ExportFile, FileExtension } from '@taucad/types';
-import { compileParameterManifest, projectDraft7SchemaToParameterDeclaration } from '@taucad/parameters';
+import { compileParameterManifest, projectJsonSchemaToParameterDeclaration } from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
 import Form from '@rjsf/core';
 import type { IChangeEvent } from '@rjsf/core';
@@ -132,7 +132,7 @@ export async function compileExportConfigurationManifest(
   // SAFETY: Web Crypto produced the 32-byte lowercase SHA-256 payload above.
   const revision = `sha256:${hash}` as ParameterManifest['identity']['dependency'];
   const manifest = await compileParameterManifest({
-    declaration: projectDraft7SchemaToParameterDeclaration({
+    declaration: projectJsonSchemaToParameterDeclaration({
       schema: resolved.schema,
       defaults: resolved.defaults,
       schemaId: `urn:taucad:configuration:${encodeURIComponent(provider)}:${encodeURIComponent(configuration)}`,

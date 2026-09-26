@@ -672,7 +672,7 @@ describe('Chat explorer component rows', () => {
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
-    const dropdownOpacity = screen.getByRole('textbox', { name: 'Opacity' });
+    const dropdownOpacity = screen.getByRole('spinbutton', { name: 'Opacity' });
     await user.click(dropdownOpacity);
     await user.clear(dropdownOpacity);
     await user.type(dropdownOpacity, '42');
@@ -729,7 +729,7 @@ describe('Chat explorer component rows', () => {
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
-    const contextOpacity = screen.getByRole('textbox', { name: 'Opacity' });
+    const contextOpacity = screen.getByRole('spinbutton', { name: 'Opacity' });
     await user.click(contextOpacity);
     await user.clear(contextOpacity);
     await user.type(contextOpacity, '37');

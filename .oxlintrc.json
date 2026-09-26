@@ -1229,7 +1229,8 @@
         "jsdoc-js/informative-docs": "warn",
         // Catches empty JSDoc blocks (/** */) that satisfy require-jsdoc but carry zero information.
         "jsdoc-js/no-blank-blocks": "warn",
-        // Enforces consistent tag ordering: @template → @param → @returns → @throws → @example → @see.
+        // Enforces eslint-plugin-jsdoc's default tag order, including the visibility tags:
+        // @template → @internal → @param → @returns → @throws → @public → @see → @example.
         // Only checks order, not spacing between groups (formatting is handled by oxfmt).
         "jsdoc-js/sort-tags": [
           "warn",

@@ -5,14 +5,13 @@
  * Purpose: Generate macOS Quick Look and Launch Services metadata from one format manifest.
  * Why: Finder extensions, the Electron host, and the converter graph must not drift apart.
  * Environment: Node.js with @oxc-node/core/register from the Tau workspace.
- * Usage: node --import @oxc-node/core/register scripts/generate-quick-look-metadata.mts [--check|--write]
+ * Usage: node --import @oxc-node/core/register apps/desktop/macos/scripts/generate-quick-look-metadata.mts [--check|--write]
  * Exit codes: 0 when generated files match; 1 for invalid input, drift, or write failures.
  */
 
 import { existsSync } from 'node:fs';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 import { converterImportFormats } from '@taucad/converter/runtime';
 
@@ -60,10 +59,10 @@ type UntrustedFormat = Partial<Omit<Format, 'fixture'>> & {
   };
 };
 
-const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const workspaceRoot = resolve(desktopRoot, '../..');
-const manifestPath = resolve(desktopRoot, 'macos/quick-look-formats.json');
-const generatedRoot = resolve(desktopRoot, 'macos/generated');
+const macosRoot = resolve(import.meta.dirname, '..');
+const workspaceRoot = resolve(macosRoot, '../../..');
+const manifestPath = resolve(macosRoot, 'quick-look-formats.json');
+const generatedRoot = resolve(macosRoot, 'generated');
 
 const xml = (value: string): string =>
   value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');

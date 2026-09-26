@@ -105,12 +105,36 @@ export function collectClippableTargets(rootGroup: THREE.Group, options: Collect
   return { meshes: meshChildren, lines: lineChildren };
 }
 
+/** One `[plane]` list per plane, shared by every material it clips; three only reads the list. */
+const clippingPlaneLists = new WeakMap<THREE.Plane, THREE.Plane[]>();
+
+const getClippingPlaneList = (plane: THREE.Plane): THREE.Plane[] => {
+  let planes = clippingPlaneLists.get(plane);
+  if (!planes) {
+    planes = [plane];
+    clippingPlaneLists.set(plane, planes);
+  }
+
+  return planes;
+};
+
+const enforceClipping = (material: THREE.Material, plane: THREE.Plane, enabled: boolean): void => {
+  if (enabled) {
+    if (material.clippingPlanes?.[0] !== plane) {
+      material.clippingPlanes = getClippingPlaneList(plane);
+    }
+  } else if (material.clippingPlanes?.length) {
+    material.clippingPlanes = [];
+  }
+};
+
 /**
  * Per-frame guard that ensures mesh materials retain the expected clipping planes.
  *
  * Material replacement operations (matcap toggle, GLTF reload) create new materials
  * that lack `clippingPlanes`. This function detects the mismatch and re-applies them.
- * When clipping is already correct, the reference identity check makes this a no-op.
+ * When clipping is already correct, the reference identity check makes this a no-op,
+ * and a new plane allocates one list for all materials rather than one per material.
  */
 export function enforceMaterialClipping(
   objects: ReadonlyArray<THREE.Mesh | THREE.LineSegments | LineSegments2>,
@@ -118,16 +142,12 @@ export function enforceMaterialClipping(
   enabled: boolean,
 ): void {
   for (const object of objects) {
-    const materials: THREE.Material[] = Array.isArray(object.material) ? object.material : [object.material];
-
-    for (const mat of materials) {
-      if (enabled) {
-        if (!mat.clippingPlanes?.length || mat.clippingPlanes[0] !== plane) {
-          mat.clippingPlanes = [plane];
-        }
-      } else if (mat.clippingPlanes?.length) {
-        mat.clippingPlanes = [];
+    if (Array.isArray(object.material)) {
+      for (const material of object.material) {
+        enforceClipping(material, plane, enabled);
       }
+    } else {
+      enforceClipping(object.material, plane, enabled);
     }
   }
 }

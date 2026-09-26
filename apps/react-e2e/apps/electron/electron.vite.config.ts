@@ -9,6 +9,14 @@ export default defineConfig(
     main: {
       build: {
         outDir: resolve(outputRoot, 'main'),
+        /* One graph for main and the utility it starts; `src/main/main.ts`
+         * resolves `kernel-host.js` beside `index.js`. */
+        rollupOptions: {
+          input: {
+            index: resolve(import.meta.dirname, 'src/main/index.ts'),
+            'kernel-host': resolve(import.meta.dirname, 'src/main/kernel-host.ts'),
+          },
+        },
       },
     },
     preload: {

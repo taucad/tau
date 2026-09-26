@@ -19,16 +19,20 @@ import thumbnail13 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
 import thumbnail14 from './kernels/replicad/hollow-box/thumbnail.webp?url';
 import thumbnail15 from './kernels/replicad/ibeam/thumbnail.webp?url';
 import thumbnail16 from './kernels/replicad/lego/thumbnail.webp?url';
-import thumbnail17 from './kernels/replicad/pot-plant/thumbnail.webp?url';
-import thumbnail18 from './kernels/replicad/simple-tray/thumbnail.webp?url';
-import thumbnail19 from './kernels/replicad/staircase/thumbnail.webp?url';
-import thumbnail20 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
-import thumbnail21 from './kernels/replicad/table/thumbnail.webp?url';
-import thumbnail22 from './kernels/replicad/tray/thumbnail.webp?url';
-import thumbnail23 from './kernels/replicad/vase/thumbnail.webp?url';
-import thumbnail24 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
-import thumbnail25 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
-import thumbnail26 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
+import thumbnail17 from './kernels/replicad/planetary-gear-system/thumbnail.webp?url';
+import thumbnail18 from './kernels/replicad/pot-plant/thumbnail.webp?url';
+import thumbnail19 from './kernels/replicad/simple-tray/thumbnail.webp?url';
+import thumbnail20 from './kernels/replicad/six-axis-arm/thumbnail.webp?url';
+import thumbnail21 from './kernels/replicad/staircase/thumbnail.webp?url';
+import thumbnail22 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
+import thumbnail23 from './kernels/replicad/table/thumbnail.webp?url';
+import thumbnail24 from './kernels/replicad/tray/thumbnail.webp?url';
+import thumbnail25 from './kernels/replicad/turbofan/thumbnail.webp?url';
+import thumbnail26 from './kernels/replicad/v8-engine/thumbnail.webp?url';
+import thumbnail27 from './kernels/replicad/vase/thumbnail.webp?url';
+import thumbnail28 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
+import thumbnail29 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail30 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
 
 const textAssetLoaders = import.meta.glob<string>(
   [
@@ -66,10 +70,18 @@ const textAssetLoaders = import.meta.glob<string>(
     './kernels/replicad/ibeam/tau.json',
     './kernels/replicad/lego/main.ts',
     './kernels/replicad/lego/tau.json',
+    './kernels/replicad/planetary-gear-system/DESIGN.md',
+    './kernels/replicad/planetary-gear-system/main.geospec.ts',
+    './kernels/replicad/planetary-gear-system/main.ts',
+    './kernels/replicad/planetary-gear-system/tau.json',
     './kernels/replicad/pot-plant/main.ts',
     './kernels/replicad/pot-plant/tau.json',
     './kernels/replicad/simple-tray/main.ts',
     './kernels/replicad/simple-tray/tau.json',
+    './kernels/replicad/six-axis-arm/DESIGN.md',
+    './kernels/replicad/six-axis-arm/main.geospec.ts',
+    './kernels/replicad/six-axis-arm/main.ts',
+    './kernels/replicad/six-axis-arm/tau.json',
     './kernels/replicad/staircase/main.ts',
     './kernels/replicad/staircase/tau.json',
     './kernels/replicad/t-slot-rail/main.ts',
@@ -78,6 +90,16 @@ const textAssetLoaders = import.meta.glob<string>(
     './kernels/replicad/table/tau.json',
     './kernels/replicad/tray/main.ts',
     './kernels/replicad/tray/tau.json',
+    './kernels/replicad/turbofan/DESIGN.md',
+    './kernels/replicad/turbofan/layout.ts',
+    './kernels/replicad/turbofan/main.geospec.ts',
+    './kernels/replicad/turbofan/main.ts',
+    './kernels/replicad/turbofan/tau.json',
+    './kernels/replicad/v8-engine/DESIGN.md',
+    './kernels/replicad/v8-engine/layout.ts',
+    './kernels/replicad/v8-engine/main.geospec.ts',
+    './kernels/replicad/v8-engine/main.ts',
+    './kernels/replicad/v8-engine/tau.json',
     './kernels/replicad/vase/main.ts',
     './kernels/replicad/vase/tau.json',
     './kernels/replicad/wavy-vase/main.ts',
@@ -111,12 +133,16 @@ const binaryAssetLoaders = import.meta.glob<string>(
     './kernels/replicad/hollow-box/thumbnail.webp',
     './kernels/replicad/ibeam/thumbnail.webp',
     './kernels/replicad/lego/thumbnail.webp',
+    './kernels/replicad/planetary-gear-system/thumbnail.webp',
     './kernels/replicad/pot-plant/thumbnail.webp',
     './kernels/replicad/simple-tray/thumbnail.webp',
+    './kernels/replicad/six-axis-arm/thumbnail.webp',
     './kernels/replicad/staircase/thumbnail.webp',
     './kernels/replicad/t-slot-rail/thumbnail.webp',
     './kernels/replicad/table/thumbnail.webp',
     './kernels/replicad/tray/thumbnail.webp',
+    './kernels/replicad/turbofan/thumbnail.webp',
+    './kernels/replicad/v8-engine/thumbnail.webp',
     './kernels/replicad/vase/thumbnail.webp',
     './kernels/replicad/wavy-vase/thumbnail.webp',
     './kernels/replicad/wedge-door-stopper/thumbnail.webp',
@@ -516,6 +542,33 @@ export const builtinExamples = [
     ],
   },
   {
+    locator: 'replicad.planetary-gear-system',
+    kernel: 'replicad',
+    manifest: {
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_K56O7izOKVeumWMffxb7J',
+      name: 'Planetary Gear System',
+      description:
+        'An open, coaxial 4:1 planetary stage: a fixed 72-tooth ring, a 24-tooth sun on a keyed input shaft and three 24-tooth planets on a twin-plate carrier with stepped pins, bronze bushings, thrust hardware and socket screws. The model declares its mechanism, so the sun, carrier and planets turn together at the true gear ratios, and GeoSpec checks cover the envelope, planet positions and tooth clearance across mesh phases.',
+      tags: ['assembly', 'gears', 'kinematics', 'parametric', 'replicad', 'manufacturing'],
+      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
+    },
+    thumbnailUrl: thumbnail17,
+    assets: [
+      { path: 'DESIGN.md', load: loadTextAsset.bind(undefined, './kernels/replicad/planetary-gear-system/DESIGN.md') },
+      {
+        path: 'main.geospec.ts',
+        load: loadTextAsset.bind(undefined, './kernels/replicad/planetary-gear-system/main.geospec.ts'),
+      },
+      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/planetary-gear-system/main.ts') },
+      { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/planetary-gear-system/tau.json') },
+      {
+        path: 'thumbnail.webp',
+        load: loadBinaryAsset.bind(undefined, './kernels/replicad/planetary-gear-system/thumbnail.webp'),
+      },
+    ],
+  },
+  {
     locator: 'replicad.pot-plant',
     kernel: 'replicad',
     manifest: {
@@ -527,7 +580,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail17,
+    thumbnailUrl: thumbnail18,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/pot-plant/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/pot-plant/tau.json') },
@@ -546,13 +599,40 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail18,
+    thumbnailUrl: thumbnail19,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/simple-tray/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/simple-tray/tau.json') },
       {
         path: 'thumbnail.webp',
         load: loadBinaryAsset.bind(undefined, './kernels/replicad/simple-tray/thumbnail.webp'),
+      },
+    ],
+  },
+  {
+    locator: 'replicad.six-axis-arm',
+    kernel: 'replicad',
+    manifest: {
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_3MEVtmRsZETjASPwp8gM0',
+      name: 'Six-Axis Arm',
+      description:
+        'A compact six-revolute industrial arm with a spherical wrist and a parallel gripper: turned pedestal and turntable, clevis shoulder, windowed twin-plate upper arm, rolling forearm and wrist clevis. The joint angles are parameters that pose the as-built model, and the declared mechanism carries realistic joint limits and a wave clip so the arm can be posed, played and dragged by its tool.',
+      tags: ['assembly', 'kinematics', 'robotics', 'parametric', 'replicad'],
+      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
+    },
+    thumbnailUrl: thumbnail20,
+    assets: [
+      { path: 'DESIGN.md', load: loadTextAsset.bind(undefined, './kernels/replicad/six-axis-arm/DESIGN.md') },
+      {
+        path: 'main.geospec.ts',
+        load: loadTextAsset.bind(undefined, './kernels/replicad/six-axis-arm/main.geospec.ts'),
+      },
+      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/six-axis-arm/main.ts') },
+      { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/six-axis-arm/tau.json') },
+      {
+        path: 'thumbnail.webp',
+        load: loadBinaryAsset.bind(undefined, './kernels/replicad/six-axis-arm/thumbnail.webp'),
       },
     ],
   },
@@ -568,7 +648,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail19,
+    thumbnailUrl: thumbnail21,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/staircase/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/staircase/tau.json') },
@@ -587,7 +667,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail20,
+    thumbnailUrl: thumbnail22,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/t-slot-rail/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/t-slot-rail/tau.json') },
@@ -609,7 +689,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail21,
+    thumbnailUrl: thumbnail23,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/table/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/table/tau.json') },
@@ -628,11 +708,55 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail22,
+    thumbnailUrl: thumbnail24,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/tray/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/tray/tau.json') },
       { path: 'thumbnail.webp', load: loadBinaryAsset.bind(undefined, './kernels/replicad/tray/thumbnail.webp') },
+    ],
+  },
+  {
+    locator: 'replicad.turbofan',
+    kernel: 'replicad',
+    manifest: {
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_CaIAcPYKNjKQ7026Sp7hD',
+      name: 'Turbofan Engine',
+      description:
+        'A two-spool, high-bypass turbofan at CFM56 scale: inlet, 22-blade fan, outlet guide vanes, three-stage booster, six-stage HP compressor with variable guide vanes, annular combustor with 20 fuel nozzles, two-stage HP and four-stage LP turbines, plug and nozzles, a radial drive to the accessory gearbox, and a translating-sleeve cascade thrust reverser. Its mechanism turns both spools and the radial drive, schedules the variable vanes from their unison rings, and deploys the reverser, whose blocker doors and drag links follow the exact linkage through sampled curve couplings.',
+      tags: ['assembly', 'kinematics', 'aerospace', 'engine', 'parametric', 'replicad'],
+      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
+    },
+    thumbnailUrl: thumbnail25,
+    assets: [
+      { path: 'DESIGN.md', load: loadTextAsset.bind(undefined, './kernels/replicad/turbofan/DESIGN.md') },
+      { path: 'layout.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/turbofan/layout.ts') },
+      { path: 'main.geospec.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/turbofan/main.geospec.ts') },
+      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/turbofan/main.ts') },
+      { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/turbofan/tau.json') },
+      { path: 'thumbnail.webp', load: loadBinaryAsset.bind(undefined, './kernels/replicad/turbofan/thumbnail.webp') },
+    ],
+  },
+  {
+    locator: 'replicad.v8-engine',
+    kernel: 'replicad',
+    manifest: {
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_4w9wTW4GJbpzweI6qnOwK',
+      name: 'V8 Engine',
+      description:
+        'A complete 90° pushrod V8 with a cross-plane crank and the 1-8-4-3-6-5-7-2 firing order: block, crank, pistons and rods, a valley camshaft driving flat-tappet lifters, pushrods, stud rockers and valves, heads, manifolds, timing drive and dress. Every repeated part is modelled once and instanced. Its mechanism drives all 64 moving parts from the crank through sampled curve couplings, so the engine can be turned, played through a full four-stroke cycle or dragged by any piston.',
+      tags: ['assembly', 'kinematics', 'automotive', 'engine', 'parametric', 'replicad'],
+      assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
+    },
+    thumbnailUrl: thumbnail26,
+    assets: [
+      { path: 'DESIGN.md', load: loadTextAsset.bind(undefined, './kernels/replicad/v8-engine/DESIGN.md') },
+      { path: 'layout.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/v8-engine/layout.ts') },
+      { path: 'main.geospec.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/v8-engine/main.geospec.ts') },
+      { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/v8-engine/main.ts') },
+      { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/v8-engine/tau.json') },
+      { path: 'thumbnail.webp', load: loadBinaryAsset.bind(undefined, './kernels/replicad/v8-engine/thumbnail.webp') },
     ],
   },
   {
@@ -647,7 +771,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail23,
+    thumbnailUrl: thumbnail27,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/vase/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/vase/tau.json') },
@@ -666,7 +790,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail24,
+    thumbnailUrl: thumbnail28,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/wavy-vase/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/wavy-vase/tau.json') },
@@ -685,7 +809,7 @@ export const builtinExamples = [
       tags: ['3d-printing', 'parametric', 'replicad'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail25,
+    thumbnailUrl: thumbnail29,
     assets: [
       { path: 'main.ts', load: loadTextAsset.bind(undefined, './kernels/replicad/wedge-door-stopper/main.ts') },
       { path: 'tau.json', load: loadTextAsset.bind(undefined, './kernels/replicad/wedge-door-stopper/tau.json') },
@@ -704,10 +828,10 @@ export const builtinExamples = [
       name: 'Worm Gear System',
       description:
         'A 30:1 single-start worm and bronze wheel on a bolted base with drilled supports and bearings. The worm is cut from a turned blank with a helical groove, the wheel is generated by the matching hob envelope, and the assembly ships with a manufacturing specification and GeoSpec checks for clearance and mesh positions.',
-      tags: ['assembly', 'gears', 'parametric', 'replicad', 'manufacturing'],
+      tags: ['assembly', 'gears', 'kinematics', 'parametric', 'replicad', 'manufacturing'],
       assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
     },
-    thumbnailUrl: thumbnail26,
+    thumbnailUrl: thumbnail30,
     assets: [
       {
         path: 'MANUFACTURING.md',

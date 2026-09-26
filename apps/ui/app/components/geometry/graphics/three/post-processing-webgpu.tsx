@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useCallback, useLayoutEffect, useRef } from 'react';
-import { NodeMaterial, QuadMesh, RenderPipeline as ThreeRenderPipeline, UnsignedByteType } from 'three/webgpu';
+import { NodeMaterial, QuadMesh, RenderTarget, UnsignedByteType } from 'three/webgpu';
 import type { WebGPURenderer } from 'three/webgpu';
 import {
   colorToDirection,
@@ -20,13 +20,13 @@ import {
   vec4,
 } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
-import { LinearSRGBColorSpace, NoToneMapping, Vector3 } from 'three';
-import type { Camera, WebGLRenderTarget } from 'three';
+import { LinearSRGBColorSpace, Vector3 } from 'three';
+import type { Camera, ToneMapping, WebGLRenderTarget } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import type { ThreeCamera } from '@taucad/three/camera';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
-import { useCameraRetarget, useCameraRig } from '#hooks/use-graphics.js';
+import { useCameraRetarget, useCameraRig, useRenderFrame } from '#hooks/use-graphics.js';
 import { pixelsToWorldUnits } from '#components/geometry/graphics/three/utils/spatial.utils.js';
 import { useOverlayDepthRestore } from '#components/geometry/graphics/three/scene-overlay.js';
 import {
@@ -38,8 +38,8 @@ import { createGtaoCameraAdapter } from '#components/geometry/graphics/three/gta
 
 type PostProcessingPipelineResources = Readonly<{
   camera: ThreeCamera;
-  post: InstanceType<typeof ThreeRenderPipeline>;
-  postWithoutAo: InstanceType<typeof ThreeRenderPipeline>;
+  outputQuad: QuadMesh;
+  outputQuadWithoutAo: QuadMesh;
   aoNode: ReturnType<typeof ao>;
   depthRestore: QuadMesh;
   depthRestoreMaterial: NodeMaterial;
@@ -57,8 +57,11 @@ type PostProcessingPipelineResources = Readonly<{
  * - **Single MRT scenePass** — one rasterisation produces beauty color + view-space normal + depth. The legacy
  *   prePass (which re-rasterised the scene purely to harvest depth/normals) is gone.
  * - **Compose-based AO** — the composite quad multiplies beauty by visibility, either before tone mapping
- *   or in linear display RGB. Native renderOutput performs one tone map and one final sRGB conversion;
- *   the AO-only diagnostic bypasses tone mapping and exposure.
+ *   or in linear display RGB. The graph tone-maps once; the AO-only diagnostic bypasses tone mapping.
+ * - **Framebuffer output** — the composite is a plain `QuadMesh` drawn through the renderer's
+ *   frame target, whose output pass only encodes sRGB (`renderer.toneMapping` stays `NoToneMapping`).
+ *   Overlays then draw into that same target: a `RenderPipeline` writes the canvas directly, and the
+ *   next overlay's output pass would copy the frame target's stale contents over it.
  * - **Explicit depth restore** — the active scene-pass depth is sampled by a retained `QuadMesh`
  *   that writes depth into the canvas, or into a caller's target, only when a pass asks for it.
  *   The main scene is never traversed or replayed.
@@ -71,7 +74,7 @@ type PostProcessingPipelineResources = Readonly<{
  * `frameloop='demand'`: temporal AA cannot accumulate while the scene is idle, and a single un-converged TRAA
  * frame surfaces as edge graininess.
  *
- * Does **not** monkey-patch `gl.render` — Three's pipeline calls `renderer.render` internally.
+ * Does **not** monkey-patch `gl.render` — `QuadMesh.render` calls `renderer.render`.
  */
 type ScenePassWithWarmup = Readonly<{
   // Three r184's PassNode methods consume only renderer from these contexts.
@@ -110,19 +113,29 @@ const updateGtaoSpatialScale = ({
   }
 };
 
+const createOutputQuad = (fragmentNode: NodeMaterial['fragmentNode']): QuadMesh => {
+  const material = new NodeMaterial();
+  material.fragmentNode = fragmentNode;
+  material.depthTest = false;
+  material.depthWrite = false;
+  return new QuadMesh(material);
+};
+
 const createPipelineResources = ({
   camera,
   gpuRenderer,
   scene,
+  toneMapping,
 }: {
   readonly camera: ThreeCamera;
   readonly gpuRenderer: WebGPURenderer;
   readonly scene: Parameters<typeof pass>[0];
+  readonly toneMapping: ToneMapping;
 }): PostProcessingPipelineResources => {
   const scenePass = pass(scene, camera);
   let aoNode: ReturnType<typeof ao> | undefined;
-  let post: InstanceType<typeof ThreeRenderPipeline> | undefined;
-  let postWithoutAo: InstanceType<typeof ThreeRenderPipeline> | undefined;
+  let outputQuad: QuadMesh | undefined;
+  let outputQuadWithoutAo: QuadMesh | undefined;
   let depthRestoreMaterial: NodeMaterial | undefined;
   try {
     scenePass.setMRT(
@@ -169,7 +182,6 @@ const createPipelineResources = ({
     const displayMode = uniform(0);
     const compositeStage = uniform(0);
 
-    post = new ThreeRenderPipeline(gpuRenderer);
     /* oxlint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access -- TSL fluent builder (`.mul`, `.sample`) is typed as `any` in `@types/three`; the runtime shape is verified via the unit + snapshot tests. */
     const aoFactor = aoTexture.sample(screenUV).r;
     const visibility = select<'float'>(displayMode.equal(2), float(1), aoFactor);
@@ -178,26 +190,22 @@ const createPipelineResources = ({
     // Traverse beauty before AO: GTAONode resets clear alpha while rendering its
     // dependencies. Scheduling the scene from that branch would make its MRT opaque.
     // AO visualization also preserves the scene's coverage instead of filling its background.
-    const beauty = renderOutput(scenePassColor.mul(vec4(vec3(beforeTone), 1)), null, LinearSRGBColorSpace).mul(
+    const beauty = renderOutput(scenePassColor.mul(vec4(vec3(beforeTone), 1)), toneMapping, LinearSRGBColorSpace).mul(
       vec4(vec3(afterTone), 1),
     );
-    // Tone-map once, on the chosen side of AO. The final conversion has no tone
-    // mapping/exposure, so the AO-only diagnostic retains its linear visibility.
-    post.outputColorTransform = false;
-    post.outputNode = renderOutput(
+    // Tone-map once, on the chosen side of AO; the AO-only diagnostic keeps its linear visibility.
+    outputQuad = createOutputQuad(
       mix(beauty, vec4(vec3(aoFactor), scenePassColor.a), select<'float'>(displayMode.equal(1), float(1), float(0))),
-      NoToneMapping,
     );
     // A uniform branch still schedules GTAONode's update pass. This retained output graph
-    // samples only the same beauty MRT and applies the same renderer display transform.
-    postWithoutAo = new ThreeRenderPipeline(gpuRenderer);
-    postWithoutAo.outputNode = scenePassColor;
+    // samples only the same beauty MRT and applies the same tone mapping.
+    outputQuadWithoutAo = createOutputQuad(renderOutput(scenePassColor, toneMapping, LinearSRGBColorSpace));
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
 
     return {
       camera,
-      post,
-      postWithoutAo,
+      outputQuad,
+      outputQuadWithoutAo,
       aoNode,
       depthRestore,
       depthRestoreMaterial,
@@ -208,8 +216,8 @@ const createPipelineResources = ({
     };
   } catch (error) {
     depthRestoreMaterial?.dispose();
-    post?.dispose();
-    postWithoutAo?.dispose();
+    (outputQuad?.material as NodeMaterial | undefined)?.dispose();
+    (outputQuadWithoutAo?.material as NodeMaterial | undefined)?.dispose();
     aoNode?.dispose();
     scenePass.dispose();
     throw error;
@@ -218,15 +226,42 @@ const createPipelineResources = ({
 
 const disposePipelineResources = (resources: readonly PostProcessingPipelineResources[]): void => {
   for (const resource of resources) {
-    resource.post.dispose();
-    resource.postWithoutAo.dispose();
+    (resource.outputQuad.material as NodeMaterial).dispose();
+    (resource.outputQuadWithoutAo.material as NodeMaterial).dispose();
     resource.aoNode.dispose();
     resource.depthRestoreMaterial.dispose();
     resource.scenePass.dispose();
   }
 };
 
-function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<PostProcessingSettings> }): ReactNode {
+/**
+ * Render an endpoint once into a throwaway target so its scene materials build their node graphs
+ * and pipelines. three keys render contexts by call depth, so the scene pass must nest inside the
+ * output quad's render as it does in a live frame; a top-level `updateBefore` builds a context no
+ * frame uses. PassNode.compileAsync is avoided because it holds global target/MRT across awaits.
+ */
+const warmScenePass = (resource: PostProcessingPipelineResources, gpuRenderer: WebGPURenderer): void => {
+  const previousTarget = gpuRenderer.getRenderTarget();
+  const previousMrt = gpuRenderer.getMRT();
+  const warmTarget = new RenderTarget(1, 1);
+  try {
+    gpuRenderer.setRenderTarget(warmTarget);
+    resource.outputQuad.render(gpuRenderer);
+  } finally {
+    gpuRenderer.setRenderTarget(previousTarget);
+    gpuRenderer.setMRT(previousMrt);
+    warmTarget.dispose();
+  }
+};
+
+type PostProcessingWebGpuProperties = Readonly<{
+  settings?: Partial<PostProcessingSettings>;
+  /** The viewer's post-processing toggle: off keeps the tone-mapped scene pass and drops AO. */
+  aoAllowed: boolean;
+  toneMapping: ToneMapping;
+}>;
+
+function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostProcessingWebGpuProperties): ReactNode {
   const { gl, scene, invalidate, size, viewport } = useThree();
   const { aoEnabled, aoCompositeStage, radiusCssPixels, gtaoIntensity, gtaoDistanceFalloff, displayMode } = {
     ...defaultPostProcessingSettings,
@@ -236,6 +271,15 @@ function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<
   const resourcesRef = useRef<Map<Camera, PostProcessingPipelineResources> | undefined>(undefined);
   const allResourcesRef = useRef<readonly PostProcessingPipelineResources[] | undefined>(undefined);
   const selectedCameraRef = useRef<ThreeCamera>(cameraRig.activeCamera);
+  const renderFrame = useRenderFrame();
+
+  const warmInactiveEndpoints = useCallback((): void => {
+    for (const [camera, resource] of resourcesRef.current ?? []) {
+      if (camera !== selectedCameraRef.current) {
+        warmScenePass(resource, gl as unknown as WebGPURenderer);
+      }
+    }
+  }, [gl]);
 
   useLayoutEffect(() => {
     const gpuRenderer = gl as unknown as WebGPURenderer;
@@ -243,7 +287,7 @@ function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<
     const resources: PostProcessingPipelineResources[] = [];
     try {
       for (const camera of [cameraRig.perspectiveCamera, cameraRig.orthographicCamera]) {
-        resources.push(createPipelineResources({ camera, gpuRenderer, scene }));
+        resources.push(createPipelineResources({ camera, gpuRenderer, scene, toneMapping }));
       }
       allResourcesRef.current = resources;
     } catch (error) {
@@ -258,22 +302,15 @@ function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<
     void (async (): Promise<void> => {
       try {
         for (const resource of resources) {
-          const previousTarget = gpuRenderer.getRenderTarget();
-          const previousMrt = gpuRenderer.getMRT();
-          try {
-            // PassNode.compileAsync holds global target/MRT across awaits. Other
-            // compile jobs and live frames would inherit those attachments.
-            // The normal pass update restores them within the same JS stack.
-            resource.scenePass.setup({ renderer: gpuRenderer });
-            resource.scenePass.updateBefore({ renderer: gpuRenderer });
-          } finally {
-            gpuRenderer.setRenderTarget(previousTarget);
-            gpuRenderer.setMRT(previousMrt);
-          }
+          warmScenePass(resource, gpuRenderer);
         }
+        // The output quads too: an unwarmed one builds its pipeline on the first frame after a
+        // projection switch, a ~200 ms stall.
         await Promise.all(
-          resources.map(async (resource) =>
-            gpuRenderer.compileAsync(resource.depthRestore, resource.depthRestore.camera),
+          resources.flatMap((resource) =>
+            [resource.depthRestore, resource.outputQuad, resource.outputQuadWithoutAo].map(async (quad) =>
+              gpuRenderer.compileAsync(quad, quad.camera),
+            ),
           ),
         );
       } catch (error) {
@@ -284,6 +321,7 @@ function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<
         return;
       }
       resourcesRef.current = new Map(resources.map((resource) => [resource.camera, resource]));
+      warmInactiveEndpoints();
       invalidate();
     })();
 
@@ -293,7 +331,7 @@ function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<
       allResourcesRef.current = undefined;
       disposePipelineResources(resources);
     };
-  }, [cameraRig, gl, invalidate, scene]);
+  }, [cameraRig, gl, invalidate, scene, toneMapping, warmInactiveEndpoints]);
 
   useLayoutEffect(() => {
     for (const resource of allResourcesRef.current ?? []) {
@@ -306,7 +344,15 @@ function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<
     if (resourcesRef.current) {
       invalidate();
     }
-  }, [aoCompositeStage, aoEnabled, displayMode, gtaoDistanceFalloff, gtaoIntensity, invalidate]);
+  }, [aoAllowed, aoCompositeStage, aoEnabled, displayMode, gtaoDistanceFalloff, gtaoIntensity, invalidate]);
+
+  useLayoutEffect(() => {
+    // A scene pass builds new geometry's materials on its first frame. The stage sets a new render
+    // frame once that geometry is mounted; warm the inactive endpoint then, so a projection switch
+    // does not stall ~200 ms on it.
+    void renderFrame;
+    warmInactiveEndpoints();
+  }, [renderFrame, warmInactiveEndpoints]);
 
   const retarget = useCallback(
     (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
@@ -339,7 +385,8 @@ function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<
       const previousTarget = renderer.getRenderTarget();
       renderer.setRenderTarget(target ?? null);
       try {
-        renderer.clearDepth();
+        // The untested full-screen quad writes every depth texel, so no clear is needed; on the
+        // frame target a clear would also run an extra output pass.
         selected.depthRestore.render(renderer);
       } finally {
         renderer.setRenderTarget(previousTarget);
@@ -353,9 +400,12 @@ function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<
     const selected = resourcesRef.current?.get(selectedCameraRef.current);
     if (selected) {
       selected.updateAoCamera();
-      (aoEnabled ? selected.post : selected.postWithoutAo).render();
+      (aoAllowed && aoEnabled ? selected.outputQuad : selected.outputQuadWithoutAo).render(
+        state.gl as unknown as WebGPURenderer,
+      );
       return;
     }
+    // ponytail: untone-mapped until the scene pass is warm; a tone-mapped fallback would need its own pass.
     state.gl.render(state.scene, state.camera);
   }, 1);
 
@@ -363,12 +413,12 @@ function PostProcessingWebGpuActive({ settings }: { readonly settings?: Partial<
 }
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- WebGPU acronym matches three.js / browser API naming
-export function PostProcessingWebGPU({ settings }: { readonly settings?: Partial<PostProcessingSettings> }): ReactNode {
+export function PostProcessingWebGPU(properties: PostProcessingWebGpuProperties): ReactNode {
   const { gl } = useThree();
 
   if (!('isWebGPURenderer' in gl) || !gl.isWebGPURenderer) {
     return null;
   }
 
-  return <PostProcessingWebGpuActive settings={settings} />;
+  return <PostProcessingWebGpuActive {...properties} />;
 }

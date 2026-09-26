@@ -961,7 +961,10 @@ describe('Print pane Bambu Studio mode', () => {
 
   /** Type a value into a number or text setting and commit it the way a person does: leave the field. */
   const enter = (name: string, value: string): void => {
-    const field = screen.getByRole('textbox', { name: `Input for ${name}` });
+    // Numbers are spin buttons; a number-or-percent setting is a text field.
+    const field =
+      screen.queryByRole('spinbutton', { name: `Input for ${name}` }) ??
+      screen.getByRole('textbox', { name: `Input for ${name}` });
     fireEvent.change(field, { target: { value } });
     fireEvent.blur(field);
   };
@@ -1029,7 +1032,7 @@ describe('Print pane Bambu Studio mode', () => {
     await renderStudio();
     await openGroup(user, 'Strength');
     const settings = screen.getByRole('group', { name: 'Bambu Studio settings' });
-    const wallLoops = (): HTMLElement => screen.getByRole('textbox', { name: 'Input for Wall Loops' });
+    const wallLoops = (): HTMLElement => screen.getByRole('spinbutton', { name: 'Input for Wall Loops' });
     expect(wallLoops()).toHaveValue('2');
     expect(screen.queryByRole('button', { name: 'Reset Wall Loops' })).not.toBeInTheDocument();
 
@@ -1079,7 +1082,7 @@ describe('Print pane Bambu Studio mode', () => {
 
     // The filter opens every group with a match; a number-or-percent setting keeps its percent.
     await user.type(within(settings).getByRole('searchbox', { name: 'Filter settings' }), 'bridge');
-    expect(within(settings).queryByRole('textbox', { name: 'Input for Wall Loops' })).not.toBeInTheDocument();
+    expect(within(settings).queryByRole('spinbutton', { name: 'Input for Wall Loops' })).not.toBeInTheDocument();
     enter('Bridge Flow', 'lots');
     expect(screen.getByRole('textbox', { name: 'Input for Bridge Flow' })).toHaveValue('1');
     enter('Bridge Flow', '95%');
@@ -1201,9 +1204,9 @@ describe('Print pane Bambu Studio mode', () => {
       await screen.findByText('1 changed setting does not exist in these presets and was dropped.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reset Layer Height' })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Input for Layer Height' })).toHaveValue('0.16');
+    expect(screen.getByRole('spinbutton', { name: 'Input for Layer Height' })).toHaveValue('0.16');
     await waitFor(() => {
-      expect(screen.queryByRole('textbox', { name: 'Input for Ironing Speed' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('spinbutton', { name: 'Input for Ironing Speed' })).not.toBeInTheDocument();
     });
     // Fine lacks ironing, so the slice leaves it out; the project's file keeps it for presets that have it.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
@@ -1231,7 +1234,7 @@ describe('Print pane Bambu Studio mode', () => {
     });
     await openGroup(user, 'Filament · Temperatures');
     await waitFor(() => {
-      expect(screen.getByRole('textbox', { name: 'Input for Nozzle Temperature' })).toHaveValue('255');
+      expect(screen.getByRole('spinbutton', { name: 'Input for Nozzle Temperature' })).toHaveValue('255');
     });
   });
 
@@ -1383,7 +1386,7 @@ describe('Print pane print settings file', () => {
         name: 'Group: Strength',
       }),
     );
-    expect(screen.getByRole('textbox', { name: 'Input for Wall Loops' })).toHaveValue('3');
+    expect(screen.getByRole('spinbutton', { name: 'Input for Wall Loops' })).toHaveValue('3');
     expect(reset('Wall Loops')).toBeInTheDocument();
 
     summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);

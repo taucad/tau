@@ -368,6 +368,9 @@ vi.mock('#hooks/use-graphics.js', () => ({
     }),
   useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
     selector({ context: createModelInteractionContext() }),
+  useKinematicsSelector: (
+    selector: (state: { context: { unitsById: Record<string, never>; revision: number } }) => unknown,
+  ) => selector({ context: { unitsById: {}, revision: 0 } }),
 }));
 
 const { ChatViewer } = await import('./chat-viewer.js');
@@ -808,7 +811,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Opacity' })).toHaveValue('100');
+    expect(screen.getByRole('spinbutton', { name: 'Opacity' })).toHaveValue('100');
 
     fireEvent.click(screen.getByText('Reveal in Explorer'));
 

@@ -7,8 +7,7 @@ import { canonicalizeCacheValue, digestContent } from '@taucad/cache-core';
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
 import { ResourceQueue } from '@taucad/filesystem';
 
-const fileName = 'machine-events.jsonl';
-// Ponytail: bounded in-memory recovery keeps the authority simple; add an indexed log only beyond 64 MiB.
+// Ponytail: bounded in-memory recovery keeps each log simple; add an indexed log only beyond 64 MiB.
 const maximumFileBytes = 64 * 1024 * 1024;
 const maximumFrameBytes = 1024 * 1024;
 const queueKey = 'machine-event-log';
@@ -49,22 +48,22 @@ const canonicalEvent = <Event extends CacheValue>(candidate: unknown, parse: (va
 const checksum = async (event: CacheValue): Promise<ContentDigest> =>
   digestContent({ bytes: encoder.encode(canonicalizeCacheValue({ value: event })) });
 
-const openLogFile = async (authorityRoot: string): Promise<FileHandle> => {
+const openLogFile = async (directoryPath: string, fileName: string): Promise<FileHandle> => {
   const createFlags =
     // oxlint-disable-next-line eslint/no-bitwise -- POSIX open flags are bit masks.
     constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_RDWR;
   let file: FileHandle;
   try {
-    file = await open(join(authorityRoot, fileName), createFlags, 0o600);
+    file = await open(join(directoryPath, fileName), createFlags, 0o600);
   } catch (error) {
     if (error === null || typeof error !== 'object' || !('code' in error) || error.code !== 'EEXIST') {
       throw error;
     }
     // oxlint-disable-next-line eslint/no-bitwise -- POSIX open flags are bit masks.
-    return open(join(authorityRoot, fileName), constants.O_APPEND | constants.O_NOFOLLOW | constants.O_RDWR);
+    return open(join(directoryPath, fileName), constants.O_APPEND | constants.O_NOFOLLOW | constants.O_RDWR);
   }
   try {
-    const directory = await open(authorityRoot, constants.O_RDONLY);
+    const directory = await open(directoryPath, constants.O_RDONLY);
     try {
       await directory.sync();
     } finally {
@@ -95,6 +94,38 @@ const readOwnedFile = async (file: FileHandle, owner: MachineEventLogOwner): Pro
   return bytes;
 };
 
+// Decode one committed frame, throwing on anything but the exact canonical bytes this log writes at `sequence`.
+const decodeFrame = async <Event extends CacheValue>(
+  line: Uint8Array<ArrayBuffer>,
+  sequence: number,
+  parse: (value: unknown) => Event,
+): Promise<Event> => {
+  if (line.byteLength < 1 || line.byteLength > maximumFrameBytes) {
+    throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD');
+  }
+  const text = decoder.decode(line);
+  const candidate: unknown = JSON.parse(text);
+  if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD');
+  }
+  const frame = candidate as Record<string, unknown>;
+  if (
+    Object.keys(frame).length !== 3 ||
+    frame['sequence'] !== sequence ||
+    typeof frame['checksum'] !== 'string' ||
+    !Object.hasOwn(frame, 'event')
+  ) {
+    throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD');
+  }
+  const event = canonicalEvent(frame['event'], parse);
+  const expectedChecksum = await checksum(event);
+  const stored: StoredFrame = { sequence, event, checksum: expectedChecksum };
+  if (frame['checksum'] !== expectedChecksum || text !== canonicalizeCacheValue({ value: stored })) {
+    throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD');
+  }
+  return event;
+};
+
 const recover = async <Event extends CacheValue>(
   file: FileHandle,
   owner: MachineEventLogOwner,
@@ -111,41 +142,12 @@ const recover = async <Event extends CacheValue>(
   let start = 0;
   while (start < committedLength) {
     const end = bytes.indexOf(10, start);
-    if (end < start || end - start < 1 || end - start > maximumFrameBytes) {
-      throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD');
-    }
-    let candidate: unknown;
-    try {
-      candidate = JSON.parse(decoder.decode(bytes.subarray(start, end)));
-    } catch (error) {
-      throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD', { cause: error });
-    }
-    if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
-      throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD');
-    }
-    const frame = candidate as Record<string, unknown>;
-    if (
-      Object.keys(frame).length !== 3 ||
-      frame['sequence'] !== records.length ||
-      typeof frame['checksum'] !== 'string' ||
-      !Object.hasOwn(frame, 'event')
-    ) {
-      throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD');
-    }
     let event: Event;
     try {
-      event = canonicalEvent(frame['event'], parse);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Checksums preserve committed record order during recovery.
+      event = await decodeFrame(bytes.subarray(start, end), records.length, parse);
     } catch (error) {
       throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD', { cause: error });
-    }
-    // oxlint-disable-next-line eslint/no-await-in-loop -- Checksums preserve committed record order during recovery.
-    const expectedChecksum = await checksum(event);
-    const stored: StoredFrame = { sequence: records.length, event, checksum: expectedChecksum };
-    if (
-      frame['checksum'] !== expectedChecksum ||
-      decoder.decode(bytes.subarray(start, end)) !== canonicalizeCacheValue({ value: stored })
-    ) {
-      throw new Error('MACHINE_EVENT_LOG_CORRUPT_RECORD');
     }
     records.push(Object.freeze({ sequence: records.length, event }));
     start = end + 1;
@@ -153,17 +155,70 @@ const recover = async <Event extends CacheValue>(
   return Object.freeze({ byteLength: committedLength, records: Object.freeze(records) });
 };
 
-/** Open one bounded, checksummed machine-authority event log.
- * @param input - Protected directory, retained writer fence, and closed event parser.
- * @returns Recovered single-writer append/replay log.
+const unowned: MachineEventLogOwner = {
+  assertCurrent() {
+    /* A read-only log is not this host's to fence. */
+  },
+};
+
+/**
+ * Read the committed events of a log another writer owned, without writing to it: bytes after the last newline and
+ * every frame from the first one that fails its checks are left out, never repaired.
+ *
  * @internal
+ * @param path - The log file; a missing file reads as empty. A link or anything but a regular file is refused.
+ * @returns The events of the valid committed prefix, in order, and whether that prefix is every committed frame.
+ */
+export const readMachineEventLogPrefix = async (
+  path: string,
+): Promise<Readonly<{ events: readonly CacheValue[]; complete: boolean }>> => {
+  let file: FileHandle;
+  try {
+    // Non-blocking, so a FIFO in the log's place is refused as a non-file instead of blocking the open.
+    // oxlint-disable-next-line eslint/no-bitwise -- POSIX open flags are bit masks.
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return Object.freeze({ events: Object.freeze([]), complete: true });
+    }
+    throw error;
+  }
+  try {
+    const bytes = await readOwnedFile(file, unowned);
+    const committedLength = bytes.lastIndexOf(10) + 1;
+    const events: CacheValue[] = [];
+    let start = 0;
+    while (start < committedLength) {
+      const end = bytes.indexOf(10, start);
+      try {
+        // SAFETY: the frame's event comes from JSON.parse, so it is plain JSON.
+        // oxlint-disable-next-line eslint/no-await-in-loop -- frames are checked in order; the first bad one ends the prefix.
+        events.push(await decodeFrame(bytes.subarray(start, end), events.length, (value) => value as CacheValue));
+      } catch {
+        return Object.freeze({ events: Object.freeze(events), complete: false });
+      }
+      start = end + 1;
+    }
+    return Object.freeze({ events: Object.freeze(events), complete: true });
+  } finally {
+    await file.close();
+  }
+};
+
+/**
+ * Open one bounded, checksummed machine event log, creating it `0600` when missing.
+ *
+ * @internal
+ * @param input - Protected directory, the log's file name, retained writer fence, and closed event parser.
+ * @returns Recovered single-writer append/replay log.
  */
 export const createNodeMachineEventLog = async <Event extends CacheValue>(input: {
-  authorityRoot: string;
+  directory: string;
+  fileName: string;
   owner: MachineEventLogOwner;
   parse(candidate: unknown): Event;
 }): Promise<MachineEventLog<Event>> => {
-  const file = await openLogFile(input.authorityRoot);
+  const file = await openLogFile(input.directory, input.fileName);
   let recovered;
   try {
     recovered = await recover(file, input.owner, input.parse);

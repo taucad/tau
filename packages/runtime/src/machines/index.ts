@@ -96,7 +96,6 @@ export type {
   MachineProviderFactory,
   MachineQueryManifest,
   MachineReconcileInput,
-  MachineRevisionReference,
   MachineRunSnapshot,
   MachineSession,
   MachineSnapshot,

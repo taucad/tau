@@ -1,6 +1,5 @@
 import type { Topic } from '@taucad/events';
 import { ResourceQueue } from '@taucad/filesystem';
-import type { CacheValue } from '@taucad/cache-core';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
 import { convert, quantityKinds } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
@@ -170,6 +169,7 @@ const snapshotSchema = z.strictObject({
 });
 const entrySchema = z.strictObject({
   machineId: identity,
+  name: identity,
   providerId: identity,
   descriptor: descriptorSchema,
   snapshot: snapshotSchema,
@@ -178,7 +178,6 @@ const entrySchema = z.strictObject({
 const scope = {
   hostId: identity,
   authorityId: identity,
-  workspaceId: identity,
 };
 const eventScope = { ...scope, revision: count.min(1) };
 const eventSchema = z.discriminatedUnion('type', [
@@ -187,7 +186,6 @@ const eventSchema = z.discriminatedUnion('type', [
     type: z.literal('machine-directory-upserted'),
     entry: entrySchema,
   }),
-  z.strictObject({ ...eventScope, type: z.literal('machine-directory-stale') }),
   z.strictObject({
     ...eventScope,
     type: z.literal('machine-directory-removed'),
@@ -206,19 +204,16 @@ const limits = {
   maximumNodes: 16_384,
   maximumCharacters: 131_072,
 };
-const pageSize = 128;
 // Ponytail: watchers resume from the last 256 live changes (256 retained entries); a watcher further behind gets
 // one lag resync snapshot instead. Raise it only if lag resyncs show up on real hosts.
 const maximumLag = 256;
 const maximumEntries = 256;
-const maximumWorkspaces = 256;
 const queueKey = 'machine-directory';
 
-/** Committed machine facts, never raw packets or host connection material. @internal */
+/** One served directory change. Changes live in memory only; the store keeps each machine's last-known identity. @internal */
 export type MachineDirectoryEvent = Readonly<{
   hostId: string;
   authorityId: string;
-  workspaceId: string;
   revision: number;
 }> &
   (
@@ -226,20 +221,25 @@ export type MachineDirectoryEvent = Readonly<{
         type: 'machine-directory-upserted';
         entry: MachineDirectoryEntry;
       }>
-    | Readonly<{ type: 'machine-directory-stale' }>
     | Readonly<{ type: 'machine-directory-removed'; machineId: string }>
   );
-/** Host-selected identity and a validated observation. Current means this session incarnation, not wall-clock freshness or physical readiness; `snapshot.observedAt` is the latest report, including one that changed nothing else. @public */
+/**
+ * Host-selected identity and a validated observation. `name` is the display name the person gave the printer.
+ * Current means this session incarnation, not wall-clock freshness or physical readiness; `snapshot.observedAt` is
+ * the latest report, including one that changed nothing else.
+ * @public
+ */
 export type MachineDirectoryEntry = Readonly<{
   machineId: string;
+  name: string;
   providerId: string;
   descriptor: MachineDescriptor;
   snapshot: MachineSnapshot;
   freshness: 'current' | 'stale';
 }>;
-/** A scoped read-through position distinct from projection revision, valid only for the directory `generation` that issued it. @public */
+/** A read-through position distinct from projection revision, valid only for the directory `generation` that issued it. @public */
 export type MachineDirectoryCursor = Readonly<z.infer<typeof cursorSchema>>;
-/** Full workspace directory at one committed read-through boundary. @public */
+/** The full machine directory at one read-through boundary. @public */
 export type MachineDirectorySnapshot = Readonly<{
   cursor: MachineDirectoryCursor;
   entries: readonly MachineDirectoryEntry[];
@@ -259,8 +259,8 @@ export type MachineDirectoryFrame =
     }>;
 /** Host-local transfer of one already-connected session. @internal */
 export type AttachMachineDirectorySessionInput = Readonly<{
-  workspaceId: string;
   machineId: string;
+  name: string;
   providerId: string;
   session: Pick<MachineSession, 'getDescriptor' | 'getSnapshot' | 'observe' | 'close'>;
   /**
@@ -270,40 +270,32 @@ export type AttachMachineDirectorySessionInput = Readonly<{
    */
   onLost?(): void;
 }>;
-/** Named workspace lookup. Admission remains the route owner's responsibility. @internal */
-export type MachineDirectoryReadInput = Readonly<{ workspaceId: string }>;
 /** One client-owned directory observation. @internal */
 export type MachineDirectoryWatchInput = Readonly<{
-  workspaceId: string;
   cursor?: MachineDirectoryCursor;
   signal: AbortSignal;
 }>;
-/** Host-owned live directory; its borrowed authority journal keeps only machine identities and removals. @internal */
+/** Host-owned live directory; the store it borrows through `persist` keeps only each machine's last-known identity. @internal */
 export type MachineDirectory = Readonly<{
   attach(input: AttachMachineDirectorySessionInput): Promise<void>;
-  remove(input: Readonly<{ workspaceId: string; machineId: string }>): Promise<void>;
-  snapshot(input: MachineDirectoryReadInput): Promise<MachineDirectorySnapshot>;
+  remove(input: Readonly<{ machineId: string }>): Promise<void>;
+  snapshot(): Promise<MachineDirectorySnapshot>;
   watch(input: MachineDirectoryWatchInput): AsyncIterable<MachineDirectoryFrame>;
   close(): Promise<void>;
-}>;
-/** Narrow append/replay port owned by the machine authority. It is deliberately independent of jobs. @internal */
-export type MachineDirectoryJournal = Readonly<{
-  append(candidate: unknown): Promise<Readonly<{ sequence: number; event: CacheValue }>>;
-  replay(input: Readonly<{ cursor: number; limit: number }>): Promise<
-    Readonly<{
-      records: ReadonlyArray<Readonly<{ sequence: number; event: CacheValue }>>;
-      nextCursor: number;
-      endCursor: number;
-    }>
-  >;
 }>;
 /** The authority owns storage and the commit topic. @internal */
 export type CreateMachineDirectoryInput = Readonly<{
   hostId: string;
   authorityId: string;
-  journal: MachineDirectoryJournal;
+  /** Each bound machine's last-known entry, served stale until a session reports. */
+  recovered: readonly MachineDirectoryEntry[];
   /** Emitted after every served change to wake watchers; the authority disposes it. */
   commits: Topic<void>;
+  /**
+   * Remember a machine whose identity (provider or descriptor) is new or changed, before it is served. A refusal
+   * leaves the directory unchanged and fails the attach or the observation that brought it.
+   */
+  persist(entry: MachineDirectoryEntry): Promise<void>;
   onError(error: unknown): void;
 }>;
 
@@ -316,13 +308,6 @@ const freeze = <Value>(value: Value): Value => {
   }
   return value;
 };
-
-/** Parse bounded committed machine records before replay or append. @internal
- * @param value - Candidate normalized record.
- * @returns Detached immutable event.
- */
-export const parseMachineDirectoryEvent = (value: unknown): MachineDirectoryEvent =>
-  freeze(eventSchema.parse(cloneBoundedJson(value, limits)));
 
 /** Parse one bounded public directory cursor.
  * @param value - Untrusted cursor value.
@@ -386,28 +371,10 @@ export const parseMachineDirectoryFrame = (value: unknown): MachineDirectoryFram
   );
 };
 
-const machineEvent = (value: CacheValue): MachineDirectoryEvent | undefined => {
-  if (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    'type' in value &&
-    typeof value['type'] === 'string' &&
-    value['type'].startsWith('machine-directory-')
-  ) {
-    return parseMachineDirectoryEvent(value);
-  }
-  return undefined;
-};
-
-// A machine reaches the journal only when this identity is new or changes.
+// A machine reaches the store only when this identity is new or changes.
 const machineIdentity = (entry: MachineDirectoryEntry): string =>
   canonicalizeCacheValue({ value: { providerId: entry.providerId, descriptor: entry.descriptor } });
 
-type Projection = {
-  revision: number;
-  entries: Map<string, MachineDirectoryEntry>;
-};
 type DirectoryChange =
   | Readonly<{ type: 'machine-directory-upserted'; entry: MachineDirectoryEntry }>
   | Readonly<{ type: 'machine-directory-removed'; machineId: string }>;
@@ -421,26 +388,27 @@ type OwnedSession = {
   lost: boolean;
 };
 
-/** Recover journaled machines as stale and own subsequent device observations in memory.
- * The supplied journal and commit topic remain owned by the authority, including on failure/close.
+/** Serve the recovered machines as stale and own subsequent device observations in memory.
+ * The commit topic remains owned by the authority, including on failure/close.
  * @internal
- * @param input - Trusted host scope and borrowed authority services.
+ * @param input - Trusted host identity, recovered entries and the borrowed store and topic.
  * @returns Directory with client-independent device lifetime.
  */
-export const createMachineDirectory = async (input: CreateMachineDirectoryInput): Promise<MachineDirectory> => {
+export const createMachineDirectory = (input: CreateMachineDirectoryInput): MachineDirectory => {
   const hostId = identity.parse(input.hostId);
   const authorityId = identity.parse(input.authorityId);
-  // Live history is never journaled, so every open mints the epoch that scopes its cursors.
+  // Live history is never stored, so every open mints the epoch that scopes its cursors.
   const generation = randomUuid();
-  /** Machine identities and removals folded from the journal: what a restart recovers. */
-  const journaled = new Map<string, Projection>();
-  /** What reads and watches serve: the journaled machines with their latest observations. */
-  const live = new Map<string, Projection>();
+  /** What reads and watches serve: every bound machine with its latest observation. */
+  const entries = new Map<string, MachineDirectoryEntry>();
+  /** The identity the store last remembered for each machine: what a restart shows. */
+  const persisted = new Map<string, string>();
   /** The last `maximumLag` served changes, for watchers resuming inside this generation. */
   const recent: ServedChange[] = [];
   const sessions = new Map<string, OwnedSession>();
   const queue = new ResourceQueue();
   let position = 0;
+  let revision = 0;
   let closed = false;
   let closing: Promise<void> | undefined;
   const shutdown = new AbortController();
@@ -451,75 +419,46 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
       /* Diagnostics cannot own device cleanup. */
     }
   };
+  // Nothing has reported in this generation yet, so every recovered machine starts stale.
+  for (const recovered of input.recovered) {
+    const entry = parseMachineDirectoryEntry({ ...recovered, freshness: 'stale' });
+    if (!entries.has(entry.machineId) && entries.size >= maximumEntries) {
+      throw new Error('MACHINE_DIRECTORY_ENTRY_LIMIT');
+    }
+    entries.set(entry.machineId, entry);
+    persisted.set(entry.machineId, machineIdentity(entry));
+  }
 
   const assertOpen = (): void => {
     if (closed) {
       throw new Error('MACHINE_DIRECTORY_CLOSED');
     }
   };
-  const projection = (projections: Map<string, Projection>, workspaceId: string): Projection =>
-    projections.get(workspaceId) ?? { revision: 0, entries: new Map() };
-  const reduce = (projections: Map<string, Projection>, event: MachineDirectoryEvent): void => {
-    if (event.hostId !== hostId || event.authorityId !== authorityId) {
-      throw new Error('MACHINE_DIRECTORY_WRONG_AUTHORITY');
-    }
-    const current = projection(projections, event.workspaceId);
-    if (event.revision !== current.revision + 1) {
-      throw new Error('MACHINE_DIRECTORY_REVISION_GAP');
-    }
-    if (!projections.has(event.workspaceId) && projections.size >= maximumWorkspaces) {
-      throw new Error('MACHINE_DIRECTORY_WORKSPACE_LIMIT');
-    }
-    if (event.type === 'machine-directory-upserted') {
-      if (!current.entries.has(event.entry.machineId) && current.entries.size >= maximumEntries) {
-        throw new Error('MACHINE_DIRECTORY_ENTRY_LIMIT');
-      }
-      current.entries.set(event.entry.machineId, event.entry);
-    } else if (event.type === 'machine-directory-removed') {
-      if (!current.entries.delete(event.machineId)) {
-        throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
-      }
-    } else {
-      for (const [key, entry] of current.entries) {
-        current.entries.set(key, freeze({ ...entry, freshness: 'stale' }));
-      }
-    }
-    current.revision = event.revision;
-    projections.set(event.workspaceId, current);
-  };
-  const change = (
-    projections: Map<string, Projection>,
-    workspaceId: string,
-    body: DirectoryChange,
-  ): MachineDirectoryEvent => ({
-    ...body,
-    hostId,
-    authorityId,
-    workspaceId,
-    revision: projection(projections, workspaceId).revision + 1,
-  });
-  const cursor = (
-    workspaceId: string,
-    at = position,
-    revision = projection(live, workspaceId).revision,
-  ): MachineDirectoryCursor =>
+  const cursor = (at = position, atRevision = revision): MachineDirectoryCursor =>
     freeze({
       hostId,
       authorityId,
-      workspaceId,
       generation,
       position: at,
-      revision,
+      revision: atRevision,
     });
-  const snapshot = (workspaceId: string): MachineDirectorySnapshot =>
+  const snapshot = (): MachineDirectorySnapshot =>
     freeze({
-      cursor: cursor(workspaceId),
-      entries: [...projection(live, workspaceId).entries.values()],
+      cursor: cursor(),
+      entries: [...entries.values()],
     });
-  // Serve one change: live projection, bounded tail and watcher wake-up.
-  const apply = (workspaceId: string, body: DirectoryChange): void => {
-    const event = freeze(change(live, workspaceId, body));
-    reduce(live, event);
+  // Serve one change: projection, bounded tail and watcher wake-up. An unknown or over-limit change throws unserved.
+  const apply = (body: DirectoryChange): void => {
+    if (body.type === 'machine-directory-upserted') {
+      if (!entries.has(body.entry.machineId) && entries.size >= maximumEntries) {
+        throw new Error('MACHINE_DIRECTORY_ENTRY_LIMIT');
+      }
+      entries.set(body.entry.machineId, body.entry);
+    } else if (!entries.delete(body.machineId)) {
+      throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
+    }
+    revision += 1;
+    const event: MachineDirectoryEvent = freeze({ ...body, hostId, authorityId, revision });
     recent.push({ sequence: position, event });
     if (recent.length > maximumLag) {
       recent.shift();
@@ -527,31 +466,14 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
     position += 1;
     input.commits.emit();
   };
-  // Journal one change before serving it; a refused append throws and leaves both projections unchanged.
-  const record = async (workspaceId: string, body: DirectoryChange): Promise<void> => {
-    const event = parseMachineDirectoryEvent(change(journaled, workspaceId, body));
-    // Validate the complete transition on a copy before any append.
-    const trial = new Map(journaled);
-    const current = journaled.get(workspaceId);
-    if (current) {
-      trial.set(workspaceId, { revision: current.revision, entries: new Map(current.entries) });
-    }
-    reduce(trial, event);
-    await input.journal.append(event);
-    reduce(journaled, event);
-    apply(workspaceId, body);
-  };
-  const markStale = (workspaceId: string, machineId: string): void => {
-    const entry = projection(live, workspaceId).entries.get(machineId);
+  const markStale = (machineId: string): void => {
+    const entry = entries.get(machineId);
     if (entry?.freshness === 'current') {
-      apply(workspaceId, { type: 'machine-directory-upserted', entry: { ...entry, freshness: 'stale' } });
+      apply({ type: 'machine-directory-upserted', entry: { ...entry, freshness: 'stale' } });
     }
   };
-  const sessionKey = (workspaceId: string, machineId: string): string => JSON.stringify([workspaceId, machineId]);
   const isCurrent = (owned: OwnedSession): boolean =>
-    !closed &&
-    sessions.get(sessionKey(owned.input.workspaceId, owned.input.machineId)) === owned &&
-    !owned.abort.signal.aborted;
+    !closed && sessions.get(owned.input.machineId) === owned && !owned.abort.signal.aborted;
   const stop = async (owned: OwnedSession): Promise<void> => {
     owned.abort.abort();
     owned.stop ??= owned.input.session.close();
@@ -575,23 +497,21 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
       if (!isCurrent(owned)) {
         return;
       }
-      const { workspaceId } = owned.input;
-      const previous = projection(live, workspaceId).entries.get(entry.machineId);
+      const previous = entries.get(entry.machineId);
       if (previous && canonicalizeCacheValue({ value: previous }) === canonicalizeCacheValue({ value: entry })) {
         return;
       }
-      const body: DirectoryChange = { type: 'machine-directory-upserted', entry };
-      const known = projection(journaled, workspaceId).entries.get(entry.machineId);
-      // Ponytail: only machine identity (a new machine, provider or descriptor) reaches the journal; observations,
-      // confirmations (reports equal but for `observedAt`) and stale marks stay in memory. Directory bytes grow with
+      // Ponytail: only machine identity (a new machine, provider or descriptor) reaches the store; observations,
+      // confirmations (reports equal but for `observedAt`) and stale marks stay in memory. Store bytes grow with
       // bindings and firmware changes, never with report rate or uptime, and a restarted host lists each machine
-      // stale with its last journaled snapshot until it reports. Journal a bounded-cadence snapshot here if a
-      // restart must show more.
-      if (known && machineIdentity(known) === machineIdentity(entry)) {
-        apply(workspaceId, body);
-        return;
+      // stale with the snapshot remembered beside that identity until it reports. Persist a bounded-cadence
+      // snapshot here if a restart must show more.
+      const identity_ = machineIdentity(entry);
+      if (persisted.get(entry.machineId) !== identity_) {
+        await input.persist(entry);
+        persisted.set(entry.machineId, identity_);
       }
-      await record(workspaceId, body);
+      apply({ type: 'machine-directory-upserted', entry });
     });
   const observe = async (owned: OwnedSession, entry: MachineDirectoryEntry): Promise<void> => {
     try {
@@ -623,7 +543,7 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
     } finally {
       if (isCurrent(owned)) {
         try {
-          const current = projection(live, owned.input.workspaceId).entries.get(owned.input.machineId);
+          const current = entries.get(owned.input.machineId);
           if (current) {
             await publish(owned, { ...current, freshness: 'stale' });
           }
@@ -640,44 +560,14 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
     }
   };
 
-  let replayed = 0;
-  let end: number | undefined;
-  do {
-    // oxlint-disable-next-line eslint/no-await-in-loop -- committed pages must fold in sequence.
-    const page = await input.journal.replay({ cursor: replayed, limit: pageSize });
-    end ??= page.endCursor;
-    for (const { sequence, event } of page.records) {
-      if (sequence !== replayed) {
-        throw new Error('MACHINE_DIRECTORY_JOURNAL_GAP');
-      }
-      const directoryEvent = machineEvent(event);
-      if (directoryEvent) {
-        reduce(journaled, directoryEvent);
-      }
-      replayed += 1;
-    }
-    if (page.nextCursor !== replayed || (replayed < end && page.records.length === 0)) {
-      throw new Error('MACHINE_DIRECTORY_JOURNAL_GAP');
-    }
-  } while (replayed < end);
-  // Nothing has reported in this generation yet, so every recovered machine starts stale.
-  for (const [workspaceId, recovered] of journaled) {
-    const entries = new Map<string, MachineDirectoryEntry>();
-    for (const [machineId, entry] of recovered.entries) {
-      entries.set(machineId, freeze({ ...entry, freshness: 'stale' }));
-    }
-    live.set(workspaceId, { revision: recovered.revision, entries });
-  }
-
-  // Served changes to the cursor's workspace after its position, oldest first.
+  // Served changes after the cursor's position, oldest first.
   const since = (after: MachineDirectoryCursor): readonly ServedChange[] =>
-    recent.filter(({ sequence, event }) => sequence >= after.position && event.workspaceId === after.workspaceId);
+    recent.filter(({ sequence }) => sequence >= after.position);
   const validCursor = (after: MachineDirectoryCursor, current: MachineDirectoryCursor): boolean => {
     if (
       !cursorSchema.safeParse(after).success ||
       after.hostId !== hostId ||
       after.authorityId !== authorityId ||
-      after.workspaceId !== current.workspaceId ||
       after.generation !== generation ||
       after.position > current.position
     ) {
@@ -690,28 +580,27 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
   return {
     async attach(attachment) {
       assertOpen();
-      const workspaceId = identity.parse(attachment.workspaceId);
       const machineId = identity.parse(attachment.machineId);
+      const name = identity.parse(attachment.name);
       const providerId = identity.parse(attachment.providerId);
-      const key = sessionKey(workspaceId, machineId);
-      const previous = sessions.get(key);
+      const previous = sessions.get(machineId);
       if (!previous && sessions.size >= maximumEntries) {
         throw new Error('MACHINE_DIRECTORY_SESSION_LIMIT');
       }
       const owned: OwnedSession = {
-        input: { ...attachment, workspaceId, machineId, providerId },
+        input: { ...attachment, machineId, name, providerId },
         abort: new AbortController(),
         ready: Promise.withResolvers<void>(),
         lost: false,
       };
-      sessions.set(key, owned);
+      sessions.set(machineId, owned);
       try {
         if (previous) {
           try {
             await queue.queueFor(queueKey, async () => {
               assertOpen();
               if (isCurrent(owned)) {
-                markStale(workspaceId, machineId);
+                markStale(machineId);
               }
             });
           } finally {
@@ -744,6 +633,7 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
         }
         const entry: MachineDirectoryEntry = {
           machineId,
+          name,
           providerId,
           descriptor,
           snapshot: current,
@@ -758,8 +648,8 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
         }
       } catch (error) {
         await stop(owned);
-        if (sessions.get(key) === owned) {
-          sessions.delete(key);
+        if (sessions.get(machineId) === owned) {
+          sessions.delete(machineId);
         }
         throw error;
       } finally {
@@ -772,46 +662,37 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
         }
       }
     },
-    async remove({ workspaceId, machineId }) {
-      identity.parse(workspaceId);
+    async remove({ machineId }) {
       identity.parse(machineId);
-      const key = sessionKey(workspaceId, machineId);
-      const owned = sessions.get(key);
+      const owned = sessions.get(machineId);
       if (owned) {
         owned.abort.abort();
       }
       try {
         await queue.queueFor(queueKey, async () => {
           assertOpen();
-          if (sessions.get(key) !== owned) {
+          if (sessions.get(machineId) !== owned) {
             throw new Error('MACHINE_DIRECTORY_SESSION_REPLACED');
           }
-          try {
-            await record(workspaceId, { type: 'machine-directory-removed', machineId });
-          } catch (error) {
-            // The journal still lists the machine and its session stops below, so it cannot stay current.
-            markStale(workspaceId, machineId);
-            throw error;
-          }
+          apply({ type: 'machine-directory-removed', machineId });
+          persisted.delete(machineId);
         });
       } finally {
         if (owned) {
           await stop(owned);
           await owned.ready.promise;
           await owned.observer;
-          if (sessions.get(key) === owned) {
-            sessions.delete(key);
+          if (sessions.get(machineId) === owned) {
+            sessions.delete(machineId);
           }
         }
       }
     },
-    async snapshot({ workspaceId }) {
-      identity.parse(workspaceId);
+    async snapshot() {
       assertOpen();
-      return snapshot(workspaceId);
+      return snapshot();
     },
     async *watch(watchInput) {
-      const workspaceId = identity.parse(watchInput.workspaceId);
       const signal = AbortSignal.any([watchInput.signal, shutdown.signal]);
       const isAborted = (): boolean => signal.aborted;
       let after = watchInput.cursor;
@@ -830,7 +711,7 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
         signal.addEventListener('abort', onAbort, { once: true });
         try {
           // The snapshot and its tail are read from memory in one turn, so the retained tail cannot move between them.
-          const current = snapshot(workspaceId);
+          const current = snapshot();
           let frames: MachineDirectoryFrame[];
           if (!after) {
             frames = [{ type: 'snapshot', snapshot: current }];
@@ -842,7 +723,7 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
             frames = since(after).map(
               ({ sequence, event }): MachineDirectoryFrame => ({
                 type: 'event',
-                cursor: cursor(workspaceId, sequence + 1, event.revision),
+                cursor: cursor(sequence + 1, event.revision),
                 event,
               }),
             );

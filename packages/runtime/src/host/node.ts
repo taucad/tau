@@ -1,22 +1,29 @@
 import { randomUUID } from 'node:crypto';
-import { dirname } from 'node:path';
 
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { canonicalizeCacheValue, digestContent } from '@taucad/cache-core';
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
 import { Topic } from '@taucad/events';
 import { ResourceQueue } from '@taucad/filesystem';
-import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
 import type {
   AdmittedHostOperation,
   AdmittedHostRoute,
+  HostActor,
   HostAdmissionAuthority,
+  HostRouteGrant,
   HostSessionHandle,
 } from '#host/host-admission.js';
-import { exposeMachineChannel, parsePrintRequest } from '#machines/machine-channel.js';
+import type { MachineEventLog } from '#host/node-machine-event-log.js';
+import { machineDisplayName, openNodeMachineStore } from '#host/node-machine-store.js';
+import type {
+  MachineBindingRecord,
+  MachineOperationsState,
+  MachinePreparationRecord,
+} from '#host/node-machine-store.js';
+import { exposeMachineChannel, machineAdmissionScope } from '#machines/machine-channel.js';
 import type { MachineChannelEndpoint, MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type {
   MachineBindingRemoval,
@@ -26,16 +33,16 @@ import type {
 } from '#machines/machine-client.js';
 import { machineCredentialReference } from '#machines/machine-credential.js';
 import type { PrintRequest } from '#machines/print-request.js';
-import { createMachineDirectory, parseMachineDirectoryEvent } from '#machines/machine-directory.js';
-import type { MachineDirectory, MachineDirectoryEvent, MachineDirectoryEntry } from '#machines/machine-directory.js';
+import { createMachineDirectory } from '#machines/machine-directory.js';
+import type { MachineDirectory, MachineDirectoryEntry } from '#machines/machine-directory.js';
 import { parseMachineProvider } from '#machines/machine.js';
 import type {
   MachineCandidate,
-  MachineArtifactReference,
   MachineBindingOutcome,
   MachineConnectInput,
   MachineConnectionContext,
   MachineConnectionRuntime,
+  MachineDescriptor,
   MachineDiscoveryEvent,
   MachineDiscoveryInput,
   MachineDiscoveryRuntime,
@@ -44,8 +51,6 @@ import type {
   MachineSubmissionReceipt,
   MachineTransferReceipt,
 } from '#machines/machine.js';
-import { createNodeMachineEventLog } from '#host/node-machine-event-log.js';
-import type { MachineEventLog } from '#host/node-machine-event-log.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 
@@ -54,12 +59,6 @@ const identity = z
   .min(1)
   .max(256)
   .refine((value) => value.isWellFormed());
-const authorityIdentitySchema = z.strictObject({
-  type: z.literal('host-authority-initialized'),
-  hostId: identity,
-  authorityId: identity,
-  generation: identity,
-});
 const candidateSchema = z.strictObject({
   id: identity,
   name: identity,
@@ -73,92 +72,10 @@ const trustSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('system') }),
   z.strictObject({ type: z.literal('pinned'), digest }),
 ]);
-const bindingEventSchema = z.strictObject({
-  type: z.literal('machine-binding-committed'),
-  workspaceId: identity,
-  machineId: identity,
-  providerId: identity,
-  physicalId: identity,
-  candidate: candidateSchema,
-  configuration: z.unknown().transform((value) =>
-    cloneBoundedJson(value, {
-      code: 'NODE_MACHINE_BINDING_CONFIGURATION',
-      maximumDepth: 20,
-      maximumNodes: 2048,
-      maximumCharacters: 65_536,
-    }),
-  ),
-  connection: z.strictObject({
-    secretRef: identity,
-    serviceTrust: z.record(identity, trustSchema).refine((value) => Object.keys(value).length <= 8),
-  }),
-});
-const bindingRemovedEventSchema = z.strictObject({
-  type: z.literal('machine-binding-removed'),
-  workspaceId: identity,
-  machineId: identity,
-});
-const artifactSchema = z.strictObject({
-  revision: z.strictObject({
-    authorityId: identity,
-    workspaceId: identity,
-    revisionId: z.custom<MachineArtifactReference['revision']['revisionId']>(
-      (value) => typeof value === 'string' && value.length > 0 && value.length <= 256 && value.isWellFormed(),
-    ),
-    treeDigest: digest,
-  }),
-  path: identity,
-  digest,
-  length: z
-    .number()
-    .int()
-    .positive()
-    .max(512 * 1024 * 1024),
-  mediaType: identity,
-  contract: z.strictObject({ id: identity, version: z.number().int().positive() }),
-  selectedMember: identity,
-});
-const preparedPrintSchema = z.strictObject({
-  preparedId: identity,
-  preparedDigest: digest,
-  configurationDigest: digest,
-  providerDataDigest: digest,
-  setupDigest: digest,
-  machineId: identity,
-  physicalMachineId: identity,
-  artifact: artifactSchema,
-  remoteName: identity,
-  parser: z.strictObject({ id: identity, version: identity }),
-  preparedAt: z.iso.datetime({ offset: true }),
-  expiresAt: z.iso.datetime({ offset: true }),
-});
-const preparedEventSchema = z.strictObject({
-  type: z.literal('machine-print-prepared'),
-  workspaceId: identity,
-  providerId: identity,
-  configuration: z.unknown().transform((value) =>
-    cloneBoundedJson(value, {
-      code: 'NODE_MACHINE_PREPARATION_CONFIGURATION',
-      maximumDepth: 20,
-      maximumNodes: 2048,
-      maximumCharacters: 65_536,
-    }),
-  ),
-  providerData: z.unknown().transform((value) =>
-    cloneBoundedJson(value, {
-      code: 'NODE_MACHINE_PROVIDER_PREPARATION',
-      maximumDepth: 12,
-      maximumNodes: 1024,
-      maximumCharacters: 65_536,
-    }),
-  ),
-  prepared: preparedPrintSchema,
-});
 const runEffectKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop']);
 const effectKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'upload', 'urgent-stop']);
 const effectIntentSchema = z.strictObject({
   type: z.literal('machine-effect-intent'),
-  workspaceId: identity,
   machineId: identity,
   providerId: identity,
   physicalMachineId: identity,
@@ -230,17 +147,18 @@ const operationReceiptSchema = z.union([
     observedAt: z.iso.datetime({ offset: true }),
   }),
 ]);
-const printRequestEventSchema = z.strictObject({
-  type: z.literal('machine-print-request'),
-  workspaceId: identity,
-  request: z.unknown().transform((value) => parsePrintRequest(value)),
-});
 const effectResultSchema = z.strictObject({
   type: z.literal('machine-effect-result'),
   operationId: identity,
   source: z.enum(['attempt', 'reconciliation', 'recovery']),
   receipt: operationReceiptSchema,
 });
+/** Everything a machine's `operations.jsonl` holds: the write-ahead records of its device effects. */
+const operationEventSchema = z.discriminatedUnion('type', [
+  effectIntentSchema,
+  effectSendingSchema,
+  effectResultSchema,
+]);
 const providerReceiptSchema = z.discriminatedUnion('status', [
   z.strictObject({
     status: z.literal('accepted'),
@@ -284,12 +202,6 @@ const discoveryEventSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.enum(['found', 'updated']), candidate: candidateSchema }),
   z.strictObject({ type: z.literal('lost'), candidateId: identity, observedAt: z.iso.datetime({ offset: true }) }),
 ]);
-const authorityIdentityLimits = {
-  code: 'NODE_MACHINE_HOST_IDENTITY',
-  maximumDepth: 2,
-  maximumNodes: 8,
-  maximumCharacters: 1024,
-};
 const discoveryLimits = {
   code: 'NODE_MACHINE_DISCOVERY',
   maximumDepth: 8,
@@ -405,33 +317,21 @@ const requestFailure = (error: unknown): NonNullable<PrintRequest['failure']> =>
     message: receiptMessage.parse(message.slice(0, 1024) || 'MACHINE_PREPARATION_FAILED'),
   };
 };
-type HostAuthorityIdentityEvent = Readonly<z.infer<typeof authorityIdentitySchema>>;
-type NodeMachineBindingEvent = Readonly<z.infer<typeof bindingEventSchema>>;
-type NodeMachineBindingRemovedEvent = Readonly<z.infer<typeof bindingRemovedEventSchema>>;
-type NodeMachinePreparedEvent = Readonly<z.infer<typeof preparedEventSchema>>;
 type NodeMachineEffectIntentEvent = Readonly<z.infer<typeof effectIntentSchema>>;
-type NodeMachineEffectSendingEvent = Readonly<z.infer<typeof effectSendingSchema>>;
 type NodeMachineEffectResultEvent = Readonly<z.infer<typeof effectResultSchema>>;
-type NodeMachinePrintRequestEvent = Readonly<z.infer<typeof printRequestEventSchema>>;
-type NodeMachineEffectEvent =
-  | NodeMachineEffectIntentEvent
-  | NodeMachineEffectSendingEvent
-  | NodeMachineEffectResultEvent;
-type HostAuthorityEvent =
-  | HostAuthorityIdentityEvent
-  | MachineDirectoryEvent
-  | NodeMachineBindingEvent
-  | NodeMachineBindingRemovedEvent
-  | NodeMachinePreparedEvent
-  | NodeMachineEffectEvent
-  | NodeMachinePrintRequestEvent;
-type OwnedPrintRequest = Readonly<{ workspaceId: string; request: PrintRequest }>;
+type NodeMachineEffectEvent = Readonly<z.infer<typeof operationEventSchema>>;
 
 type NodeMachineEffectState = {
   intent: NodeMachineEffectIntentEvent;
   status: MachineOperationSnapshot['status'];
   updatedAt: string;
   receipt?: MachineOperationReceipt;
+};
+
+/** One bound machine: its latest `machine.json` and its operations log, which may have been found unreadable. */
+type BoundMachine = {
+  record: MachineBindingRecord;
+  operations: MachineOperationsState<NodeMachineEffectEvent>;
 };
 
 type ExecutableMachineDefinition = Readonly<{
@@ -452,7 +352,7 @@ export type NodeMachineRuntime = Readonly<{
     has(reference: string): Promise<boolean>;
     forget(reference: string): Promise<void>;
   }>;
-  connection(workspaceId: string): MachineConnectionRuntime;
+  connection(): MachineConnectionRuntime;
 }>;
 
 /** Trusted native completion of a browser-initiated, non-secret binding ceremony. @public */
@@ -464,35 +364,27 @@ export type CompleteNodeMachineBindingInput = Readonly<{
 
 /** Trusted native removal of one committed binding, e.g. to roll back a binding whose credential could not be saved. @public */
 export type RemoveNodeMachineBindingInput = Readonly<{
-  workspaceId: string;
   machineId: string;
 }>;
 
-/** One explicitly trusted, already-connected machine attachment. @public */
-export type NodeMachineHostAttachment = Readonly<{
-  workspaceId: string;
-  machineId: string;
-  providerId: string;
-  session: Pick<MachineSession, 'getDescriptor' | 'getSnapshot' | 'observe' | 'close'>;
-}>;
-
-/** Input for one Node-owned machine-directory authority. @public */
+/** Input for one Node-owned machine store and its machine directory. @public */
 export type CreateNodeMachineHostInput = Readonly<{
-  /** Existing protected host-state directory that owns the authority journal. */
-  authorityRoot: string;
+  /**
+   * The machine store root, created `0700` when missing. One host at a time owns it, through the writer lock at
+   * `authority/authority.writer.lock`; a second gets `AUTHORITY_ALREADY_OWNED`.
+   */
+  storeRoot: string;
+  /** Older store roots whose legacy `authority/machine-events.jsonl` the store's first open imports, read-only. */
+  legacyStoreRoots?: readonly string[];
   hostId: string;
   authorityId: string;
   /** Executable-owned admission authority bound to this host instance. */
   admission: HostAdmissionAuthority;
-  /** Stable identity of this journal history, retained across restarts. */
-  generation: string;
   providers: ReadonlyArray<MachineProvider & RuntimePluginDefinitionCarrier<unknown>>;
   /** Host-owned provider runtime. Supply this for built-in discovery and binding ceremonies. */
   runtime?: NodeMachineRuntime;
   /** Custom admitted operations for hosts that own an equivalent binding implementation. */
   operations?: MachineChannelHostOperations;
-  /** Trusted sessions already resolved by the executable host; this function never discovers credentials. */
-  attachments?: readonly NodeMachineHostAttachment[];
   onError(error: unknown): void;
 }>;
 
@@ -500,7 +392,12 @@ export type CreateNodeMachineHostInput = Readonly<{
 export type ServeNodeMachineChannelInput = Readonly<{
   port: MachineChannelEndpoint;
   session: HostSessionHandle;
-  workspaceId: string;
+}>;
+
+/** Trusted issuance of one machines-route session; revoke it through the host's admission authority. @public */
+export type IssueNodeMachineSessionInput = Readonly<{
+  actor: HostActor;
+  grants: readonly HostRouteGrant[];
 }>;
 
 /** Lifecycle subset required by a host socket owner. @public */
@@ -510,8 +407,10 @@ export type NodeMachineChannelHandle = Readonly<{
   onClose(handler: () => void): () => void;
 }>;
 
-/** One exclusively owned Node machine-directory service. @public */
+/** One exclusively owned Node machine store and directory service. @public */
 export type NodeMachineHost = Readonly<{
+  /** A session this host's routes admit; machines belong to the store, so the session names no workspace. */
+  issueSession(input: IssueNodeMachineSessionInput): HostSessionHandle;
   admitRoute(input: Omit<ServeNodeMachineChannelInput, 'port'>): AdmittedHostRoute;
   serve(input: ServeNodeMachineChannelInput): NodeMachineChannelHandle;
   completeBinding(input: CompleteNodeMachineBindingInput): Promise<MachineBindingOutcome>;
@@ -539,187 +438,107 @@ const closeOwned = async (operations: ReadonlyArray<() => void | Promise<void>>)
   }
 };
 
-const parseAuthorityEvent = (candidate: unknown): HostAuthorityEvent => {
-  if (
-    candidate !== null &&
-    typeof candidate === 'object' &&
-    !Array.isArray(candidate) &&
-    'type' in candidate &&
-    candidate['type'] === 'host-authority-initialized'
-  ) {
-    return Object.freeze(authorityIdentitySchema.parse(cloneBoundedJson(candidate, authorityIdentityLimits)));
-  }
-  if (
-    candidate !== null &&
-    typeof candidate === 'object' &&
-    !Array.isArray(candidate) &&
-    'type' in candidate &&
-    candidate['type'] === 'machine-binding-committed'
-  ) {
-    return Object.freeze(bindingEventSchema.parse(candidate));
-  }
-  if (
-    candidate !== null &&
-    typeof candidate === 'object' &&
-    !Array.isArray(candidate) &&
-    'type' in candidate &&
-    candidate['type'] === 'machine-binding-removed'
-  ) {
-    return Object.freeze(bindingRemovedEventSchema.parse(candidate));
-  }
-  if (
-    candidate !== null &&
-    typeof candidate === 'object' &&
-    !Array.isArray(candidate) &&
-    'type' in candidate &&
-    candidate['type'] === 'machine-print-prepared'
-  ) {
-    return Object.freeze(preparedEventSchema.parse(candidate));
-  }
-  if (
-    candidate !== null &&
-    typeof candidate === 'object' &&
-    !Array.isArray(candidate) &&
-    'type' in candidate &&
-    candidate['type'] === 'machine-effect-intent'
-  ) {
-    return Object.freeze(effectIntentSchema.parse(candidate));
-  }
-  if (
-    candidate !== null &&
-    typeof candidate === 'object' &&
-    !Array.isArray(candidate) &&
-    'type' in candidate &&
-    candidate['type'] === 'machine-effect-sending'
-  ) {
-    return Object.freeze(effectSendingSchema.parse(candidate));
-  }
-  if (
-    candidate !== null &&
-    typeof candidate === 'object' &&
-    !Array.isArray(candidate) &&
-    'type' in candidate &&
-    candidate['type'] === 'machine-effect-result'
-  ) {
-    return Object.freeze(effectResultSchema.parse(candidate));
-  }
-  if (
-    candidate !== null &&
-    typeof candidate === 'object' &&
-    !Array.isArray(candidate) &&
-    'type' in candidate &&
-    candidate['type'] === 'machine-print-request'
-  ) {
-    return Object.freeze(printRequestEventSchema.parse(candidate));
-  }
-  return parseMachineDirectoryEvent(candidate);
-};
+const parseOperationEvent = (candidate: unknown): NodeMachineEffectEvent =>
+  Object.freeze(operationEventSchema.parse(candidate));
 
-const initializeAuthorityIdentity = async (
-  journal: MachineEventLog<HostAuthorityEvent>,
-  expected: Omit<HostAuthorityIdentityEvent, 'type'>,
-): Promise<void> => {
-  let cursor = 0;
-  let endCursor: number | undefined;
-  let found = false;
-  do {
-    // oxlint-disable-next-line eslint/no-await-in-loop -- identity admission scans the stable journal in order.
-    const page = await journal.replay({ cursor, limit: 128 });
-    endCursor ??= page.endCursor;
-    for (const record of page.records) {
-      if (record.event.type !== 'host-authority-initialized') {
+/**
+ * Fold one machine's operations log under the replay rules. Any violation makes the whole log unusable, since an
+ * effect whose history cannot be trusted must never be sent again.
+ *
+ * @param machineId - The machine whose directory holds the log.
+ * @param log - Its recovered operations log.
+ * @returns Each recorded effect's latest state, by operation id.
+ */
+const replayOperations = async (
+  machineId: string,
+  log: MachineEventLog<NodeMachineEffectEvent>,
+): Promise<Map<string, NodeMachineEffectState>> => {
+  const replayed = new Map<string, NodeMachineEffectState>();
+  for (let cursor = 0; ; ) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- the log folds in sequence.
+    const page = await log.replay({ cursor, limit: 128 });
+    for (const { event } of page.records) {
+      if (event.type === 'machine-effect-intent') {
+        if (replayed.has(event.operationId)) {
+          throw new Error('NODE_MACHINE_EFFECT_DUPLICATE_INTENT');
+        }
+        if (event.machineId !== machineId) {
+          throw new Error('NODE_MACHINE_EFFECT_MACHINE_MISMATCH');
+        }
+        replayed.set(event.operationId, { intent: event, status: 'planned', updatedAt: event.plannedAt });
         continue;
       }
-      if (found || record.sequence !== 0) {
-        throw new Error('NODE_MACHINE_HOST_DUPLICATE_IDENTITY');
+      const state = replayed.get(event.operationId);
+      if (!state) {
+        throw new Error('NODE_MACHINE_EFFECT_ORPHAN_TRANSITION');
       }
-      found = true;
+      if (event.type === 'machine-effect-sending') {
+        if (state.status !== 'planned') {
+          throw new Error('NODE_MACHINE_EFFECT_INVALID_SENDING');
+        }
+        state.status = 'sending';
+        state.updatedAt = event.observedAt;
+        continue;
+      }
       if (
-        record.event.hostId !== expected.hostId ||
-        record.event.authorityId !== expected.authorityId ||
-        record.event.generation !== expected.generation
+        event.receipt.operationId !== state.intent.operationId ||
+        event.receipt.machineId !== state.intent.machineId ||
+        event.receipt.kind !== state.intent.intent.kind ||
+        (state.status !== 'sending' && state.status !== 'unknown')
       ) {
-        throw new Error('NODE_MACHINE_HOST_IDENTITY_MISMATCH');
+        throw new Error('NODE_MACHINE_EFFECT_INVALID_RESULT');
       }
+      state.status = event.receipt.status;
+      state.updatedAt = event.receipt.observedAt;
+      state.receipt = event.receipt;
+    }
+    if (page.records.length === 0 || page.nextCursor >= page.endCursor) {
+      return replayed;
     }
     cursor = page.nextCursor;
-    if (cursor < endCursor && page.records.length === 0) {
-      throw new Error('NODE_MACHINE_HOST_JOURNAL_GAP');
-    }
-  } while (cursor < endCursor);
-  if (found) {
-    return;
   }
-  if (endCursor !== 0) {
-    throw new Error('NODE_MACHINE_HOST_IDENTITY_MISSING');
-  }
-  await journal.append({ type: 'host-authority-initialized', ...expected });
 };
 
-const readAuthorityState = async (
-  journal: MachineEventLog<HostAuthorityEvent>,
-): Promise<
-  Readonly<{
-    bindings: NodeMachineBindingEvent[];
-    preparations: NodeMachinePreparedEvent[];
-    effects: NodeMachineEffectEvent[];
-    requests: OwnedPrintRequest[];
-  }>
-> => {
-  const bindings = new Map<string, NodeMachineBindingEvent>();
-  const preparations = new Map<string, NodeMachinePreparedEvent>();
-  const effects: NodeMachineEffectEvent[] = [];
-  const requests = new Map<string, OwnedPrintRequest>();
-  let cursor = 0;
-  let endCursor: number | undefined;
-  do {
-    // oxlint-disable-next-line eslint/no-await-in-loop -- protected authority history folds in sequence.
-    const page = await journal.replay({ cursor, limit: 128 });
-    endCursor ??= page.endCursor;
-    for (const record of page.records) {
-      switch (record.event.type) {
-        case 'machine-binding-committed': {
-          bindings.set(JSON.stringify([record.event.workspaceId, record.event.machineId]), record.event);
-          break;
-        }
-        case 'machine-binding-removed': {
-          bindings.delete(JSON.stringify([record.event.workspaceId, record.event.machineId]));
-          break;
-        }
-        case 'machine-print-prepared': {
-          preparations.set(record.event.prepared.preparedId, record.event);
-          break;
-        }
-        case 'machine-effect-intent':
-        case 'machine-effect-result':
-        case 'machine-effect-sending': {
-          effects.push(record.event);
-          break;
-        }
-        case 'machine-print-request': {
-          requests.set(JSON.stringify([record.event.workspaceId, record.event.request.requestId]), {
-            workspaceId: record.event.workspaceId,
-            request: record.event.request,
-          });
-          break;
-        }
-        default: {
-          break;
-        }
-      }
-    }
-    cursor = page.nextCursor;
-    if (cursor < endCursor && page.records.length === 0) {
-      throw new Error('NODE_MACHINE_HOST_JOURNAL_GAP');
-    }
-  } while (cursor < endCursor);
-  return Object.freeze({
-    bindings: [...bindings.values()],
-    preparations: [...preparations.values()],
-    effects,
-    requests: [...requests.values()],
-  });
+const sameDescriptor = (left: MachineDescriptor, right: MachineDescriptor): boolean =>
+  canonicalizeCacheValue({ value: left }) === canonicalizeCacheValue({ value: right });
+
+// A placeholder has no envelope; the smallest positive one keeps any fit check refusing it.
+const unreportedEnvelope: MachineDescriptor['ratedEnvelope'] = {
+  width: Number.MIN_VALUE,
+  depth: Number.MIN_VALUE,
+  height: Number.MIN_VALUE,
+  unit: 'm',
 };
+
+/**
+ * What a binding whose printer has never reported is listed with (one migrated without a usable directory entry), so
+ * it can be seen and removed: its own identity, unknown facts and no operations, stale until the printer connects.
+ *
+ * @param record - The binding.
+ * @param vendor - The provider's vendor name.
+ * @returns A placeholder descriptor and snapshot.
+ */
+const unreportedIdentity = (
+  record: MachineBindingRecord,
+  vendor: string,
+): Pick<MachineDirectoryEntry, 'descriptor' | 'snapshot'> => ({
+  descriptor: {
+    id: record.physicalId,
+    name: record.candidate.name,
+    vendor,
+    model: record.candidate.claimedIdentity.model ?? 'unknown',
+    technology: 'unknown',
+    firmware: 'unknown',
+    accepts: [],
+    operations: [],
+    ratedEnvelope: unreportedEnvelope,
+    printableEnvelope: unreportedEnvelope,
+    tools: [],
+    materialSystem: { kind: 'unknown', slotCount: 0 },
+    bedTypes: [],
+  },
+  snapshot: { connection: 'disconnected', readiness: 'unknown', observedAt: record.boundAt, setup: { materials: [] } },
+});
 
 const terminalRequestStates: ReadonlySet<PrintRequest['state']> = new Set([
   'denied',
@@ -743,18 +562,20 @@ const connectionContextSchema = z.strictObject({
 });
 
 /**
- * Open one protected Node authority journal and its machine directory.
+ * Open the machine store and serve its machine directory.
  *
- * Unknown committed record kinds fail closed. Future machine effect records extend
- * this same private authority parser and share this host's writer. Live machine
- * observations stay in the directory's memory; the journal keeps recovery facts.
+ * Recovery follows the store's order: take the lock, migrate a legacy journal once, load every `machine.json` and
+ * unexpired preparation, replay each machine's operations log and record every possible send as `unknown`, settle
+ * the print requests, list each machine stale from its last-known identity (a placeholder for one whose printer never
+ * reported), then reconnect. A machine whose operations log is unreadable, or cannot take its recovery record, stays
+ * listed but unavailable; every other machine works.
  *
- * @param input - Trusted host identity, storage root, providers and connected sessions.
+ * @param input - Trusted host identity, store root, providers and operation owner.
  * @returns The owning host service and authenticated channel attachment point.
  * @public
  */
 export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): Promise<NodeMachineHost> => {
-  const { admission, authorityId, authorityRoot, generation, hostId, onError } = input;
+  const { admission, authorityId, hostId, onError } = input;
   const report = (error: unknown): void => {
     try {
       onError(error);
@@ -806,47 +627,56 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     }
     return pending;
   };
-  const attachments = Object.freeze(
-    (input.attachments ?? []).map(({ machineId, providerId, session, workspaceId }) =>
-      Object.freeze({ machineId, providerId, session, workspaceId }),
-    ),
-  );
-  const owner = await acquireNodeAuthorityWriter({ authorityRoot });
-  const canonicalRoot = dirname(owner.lockPath);
-  const committedBindings = new Map<string, NodeMachineBindingEvent>();
-  const preparations = new Map<string, NodeMachinePreparedEvent>();
+  const now = (): string => input.runtime?.discovery.clock.now() ?? new Date().toISOString();
+  const store = await openNodeMachineStore<NodeMachineEffectEvent>({
+    storeRoot: input.storeRoot,
+    legacyStoreRoots: input.legacyStoreRoots ?? [],
+    parseOperation: parseOperationEvent,
+    now,
+    onError: report,
+  });
+  /** Every bound machine, by machine id. */
+  const machines = new Map<string, BoundMachine>();
+  const preparations = new Map<string, MachinePreparationRecord>();
+  /** Every recorded effect of a machine with a readable log, by operation id. */
   const effects = new Map<string, NodeMachineEffectState>();
-  const requests = new Map<string, OwnedPrintRequest>();
+  /** Every print request of a bound machine, by request id. */
+  const requests = new Map<string, PrintRequest>();
   const stillCaptureTimes = new Map<string, number>();
   const effectQueue = new ResourceQueue();
   const connectedSessions = new Map<string, MachineSession>();
-  /** One reconnect loop per supervised binding; aborting `stop` ends it. */
+  /** One reconnect loop per supervised machine; aborting `stop` ends it. */
   const supervisors = new Map<string, Readonly<{ stop: AbortController; done: Promise<void> }>>();
   let closed = false;
-  let journal: MachineEventLog<HostAuthorityEvent> | undefined;
   let directory: MachineDirectory | undefined;
-  const commits = new Topic<void>({ name: 'node-machine-authority-commits', onError });
-  const requestCommits = new Topic<OwnedPrintRequest>({ name: 'node-machine-print-requests', onError });
-  const now = (): string => input.runtime?.discovery.clock.now() ?? new Date().toISOString();
-  const requestKey = (workspaceId: string, requestId: string): string => JSON.stringify([workspaceId, requestId]);
-  const commitRequest = async (workspaceId: string, record: PrintRequest): Promise<PrintRequest> => {
-    if (!journal) {
-      throw new Error('NODE_MACHINE_HOST_CLOSED');
+  const commits = new Topic<void>({ name: 'node-machine-directory-commits', onError });
+  const requestCommits = new Topic<PrintRequest>({ name: 'node-machine-print-requests', onError });
+  // The machine an effect is recorded against, refusing an unbound machine with `missing` and an unreadable log.
+  const usableMachine = (
+    machineId: string,
+    missing: string,
+  ): Readonly<{ record: MachineBindingRecord; log: MachineEventLog<NodeMachineEffectEvent> }> => {
+    const machine = machines.get(machineId);
+    if (!machine) {
+      throw new Error(missing);
     }
-    const event = Object.freeze(
-      printRequestEventSchema.parse({
-        type: 'machine-print-request',
-        workspaceId,
-        request: { ...record, updatedAt: now() },
-      }),
-    );
-    await journal.append(event);
-    const owned: OwnedPrintRequest = Object.freeze({ workspaceId, request: event.request });
-    requests.set(requestKey(workspaceId, event.request.requestId), owned);
-    requestCommits.emit(owned);
-    return event.request;
+    if (machine.operations.status !== 'open') {
+      throw new Error('MACHINE_OPERATIONS_LOG_CORRUPT', { cause: machine.operations.error });
+    }
+    return { record: machine.record, log: machine.operations.log };
   };
-  /** Fold the durable effect ledger into one in-flight request; `undefined` means nothing settled yet. */
+  const commitRequest = async (record: PrintRequest): Promise<PrintRequest> => {
+    const committed = await store.writeRequest({ ...record, updatedAt: now() });
+    requests.set(committed.requestId, committed);
+    requestCommits.emit(committed);
+    return committed;
+  };
+  /**
+   * Fold the durable effect ledger into one in-flight request.
+   *
+   * @param record - The in-flight request.
+   * @returns The next request state, or `undefined` while nothing has settled.
+   */
   const advanceRequest = (record: PrintRequest): PrintRequest | undefined => {
     const phase =
       record.state === 'uploading' || (record.state === 'unknown' && record.transferId === undefined)
@@ -878,136 +708,180 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       : { ...record, state: 'started', receipt };
   };
   const syncRequests = async (operationId: string): Promise<void> => {
-    for (const owned of requests.values()) {
-      if (owned.request.uploadOperationId !== operationId && owned.request.startOperationId !== operationId) {
+    for (const request of requests.values()) {
+      if (request.uploadOperationId !== operationId && request.startOperationId !== operationId) {
         continue;
       }
-      const next = advanceRequest(owned.request);
+      const next = advanceRequest(request);
       if (next) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- request transitions journal in ledger order.
-        await commitRequest(owned.workspaceId, next);
+        // oxlint-disable-next-line eslint/no-await-in-loop -- request transitions follow the effect ledger in order.
+        await commitRequest(next);
       }
     }
   };
-  try {
-    journal = await createNodeMachineEventLog({ authorityRoot: canonicalRoot, owner, parse: parseAuthorityEvent });
-    await initializeAuthorityIdentity(journal, {
-      hostId,
-      authorityId,
-      generation,
+  const recordEffectResult = async (
+    state: NodeMachineEffectState,
+    receipt: MachineOperationReceipt,
+    source: NodeMachineEffectResultEvent['source'],
+  ): Promise<void> => {
+    const { log } = usableMachine(state.intent.machineId, 'MACHINE_OPERATION_UNAVAILABLE');
+    await log.append(
+      Object.freeze(
+        effectResultSchema.parse({
+          type: 'machine-effect-result',
+          operationId: state.intent.operationId,
+          source,
+          receipt,
+        }),
+      ),
+    );
+    state.status = receipt.status;
+    state.updatedAt = receipt.observedAt;
+    state.receipt = receipt;
+  };
+  const appendEffectResult = async (
+    state: NodeMachineEffectState,
+    receipt: MachineOperationReceipt,
+    source: NodeMachineEffectResultEvent['source'],
+  ): Promise<void> => {
+    await recordEffectResult(state, receipt, source);
+    await syncRequests(state.intent.operationId);
+  };
+  // Remember a new or changed machine identity in its `machine.json`, so a restart lists it with that identity. A
+  // binding already wrote the one it connected with, so a first report of it writes nothing.
+  // Take one machine out of service for this run: its log cannot be trusted or written, so none of its effects is sent
+  // or settled again. Every other machine is untouched.
+  const markCorrupt = (machineId: string, cause: unknown): void => {
+    const error = new Error('MACHINE_OPERATIONS_LOG_CORRUPT', { cause });
+    const machine = machines.get(machineId);
+    if (machine) {
+      machine.operations = { status: 'corrupt', error };
+    }
+    for (const [operationId, state] of effects) {
+      if (state.intent.machineId === machineId) {
+        effects.delete(operationId);
+      }
+    }
+    report(error);
+  };
+  const persistMachine = async (entry: MachineDirectoryEntry): Promise<void> => {
+    const machine = machines.get(entry.machineId);
+    if (!machine || (machine.record.last && sameDescriptor(machine.record.last.descriptor, entry.descriptor))) {
+      return;
+    }
+    machine.record = await store.writeMachine({
+      ...machine.record,
+      last: { descriptor: entry.descriptor, snapshot: entry.snapshot, observedAt: now() },
     });
-    const recovered = await readAuthorityState(journal);
-    for (const binding of recovered.bindings) {
-      committedBindings.set(JSON.stringify([binding.workspaceId, binding.machineId]), binding);
+  };
+  try {
+    for (const loaded of store.machines) {
+      machines.set(loaded.record.id, { record: loaded.record, operations: loaded.operations });
+      for (const preparation of loaded.preparations) {
+        preparations.set(preparation.prepared.preparedId, preparation);
+      }
     }
-    for (const preparation of recovered.preparations) {
-      preparations.set(preparation.prepared.preparedId, preparation);
-    }
-    for (const event of recovered.effects) {
-      if (event.type === 'machine-effect-intent') {
-        if (effects.has(event.operationId)) {
+    for (const [machineId, machine] of machines) {
+      if (machine.operations.status !== 'open') {
+        report(machine.operations.error);
+        continue;
+      }
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- each machine's log folds before the next.
+        const replayed = await replayOperations(machineId, machine.operations.log);
+        if ([...replayed.keys()].some((operationId) => effects.has(operationId))) {
           throw new Error('NODE_MACHINE_EFFECT_DUPLICATE_INTENT');
         }
-        effects.set(event.operationId, {
-          intent: event,
-          status: 'planned',
-          updatedAt: event.plannedAt,
-        });
-        continue;
-      }
-      const state = effects.get(event.operationId);
-      if (!state) {
-        throw new Error('NODE_MACHINE_EFFECT_ORPHAN_TRANSITION');
-      }
-      if (event.type === 'machine-effect-sending') {
-        if (state.status !== 'planned') {
-          throw new Error('NODE_MACHINE_EFFECT_INVALID_SENDING');
+        for (const [operationId, state] of replayed) {
+          effects.set(operationId, state);
         }
-        state.status = 'sending';
-        state.updatedAt = event.observedAt;
-        continue;
+      } catch (error) {
+        markCorrupt(machineId, error);
       }
-      if (
-        event.receipt.operationId !== state.intent.operationId ||
-        event.receipt.machineId !== state.intent.machineId ||
-        event.receipt.kind !== state.intent.intent.kind ||
-        (state.status !== 'sending' && state.status !== 'unknown')
-      ) {
-        throw new Error('NODE_MACHINE_EFFECT_INVALID_RESULT');
-      }
-      state.status = event.receipt.status;
-      state.updatedAt = event.receipt.observedAt;
-      state.receipt = event.receipt;
     }
     for (const state of effects.values()) {
       if (state.status !== 'sending') {
         continue;
       }
-      const receipt: MachineOperationReceipt = {
-        operationId: state.intent.operationId,
-        machineId: state.intent.machineId,
-        kind: state.intent.intent.kind,
-        status: 'unknown',
-        reason: 'host-restarted-after-possible-send',
-        observedAt: input.runtime?.discovery.clock.now() ?? new Date().toISOString(),
-      };
-      const event = Object.freeze(
-        effectResultSchema.parse({
-          type: 'machine-effect-result',
-          operationId: state.intent.operationId,
-          source: 'recovery',
-          receipt,
-        }),
-      );
-      // oxlint-disable-next-line eslint/no-await-in-loop -- recovery must durably classify each possible send.
-      await journal.append(event);
-      state.status = 'unknown';
-      state.updatedAt = receipt.observedAt;
-      state.receipt = receipt;
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- recovery must durably classify each possible send.
+        await recordEffectResult(
+          state,
+          {
+            operationId: state.intent.operationId,
+            machineId: state.intent.machineId,
+            kind: state.intent.intent.kind,
+            status: 'unknown',
+            reason: 'host-restarted-after-possible-send',
+            observedAt: now(),
+          },
+          'recovery',
+        );
+      } catch (error) {
+        // A log that cannot take the durable `unknown` (a full log, a failing disk) takes only its machine down.
+        markCorrupt(state.intent.machineId, error);
+      }
     }
-    for (const owned of recovered.requests) {
-      requests.set(requestKey(owned.workspaceId, owned.request.requestId), owned);
+    for (const loaded of store.machines) {
+      for (const request of loaded.requests) {
+        requests.set(request.requestId, request);
+      }
     }
-    for (const owned of recovered.requests) {
-      if (terminalRequestStates.has(owned.request.state)) {
+    for (const request of requests.values()) {
+      if (terminalRequestStates.has(request.state)) {
         continue;
       }
+      // A request of a machine whose log is unreadable keeps its state: its receipts cannot be read.
       const next: PrintRequest | undefined =
-        owned.request.state === 'preparing'
+        request.state === 'preparing'
           ? {
-              ...owned.request,
+              ...request,
               state: 'failed',
               failure: { code: 'HOST_RESTARTED', message: 'The host restarted before preparation completed.' },
             }
-          : advanceRequest(owned.request);
+          : machines.get(request.machineId)?.operations.status === 'open'
+            ? advanceRequest(request)
+            : undefined;
       if (next) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- recovered requests settle in journal order.
-        await commitRequest(owned.workspaceId, next);
+        // oxlint-disable-next-line eslint/no-await-in-loop -- recovered requests settle one at a time.
+        await commitRequest(next);
       }
     }
-    directory = await createMachineDirectory({
+    directory = createMachineDirectory({
       hostId,
       authorityId,
-      journal,
+      // Every binding is listed, stale until its printer reports; one that never has shows a placeholder.
+      recovered: [...machines.values()].map(({ record }): MachineDirectoryEntry => {
+        const { descriptor, snapshot } =
+          record.last ??
+          unreportedIdentity(
+            record,
+            providers.find((provider) => provider.id === record.providerId)?.vendor ?? record.providerId,
+          );
+        return {
+          machineId: record.id,
+          name: record.name,
+          providerId: record.providerId,
+          descriptor,
+          snapshot,
+          freshness: 'stale',
+        };
+      }),
+      persist: persistMachine,
       commits,
       onError,
     });
-    for (const attachment of attachments) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- trusted session ownership transfers in caller order.
-      await directory.attach(attachment);
-    }
   } catch (error) {
     const initializationError = error;
     const failedDirectory = directory;
-    const failedJournal = journal;
     try {
       await closeOwned([
         ...(failedDirectory ? [async () => failedDirectory.close()] : []),
-        ...(failedJournal ? [async () => failedJournal.close()] : []),
         () => {
           commits.dispose();
+          requestCommits.dispose();
         },
-        async () => owner.release(),
+        async () => store.close(),
       ]);
     } catch (cleanupError) {
       throw new AggregateError(
@@ -1018,17 +892,14 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     throw initializationError;
   }
   const ownedDirectory = directory;
-  const ownedJournal = journal;
   type DiscoveredCandidate = Readonly<{
-    workspaceId: string;
     providerId: string;
     configuration: CacheValue;
     candidate: MachineCandidate;
   }>;
-  type PendingCeremony = DiscoveredCandidate & Readonly<{ machineId: string }>;
+  type PendingCeremony = DiscoveredCandidate & Readonly<{ name: string }>;
   const discovered = new Map<string, DiscoveredCandidate>();
   const ceremonies = new Map<string, PendingCeremony>();
-  const scopedKey = (workspaceId: string, identity_: string): string => JSON.stringify([workspaceId, identity_]);
   // Mark a candidate whose claimed identity already has a saved credential; a failed lookup leaves it unmarked.
   const withCredentialFlag = async (providerId: string, candidate: MachineCandidate): Promise<MachineCandidate> => {
     const { serial } = candidate.claimedIdentity;
@@ -1045,41 +916,40 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       return candidate;
     }
   };
-  // Connect a committed binding, check that the same printer answers, and swap the session into the directory on the
+  // Connect a bound machine, check that the same printer answers, and swap the session into the directory on the
   // machine's queue, so the session never changes under an in-flight upload, start or control. `lost` settles once
   // the new session stops being live.
   const connectBinding = async (
-    binding: NodeMachineBindingEvent,
+    record: MachineBindingRecord,
     signal: AbortSignal,
   ): Promise<Readonly<{ lost: Promise<void> }>> => {
     const { runtime } = input;
     if (!runtime) {
       throw new Error('MACHINE_OPERATION_UNAVAILABLE');
     }
-    const { workspaceId, machineId, providerId } = binding;
-    const definition = await definitionOf(providerId);
+    const definition = await definitionOf(record.providerId);
     const session = await definition.connect(
-      { candidate: binding.candidate, configuration: binding.configuration, connection: binding.connection, signal },
-      runtime.connection(workspaceId),
+      { candidate: record.candidate, configuration: record.configuration, connection: record.connection, signal },
+      runtime.connection(),
     );
     const lost = Promise.withResolvers<void>();
     try {
       const descriptor = await session.getDescriptor({ signal });
-      if (descriptor.id !== binding.physicalId) {
+      if (descriptor.id !== record.physicalId) {
         throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CHANGED');
       }
-      await effectQueue.queueFor(`machine:${workspaceId}:${machineId}`, async () => {
+      await effectQueue.queueFor(`machine:${record.id}`, async () => {
         signal.throwIfAborted();
         await ownedDirectory.attach({
-          workspaceId,
-          machineId,
-          providerId,
+          machineId: record.id,
+          name: record.name,
+          providerId: record.providerId,
           session,
           onLost() {
             lost.resolve();
           },
         });
-        connectedSessions.set(scopedKey(workspaceId, machineId), session);
+        connectedSessions.set(record.id, session);
       });
     } catch (error) {
       await session.close().catch(() => undefined);
@@ -1087,11 +957,11 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     }
     return { lost: lost.promise };
   };
-  // Keep one committed binding connected until it is removed, refused for good or the host closes. A live session is
+  // Keep one bound machine connected until it is removed, refused for good or the host closes. A live session is
   // waited out; attempts then follow the backoff, and a good connect starts it over. An attempt only replaces the
   // session, so an effect whose outcome was lost with the old one stays `unknown` until it is reconciled.
   const keepConnected = async (
-    binding: NodeMachineBindingEvent,
+    record: MachineBindingRecord,
     signal: AbortSignal,
     live: Promise<void> | undefined,
   ): Promise<void> => {
@@ -1124,7 +994,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       }
       try {
         // oxlint-disable-next-line eslint/no-await-in-loop -- one attempt at a time.
-        ({ lost } = await connectBinding(binding, signal));
+        ({ lost } = await connectBinding(record, signal));
       } catch (error) {
         lost = undefined;
         if (isAborted()) {
@@ -1137,31 +1007,33 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       }
     }
   };
-  // Supervise a committed binding in the background, replacing any loop an earlier binding of the same machine ran.
-  const supervise = (binding: NodeMachineBindingEvent, live: Promise<void> | undefined): void => {
+  // Supervise a bound machine in the background, replacing any loop an earlier binding of the same id ran.
+  const supervise = (record: MachineBindingRecord, live: Promise<void> | undefined): void => {
     if (closed) {
       return;
     }
-    const key = scopedKey(binding.workspaceId, binding.machineId);
-    supervisors.get(key)?.stop.abort();
+    supervisors.get(record.id)?.stop.abort();
     const stop = new AbortController();
-    supervisors.set(key, { stop, done: keepConnected(binding, stop.signal, live) });
+    supervisors.set(record.id, { stop, done: keepConnected(record, stop.signal, live) });
   };
-  // Every recovered binding gets one attempt now, in journal order, then supervision unless it was refused for good
-  // or this host does not serve its provider.
+  // Every machine with a readable log gets one attempt now, in id order, then supervision unless it was refused for
+  // good or this host does not serve its provider.
   if (input.runtime) {
-    for (const binding of committedBindings.values()) {
+    for (const machine of machines.values()) {
+      if (machine.operations.status !== 'open') {
+        continue;
+      }
       let live: Promise<void> | undefined;
       try {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- recovered bindings connect in journal order.
-        ({ lost: live } = await connectBinding(binding, new AbortController().signal));
+        // oxlint-disable-next-line eslint/no-await-in-loop -- recovered machines connect in id order.
+        ({ lost: live } = await connectBinding(machine.record, new AbortController().signal));
       } catch (error) {
         report(error);
-        if (needsRebind(error) || !providerSources.has(binding.providerId)) {
+        if (needsRebind(error) || !providerSources.has(machine.record.providerId)) {
           continue;
         }
       }
-      supervise(binding, live);
+      supervise(machine.record, live);
     }
   }
   const effectSnapshot = (state: NodeMachineEffectState): MachineOperationSnapshot =>
@@ -1174,25 +1046,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       updatedAt: state.updatedAt,
       ...(state.receipt ? { receipt: state.receipt } : {}),
     });
-  const appendEffectResult = async (
-    state: NodeMachineEffectState,
-    receipt: MachineOperationReceipt,
-    source: NodeMachineEffectResultEvent['source'],
-  ): Promise<void> => {
-    const event = Object.freeze(
-      effectResultSchema.parse({
-        type: 'machine-effect-result',
-        operationId: state.intent.operationId,
-        source,
-        receipt,
-      }),
-    );
-    await ownedJournal.append(event);
-    state.status = receipt.status;
-    state.updatedAt = receipt.observedAt;
-    state.receipt = receipt;
-    await syncRequests(state.intent.operationId);
-  };
   const executeEffect = async (
     effectInput: Readonly<{
       admitted: AdmittedHostOperation;
@@ -1211,6 +1064,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       throw new Error('MACHINE_OPERATION_UNAVAILABLE');
     }
     const operationId = identity.parse(effectInput.operationId);
+    const { log } = usableMachine(effectInput.machineId, 'MACHINE_OPERATION_UNAVAILABLE');
     const inputDigest = await digestContent({
       bytes: encoder.encode(
         canonicalizeCacheValue({
@@ -1233,11 +1087,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     });
     let state = effects.get(operationId);
     if (state) {
-      if (
-        state.intent.inputDigest !== inputDigest ||
-        state.intent.workspaceId !== effectInput.admitted.workspaceId ||
-        state.intent.machineId !== effectInput.machineId
-      ) {
+      if (state.intent.inputDigest !== inputDigest || state.intent.machineId !== effectInput.machineId) {
         throw new Error('MACHINE_OPERATION_ID_CONFLICT');
       }
       if (state.receipt) {
@@ -1251,7 +1101,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       const intent = Object.freeze(
         effectIntentSchema.parse({
           type: 'machine-effect-intent',
-          workspaceId: effectInput.admitted.workspaceId,
           machineId: effectInput.machineId,
           providerId: effectInput.providerId,
           physicalMachineId: effectInput.physicalMachineId,
@@ -1261,7 +1110,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           plannedAt,
         }),
       );
-      await ownedJournal.append(intent);
+      await log.append(intent);
       state = { intent, status: 'planned', updatedAt: plannedAt };
       effects.set(operationId, state);
     }
@@ -1271,7 +1120,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     effectInput.signal.throwIfAborted();
     effectInput.admitted.assertCurrent();
     const sendingAt = runtime.discovery.clock.now();
-    await ownedJournal.append({ type: 'machine-effect-sending', operationId, observedAt: sendingAt });
+    await log.append({ type: 'machine-effect-sending', operationId, observedAt: sendingAt });
     state.status = 'sending';
     state.updatedAt = sendingAt;
     let receipt: MachineOperationReceipt;
@@ -1295,6 +1144,17 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     await appendEffectResult(state, receipt, 'attempt');
     return receipt;
   };
+  const listRequests = (machineId: string | undefined, projectId: string | undefined): readonly PrintRequest[] =>
+    [...requests.values()]
+      .filter(
+        (request) =>
+          (machineId === undefined || request.machineId === machineId) &&
+          (projectId === undefined || request.artifact.projectId === projectId),
+      )
+      .sort(
+        (left, right) => right.createdAt.localeCompare(left.createdAt) || right.requestId.localeCompare(left.requestId),
+      )
+      .slice(0, 1024);
   const hostOperations: MachineChannelHostOperations =
     input.operations ??
     Object.freeze({
@@ -1321,25 +1181,14 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           operationInput.signal.throwIfAborted();
           operationInput.admitted.assertCurrent();
           const event = Object.freeze(discoveryEventSchema.parse(cloneBoundedJson(raw, discoveryLimits)));
-          const key = scopedKey(
-            operationInput.admitted.workspaceId,
-            event.type === 'lost' ? event.candidateId : event.candidate.id,
-          );
+          const key = event.type === 'lost' ? event.candidateId : event.candidate.id;
           if (event.type === 'lost') {
             discovered.delete(key);
           } else {
             if (!discovered.has(key) && discovered.size >= 256) {
               throw new Error('MACHINE_DISCOVERY_CANDIDATE_LIMIT');
             }
-            discovered.set(
-              key,
-              Object.freeze({
-                workspaceId: operationInput.admitted.workspaceId,
-                providerId: source.id,
-                configuration,
-                candidate: event.candidate,
-              }),
-            );
+            discovered.set(key, Object.freeze({ providerId: source.id, configuration, candidate: event.candidate }));
           }
           yield event.type === 'lost'
             ? event
@@ -1350,9 +1199,11 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         if (!input.runtime) {
           throw new Error('MACHINE_OPERATION_UNAVAILABLE');
         }
-        const machineId = identity.parse(operationInput.name);
-        const key = scopedKey(operationInput.admitted.workspaceId, operationInput.candidate.id);
-        const selected = discovered.get(key);
+        const name = machineDisplayName(operationInput.name);
+        if (name.length === 0 || name !== operationInput.name.trim() || !name.isWellFormed()) {
+          throw new Error('MACHINE_BINDING_NAME_INVALID');
+        }
+        const selected = discovered.get(operationInput.candidate.id);
         if (
           !selected ||
           Date.parse(selected.candidate.expiresAt) <= Date.parse(input.runtime.discovery.clock.now()) ||
@@ -1361,25 +1212,21 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         ) {
           throw new Error('MACHINE_BINDING_CANDIDATE_EXPIRED');
         }
-        const existing = [...committedBindings.values()].find(
-          (binding) =>
-            binding.workspaceId === selected.workspaceId &&
-            binding.providerId === selected.providerId &&
-            binding.candidate.id === selected.candidate.id,
+        const existing = [...machines.values()].find(
+          ({ record }) => record.providerId === selected.providerId && record.candidate.id === selected.candidate.id,
         );
         if (existing) {
-          return Object.freeze({ status: 'bound', machineId: existing.machineId });
+          return Object.freeze({ status: 'bound', machineId: existing.record.id });
         }
         if (ceremonies.size >= 64) {
           throw new Error('MACHINE_BINDING_CEREMONY_LIMIT');
         }
         const ceremonyId = randomUUID();
-        ceremonies.set(ceremonyId, Object.freeze({ ...selected, machineId }));
+        ceremonies.set(ceremonyId, Object.freeze({ ...selected, name }));
         return Object.freeze({ status: 'operator-action-required', ceremonyId });
       },
       async removeBinding(operationInput) {
-        return removeCommittedBinding({
-          workspaceId: operationInput.admitted.workspaceId,
+        return removeBoundMachine({
           machineId: operationInput.machineId,
           assertCurrent() {
             operationInput.signal.throwIfAborted();
@@ -1392,20 +1239,13 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           throw new Error('MACHINE_OPERATION_UNAVAILABLE');
         }
         const machineId = identity.parse(operationInput.machineId);
-        if (
-          operationInput.artifact.revision.authorityId !== operationInput.admitted.authorityId ||
-          operationInput.artifact.revision.workspaceId !== operationInput.admitted.workspaceId
-        ) {
-          throw new Error('MACHINE_ARTIFACT_SCOPE_MISMATCH');
-        }
-        const machineKey = scopedKey(operationInput.admitted.workspaceId, machineId);
-        const binding = committedBindings.get(machineKey);
-        const session = connectedSessions.get(machineKey);
-        if (!binding || !session) {
+        const { record } = usableMachine(machineId, 'MACHINE_PREPARATION_UNAVAILABLE');
+        const session = connectedSessions.get(machineId);
+        if (!session) {
           throw new Error('MACHINE_PREPARATION_UNAVAILABLE');
         }
-        const directory = await ownedDirectory.snapshot({ workspaceId: operationInput.admitted.workspaceId });
-        const entry = directory.entries.find((candidate) => candidate.machineId === machineId);
+        const listed = await ownedDirectory.snapshot();
+        const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
         if (entry?.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
           throw new Error('MACHINE_PREPARATION_STALE_MACHINE');
         }
@@ -1422,7 +1262,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         if (!acceptsArtifact) {
           throw new Error('MACHINE_ARTIFACT_INCOMPATIBLE');
         }
-        const definition = await definitionOf(binding.providerId);
+        const definition = await definitionOf(record.providerId);
         const validated = await definition.submissionConfiguration.schema['~standard'].validate(
           operationInput.configuration,
         );
@@ -1444,7 +1284,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         try {
           receipt = await session.preparePrint({
             operationId: preparedId,
-            expectedMachineId: binding.physicalId,
+            expectedMachineId: record.physicalId,
             artifact: operationInput.artifact,
             configuration: validated.value,
             signal: operationInput.signal,
@@ -1471,7 +1311,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         const body = Object.freeze({
           preparedId,
           machineId,
-          physicalMachineId: binding.physicalId,
+          physicalMachineId: record.physicalId,
           artifact: operationInput.artifact,
           remoteName: identity.parse(receipt.remoteName),
           parser: receipt.parser,
@@ -1494,19 +1334,15 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           ),
         });
         const prepared: MachinePreparedPrint = Object.freeze({ ...body, preparedDigest });
-        const event = Object.freeze(
-          preparedEventSchema.parse({
-            type: 'machine-print-prepared',
-            workspaceId: operationInput.admitted.workspaceId,
-            providerId: binding.providerId,
-            configuration,
-            providerData,
-            prepared,
-          }),
-        );
-        await ownedJournal.append(event);
-        preparations.set(preparedId, event);
-        return prepared;
+        const preparation = await store.writePreparation({
+          version: 1,
+          prepared,
+          providerId: record.providerId,
+          configuration,
+          providerData,
+        });
+        preparations.set(preparedId, preparation);
+        return preparation.prepared;
       },
       async uploadPrint(operationInput) {
         const { runtime } = input;
@@ -1515,81 +1351,73 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         }
         const machineId = identity.parse(operationInput.machineId);
         const operationId = identity.parse(operationInput.operationId);
-        return effectQueue.queueForMany(
-          [`effect:${operationId}`, `machine:${operationInput.admitted.workspaceId}:${machineId}`],
-          async () => {
-            operationInput.signal.throwIfAborted();
-            operationInput.admitted.assertCurrent();
-            const preparation = preparations.get(identity.parse(operationInput.preparedId));
-            if (
-              !preparation ||
-              preparation.workspaceId !== operationInput.admitted.workspaceId ||
-              preparation.prepared.machineId !== machineId ||
-              preparation.prepared.preparedDigest !== operationInput.preparedDigest
-            ) {
-              throw new Error('MACHINE_PREPARATION_MISMATCH');
-            }
-            const machineKey = scopedKey(operationInput.admitted.workspaceId, machineId);
-            const binding = committedBindings.get(machineKey);
-            if (!binding) {
-              throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-            }
-            return executeEffect({
-              admitted: operationInput.admitted,
-              signal: operationInput.signal,
-              operationId,
-              machineId,
-              providerId: binding.providerId,
-              physicalMachineId: binding.physicalId,
-              intent: {
-                kind: 'upload',
-                preparedId: preparation.prepared.preparedId,
-                preparedDigest: preparation.prepared.preparedDigest,
-              },
-              async preflight() {
-                if (Date.parse(preparation.prepared.expiresAt) <= Date.parse(runtime.discovery.clock.now())) {
-                  throw new Error('MACHINE_PREPARATION_EXPIRED');
-                }
-                const directory = await ownedDirectory.snapshot({ workspaceId: operationInput.admitted.workspaceId });
-                const entry = directory.entries.find((candidate) => candidate.machineId === machineId);
-                if (entry?.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
-                  throw new Error('MACHINE_UPLOAD_STALE_MACHINE');
-                }
-                if (!connectedSessions.has(machineKey)) {
-                  throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-                }
-              },
-              async send() {
-                const session = connectedSessions.get(machineKey);
-                if (!session) {
-                  throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-                }
-                const transfer = await session.uploadPrint({
-                  operationId,
-                  expectedMachineId: binding.physicalId,
-                  artifact: preparation.prepared.artifact,
-                  remoteName: preparation.prepared.remoteName,
-                  providerData: preparation.providerData,
-                  configuration: preparation.configuration,
-                  signal: operationInput.signal,
-                });
-                if (
-                  transfer.status === 'transferred' &&
-                  (transfer.digest !== preparation.prepared.artifact.digest ||
-                    transfer.length !== preparation.prepared.artifact.length)
-                ) {
-                  return {
-                    status: 'rejected',
-                    code: 'TRANSFER_MISMATCH',
-                    message: 'The transferred object does not match the prepared artifact.',
-                    observedAt: transfer.observedAt,
-                  };
-                }
-                return transfer;
-              },
-            });
-          },
-        );
+        return effectQueue.queueForMany([`effect:${operationId}`, `machine:${machineId}`], async () => {
+          operationInput.signal.throwIfAborted();
+          operationInput.admitted.assertCurrent();
+          const preparation = preparations.get(identity.parse(operationInput.preparedId));
+          if (
+            !preparation ||
+            preparation.prepared.machineId !== machineId ||
+            preparation.prepared.preparedDigest !== operationInput.preparedDigest
+          ) {
+            throw new Error('MACHINE_PREPARATION_MISMATCH');
+          }
+          const { record } = usableMachine(machineId, 'MACHINE_OPERATION_UNAVAILABLE');
+          return executeEffect({
+            admitted: operationInput.admitted,
+            signal: operationInput.signal,
+            operationId,
+            machineId,
+            providerId: record.providerId,
+            physicalMachineId: record.physicalId,
+            intent: {
+              kind: 'upload',
+              preparedId: preparation.prepared.preparedId,
+              preparedDigest: preparation.prepared.preparedDigest,
+            },
+            async preflight() {
+              if (Date.parse(preparation.prepared.expiresAt) <= Date.parse(runtime.discovery.clock.now())) {
+                throw new Error('MACHINE_PREPARATION_EXPIRED');
+              }
+              const listed = await ownedDirectory.snapshot();
+              const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
+              if (entry?.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
+                throw new Error('MACHINE_UPLOAD_STALE_MACHINE');
+              }
+              if (!connectedSessions.has(machineId)) {
+                throw new Error('MACHINE_OPERATION_UNAVAILABLE');
+              }
+            },
+            async send() {
+              const session = connectedSessions.get(machineId);
+              if (!session) {
+                throw new Error('MACHINE_OPERATION_UNAVAILABLE');
+              }
+              const transfer = await session.uploadPrint({
+                operationId,
+                expectedMachineId: record.physicalId,
+                artifact: preparation.prepared.artifact,
+                remoteName: preparation.prepared.remoteName,
+                providerData: preparation.providerData,
+                configuration: preparation.configuration,
+                signal: operationInput.signal,
+              });
+              if (
+                transfer.status === 'transferred' &&
+                (transfer.digest !== preparation.prepared.artifact.digest ||
+                  transfer.length !== preparation.prepared.artifact.length)
+              ) {
+                return {
+                  status: 'rejected',
+                  code: 'TRANSFER_MISMATCH',
+                  message: 'The transferred object does not match the prepared artifact.',
+                  observedAt: transfer.observedAt,
+                };
+              }
+              return transfer;
+            },
+          });
+        });
       },
       async startPrint(operationInput) {
         const { runtime } = input;
@@ -1599,91 +1427,83 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         const machineId = identity.parse(operationInput.machineId);
         const operationId = identity.parse(operationInput.operationId);
         const transferId = identity.parse(operationInput.transferId);
-        return effectQueue.queueForMany(
-          [`effect:${operationId}`, `machine:${operationInput.admitted.workspaceId}:${machineId}`],
-          async () => {
-            operationInput.signal.throwIfAborted();
-            operationInput.admitted.assertCurrent();
-            const preparation = preparations.get(identity.parse(operationInput.preparedId));
-            if (
-              !preparation ||
-              preparation.workspaceId !== operationInput.admitted.workspaceId ||
-              preparation.prepared.machineId !== machineId ||
-              preparation.prepared.preparedDigest !== operationInput.preparedDigest ||
-              preparation.prepared.setupDigest !== operationInput.expectedSetupDigest
-            ) {
-              throw new Error('MACHINE_PREPARATION_MISMATCH');
-            }
-            const transferred = [...effects.values()].some(
-              (state) =>
-                state.intent.intent.kind === 'upload' &&
-                state.intent.intent.preparedId === preparation.prepared.preparedId &&
-                state.receipt?.status === 'accepted' &&
-                state.receipt.kind === 'upload' &&
-                state.receipt.evidence.transferId === transferId,
-            );
-            if (!transferred) {
-              throw new Error('MACHINE_TRANSFER_MISMATCH');
-            }
-            const machineKey = scopedKey(operationInput.admitted.workspaceId, machineId);
-            const binding = committedBindings.get(machineKey);
-            if (!binding) {
-              throw new Error('MACHINE_OPERATION_UNAVAILABLE');
-            }
-            return executeEffect({
-              admitted: operationInput.admitted,
-              signal: operationInput.signal,
-              operationId,
-              machineId,
-              providerId: binding.providerId,
-              physicalMachineId: binding.physicalId,
-              intent: {
-                kind: 'start',
-                preparedId: preparation.prepared.preparedId,
-                preparedDigest: preparation.prepared.preparedDigest,
+        return effectQueue.queueForMany([`effect:${operationId}`, `machine:${machineId}`], async () => {
+          operationInput.signal.throwIfAborted();
+          operationInput.admitted.assertCurrent();
+          const preparation = preparations.get(identity.parse(operationInput.preparedId));
+          if (
+            !preparation ||
+            preparation.prepared.machineId !== machineId ||
+            preparation.prepared.preparedDigest !== operationInput.preparedDigest ||
+            preparation.prepared.setupDigest !== operationInput.expectedSetupDigest
+          ) {
+            throw new Error('MACHINE_PREPARATION_MISMATCH');
+          }
+          const transferred = [...effects.values()].some(
+            (state) =>
+              state.intent.intent.kind === 'upload' &&
+              state.intent.intent.preparedId === preparation.prepared.preparedId &&
+              state.receipt?.status === 'accepted' &&
+              state.receipt.kind === 'upload' &&
+              state.receipt.evidence.transferId === transferId,
+          );
+          if (!transferred) {
+            throw new Error('MACHINE_TRANSFER_MISMATCH');
+          }
+          const { record } = usableMachine(machineId, 'MACHINE_OPERATION_UNAVAILABLE');
+          return executeEffect({
+            admitted: operationInput.admitted,
+            signal: operationInput.signal,
+            operationId,
+            machineId,
+            providerId: record.providerId,
+            physicalMachineId: record.physicalId,
+            intent: {
+              kind: 'start',
+              preparedId: preparation.prepared.preparedId,
+              preparedDigest: preparation.prepared.preparedDigest,
+              transferId,
+              expectedSetupDigest: operationInput.expectedSetupDigest,
+            },
+            async preflight() {
+              if (Date.parse(preparation.prepared.expiresAt) <= Date.parse(runtime.discovery.clock.now())) {
+                throw new Error('MACHINE_PREPARATION_EXPIRED');
+              }
+              const listed = await ownedDirectory.snapshot();
+              const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
+              if (
+                entry?.freshness !== 'current' ||
+                entry.snapshot.connection !== 'connected' ||
+                entry.snapshot.readiness !== 'idle' ||
+                entry.snapshot.activeRunId !== undefined
+              ) {
+                throw new Error('MACHINE_START_STALE_OR_BUSY');
+              }
+              if ((await digestMachineSetup(entry)) !== preparation.prepared.setupDigest) {
+                throw new Error('MACHINE_START_SETUP_CHANGED');
+              }
+              if (!connectedSessions.has(machineId)) {
+                throw new Error('MACHINE_START_UNAVAILABLE');
+              }
+            },
+            async send() {
+              const session = connectedSessions.get(machineId);
+              if (!session) {
+                throw new Error('MACHINE_START_UNAVAILABLE');
+              }
+              return session.submit({
+                operationId,
+                expectedMachineId: record.physicalId,
+                artifact: preparation.prepared.artifact,
+                remoteName: preparation.prepared.remoteName,
                 transferId,
-                expectedSetupDigest: operationInput.expectedSetupDigest,
-              },
-              async preflight() {
-                if (Date.parse(preparation.prepared.expiresAt) <= Date.parse(runtime.discovery.clock.now())) {
-                  throw new Error('MACHINE_PREPARATION_EXPIRED');
-                }
-                const directory = await ownedDirectory.snapshot({ workspaceId: operationInput.admitted.workspaceId });
-                const entry = directory.entries.find((candidate) => candidate.machineId === machineId);
-                if (
-                  entry?.freshness !== 'current' ||
-                  entry.snapshot.connection !== 'connected' ||
-                  entry.snapshot.readiness !== 'idle' ||
-                  entry.snapshot.activeRunId !== undefined
-                ) {
-                  throw new Error('MACHINE_START_STALE_OR_BUSY');
-                }
-                if ((await digestMachineSetup(entry)) !== preparation.prepared.setupDigest) {
-                  throw new Error('MACHINE_START_SETUP_CHANGED');
-                }
-                if (!connectedSessions.has(machineKey)) {
-                  throw new Error('MACHINE_START_UNAVAILABLE');
-                }
-              },
-              async send() {
-                const session = connectedSessions.get(machineKey);
-                if (!session) {
-                  throw new Error('MACHINE_START_UNAVAILABLE');
-                }
-                return session.submit({
-                  operationId,
-                  expectedMachineId: binding.physicalId,
-                  artifact: preparation.prepared.artifact,
-                  remoteName: preparation.prepared.remoteName,
-                  transferId,
-                  providerData: preparation.providerData,
-                  configuration: preparation.configuration,
-                  signal: operationInput.signal,
-                });
-              },
-            });
-          },
-        );
+                providerData: preparation.providerData,
+                configuration: preparation.configuration,
+                signal: operationInput.signal,
+              });
+            },
+          });
+        });
       },
       async controlRun(operationInput) {
         if (!input.runtime) {
@@ -1691,56 +1511,49 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         }
         const machineId = identity.parse(operationInput.machineId);
         const operationId = identity.parse(operationInput.operationId);
-        return effectQueue.queueForMany(
-          [`effect:${operationId}`, `machine:${operationInput.admitted.workspaceId}:${machineId}`],
-          async () => {
-            operationInput.signal.throwIfAborted();
-            operationInput.admitted.assertCurrent();
-            const machineKey = scopedKey(operationInput.admitted.workspaceId, machineId);
-            const binding = committedBindings.get(machineKey);
-            if (!binding) {
-              throw new Error('MACHINE_CONTROL_UNAVAILABLE');
-            }
-            return executeEffect({
-              admitted: operationInput.admitted,
-              signal: operationInput.signal,
-              operationId,
-              machineId,
-              providerId: binding.providerId,
-              physicalMachineId: binding.physicalId,
-              intent: {
-                kind: operationInput.command,
+        return effectQueue.queueForMany([`effect:${operationId}`, `machine:${machineId}`], async () => {
+          operationInput.signal.throwIfAborted();
+          operationInput.admitted.assertCurrent();
+          const { record } = usableMachine(machineId, 'MACHINE_CONTROL_UNAVAILABLE');
+          return executeEffect({
+            admitted: operationInput.admitted,
+            signal: operationInput.signal,
+            operationId,
+            machineId,
+            providerId: record.providerId,
+            physicalMachineId: record.physicalId,
+            intent: {
+              kind: operationInput.command,
+              expectedProviderRunId: operationInput.expectedProviderRunId,
+            },
+            async preflight() {
+              const listed = await ownedDirectory.snapshot();
+              const entry = listed.entries.find((candidate) => candidate.machineId === machineId);
+              if (
+                entry?.freshness !== 'current' ||
+                entry.snapshot.connection !== 'connected' ||
+                entry.snapshot.activeRunId !== operationInput.expectedProviderRunId
+              ) {
+                throw new Error('MACHINE_CONTROL_STALE_RUN');
+              }
+              if (!connectedSessions.has(machineId)) {
+                throw new Error('MACHINE_CONTROL_UNAVAILABLE');
+              }
+            },
+            async send() {
+              const session = connectedSessions.get(machineId);
+              if (!session) {
+                throw new Error('MACHINE_CONTROL_UNAVAILABLE');
+              }
+              return session.control({
+                command: operationInput.command,
+                operationId,
                 expectedProviderRunId: operationInput.expectedProviderRunId,
-              },
-              async preflight() {
-                const directory = await ownedDirectory.snapshot({ workspaceId: operationInput.admitted.workspaceId });
-                const entry = directory.entries.find((candidate) => candidate.machineId === machineId);
-                if (
-                  entry?.freshness !== 'current' ||
-                  entry.snapshot.connection !== 'connected' ||
-                  entry.snapshot.activeRunId !== operationInput.expectedProviderRunId
-                ) {
-                  throw new Error('MACHINE_CONTROL_STALE_RUN');
-                }
-                if (!connectedSessions.has(machineKey)) {
-                  throw new Error('MACHINE_CONTROL_UNAVAILABLE');
-                }
-              },
-              async send() {
-                const session = connectedSessions.get(machineKey);
-                if (!session) {
-                  throw new Error('MACHINE_CONTROL_UNAVAILABLE');
-                }
-                return session.control({
-                  command: operationInput.command,
-                  operationId,
-                  expectedProviderRunId: operationInput.expectedProviderRunId,
-                  signal: operationInput.signal,
-                });
-              },
-            });
-          },
-        );
+                signal: operationInput.signal,
+              });
+            },
+          });
+        });
       },
       async captureStill(operationInput) {
         const { runtime } = input;
@@ -1748,23 +1561,21 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           throw new Error('MACHINE_OPERATION_UNAVAILABLE');
         }
         const machineId = identity.parse(operationInput.machineId);
-        const machineKey = scopedKey(operationInput.admitted.workspaceId, machineId);
-        const binding = committedBindings.get(machineKey);
-        const session = connectedSessions.get(machineKey);
-        if (!binding || session?.stillCapture.type !== 'supported') {
+        const session = connectedSessions.get(machineId);
+        if (!machines.has(machineId) || session?.stillCapture.type !== 'supported') {
           throw new Error('MACHINE_STILL_UNAVAILABLE');
         }
         const requestedAt = Date.parse(runtime.discovery.clock.now());
         if (!Number.isFinite(requestedAt)) {
           throw new TypeError('MACHINE_CLOCK_INVALID');
         }
-        const previous = stillCaptureTimes.get(machineKey);
+        const previous = stillCaptureTimes.get(machineId);
         if (previous !== undefined && requestedAt - previous < 5000) {
           throw new Error('MACHINE_STILL_RATE_LIMITED');
         }
         operationInput.signal.throwIfAborted();
         operationInput.admitted.assertCurrent();
-        stillCaptureTimes.set(machineKey, requestedAt);
+        stillCaptureTimes.set(machineId, requestedAt);
         const still = await session.stillCapture.capture({ signal: operationInput.signal });
         operationInput.signal.throwIfAborted();
         operationInput.admitted.assertCurrent();
@@ -1802,18 +1613,18 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         return effectQueue.queueFor(`effect:${operationId}`, async () => {
           operationInput.signal.throwIfAborted();
           operationInput.admitted.assertCurrent();
+          const machine = machines.get(machineId);
+          if (machine?.operations.status === 'corrupt') {
+            throw new Error('MACHINE_OPERATIONS_LOG_CORRUPT', { cause: machine.operations.error });
+          }
           const state = effects.get(operationId);
-          if (
-            !state ||
-            state.intent.workspaceId !== operationInput.admitted.workspaceId ||
-            state.intent.machineId !== machineId
-          ) {
+          if (state?.intent.machineId !== machineId) {
             throw new Error('MACHINE_OPERATION_UNKNOWN');
           }
           if (state.status !== 'unknown') {
             return effectSnapshot(state);
           }
-          const session = connectedSessions.get(scopedKey(operationInput.admitted.workspaceId, machineId));
+          const session = connectedSessions.get(machineId);
           if (!session) {
             return effectSnapshot(state);
           }
@@ -1853,9 +1664,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         }
         const requestId = identity.parse(operationInput.requestId);
         const machineId = identity.parse(operationInput.machineId);
-        const { workspaceId } = operationInput.admitted;
-        const key = requestKey(workspaceId, requestId);
-        return effectQueue.queueFor(`request:${key}`, async () => {
+        return effectQueue.queueFor(`request:${requestId}`, async () => {
           operationInput.signal.throwIfAborted();
           operationInput.admitted.assertCurrent();
           const configuration = cloneBoundedJson(operationInput.configuration, {
@@ -1864,7 +1673,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
             maximumNodes: 2048,
             maximumCharacters: 65_536,
           });
-          const existing = requests.get(key)?.request;
+          const existing = requests.get(requestId);
           if (existing) {
             if (
               existing.machineId !== machineId ||
@@ -1877,8 +1686,10 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
             }
             return existing;
           }
+          // A request lives in its machine's directory, so an unbound machine gets none.
+          usableMachine(machineId, 'MACHINE_PREPARATION_UNAVAILABLE');
           const createdAt = now();
-          let record = await commitRequest(workspaceId, {
+          let record = await commitRequest({
             requestId,
             machineId,
             artifact: operationInput.artifact,
@@ -1897,31 +1708,30 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
               artifact: operationInput.artifact,
               configuration,
             });
-            record = await commitRequest(workspaceId, { ...record, state: 'awaiting-approval', prepared });
+            record = await commitRequest({ ...record, state: 'awaiting-approval', prepared });
           } catch (error) {
-            record = await commitRequest(workspaceId, { ...record, state: 'failed', failure: requestFailure(error) });
+            record = await commitRequest({ ...record, state: 'failed', failure: requestFailure(error) });
           }
           return record;
         });
       },
       async listPrintRequests(operationInput) {
         const machineId = operationInput.machineId === undefined ? undefined : identity.parse(operationInput.machineId);
-        return listRequests(operationInput.admitted.workspaceId, machineId);
+        return listRequests(machineId, operationInput.projectId);
       },
       async *watchPrintRequests(operationInput) {
-        const { signal } = operationInput;
-        const { workspaceId } = operationInput.admitted;
+        const { signal, projectId } = operationInput;
         const machineId = operationInput.machineId === undefined ? undefined : identity.parse(operationInput.machineId);
         // Ponytail: every frame is a whole record, so pending updates coalesce by request id and never need a cursor.
         const pending = new Map<string, PrintRequest>();
         let wake = Promise.withResolvers<void>();
         const off = requestCommits.subscribe(
-          (owned) => {
+          (request) => {
             if (
-              owned.workspaceId === workspaceId &&
-              (machineId === undefined || owned.request.machineId === machineId)
+              (machineId === undefined || request.machineId === machineId) &&
+              (projectId === undefined || request.artifact.projectId === projectId)
             ) {
-              pending.set(owned.request.requestId, owned.request);
+              pending.set(request.requestId, request);
               wake.resolve();
             }
           },
@@ -1932,7 +1742,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         };
         signal.addEventListener('abort', onAbort, { once: true });
         try {
-          for (const request of listRequests(workspaceId, machineId)) {
+          for (const request of listRequests(machineId, projectId)) {
             signal.throwIfAborted();
             yield pending.get(request.requestId) ?? request;
           }
@@ -1961,12 +1771,10 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         }
         const requestId = identity.parse(operationInput.requestId);
         const { admitted } = operationInput;
-        const { workspaceId } = admitted;
-        const key = requestKey(workspaceId, requestId);
-        return effectQueue.queueFor(`request:${key}`, async () => {
+        return effectQueue.queueFor(`request:${requestId}`, async () => {
           operationInput.signal.throwIfAborted();
           admitted.assertCurrent();
-          const record = requests.get(key)?.request;
+          const record = requests.get(requestId);
           if (!record) {
             throw new Error('MACHINE_PRINT_REQUEST_UNKNOWN');
           }
@@ -1974,11 +1782,13 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
             if (record.state !== 'awaiting-approval') {
               throw new Error('MACHINE_PRINT_REQUEST_NOT_AWAITING');
             }
-            return commitRequest(workspaceId, { ...record, state: 'denied', resolvedBy: operationInput.resolvedBy });
+            return commitRequest({ ...record, state: 'denied', resolvedBy: operationInput.resolvedBy });
           }
+          // An approval moves toward the printer; a machine whose log is unreadable could not record it.
+          usableMachine(record.machineId, 'MACHINE_OPERATION_UNAVAILABLE');
           let current = record;
           if (current.state === 'awaiting-approval') {
-            current = await commitRequest(workspaceId, {
+            current = await commitRequest({
               ...current,
               state: 'approved',
               resolvedBy: operationInput.resolvedBy,
@@ -2001,10 +1811,10 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           if (!prepared || uploadOperationId === undefined || startOperationId === undefined) {
             throw new Error('NODE_MACHINE_PRINT_REQUEST_INVALID');
           }
-          const latest = (): PrintRequest => requests.get(key)?.request ?? current;
+          const latest = (): PrintRequest => requests.get(requestId) ?? current;
           try {
             if (current.state === 'approved') {
-              current = await commitRequest(workspaceId, { ...current, state: 'uploading' });
+              current = await commitRequest({ ...current, state: 'uploading' });
             }
             if (current.state === 'uploading') {
               // The approval is durable: the transfer answers to the host, not to the caller's wait.
@@ -2034,7 +1844,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           } catch (error) {
             current = latest();
             if (!terminalRequestStates.has(current.state)) {
-              current = await commitRequest(workspaceId, {
+              current = await commitRequest({
                 ...current,
                 state: 'failed',
                 failure: requestFailure(error),
@@ -2046,33 +1856,20 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       },
       async withdrawPrintRequest(operationInput) {
         const requestId = identity.parse(operationInput.requestId);
-        const { workspaceId } = operationInput.admitted;
-        const key = requestKey(workspaceId, requestId);
-        return effectQueue.queueFor(`request:${key}`, async () => {
+        return effectQueue.queueFor(`request:${requestId}`, async () => {
           operationInput.signal.throwIfAborted();
           operationInput.admitted.assertCurrent();
-          const record = requests.get(key)?.request;
+          const record = requests.get(requestId);
           if (!record) {
             throw new Error('MACHINE_PRINT_REQUEST_UNKNOWN');
           }
           if (record.state !== 'awaiting-approval') {
             throw new Error('MACHINE_PRINT_REQUEST_NOT_AWAITING');
           }
-          return commitRequest(workspaceId, { ...record, state: 'withdrawn', resolvedBy: operationInput.resolvedBy });
+          return commitRequest({ ...record, state: 'withdrawn', resolvedBy: operationInput.resolvedBy });
         });
       },
     });
-  const listRequests = (workspaceId: string, machineId: string | undefined): readonly PrintRequest[] =>
-    [...requests.values()]
-      .filter(
-        (owned) =>
-          owned.workspaceId === workspaceId && (machineId === undefined || owned.request.machineId === machineId),
-      )
-      .map((owned) => owned.request)
-      .sort(
-        (left, right) => right.createdAt.localeCompare(left.createdAt) || right.requestId.localeCompare(left.requestId),
-      )
-      .slice(0, 1024);
   const channels = new Set<NodeMachineChannelHandle>();
   let closing: Promise<void> | undefined;
   const completeBinding = async (bindingInput: CompleteNodeMachineBindingInput): Promise<MachineBindingOutcome> => {
@@ -2087,11 +1884,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     const connection = Object.freeze(
       connectionContextSchema.parse({ secretRef: bindingInput.secretRef, serviceTrust: bindingInput.serviceTrust }),
     );
-    const machineKey = scopedKey(pending.workspaceId, pending.machineId);
-    const previous = committedBindings.get(machineKey);
-    if (previous && (previous.providerId !== pending.providerId || previous.candidate.id !== pending.candidate.id)) {
-      throw new Error('MACHINE_BINDING_LOGICAL_ID_CONFLICT');
-    }
     const definition = await definitionOf(pending.providerId);
     const abort = new AbortController();
     const session = await definition.connect(
@@ -2101,108 +1893,126 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         connection,
         signal: abort.signal,
       },
-      input.runtime.connection(pending.workspaceId),
+      input.runtime.connection(),
     );
     const lost = Promise.withResolvers<void>();
+    let bound: MachineBindingRecord | undefined;
     try {
       const descriptor = await session.getDescriptor({ signal: abort.signal });
       if (pending.candidate.claimedIdentity.serial && pending.candidate.claimedIdentity.serial !== descriptor.id) {
         throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CHANGED');
       }
-      const duplicate = [...committedBindings.values()].find(
-        (binding) =>
-          binding.providerId === pending.providerId &&
-          binding.physicalId === descriptor.id &&
-          (binding.workspaceId !== pending.workspaceId || binding.machineId !== pending.machineId),
-      );
-      if (duplicate) {
-        throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CONFLICT');
-      }
-      await ownedDirectory.attach({
-        workspaceId: pending.workspaceId,
-        machineId: pending.machineId,
-        providerId: pending.providerId,
-        session,
-        onLost() {
-          lost.resolve();
-        },
-      });
-      const event = Object.freeze(
-        bindingEventSchema.parse({
-          type: 'machine-binding-committed',
-          workspaceId: pending.workspaceId,
-          machineId: pending.machineId,
+      const snapshot = await session.getSnapshot({ signal: abort.signal });
+      // `machine.json` is written before the session attaches: a crash after this leaves a whole binding that
+      // reconnects at the next start, never a live session the store does not know.
+      bound = await effectQueue.queueFor('bindings', async () => {
+        if (closed) {
+          throw new Error('MACHINE_BINDING_UNAVAILABLE');
+        }
+        // Identity is `{ providerId, physicalId }` in each `machine.json`, never a directory name.
+        if (
+          [...machines.values()].some(
+            ({ record }) => record.providerId === pending.providerId && record.physicalId === descriptor.id,
+          )
+        ) {
+          throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CONFLICT');
+        }
+        const created = await store.createMachine({
+          name: pending.name,
           providerId: pending.providerId,
           physicalId: descriptor.id,
           candidate: pending.candidate,
           configuration: pending.configuration,
           connection,
-        }),
-      );
+          boundAt: now(),
+          last: { descriptor, snapshot, observedAt: now() },
+        });
+        machines.set(created.record.id, { record: created.record, operations: { status: 'open', log: created.log } });
+        return created.record;
+      });
       try {
-        await ownedJournal.append(event);
+        await ownedDirectory.attach({
+          machineId: bound.id,
+          name: bound.name,
+          providerId: bound.providerId,
+          session,
+          onLost() {
+            lost.resolve();
+          },
+        });
       } catch (error) {
-        await ownedDirectory.remove({ workspaceId: pending.workspaceId, machineId: pending.machineId });
+        machines.delete(bound.id);
+        await store.discardMachine(bound.id).catch(report);
         throw error;
       }
-      committedBindings.set(machineKey, event);
-      connectedSessions.set(machineKey, session);
-      supervise(event, lost.promise);
+      connectedSessions.set(bound.id, session);
+      supervise(bound, lost.promise);
       ceremonies.delete(ceremonyId);
-      return Object.freeze({ status: 'bound', machineId: pending.machineId });
+      return Object.freeze({ status: 'bound', machineId: bound.id });
     } catch (error) {
-      if (connectedSessions.get(machineKey) !== session) {
+      if (bound === undefined || connectedSessions.get(bound.id) !== session) {
         await session.close().catch(() => undefined);
       }
       throw error;
     }
   };
   // Unbind one machine and forget its credential once no other binding uses it. The directory entry goes first
-  // (removing it closes the session the directory owns), then the durable removal record: a crash between the two
-  // leaves a whole binding that reconnects, never a directory entry without one.
-  const removeCommittedBinding = async (
+  // (removing it closes the session the directory owns), then the machine's directory is moved aside: a crash between
+  // the two leaves a whole binding that reconnects, never a listed machine without one.
+  const removeBoundMachine = async (
     removal: RemoveNodeMachineBindingInput & Readonly<{ assertCurrent?(): void }>,
   ): Promise<MachineBindingRemoval> => {
-    const workspaceId = identity.parse(removal.workspaceId);
     const machineId = identity.parse(removal.machineId);
-    const machineKey = scopedKey(workspaceId, machineId);
     // Queued behind this machine's in-flight upload, start or control.
-    return effectQueue.queueFor(`machine:${workspaceId}:${machineId}`, async () => {
+    return effectQueue.queueFor(`machine:${machineId}`, async () => {
       if (closed) {
         throw new Error('MACHINE_BINDING_UNAVAILABLE');
       }
       removal.assertCurrent?.();
-      const binding = committedBindings.get(machineKey);
-      if (!binding) {
+      const machine = machines.get(machineId);
+      if (!machine) {
         throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
       }
+      // A machine whose log is unreadable can never settle its requests, so they do not hold it.
       if (
+        machine.operations.status === 'open' &&
         [...requests.values()].some(
-          (owned) =>
-            owned.workspaceId === workspaceId &&
-            owned.request.machineId === machineId &&
-            bindingBusyStates.has(owned.request.state),
+          (request) => request.machineId === machineId && bindingBusyStates.has(request.state),
         )
       ) {
         throw new Error('MACHINE_BINDING_BUSY');
       }
-      // A retry after a refused removal record finds the directory entry already gone.
-      const listed = await ownedDirectory.snapshot({ workspaceId });
-      if (listed.entries.some((entry) => entry.machineId === machineId)) {
-        await ownedDirectory.remove({ workspaceId, machineId });
-      }
-      await ownedJournal.append(
-        bindingRemovedEventSchema.parse({ type: 'machine-binding-removed', workspaceId, machineId }),
-      );
-      committedBindings.delete(machineKey);
-      connectedSessions.delete(machineKey);
       // Nothing reconnects a removed binding; an attempt in flight is abandoned.
-      supervisors.get(machineKey)?.stop.abort();
-      supervisors.delete(machineKey);
-      const { secretRef } = binding.connection;
+      supervisors.get(machineId)?.stop.abort();
+      supervisors.delete(machineId);
+      // A retry after a refused move finds the directory entry already gone.
+      const listed = await ownedDirectory.snapshot();
+      if (listed.entries.some((entry) => entry.machineId === machineId)) {
+        await ownedDirectory.remove({ machineId });
+      }
+      connectedSessions.delete(machineId);
+      await store.removeMachine(machineId);
+      machines.delete(machineId);
+      stillCaptureTimes.delete(machineId);
+      for (const [operationId, state] of effects) {
+        if (state.intent.machineId === machineId) {
+          effects.delete(operationId);
+        }
+      }
+      for (const [preparedId, preparation] of preparations) {
+        if (preparation.prepared.machineId === machineId) {
+          preparations.delete(preparedId);
+        }
+      }
+      for (const [requestId, request] of requests) {
+        if (request.machineId === machineId) {
+          requests.delete(requestId);
+        }
+      }
+      const { secretRef } = machine.record.connection;
       if (
         secretRef !== 'none' &&
-        ![...committedBindings.values()].some((other) => other.connection.secretRef === secretRef)
+        ![...machines.values()].some(({ record }) => record.connection.secretRef === secretRef)
       ) {
         try {
           await input.runtime?.credentials?.forget(secretRef);
@@ -2213,19 +2023,35 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       return Object.freeze({ status: 'removed', machineId });
     });
   };
+  const assertServing = (): void => {
+    if (closed) {
+      throw new Error('NODE_MACHINE_HOST_CLOSED');
+    }
+    if (admission.hostId !== hostId) {
+      throw new Error('NODE_MACHINE_HOST_WRONG_ADMISSION');
+    }
+  };
 
   return Object.freeze({
+    issueSession(sessionInput) {
+      assertServing();
+      // Only this host's own route: holding the host never mints a session for another route.
+      if (sessionInput.grants.some((grant) => grant.route !== 'machines')) {
+        throw new TypeError('INVALID_HOST_GRANT');
+      }
+      return admission.issueTrustedSession({
+        actor: sessionInput.actor,
+        authorityId,
+        workspaceId: machineAdmissionScope,
+        grants: sessionInput.grants,
+      });
+    },
     admitRoute(routeInput) {
-      if (closed) {
-        throw new Error('NODE_MACHINE_HOST_CLOSED');
-      }
-      if (admission.hostId !== hostId) {
-        throw new Error('NODE_MACHINE_HOST_WRONG_ADMISSION');
-      }
+      assertServing();
       return admission.admitRoute({
         session: routeInput.session,
         authorityId,
-        workspaceId: routeInput.workspaceId,
+        workspaceId: machineAdmissionScope,
         route: 'machines',
       });
     },
@@ -2236,11 +2062,12 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       const admitted = admission.admitRoute({
         session: channelInput.session,
         authorityId,
-        workspaceId: channelInput.workspaceId,
+        workspaceId: machineAdmissionScope,
         route: 'machines',
       });
       const channel = exposeMachineChannel({
-        ...channelInput,
+        port: channelInput.port,
+        session: channelInput.session,
         admission,
         authorityId,
         directory: ownedDirectory,
@@ -2266,7 +2093,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       const pending = ceremonies.get(ceremonyId);
       return pending ? Object.freeze({ providerId: pending.providerId, candidate: pending.candidate }) : undefined;
     },
-    removeBinding: removeCommittedBinding,
+    removeBinding: removeBoundMachine,
     async close() {
       if (closing) {
         return closing;
@@ -2297,12 +2124,11 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           discovered.clear();
           ceremonies.clear();
         },
-        async () => ownedJournal.close(),
         () => {
           commits.dispose();
           requestCommits.dispose();
         },
-        async () => owner.release(),
+        async () => store.close(),
       ]);
       return closing;
     },

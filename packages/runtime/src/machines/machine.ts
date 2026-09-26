@@ -1,6 +1,5 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
-import type { RevisionId } from '@taucad/revisions/algorithms';
 import type { Quantity } from '@taucad/units/quantity';
 import { z } from 'zod';
 
@@ -108,14 +107,6 @@ export type MachineDatagram = Readonly<{
   peer: Readonly<{ address: string; interface: string; port: number }>;
 }>;
 
-/** Authority-qualified immutable revision identity consumed by machine operations. @public */
-export type MachineRevisionReference = Readonly<{
-  authorityId: string;
-  workspaceId: string;
-  revisionId: RevisionId;
-  treeDigest: ContentDigest;
-}>;
-
 /** Explicit native-unit declaration carried by a physical preparation profile. @public */
 export type MachineQuantityDeclaration = Readonly<{
   value: number;
@@ -124,9 +115,15 @@ export type MachineQuantityDeclaration = Readonly<{
   space: 'difference' | 'linear' | 'point';
 }>;
 
-/** Qualified immutable prepared-artifact identity. @public */
+/**
+ * A project artifact a print request names. The host finds the project by `projectId`, reads `path` from it and
+ * re-verifies `length` and `digest` on every use, so the reference is never a copy of the bytes.
+ * @public
+ */
 export type MachineArtifactReference = Readonly<{
-  revision: MachineRevisionReference;
+  /** The project's `tau.json` id, `proj_` and 21 letters or digits. */
+  projectId: string;
+  /** Normalized project-relative path, without `.`, `..` or empty segments. */
   path: string;
   digest: ContentDigest;
   length: number;

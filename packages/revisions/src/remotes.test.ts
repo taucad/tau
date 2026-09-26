@@ -230,6 +230,24 @@ describe('remotes', () => {
  * (review R1); and nothing is reached at all before routing is known.
  */
 describe('remoteTransportError', () => {
+  /* W13d: a 429 is a wait the remote names, and only a 429 carries one. */
+  it('carries a 429’s Retry-After as its wait, a bounded default without one, and no wait on a 503', () => {
+    const limited = { data: { statusCode: 429, response: '{"code":"GIT_RATE_LIMITED","message":"Too many"}' } };
+    const stderr = 'error: RPC failed; HTTP 429 curl 22 The requested URL returned error: 429';
+
+    expect(remoteTransportError(limited, { remote: tauRemoteName, retryAfter: '12' })).toMatchObject({
+      code: 'REMOTE_UNAVAILABLE',
+      retryAfterMilliseconds: 12_000,
+    });
+    expect(remoteTransportError(new Error(stderr), { remote: tauRemoteName, stderr }).retryAfterMilliseconds).toBe(
+      30_000,
+    );
+    expect(
+      remoteTransportError({ data: { statusCode: 503, response: '' } }, { remote: tauRemoteName, retryAfter: '5' })
+        .retryAfterMilliseconds,
+    ).toBeUndefined();
+  });
+
   /* Contract §4: the server refuses a rewind or a deletion on *every* ref
    * family from its `pre-receive` hook, which answers over the sideband and
    * never with an HTTP status — so the status rule alone read a refusal every

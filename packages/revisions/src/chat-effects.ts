@@ -230,6 +230,11 @@ export const createChatEffects = (
     error instanceof LfsQuotaError ||
     (error instanceof RevisionPortError && (error.code === 'REMOTE_REJECTED' || error.code === 'REMOTE_REF_CONFLICT'));
 
+  /* A 429 is the whole push's, and the scheduler's to wait out (W13d): offering
+   * each record alone would spend N more requests on the same limit. */
+  const rateLimited = (error: unknown): boolean =>
+    error instanceof RevisionPortError && error.retryAfterMilliseconds !== undefined;
+
   /** Every ref of one push, refused with one reason — a quota, or a throw. */
   const refusedAll = (
     names: readonly string[],
@@ -278,6 +283,9 @@ export const createChatEffects = (
             : outcomeOf(entry, input.offered),
       };
     } catch (error) {
+      if (rateLimited(error)) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : 'This record could not be backed up.';
       return {
         outcome: {
@@ -326,7 +334,10 @@ export const createChatEffects = (
       return pushed.refs.every((entry) => entry.status === 'rejected')
         ? undefined
         : new Map(pushed.refs.map((entry) => [entry.name, outcomeOf(entry, input.offered)]));
-    } catch {
+    } catch (error) {
+      if (rateLimited(error)) {
+        throw error;
+      }
       return undefined;
     }
   };

@@ -674,17 +674,28 @@ export type RevisionPortErrorCode =
 /** Typed revision-port failure. @public */
 export class RevisionPortError extends Error {
   public readonly code: RevisionPortErrorCode;
+  /**
+   * How long a rate-limited remote (HTTP 429) asked this host to wait: its
+   * `Retry-After`, or a bounded default on a leg that cannot read the header.
+   * A wait, not a failure to back off from (W13d).
+   */
+  public readonly retryAfterMilliseconds: number | undefined;
 
   /**
    * Create a stable port failure.
    *
    * @param code - Machine-readable failure category.
    * @param message - Safe diagnostic without remote credentials or command arguments.
-   * @param options - Optional cause.
+   * @param options - Optional cause, and a rate limit's wait.
    */
-  public constructor(code: RevisionPortErrorCode, message: string, options?: ErrorOptions) {
+  public constructor(
+    code: RevisionPortErrorCode,
+    message: string,
+    options?: ErrorOptions & Readonly<{ retryAfterMilliseconds?: number }>,
+  ) {
     super(message, options);
     this.name = 'RevisionPortError';
     this.code = code;
+    this.retryAfterMilliseconds = options?.retryAfterMilliseconds;
   }
 }

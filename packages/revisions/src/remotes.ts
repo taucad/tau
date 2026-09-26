@@ -343,7 +343,30 @@ export type RemoteTransportContext = Readonly<{
   remote?: string;
   /** Git's own stderr, on the leg that has one. */
   stderr?: string;
+  /** A 429's `Retry-After` header, on the leg that can read it. */
+  retryAfter?: string;
 }>;
+
+/**
+ * A rate limit's wait when the remote named none the leg could read: the Tau
+ * git budget's window is 60 s, so half of it on average (W13d).
+ */
+const defaultRateLimitWaitMilliseconds = 30_000;
+
+/**
+ * `Retry-After` in milliseconds: delta-seconds or an HTTP date.
+ *
+ * @param header - The header's value.
+ * @returns The wait, or `undefined` when the value says nothing usable.
+ */
+const retryAfterMilliseconds = (header: string | undefined): number | undefined => {
+  if (header === undefined || header.trim() === '') {
+    return undefined;
+  }
+  const seconds = Number(header);
+  const wait = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now();
+  return Number.isFinite(wait) ? Math.max(0, wait) : undefined;
+};
 
 /** What a remote answered, however this leg learned it. */
 type RemoteRefusal = Readonly<{ status?: number; code?: string; message?: string }>;
@@ -631,7 +654,12 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
                        retryable, 503 race-lost included. */
                     'REMOTE_DAMAGED'
                   : 'REMOTE_UNAVAILABLE';
-  return new RevisionPortError(code, answered.message ?? refusalSentence(code), { cause: error });
+  return new RevisionPortError(code, answered.message ?? refusalSentence(code), {
+    cause: error,
+    ...(status === 429
+      ? { retryAfterMilliseconds: retryAfterMilliseconds(context.retryAfter) ?? defaultRateLimitWaitMilliseconds }
+      : {}),
+  });
 };
 
 /**

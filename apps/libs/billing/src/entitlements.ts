@@ -74,7 +74,8 @@ export const formatStorageLimit = (bytes: number): string => {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const step = bytes <= 0 ? 0 : Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = Math.max(bytes, 0) / 1024 ** step;
-  return `${Number.isInteger(value) ? String(value) : value.toFixed(1)} ${units[step] ?? 'B'}`;
+  /* Trailing zeros trimmed (RV-W8 F12), so a full plan reads `1 GB of 1 GB`, never `1.0 GB`. */
+  return `${String(Number(value.toFixed(1)))} ${units[step] ?? 'B'}`;
 };
 
 /**
@@ -125,9 +126,10 @@ const proEntitlements = {
  * Used as the MVP fallback before `GET /v1/billing/entitlements` ships.
  *
  * Free sync is a launch gate (charter D23): until a deployment opens it, the
- * free tier projects `canSyncFiles` and `canConnectGitHub` as `false`, so the
- * default is the closed answer everywhere this is called without the flag —
- * including a browser's fallback before the server has answered.
+ * free tier projects `canSyncFiles` as `false`, so the default is the closed
+ * answer everywhere this is called without the flag — including a browser's
+ * fallback before the server has answered. The gate covers Tau's storage only:
+ * a GitHub connection uses the user's own storage, so every tier has it (EQ2).
  *
  * @param tier - The subscriber's billing tier
  * @param options - Deployment gates; `freeTierSync` opens the free tier's sync.
@@ -151,7 +153,7 @@ export const entitlementsFromTier = (
         tier,
         status: 'none',
         ...freeEntitlements,
-        ...(options.freeTierSync === true ? {} : { canSyncFiles: false, canConnectGitHub: false }),
+        ...(options.freeTierSync === true ? {} : { canSyncFiles: false }),
         paidThrough: undefined,
         graceEndsAt: undefined,
         cancelAtPeriodEnd: false,

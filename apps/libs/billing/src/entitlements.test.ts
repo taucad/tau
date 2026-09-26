@@ -3,12 +3,15 @@ import { entitlementsFromTier, formatStorageLimit, storageLimitBytesByTier } fro
 
 describe('entitlementsFromTier', () => {
   /* D23: free sync is a launch gate, closed unless a deployment opens it. */
-  it('should keep free-tier sync and GitHub closed unless the deployment opens free sync', () => {
-    expect(entitlementsFromTier('free')).toMatchObject({ canSyncFiles: false, canConnectGitHub: false });
-    expect(entitlementsFromTier('free', { freeTierSync: false })).toMatchObject({
-      canSyncFiles: false,
-      canConnectGitHub: false,
-    });
+  it('should keep free-tier sync closed unless the deployment opens free sync', () => {
+    expect(entitlementsFromTier('free')).toMatchObject({ canSyncFiles: false });
+    expect(entitlementsFromTier('free', { freeTierSync: false })).toMatchObject({ canSyncFiles: false });
+  });
+
+  /* EQ2 (F6): GitHub uses the user's own storage, so D23 does not gate it. */
+  it('should let a free account connect GitHub whatever the free-sync gate says', () => {
+    expect(entitlementsFromTier('free').canConnectGitHub).toBe(true);
+    expect(entitlementsFromTier('free', { freeTierSync: false }).canConnectGitHub).toBe(true);
   });
 
   /* D16 and EQ2: open, a free account backs up, publishes and connects GitHub. */
@@ -36,7 +39,7 @@ describe('entitlementsFromTier', () => {
       canUseProKernels: false,
       canCreatePrivateShares: false,
       canSyncFiles: false,
-      canConnectGitHub: false,
+      canConnectGitHub: true,
       canConnectEnterpriseGit: false,
       apiCadGatewayMonthlyLimit: 1000,
       conversionApiMonthlyLimit: 0,
@@ -119,5 +122,8 @@ describe('storageLimitBytesByTier', () => {
     expect(formatStorageLimit(2.5 * 1024 ** 3)).toBe('2.5 GB');
     expect(formatStorageLimit(512 * 1024 ** 2)).toBe('512 MB');
     expect(formatStorageLimit(0)).toBe('0 B');
+    /* F12: a figure that rounds to a whole unit reads without `.0`. */
+    expect(formatStorageLimit(1024 ** 3 + 1)).toBe('1 GB');
+    expect(formatStorageLimit(340 * 1024 ** 2)).toBe('340 MB');
   });
 });

@@ -400,6 +400,17 @@ fn count_rule_json(rule: CountRule, area: bool) -> Json {
 }
 
 pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
+    // MESH-ON-BREP-01 (ruling 2): a BRep subject answers closure from exact
+    // topology, and its integrity claims never tessellate.
+    if context.subject().brep.is_some() {
+        match prepared {
+            Prepared::Watertight => return evaluate_exact_watertight(context),
+            Prepared::MeshIntegrity(expected) => {
+                return evaluate_exact_integrity(expected, context)
+            }
+            _ => {}
+        }
+    }
     let evaluation = evaluate_family(prepared, context);
     if matches!(prepared, Prepared::BoundingBox { .. })
         && context.subject().format == crate::subject::SubjectFormat::MeshBufferV1
@@ -983,6 +994,236 @@ fn count_failures(failures: &mut Vec<String>, count: u64, rule: CountRule, label
                 "{count} {label}, above the declared maximum {maximum}"
             ));
         }
+    }
+}
+
+/// V1: the exact shell-closure facet (the single BRep unit, no tessellation):
+/// the verdict, its measured fields and each failing shell with the paths of
+/// the leaf occurrences that hold it.
+struct ExactClosure {
+    watertight: bool,
+    open_edges: u32,
+    nonmanifold_edges: u32,
+    measured: Json,
+    failing_shells: Vec<Json>,
+}
+
+fn exact_closure(context: &mut EvaluationContext<'_>) -> Result<ExactClosure, Evaluation> {
+    let brep = context
+        .brep_gate()?
+        .expect("the exact closure route serves BRep subjects only");
+    let closure = brep.closure().map_err(backend_refusal)?;
+    let occurrences = if closure
+        .failing
+        .iter()
+        .any(|group| !group.occurrences.is_empty())
+    {
+        context.source_occurrence_structure()?
+    } else {
+        None
+    };
+    let path = |ordinal: &u32| {
+        occurrences
+            .as_deref()
+            .and_then(|all| all.get(*ordinal as usize))
+            .map_or(Json::Null, |occurrence| Json::string(&occurrence.path))
+    };
+    let failing_shells = closure
+        .failing
+        .iter()
+        .map(|group| {
+            let samples = group.samples.iter().map(|sample| {
+                Json::object([
+                    (
+                        "kind",
+                        Json::string(if sample.face_uses >= 3 {
+                            "non-manifold"
+                        } else {
+                            "open-boundary"
+                        }),
+                    ),
+                    ("faceUses", Json::Number(f64::from(sample.face_uses))),
+                    ("start", point_json(sample.start)),
+                    ("end", point_json(sample.end)),
+                    ("center", point_json(sample.center)),
+                ])
+            });
+            Json::object([
+                (
+                    "kind",
+                    Json::string(if group.free_faces {
+                        "free-faces"
+                    } else {
+                        "shell"
+                    }),
+                ),
+                (
+                    "occurrences",
+                    Json::Array(group.occurrences.iter().map(path).collect()),
+                ),
+                (
+                    "openBoundaryEdges",
+                    Json::Number(f64::from(group.open_edges)),
+                ),
+                (
+                    "nonManifoldEdges",
+                    Json::Number(f64::from(group.nonmanifold_edges)),
+                ),
+                ("samples", Json::Array(samples.collect())),
+            ])
+        })
+        .collect();
+    let watertight = closure.open_edges == 0 && closure.nonmanifold_edges == 0;
+    Ok(ExactClosure {
+        watertight,
+        open_edges: closure.open_edges,
+        nonmanifold_edges: closure.nonmanifold_edges,
+        measured: Json::object([
+            ("watertight", Json::Bool(watertight)),
+            (
+                "openBoundaryEdges",
+                Json::Number(f64::from(closure.open_edges)),
+            ),
+            (
+                "nonManifoldEdges",
+                Json::Number(f64::from(closure.nonmanifold_edges)),
+            ),
+            ("shells", Json::Number(f64::from(closure.shells))),
+            ("freeFaces", Json::Number(f64::from(closure.free_faces))),
+        ]),
+        failing_shells,
+    })
+}
+
+fn evaluate_exact_watertight(context: &mut EvaluationContext<'_>) -> Evaluation {
+    let (hash, mut diagnostics) = subject_meta(context);
+    let closure = match exact_closure(context) {
+        Ok(value) => value,
+        Err(result) => return result,
+    };
+    if !closure.watertight {
+        let Json::Object(mut details) = closure.measured.clone() else {
+            unreachable!("owned closure evidence")
+        };
+        details.push((
+            "failingShells".into(),
+            Json::Array(closure.failing_shells.clone()),
+        ));
+        details.push(("matcher".into(), Json::string("toBeWatertight")));
+        mismatch(
+            &mut diagnostics,
+            "GEOSPEC_WATERTIGHT_MISMATCH",
+            format!(
+                "The exact BRep topology has {} open-boundary and {} non-manifold edges in {} failing shells, so it is not a closed manifold surface.",
+                closure.open_edges,
+                closure.nonmanifold_edges,
+                closure.failing_shells.len()
+            ),
+            "Close the open shells and remove the over-shared edges at the reported samples in the named occurrences, then re-export.",
+            Json::Object(details),
+            None,
+        );
+    }
+    Evaluation::Geometric {
+        positive_satisfied: closure.watertight,
+        diagnostics,
+        negated_diagnostic: None,
+        evidence: crate::result::family_evidence(
+            &hash,
+            Prepared::Watertight.expected(),
+            closure.measured,
+            Json::object([("failingShells", Json::Array(closure.failing_shells))]),
+        ),
+    }
+}
+
+/// M1 (ruling 2): STEP integrity answers only `watertight`, from the exact
+/// closure; the mesh-only options would measure GeoSpec's own tessellation.
+fn evaluate_exact_integrity(
+    expected: &IntegrityExpectation,
+    context: &mut EvaluationContext<'_>,
+) -> Evaluation {
+    let mesh_only = [
+        (expected.finite_positions.is_some(), "finitePositions"),
+        (
+            expected.degenerate_triangles.is_some(),
+            "degenerateTriangles",
+        ),
+        (expected.duplicate_faces.is_some(), "duplicateFaces"),
+        (expected.triangle_count.is_some(), "triangleCount"),
+    ]
+    .into_iter()
+    .filter_map(|(declared, name)| declared.then_some(name))
+    .collect::<Vec<_>>();
+    if !mesh_only.is_empty() {
+        let mut diagnostic = Diagnostic::error(
+            "GEOSPEC_UNSUPPORTED_EVIDENCE",
+            format!(
+                "Exact BRep integrity answers only `watertight`; {} would measure GeoSpec's own tessellation, not the subject.",
+                mesh_only.join(", ")
+            ),
+        );
+        diagnostic.suggestion = Some(
+            "Assert `watertight` on the STEP subject, and assert mesh-only integrity on a rendered mesh subject such as GLB."
+                .into(),
+        );
+        diagnostic.details = Some(Json::object([
+            ("matcher", Json::string("toHaveMeshIntegrity")),
+            (
+                "unsupported",
+                Json::Array(mesh_only.iter().map(|name| Json::string(name)).collect()),
+            ),
+        ]));
+        return Evaluation::Refused {
+            diagnostics: vec![diagnostic],
+        };
+    }
+    let (hash, mut diagnostics) = subject_meta(context);
+    let mut measured = Vec::new();
+    let mut witnesses = Vec::new();
+    let mut failures = Vec::new();
+    if let Some(declared) = expected.watertight {
+        let closure = match exact_closure(context) {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+        if closure.watertight != declared {
+            failures.push(format!(
+                "watertight is {}, not the declared {declared}",
+                closure.watertight
+            ));
+        }
+        measured.push(("watertight".into(), Json::Bool(closure.watertight)));
+        witnesses.push(("failingShells".into(), Json::Array(closure.failing_shells)));
+    }
+    let failure_list = Json::Array(failures.iter().map(|value| Json::string(value)).collect());
+    if !failures.is_empty() {
+        let mut details = witnesses.clone();
+        details.push(("failures".into(), failure_list.clone()));
+        details.push(("matcher".into(), Json::string("toHaveMeshIntegrity")));
+        mismatch(
+            &mut diagnostics,
+            "GEOSPEC_MESH_INTEGRITY_MISMATCH",
+            format!(
+                "Exact BRep evidence does not satisfy the declared integrity: {}.",
+                failures.join("; ")
+            ),
+            "Close the open shells and remove the over-shared edges at the reported samples, then re-export.",
+            Json::Object(details),
+            None,
+        );
+    }
+    witnesses.push(("failures".into(), failure_list));
+    Evaluation::Geometric {
+        positive_satisfied: failures.is_empty(),
+        diagnostics,
+        negated_diagnostic: None,
+        evidence: crate::result::family_evidence(
+            &hash,
+            integrity_json(expected),
+            Json::Object(measured),
+            Json::Object(witnesses),
+        ),
     }
 }
 

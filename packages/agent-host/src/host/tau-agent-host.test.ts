@@ -707,6 +707,8 @@ describe('createTauAgentHost', () => {
       UNKNOWN_GATEWAY_ERROR: false,
       // A voided attempt was never charged or answered; the person sends again (W11).
       ATTEMPT_VOIDED: false,
+      // A closed account's attempt cannot be resolved or charged; signing in again does not change it (W11).
+      BILLING_ACCOUNT_CLOSED: false,
       // Compaction failures resume through start-of-turn reprojection and the degradation ladder.
       SUMMARY_REQUIRED: true,
       NO_EVICTABLE_HISTORY: true,

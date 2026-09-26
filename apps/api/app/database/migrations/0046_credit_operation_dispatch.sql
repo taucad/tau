@@ -1,0 +1,1 @@
+ALTER TABLE "billing"."credit_operation" ADD CONSTRAINT "credit_operation_dispatch" CHECK ("billing"."credit_operation"."history_version" IS NULL OR "billing"."credit_operation"."customer_state" <> 'settled' OR "billing"."credit_operation"."dispatch_intent_at" IS NOT NULL);

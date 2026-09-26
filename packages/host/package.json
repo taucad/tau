@@ -99,9 +99,10 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/xstate-testing": "workspace:*",
     "@types/ws": "^8.18.1",
     "geospec": "workspace:*",
-    "zod": "catalog:",
-    "xstate": "catalog:"
+    "xstate": "catalog:",
+    "zod": "catalog:"
   }
 }

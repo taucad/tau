@@ -4,6 +4,7 @@ import type { ConfigService } from '@nestjs/config';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type postgres from 'postgres';
 import { mock, mockDeep } from 'vitest-mock-extended';
+import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { describe, expect, it } from 'vitest';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import type { Environment } from '#config/environment.config.js';
@@ -24,7 +25,10 @@ const createService = (environment = 'staging', secret = 'billing-usage-test-sec
   const databaseService = mockDeep<DatabaseService>();
   const configService = mock<ConfigService<Environment, true>>();
   configService.get.mockImplementation((key: string) => (key === 'BILLING_ENVIRONMENT' ? environment : secret));
-  return { databaseService, service: new BillingUsageService(databaseService, configService) };
+  return {
+    databaseService,
+    service: new BillingUsageService(databaseService, configService, mock<CreditLedgerService>()),
+  };
 };
 
 describe('BillingUsageService query admission', () => {

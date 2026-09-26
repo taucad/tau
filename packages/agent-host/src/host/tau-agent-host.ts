@@ -141,11 +141,8 @@ export type ExternalAgentTurn = {
   readonly agent: ExternalRunKind;
   readonly chatId: string;
   readonly runId: string;
-  /**
-   * The run's attempt, from 1; a resumed turn has the next one (W10 EA-S8). The host always sets it; optional only
-   * while runners built before it still construct turns without one.
-   */
-  readonly attempt?: number | undefined;
+  /** The run's attempt, from 1; a resumed turn has the next one (W10 EA-S8). */
+  readonly attempt: number;
   /** The new user turn; absent when resuming one a restart left unanswered. */
   readonly message?: UserProviderMessage | undefined;
   /**

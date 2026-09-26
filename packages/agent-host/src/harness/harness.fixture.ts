@@ -21,6 +21,8 @@ export const fundedFacet = (
   type: 'funded',
   usesBillingAttempt,
   resolveInvocation: async ({ attemptId }) => resolve(attemptId),
+  /* Unknown: rows go unstamped, and a stamped row is refused (fails closed). */
+  principal: async () => undefined,
 });
 
 /** Deterministic pi model descriptor used by harness unit fixtures. @public */

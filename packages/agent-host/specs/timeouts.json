@@ -439,8 +439,8 @@
     },
     {
       "id": "E13",
-      "bound": "ACP session/close, and E22's cancel settlement until W10 splits it",
-      "site": "packages/host/src/acp/session.ts",
+      "bound": "ACP session/close",
+      "site": "packages/host/src/acp/acp-session.machine.ts",
       "token": "sessionCloseTimeout",
       "class": "External edge",
       "owner": "W10"
@@ -462,11 +462,51 @@
       "owner": "W8"
     },
     {
+      "id": "E16",
+      "bound": "ACP adapter start: spawn, skill publication and initialize",
+      "site": "packages/host/src/acp/acp-session.machine.ts",
+      "token": "acpStartTimeout",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
+      "id": "E17",
+      "bound": "ACP SIGTERM to SIGKILL of the adapter's process group",
+      "site": "packages/host/src/acp/acp-session.machine.ts",
+      "token": "acpKillGrace",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
+      "id": "E18",
+      "bound": "ACP terminating backstop; kills the group again before it ends the state",
+      "site": "packages/host/src/acp/acp-session.machine.ts",
+      "token": "acpTerminateBackstop",
+      "class": "External edge (backstop)",
+      "owner": "W10"
+    },
+    {
       "id": "E19",
       "bound": "ACP idle session",
-      "site": "packages/host/src/acp/run.ts",
+      "site": "packages/host/src/acp/acp-sessions.machine.ts",
       "token": "idleTimeout",
       "class": "Debounce",
+      "owner": "W10"
+    },
+    {
+      "id": "E20",
+      "bound": "MCP binding lease ceiling past capability expiry",
+      "site": "packages/host/src/mcp-server.ts",
+      "token": "hostMcpLeaseCeiling",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
+      "id": "E22",
+      "bound": "ACP cancel settlement",
+      "site": "packages/host/src/acp/acp-session.machine.ts",
+      "token": "acpCancelSettleTimeout",
+      "class": "External edge",
       "owner": "W10"
     },
     {
@@ -534,6 +574,14 @@
       "class": "Peer",
       "owner": "W6",
       "fixedBy": "W6"
+    },
+    {
+      "id": "E31",
+      "bound": "Gateway attempt lookup (resolveInvocation), 10 s, then `unavailable` (RA-Q5)",
+      "site": "packages/agent-host/src/transport/tau-cloud-gateway-model-transport.ts",
+      "token": "attemptLookupTimeout",
+      "class": "External edge",
+      "owner": "W11"
     },
     {
       "id": "N1",

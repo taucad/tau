@@ -29,6 +29,7 @@
 #include <Geom2dAdaptor_Curve.hxx>
 #include <HeaderSection_FileSchema.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <Interface_Check.hxx>
 #include <Interface_EntityIterator.hxx>
 #include <Interface_Graph.hxx>
 #include <Interface_InterfaceModel.hxx>
@@ -83,6 +84,7 @@
 #include <TopLoc_Location.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TransferBRep.hxx>
+#include <Transfer_Binder.hxx>
 #include <Transfer_TransientProcess.hxx>
 #include <NCollection_DataMap.hxx>
 #include <NCollection_IncAllocator.hxx>
@@ -6013,6 +6015,27 @@ static void skip_semantic_check(STEPCAFControl_Reader& reader) {
   session->ComputeGraph(true);
 }
 
+// Transfer fails only when no shape results. An entity that fails on its own
+// (an exception, a dead loop, a surface it cannot build) is recorded as a fail
+// on a transfer binder while the rest transfers without it. Returns the first
+// recorded fail as "<entity type>: <text>", or its text alone when OCCT
+// recorded it against no entity (a face surface that did not read is null).
+static std::optional<std::string> first_transfer_fail(STEPCAFControl_Reader& reader) {
+  const auto transfer_reader = reader.ChangeReader().WS()->TransferReader();
+  const auto process = transfer_reader.IsNull()
+                           ? occ::handle<Transfer_TransientProcess>{}
+                           : transfer_reader->TransientProcess();
+  for (int index = 1; !process.IsNull() && index <= process->NbMapped(); ++index) {
+    const occ::handle<Transfer_Binder> binder = process->MapItem(index);
+    if (binder.IsNull() || binder->Check()->NbFails() == 0) continue;
+    std::string text = binder->Check()->CFail(1, false);
+    text.erase(0, text.find_first_not_of(' '));  // OCCT texts start with a space
+    const occ::handle<Standard_Transient>& entity = process->Mapped(index);
+    return entity.IsNull() ? text : std::string(entity->DynamicType()->Name()) + ": " + text;
+  }
+  return std::nullopt;
+}
+
 int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                            geospec_occt_document** output,
                            geospec_occt_string* error) noexcept {
@@ -6081,6 +6104,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
 
     if (!reader.Transfer(result->document)) {
       return fail(GEOSPEC_OCCT_TRANSFER_FAILED, "STEP XDE transfer failed.", error);
+    }
+    // A partial transfer is a degraded subject, never evidence (policy §16).
+    if (const auto lost = first_transfer_fail(reader)) {
+      return fail(GEOSPEC_OCCT_TRANSFER_FAILED, "STEP transfer lost an entity: " + *lost, error);
     }
     if (result->source_length_unit.empty()) {
       double unit_meters = 0.0;

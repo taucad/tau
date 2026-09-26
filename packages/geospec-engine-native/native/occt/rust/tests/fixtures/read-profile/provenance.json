@@ -1,6 +1,6 @@
 {
   "schema": "read-profile-test-fixtures-v1",
-  "attribution": "OCCT reader controls from GeoSpec substrate lane O1 (run 2026-09-26-occt-substrate) plus one displaced-line control derived from ap242-box.step.",
+  "attribution": "OCCT reader and transfer controls from GeoSpec substrate lane O1 (run 2026-09-26-occt-substrate) plus one displaced-line control derived from ap242-box.step.",
   "runtimeDependency": "All runtime inputs are files in this directory or its parent. Provenance locators are historical attribution only and are never read by the test.",
   "bytePolicy": "Byte-locked assets: do not reformat, regenerate, or alter expectations.",
   "files": [
@@ -17,6 +17,13 @@
       "bytes": 17471,
       "description": "The same file with the tessellated solid dropped from the BRep representation items.",
       "provenance": "docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-occt-substrate/lanes/o1-data-exchange-a1/evidence/runs/controls/box-brep-only.step"
+    },
+    {
+      "file": "box-face-wrong-surface.step",
+      "sha256": "d03e8ad42f98ab0136ac7e054d84c43557dc8ea93642bf9e9be6af6505d63d97",
+      "bytes": 17471,
+      "description": "box-brep-only.step with one ADVANCED_FACE naming its AXIS2_PLACEMENT_3D (#33) where its PLANE (#32) belongs. OCCT's transfer returns success with five faces; it records the fail 'Surface has not been created' against the unread (null) surface and only a warning on the face.",
+      "provenance": "docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-occt-substrate/lanes/o1-data-exchange-a1/evidence/runs/controls/box-face-wrong-surface.step"
     },
     {
       "file": "ap242-radius1-height10-no-uncertainty.step",

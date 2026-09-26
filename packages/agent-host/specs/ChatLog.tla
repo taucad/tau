@@ -77,11 +77,11 @@ Reopenable(r) ==
   \/ lifecycle[r] = "failed" /\ CodeOf(r) \in ReopenCodes
   \/ lifecycle[r] = "paused" /\ ~\E p \in pending : p[1] = r
 
-(* CL-R9: a `running` row opens the next attempt (`reopens`). *)
+(* CL-R9: a `running` row opens the next attempt (`reopens`), settled or not (ChatRunSlot's Att(T)+1; W7.r1). *)
 Reopens(e) ==
   /\ IsLifecycle(e) /\ e.state = "running" /\ HasRun(e.runId)
   /\ ~Has(e, "attempt") \/ e.attempt = AttemptOf(e.runId) + 1
-  /\ SettledNow(e.runId) /\ lifecycle[e.runId] \in Rested /\ Reopenable(e.runId)
+  /\ lifecycle[e.runId] \in Rested /\ Reopenable(e.runId)
 
 (* The run's state in `run-lifecycle.legality.json`'s domain; "open" and "ended" have one row. *)
 LegalityState(r) ==

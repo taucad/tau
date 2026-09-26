@@ -276,6 +276,7 @@ const hostSettle = async (
     systemPrompt: 'differential',
     model: { id: 'differential-model', contextWindow: 1000 },
     modelTransport: {
+      funding: { type: 'unfunded' },
       async *stream() {
         yield* [];
       },

@@ -1,5 +1,350 @@
 {
   "configs": {
+    "ChatRunSlot.gate-only.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "I8: the append gate alone suffices (HoldUntilRows FALSE)"
+    },
+    "ChatRunSlot.hold-only.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "I8: the held reservation alone suffices (BoundaryExclusive FALSE)"
+    },
+    "ChatRunSlot.liveness-close.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35, I15 behind the close barrier, with tools and the stop bound"
+    },
+    "ChatRunSlot.liveness-gateway.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "L4 P-L2 (ResumeAnswered), I35, I15 with the abstract gateway"
+    },
+    "ChatRunSlot.liveness-interrupt.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35 (CancelEnds, WaitersSettle), I11, I15 with cancel, native interrupt, resume and steer"
+    },
+    "ChatRunSlot.liveness-placement.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35, I11, I15 while commands wait for settlement (CHAT_RUN_LIVE{settling})"
+    },
+    "ChatRunSlot.liveness-recovery.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35, I15 with the lazy claim, a stale writer, relinquish and an orphaned external pause"
+    },
+    "ChatRunSlot.liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "I35, I11, I15; L4 P-L1, P-L2; L5 D4; L2a F8: every liveness property under weak fairness of live processes (none on a person, a crash or close), the draft's scope (external, resume, steer)"
+    },
+    "ChatRunSlot.no-AckAfterRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AckAfterDurable"
+      },
+      "kind": "witness",
+      "ref": "AckAfterRow (I18)"
+    },
+    "ChatRunSlot.no-AtomicAbandon.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonOnlyOrphans"
+      },
+      "kind": "witness",
+      "ref": "AtomicAbandon (L2a D4)"
+    },
+    "ChatRunSlot.no-HoldUntilRows.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonOnlyOrphans"
+      },
+      "kind": "witness",
+      "ref": "HoldUntilRows (L2a D2): the draft attach abandons an external run released before it registers"
+    },
+    "ChatRunSlot.no-KeyedCommands.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "witness",
+      "ref": "KeyedCommands (D15, I14)"
+    },
+    "ChatRunSlot.no-PayloadFirst.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "PayloadDurable"
+      },
+      "kind": "witness",
+      "ref": "PayloadFirst (L2a D5, I12)"
+    },
+    "ChatRunSlot.no-ReleaseOnFailure.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ReservationHasHolder"
+      },
+      "kind": "witness",
+      "ref": "ReleaseOnFailure (L2a D1)"
+    },
+    "ChatRunSlot.no-StopFence.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoRowAfterEnding"
+      },
+      "kind": "witness",
+      "ref": "StopFence (D13; L2a D16): cancel neither awaits early-started tools nor revokes the tool port, so a tool row lands after `cancelled`"
+    },
+    "ChatRunSlot.no-gate-no-hold.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ChatSingleRun"
+      },
+      "kind": "witness",
+      "ref": "I8: with neither the gate nor the hold two runs open"
+    },
+    "ChatRunSlot.target-2crashes.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7 RA-S1: M1 over the draft's scope (external, resume, steer), two crashes"
+    },
+    "ChatRunSlot.target-close.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 behind the close barrier (L2a D14)"
+    },
+    "ChatRunSlot.target-extpause.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with an external pause orphaned by a restart and resolved at opening (W10)"
+    },
+    "ChatRunSlot.target-fence.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with the lazy claim at opening, a frozen leader's stale append, relinquish and W6's reread on LOG_FENCED"
+    },
+    "ChatRunSlot.target-gateway.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with an abstract gateway, charge and proceed (EQ1), lostReplyRetries 1"
+    },
+    "ChatRunSlot.target-interrupt.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with cancel, native interrupt, resolveInterrupt and resume; I18 covers cancel and resolve-interrupt"
+    },
+    "ChatRunSlot.target-placement.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with W8 placement and settlement per attempt, a native pause settling, and I19's host half"
+    },
+    "ChatRunSlot.target-stop.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7: M1 with early-started tools and abandon at the stop bound (D13)"
+    },
+    "ChatRunSlot.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7 RA-S1: M1 (every switch TRUE) over the draft's scope (external, resume, steer), one crash; every safety property"
+    },
+    "ChatRunSlot.today-AbandonIsClaim.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonIsClaim"
+      },
+      "kind": "defect",
+      "ref": "I13; L2a D4; L2b F10: a second host abandons a frozen leader's live run with no conditional claim, then the stale writer appends",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-AbandonOnlyOrphans.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonOnlyOrphans"
+      },
+      "kind": "defect",
+      "ref": "L2a D2, D4: attach checks, then abandons a run that is being admitted",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-AckAfterDurable.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AckAfterDurable"
+      },
+      "kind": "defect",
+      "ref": "L4 D-104: steer is answered before its row (cancel of a paused run also answers with no row, L2a D9)",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-AckBeforeNextAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AckBeforeNextAttempt"
+      },
+      "kind": "defect",
+      "ref": "D9, TS-R10: a resume opens attempt 2 while attempt 1's lease is held, since settlement is not ordered before it",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-AtMostOnceEffect.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOnceEffect"
+      },
+      "kind": "defect",
+      "ref": "S4 finding 2; L4 D-100: a resume applied, the host crashes before the answer, the re-sent resume applies again",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-CancelEnds.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "CancelEnds"
+      },
+      "kind": "defect",
+      "ref": "L2a D9 (at the base cancel of any paused native run is a no-op); today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-ChargeAfterRecordedLoss.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ChargeAfterRecordedLoss"
+      },
+      "kind": "defect",
+      "ref": "EQ1; W11 current system 8; L4 D-086: Resume re-sends after a charged lost reply without recording the charge",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-ChatSingleRun.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ChatSingleRun"
+      },
+      "kind": "witness",
+      "ref": "L2a D2, D3: the external path releases before it registers and no gate checks the chat; W0.6 landed the hold, W7 adds the gate (RA-R6)"
+    },
+    "ChatRunSlot.today-CutIffExecuted.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CutIffExecuted"
+      },
+      "kind": "defect",
+      "ref": "D10, TS-R11: only a completed attempt is cut; one that executed and failed is not",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-EveryCommandAnswered.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "EveryCommandAnswered"
+      },
+      "kind": "defect",
+      "ref": "I15; L2a D10: the re-armed resume waits on a person; today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-FencedAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "FencedAttempt"
+      },
+      "kind": "defect",
+      "ref": "L2a D12: after an in-place assumeLeadership an external run's terminal row takes the current epoch",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-NeverResendKnownAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NeverResendKnownAttempt"
+      },
+      "kind": "defect",
+      "ref": "I16; W11 current system 8: a failure message counts as completion, so Resume prepares a new attempt while the gateway still holds the old one pending",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-NoRowAfterEnding.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoRowAfterEnding"
+      },
+      "kind": "defect",
+      "ref": "D13, RA-R6: no gate after the ending row; the shortest trace is attach abandoning a run whose session then writes its commit row (L2a D4, D5); no-StopFence shows the stop-bound path",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-NoTransientTerminal.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoTransientTerminal"
+      },
+      "kind": "defect",
+      "ref": "L2a D8; S5 D4: interrupt aborts, the session records `cancelled`, then the host writes `paused`",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-NothingAfterClose.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NothingAfterClose"
+      },
+      "kind": "defect",
+      "ref": "L2a D14: close has no barrier; an admission in flight appends after the log closed",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-OrphanApprovalCoded.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OrphanApprovalCoded"
+      },
+      "kind": "defect",
+      "ref": "W10; L2a D9; L4 D-112: an external pause orphaned by a restart stays pending with no driver",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-PayloadDurable.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "PayloadDurable"
+      },
+      "kind": "defect",
+      "ref": "L2a D5: `admitted` carries no payload and the message rides the commit row",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-QuiescentAfterAck.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "QuiescentAfterAck"
+      },
+      "kind": "defect",
+      "ref": "EQ4: the host is quiescent once the run ends, before the lease retires",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-ReservationEnds.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "ReservationEnds"
+      },
+      "kind": "defect",
+      "ref": "I11; L2a D10: resume of a pending pause holds the reservation across the person's decision; today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-ReservationHasHolder.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ReservationHasHolder"
+      },
+      "kind": "witness",
+      "ref": "L2a D1: a failed construction keeps the reservation; W0.5 landed the release"
+    },
+    "ChatRunSlot.today-ResumeAnswered.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "ResumeAnswered"
+      },
+      "kind": "defect",
+      "ref": "L4 P-L2, D-086: an in-doubt Resume throws \"has no durable result\"; today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
+    "ChatRunSlot.today-WaitersSettle.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "WaitersSettle"
+      },
+      "kind": "defect",
+      "ref": "L2a D9, D11: after a restart resolveInterrupt refuses INTERRUPT_NOT_PENDING and records nothing; today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
+      "fixedBy": "W7"
+    },
     "CrossDevice.ledger-OneLiveRunMerged.cfg": {
       "tier": "nightly",
       "expect": {
@@ -527,6 +872,11 @@
       "tier": "pr",
       "expect": "pass",
       "ref": "S4 3.1 (w1s2s3)"
+    },
+    "ChatRunSlotGraph.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W7 RA-S15 graph export (graphs.ChatRunSlotGraph): M1's native run with cancel and steer"
     }
   },
   "apalache": [
@@ -855,6 +1205,12 @@
         "kind": "witness",
         "ref": "SC T15 N1 control: a re-send after a false suspicion appends k1 a second time (AtMostOneEffectPerKey)"
       }
+    }
+  },
+  "graphs": {
+    "ChatRunSlotGraph": {
+      "config": "ChatRunSlotGraph.export.cfg",
+      "phase": "pc"
     }
   }
 }

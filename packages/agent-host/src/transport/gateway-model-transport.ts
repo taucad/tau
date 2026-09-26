@@ -184,12 +184,18 @@ export type GatewayModelTransportOptions = {
   readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
 };
 
-/** Managed Cloud operation binding kept outside the provider transport's self-host graph. @public */
+/**
+ * Managed Cloud operation binding kept outside the provider transport's self-host graph. Funding and resolution are the
+ * transport's `funding` facet (RA-S11); this seam only binds a response.
+ */
 export type GatewayFundedOperationProtocol = {
-  /** Whether the selected provider uses Tau-funded operation accounting. */
-  usesBillingAttempt(providerKind: ModelProviderKind | undefined): boolean;
-  /** Recover an ambiguous attempt without dispatching it again. */
-  lookupAttempt(attemptId: string, signal: AbortSignal): Promise<ModelInvocationBinding | undefined>;
+  /**
+   * @deprecated Ignored: `funding.usesBillingAttempt` decides. Deleted with the Tau Cloud transport's legacy lookup
+   * (W11's file, applied at merge).
+   */
+  usesBillingAttempt?(providerKind: ModelProviderKind | undefined): boolean;
+  /** @deprecated Ignored: `funding.resolveInvocation` resolves an attempt. Deleted with W11's legacy lookup at merge. */
+  lookupAttempt?(attemptId: string, signal: AbortSignal): Promise<unknown>;
   /** Require and validate the operation identity on an accepted gateway response. */
   bindResponse(response: Response): ModelInvocationBinding;
 };
@@ -915,12 +921,8 @@ const streamPiEvents = async function* (options: {
  * @public
  */
 export const createGatewayModelTransport = (options: GatewayModelTransportOptions): ModelTransport => ({
-  ...(options.fundedOperations
-    ? {
-        usesBillingAttempt: options.fundedOperations.usesBillingAttempt,
-        lookupAttempt: options.fundedOperations.lookupAttempt,
-      }
-    : {}),
+  /* Self-host: no gateway ledger. Tau Cloud's transport replaces this facet with its funded one. */
+  funding: { type: 'unfunded' },
   async *stream(request) {
     if (!request.attemptId || request.attemptId.length > 128 || !/^[\u0021-\u007E]+$/u.test(request.attemptId)) {
       throw new GatewayModelTransportError({

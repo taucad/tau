@@ -320,8 +320,7 @@ describe('createGatewayModelTransport', () => {
     });
 
     await expect(collect(transport.stream(request()))).resolves.not.toHaveLength(0);
-    expect(transport.usesBillingAttempt).toBeUndefined();
-    expect(transport.lookupAttempt).toBeUndefined();
+    expect(transport.funding).toEqual({ type: 'unfunded' });
   });
 
   it('emits tool identity before held argument generation completes', async () => {
@@ -754,33 +753,6 @@ describe('createGatewayModelTransport', () => {
     await expect(collect(modelless.stream(request()))).rejects.toMatchObject({
       code: 'INVALID_REQUEST',
     });
-  });
-
-  it('looks up an ambiguous attempt without posting it again', async () => {
-    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
-      expect(new URL(input instanceof Request ? input.url : input).pathname).toBe(
-        '/v1/billing/attempts/gateway/attempt-fixture-1',
-      );
-      return new Response(
-        JSON.stringify({
-          state: 'terminal',
-          operationId: 'operation-fixture-1',
-        }),
-        {
-          headers: { 'content-type': 'application/json' },
-        },
-      );
-    });
-    const transport = createGatewayModelTransport({
-      baseUrl: 'https://gateway.example',
-      fetch: fetchSpy,
-    });
-
-    await expect(transport.lookupAttempt?.('attempt-fixture-1', new AbortController().signal)).resolves.toEqual({
-      operationId: 'operation-fixture-1',
-      status: 'terminal',
-    });
-    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
   /*

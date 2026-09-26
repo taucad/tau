@@ -8,10 +8,10 @@
   },
   {
     "id": "M2",
-    "drift": "reopens without a settled attempt (T4: the reopen predicate loses its settlement clause)",
+    "drift": "reopens a run whose failure is not resumable (T4: the reopen predicate loses its resumable clause)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "decide (en.append = .settled) && reopenable en",
-    "replace": "reopenable en"
+    "find": "def reopenable (en : Entry) : Bool := attemptEnded en && rests en",
+    "replace": "def reopenable (en : Entry) : Bool := attemptEnded en"
   },
   {
     "id": "M3",

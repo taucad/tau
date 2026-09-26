@@ -1,10 +1,3 @@
 {
-  "ui-e2e": [
-    {
-      "rule": "RowsNeedRun",
-      "kind": "defect",
-      "fixedBy": "W7 RA-S5",
-      "ref": "RA-R3: an attempt's intent row precedes its rewind; today's host writes history.rewound before the new run's admitted row on an edit"
-    }
-  ]
+  "ui-e2e": []
 }

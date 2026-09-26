@@ -3,7 +3,25 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import { withLength } from '#log/event-log-storage.fixture.js';
 import type { BareEventLogStorage } from '#log/event-log-storage.fixture.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
-import type { AgentLogEvent } from '#log/event-types.js';
+import type { AgentLogEvent, ModelProviderKind } from '#log/event-types.js';
+import type { InvocationFunding } from '#waist/ports.js';
+import type { InvocationResolution } from '#wire/gateway.js';
+
+/**
+ * A funded facet for fakes (RA-S11). The default lookup answers `voided`: the gateway never admitted the key.
+ *
+ * @param resolve - The lookup's answer.
+ * @param usesBillingAttempt - Which providers the gateway funds.
+ * @returns The facet.
+ */
+export const fundedFacet = (
+  resolve: (attemptId: string) => Promise<InvocationResolution> = async () => ({ status: 'voided' }),
+  usesBillingAttempt: (providerKind: ModelProviderKind | undefined) => boolean = () => true,
+): InvocationFunding => ({
+  type: 'funded',
+  usesBillingAttempt,
+  resolveInvocation: async ({ attemptId }) => resolve(attemptId),
+});
 
 /** Deterministic pi model descriptor used by harness unit fixtures. @public */
 export const stubModel: Model<'openai-responses'> = {

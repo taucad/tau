@@ -542,6 +542,38 @@
       "token": "laterCutoff",
       "class": "None",
       "owner": "W4"
+    },
+    {
+      "id": "C6",
+      "bound": "Chat idle eviction (M1 idle.free and idle.paused)",
+      "site": "packages/agent-host/src/host/chat-run.machine.ts",
+      "token": "idleEviction",
+      "class": "Debounce",
+      "owner": "W7"
+    },
+    {
+      "id": "E15",
+      "bound": "Driver stop bound before the tool port is abandoned",
+      "site": "packages/agent-host/src/host/chat-run.machine.ts",
+      "token": "driverStopBound",
+      "class": "External edge",
+      "owner": "W7"
+    },
+    {
+      "id": "W7-1",
+      "bound": "Cut retry after CUT_FAILED",
+      "site": "packages/agent-host/src/host/chat-run.machine.ts",
+      "token": "cutRetry",
+      "class": "Backoff",
+      "owner": "W7"
+    },
+    {
+      "id": "E9",
+      "bound": "Model-stream stall between transport events (fails MODEL_STREAM_STALLED; a late firing after a freeze re-arms once)",
+      "site": "packages/agent-host/src/harness/session.ts",
+      "token": "stallTimer",
+      "class": "External edge",
+      "owner": "W7"
     }
   ]
 }

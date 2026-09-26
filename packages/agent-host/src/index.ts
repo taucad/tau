@@ -117,7 +117,14 @@ export type {
   ModelInvocationBinding,
   ModelStreamRequest,
   ModelTransport,
-  RunLifecycleCommands,
+  InvocationFunding,
+  InvocationResolutionRequest,
+  TurnAttemptKey,
+  TurnPlacementAnswer,
+  TurnPlacementFact,
+  TurnPlacementGrant,
+  TurnPlacementPort,
+  TurnSettlementRow,
   ToolRegistry,
 } from '#waist/ports.js';
 export type { ModelCostRates, StopReason, Usage } from '@earendil-works/pi-ai';
@@ -131,7 +138,14 @@ export type {
   SafeguardThresholds,
   ToolEventSummary,
 } from '#harness/safeguards.js';
-export type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
+export type {
+  AgentRunOutcome,
+  AgentSession,
+  AgentSessionModel,
+  CreateAgentSessionOptions,
+  HostClock,
+  StreamStallBound,
+} from '#harness/session.js';
 export { materializeAttachments } from '#harness/session-record.js';
 export type { AttachmentReader, DocumentBlockBuilder, MaterializedAttachments } from '#harness/session-record.js';
 export type {
@@ -149,7 +163,6 @@ export type {
 } from '#host/tau-agent-host.js';
 export type {
   CachedSystemPromptOptions,
-  GatewayFundedOperationProtocol,
   GatewayModelErrorCode,
   GatewayModelTransportOptions,
 } from '#transport/gateway-model-transport.js';

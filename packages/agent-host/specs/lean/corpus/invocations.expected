@@ -1350,7 +1350,7 @@ A 14 appended
 A 15 EVENT_OUT_OF_ORDER
 A 16 appended
 A 17 LOG_FENCED
-R 3 running 2 open 0 0 - i0 - recover
+R 3 running 3 open 0 0 - i0 - recover
 R 1 - 1 unadmitted 0 0 - - - admit
 R 2 admitted 1 open 0 0 - i2 - recover
 I a3 1 1 g 1 -
@@ -1778,7 +1778,7 @@ A 14 appended
 A 15 appended
 R 3 running 1 open 0 0 - - - recover
 R 1 - 1 unadmitted 0 0 - - a0 admit
-R 2 running 3 settled 1 0 3@4:0 - - resume
+R 2 running 4 settled 1 0 4@4:0 - - resume
 I a2 1 1 c 0 -
 I a0 1 1 c 0 -
 C 2 running -
@@ -1796,7 +1796,7 @@ A 23 EVENT_OUT_OF_ORDER
 A 24 EVENT_OUT_OF_ORDER
 R 3 running 1 open 0 0 - - - recover
 R 1 - 1 unadmitted 0 0 - - a0 admit
-R 2 running 3 settled 1 0 3@4:0 - - resume
+R 2 running 4 settled 1 0 4@4:0 - - resume
 I a2 1 1 c 0 -
 I a0 1 1 c 0 -
 C 2 running -
@@ -1805,7 +1805,7 @@ N order@1:0,order@1:2
 U -
 R 3 running 1 open 0 0 - - - recover
 R 1 - 1 unadmitted 0 0 - - a0 admit
-R 2 running 3 settled 1 0 3@4:0 - - resume
+R 2 running 4 settled 1 0 4@4:0 - - resume
 I a2 1 1 c 0 -
 I a0 1 1 c 0 -
 C 2 running -
@@ -3799,7 +3799,7 @@ A 16 duplicate
 A 17 HISTORY_INVALID
 A 18 appended
 R 1 - 1 unadmitted 0 0 - - a1 admit
-R 3 running 1 open 0 0 - - - recover
+R 3 running 2 open 0 0 - - - recover
 I a1 1 1 g 0 -
 C 3 running -
 P 6 0:5 1 1
@@ -3808,7 +3808,7 @@ U -
 A 19 appended
 A 20 EVENT_OUT_OF_ORDER
 R 1 - 1 unadmitted 0 0 - - a1 admit
-R 3 running 1 open 0 0 - - - recover
+R 3 running 2 open 0 0 - - - recover
 R 2 paused 1 terminal 0 0 - - - recover
 I a1 1 1 g 0 -
 C 2 paused -
@@ -3818,7 +3818,7 @@ U 2:1
 A 21 EVENT_OUT_OF_ORDER
 A 22 EVENT_OUT_OF_ORDER
 R 1 - 1 unadmitted 0 0 - - a1 admit
-R 3 running 1 open 0 0 - - - recover
+R 3 running 2 open 0 0 - - - recover
 R 2 paused 1 terminal 0 0 - - - recover
 I a1 1 1 g 0 -
 C 2 paused -
@@ -3827,7 +3827,7 @@ N conflict@0:1,order@0:4,order@0:6
 U 2:1
 A 23 EVENT_OUT_OF_ORDER
 R 1 - 1 unadmitted 0 0 - - a1 admit
-R 3 running 1 open 0 0 - - - recover
+R 3 running 2 open 0 0 - - - recover
 R 2 paused 1 terminal 0 0 - - - recover
 I a1 1 1 g 0 -
 C 2 paused -

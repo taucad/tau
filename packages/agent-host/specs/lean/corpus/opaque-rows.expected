@@ -5783,7 +5783,7 @@ O 0 0 0 0
 A 11 appended
 O 0 0 0 0
 A 12 appended
-R 1 running 1 open 0 1 - - - recover
+R 1 running 2 open 0 1 - - - recover
 R 3 completed 1 settled 0 0 1@0:4 - - resume
 R 2 cancelled 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
@@ -5792,7 +5792,7 @@ N order@0:0,order@0:1,order@0:2,opaque@1:0
 U 2:1
 A 13 LOG_FENCED
 A 14 LOG_FENCED
-R 1 running 1 open 0 1 - - - recover
+R 1 running 2 open 0 1 - - - recover
 R 3 completed 1 settled 0 0 1@0:4 - - resume
 R 2 cancelled 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
@@ -5809,7 +5809,7 @@ QB refused cursor-ahead 8 -
 QB batch 6 8 8 1:1,1:2
 D folded
 D folded
-rR 1 running 1 open 0 1 - - - recover
+rR 1 running 2 open 0 1 - - - recover
 rR 3 completed 1 settled 0 0 1@0:4 - - resume
 rR 2 cancelled 1 terminal 0 0 - - - resume
 rC 3 terminal 3:completed
@@ -10695,7 +10695,7 @@ A 18 LOG_FENCED
 A 19 LOG_FENCED
 R 3 - 1 unadmitted 0 0 1@0:0 i2 - admit
 R 2 - 1 unadmitted 0 0 1@0:1 - - admit
-R 1 running 1 open 0 0 - i1 - recover
+R 1 running 2 open 0 0 - i1 - recover
 C 1 running 1:failed
 P 10 1:5 2 1
 N conflict@0:2,order@1:0,conflict@1:2
@@ -10720,7 +10720,7 @@ A 25 duplicate
 A 26 EVENT_OUT_OF_ORDER
 R 3 - 1 unadmitted 0 0 1@0:0 i2 - admit
 R 2 admitted 1 settled 0 0 1@0:1 - - recover
-R 1 running 1 open 0 0 - i1 - recover
+R 1 running 2 open 0 0 - i1 - recover
 C 2 admitted 1:failed
 P 12 1:7 2 1
 N conflict@0:2,order@1:0,conflict@1:2,conflict@1:7
@@ -10730,7 +10730,7 @@ A 27 LOG_FENCED
 D folded
 R 3 - 1 unadmitted 0 1 1@0:0 i2 - admit
 R 2 admitted 1 settled 0 0 1@0:1 - - recover
-R 1 running 1 open 0 1 - i1 - recover
+R 1 running 2 open 0 1 - i1 - recover
 C 2 admitted 1:failed
 P 15 1:10 2 0
 N conflict@0:2,order@1:0,conflict@1:2,conflict@1:7,opaque@1:8,conflict@1:9,opaque@1:10
@@ -10748,7 +10748,7 @@ D folded
 D folded
 rR 3 - 1 unadmitted 0 1 1@0:0 i2 - admit
 rR 2 admitted 1 settled 0 0 1@0:1 - - recover
-rR 1 running 1 open 0 1 - i1 - recover
+rR 1 running 2 open 0 1 - i1 - recover
 rC 2 admitted 1:failed
 rP 15 1:10 2 0
 rN conflict@0:2,order@1:0,conflict@1:2,conflict@1:7,opaque@1:8,conflict@1:9,opaque@1:10

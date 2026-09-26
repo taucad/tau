@@ -3,13 +3,18 @@ import type { ModelCostRates, StopReason, Usage } from '@earendil-works/pi-ai';
 import type {
   JsonObject,
   JsonValue,
+  LogEventBase,
   ModelReasoningConfig,
   ModelProviderKind,
   ModelSystemPromptBlock,
   ProviderMessage,
-  RunTrigger,
   RunLifecycleState,
+  TurnConflictedLogEvent,
+  TurnFailedLogEvent,
+  TurnFinalizedLogEvent,
+  TurnPlacement,
 } from '#log/event-types.js';
+import type { InvocationResolution } from '#wire/gateway.js';
 
 /** W1: ordered, durable event-log port owned by the active host. @public */
 export type DurableEventLog = EventLogAppender;
@@ -22,6 +27,11 @@ export type HostToolDefinition = {
   readonly description: string;
   /** JSON Schema object for tool input. */
   readonly inputSchema: JsonObject;
+  /**
+   * `sequential` when one call's effect spans more than one path or state outside the workspace: pi then runs the whole
+   * batch in call order (EQ6). Parallel when absent.
+   */
+  readonly executionMode?: 'sequential' | 'parallel' | undefined;
 };
 
 /** One normalized streaming event from the model transport. @public */
@@ -187,20 +197,53 @@ export type MaterializedDocument = {
   readonly filename?: string | undefined;
 };
 
+/** Input for one invocation resolution. The signal cancels the lookup, not the attempt. @public */
+export type InvocationResolutionRequest = {
+  /** The prepared attempt's id, the gateway's attempt key. */
+  readonly attemptId: string;
+  /** Cancels the lookup; a `TimeoutError` reason answers `unavailable`, any other reason rethrows. */
+  readonly signal: AbortSignal;
+};
+
+/**
+ * Whether this transport's calls are funded by Tau's gateway ledger (library-API §11: one facet, not optional methods).
+ * A self-host transport is `unfunded`; the host refuses a chat whose attempts were funded elsewhere
+ * (`MODEL_ATTEMPT_OTHER_ACCOUNT`) and never resolves them.
+ *
+ * @public
+ */
+export type InvocationFunding =
+  | { readonly type: 'unfunded' }
+  | {
+      readonly type: 'funded';
+      /**
+       * The opaque account this transport funds calls as, recorded on each prepared row. Reconciliation never resolves
+       * another account's attempt: it refuses `MODEL_ATTEMPT_OTHER_ACCOUNT` (RV5-F2). Absent, no account is recorded.
+       */
+      principal?: (() => Promise<string | undefined>) | undefined;
+      /** Whether this provider/model selection uses Tau's funded gateway. */
+      usesBillingAttempt(providerKind: ModelProviderKind | undefined): boolean;
+      /**
+       * Two-way lookup: the gateway voids an unknown key before answering `voided` (GI-R3). A sign-in failure throws
+       * `UNAUTHENTICATED` as `stream` does; an answer this build cannot read throws `MALFORMED_RESPONSE`.
+       */
+      resolveInvocation(request: InvocationResolutionRequest): Promise<InvocationResolution>;
+    };
+
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */
 export type ModelTransport = {
-  /** Whether this provider/model selection uses Tau's funded gateway. */
-  usesBillingAttempt?: ((providerKind: ModelProviderKind | undefined) => boolean) | undefined;
-  /** Resolve an ambiguous prepared attempt without dispatching it again. */
-  lookupAttempt?: ((attemptId: string, signal: AbortSignal) => Promise<ModelInvocationBinding | undefined>) | undefined;
+  /** Whether Tau's gateway ledger funds this transport's calls, and how an attempt is resolved (GI-S4, RA-S11). */
+  readonly funding: InvocationFunding;
   /** Start one provider stream. */
   stream(request: ModelStreamRequest): AsyncIterable<ModelStreamEvent>;
 };
 
-/** Opaque API-owned operation binding exposed to portable hosts. @public */
+/**
+ * The API-owned operation a funded call was bound to, read off the accepted response. Bind is its only producer, so
+ * it carries no status: the bound row writes `pending` for older readers (GI-R6, gi-surface-trim). @public
+ */
 export type ModelInvocationBinding = {
   readonly operationId: string;
-  readonly status: 'pending' | 'terminal' | 'unavailable';
 };
 
 /** Input for one direct in-host tool dispatch. @public */
@@ -275,14 +318,19 @@ export type InterruptResolution = {
   readonly payload?: JsonValue | undefined;
 };
 
-/** W5: durable pause, presentation, and resume boundary. @public */
+/**
+ * W5: the presentation side of the durable pending set. The run actor keeps the set in the chat log
+ * (`interrupt.recorded` rows), so a host no longer supplies this port.
+ *
+ * @public
+ */
 export type InterruptApprovalPort = {
-  /** Persist and pause until a matching resolution is resumed. */
-  pause(request: InterruptRequest): Promise<InterruptResolution>;
+  /** Legacy: M1 records every pause as rows; the host never calls it. W6 RH-S7 removes the last caller. */
+  pause?(request: InterruptRequest): Promise<InterruptResolution>;
   /** List unresolved requests for presentation. */
   pending(input: { readonly runId: string }): Promise<readonly InterruptRequest[]>;
-  /** Resolve a durable request and wake its paused run. */
-  resume(resolution: InterruptResolution): Promise<void>;
+  /** Legacy: `resolve-interrupt` records the resolution; the host never calls it. W6 RH-S7 removes the last caller. */
+  resume?(resolution: InterruptResolution): Promise<void>;
 };
 
 /** Immutable identity and current state of one admitted run. @public */
@@ -321,28 +369,107 @@ export type HostRunSnapshot = HostRun & {
   readonly failure?: HostRunFailure | undefined;
 };
 
-/** W6: run admission, steering, cancellation, resume, and snapshot commands. @public */
-export type RunLifecycleCommands = {
-  /** Admit a new execution identity and initial user turn. */
-  admit(
-    input: {
-      readonly chatId: string;
-      readonly runId: string;
-      readonly message: Extract<ProviderMessage, { readonly role: 'user' }>;
-    } & (
-      | { readonly trigger: 'submit'; readonly retainedMessageIds?: never }
-      | {
-          readonly trigger: Exclude<RunTrigger, 'submit'>;
-          readonly retainedMessageIds: readonly string[];
-        }
-    ),
-  ): Promise<HostRun>;
-  /** Add operator steering to an active run. */
-  steer(input: { readonly runId: string; readonly message: string }): Promise<void>;
-  /** Cancel an active or paused run. */
-  cancel(input: { readonly runId: string; readonly reason?: string | undefined }): Promise<void>;
-  /** Resume an interrupted run from its durable state. */
-  resume(input: { readonly runId: string }): Promise<HostRun>;
-  /** Read a projection rebuilt from durable host state. */
-  snapshot(input: { readonly runId: string }): Promise<HostRunSnapshot>;
-};
+/** One attempt of one agent run against one checkout (I9, D15). `turnId` is the user message id. @public */
+export type TurnAttemptKey = Readonly<{ chatId: string; turnId: string; runId: string; attempt: number }>;
+
+/** What every verb that addresses one attempt takes: the request id every answer echoes (D14), and the key. @public */
+export type TurnAttemptInput = Readonly<{ requestId: string; key: TurnAttemptKey }>;
+
+/** `admit`: lease the attempt, pre-mint a dirty base, and hand out its tools. @public */
+export type TurnAdmitInput = TurnAttemptInput &
+  Readonly<{
+    /** The person's placement choice (TS-R12). Absent: the chat record's checkout, then the live one. */
+    checkoutId?: string | undefined;
+  }>;
+
+/** `complete`: settle the attempt. `cut` is true for every attempt that executed, whatever its outcome (TS-R11). @public */
+export type TurnCompleteInput = TurnAttemptInput & Readonly<{ cut: boolean }>;
+
+/** `reconcile`: list the lease records of the project, or of one chat. @public */
+export type TurnReconcileInput = Readonly<{ requestId: string; chatId?: string | undefined }>;
+
+/** `settlements`: a listen that replays every unacknowledged fact on subscribe. @public */
+export type TurnSettlementsInput = Readonly<{ signal: AbortSignal }>;
+
+/**
+ * Where an attempt runs (TS-S0's `TurnPlacement`, renamed so it does not collide with the log's placement record,
+ * which this package already exports as `TurnPlacement`). The record part is what attempt 1's `running` row stores.
+ *
+ * @public
+ */
+export type TurnPlacementGrant = TurnPlacement &
+  Readonly<{
+    /** Where the attempt's files are rooted in this host's namespace (an external agent's cwd). */
+    root: string;
+    /** The attempt's tools over that root. `complete`, `abandon` and the session fence revoke them. */
+    tools: ToolRegistry;
+  }>;
+
+/** One settlement row as the port publishes it: a `turn.*` body keyed by run and attempt. @public */
+export type TurnSettlementRow = Readonly<{ runId: string; attempt: number }> &
+  (
+    | Omit<TurnFinalizedLogEvent, keyof LogEventBase>
+    | Omit<TurnConflictedLogEvent, keyof LogEventBase>
+    | (Omit<TurnFailedLogEvent, keyof LogEventBase> & Readonly<{ code?: string | undefined }>)
+  );
+
+/** An answer to one port request. A refusal is data; a dead session rejects instead. @public */
+export type TurnPlacementAnswer<Result extends Record<string, unknown>, Code extends string> =
+  | (Readonly<{ requestId: string; status: 'applied' | 'replayed' }> & Result)
+  | Readonly<{
+      requestId: string;
+      status: 'refused';
+      code: Code;
+      /** Names the recovery. */
+      message: string;
+      details?: Readonly<Record<string, unknown>> | undefined;
+    }>;
+
+/** What the root publishes. Delivery is at least once; M1's append is idempotent per key (TS-R18). @public */
+export type TurnPlacementFact =
+  | Readonly<{ kind: 'settled'; key: TurnAttemptKey; row: TurnSettlementRow }>
+  /** A lease this session did not admit refused one of its operations (TS-R16, TS-R17). */
+  | Readonly<{ kind: 'leaseHeld'; key: TurnAttemptKey; checkoutId: string }>;
+
+type NoResult = Readonly<Record<never, never>>;
+
+/**
+ * The host's placement and settlement port (D9, TS-S0 consumer-port). One instance per project (I23). M1 drives its
+ * order: `admit` after the intent row, `complete` after the ending row, `abandon` at the stop bound and on fencing,
+ * `acknowledge` after the `turn.*` row. Function-typed properties, so an adapter's drifted input is caught.
+ *
+ * @public
+ */
+export type TurnPlacementPort = Readonly<{
+  admit: (
+    input: TurnAdmitInput,
+  ) => Promise<
+    TurnPlacementAnswer<
+      Readonly<{ placement: TurnPlacementGrant }>,
+      | 'CHECKOUT_UNKNOWN'
+      | 'CHECKOUT_CONFLICT'
+      | 'BASE_CUT_FAILED'
+      | 'TURN_ALREADY_LEASED'
+      | 'REVISIONS_UNAVAILABLE'
+      | 'SESSION_FENCED'
+    >
+  >;
+  complete: (
+    input: TurnCompleteInput,
+  ) => Promise<
+    TurnPlacementAnswer<NoResult, 'TURN_UNKNOWN' | 'CUT_FAILED' | 'LEASE_HELD_ELSEWHERE' | 'SESSION_FENCED'>
+  >;
+  abandon: (input: TurnAttemptInput) => Promise<TurnPlacementAnswer<NoResult, 'TURN_UNKNOWN' | 'SESSION_FENCED'>>;
+  reconcile: (
+    input: TurnReconcileInput,
+  ) => Promise<
+    TurnPlacementAnswer<
+      Readonly<{ held: ReadonlyArray<Readonly<{ key: TurnAttemptKey; checkoutId: string }>> }>,
+      'REVISIONS_UNAVAILABLE' | 'SESSION_FENCED'
+    >
+  >;
+  settlements: (input: TurnSettlementsInput) => AsyncIterable<TurnPlacementFact>;
+  acknowledge: (
+    input: TurnAttemptInput,
+  ) => Promise<TurnPlacementAnswer<NoResult, 'LEASE_HELD_ELSEWHERE' | 'REVISIONS_BUSY' | 'SESSION_FENCED'>>;
+}>;

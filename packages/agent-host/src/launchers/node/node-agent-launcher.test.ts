@@ -176,10 +176,8 @@ describe('createNodeAgentLauncher', () => {
     const logPath = join(currentRoot(), '.tau', 'chats', 'chat-1', 'events.jsonl');
     const durableLog = await readFile(logPath, 'utf8');
     expect(durableLog).toContain('"type":"run.lifecycle"');
-    expect(durableLog.indexOf('"type":"model.invocation-prepared"')).toBeLessThan(
-      durableLog.indexOf('"type":"model.invocation-bound"'),
-    );
-    expect(durableLog).toContain('"operationId":"operation-daemon-1"');
+    // The gateway transport is unfunded (RA-S11): it records no invocation rows, only the Tau Cloud transport does.
+    expect(durableLog).not.toContain('"type":"model.invocation-prepared"');
     expect(durableLog).toContain(`"commandId":"${started.commandId}"`);
 
     // A reconnecting client reads the same transcript from a cursor.
@@ -501,16 +499,14 @@ describe('createNodeAgentLauncher', () => {
 
   it('refuses a Tau start when neither the launcher nor the admission names a model', async () => {
     const host = await makeModellessLauncher(scriptedGateway());
-    // The admission is recorded with its failure (R2), so the start is applied and the run ends coded.
+    // Refused before any row (RA-R4): the log is as it was, and the chat has no run to fail.
     await expect(start(host, { chatId: 'chat-modelless', runId: 'run-modelless' })).resolves.toMatchObject({
-      status: 'applied',
-      effect: 'durable',
+      status: 'refused',
+      effect: 'not-applied',
+      code: 'HOST_MODEL_UNAVAILABLE',
     });
     const settled3 = await attach(host, 'chat-modelless');
-    expect(settled3.snapshot).toMatchObject({
-      state: 'failed',
-      failure: { code: 'HOST_MODEL_UNAVAILABLE' },
-    });
+    expect(settled3.snapshot).toBeUndefined();
   });
 
   it('runs a turn on a model-less launcher when the admission carries its own model row', async () => {

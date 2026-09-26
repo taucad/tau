@@ -187,6 +187,7 @@ const transportFor = (options: {
 }): ModelTransport => {
   let call = 0;
   return {
+    funding: { type: 'unfunded' },
     async *stream(request): AsyncGenerator<ModelStreamEvent> {
       call++;
       options.onRequest(request);
@@ -346,6 +347,7 @@ describe('long-session compaction invariants', () => {
       systemPrompt: 'system',
       model: { ...models.at(-1)!, contextWindow },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream() {
           yield { type: 'completed', stopReason: 'stop' };
         },

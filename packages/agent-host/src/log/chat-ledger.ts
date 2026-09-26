@@ -83,6 +83,8 @@ export type InvocationEntry = Readonly<{
   attempt: number;
   purpose: 'generation' | 'compaction';
   prepared: RowKey;
+  /** The account that funded it, when its prepared row names one (RV5-F2). */
+  principal?: string;
   /** The bound operation: a snapshot at bind, never read as current status (GI-R6). */
   operationId?: string;
   /** `'0'` credit atoms for a voided or released attempt. */
@@ -200,8 +202,10 @@ const reopenable = (entry: RunEntry): boolean =>
 
 /**
  * The one reopen predicate (I10, CL-R9): the fold, the gate and resume all call it. A `running` row opens the next
- * attempt only when it names that attempt (or, legacy, none), the current attempt is settled, and the run failed
- * resumably or rests on a native pause with no pending request.
+ * attempt only when it names that attempt (or, legacy, none), and the run's current attempt ended with a resumable
+ * failure or a native pause with no pending request. Settled or not: without placement no attempt is ever settled,
+ * and the spec opens `Att(T)+1` on every reopening row (`ChatRunSlot.tla` resume; W7.r1 finding 1). Placement still
+ * settles before it reopens, which M1 orders (D17).
  *
  * @internal
  * @param entry - The run before the row.
@@ -209,10 +213,7 @@ const reopenable = (entry: RunEntry): boolean =>
  * @returns `true` when the row opens attempt `entry.attempt + 1`.
  */
 export const reopens = (entry: RunEntry, row: Pick<RunLifecycleEvent, 'state' | 'attempt'>): boolean =>
-  row.state === 'running' &&
-  (row.attempt === undefined || row.attempt === entry.attempt + 1) &&
-  entry.appendState === 'settled' &&
-  reopenable(entry);
+  row.state === 'running' && (row.attempt === undefined || row.attempt === entry.attempt + 1) && reopenable(entry);
 
 /** The run's condition, in `run-lifecycle.legality.json`'s domain. */
 const lifecycleCondition = (entry: RunEntry | undefined): keyof typeof lifecycleTable.table => {
@@ -420,6 +421,7 @@ const createFold = (ledger: ChatLedger) => {
           attempt: entry.attempt,
           purpose: event.purpose,
           prepared: key,
+          ...(event.principal === undefined ? {} : { principal: event.principal }),
           shown: false,
         };
         entry.openInvocation = event.attemptId;
@@ -678,6 +680,18 @@ export const replayedStartOutcome = (ledger: ChatLedger, runId: string): Replaye
   }
   return ended ? 'resume' : 'recover';
 };
+
+/**
+ * Whether another account funded the attempt: its prepared row names a principal other than `principal`. Such an
+ * attempt is never resolved, voided or recorded here (RV5-F2, W11 GI-Q6).
+ *
+ * @internal
+ * @param entry - The attempt.
+ * @param principal - The account the transport funds calls as, if it says.
+ * @returns `true` when the attempt is another account's.
+ */
+export const isForeignInvocation = (entry: InvocationEntry, principal: string | undefined): boolean =>
+  entry.principal !== undefined && entry.principal !== principal;
 
 /**
  * Every prepared model invocation with neither a shown reply nor a settled row, across runs (GI-R10).

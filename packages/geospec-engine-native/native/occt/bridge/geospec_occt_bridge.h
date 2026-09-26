@@ -756,8 +756,10 @@ int geospec_occt_occurrence_face_edge(
     size_t edge_index, uint32_t* out_edge,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
-size_t geospec_occt_occurrence_edge_count(
-    const geospec_occt_document* document, uint32_t occurrence) GEOSPEC_OCCT_NOEXCEPT;
+// Maps the occurrence's edge addresses on first demand, so it can fail.
+int geospec_occt_occurrence_edge_count(
+    const geospec_occt_document* document, uint32_t occurrence,
+    size_t* out_count, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_occurrence_edge(
     const geospec_occt_document* document, uint32_t occurrence, size_t index,
     geospec_occt_edge_facts* out_edge,

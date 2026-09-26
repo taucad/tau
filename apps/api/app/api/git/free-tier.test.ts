@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type { FastifyReply } from 'fastify';
 import { entitlementsFromTier, storageLimitBytesByTier } from '@taucad/billing';
 import type { BillingTier } from '@taucad/billing';
 import type { DatabaseService } from '#database/database.service.js';
@@ -197,7 +198,31 @@ describe('quota refusal (D17)', () => {
   });
 });
 
+const usageRoute = (
+  access: ProjectAccessService,
+  repositories: GitRepositoryService,
+  allowed = true,
+): UsageController => {
+  const limiter = mock<PublicationRateLimiterService>();
+  limiter.consumeWindowBudget.mockResolvedValue({ allowed, count: allowed ? 1 : 31, retryAfterSeconds: 17 });
+  return new UsageController(access, repositories, limiter);
+};
+
 describe('usage route (D18)', () => {
+  /* RV-W8 F8: a looping client spends its own window, before any database read. */
+  it('should refuse a caller past its window with 429 and Retry-After, reading nothing', async () => {
+    const { access, repositories } = hostedRemote({ entitlements: openTier('free') });
+    const read = vi.spyOn(repositories, 'readStorageAllowance');
+    const reply = mock<FastifyReply>();
+
+    await expect(usageRoute(access, repositories, false).usage(projectId, ownerId, reply)).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(reply.header).toHaveBeenCalledWith('retry-after', '17');
+    expect(access.authorize).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it('should answer the owner the figures a later 413 quotes', async () => {
     const { access, repositories } = hostedRemote({ entitlements: openTier('free'), usedBytes: 340 * 1024 ** 2 });
     vi.spyOn(repositories, 'readOwnerUsage').mockResolvedValue({
@@ -206,7 +231,7 @@ describe('usage route (D18)', () => {
       retainedBytes: 12 * 1024 ** 2,
     });
 
-    const usage = await new UsageController(access, repositories).usage(projectId, ownerId);
+    const usage = await usageRoute(access, repositories).usage(projectId, ownerId, mock<FastifyReply>());
 
     expect(usage).toStrictEqual({
       storageBytes: 300 * 1024 ** 2,
@@ -233,7 +258,7 @@ describe('usage route (D18)', () => {
   it('should answer an allowance of 0 while the plan cannot sync', async () => {
     const { access, repositories } = hostedRemote({ entitlements: entitlementsFromTier('free') });
 
-    const usage = await new UsageController(access, repositories).usage(projectId, ownerId);
+    const usage = await usageRoute(access, repositories).usage(projectId, ownerId, mock<FastifyReply>());
 
     expect(usage.storageLimitBytes).toBe(0);
   });

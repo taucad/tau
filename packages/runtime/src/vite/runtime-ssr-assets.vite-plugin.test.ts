@@ -442,6 +442,111 @@ describe('runtimeAssetsPlugin', () => {
     expect(outputCode).not.toContain('ROLLUP_FILE_URL');
     expect(outputCode).not.toContain('__TAUCAD_RUNTIME_ASSET__');
   });
+
+  it('should emit only the assets that rendered chunks reference in a Vite SSR build', async () => {
+    const fixtureDirectory = mkdtempSync(path.resolve(tmpdir(), 'tau-runtime-ssr-pruning-'));
+    const outputDirectory = path.join(fixtureDirectory, 'dist');
+    temporaryDirectories.push(fixtureDirectory);
+    const entry = path.join(fixtureDirectory, 'entry.mjs');
+    writeFileSync(path.join(fixtureDirectory, 'kept asset.wasm'), 'kept');
+    // Same bytes as the kept asset, so the bundler merges both into one file. The space leaves only
+    // the URL-encoded name in the chunk, so the resolved reference alone must keep that file.
+    writeFileSync(path.join(fixtureDirectory, 'copy asset.wasm'), 'kept');
+    writeFileSync(path.join(fixtureDirectory, 'dropped.wasm'), 'dropped');
+    writeFileSync(
+      path.join(fixtureDirectory, 'kept.mjs'),
+      `export const keptAsset = () => new URL('./kept asset.wasm', import.meta.url).href;`,
+    );
+    writeFileSync(
+      path.join(fixtureDirectory, 'dropped.mjs'),
+      `export const droppedAssets = () => [new URL('./dropped.wasm', import.meta.url), new URL('./copy asset.wasm', import.meta.url)];`,
+    );
+    writeFileSync(
+      entry,
+      [
+        `import { keptAsset } from './kept.mjs';`,
+        `import { droppedAssets } from './dropped.mjs';`,
+        `export const asset = keptAsset();`,
+      ].join('\n'),
+    );
+
+    await build({
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [runtimeAssetsPlugin()],
+      build: { ssr: entry, outDir: outputDirectory },
+    });
+
+    const emitted = readdirSync(outputDirectory, { recursive: true }).map(String);
+    expect(emitted.filter((file) => file.endsWith('.wasm'))).toHaveLength(1);
+    const entryOutput = emitted.find((file) => /entry\.(?:mjs|js)$/.test(file)) ?? 'missing';
+    const builtEntry = (await import(pathToFileURL(path.join(outputDirectory, entryOutput)).href)) as {
+      readonly asset: string;
+    };
+    expect(readFileSync(fileURLToPath(builtEntry.asset), 'utf8')).toBe('kept');
+  });
+
+  it("should keep a tree-shaken module's asset when a kept chunk references the same file", async () => {
+    const fixtureDirectory = mkdtempSync(path.resolve(tmpdir(), 'tau-runtime-ssr-shared-'));
+    const outputDirectory = path.join(fixtureDirectory, 'dist');
+    temporaryDirectories.push(fixtureDirectory);
+    const entry = path.join(fixtureDirectory, 'entry.mjs');
+    writeFileSync(path.join(fixtureDirectory, 'font.ttf'), 'font');
+    writeFileSync(
+      path.join(fixtureDirectory, 'dropped.mjs'),
+      `export const font = () => new URL('./font.ttf', import.meta.url);`,
+    );
+    // Vite's asset plugin emits the same font for `?url`, and the bundler merges it with the runtime's copy.
+    writeFileSync(
+      entry,
+      [
+        `import { font } from './dropped.mjs';`,
+        `import fontUrl from './font.ttf?url';`,
+        `export const asset = fontUrl;`,
+      ].join('\n'),
+    );
+
+    await build({
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [runtimeAssetsPlugin()],
+      build: { ssr: entry, outDir: outputDirectory, assetsInlineLimit: 0 },
+    });
+
+    const entryOutput =
+      readdirSync(outputDirectory, { recursive: true })
+        .map(String)
+        .find((file) => /entry\.(?:mjs|js)$/.test(file)) ?? 'missing';
+    const builtEntry = (await import(pathToFileURL(path.join(outputDirectory, entryOutput)).href)) as {
+      readonly asset: string;
+    };
+    expect(readFileSync(path.join(outputDirectory, builtEntry.asset), 'utf8')).toBe('font');
+  });
+
+  it('should not emit an exported dependency asset whose importer a Vite client build tree-shakes', async () => {
+    const fixtureDirectory = mkdtempSync(path.join(path.dirname(importer), '.tau-runtime-client-pruning-'));
+    const outputDirectory = path.join(fixtureDirectory, 'dist');
+    temporaryDirectories.push(fixtureDirectory);
+    const entry = path.join(fixtureDirectory, 'entry.mjs');
+    writeFileSync(
+      path.join(fixtureDirectory, 'dropped.mjs'),
+      `export const wasm = () => new URL(import.meta.resolve('manifold-3d/manifold.wasm')).href;`,
+    );
+    writeFileSync(entry, `import { wasm } from './dropped.mjs';\nexport const value = 1;`);
+
+    // Vite's manifest lists every named asset in the bundle, so pruning must precede it.
+    await build({
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [runtimeAssetsPlugin()],
+      build: { lib: { entry, formats: ['es'] }, outDir: outputDirectory, manifest: true },
+    });
+
+    const emitted = readdirSync(outputDirectory, { recursive: true }).map(String);
+    expect(emitted.filter((file) => file.endsWith('.wasm'))).toEqual([]);
+    expect(readFileSync(path.join(outputDirectory, '.vite/manifest.json'), 'utf8')).not.toContain('.wasm');
+  });
+
   it('should transform a server-environment module in a dev server', async () => {
     // Vite runs buildStart only for the client environment during dev unless a plugin opts in, so a
     // server environment reaching the transform without its per-environment state is a real regression.

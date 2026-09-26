@@ -31,10 +31,6 @@ import type { ComputeBinding } from '@taucad/runtime/types';
 import { defaultConfigDirectory, discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host';
 
-import kernelUtilityEntry from '#tau/kernel-host.entry?modulePath';
-import servicesUtilityEntry from '#tau/services-host.entry?modulePath';
-import computeStoreWorkerEntry from '#main/compute-store.worker?modulePath';
-
 import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
 import { createAuthService } from '#main/auth-service.js';
 import {
@@ -103,6 +99,11 @@ const clientRoot =
   (app.isPackaged
     ? join(process.resourcesPath, 'ui/client')
     : join(import.meta.dirname, '../../../ui/desktop/build/client'));
+/* Entries `electron.vite.config.ts` emits beside `index.js`, the bundle this
+ * module lands in. */
+const kernelUtilityEntry = join(import.meta.dirname, 'kernel-host.js');
+const servicesUtilityEntry = join(import.meta.dirname, 'services-host.js');
+const computeStoreWorkerEntry = join(import.meta.dirname, 'compute-store.worker.js');
 const applicationResource = (name: string): string =>
   app.isPackaged ? join(process.resourcesPath, 'branding', name) : join(import.meta.dirname, '../../resources', name);
 const applicationIcon = applicationResource(`icon.${process.platform === 'win32' ? 'ico' : 'png'}`);

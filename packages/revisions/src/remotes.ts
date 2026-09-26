@@ -14,10 +14,11 @@
  * kind's UI; the data model already holds it.
  */
 
-import { isCeilingRefusal, isIncompleteRepositoryRefusal } from '#refusal-markers.js';
+import { isIncompleteRepositoryRefusal, isStorageRefusal } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
+import type { RemoteStorage } from '#remote.types.js';
 
 /** Which of the two remote kinds a project's remote is. @public */
 export type RemoteKind = 'tau' | 'git';
@@ -560,14 +561,14 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
      * rewind or a deletion on every ref family that way (contract §4). Its own
      * words, never one of Tau's (N4). */
     if (answered.message !== undefined) {
-      /* D20's ceiling refusal is one of those sentences, and it is a *quota*
-         answer rather than a rule the caller broke: the affordance must not
-         offer "Sync now" again. `isCeilingRefusal` (`refusal-markers.ts`) is
+      /* D20's ceiling and D17's plan quota are two of those sentences, and each
+         is a *quota* answer rather than a rule the caller broke: the affordance must not
+         offer "Sync now" again. `isStorageRefusal` (`refusal-markers.ts`) is
          the one place that question is answered, for this leg and for the
          scheduler's. The remote's own words, list of files and all, are still
          what is shown. */
       return new RevisionPortError(
-        isCeilingRefusal(answered.message)
+        isStorageRefusal(answered.message)
           ? 'REMOTE_QUOTA_EXCEEDED'
           : isIncompleteRepositoryRefusal(answered.message)
             ? 'REMOTE_DAMAGED'
@@ -767,6 +768,41 @@ export const registerProjectOverHttp = async (
     const answered = await answeredCode(response);
     throw new Error(registerProjectFailureMessage(response.status, answered.code, answered.message));
   }
+};
+
+/**
+ * What the owner's Tau Cloud account stores against its plan (D18), for a Sync
+ * region to render as `x of 1 GB` before any push is refused.
+ *
+ * Answers only for the project's owner: a collaborator is refused (`403`) and
+ * draws no meter, as does a signed-out host or a plan that cannot sync. The
+ * figures are the ones a later quota refusal quotes — account-wide, because
+ * the allowance is.
+ *
+ * @param apiBaseUrl - The API origin, with or without a trailing slash.
+ * @param auth - How this host proves who is asking.
+ * @param projectId - The project whose owner's account is asked about.
+ * @returns Bytes used and the allowance, or `undefined` when there is no figure to show.
+ * @public
+ */
+export const readRemoteStorageOverHttp = async (
+  apiBaseUrl: string,
+  auth: TauCloudAuth,
+  projectId: string,
+): Promise<RemoteStorage | undefined> => {
+  const response = await globalThis.fetch(
+    `${apiBaseUrl.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(projectId)}/usage`,
+    tauCloudRequestInit(auth),
+  );
+  if (!response.ok) {
+    return undefined;
+  }
+  const body = (await response.json()) as Readonly<Record<string, unknown>>;
+  const { storageBytes, lfsBytes, storageLimitBytes } = body;
+  if (typeof storageBytes !== 'number' || typeof lfsBytes !== 'number' || typeof storageLimitBytes !== 'number') {
+    return undefined;
+  }
+  return storageLimitBytes > 0 ? { used: storageBytes + lfsBytes, quota: storageLimitBytes } : undefined;
 };
 
 /**

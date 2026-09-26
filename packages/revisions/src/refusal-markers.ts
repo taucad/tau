@@ -20,18 +20,29 @@
 export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
 
 /**
- * Whether a refusal the remote wrote is D20's repository ceiling.
+ * The fixed first words of the hosted remote's plan-quota refusal (D17).
  *
- * A ceiling is a quota answer, not a rule the caller broke: *Sync now* replays
- * the same bytes and can never clear it, so the only useful affordance is
- * Upgrade.
+ * The same kind of answer as {@link ceilingRefusalMarker}, from the same hook:
+ * the owner's plan has no room for what this push brings. The server prints
+ * it from `quotaRefusalMarker` in `apps/api/app/api/git/git.constants.ts`;
+ * those two copies, both tested, are the only ones.
+ */
+export const quotaRefusalMarker = 'Tau: storage quota exceeded';
+
+/**
+ * Whether a refusal the remote wrote is a storage answer: D20's repository
+ * ceiling or the owner's plan quota (D17).
+ *
+ * Neither is a rule the caller broke: *Sync now* replays the same bytes and
+ * can never clear one, so the refusal is filed as `quota`, whose one action is
+ * chosen by who is asking.
  *
  * @param message - The sentence the remote sent, verbatim.
- * @returns True when it is the ceiling refusal.
+ * @returns True when it is the ceiling or the quota refusal.
  * @public
  */
-export const isCeilingRefusal = (message: string | undefined): boolean =>
-  message?.includes(ceilingRefusalMarker) ?? false;
+export const isStorageRefusal = (message: string | undefined): boolean =>
+  message !== undefined && (message.includes(ceilingRefusalMarker) || message.includes(quotaRefusalMarker));
 
 /**
  * The fixed first words of the hosted remote's `GIT_REPOSITORY_INCOMPLETE` refusal.

@@ -41,6 +41,8 @@
  * | 31 | `connected --quotaRefused--> --connect--> choosing` | **L2-F10**: a replaced remote does not keep the old destination's refused files |
  * | 32 | `failed --quotaRefused-->` | **L2-F10**: a refusal forwarded outside `connected` is not dropped |
  * | 33 | `initialSync → failed` + parent `childToast` | **L2-F8**: a toast reaches the root, not only a subscriber of this child |
+ * | 34 | `reading → connected` invokes `readStorage` | **D18**: a reopened project shows its usage without connecting again |
+ * | 35 | `connected`, `readStorage` fails | **D18**: a usage read that fails leaves the connection and its figure alone |
  *
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
@@ -63,6 +65,7 @@ import type {
   RemoteRecord,
   RemoteValidateActorOutput,
 } from '#remote.machine.js';
+import type { RemoteStorage } from '#remote.types.js';
 
 const tauRemote: RemoteRecord = { name: 'tau', url: 'https://api.tau.new/v1/git/p1.git', kind: 'tau' };
 
@@ -130,6 +133,7 @@ const start = (
       }),
     }),
     initialSync: createAsyncLogic({ run: async (): Promise<RemoteInitialSyncActorOutput> => ({}) }),
+    readStorage: createAsyncLogic({ run: async (): Promise<RemoteStorage | undefined> => undefined }),
     ...overrides,
   };
   const actor = createActor(remoteMachine.provide({ actors }), {
@@ -861,5 +865,39 @@ describe('remoteMachine', () => {
     ]);
     actor.stop();
     parent.stop();
+  });
+
+  it('34 (D18): reads what a reopened Tau Cloud project stores, which never passes through validate', async () => {
+    const asked: Array<Readonly<{ remote: string; kind: string }>> = [];
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async ({ input }): Promise<RemoteStorage | undefined> => {
+          asked.push(input);
+          return { used: 340 * 1024 ** 2, quota: 1024 ** 3 };
+        },
+      }),
+    });
+
+    await settle();
+
+    expect(asked).toStrictEqual([{ remote: 'tau', kind: 'tau' }]);
+    expect(selectRemoteFacet(actor.getSnapshot()).storage).toStrictEqual({ used: 340 * 1024 ** 2, quota: 1024 ** 3 });
+    actor.stop();
+  });
+
+  it('35 (D18): keeps the connection and the figure it had when the usage read fails', async () => {
+    const { actor } = start({ readStorage: failing('usage unavailable') });
+    await settle();
+
+    actor.send({ type: 'connect', kind: 'tau' });
+    await settle();
+
+    expect(actor.getSnapshot().matches('connected')).toBe(true);
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+      error: undefined,
+      storage: { used: 2_100_000_000, quota: 10_000_000_000 },
+    });
+    actor.stop();
   });
 });

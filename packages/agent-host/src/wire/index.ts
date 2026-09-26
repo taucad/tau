@@ -59,7 +59,7 @@ export type {
   ReadInput,
   ReadRequest,
 } from '#wire/frames.schema.js';
-export { gatewayErrorCodes } from '#wire/gateway.js';
-export type { GatewayErrorCode } from '#wire/gateway.js';
+export { attemptReceiptSchema, gatewayErrorCodes } from '#wire/gateway.js';
+export type { GatewayErrorCode, InvocationResolution } from '#wire/gateway.js';
 export { isResumable, refusalOf, refusals } from '#wire/refusals.js';
 export type { RefusalCode, RefusalEntry, RefusalOwner, RetryClass } from '#wire/refusals.js';

@@ -58,12 +58,12 @@ const spendBudgetId = `journal-spend-${randomUUID()}`;
 const riskBudgetId = `journal-risk-${randomUUID()}`;
 
 /**
- * A pending operation that authorizes nothing.
+ * A pending operation that authorizes and holds `planHeldAtoms` of plan credit (nothing by default).
  *
  * `require_operation_holds` is a deferred constraint trigger, so the operation and its two
  * budget holds must land in one transaction.
  */
-const seedOperation = async (accountId: string): Promise<string> => {
+const seedOperation = async (accountId: string, planHeldAtoms = 0n): Promise<string> => {
   const id = `operation-${randomUUID()}`;
   await database.transaction(async (transaction) => {
     await transaction.insert(schema.creditOperation).values({
@@ -83,9 +83,9 @@ const seedOperation = async (accountId: string): Promise<string> => {
       policyId,
       activationId,
       meterContractId: 'journal-fixture-meter',
-      authorizedAtoms: 0n,
+      authorizedAtoms: planHeldAtoms,
       promoHeldAtoms: 0n,
-      planHeldAtoms: 0n,
+      planHeldAtoms,
       purchasedHeldAtoms: 0n,
       spendBudgetHoldId: `spend-${id}`,
       riskBudgetHoldId: `risk-${id}`,
@@ -344,11 +344,13 @@ describe('journal reconciliation foundation', () => {
     expect(recordedAccounts.at(-1)).toBe(1);
   });
 
-  it('should accept a held refund intent as a hold cause and case a hold that has none', async () => {
+  it('should accept a pending operation and a held refund intent as hold causes and case a hold that has none', async () => {
+    // GI-A7: the account's plan hold is a pending admission (100) plus a held refund intent (400); neither is drift.
     const explained = await seedAccount({
-      counters: { planAtoms: 400n, planHeldAtoms: 400n },
-      journal: { plan: 400n },
+      counters: { planAtoms: 500n, planHeldAtoms: 500n },
+      journal: { plan: 500n },
     });
+    await seedOperation(explained, 100n);
     const purchaseId = `purchase-${randomUUID()}`;
     const reversalCaseId = `reversal-${randomUUID()}`;
     await database.insert(schema.billingPurchase).values({

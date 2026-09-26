@@ -1413,6 +1413,58 @@ export const projectParameterSchemaToDraft7 = (schema: JsonStructureSchema): Par
   );
 };
 
+// Keywords whose values are data or names, never schemas, and keywords whose values map names to schemas.
+const carrierDataKeywords = new Set([
+  '$uses',
+  'altenums',
+  'altnames',
+  'const',
+  'default',
+  'dependentRequired',
+  'enum',
+  'examples',
+  'required',
+  'symbols',
+]);
+const carrierNameMapKeywords = new Set(['choices', 'definitions', 'properties']);
+
+/* Authored JSON Schema claims never ride inside the carrier: native producers declare semantics in `bindings`,
+ * and authored documents enter through the JSON Schema adapter, which lifts them. Refusing here keeps one
+ * admission owner and never drops a claim silently. */
+const assertNoAuthoredClaims = (schema: unknown, resource: string): void => {
+  const pending: Array<Readonly<{ node: unknown; pointer: string; names: boolean }>> = [
+    { node: schema, pointer: '', names: false },
+  ];
+  while (pending.length > 0) {
+    const { node, pointer, names } = pending.pop()!;
+    if (Array.isArray(node)) {
+      for (const [index, child] of node.entries()) {
+        pending.push({ node: child, pointer: `${pointer}/${String(index)}`, names: false });
+      }
+      continue;
+    }
+    if (!isRecord(node)) {
+      continue;
+    }
+    for (const [key, child] of Object.entries(node)) {
+      const childPointer = `${pointer}/${escapePointer(key)}`;
+      if (!names && (key.startsWith('x-tau-') || key.startsWith('x-ogc-'))) {
+        fail(
+          diagnostic(
+            'INVALID_ANNOTATION',
+            `${key} is an authored JSON Schema claim; declare it in bindings or admit the authored schema through the JSON Schema adapter`,
+            resource,
+            childPointer,
+          ),
+        );
+      }
+      if (names || !carrierDataKeywords.has(key)) {
+        pending.push({ node: child, pointer: childPointer, names: !names && carrierNameMapKeywords.has(key) });
+      }
+    }
+  }
+};
+
 const cloneDeclaration = (value: unknown): ParameterDeclaration => {
   const candidate: unknown = cloneBoundedJson(value, limits);
   if (!isRecord(candidate)) {
@@ -1493,10 +1545,18 @@ const cloneDeclaration = (value: unknown): ParameterDeclaration => {
   return candidate as ParameterDeclaration;
 };
 
-/** Admit a producer declaration using the pinned JSON Structure profile. @public */
+/**
+ * Admit a producer declaration using the pinned JSON Structure profile. Authored JSON Schema claims (`x-tau-*`,
+ * `x-ogc-*`) inside the carrier are refused with `INVALID_ANNOTATION`; declare them in `bindings` instead.
+ * @public
+ */
 export const admitParameterDeclaration = (value: unknown): ParameterDeclaration => {
   const declaration = cloneDeclaration(value);
   const resources = declaration.resources ?? {};
+  assertNoAuthoredClaims(declaration.schema, rootResource);
+  for (const [uri, schema] of Object.entries(resources)) {
+    assertNoAuthoredClaims(schema, uri);
+  }
   deriveManifestTables(declaration, {
     id: 'parameter-admission',
     version: profile,

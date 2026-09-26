@@ -1176,3 +1176,97 @@ describe('native parameter manifest', () => {
     ).rejects.toThrow(ParameterAdmissionError);
   });
 });
+
+describe('authored claims inside the native carrier', () => {
+  const lengthKind = 'http://qudt.org/vocab/quantitykind/Length';
+  const carrier = (properties: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    $schema: 'https://json-structure.org/meta/extended/v0/#',
+    $id: 'urn:taucad:test:claims',
+    $uses: ['JSONSchemaUnits'],
+    name: 'Claims',
+    type: 'object',
+    properties,
+    ...extra,
+  });
+  const refusal = (value: unknown): Readonly<{ code: string; resource: string; schemaPointer: string }> => {
+    try {
+      admitParameterDeclaration(value);
+    } catch (error) {
+      const first = error instanceof ParameterAdmissionError ? error.diagnostics[0] : undefined;
+      if (first === undefined) {
+        throw error;
+      }
+      return { code: first.code, resource: first.resource, schemaPointer: first.schemaPointer };
+    }
+    return expect.fail('expected the declaration to be refused');
+  };
+
+  it.each([
+    ['x-tau-quantity-kind', lengthKind],
+    ['x-ogc-definition', lengthKind],
+    ['x-tau-space', 'linear'],
+    ['x-tau-unit', 'mm'],
+    ['x-ogc-unit', 'mm'],
+  ])('should refuse an in-document %s claim instead of dropping it', (claim, value) => {
+    expect(
+      refusal({ schema: carrier({ length: { type: 'double', ucumUnit: 'mm', [claim]: value } }), defaults: {} }),
+    ).toEqual({
+      code: 'INVALID_ANNOTATION',
+      resource: 'urn:taucad:parameter-schema:root',
+      schemaPointer: `/properties/length/${claim}`,
+    });
+  });
+
+  it('should refuse claims in definitions, array items and supplied resources', () => {
+    expect(
+      refusal({
+        schema: carrier(
+          { length: { type: { $ref: '#/definitions/length' } } },
+          { definitions: { length: { type: 'double', ucumUnit: 'mm', 'x-tau-space': 'linear' } } },
+        ),
+        defaults: {},
+      }),
+    ).toMatchObject({ code: 'INVALID_ANNOTATION', schemaPointer: '/definitions/length/x-tau-space' });
+    expect(
+      refusal({
+        schema: carrier({ samples: { type: 'array', items: { type: 'double', 'x-ogc-unit': 'mm' } } }),
+        defaults: {},
+      }),
+    ).toMatchObject({ code: 'INVALID_ANNOTATION', schemaPointer: '/properties/samples/items/x-ogc-unit' });
+    expect(
+      refusal({
+        schema: carrier({ offset: { type: { $ref: 'urn:taucad:test:claims-resource' } } }),
+        resources: {
+          'urn:taucad:test:claims-resource': {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:test:claims-resource',
+            $uses: ['JSONSchemaUnits'],
+            name: 'ClaimsResource',
+            type: 'double',
+            ucumUnit: 'cm',
+            'x-tau-quantity-kind': lengthKind,
+          },
+        },
+        defaults: {},
+      }),
+    ).toEqual({
+      code: 'INVALID_ANNOTATION',
+      resource: 'urn:taucad:test:claims-resource',
+      schemaPointer: '/x-tau-quantity-kind',
+    });
+  });
+
+  it('should admit data payloads whose keys merely look like claims', () => {
+    const literal = { 'x-tau-unit': 'literal', 'x-ogc-definition': lengthKind };
+
+    expect(() =>
+      admitParameterDeclaration({
+        schema: carrier(
+          { length: { type: 'double', ucumUnit: 'mm' } },
+          { default: literal, const: literal, enum: [literal], examples: [literal] },
+        ),
+        defaults: {},
+      }),
+    ).not.toThrow();
+  });
+});

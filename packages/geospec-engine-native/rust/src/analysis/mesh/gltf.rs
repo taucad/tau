@@ -586,22 +586,20 @@ fn flatten(
                             "Mesh position count exceeds the retained u32 index profile.",
                         )
                     })?;
-                    let transformed: Vec<_> = source
-                        .map(|point| transform(matrix, point, scale))
-                        .collect();
-                    let vertex_count = u32::try_from(transformed.len()).map_err(|_| {
-                        MeshDecodeError::new(
-                            MeshDecodeErrorKind::LimitExceeded,
-                            "A POSITION accessor exceeds the retained u32 count profile.",
-                        )
-                    })?;
+                    positions.extend(source.map(|point| transform(matrix, point, scale)));
+                    let vertex_count = u32::try_from(positions.len() - vertex_start as usize)
+                        .map_err(|_| {
+                            MeshDecodeError::new(
+                                MeshDecodeErrorKind::LimitExceeded,
+                                "A POSITION accessor exceeds the retained u32 count profile.",
+                            )
+                        })?;
                     vertex_start.checked_add(vertex_count).ok_or_else(|| {
                         MeshDecodeError::new(
                             MeshDecodeErrorKind::LimitExceeded,
                             "Mesh position count exceeds the retained u32 index profile.",
                         )
                     })?;
-                    positions.extend(transformed);
                     position_segments.insert(attribute.index(), (vertex_start, vertex_count));
                     (vertex_start, vertex_count)
                 };
@@ -618,24 +616,12 @@ fn flatten(
             });
             let reader =
                 primitive.reader(|buffer| buffers.get(buffer.index()).map(BufferBytes::as_slice));
-            let indices: Vec<u32> = reader
-                .read_indices()
-                .map(|values| values.into_u32().collect())
-                .unwrap_or_else(|| (0..vertex_count).collect());
-            for triangle in indices.chunks_exact(3) {
-                if triangle.iter().any(|&index| index >= vertex_count) {
-                    return Err(MeshDecodeError::new(
-                        MeshDecodeErrorKind::InvalidResource,
-                        "A primitive index is outside its POSITION accessor.",
-                    ));
-                }
-                triangles.push([
-                    vertex_start + triangle[0],
-                    vertex_start + triangle[1],
-                    vertex_start + triangle[2],
-                ]);
-                triangle_primitives.push(primitive_index);
-            }
+            let segment = (vertex_start, vertex_count, primitive_index);
+            let rows = (&mut triangles, &mut triangle_primitives);
+            match reader.read_indices() {
+                Some(values) => push_triangles(values.into_u32(), segment, rows),
+                None => push_triangles(0..vertex_count, segment, rows),
+            }?;
         }
     }
     let record = MeshAnalysisRecord {
@@ -654,6 +640,27 @@ fn flatten(
         record,
         consumed_resources,
     })
+}
+
+/// Appends each complete index triple without buffering the index stream; a
+/// trailing partial triple is ignored.
+fn push_triangles(
+    mut indices: impl Iterator<Item = u32>,
+    (vertex_start, vertex_count, primitive): (u32, u32, u32),
+    (triangles, triangle_primitives): (&mut Vec<[u32; 3]>, &mut Vec<u32>),
+) -> Result<(), MeshDecodeError> {
+    while let (Some(a), Some(b), Some(c)) = (indices.next(), indices.next(), indices.next()) {
+        let triangle = [a, b, c];
+        if triangle.iter().any(|&index| index >= vertex_count) {
+            return Err(MeshDecodeError::new(
+                MeshDecodeErrorKind::InvalidResource,
+                "A primitive index is outside its POSITION accessor.",
+            ));
+        }
+        triangles.push(triangle.map(|index| vertex_start + index));
+        triangle_primitives.push(primitive);
+    }
+    Ok(())
 }
 
 pub fn decode_glb(
@@ -765,7 +772,7 @@ mod tests {
             record.positions[1],
             [10_000.0, (21.0 + f64::from(0.1_f32)) * 1_000.0, 30_000.0]
         );
-        let size = analyze(&Rc::new(record)).unwrap().bounding_box().size;
+        let size = analyze(&Rc::new(record)).bounding_box().size;
         assert!(size.into_iter().all(|axis| (axis - 9_000.0).abs() < 1e-10));
     }
 
@@ -817,11 +824,70 @@ mod tests {
                 [16_777_218.0, 2.0, 0.0],
             ]
         );
-        let analysis = analyze(&Rc::new(decoded.record)).unwrap();
+        let analysis = analyze(&Rc::new(decoded.record));
         let bounds = analysis.bounding_box();
         assert_eq!(bounds.size, [4.0, 2.0, 0.0]);
         assert_eq!(bounds.center, [16_777_219.0, 1.0, 0.0]);
         assert_eq!(analysis.mesh_quality().surface_area, 4.0);
+    }
+
+    /// One primitive over four positions; `indices` of `None` omits the accessor.
+    fn index_fixture(indices: Option<&[u16]>) -> (Vec<u8>, ResourceBundle) {
+        let mut buffer = Vec::new();
+        for value in [
+            0.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0,
+        ] {
+            buffer.extend_from_slice(&value.to_le_bytes());
+        }
+        let (view, accessor, primitive) = match indices {
+            Some(values) => {
+                for index in values {
+                    buffer.extend_from_slice(&index.to_le_bytes());
+                }
+                (
+                    format!(
+                        r#",{{"buffer":0,"byteOffset":48,"byteLength":{}}}"#,
+                        values.len() * 2
+                    ),
+                    format!(
+                        r#",{{"bufferView":1,"componentType":5123,"count":{},"type":"SCALAR"}}"#,
+                        values.len()
+                    ),
+                    r#","indices":1"#,
+                )
+            }
+            None => (String::new(), String::new(), ""),
+        };
+        let json = format!(
+            r#"{{"asset":{{"version":"2.0"}},"buffers":[{{"byteLength":{},"uri":"mesh.bin"}}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":48}}{view}],"accessors":[{{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}}{accessor}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}}{primitive}}}]}}],"nodes":[{{"mesh":0}}],"scenes":[{{"nodes":[0]}}],"scene":0}}"#,
+            buffer.len(),
+        );
+        let resources = ResourceBundle {
+            entries: BTreeMap::from([("mesh.bin".into(), buffer)]),
+        };
+        (json.into_bytes(), resources)
+    }
+
+    #[test]
+    fn streams_complete_index_triples_and_refuses_out_of_range_indices() {
+        let decode = |indices: Option<&[u16]>| {
+            let (json, resources) = index_fixture(indices);
+            decode_gltf(&json, &resources, 1.0)
+        };
+        // A trailing partial triple is ignored, indexed or not.
+        let indexed = decode(Some([2, 1, 0, 3].as_slice())).unwrap().record;
+        assert_eq!(indexed.triangles, [[2, 1, 0]]);
+        assert_eq!(indexed.triangle_primitives, [0]);
+        let unindexed = decode(None).unwrap().record;
+        assert_eq!(unindexed.triangles, [[0, 1, 2]]);
+        assert_eq!(unindexed.positions.len(), 4);
+
+        let error = decode(Some([0, 1, 4].as_slice())).unwrap_err();
+        assert_eq!(error.kind, MeshDecodeErrorKind::InvalidResource);
+        assert_eq!(
+            error.message,
+            "A primitive index is outside its POSITION accessor."
+        );
     }
 
     #[test]

@@ -8,6 +8,7 @@ import {
   performanceLabCases,
   performanceLabNativeQueries,
   performanceLabScaleCases,
+  performanceLabScaleQueries,
 } from '../../../../packages/geospec-engine-native/bench/performance-lab.js';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- Type-only view of the same private benchmark catalog.
 import type {
@@ -36,7 +37,10 @@ export const mtExecution = (permits: number): Extract<PerformanceLabWasmExecutio
     : undefined;
 };
 
-export type PerformanceLabSelectionCase = CatalogCase | (typeof performanceLabNativeQueries)[number];
+export type PerformanceLabSelectionCase =
+  | CatalogCase
+  | (typeof performanceLabNativeQueries)[number]
+  | (typeof performanceLabScaleQueries)[number];
 const unverifiedV5 = new Set(currentAuthority.affectedCaseIds);
 
 export type PerformanceLabPortRequest = {
@@ -83,10 +87,11 @@ const toRunCase = (value: PerformanceLabSelectionCase): PerformanceLabRunInput['
 export const casesForFixture = (fixtureId: string): readonly PerformanceLabSelectionCase[] => [
   ...performanceLabCases.filter((entry) => entry.fixtureId === fixtureId),
   ...performanceLabScaleCases.filter((entry) => entry.fixtureId === fixtureId),
+  ...performanceLabScaleQueries.filter((entry) => entry.fixtureId === fixtureId),
   ...performanceLabNativeQueries.filter((entry) => entry.fixtureId === fixtureId),
 ];
 
-const scaleIds = new Set(performanceLabScaleCases.map(({ id }) => id));
+const scaleIds = new Set([...performanceLabScaleCases, ...performanceLabScaleQueries].map(({ id }) => id));
 export const catalogCasesForFixture = (
   fixtureId: string,
   includeScale: boolean,

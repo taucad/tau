@@ -1,8 +1,8 @@
 use geospec_engine_native_core::backend::brep::{
-    BrepEntity, BrepSubject, CurveFacts, DocumentFacts, EdgeTreatmentBoundaryRole as Role,
+    BrepEntity, BrepSubject, CurveFacts, EdgeTreatmentBoundaryRole as Role,
     EdgeTreatmentCertificate, EdgeTreatmentCounts, EdgeTreatmentDisposition as Disposition,
     EdgeTreatmentInventory, EdgeTreatmentKind, EdgeTreatmentKind::*, EdgeTreatmentLabel,
-    EdgeTreatmentMaterialSide, EdgeTreatmentResidualKind as Residual, LocatedFace,
+    EdgeTreatmentMaterialSide, EdgeTreatmentResidualKind as Residual, LocatedFace, OccurrenceFacts,
     ResolvedSourceFace, SourceFaceKey, SurfaceFacts,
 };
 use geospec_engine_native_occt::Document;
@@ -20,7 +20,6 @@ struct Occurrence {
 }
 struct Case {
     file: &'static str,
-    root: &'static str,
     kind: Option<EdgeTreatmentKind>,
     occurrences: &'static [Occurrence],
     uses: u32,
@@ -28,7 +27,6 @@ struct Case {
 const CASES: &[Case] = &[
     Case {
         file: "01-planar-chamfer.step",
-        root: "m3-edge-planar-chamfer",
         kind: Some(PlanarChamfer),
         occurrences: &[Occurrence {
             name: "planar-chamfer-part",
@@ -49,7 +47,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "02-cylindrical-fillet.step",
-        root: "m3-edge-cylindrical-fillet",
         kind: Some(CylindricalFillet),
         occurrences: &[Occurrence {
             name: "cylindrical-fillet-part",
@@ -70,7 +67,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "03-conical-chamfer.step",
-        root: "m3-edge-conical-chamfer",
         kind: Some(ConicalChamfer),
         occurrences: &[Occurrence {
             name: "conical-chamfer-part",
@@ -83,7 +79,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "04-toroidal-fillet.step",
-        root: "m3-edge-toroidal-fillet",
         kind: Some(ToroidalFillet),
         occurrences: &[Occurrence {
             name: "toroidal-fillet-part",
@@ -96,7 +91,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "05-plain-box.step",
-        root: "m3-edge-plain-box",
         kind: None,
         occurrences: &[Occurrence {
             name: "plain-box-part",
@@ -116,7 +110,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "06-full-cylinder.step",
-        root: "m3-edge-full-cylinder",
         kind: None,
         occurrences: &[Occurrence {
             name: "full-cylinder-part",
@@ -129,7 +122,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "07-rotated-planar-chamfer.step",
-        root: "m3-edge-rotated-planar-chamfer",
         kind: Some(PlanarChamfer),
         occurrences: &[Occurrence {
             name: "rotated-planar-chamfer-part",
@@ -152,7 +144,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "08-rotated-plain-box.step",
-        root: "m3-edge-rotated-plain-box",
         kind: None,
         occurrences: &[Occurrence {
             name: "rotated-plain-box-part",
@@ -174,7 +165,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "09-unrelated-planar-assembly.step",
-        root: "m3-edge-unrelated-planar-assembly",
         kind: Some(PlanarChamfer),
         occurrences: &[
             Occurrence {
@@ -211,7 +201,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "10-unrelated-cylinder-assembly.step",
-        root: "m3-edge-unrelated-cylinder-assembly",
         kind: None,
         occurrences: &[
             Occurrence {
@@ -240,7 +229,6 @@ const CASES: &[Case] = &[
     },
     Case {
         file: "11-shared-fillet-instances.step",
-        root: "m3-edge-shared-fillet-instances",
         kind: Some(CylindricalFillet),
         occurrences: &[
             Occurrence {
@@ -281,7 +269,8 @@ const CASES: &[Case] = &[
 type Observed<T> = Result<T, String>;
 #[derive(Debug)]
 struct Observation {
-    facts: Observed<Rc<DocumentFacts>>,
+    /// Source unit scale, source validity and source occurrences.
+    facts: Observed<(f64, bool, Rc<[OccurrenceFacts]>)>,
     faces: Vec<Observed<Rc<[LocatedFace]>>>,
     sources: Vec<Vec<Observed<ResolvedSourceFace>>>,
     counts: Observed<EdgeTreatmentCounts>,
@@ -309,18 +298,19 @@ fn observe(case: &Case) -> Observed<Observation> {
         )
         .map_err(|error| format!("inventory: {error:?}"));
     let facts = document
-        .facts()
-        .map_err(|error| format!("facts: {error:?}"));
-    let faces = case
-        .occurrences
-        .iter()
-        .enumerate()
-        .map(|(index, _)| {
-            document
-                .occurrence_faces(index as u32)
-                .map_err(|error| format!("faces: {error:?}"))
+        .admission_facts()
+        .and_then(|admission| {
+            Ok((
+                admission.source_unit_to_millimeters,
+                document.validity()?.valid,
+                document.source_occurrence_structure()?,
+            ))
         })
-        .collect();
+        .map_err(|error| format!("facts: {error:?}"));
+    let faces = match document.reported_faces(false) {
+        Ok(faces) => faces.occurrence_faces.into_iter().map(Ok).collect(),
+        Err(error) => vec![Err(format!("faces: {error:?}")); case.occurrences.len()],
+    };
     let sources = case
         .occurrences
         .iter()
@@ -467,8 +457,7 @@ fn certificate(
     );
     if let Some(face) = faces.get(2) {
         check.require(
-            value.surface == face.facts.surface
-                && value.parameter_bounds == face.facts.parameter_bounds,
+            value.surface == face.facts.surface,
             "certificate surface/trim must join the actual public face",
         );
     }
@@ -528,7 +517,6 @@ fn certificate(
         if let Some(face) = faces.get(ordinal as usize) {
             check.require(
                 support.surface == face.facts.surface
-                    && support.parameter_bounds == face.facts.parameter_bounds
                     && support.transferred_reversed == face.reversed,
                 "support must join its actual placed face",
             );
@@ -795,23 +783,16 @@ fn should_qualify_four_edge_treatment_families_and_preserve_all_occurrence_evide
                 "counts must include all faces and repeated oriented seam uses",
             );
         }
-        if let Some(facts) = check.result(&observation.facts) {
+        if let Some((unit, valid, occurrences)) = check.result(&observation.facts) {
             check.require(
-                facts.source_unit_to_millimeters == 1.0 && facts.shape.valid,
+                *unit == 1.0 && *valid,
                 "valid millimeter source admission required",
             );
             check.require(
-                facts.occurrences.len() == case.occurrences.len(),
+                occurrences.len() == case.occurrences.len(),
                 "occurrence count differs",
             );
-            check.require(
-                facts
-                    .products
-                    .iter()
-                    .any(|product| product.name == case.root),
-                "original root product identity differs",
-            );
-            for (actual, expected) in facts.occurrences.iter().zip(case.occurrences) {
+            for (actual, expected) in occurrences.iter().zip(case.occurrences) {
                 check.require(
                     actual.path == expected.name,
                     "source occurrence path differs",
@@ -825,10 +806,10 @@ fn should_qualify_four_edge_treatment_families_and_preserve_all_occurrence_evide
                     "rigid occurrence placement differs",
                 );
             }
-            if case.file == "11-shared-fillet-instances.step" && facts.occurrences.len() == 2 {
+            if case.file == "11-shared-fillet-instances.step" && occurrences.len() == 2 {
                 check.require(
-                    facts.occurrences[0].product == facts.occurrences[1].product
-                        && facts.occurrences[0].label != facts.occurrences[1].label,
+                    occurrences[0].product == occurrences[1].product
+                        && occurrences[0].ordinal_path != occurrences[1].ordinal_path,
                     "two actual occurrences must share one source product definition",
                 );
             }

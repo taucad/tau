@@ -20,7 +20,6 @@ fn entity(origin: [f64; 3], direction: [f64; 3], plane: bool, reversed: bool) ->
             },
             facts: FaceFacts {
                 index: 2,
-                parameter_bounds: [0.; 4],
                 area: 1.,
                 center_of_mass: origin,
                 surface: if plane {
@@ -41,8 +40,6 @@ fn entity(origin: [f64; 3], direction: [f64; 3], plane: bool, reversed: bool) ->
                 max: [1.; 3],
             },
             reversed,
-            edge_indices: vec![],
-            shape_label: None,
         },
     )
 }
@@ -291,44 +288,11 @@ impl BrepSubject for BoxControl {
             _ => continuous::nominal_analytic_box_control(id, [9., 0., 0.], [12., 10., 10.]),
         })
     }
-    fn facts(&self) -> Result<Rc<crate::backend::brep::DocumentFacts>, BackendError> {
-        unreachable!()
-    }
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!()
-    }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!()
-    }
-    fn occurrence_edges(
-        &self,
-        _: u32,
-    ) -> Result<Rc<[crate::backend::brep::EdgeFacts]>, BackendError> {
         unreachable!()
     }
     fn validity(&self) -> Result<Rc<crate::backend::brep::ValidityFacts>, BackendError> {
         unreachable!()
-    }
-    fn extrema(
-        &self,
-        _: BrepEntity,
-        _: BrepEntity,
-    ) -> Result<crate::backend::brep::Extrema, BackendError> {
-        unreachable!()
-    }
-    fn classify_points(
-        &self,
-        _: u32,
-        _: &[[f64; 3]],
-    ) -> Result<Vec<crate::backend::brep::PointState>, BackendError> {
-        unreachable!()
-    }
-    fn common_volume(
-        &self,
-        _: u32,
-        _: u32,
-    ) -> Result<crate::backend::brep::CommonVolume, BackendError> {
-        panic!("no general Boolean fallback")
     }
     fn classify_face_points(
         &self,
@@ -336,12 +300,6 @@ impl BrepSubject for BoxControl {
         _: &[[f64; 3]],
         _: f64,
     ) -> Result<Vec<crate::backend::brep::PointState>, BackendError> {
-        unreachable!()
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &crate::backend::brep::WallOptions,
-    ) -> Result<crate::backend::brep::WallThicknessOutcome, BackendError> {
         unreachable!()
     }
     fn tessellate(

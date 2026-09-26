@@ -3,10 +3,9 @@ use std::{cell::Cell, rc::Rc};
 use super::*;
 use crate::backend::{
     brep::{
-        BrepEntity, CircularBoreCandidate, CircularBoreEnd, CircularBoreTopology, CommonVolume,
-        CylinderAxialExtent, EdgeFacts, Extrema, FaceFacts, LocatedFace, OccurrenceFacts,
-        PointState, ProductFacts, ShapeFacts, TessellationProfile, ValidityCheck, WallOptions,
-        WallThicknessOutcome,
+        BrepEntity, CircularBoreCandidate, CircularBoreEnd, CircularBoreTopology,
+        CylinderAxialExtent, FaceFacts, LocatedFace, OccurrenceFacts, PointState, ShapeFacts,
+        TessellationProfile, ValidityCheck,
     },
     TriangleMesh,
 };
@@ -31,22 +30,17 @@ fn face(
         entity: BrepEntity::WholeFace(index),
         facts: FaceFacts {
             index: index - 1,
-            parameter_bounds: [0.0; 4],
             area: 20.0,
             center_of_mass: center,
             surface,
         },
         bounds,
         reversed,
-        edge_indices: Vec::new(),
-        shape_label: Some(format!("face-{index}")),
     }
 }
 
 fn occurrence(index: u32, path: &str) -> OccurrenceFacts {
     OccurrenceFacts {
-        label: format!("occurrence-{index}"),
-        product_label: "product-bracket".into(),
         name: path.into(),
         placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         bounds: bounds([-10.0, -10.0, 0.0], [10.0, 10.0, 10.0]),
@@ -63,13 +57,8 @@ fn retained_facts() -> DocumentFacts {
     DocumentFacts {
         source_length_unit: "millimetre".into(),
         source_unit_to_millimeters: 1.0,
-        products: vec![ProductFacts {
-            label: "product-bracket".into(),
-            name: "bracket".into(),
-        }],
         occurrences: vec![occurrence(0, "left"), occurrence(1, "right")],
         shape: ShapeFacts {
-            valid: true,
             bounds: bounds([-10.0, -10.0, 0.0], [10.0, 10.0, 10.0]),
             volume: 1_000.0,
             surface_area: 1_200.0,
@@ -84,7 +73,6 @@ fn retained_facts() -> DocumentFacts {
                 vertices: 16,
             },
         },
-        faces: Vec::new(),
         subshapes: Vec::new(),
         datum_placements: Vec::new(),
         semantic_datums: Vec::new(),
@@ -319,29 +307,11 @@ impl BrepSubject for RetainedBrep {
         })
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(self.facts.clone())
-    }
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         Ok(self.faces.clone())
     }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        Ok(Rc::from(Vec::<LocatedFace>::new()))
-    }
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        Err(unused())
-    }
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         Ok(self.validity.clone())
-    }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        Err(unused())
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        Err(unused())
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        Err(unused())
     }
     fn classify_face_points(
         &self,
@@ -349,12 +319,6 @@ impl BrepSubject for RetainedBrep {
         _: &[[f64; 3]],
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
-        Err(unused())
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
         Err(unused())
     }
     fn tessellate(
@@ -442,7 +406,7 @@ fn admitted_units_do_not_demand_a_failing_report() {
     ));
     assert_eq!(calls.get(), 0);
     assert_eq!(
-        subjects[0].report_bundle().unwrap_err().message,
+        subjects[0].report_faces(false).unwrap_err().message,
         "deliberate report failure"
     );
     assert_eq!(calls.get(), 1);
@@ -607,7 +571,6 @@ fn prepares_and_normalizes_all_eleven_matchers() {
     for (capability, expected) in valid_expectations() {
         let prepared = prepared(capability, expected);
         assert_eq!(prepared.capability(), capability);
-        assert!(prepared.demand().brep);
         assert!(matches!(prepared.normalized_payload(), Json::Object(_)));
     }
 }
@@ -730,7 +693,7 @@ fn rejects_malformed_expectations_for_all_eleven_matchers() {
 #[test]
 fn retained_neutral_facts_drive_all_eleven_positive_predicates() {
     let brep = RetainedBrep::complete();
-    let facts = brep.facts().unwrap();
+    let facts = Rc::clone(&brep.facts);
 
     assert!(evaluate_units("mm", &facts).unwrap().positive);
     assert!(
@@ -852,7 +815,7 @@ fn evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit() {
     };
     let source_evidence = brep_evidence(
         &retained,
-        &retained.facts,
+        &retained.facts.shape,
         &retained.circular_bores(4096).unwrap(),
         &empty_edge_treatments,
     )
@@ -1302,7 +1265,7 @@ fn analyze_brep_reports_the_source_unavailable_diagnostic() {
 #[test]
 fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
     let brep = RetainedBrep::complete();
-    let facts = brep.facts().unwrap();
+    let facts = Rc::clone(&brep.facts);
     assert!(!evaluate_units("in", &facts).unwrap().positive);
     assert!(
         !evaluate_products(
@@ -1411,7 +1374,7 @@ fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
 #[test]
 fn numeric_matcher_boundaries_are_inclusive() {
     let brep = RetainedBrep::complete();
-    let facts = brep.facts().unwrap();
+    let facts = Rc::clone(&brep.facts);
     let mut features = derive_features(&brep).unwrap();
     populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     assert!(
@@ -1867,4 +1830,93 @@ fn analyze_brep_exposes_partial_bore_inventory_without_fabricated_pattern() {
         ),
         Some(&Json::Bool(false))
     );
+}
+
+#[test]
+fn gate_claims_read_the_source_without_any_report_facet() {
+    // F3: validity and feature claims charge the BRep unit and read the
+    // source; a failing report cannot refuse them, and none is built.
+    let mut subject = retained_subject();
+    let mut connector = RetainedBrep::complete();
+    connector.fail_report = true;
+    let calls = Rc::clone(&connector.report_calls);
+    subject.brep = Some(Box::new(connector));
+    let subjects = [Rc::new(subject)];
+    for (capability, expected) in valid_expectations().into_iter().filter(|(capability, _)| {
+        matches!(
+            capability,
+            Capability::ToBeValidBrep
+                | Capability::ToHavePlanarFace
+                | Capability::ToHaveCylindricalFace
+        )
+    }) {
+        let prepared = prepared(capability, expected);
+        let normalized = prepared.normalized_payload();
+        let budget = Budget::new(1);
+        let mut context =
+            EvaluationContext::new(&subjects, capability, "gate", &normalized, &budget, None);
+        assert!(
+            matches!(
+                evaluate(&prepared, &mut context),
+                Evaluation::Geometric {
+                    positive_satisfied: true,
+                    ..
+                }
+            ),
+            "{} did not read the source",
+            capability.name()
+        );
+        drop(context);
+        assert_eq!(budget.used(), 1, "{}", capability.name());
+    }
+    assert_eq!(calls.get(), 0);
+    assert!(subjects[0].mesh_record().is_none());
+}
+
+#[test]
+fn analyze_brep_meets_the_edge_treatment_face_limit_before_report_facts_and_bores() {
+    // F12: 4,097 whole faces of an occurrence-free document exceed the
+    // edge-treatment rows; the same refusal now comes before any other work.
+    let mut connector = RetainedBrep::complete();
+    let template = connector.faces[0].clone();
+    connector.faces = (1..=4097)
+        .map(|index| {
+            let mut face = template.clone();
+            face.entity = BrepEntity::WholeFace(index);
+            face.facts.index = index - 1;
+            face
+        })
+        .collect::<Vec<_>>()
+        .into();
+    connector.facts = Rc::new(DocumentFacts {
+        occurrences: Vec::new(),
+        ..retained_facts()
+    });
+    let queries = Rc::clone(&connector.bore_queries);
+    let mut subject = retained_subject();
+    subject.brep = Some(Box::new(connector));
+    let subjects = [Rc::new(subject)];
+    let normalized = Json::Null;
+    let budget = Budget::new(8);
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::AnalyzeBrep,
+        "analyze",
+        &normalized,
+        &budget,
+        None,
+    );
+    let Evaluation::Refused { diagnostics } = evaluate_brep(&mut context) else {
+        panic!("an oversized edge-treatment scope must refuse")
+    };
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "GEOSPEC_UNSUPPORTED_EVIDENCE");
+    assert_eq!(
+        diagnostics[0].message,
+        "The report bundle exceeds the declared binary or retained derived-data limits."
+    );
+    drop(context);
+    assert_eq!(budget.used(), 1);
+    assert_eq!(queries.get(), 0);
+    assert!(subjects[0].mesh_record().is_none());
 }

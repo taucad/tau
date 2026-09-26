@@ -1,6 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     rc::Rc,
 };
 
@@ -8,10 +8,9 @@ use geospec_engine_native_core::{
     backend::{
         brep::{
             Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepIdentityProfile,
-            BrepSubject, CommonVolume, ContinuousWallDomain, ContinuousWallShape, DocumentFacts,
-            EdgeFacts, Extrema, LocatedFace, OccurrenceFacts, PointState, ProductFacts,
-            ReportedBrepBundle, ShapeFacts, TessellationProfile, TopologyCounts, ValidityFacts,
-            WallOptions, WallSupport, WallThickness, WallThicknessOutcome,
+            BrepSubject, ContinuousWallDomain, ContinuousWallShape, DocumentFacts, LocatedFace,
+            OccurrenceFacts, PointState, ReportedBrepBundle, ShapeFacts, TessellationProfile,
+            TopologyCounts, ValidityFacts,
         },
         csg::{
             BooleanOp, CsgConnector, FillRule, MeshExport, Section, SectionComponent, SectionOp,
@@ -92,8 +91,6 @@ fn cube(bounds: Bounds) -> TriangleMesh {
 
 fn occurrence() -> OccurrenceFacts {
     OccurrenceFacts {
-        label: "wall".into(),
-        product_label: "wall-product".into(),
         name: "wall".into(),
         placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         bounds: bounds([0.0; 3], [1.0; 3]),
@@ -110,13 +107,8 @@ fn facts() -> Rc<DocumentFacts> {
     Rc::new(DocumentFacts {
         source_length_unit: "millimetre".into(),
         source_unit_to_millimeters: 1.0,
-        products: vec![ProductFacts {
-            label: "wall-product".into(),
-            name: "wall".into(),
-        }],
         occurrences: vec![occurrence()],
         shape: ShapeFacts {
-            valid: true,
             bounds: bounds([0.0; 3], [1.0; 3]),
             volume: 1.0,
             surface_area: 6.0,
@@ -131,7 +123,6 @@ fn facts() -> Rc<DocumentFacts> {
                 vertices: 8,
             },
         },
-        faces: Vec::new(),
         subshapes: Vec::new(),
         datum_placements: Vec::new(),
         semantic_datums: Vec::new(),
@@ -267,7 +258,6 @@ fn cylinder_domain(radius: f64, from: f64, to: f64) -> ContinuousWallDomain {
 }
 
 struct ProofBrepConnector {
-    budgets: Rc<RefCell<Vec<u64>>>,
     tessellations: Rc<Cell<u32>>,
     continuous_wall: Result<ContinuousWallDomain, BackendError>,
     continuous_wall_queries: Rc<Cell<u32>>,
@@ -283,7 +273,6 @@ impl BrepConnector for ProofBrepConnector {
 
     fn open_step(&self, _: &[u8]) -> Result<Box<dyn BrepSubject>, BackendError> {
         Ok(Box::new(ProofBrep {
-            budgets: Rc::clone(&self.budgets),
             tessellations: Rc::clone(&self.tessellations),
             continuous_wall: self.continuous_wall.clone(),
             continuous_wall_queries: Rc::clone(&self.continuous_wall_queries),
@@ -292,7 +281,6 @@ impl BrepConnector for ProofBrepConnector {
 }
 
 struct ProofBrep {
-    budgets: Rc<RefCell<Vec<u64>>>,
     tessellations: Rc<Cell<u32>>,
     continuous_wall: Result<ContinuousWallDomain, BackendError>,
     continuous_wall_queries: Rc<Cell<u32>>,
@@ -322,35 +310,11 @@ impl BrepSubject for ProofBrep {
         self.continuous_wall.clone()
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(facts())
-    }
-
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         Ok(Rc::from(Vec::<LocatedFace>::new()))
     }
 
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        Ok(Rc::from(Vec::<LocatedFace>::new()))
-    }
-
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        Err(backend_unused())
-    }
-
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
-        Err(backend_unused())
-    }
-
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        Err(backend_unused())
-    }
-
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        Err(backend_unused())
-    }
-
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
         Err(backend_unused())
     }
 
@@ -361,41 +325,6 @@ impl BrepSubject for ProofBrep {
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
         Err(backend_unused())
-    }
-
-    fn minimum_wall_thickness(
-        &self,
-        options: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
-        self.budgets.borrow_mut().push(options.work_unit_budget);
-        if options.work_unit_budget < 3 {
-            return Ok(WallThicknessOutcome::BudgetExceeded {
-                consumed: 3,
-                limit: options.work_unit_budget,
-            });
-        }
-        Ok(WallThicknessOutcome::Measured(WallThickness {
-            consumed: 3,
-            value: 2.0,
-            location: Some([0.5, 0.5, 0.5]),
-            point_a: Some([0.0, 0.5, 0.5]),
-            point_b: Some([2.0, 0.5, 0.5]),
-            solid_index: Some(0),
-            tie_count: Some(2),
-            algorithm: "source-wall-control".into(),
-            tolerance: 0.01,
-            support_a: Some(WallSupport {
-                face_index: Some(4),
-                surface_type: Some("plane".into()),
-                support_type: Some("face".into()),
-            }),
-            support_b: Some(WallSupport {
-                face_index: Some(9),
-                surface_type: Some("plane".into()),
-                support_type: Some("face".into()),
-            }),
-            rejections: BTreeMap::from([("parallel".into(), 1)]),
-        }))
     }
 
     fn tessellate(
@@ -593,17 +522,10 @@ impl CsgConnector for ProofCsg {
     }
 }
 
-type EngineSignals = (
-    Engine,
-    Rc<RefCell<Vec<u64>>>,
-    Rc<Cell<u32>>,
-    Rc<Cell<u32>>,
-    Rc<Cell<u32>>,
-);
+type EngineSignals = (Engine, Rc<Cell<u32>>, Rc<Cell<u32>>, Rc<Cell<u32>>);
 
 type EngineWallSignals = (
     Engine,
-    Rc<RefCell<Vec<u64>>>,
     Rc<Cell<u32>>,
     Rc<Cell<u32>>,
     Rc<Cell<u32>>,
@@ -611,15 +533,14 @@ type EngineWallSignals = (
 );
 
 fn engine() -> EngineSignals {
-    let (engine, budgets, intersections, csg_calls, tessellations, _) =
+    let (engine, intersections, csg_calls, tessellations, _) =
         engine_with_wall(Ok(box_domain([2.0, 3.0, 4.0])));
-    (engine, budgets, intersections, csg_calls, tessellations)
+    (engine, intersections, csg_calls, tessellations)
 }
 
 fn engine_with_wall(
     continuous_wall: Result<ContinuousWallDomain, BackendError>,
 ) -> EngineWallSignals {
-    let budgets = Rc::new(RefCell::new(Vec::new()));
     let intersections = Rc::new(Cell::new(0));
     let csg_calls = Rc::new(Cell::new(0));
     let tessellations = Rc::new(Cell::new(0));
@@ -627,7 +548,6 @@ fn engine_with_wall(
     let engine = Engine::with_backends(
         EngineConfig::entry(),
         Box::new(ProofBrepConnector {
-            budgets: Rc::clone(&budgets),
             tessellations: Rc::clone(&tessellations),
             continuous_wall,
             continuous_wall_queries: Rc::clone(&continuous_wall_queries),
@@ -639,7 +559,6 @@ fn engine_with_wall(
     );
     (
         engine,
-        budgets,
         intersections,
         csg_calls,
         tessellations,
@@ -781,7 +700,7 @@ fn claim(id: &str, capability: &str, payload: Value, polarity: &str, budget: u64
 
 #[test]
 fn sampled_gltf_interference_and_required_pairs_refuse_before_geometry() {
-    let (mut engine, _, intersections, _, _) = engine();
+    let (mut engine, intersections, _, _) = engine();
     let (subject_hash, _) = ingest_gltf(&mut engine);
     let unsupported = json!([{
         "code": "GEOSPEC_EVIDENCE_UNSUPPORTED",
@@ -850,7 +769,7 @@ fn sampled_gltf_interference_and_required_pairs_refuse_before_geometry() {
 }
 
 fn wall_result(domain: ContinuousWallDomain, expected: Value) -> Value {
-    let (mut engine, _, _, _, _, _) = engine_with_wall(Ok(domain));
+    let (mut engine, _, _, _, _) = engine_with_wall(Ok(domain));
     let (subject_hash, _) = ingest_step(&mut engine);
     claims(
         &engine,
@@ -963,7 +882,7 @@ fn continuous_wall_cylinder_algebra_covers_axial_diametric_and_equal_ties() {
 
 #[test]
 fn continuous_wall_numeric_expectations_preserve_polarity_and_tolerance_boundaries() {
-    let (mut engine, budgets, _, _, _, queries) = engine_with_wall(Ok(box_domain([2.0, 3.0, 4.0])));
+    let (mut engine, _, _, _, queries) = engine_with_wall(Ok(box_domain([2.0, 3.0, 4.0])));
     let (subject_hash, content_hash) = ingest_step(&mut engine);
     let response = claims(
         &engine,
@@ -1022,16 +941,12 @@ fn continuous_wall_numeric_expectations_preserve_polarity_and_tolerance_boundari
     );
     assert!(results[3]["diagnostics"].as_array().unwrap().is_empty());
     assert_eq!(queries.get(), 1);
-    assert!(
-        budgets.borrow().is_empty(),
-        "the historical support-pair query is unused"
-    );
 }
 
 #[test]
 fn sampled_step_voids_keep_csg_and_minimum_cross_section_refusals_distinct() {
     for min_cross_section in [None, Some(1)] {
-        let (mut engine, _, _, csg_calls, tessellations) = engine();
+        let (mut engine, _, csg_calls, tessellations) = engine();
         let (subject_hash, _) = ingest_step(&mut engine);
         let path = if min_cross_section.is_some() {
             json!([{"occurrence": "wall"}])
@@ -1099,7 +1014,7 @@ fn sampled_step_voids_keep_csg_and_minimum_cross_section_refusals_distinct() {
 #[test]
 fn continuous_wall_outside_domain_refuses_both_polarities() {
     for polarity in ["positive", "negative"] {
-        let (mut engine, budgets, _, _, _, queries) = engine_with_wall(Err(BackendError {
+        let (mut engine, _, _, _, queries) = engine_with_wall(Err(BackendError {
             kind: BackendErrorKind::Unsupported,
             message: "ordinary outside-domain control".into(),
         }));
@@ -1134,13 +1049,12 @@ fn continuous_wall_outside_domain_refuses_both_polarities() {
             })
         );
         assert_eq!(queries.get(), 1);
-        assert!(budgets.borrow().is_empty());
     }
 }
 
 #[test]
 fn continuous_wall_budget_charges_report_and_query_on_cold_and_warm_claims() {
-    let (mut engine, budgets, _, _, _, queries) = engine_with_wall(Ok(box_domain([2.0, 3.0, 4.0])));
+    let (mut engine, _, _, _, queries) = engine_with_wall(Ok(box_domain([2.0, 3.0, 4.0])));
     let (subject_hash, _) = ingest_step(&mut engine);
     for (budget, expected_status, expected_queries) in [
         (1, "refused", 0),
@@ -1168,8 +1082,4 @@ fn continuous_wall_budget_charges_report_and_query_on_cold_and_warm_claims() {
         }
         assert_eq!(queries.get(), expected_queries);
     }
-    assert!(
-        budgets.borrow().is_empty(),
-        "no historical wall query is issued"
-    );
 }

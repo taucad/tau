@@ -15,9 +15,8 @@ fn local_fixture(name: &str) -> Vec<u8> {
 }
 
 fn occurrence(document: &Document, name: &str) -> BrepEntity {
-    let facts = document.facts().unwrap();
-    let index = facts
-        .occurrences
+    let occurrences = document.source_occurrence_structure().unwrap();
+    let index = occurrences
         .iter()
         .position(|row| {
             row.name == name
@@ -25,12 +24,7 @@ fn occurrence(document: &Document, name: &str) -> BrepEntity {
                 || row.instance_name.as_deref() == Some(name)
                 || row.path == name
         })
-        .unwrap_or_else(|| {
-            panic!(
-                "missing occurrence {name}; observed: {:#?}",
-                facts.occurrences
-            )
-        });
+        .unwrap_or_else(|| panic!("missing occurrence {name}; observed: {occurrences:#?}"));
     BrepEntity::Occurrence(index as u32)
 }
 

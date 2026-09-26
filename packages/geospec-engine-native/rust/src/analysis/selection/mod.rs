@@ -1,13 +1,16 @@
 //! Pure, deterministic selector parsing and resolution over retained neutral facts.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::OnceCell,
+    collections::{HashMap, HashSet},
+};
 
 use super::node24_hypot3;
 use crate::{
     backend::{
         brep::{
-            Bounds, BrepEntity, BrepSubject, DocumentFacts, LocatedFace, PointState, SubshapeType,
-            SurfaceFacts,
+            Bounds, BrepEntity, BrepSubject, DocumentRows, LocatedFace, OccurrenceFacts,
+            PointState, SubshapeType, SurfaceFacts,
         },
         BackendError, BackendErrorKind,
     },
@@ -746,33 +749,66 @@ pub(crate) struct SelectorIndex {
     pub datums: Vec<NamedRow>,
     pub groups: Vec<NamedRow>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Axis and plane query pools derived from `faces` on their first query
+    /// (C11); `faces` must not change after either is built.
+    pub axes: OnceCell<Vec<Entity>>,
+    pub planes: OnceCell<Vec<Entity>>,
 }
 
 #[cfg(test)]
 pub(crate) fn build_index(
-    facts: &DocumentFacts,
+    facts: &crate::backend::brep::DocumentFacts,
     brep: &dyn BrepSubject,
 ) -> Result<SelectorIndex, BackendError> {
     let whole = brep.faces()?;
-    let occurrences = (0..facts.occurrences.len())
-        .map(|index| brep.occurrence_faces(index as u32))
-        .collect::<Result<Vec<_>, _>>()?;
-    build_report_index(facts, &whole, &occurrences)
+    // Each occurrence re-addresses the probe's whole faces.
+    let occurrences = (0..facts.occurrences.len() as u32)
+        .map(|occurrence| {
+            whole
+                .iter()
+                .cloned()
+                .map(|mut face| {
+                    face.entity = BrepEntity::Face {
+                        occurrence,
+                        face: face.facts.index,
+                    };
+                    face
+                })
+                .collect::<Vec<_>>()
+                .into()
+        })
+        .collect::<Vec<_>>();
+    let rows = DocumentRows {
+        subshapes: facts.subshapes.clone(),
+        datum_placements: facts.datum_placements.clone(),
+        semantic_datums: facts.semantic_datums.clone(),
+    };
+    build_report_index(
+        &facts.occurrences,
+        Some(facts.shape.bounds),
+        &rows,
+        &whole,
+        &occurrences,
+    )
 }
 
+/// The selector index from the facts facets (F8): source occurrences with
+/// bounds, report face tables with measures, document rows and, for an
+/// occurrence-free document only, the whole-shape report bounds.
 pub(crate) fn build_report_index(
-    facts: &DocumentFacts,
+    source_occurrences: &[OccurrenceFacts],
+    whole_bounds: Option<Bounds>,
+    rows: &DocumentRows,
     whole_faces: &[LocatedFace],
     occurrence_faces: &[std::rc::Rc<[LocatedFace]>],
 ) -> Result<SelectorIndex, BackendError> {
-    if occurrence_faces.len() != facts.occurrences.len() {
+    if occurrence_faces.len() != source_occurrences.len() {
         return Err(BackendError {
             kind: BackendErrorKind::ComputationFailed,
             message: "Report occurrence face mapping is incomplete.".into(),
         });
     }
-    let occurrences: Vec<_> = facts
-        .occurrences
+    let occurrences: Vec<_> = source_occurrences
         .iter()
         .enumerate()
         .map(|(occurrence, row)| OccurrenceRow {
@@ -811,7 +847,7 @@ pub(crate) fn build_report_index(
             facts: EntityFacts {
                 area: Some(area),
                 centroid,
-                bounds: Some(facts.shape.bounds),
+                bounds: whole_bounds,
                 ..EntityFacts::default()
             },
             topology_ref: None,
@@ -859,7 +895,7 @@ pub(crate) fn build_report_index(
 
     let mut diagnostics = Vec::new();
     let mut interfaces = Vec::new();
-    for row in &facts.subshapes {
+    for row in &rows.subshapes {
         if row.shape_type != SubshapeType::Face {
             diagnostics.push(informational_diagnostic(
                 "GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE",
@@ -921,7 +957,7 @@ pub(crate) fn build_report_index(
     }
 
     let mut datums = Vec::new();
-    for row in &facts.datum_placements {
+    for row in &rows.datum_placements {
         let full_name = compose_name(&row.occurrence_path, &row.name);
         datums.push(named_datum(
             full_name,
@@ -933,7 +969,7 @@ pub(crate) fn build_report_index(
             row.z_axis,
         ));
     }
-    for row in &facts.semantic_datums {
+    for row in &rows.semantic_datums {
         let full_name = compose_name(&row.occurrence_path, &row.label);
         let face = row.face_indices.first().and_then(|index| {
             faces.iter().find(|entity| {
@@ -973,6 +1009,7 @@ pub(crate) fn build_report_index(
         datums,
         groups,
         diagnostics,
+        ..SelectorIndex::default()
     })
 }
 
@@ -1674,42 +1711,48 @@ fn cardinality(
     )
 }
 
-fn query_pool(kind: EntityType, index: &SelectorIndex) -> Vec<Entity> {
+/// The entities a query ranges over, borrowed from the index; the axis and
+/// plane views are built once per index.
+fn query_pool(kind: EntityType, index: &SelectorIndex) -> &[Entity] {
     match kind {
-        EntityType::Body => index.bodies.clone(),
-        EntityType::Axis => index
-            .faces
-            .iter()
-            .filter(|entity| {
-                entity.facts.axis_direction.is_some()
-                    && matches!(
-                        entity.facts.surface_type.as_deref(),
-                        Some("cylinder" | "cone")
-                    )
-            })
-            .map(|entity| {
-                let mut value = entity.clone();
-                value.entity_type = EntityType::Axis;
-                // resolve.ts faceEntity uses the indexed faceIndex, not an axis ordinal.
-                value.id = match (entity.occurrence_path.as_deref(), entity.facts.face_index) {
-                    (Some(path), Some(face_index)) => format!("axis:{path}#{face_index}"),
-                    _ => entity.id.replacen("face:", "axis:", 1),
-                };
-                value
-            })
-            .collect(),
-        EntityType::Plane => index
-            .faces
-            .iter()
-            .filter(|entity| entity.facts.surface_type.as_deref() == Some("plane"))
-            .map(|entity| {
-                let mut value = entity.clone();
-                value.entity_type = EntityType::Plane;
-                value.id = value.id.replacen("face:", "plane:", 1);
-                value
-            })
-            .collect(),
-        _ => index.faces.clone(),
+        EntityType::Body => &index.bodies,
+        EntityType::Axis => index.axes.get_or_init(|| {
+            index
+                .faces
+                .iter()
+                .filter(|entity| {
+                    entity.facts.axis_direction.is_some()
+                        && matches!(
+                            entity.facts.surface_type.as_deref(),
+                            Some("cylinder" | "cone")
+                        )
+                })
+                .map(|entity| {
+                    let mut value = entity.clone();
+                    value.entity_type = EntityType::Axis;
+                    // resolve.ts faceEntity uses the indexed faceIndex, not an axis ordinal.
+                    value.id = match (entity.occurrence_path.as_deref(), entity.facts.face_index) {
+                        (Some(path), Some(face_index)) => format!("axis:{path}#{face_index}"),
+                        _ => entity.id.replacen("face:", "axis:", 1),
+                    };
+                    value
+                })
+                .collect()
+        }),
+        EntityType::Plane => index.planes.get_or_init(|| {
+            index
+                .faces
+                .iter()
+                .filter(|entity| entity.facts.surface_type.as_deref() == Some("plane"))
+                .map(|entity| {
+                    let mut value = entity.clone();
+                    value.entity_type = EntityType::Plane;
+                    value.id = value.id.replacen("face:", "plane:", 1);
+                    value
+                })
+                .collect()
+        }),
+        _ => &index.faces,
     }
 }
 
@@ -1828,7 +1871,7 @@ pub(crate) fn resolve_budgeted_with_brep(
                         .is_some_and(|path| paths.contains(path))
                 });
                 if in_scope && in_within {
-                    let failure = match predicate_failure(query, &entity, brep, budget) {
+                    let failure = match predicate_failure(query, entity, brep, budget) {
                         Ok(value) => value,
                         Err(error) => return probe_unsupported(expect.clone(), error),
                     };
@@ -1838,7 +1881,7 @@ pub(crate) fn resolve_budgeted_with_brep(
             let mut matches: Vec<_> = evaluated
                 .iter()
                 .filter(|(_, failure)| failure.is_none())
-                .map(|(entity, _)| entity.clone())
+                .map(|(entity, _)| (*entity).clone())
                 .collect();
             if let Some((origin, direction)) = query.hit_by_ray {
                 matches = match apply_ray_probe(matches, origin, direction, brep, budget) {
@@ -1920,7 +1963,7 @@ pub(crate) fn resolve_budgeted_with_brep(
                 .drain(..)
                 .filter(|(_, failure)| failure.is_some())
                 .take(NEAR_MISS_LIMIT)
-                .map(|entry| entry.0)
+                .map(|entry| entry.0.clone())
                 .collect();
             cardinality(
                 matches,
@@ -2303,8 +2346,8 @@ mod tests {
     use super::*;
     use crate::backend::{
         brep::{
-            CommonVolume, EdgeFacts, Extrema, FaceFacts, PointState, ShapeFacts,
-            TessellationProfile, TopologyCounts, ValidityFacts, WallOptions, WallThicknessOutcome,
+            DocumentFacts, FaceFacts, PointState, ShapeFacts, TessellationProfile, TopologyCounts,
+            ValidityFacts,
         },
         TriangleMesh,
     };
@@ -2446,8 +2489,18 @@ mod tests {
         }
         observations
             .push(json!({"operation":"face inventory unchanged","passed":index.faces==original}));
-        index.faces.push(index.faces[0].clone());
-        let duplicates = query_pool(EntityType::Axis, &index);
+        // C11: the pools borrow the index; the axis view is built once.
+        assert!(std::ptr::eq(query_pool(EntityType::Axis, &index), pool));
+        assert!(std::ptr::eq(
+            query_pool(EntityType::Face, &index),
+            index.faces.as_slice()
+        ));
+        let mut duplicated = SelectorIndex {
+            faces: index.faces.clone(),
+            ..SelectorIndex::default()
+        };
+        duplicated.faces.push(index.faces[0].clone());
+        let duplicates = query_pool(EntityType::Axis, &duplicated);
         let ids: Vec<_> = duplicates.iter().map(|entity| entity.id.as_str()).collect();
         let expected: Vec<_> = oracle["selection"]["duplicateIds"]
             .as_array()
@@ -2571,15 +2624,11 @@ mod tests {
     }
 
     impl BrepSubject for ProbeBrep {
-        fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-            Ok(Rc::new(flat_facts()))
-        }
         fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
             Ok(Rc::from(vec![LocatedFace {
                 entity: BrepEntity::WholeFace(1),
                 facts: FaceFacts {
                     index: 1,
-                    parameter_bounds: [0.0; 4],
                     area: 4.0,
                     center_of_mass: [0.0, 0.0, 0.0],
                     surface: SurfaceFacts::Plane {
@@ -2592,38 +2641,9 @@ mod tests {
                     max: [1.0, 1.0, 0.0],
                 },
                 reversed: false,
-                edge_indices: Vec::new(),
-                shape_label: None,
             }]))
         }
-        fn occurrence_faces(&self, occurrence: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-            Ok(self
-                .faces()?
-                .iter()
-                .cloned()
-                .map(|mut face| {
-                    face.entity = BrepEntity::Face {
-                        occurrence,
-                        face: face.facts.index,
-                    };
-                    face
-                })
-                .collect::<Vec<_>>()
-                .into())
-        }
-        fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-            Err(unused())
-        }
         fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
-            Err(unused())
-        }
-        fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-            Err(unused())
-        }
-        fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-            Err(unused())
-        }
-        fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
             Err(unused())
         }
         fn classify_face_points(
@@ -2653,12 +2673,6 @@ mod tests {
                     _ => PointState::Out,
                 })
                 .collect())
-        }
-        fn minimum_wall_thickness(
-            &self,
-            _: &WallOptions,
-        ) -> Result<WallThicknessOutcome, BackendError> {
-            Err(unused())
         }
         fn tessellate(
             &self,
@@ -2696,10 +2710,8 @@ mod tests {
         DocumentFacts {
             source_length_unit: "millimetre".into(),
             source_unit_to_millimeters: 1.0,
-            products: Vec::new(),
             occurrences: Vec::new(),
             shape: ShapeFacts {
-                valid: true,
                 bounds: Bounds {
                     min: [-1.0, -1.0, 0.0],
                     max: [1.0, 1.0, 0.0],
@@ -2717,7 +2729,6 @@ mod tests {
                     vertices: 4,
                 },
             },
-            faces: Vec::new(),
             subshapes: Vec::new(),
             datum_placements: Vec::new(),
             semantic_datums: Vec::new(),
@@ -3004,8 +3015,6 @@ mod tests {
         facts
             .occurrences
             .push(crate::backend::brep::OccurrenceFacts {
-                label: "occ".into(),
-                product_label: "product".into(),
                 name: "part".into(),
                 placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
                 bounds: facts.shape.bounds,

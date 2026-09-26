@@ -7,12 +7,13 @@ pub(crate) struct Mesh {
 }
 
 impl Mesh {
-    /// Retains all admitted f32 positions for mesh analysis. GSM1 bounds remain
-    /// indexed through the subject's explicit format-specific bounds scope.
-    pub(crate) fn analysis_record(&self) -> crate::analysis::mesh::MeshAnalysisRecord {
+    /// Moves all admitted f32 positions into the mesh analysis record. GSM1
+    /// bounds remain indexed through the subject's format-specific bounds scope.
+    pub(crate) fn analysis_record(self) -> crate::analysis::mesh::MeshAnalysisRecord {
         use crate::analysis::mesh::{MeshAnalysisRecord, Primitive};
+        let vertex_count =
+            u32::try_from(self.positions.len()).expect("GSM1 vertex count was admitted as u32");
         MeshAnalysisRecord {
-            positions: self.positions.clone(),
             triangles: self
                 .indices
                 .chunks_exact(3)
@@ -26,9 +27,9 @@ impl Mesh {
             primitives: vec![Primitive {
                 name: "mesh-buffer#0".into(),
                 vertex_start: 0,
-                vertex_count: u32::try_from(self.positions.len())
-                    .expect("GSM1 vertex count was admitted as u32"),
+                vertex_count,
             }],
+            positions: self.positions,
         }
     }
 

@@ -58,16 +58,6 @@ fn selected_box(occurrence: u32, min_x: f64, max_x: f64) -> SelectedContinuousDo
 
 fn selected_in_order(order: [u32; 2]) -> [SelectedContinuousDomain; 2] {
     let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
-    let facts = document.facts().unwrap();
-    let faces = [
-        document.occurrence_faces(0).unwrap(),
-        document.occurrence_faces(1).unwrap(),
-    ];
-    let edges = [
-        document.occurrence_edges(0).unwrap(),
-        document.occurrence_edges(1).unwrap(),
-    ];
-
     let mut selected = order.map(|occurrence| {
         let actual = document.selected_continuous_domain(occurrence).unwrap();
         let expected = match occurrence {
@@ -79,26 +69,6 @@ fn selected_in_order(order: [u32; 2]) -> [SelectedContinuousDomain; 2] {
         assert_eq!(actual, expected);
         actual
     });
-
-    // These retained Rc-backed API reads check cached-facts readback stability. The
-    // source classifier read-only trace is the separate mutation-scope evidence.
-    assert_eq!(facts.as_ref(), document.facts().unwrap().as_ref());
-    for occurrence in 0..2 {
-        assert_eq!(
-            faces[occurrence].as_ref(),
-            document
-                .occurrence_faces(occurrence as u32)
-                .unwrap()
-                .as_ref()
-        );
-        assert_eq!(
-            edges[occurrence].as_ref(),
-            document
-                .occurrence_edges(occurrence as u32)
-                .unwrap()
-                .as_ref()
-        );
-    }
     selected.sort_by_key(|value| value.occurrence);
     selected
 }
@@ -111,7 +81,6 @@ fn selected_located_box_domains_preserve_complete_associations_and_query_order()
 #[test]
 fn selected_queries_preserve_whole_box_and_rod_disposition() {
     let box_document = Document::from_step(&fixture("ap242-box.step")).unwrap();
-    let box_facts = box_document.facts().unwrap();
     let box_actual = box_document
         .continuous_wall_domain(BrepEntity::Whole)
         .unwrap();
@@ -153,11 +122,8 @@ fn selected_queries_preserve_whole_box_and_rod_disposition() {
             },
         }
     );
-    // Retained Rc-backed whole facts check cached-facts readback stability only.
-    assert_eq!(box_facts.as_ref(), box_document.facts().unwrap().as_ref());
 
     let rod_document = Document::from_step(&fixture("ap242-radius1-height10.step")).unwrap();
-    let rod_facts = rod_document.facts().unwrap();
     let error = rod_document
         .continuous_wall_domain(BrepEntity::Whole)
         .unwrap_err();
@@ -167,6 +133,4 @@ fn selected_queries_preserve_whole_box_and_rod_disposition() {
         error.message,
         "Continuous cylinder requires a finite increasing axial interval and an exact full analytic U period."
     );
-    // Retained Rc-backed whole facts check cached-facts readback stability only.
-    assert_eq!(rod_facts.as_ref(), rod_document.facts().unwrap().as_ref());
 }

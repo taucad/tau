@@ -2,7 +2,7 @@
 
 use super::{BackendError, TriangleMesh};
 use serde::Serialize;
-use std::{collections::BTreeMap, rc::Rc};
+use std::rc::Rc;
 
 /// Complete analytic boundary certificate for the declared continuous wall domain.
 /// Kernel/model tolerance is evidence, not an exact-real certification.
@@ -163,8 +163,9 @@ pub struct StepSubjectMetadata {
     pub native_read_stream: bool,
 }
 
-/// One coherent fixed-profile report. The core owns its successful retention;
-/// entity ordinals still address immutable nominal query shapes.
+/// One coherent fixed-profile report of a connector without separate facets;
+/// the `BrepSubject` facet defaults slice it. Entity ordinals still address
+/// immutable nominal query shapes.
 #[derive(Clone, Debug)]
 pub struct ReportedBrepBundle {
     pub facts: Rc<DocumentFacts>,
@@ -178,10 +179,8 @@ pub struct ReportedBrepBundle {
 pub struct DocumentFacts {
     pub source_length_unit: String,
     pub source_unit_to_millimeters: f64,
-    pub products: Vec<ProductFacts>,
     pub occurrences: Vec<OccurrenceFacts>,
     pub shape: ShapeFacts,
-    pub faces: Vec<FaceFacts>,
     pub subshapes: Vec<SubshapeFacts>,
     pub datum_placements: Vec<DatumPlacementFacts>,
     pub semantic_datums: Vec<SemanticDatumFacts>,
@@ -189,16 +188,7 @@ pub struct DocumentFacts {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProductFacts {
-    pub label: String,
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct OccurrenceFacts {
-    pub label: String,
-    pub product_label: String,
     pub name: String,
     pub placement: [f64; 12],
     pub bounds: Bounds,
@@ -210,10 +200,26 @@ pub struct OccurrenceFacts {
     pub ordinal_path: Vec<u32>,
 }
 
+/// Report face tables in public order: whole faces and one table per
+/// occurrence. Address-only tables leave `facts.area`,
+/// `facts.center_of_mass` and `bounds` unmeasured (NaN).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReportedFaces {
+    pub whole_faces: Rc<[LocatedFace]>,
+    pub occurrence_faces: Vec<Rc<[LocatedFace]>>,
+}
+
+/// Subshape names and datums of the admitted document; no report or mesh.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DocumentRows {
+    pub subshapes: Vec<SubshapeFacts>,
+    pub datum_placements: Vec<DatumPlacementFacts>,
+    pub semantic_datums: Vec<SemanticDatumFacts>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShapeFacts {
-    pub valid: bool,
     pub bounds: Bounds,
     pub volume: f64,
     pub surface_area: f64,
@@ -243,7 +249,6 @@ pub struct TopologyCounts {
 #[serde(rename_all = "camelCase")]
 pub struct FaceFacts {
     pub index: u32,
-    pub parameter_bounds: [f64; 4],
     pub area: f64,
     pub center_of_mass: [f64; 3],
     pub surface: SurfaceFacts,
@@ -340,6 +345,11 @@ pub struct SemanticDatumFacts {
     pub face_indices: Vec<u32>,
 }
 
+/// A claim-local memo a connector fills once per occurrence (C7), such as its
+/// qualified regular-solid operand. The evaluation context owns it and drops
+/// it with the claim, so nothing is retained with the subject.
+pub type OperandMemo = Box<dyn std::any::Any>;
+
 /// Entity ordinals are local to one retained subject, never foreign pointers.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum BrepEntity {
@@ -362,8 +372,6 @@ pub struct LocatedFace {
     pub facts: FaceFacts,
     pub bounds: Bounds,
     pub reversed: bool,
-    pub edge_indices: Vec<u32>,
-    pub shape_label: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -428,72 +436,11 @@ pub struct ValidityFacts {
     pub reason: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Extrema {
-    pub distance: f64,
-    pub point_a: [f64; 3],
-    pub point_b: [f64; 3],
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PointState {
     In,
     On,
     Out,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CommonVolume {
-    pub volume: f64,
-    pub centroid: [f64; 3],
-}
-
-/// Source wall facet options, with units stated at the connector boundary.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WallOptions {
-    pub work_unit_budget: u64,
-    pub mesh_linear_tolerance_mm: f64,
-    pub mesh_angular_tolerance_degrees: f64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct WallSupport {
-    pub face_index: Option<u32>,
-    pub surface_type: Option<String>,
-    pub support_type: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct WallThickness {
-    /// Actual completed logical requests reported by the kernel.
-    pub consumed: u64,
-    pub value: f64,
-    pub location: Option<[f64; 3]>,
-    pub point_a: Option<[f64; 3]>,
-    pub point_b: Option<[f64; 3]>,
-    pub solid_index: Option<u32>,
-    pub tie_count: Option<u32>,
-    pub algorithm: String,
-    pub tolerance: f64,
-    pub support_a: Option<WallSupport>,
-    pub support_b: Option<WallSupport>,
-    pub rejections: BTreeMap<String, u32>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-// Preserve the inline connector return contract; boxing adds a per-query
-// allocation and changes callers outside the core quality scope.
-#[allow(clippy::large_enum_variant)]
-pub enum WallThicknessOutcome {
-    Measured(WallThickness),
-    Empty {
-        consumed: u64,
-        rejections: BTreeMap<String, u32>,
-    },
-    BudgetExceeded {
-        consumed: u64,
-        limit: u64,
-    },
 }
 
 /// Validated regular-solid difference facts. Zero residual volume alone never
@@ -982,6 +929,8 @@ pub trait BrepSubject {
         Ok(None)
     }
 
+    /// The combined report. A connector with separate facets overrides the
+    /// facets below instead; their defaults slice this bundle.
     fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
@@ -989,20 +938,45 @@ pub trait BrepSubject {
         })
     }
 
-    /// The report's mesh facet alone, from a retained copy+mesh generation that
-    /// a later `reported_facts` reuses. `None` means only the combined report
-    /// exists, so the caller demands `reported_facts_and_mesh` instead.
-    fn reported_mesh(&self) -> Result<Option<Rc<TriangleMesh>>, BackendError> {
-        Ok(None)
+    /// The report mesh facet, owned so the caller can move it into its record.
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
+        Ok(self.reported_facts_and_mesh()?.mesh.as_ref().clone())
     }
 
-    /// The report's facts facet from the generation that produced `mesh`; the
-    /// returned bundle carries that same mesh.
-    fn reported_facts(&self, mesh: Rc<TriangleMesh>) -> Result<ReportedBrepBundle, BackendError> {
-        Ok(ReportedBrepBundle {
-            mesh,
-            ..self.reported_facts_and_mesh()?
+    /// The report's whole-shape facts.
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        Ok(self.reported_facts_and_mesh()?.facts.shape.clone())
+    }
+
+    /// The report face tables; `measured == false` may leave them address-only.
+    fn reported_faces(&self, _measured: bool) -> Result<ReportedFaces, BackendError> {
+        let bundle = self.reported_facts_and_mesh()?;
+        Ok(ReportedFaces {
+            whole_faces: bundle.whole_faces,
+            occurrence_faces: bundle.occurrence_faces,
         })
+    }
+
+    /// Subshape names and datums without a report.
+    fn document_rows(&self) -> Result<DocumentRows, BackendError> {
+        let facts = self.reported_facts_and_mesh()?.facts;
+        Ok(DocumentRows {
+            subshapes: facts.subshapes.clone(),
+            datum_placements: facts.datum_placements.clone(),
+            semantic_datums: facts.semantic_datums.clone(),
+        })
+    }
+
+    /// The `AddOptimal` box of one public whole face, measured only for the
+    /// faces whose box is read (F6). `faces()` may leave boxes unmeasured.
+    fn face_optimal_bounds(&self, public_face: u32) -> Result<Bounds, BackendError> {
+        self.faces()?
+            .get(public_face as usize)
+            .map(|face| face.bounds)
+            .ok_or_else(|| BackendError {
+                kind: super::BackendErrorKind::InvalidInput,
+                message: "Whole-face index is out of range.".into(),
+            })
     }
 
     /// Unqualified trims must refuse; world AABB projections are not evidence.
@@ -1077,6 +1051,40 @@ pub trait BrepSubject {
         })
     }
 
+    /// A fresh claim-local operand memo. The default memo is empty and the
+    /// `*_memoized` defaults below ignore it.
+    fn operand_memo(&self) -> OperandMemo {
+        Box::new(())
+    }
+
+    /// `selected_interference_material`, qualifying each occurrence once per memo.
+    fn selected_interference_material_memoized(
+        &self,
+        face: BrepEntity,
+        _memo: &mut OperandMemo,
+    ) -> Result<SelectedInterferenceMaterial, BackendError> {
+        self.selected_interference_material(face)
+    }
+
+    /// `selected_bore_void`, qualifying each occurrence once per memo.
+    fn selected_bore_void_memoized(
+        &self,
+        face: BrepEntity,
+        _memo: &mut OperandMemo,
+    ) -> Result<SelectedBoreVoid, BackendError> {
+        self.selected_bore_void(face)
+    }
+
+    /// `regular_solid_containment` whose occurrence operands come from the memo.
+    fn regular_solid_containment_memoized(
+        &self,
+        subject: BrepEntity,
+        target: BrepEntity,
+        _memo: &mut OperandMemo,
+    ) -> Result<RegularSolidContainment, BackendError> {
+        self.regular_solid_containment(subject, target)
+    }
+
     /// One requested subject-target difference. Implementations must validate
     /// regular closed 3D operands and successful valid result topology; faces,
     /// open shells and indeterminate results cannot be reported contained.
@@ -1129,12 +1137,15 @@ pub trait BrepSubject {
     }
 
     /// Ordered source occurrence metadata without preparing a report or
-    /// transferring whole-document face/PMI inventories.
+    /// transferring whole-document face/PMI inventories. `name` may be left
+    /// empty.
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
-        Err(BackendError {
-            kind: super::BackendErrorKind::Unsupported,
-            message: "The BRep connector has no source occurrence metadata route.".into(),
-        })
+        Ok(self
+            .reported_facts_and_mesh()?
+            .facts
+            .occurrences
+            .clone()
+            .into())
     }
 
     /// `source_occurrences` without measuring occurrence bounds: every field
@@ -1143,7 +1154,6 @@ pub trait BrepSubject {
         self.source_occurrences()
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError>;
     /// All uniquely forward-transferred public faces for an original source face.
     /// Empty/missing and ambiguous bindings remain typed inventory states.
     fn pmi_source_faces(
@@ -1156,17 +1166,9 @@ pub trait BrepSubject {
         ))
     }
     /// Located faces in the whole retained shape, including flat STEP documents.
+    /// `bounds` may be unmeasured (NaN); `face_optimal_bounds` measures one.
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
-    fn occurrence_faces(&self, occurrence: u32) -> Result<Rc<[LocatedFace]>, BackendError>;
-    fn occurrence_edges(&self, occurrence: u32) -> Result<Rc<[EdgeFacts]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
-    fn extrema(&self, a: BrepEntity, b: BrepEntity) -> Result<Extrema, BackendError>;
-    fn classify_points(
-        &self,
-        occurrence: u32,
-        points: &[[f64; 3]],
-    ) -> Result<Vec<PointState>, BackendError>;
-    fn common_volume(&self, a: u32, b: u32) -> Result<CommonVolume, BackendError>;
     /// Classify against the located trimmed face. Off-surface points are Out.
     fn classify_face_points(
         &self,
@@ -1174,10 +1176,6 @@ pub trait BrepSubject {
         points: &[[f64; 3]],
         tolerance_mm: f64,
     ) -> Result<Vec<PointState>, BackendError>;
-    fn minimum_wall_thickness(
-        &self,
-        options: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError>;
     fn tessellate(
         &self,
         entity: BrepEntity,

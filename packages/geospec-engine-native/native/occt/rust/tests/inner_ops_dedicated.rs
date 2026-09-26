@@ -100,9 +100,8 @@ fn settled_thread_times(expected: usize) -> BTreeMap<u64, u64> {
 }
 
 fn occurrence(document: &Document, name: &str) -> BrepEntity {
-    let facts = document.facts().unwrap();
-    let index = facts
-        .occurrences
+    let occurrences = document.source_occurrence_structure().unwrap();
+    let index = occurrences
         .iter()
         .position(|row| {
             row.name == name
@@ -198,10 +197,14 @@ fn should_keep_dedicated_inner_operations_bounded_and_byte_identical() {
     let before_pool = thread_times();
     assert_eq!(configure_thread_pool_width(2).unwrap(), 2);
     let warm = Document::from_step(include_bytes!("fixtures/regular-solid-controls.step")).unwrap();
-    warm.common_volume(0, 1).unwrap();
+    let (subject, target) = (occurrence(&warm, "protruding"), occurrence(&warm, "target"));
     // SAFETY: this single GeoSpec test binary owns its static OCCT closure and
     // the caller-inclusive two-CPU pool throughout the test.
-    assert!(unsafe { warm.validity_dedicated(2).unwrap().1 });
+    assert!(
+        unsafe { warm.regular_solid_containment_dedicated(subject, target, 2) }
+            .unwrap()
+            .1
+    );
     let after_warm = thread_times();
     let workers = after_warm
         .keys()
@@ -234,26 +237,6 @@ fn should_keep_dedicated_inner_operations_bounded_and_byte_identical() {
     eprintln!("inner-op=mesh exact-bytes={}", expected_mesh_bytes.len());
 
     let regular_input = include_bytes!("fixtures/regular-solid-controls.step");
-    let common_serial = Document::from_step(regular_input).unwrap();
-    let common_parallel = Document::from_step(regular_input).unwrap();
-    let expected_common = common_serial.common_volume(0, 1).unwrap();
-    let expected_common_bytes = format!("{expected_common:?}").into_bytes();
-    let commons = measured("common", worker_id, || {
-        (0..24)
-            .map(|_| unsafe { common_parallel.common_volume_dedicated(0, 1, 2) })
-            .collect::<Result<Vec<_>, _>>()
-    })
-    .unwrap();
-    for (value, parallel) in commons {
-        assert!(parallel);
-        assert_eq!(value, expected_common);
-        assert_eq!(format!("{value:?}").into_bytes(), expected_common_bytes);
-    }
-    eprintln!(
-        "inner-op=common exact-fact-bytes={}",
-        expected_common_bytes.len()
-    );
-
     let cut_serial = Document::from_step(regular_input).unwrap();
     let cut_parallel = Document::from_step(regular_input).unwrap();
     let serial_subject = occurrence(&cut_serial, "protruding");
@@ -283,7 +266,8 @@ fn should_keep_dedicated_inner_operations_bounded_and_byte_identical() {
     }
     eprintln!("inner-op=cut exact-fact-bytes={}", expected_cut_bytes.len());
 
-    let bore_input = include_bytes!("fixtures/circular-bores/01-through.step");
+    // The obstructed bore is the one whose clearance only the Common decides.
+    let bore_input = include_bytes!("fixtures/circular-bores/08-obstructed-through.step");
     let bore_serial = Document::from_step(bore_input).unwrap();
     let bore_parallel = Document::from_step(bore_input).unwrap();
     let expected_bores = bore_serial.circular_bores(16).unwrap();
@@ -306,7 +290,10 @@ fn should_keep_dedicated_inner_operations_bounded_and_byte_identical() {
     );
 
     assert!(unsafe { mesh_parallel.tessellate_dedicated(BrepEntity::Whole, profile, 0) }.is_err());
-    assert!(unsafe { common_parallel.common_volume_dedicated(0, 1, 3) }.is_err());
+    assert!(unsafe {
+        cut_parallel.regular_solid_containment_dedicated(parallel_subject, parallel_target, 3)
+    }
+    .is_err());
     assert!(unsafe {
         cut_parallel.regular_solid_containment_dedicated(
             BrepEntity::Occurrence(u32::MAX),

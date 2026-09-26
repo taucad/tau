@@ -102,11 +102,11 @@ pub(crate) fn build_component_labels(
             }
         }
     }
-    let Some(facts) = subject.brep_facts()? else {
+    // Labels are source occurrence structure; the report bundle is not built.
+    let Some(occurrences) = subject.source_occurrence_structure()? else {
         return Ok(Vec::new());
     };
-    Ok(facts
-        .occurrences
+    Ok(occurrences
         .iter()
         .enumerate()
         .map(|(index, occurrence)| ComponentIdentity {
@@ -273,6 +273,10 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
     let components = match components(subject)? {
         Some(value) => value,
         None => {
+            // ponytail: STEP's primitiveCount is the report mesh's (one primitive
+            // when it has triangles), so only this diagnostic still builds it,
+            // uncharged (ruling 11); a structure count replaces it in Wave 2 (C3b).
+            subject.report_mesh()?;
             let primitive_count = subject
                 .mesh_record()
                 .and_then(named_identities)
@@ -301,7 +305,7 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
                 vertex_count: component.mesh.positions.len() as u32,
             }],
         };
-        let analysis = analyze(&Rc::new(record))?;
+        let analysis = analyze(&Rc::new(record));
         let watertight = analysis.watertight();
         if !watertight.watertight {
             let mut diagnostic = Diagnostic::error(
@@ -389,10 +393,10 @@ pub(crate) fn analyze_overlap(
 ) -> Result<Analysis, BackendError> {
     if subject.brep.is_some() {
         // STEP's component preparation requests every occurrence profile even
-        // on warm replay; the report was already charged by the claim owner.
-        if let Some(facts) = subject.brep_facts()? {
-            if facts.occurrences.len() >= 2 {
-                csg.charge(facts.occurrences.len() as u64)?;
+        // on warm replay; the BRep demand was already charged by the claim owner.
+        if let Some(occurrences) = subject.source_occurrence_structure()? {
+            if occurrences.len() >= 2 {
+                csg.charge(occurrences.len() as u64)?;
             }
         }
     }
@@ -649,14 +653,28 @@ fn components(subject: &Subject) -> Result<Option<Vec<Component>>, BackendError>
             return Ok(Some(value));
         }
     }
-    let (Some(_), Some(facts)) = (subject.brep.as_deref(), subject.brep_facts()?) else {
+    let (Some(_), Some(occurrences)) = (
+        subject.brep.as_deref(),
+        subject.source_occurrence_structure()?,
+    ) else {
         return Ok(None);
     };
-    if facts.occurrences.len() < 2 {
+    if occurrences.len() < 2 {
         return Ok(None);
     }
+    // Each occurrence becomes its own retained tessellation entry and the
+    // partition diagnostic's report mesh one more (R10 built it first), so N
+    // occurrences need N + 1 entries whatever is already retained: refuse with
+    // the tessellation refusal before the first BRepMesh pass.
+    if occurrences.len() as u64 >= u64::from(subject.retention_limits.max_mesh_entries) {
+        return Err(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Tessellation demands exceed the declared analysis retention entry limit."
+                .into(),
+        });
+    }
     let mut result = Vec::new();
-    for (index, occurrence) in facts.occurrences.iter().enumerate() {
+    for (index, occurrence) in occurrences.iter().enumerate() {
         let mesh =
             subject.tessellate(BrepEntity::Occurrence(index as u32), TESSELLATION_PROFILE)?;
         if let Some(component) = occurrence_component(index, occurrence, mesh)? {
@@ -892,8 +910,6 @@ mod tests {
 
     fn occurrence(path: &str) -> crate::backend::brep::OccurrenceFacts {
         crate::backend::brep::OccurrenceFacts {
-            label: path.into(),
-            product_label: path.into(),
             name: path.into(),
             placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
             bounds: Bounds {
@@ -1126,6 +1142,60 @@ mod tests {
         assert_eq!(
             overlap_candidates(&components, None, 0.001).len(),
             255 * 254 / 2
+        );
+    }
+
+    /// Occurrence structure only; any tessellation would be a failure.
+    struct Occurrences(Rc<[crate::backend::brep::OccurrenceFacts]>);
+
+    impl crate::backend::brep::BrepSubject for Occurrences {
+        fn source_occurrences(
+            &self,
+        ) -> Result<Rc<[crate::backend::brep::OccurrenceFacts]>, BackendError> {
+            Ok(Rc::clone(&self.0))
+        }
+        fn faces(&self) -> Result<Rc<[crate::backend::brep::LocatedFace]>, BackendError> {
+            unreachable!()
+        }
+        fn validity(&self) -> Result<Rc<crate::backend::brep::ValidityFacts>, BackendError> {
+            unreachable!()
+        }
+        fn classify_face_points(
+            &self,
+            _: BrepEntity,
+            _: &[[f64; 3]],
+            _: f64,
+        ) -> Result<Vec<crate::backend::brep::PointState>, BackendError> {
+            unreachable!()
+        }
+        fn tessellate(
+            &self,
+            _: BrepEntity,
+            _: TessellationProfile,
+        ) -> Result<Rc<TriangleMesh>, BackendError> {
+            unreachable!("the entry limit refuses before the first BRepMesh pass")
+        }
+    }
+
+    #[test]
+    fn occurrences_leaving_no_report_mesh_entry_refuse_before_tessellating() {
+        let mut subject = Subject::new(
+            "entry-limit".into(),
+            crate::subject::SubjectFormat::Step,
+            "mm".into(),
+        );
+        // Two occurrences plus the report mesh need three entries (R10 refused
+        // at the second tessellation because the report mesh held one).
+        subject.retention_limits.max_mesh_entries = 2;
+        subject.brep = Some(Box::new(Occurrences(Rc::from(vec![
+            occurrence("a"),
+            occurrence("b"),
+        ]))));
+        let error = components(&subject).unwrap_err();
+        assert_eq!(error.kind, BackendErrorKind::Unsupported);
+        assert_eq!(
+            error.message,
+            "Tessellation demands exceed the declared analysis retention entry limit."
         );
     }
 }

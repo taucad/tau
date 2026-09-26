@@ -198,13 +198,10 @@ fn input() -> PathBuf {
 fn selected_bore_void_actual_guide_and_wrong_face() {
     let document =
         Document::from_step(&std::fs::read(input().join("guide.step")).unwrap()).unwrap();
-    let facts = document.facts().unwrap();
-    let occurrence = facts
-        .occurrences
-        .iter()
-        .position(|o| o.path == "guide")
-        .unwrap() as u32;
-    let faces = document.occurrence_faces(occurrence).unwrap();
+    let occurrences = document.source_occurrence_structure().unwrap();
+    let occurrence_faces = document.reported_faces(false).unwrap().occurrence_faces;
+    let occurrence = occurrences.iter().position(|o| o.path == "guide").unwrap() as u32;
+    let faces = &occurrence_faces[occurrence as usize];
     let face = faces
         .iter()
         .find(|f| f.reversed && matches!(f.facts.surface, SurfaceFacts::Cylinder { .. }))
@@ -217,13 +214,8 @@ fn selected_bore_void_actual_guide_and_wrong_face() {
     assert!(document
         .selected_bore_void(BrepEntity::WholeFace(1))
         .is_err());
-    let valve = facts
-        .occurrences
-        .iter()
-        .position(|o| o.path == "valve")
-        .unwrap() as u32;
-    let other = document.occurrence_faces(valve).unwrap();
-    for face in other.iter() {
+    let valve = occurrences.iter().position(|o| o.path == "valve").unwrap();
+    for face in occurrence_faces[valve].iter() {
         assert!(document.selected_bore_void(face.entity).is_err());
     }
     for face in faces
@@ -238,13 +230,13 @@ fn selected_bore_void_actual_guide_and_wrong_face() {
 fn selected_bore_void_rejects_obstruction_and_extra_selected_solid() {
     for name in ["obstructed.step", "extra-solid.step"] {
         let document = Document::from_step(&std::fs::read(input().join(name)).unwrap()).unwrap();
-        let facts = document.facts().unwrap();
+        let occurrence_faces = document.reported_faces(false).unwrap().occurrence_faces;
         assert_eq!(
-            facts.occurrences.len(),
+            occurrence_faces.len(),
             1,
             "{name}: one selected material scope"
         );
-        let faces = document.occurrence_faces(0).unwrap();
+        let faces = &occurrence_faces[0];
         let cylinders: Vec<_> = faces
             .iter()
             .filter(|f| f.reversed && matches!(f.facts.surface, SurfaceFacts::Cylinder { .. }))

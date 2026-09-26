@@ -15,8 +15,8 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { useViewCameraSession } from '#hooks/use-graphics.js';
 
-/** Milliseconds. Quiet period after the last camera emission before the settled pose is persisted. */
-const cameraSettle = 250;
+/** Milliseconds. Quiet period after the last camera emission or section-pose change before the pose is persisted. */
+const poseSettle = 250;
 
 const vector3Equal = (left: readonly [number, number, number], right: readonly [number, number, number]): boolean =>
   left[0] === right[0] && left[1] === right[1] && left[2] === right[2];
@@ -29,8 +29,8 @@ const cameraViewEqual = (left: PersistedCameraView, right: PersistedCameraView):
   left.verticalSpan === right.verticalSpan &&
   left.perspectiveZoom === right.perspectiveZoom;
 
-/* The pivot and rotation are rebuilt on every assign, so a drag hands this hook a new array per
- * pointer move. Comparing by value is what keeps a drag from fanning an editor event out per frame. */
+/* A drag can settle where it started, and re-selecting a plane rebuilds equal tuples. Comparing by value
+ * keeps either from sending an editor event, which every editor subscriber would re-render for. */
 const sectionViewEqual = (left: PersistedSectionView, right: PersistedSectionView): boolean =>
   left.active === right.active &&
   left.plane === right.plane &&
@@ -52,10 +52,11 @@ const sectionViewEqual = (left: PersistedSectionView, right: PersistedSectionVie
  * creates a new reference on every emission, which triggers the `useEffect`
  * on every render and causes an infinite update loop.
  *
- * The camera pose is deliberately NOT selected: it changes every frame during
- * an orbit, so subscribing to it would re-render the calling viewer (and fan a
- * machine event out to every editor subscriber) once per frame. It is read
- * imperatively once the pose has settled.
+ * The camera pose and the section cut's pivot and rotation are deliberately NOT
+ * selected: they change every frame during an orbit or a drag, so subscribing to
+ * them would re-render the calling viewer (and fan a machine event out to every
+ * editor subscriber) once per frame. They are read imperatively once the pose
+ * has settled.
  */
 export function useViewSettingsSync({
   viewId,
@@ -93,11 +94,10 @@ export function useViewSettingsSync({
   const geometryFormat = useSelector(cadRef, (s) => s?.context.geometry?.format);
   const graphicsBackendPreference = useSelector(graphicsRef, (s) => s.context.graphicsBackendPreference);
 
-  // Section view: the cut is entry-scoped, its display preferences are pane-scoped (E2)
+  // Section view: the cut is entry-scoped, its display preferences are pane-scoped (E2). The pivot and
+  // rotation are read when the pose settles.
   const isSectionViewActive = useSelector(graphicsRef, (s) => s.context.isSectionViewActive);
   const selectedSectionViewId = useSelector(graphicsRef, (s) => s.context.selectedSectionViewId);
-  const sectionViewPivot = useSelector(graphicsRef, (s) => s.context.sectionViewPivot);
-  const sectionViewRotation = useSelector(graphicsRef, (s) => s.context.sectionViewRotation);
   const sectionViewDirection = useSelector(graphicsRef, (s) => s.context.sectionViewDirection);
   const enableClippingLines = useSelector(graphicsRef, (s) => s.context.enableClippingLines);
   const enableClippingMesh = useSelector(graphicsRef, (s) => s.context.enableClippingMesh);
@@ -124,17 +124,6 @@ export function useViewSettingsSync({
           name: m.name,
         })),
     [measurements],
-  );
-
-  const sectionView = useMemo<PersistedSectionView>(
-    () => ({
-      active: isSectionViewActive,
-      plane: selectedSectionViewId,
-      pivot: sectionViewPivot,
-      rotation: sectionViewRotation,
-      direction: sectionViewDirection,
-    }),
-    [isSectionViewActive, selectedSectionViewId, sectionViewPivot, sectionViewRotation, sectionViewDirection],
   );
 
   const sectionDisplay = useMemo<PersistedSectionDisplay>(
@@ -173,6 +162,15 @@ export function useViewSettingsSync({
           cameraView: previous?.cameraView && cameraViewEqual(previous.cameraView, next) ? previous.cameraView : next,
         };
       })();
+
+      const { sectionViewPivot, sectionViewRotation } = graphicsRef.getSnapshot().context;
+      const sectionView: PersistedSectionView = {
+        active: isSectionViewActive,
+        plane: selectedSectionViewId,
+        pivot: sectionViewPivot,
+        rotation: sectionViewRotation,
+        direction: sectionViewDirection,
+      };
 
       const newSettings: Partial<GraphicsViewSettings> = {
         enableSurfaces,
@@ -213,6 +211,7 @@ export function useViewSettingsSync({
   }, [
     viewId,
     editorRef,
+    graphicsRef,
     enableSurfaces,
     enableLines,
     enableGizmo,
@@ -226,7 +225,9 @@ export function useViewSettingsSync({
     geometryFormat,
     graphicsBackendPreference,
     pinnedMeasurements,
-    sectionView,
+    isSectionViewActive,
+    selectedSectionViewId,
+    sectionViewDirection,
     sectionDisplay,
   ]);
 
@@ -250,23 +251,31 @@ export function useViewSettingsSync({
     editorRef.send({ type: 'setUnitSettings', entryPath, settings: { renderTimeout } });
   }, [cadRef, editorRef, entryPath, renderTimeout]);
 
-  // Persist the camera pose once it has settled instead of once per frame.
+  // Persist the camera pose and the section pose once they have settled instead of once per frame or step.
   useEffect(() => {
-    if (!session) {
-      return;
-    }
-
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
-    const subscription = session.rig.actorRef.subscribe(() => {
+    const restartSettle = (): void => {
       clearTimeout(settleTimer);
       settleTimer = setTimeout(() => {
         settleTimer = undefined;
         persistRef.current();
-      }, cameraSettle);
+      }, poseSettle);
+    };
+    const cameraSubscription = session?.rig.actorRef.subscribe(restartSettle);
+    /* The graphics actor emits for every event it handles; only a new pivot or rotation is a pose change.
+     * An unchanged step keeps both tuples, so comparing references is enough. */
+    let { sectionViewPivot, sectionViewRotation } = graphicsRef.getSnapshot().context;
+    const sectionSubscription = graphicsRef.subscribe(({ context }) => {
+      if (context.sectionViewPivot === sectionViewPivot && context.sectionViewRotation === sectionViewRotation) {
+        return;
+      }
+      ({ sectionViewPivot, sectionViewRotation } = context);
+      restartSettle();
     });
 
     return () => {
-      subscription.unsubscribe();
+      cameraSubscription?.unsubscribe();
+      sectionSubscription.unsubscribe();
       if (settleTimer === undefined) {
         return;
       }
@@ -276,7 +285,7 @@ export function useViewSettingsSync({
       clearTimeout(settleTimer);
       persistRef.current();
     };
-  }, [session]);
+  }, [graphicsRef, session]);
 }
 
 /**

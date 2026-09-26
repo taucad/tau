@@ -207,6 +207,26 @@ describe('lifecycle bounds', () => {
   });
 });
 
+/* D18: the Sync region's figure comes from the host, for Tau Cloud only. */
+describe('reading remote storage', () => {
+  it('should ask the host for Tau Cloud usage and never for a Git remote', async () => {
+    const asked: string[] = [];
+    const { actors } = await fixture({}, undefined, {
+      remoteStorage: async (remote) => {
+        asked.push(remote);
+        return { used: 340, quota: 1024 };
+      },
+    });
+
+    expect(await run(actors.remote.readStorage, { remote: 'tau', kind: 'tau' })).toStrictEqual({
+      used: 340,
+      quota: 1024,
+    });
+    expect(await run(actors.remote.readStorage, { remote: 'origin', kind: 'git' })).toBeUndefined();
+    expect(asked).toStrictEqual(['tau']);
+  });
+});
+
 describe('the capture memo', () => {
   it('reads a same-size rewrite after the clock steps back, instead of trusting the high-water mark (RV-W4W5a #5)', async () => {
     const realNow = Date.now();

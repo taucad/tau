@@ -117,6 +117,9 @@ export type RemoteValidateActorInput = Readonly<{ remote: string; url: string }>
 /** What `validate` answers: the remote answered, and what it costs. @public */
 export type RemoteValidateActorOutput = Readonly<{ storage?: RemoteStorage }>;
 
+/** Which connected remote `readStorage` asks about. @public */
+export type RemoteReadStorageActorInput = Readonly<{ remote: string; kind: RemoteKind | 'none' }>;
+
 /** What the initial sync is asked to do. @public */
 export type RemoteInitialSyncActorInput = Readonly<{ remote: string; branch: string }>;
 
@@ -259,6 +262,8 @@ const remoteMachineDefinition = setup({
     /** Resolves the *reference* the host will authenticate with, never a secret (I8). */
     authorize: createAsyncLogic<void, RemoteAuthorizeActorInput>({ run: unsupported }),
     validate: createAsyncLogic<RemoteValidateActorOutput, RemoteValidateActorInput>({ run: unsupported }),
+    /** What a connected remote says this project costs (D18); `undefined` when it cannot say. */
+    readStorage: createAsyncLogic<RemoteStorage | undefined, RemoteReadStorageActorInput>({ run: unsupported }),
     initialSync: createAsyncLogic<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>({ run: unsupported }),
   },
 }).createMachine({
@@ -461,6 +466,18 @@ const remoteMachineDefinition = setup({
 
     connected: {
       entry: () => ({ context: { attemptWroteRemote: false } }),
+      /*
+       * D18: the figure the Sync region renders, read on every arrival here —
+       * a reopened project included, which reaches `connected` from `reading`
+       * without ever validating. A host that cannot say leaves the row out, and
+       * a failed read is no reason to doubt a connection that already stands.
+       */
+      invoke: {
+        src: 'readStorage',
+        input: ({ context }) => ({ remote: context.remote?.name ?? '', kind: context.kind }),
+        onDone: ({ context, event }) => ({ context: { storage: event.output ?? context.storage } }),
+        onError: {},
+      },
       on: {
         disconnect: { target: 'disconnecting' },
         connect: ({ event }) => reconnect(event),

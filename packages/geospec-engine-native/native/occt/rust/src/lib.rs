@@ -133,6 +133,12 @@ impl Document {
         unsafe { ffi::geospec_occt_triangulated_face_count(self.raw.as_ptr()) }
     }
 
+    /// Diagnostic count of occurrence operand qualifications run on this
+    /// document: operand-memo misses and memo-less queries.
+    pub fn occurrence_qualifications(&self) -> usize {
+        unsafe { ffi::geospec_occt_occurrence_qualifications(self.raw.as_ptr()) }
+    }
+
     /// Diagnostic count of bore interiors the separation certificate cleared
     /// without a Common in this document's inventories.
     pub fn certified_clear_bores(&self) -> usize {
@@ -4168,6 +4174,7 @@ mod ffi {
         ) -> i32;
         pub fn geospec_occt_operand_memo_new(document: *const Document) -> *mut OperandMemo;
         pub fn geospec_occt_operand_memo_release(memo: *mut OperandMemo);
+        pub fn geospec_occt_occurrence_qualifications(document: *const Document) -> usize;
         pub fn geospec_occt_regular_solid_containment_dedicated(
             document: *const Document,
             subject: Entity,

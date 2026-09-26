@@ -1145,8 +1145,11 @@ mod tests {
         );
     }
 
-    /// Occurrence structure only; any tessellation would be a failure.
-    struct Occurrences(Rc<[crate::backend::brep::OccurrenceFacts]>);
+    /// Occurrence structure plus empty tessellations, counted.
+    struct Occurrences(
+        Rc<[crate::backend::brep::OccurrenceFacts]>,
+        Rc<std::cell::Cell<usize>>,
+    );
 
     impl crate::backend::brep::BrepSubject for Occurrences {
         fn source_occurrences(
@@ -1173,29 +1176,56 @@ mod tests {
             _: BrepEntity,
             _: TessellationProfile,
         ) -> Result<Rc<TriangleMesh>, BackendError> {
-            unreachable!("the entry limit refuses before the first BRepMesh pass")
+            self.1.set(self.1.get() + 1);
+            Ok(Rc::new(TriangleMesh {
+                positions: Vec::new(),
+                triangles: Vec::new(),
+            }))
         }
     }
 
     #[test]
     fn occurrences_leaving_no_report_mesh_entry_refuse_before_tessellating() {
-        let mut subject = Subject::new(
-            "entry-limit".into(),
-            crate::subject::SubjectFormat::Step,
-            "mm".into(),
-        );
         // Two occurrences plus the report mesh need three entries (R10 refused
-        // at the second tessellation because the report mesh held one).
-        subject.retention_limits.max_mesh_entries = 2;
-        subject.brep = Some(Box::new(Occurrences(Rc::from(vec![
-            occurrence("a"),
-            occurrence("b"),
-        ]))));
-        let error = components(&subject).unwrap_err();
-        assert_eq!(error.kind, BackendErrorKind::Unsupported);
-        assert_eq!(
-            error.message,
-            "Tessellation demands exceed the declared analysis retention entry limit."
-        );
+        // at the second tessellation because the report mesh held one): two
+        // entries refuse before the first BRepMesh pass, three tessellate both.
+        for (max_mesh_entries, tessellations) in [(2, 0), (3, 2)] {
+            let identity = crate::identity::SubjectIdentity::step(
+                b"entry-limit",
+                "millimetre",
+                1.0,
+                crate::backend::brep::BrepIdentityProfile {
+                    ingest_profile: "core-control",
+                    backend_profile: "core-control",
+                },
+                None,
+            )
+            .unwrap();
+            let mut subject = Subject::new(
+                identity.primary_hash().into(),
+                crate::subject::SubjectFormat::Step,
+                "mm".into(),
+            );
+            subject.semantic_identity.set(identity).unwrap();
+            subject.retention_limits.max_mesh_entries = max_mesh_entries;
+            let calls = Rc::new(std::cell::Cell::new(0));
+            subject.brep = Some(Box::new(Occurrences(
+                Rc::from(vec![occurrence("a"), occurrence("b")]),
+                Rc::clone(&calls),
+            )));
+            match components(&subject) {
+                Err(error) => {
+                    assert_eq!(max_mesh_entries, 2, "{error:?}");
+                    assert_eq!(error.kind, BackendErrorKind::Unsupported);
+                    assert_eq!(
+                        error.message,
+                        "Tessellation demands exceed the declared analysis retention entry limit."
+                    );
+                }
+                // Empty meshes leave no component to compare.
+                Ok(value) => assert!(max_mesh_entries == 3 && value.is_none()),
+            }
+            assert_eq!(calls.get(), tessellations, "{max_mesh_entries} entries");
+        }
     }
 }

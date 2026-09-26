@@ -67,6 +67,7 @@
  * | 60 | `pending --revisionMinted every 500 ms--> pushing` within `syncDebounceMaxWaitMilliseconds` | **W13 follow-up**: a steady mint cadence faster than the window still pushes, at least once per bound |
  * | 59 | `merging(merged) → pushing` | **D12**: a diverged clean checkout merges, re-heads its actor, and pushes the merge revision under the fetched lease |
  * | 63 | `pushing / opening --429--> queued --Retry-After--> opening` | **W13d**: a rate limit waits the remote's own wait, a remote move does not cut it short, and it does not advance the doubling |
+ * | 32d | `conflicted.offering → onError / refused → owed --syncBackoff--> opening → conflicted.offering` | **D14-P**: a conflict line the push could not offer is reported and offered again after the backoff; a terminal class waits for a person |
  * | 64 | `pushing --onDone[updated]--> parent pushed` | **RV-W8 F9**: a push that moved a ref tells `remote.machine` its stored figure is stale; a refused one does not |
  * | 65 | `pushing / recording --syncNow { pushId }--> … → pushing → recording` + `pushSettled` | **W15 F1**: a correlated request is answered by a push that starts after it, so it carries the head current at the request |
  * | 66 | `pushing --syncNow { pushId }, open--> opening → pushing` + one `pushSettled` | **RV-W15**: a request parked behind a push that `open` abandons is not stranded |
@@ -1303,6 +1304,54 @@ describe('syncMachine', () => {
     });
 
     harness.stop();
+  });
+
+  it('row 32d (D14-P): a conflict line the push could not offer is reported and offered again after the backoff', async () => {
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const harness = start();
+    const reachConflict = async (): Promise<void> => {
+      await settleWhenRunning(harness.effects, 'fetch', {
+        output: { leases: { [mainRef]: 'remote-head' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+      });
+      await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('push')).toBe(1);
+      });
+      expect(harness.effects.inputsFor('push').at(-1)).toMatchObject({ refs: [syncRef] });
+    };
+    await reachConflict();
+
+    /* Another device's push committed first (`503 GIT_PUSH_RACE_LOST`): said, and still owed. */
+    const thrown = new RevisionPortError('REMOTE_UNAVAILABLE', 'Another push for this project committed first; retry.');
+    harness.effects.settle('push', { error: thrown });
+    await vi.waitFor(() => {
+      expect(reported).toHaveBeenCalledWith('[revisions] conflict line push', thrown);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot()).state).toBe('conflicted');
+    harness.clock.advance(5000);
+    await reachConflict();
+
+    /* A refused line is owed the same way. */
+    harness.effects.settle('push', {
+      output: pushResult({ name: syncRef, status: 'rejected', head: 'c1', reason: 'leaseLost' }),
+    });
+    await vi.waitFor(() => {
+      expect(reported).toHaveBeenCalledWith('[revisions] conflict line refused', syncRef, 'leaseLost');
+    });
+    harness.clock.advance(10_000);
+    await reachConflict();
+
+    /* A terminal class waits for a person, as every terminal class does (rule 19). */
+    harness.effects.settle('push', { error: new RevisionPortError('REMOTE_UNAUTHORIZED', 'Sign in again.') });
+    await vi.waitFor(() => {
+      expect(reported).toHaveBeenCalledTimes(3);
+    });
+    harness.clock.advance(300_000);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
+    expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
+
+    harness.stop();
+    reported.mockRestore();
   });
 
   it('row 32c (D14): a decision landed while backed up is pushed like a mint', async () => {

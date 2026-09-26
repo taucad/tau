@@ -11,6 +11,7 @@
  * | refusal | a 404 stops the loop and hands the server's sentence to the classifier (rule 19) |
  * | backoff | a 5xx waits and asks again; `stop` aborts the poll in flight |
  * | auth | the page's cookie and a disk host's bearer are both honoured |
+ * | heads | each ref's head is its newest entry's; an entry without heads, or a malformed one, leaves the ref with none (W13e) |
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -19,7 +20,10 @@ import { revisionStreamId, watchRevisionStream } from '#revision-stream.js';
 import type { RevisionStreamMove } from '#revision-stream.js';
 import type { RevisionPortError } from '#revision-port.js';
 
-const page = (nextSequence: number, events: ReadonlyArray<Readonly<{ generation: number; refs: string[] }>> = []) =>
+const page = (
+  nextSequence: number,
+  events: ReadonlyArray<Readonly<{ generation: number; refs: string[]; heads?: unknown }>> = [],
+) =>
   Response.json({
     found: true,
     snapshot: { streamId: 'revision:p1', kind: 'revision', subjectId: 'p1', sequence: nextSequence, data: {} },
@@ -118,10 +122,43 @@ describe('the revision stream reader', () => {
     });
     expect(next?.url.searchParams.get('afterSequence')).toBe('9');
     /* The entries before the tail are the open pull's; the page after it is one wake-up. */
-    expect(stream.moves).toEqual([{ generation: 9, refs: ['refs/heads/main', 'refs/tau/chats/c1'] }]);
+    expect(stream.moves).toEqual([{ generation: 9, refs: ['refs/heads/main', 'refs/tau/chats/c1'], heads: new Map() }]);
     expect(tail?.init).toMatchObject({ credentials: 'include' });
     /* Announced once, after the tail read and before the first long poll. */
     expect(stream.watchings).toEqual([1]);
+  });
+
+  it('reports each ref at the head its newest entry names, and no head where an entry names none (W13e)', async () => {
+    const [echo, theirs, chat] = ['a', 'b', 'c'].map((digit) => digit.repeat(40));
+    const api = scripted([
+      () => page(1),
+      () =>
+        page(5, [
+          /* This device's own push, then another device's move of the same ref: theirs wins. */
+          { generation: 2, refs: ['refs/heads/main'], heads: { 'refs/heads/main': echo } },
+          {
+            generation: 3,
+            refs: ['refs/heads/main', 'refs/tau/chats/c1'],
+            heads: { 'refs/heads/main': theirs, 'refs/tau/chats/c1': chat },
+          },
+          /* An older server's entry: the chat's head is no longer known. */
+          { generation: 4, refs: ['refs/tau/chats/c1'] },
+          /* Malformed heads, and a head for a ref the entry does not name, count as none. */
+          { generation: 5, refs: ['refs/tags/v1'], heads: { 'refs/tags/v1': 7, 'refs/heads/other': echo } },
+        ]),
+    ]);
+    const stream = watch(api.fetch);
+
+    await vi.waitFor(() => {
+      expect(stream.moves).toHaveLength(1);
+    });
+    stream.stop();
+
+    expect(stream.moves[0]).toEqual({
+      generation: 5,
+      refs: ['refs/heads/main', 'refs/tau/chats/c1', 'refs/tags/v1'],
+      heads: new Map([['refs/heads/main', theirs]]),
+    });
   });
 
   it('stops at a 404 and hands the server’s sentence to the refusal classifier (rule 19)', async () => {

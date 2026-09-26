@@ -207,7 +207,9 @@ cmake -S "${build_source}" -B "${build_dir}" -G Ninja \
   -DUSE_TCL=OFF \
   -DUSE_TK=OFF \
   -DUSE_FREETYPE=OFF \
-  -DUSE_OPENGL=OFF "$@"
+  -DUSE_OPENGL=OFF \
+  -DCMAKE_C_FLAGS=-UOCC_CONVERT_SIGNALS \
+  -DCMAKE_CXX_FLAGS=-UOCC_CONVERT_SIGNALS "$@"
 
 printf '%s\n' '→ building and installing exact OCCT TKDESTEP static closure'
 cmake --build "${build_dir}" --target install --parallel "${GEOSPEC_OCCT_JOBS}"

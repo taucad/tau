@@ -191,7 +191,7 @@ export const startBlocker = (
   entry: MachineDirectoryEntry,
   manifest: MachineManifest | undefined,
 ): string | undefined => {
-  const { name } = entry.descriptor;
+  const { name } = entry;
   if (entry.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
     return `Wait for a current observation from ${name} before starting.`;
   }
@@ -356,12 +356,12 @@ function ApprovalCard({
   readonly error: string | undefined;
   readonly onStart: () => void;
   readonly onDecline: () => void;
-  /** Open the recorded artifact in the printer viewer. */
-  readonly onPreview: () => void;
+  /** Open the recorded artifact in the printer viewer; absent for another project's request, whose files are not here. */
+  readonly onPreview: (() => void) | undefined;
 }): React.JSX.Element {
   const [isConfirming, setIsConfirming] = useState(false);
   const isAgent = request.requestedBy.kind === 'agent';
-  const machineName = entry.descriptor.name;
+  const machineName = entry.name;
   const blocker = startBlocker(request.configuration, entry, manifest);
 
   return (
@@ -393,10 +393,14 @@ function ApprovalCard({
         </div>
       </div>
       <ArtifactDetails request={request} />
-      <Button type='button' size='sm' variant='outline' className='self-start' onClick={onPreview}>
-        <Eye aria-hidden />
-        Open printer preview
-      </Button>
+      {onPreview === undefined ? (
+        <p className='text-xs text-muted-foreground'>From another project</p>
+      ) : (
+        <Button type='button' size='sm' variant='outline' className='self-start' onClick={onPreview}>
+          <Eye aria-hidden />
+          Open printer preview
+        </Button>
+      )}
       {isConfirming ? (
         <StartConfirmationCard
           digest={request.artifact.digest}
@@ -469,12 +473,12 @@ function ProgressCard({
 }): React.JSX.Element {
   const label =
     request.state === 'preparing'
-      ? `Checking ${request.summary.fileName} against ${entry.descriptor.name}…`
+      ? `Checking ${request.summary.fileName} against ${entry.name}…`
       : request.state === 'uploading'
-        ? `Uploading ${request.summary.fileName} to ${entry.descriptor.name}…`
+        ? `Uploading ${request.summary.fileName} to ${entry.name}…`
         : request.state === 'starting'
-          ? `Starting on ${entry.descriptor.name}…`
-          : `Sending ${request.summary.fileName} to ${entry.descriptor.name}…`;
+          ? `Starting on ${entry.name}…`
+          : `Sending ${request.summary.fileName} to ${entry.name}…`;
   return (
     <div
       role='status'
@@ -608,7 +612,7 @@ export function SendSection({
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const [reconciled, setReconciled] = useState<Readonly<Record<string, MachineOperationSnapshot>>>({});
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
-  const { editorRef } = useProject();
+  const { projectId, editorRef } = useProject();
   const operationIdsRef = useRef(
     new Map<string, { readonly uploadOperationId: string; readonly startOperationId: string }>(),
   );
@@ -722,9 +726,14 @@ export function SendSection({
               onDecline={() => {
                 void decline(request);
               }}
-              onPreview={() => {
-                preview(request);
-              }}
+              onPreview={
+                /* The path is this project's to open only when the artifact is (blueprint D5). */
+                request.artifact.projectId === projectId
+                  ? () => {
+                      preview(request);
+                    }
+                  : undefined
+              }
             />
           );
         }

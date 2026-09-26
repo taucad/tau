@@ -27,6 +27,7 @@ import type { BambuPresetSummary, BambuStudioSelection, BambuStudioSettings } fr
 import type { Quantity } from '@taucad/units/quantity';
 import type { RJSFSchema } from '@rjsf/utils';
 import { mergeFormDefaults } from '#components/geometry/parameters/rjsf-utils.js';
+import { projectFiles } from '#components/print/testing/project-files.js';
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import type { PendingAgentHostApproval } from '#components/chat/chat-approval-banner.js';
 import type { DesktopBambuStudio } from '#filesystem/desktop-bridge.js';
@@ -37,9 +38,16 @@ import type { SliceSummary } from '#routes/w.$workspace.$project/chat-print-summ
 export const timestamp = '2026-09-24T02:00:00.000Z';
 export const later = '2026-09-24T02:00:05.000Z';
 
+/** The open project's `tau.json` id, which every artifact the pane records carries (blueprint D5). */
+export const projectId = 'proj_000000000000000000001';
+
 export const mockEditorSend = vi.fn();
-export const mockWriteFiles = vi.fn(async () => undefined);
-export const mockSaveRevision = vi.fn(async () => undefined);
+/** Slice writes land in the shared project, so a second slice of the same bytes finds them there. */
+export const mockWriteFiles = vi.fn(async (files: Readonly<Record<string, { content: Uint8Array<ArrayBuffer> }>>) => {
+  for (const [path, { content }] of Object.entries(files)) {
+    projectFiles.write(path, content);
+  }
+});
 export const mockExport = vi.fn(async () => ({
   success: true,
   data: [
@@ -108,21 +116,26 @@ type ProjectSeam = Readonly<{
 /** What the pane reads from `useProject`. */
 export const projectMock = {
   useProject: (): ProjectSeam => ({
-    projectId: 'project-1',
+    projectId,
     geometryUnits: new Map([['main.ts', cadActor]]),
     mainEntryPath: 'main.ts',
     editorRef: { send: mockEditorSend },
   }),
 };
 
-export const fileManagerMock = {
-  useFileManager: (): { writeFiles: typeof mockWriteFiles } => ({ writeFiles: mockWriteFiles }),
-};
+type ProjectFilesSeam = (typeof projectFiles)['fileManager'];
 
-export const revisionMock = {
-  useRevisionClient: (): { saveRevision: typeof mockSaveRevision; status: () => { headRevisionId: string } } => ({
-    saveRevision: mockSaveRevision,
-    status: () => ({ headRevisionId: 'revision-1' }),
+/** What the pane reads from `useFileManager`: the shared project its slices and print intent live in. */
+export const fileManagerMock = {
+  useFileManager: (): {
+    writeFiles: typeof mockWriteFiles;
+    exists: ProjectFilesSeam['parameterFiles']['exists'];
+    readFile: ProjectFilesSeam['parameterFiles']['readFile'];
+  } & ProjectFilesSeam => ({
+    writeFiles: mockWriteFiles,
+    exists: projectFiles.fileManager.parameterFiles.exists,
+    readFile: projectFiles.fileManager.parameterFiles.readFile,
+    ...projectFiles.fileManager,
   }),
 };
 
@@ -165,9 +178,10 @@ const observed = (value: number, code: string): Quantity => {
 };
 
 /**
- * A stand-in for the shared Parameters renderer: shows the draft, offers one
- * edit, and shows each boolean field as the real form does: a switch named
- * "Toggle for <Label>" holding the draft over the defaults.
+ * A stand-in for the shared Parameters renderer: shows the draft, offers a
+ * slicer option, a machine option and one field reset, and shows each boolean
+ * field as the real form does: a switch named "Toggle for <Label>" holding the
+ * draft over the defaults.
  */
 export function ParametersFake({
   parameters,
@@ -204,6 +218,23 @@ export function ParametersFake({
         }}
       >
         Set layer height
+      </button>
+      <button
+        type='button'
+        onClick={() => {
+          onParametersChange({ ...parameters, nozzleDiameter: 0.6 });
+        }}
+      >
+        Set nozzle diameter
+      </button>
+      <button
+        type='button'
+        onClick={() => {
+          const { layerHeight: _layerHeight, ...rest } = parameters;
+          onParametersChange(rest);
+        }}
+      >
+        Reset layer height
       </button>
     </div>
   );
@@ -322,10 +353,12 @@ export const simulatorProvider: MachineProvider = { ...provider, id: 'bambu-simu
  */
 export const entry = (overrides: Partial<MachineDirectoryEntry> = {}): MachineDirectoryEntry => ({
   machineId: 'machine-1',
+  /* The name the person gave it, which every surface shows (blueprint D3); the device reports its own. */
+  name: 'Workshop X1C',
   providerId: 'bambu-simulator',
   descriptor: {
     id: 'physical-1',
-    name: 'Workshop X1C',
+    name: 'X1C-00M09A350100123',
     vendor: 'Bambu Lab',
     model: 'X1C',
     technology: 'additive.fff',
@@ -386,7 +419,6 @@ export const printing = (): MachineDirectoryEntry =>
 const cursor = {
   hostId: 'host-1',
   authorityId: 'authority-1',
-  workspaceId: 'workspace-1',
   generation: 'generation-1',
   position: 1,
   revision: 1,
@@ -398,13 +430,8 @@ const digestOf = (fill: string): PrintRequest['artifact']['digest'] =>
   `sha256:${fill.repeat(64)}` as PrintRequest['artifact']['digest'];
 
 export const artifact: PrintRequest['artifact'] = {
-  revision: {
-    authorityId: 'authority-1',
-    workspaceId: 'workspace-1',
-    revisionId: 'revision-1' as PrintRequest['artifact']['revision']['revisionId'],
-    treeDigest: digestOf('a'),
-  },
-  path: 'exports/pyramid.gcode.3mf',
+  projectId,
+  path: `.tau/artifacts/${'b'.repeat(64)}/pyramid.gcode.3mf`,
   digest: digestOf('b'),
   length: 4,
   mediaType: accepted.mediaType,
@@ -617,9 +644,20 @@ export const createFixture = ({
     },
     watch: ({ signal }) => directory.iterate(signal),
     requestPrint,
-    listPrintRequests: async ({ machineId }) =>
-      [...records.values()].filter((record) => machineId === undefined || record.machineId === machineId),
-    watchPrintRequests: ({ signal }) => requestFrames.iterate(signal),
+    /* Filtered as the host filters: by machine, and by the project the artifact names. */
+    listPrintRequests: async ({ machineId, projectId: project }) =>
+      [...records.values()].filter(
+        (record) =>
+          (machineId === undefined || record.machineId === machineId) &&
+          (project === undefined || record.artifact.projectId === project),
+      ),
+    async *watchPrintRequests({ projectId: project, signal }) {
+      for await (const record of requestFrames.iterate(signal)) {
+        if (project === undefined || record.artifact.projectId === project) {
+          yield record;
+        }
+      }
+    },
     resolvePrintRequest,
     withdrawPrintRequest,
   };
@@ -631,18 +669,21 @@ export const createFixture = ({
     };
     directory.push({ type: 'snapshot', snapshot });
   };
+  /* The host lost its sessions: each machine is listed again from its last observation, marked stale. */
   const goStale = (): void => {
-    directory.push({
-      type: 'event',
-      cursor: { ...cursor, position: 9, revision: 9 },
-      event: {
-        type: 'machine-directory-stale',
-        hostId: 'host-1',
-        authorityId: 'authority-1',
-        workspaceId: 'workspace-1',
-        revision: 9,
-      },
-    });
+    for (const current of snapshot.entries) {
+      directory.push({
+        type: 'event',
+        cursor: { ...cursor, position: 9, revision: 9 },
+        event: {
+          type: 'machine-directory-upserted',
+          hostId: 'host-1',
+          authorityId: 'authority-1',
+          revision: 9,
+          entry: { ...current, freshness: 'stale' },
+        },
+      });
+    }
   };
   const journal = (record: PrintRequest): void => {
     records.set(record.requestId, record);
@@ -685,7 +726,7 @@ export const createBridge = (
 
 /** A slice already written for `main.ts`, for orientation tests that need one without exporting. */
 export const sliceFixture: SlicedArtifact = {
-  path: 'exports/main.gcode.3mf',
+  path: `.tau/artifacts/${'d'.repeat(64)}/main.gcode.3mf`,
   fileName: 'main.gcode.3mf',
   digest: digestOf('d'),
   length: 4,
@@ -827,6 +868,7 @@ export const createBambuStudio = (available = true): BambuStudioFake => ({
     },
     printers: [
       { name: x1c, kind: 'machine', source: 'system', printerModel: 'Bambu Lab X1 Carbon', nozzleDiameter: 0.4 },
+      { name: 'My X1C', kind: 'machine', source: 'user', printerModel: 'Bambu Lab X1 Carbon', nozzleDiameter: 0.4 },
     ],
     processes: [
       ...Object.values(processByPreset).map(

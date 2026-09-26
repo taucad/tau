@@ -32,10 +32,6 @@ vi.mock('#hooks/use-file-manager.js', async () => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.fileManagerMock;
 });
-vi.mock('#hooks/use-revision-status.js', async () => {
-  const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
-  return fixtures.revisionMock;
-});
 vi.mock('#routes/w.$workspace.$project/chat-converter.js', async () => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.converterMock;

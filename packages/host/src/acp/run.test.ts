@@ -8,28 +8,40 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import type { ExternalAgentTurn, UserProviderMessage } from '@taucad/agent-host';
 
+import { createCallbackLogic } from 'xstate';
+
 import { createAcpExternalAgentPort } from '#acp/run.js';
-import type { AcpSession } from '#acp/session.js';
+import type { AcpConnectionCommand, AcpConnectionInput } from '#acp/acp-session.machine.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
-const prompts: Array<string | readonly ContentBlock[]> = [];
+const prompts: Array<readonly ContentBlock[]> = [];
 
-vi.mock('#acp/session.js', () => ({
-  openAcpSession: vi.fn(
-    async (): Promise<AcpSession> => ({
-      acpSessionId: 'acp-1',
-      agent: { protocolVersion: 1, agentCapabilities: undefined, authMethods: [], agentInfo: undefined },
-      configOptions: undefined,
-      modeId: undefined,
-      contextLost: false,
-      closed: Promise.withResolvers<void>().promise,
-      prompt: async (prompt) => {
-        prompts.push(prompt);
-        return { stopReason: 'end_turn', acpSessionId: 'acp-1', configuration: {} };
-      },
-      close: async () => undefined,
+/* Only the adapter is faked: the machines, the facade and the pure helpers stay real. */
+vi.mock('#acp/adapter-connection.js', () => ({
+  createAdapterConnection: () =>
+    createCallbackLogic<AcpConnectionCommand, AcpConnectionInput>(({ sendBack, receive }) => {
+      receive((command) => {
+        if (command.type === 'call') {
+          if (command.method === 'session/prompt') {
+            prompts.push(command.params.prompt);
+          }
+          const result =
+            command.method === 'initialize'
+              ? {
+                  protocolVersion: 1,
+                  agentCapabilities: { promptCapabilities: { image: true, embeddedContext: true } },
+                }
+              : command.method === 'session/new'
+                ? { sessionId: 'acp-1' }
+                : command.method === 'session/prompt'
+                  ? { stopReason: 'end_turn' }
+                  : {};
+          sendBack({ type: 'callSettled', id: command.id, at: 0, answer: { method: command.method, result } });
+        } else if (command.type === 'terminate' || command.type === 'kill') {
+          sendBack({ type: 'adapterExited', stderr: '' });
+        }
+      });
     }),
-  ),
 }));
 
 const adapter: AcpAdapter = {
@@ -86,7 +98,7 @@ const run = async (message: UserProviderMessage, turns = 1): Promise<readonly Co
   }
   await port.closeChat?.('chat-1');
   const [prompt] = prompts;
-  if (prompt === undefined || typeof prompt === 'string') {
+  if (prompt === undefined) {
     throw new TypeError('The port sent no content blocks.');
   }
   return prompt;

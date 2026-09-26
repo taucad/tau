@@ -3542,6 +3542,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../libs/xstate-testing
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1

@@ -25,7 +25,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
 
-import { modelChoice, openAcpSession } from '#acp/session.js';
+import { modelChoice } from '#acp/session.js';
+import { openAcpSession } from '#acp/acp-session.js';
 import type { AcpSession } from '#acp/session.js';
 import type { ExternalAgentDescriptor, ExternalAgentRefusalCode } from '@taucad/agent-host/wire';
 

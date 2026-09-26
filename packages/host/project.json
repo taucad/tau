@@ -6,6 +6,12 @@
   "tags": ["scope:shared", "type:package"],
   "targets": {
     "formal": {},
+    "formal:nightly": {
+      "options": {
+        "command": "node tools/formal/src/cli.ts nightly packages/host && vitest run --root packages/host src/acp/acp-sessions.machine.conformance.test.ts",
+        "env": { "FORMAL_SIMULATED": "out/test-results/formal/packages/host/simulated" }
+      }
+    },
     "test:acp-live": {
       "executor": "nx:run-commands",
       "cache": false,

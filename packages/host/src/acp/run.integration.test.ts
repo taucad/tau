@@ -11,12 +11,13 @@
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import type { Server } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 
@@ -26,14 +27,15 @@ import type { Client, SessionConfigOption, SessionUpdate, StopReason } from '@ag
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { AgentChannelAdmissionConfig } from '@taucad/agent-host/wire';
-import type { AgentLogEvent, JsonObject, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
+import type { AgentLogEvent, ExternalAgentTurn, JsonValue, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
 import { reduceEventLog } from '@taucad/agent-host';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
-import { acpCapabilityRenewalMargin, createAcpExternalAgentPort } from '#acp/run.js';
-import { openAcpSession, readSessionTextFile, writeSessionTextFile } from '#acp/session.js';
+import { acpCapabilityRenewalMargin, acpLiveSessionLimit, createAcpExternalAgentPort } from '#acp/run.js';
+import { openAcpSession } from '#acp/acp-session.js';
+import { readSessionTextFile, writeSessionTextFile } from '#acp/session.js';
 import type { AcpPromptTurn, OpenAcpSessionOptions } from '#acp/session.js';
 import { createProjectRevisions } from '#revisions.js';
 import type { TurnCheckout, TurnFinalizedEvent } from '#revisions.js';
@@ -42,7 +44,7 @@ import type { AcpWireFrame } from '#acp/spawn.js';
 import { sampleTcpPeers } from '#acp/tcp-peers.js';
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
-import { createHostMcpEndpoint } from '#mcp-server.js';
+import { createHostMcpEndpoint, hostMcpCapabilityLifetime } from '#mcp-server.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { HostSystemSkillBundle } from '#agent-tools.js';
 
@@ -145,6 +147,8 @@ const startHarness = async (
     readonly agents?: readonly AcpAdapter[];
     /** Override the minted capability's expiry (ISO instant), or offer an empty MCP url. */
     readonly mcp?: { readonly expiresAt?: () => string; readonly url?: string };
+    /** The MCP endpoint's clock, so a test can move time under a prompt in flight. */
+    readonly mcpNow?: () => number;
     /** Wrap the launcher the way a daemon does, so external turns are recorded (V19). */
     readonly revisions?: boolean;
     readonly systemSkillBundles?: readonly HostSystemSkillBundle[];
@@ -154,7 +158,11 @@ const startHarness = async (
   roots.push(workspaceRoot);
   await writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8');
   const api = await startStubApi();
-  const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry });
+  const mcp = createHostMcpEndpoint({
+    secret: randomBytes(32).toString('base64url'),
+    registry,
+    ...(options.mcpNow === undefined ? {} : { now: options.mcpNow }),
+  });
   closers.push(async () => mcp.close());
 
   const launcherRef: { current?: NodeAgentLauncher } = {};
@@ -338,6 +346,132 @@ const until = async (
     });
   }
   throw new Error(`Timed out waiting for ${label}. Log: ${JSON.stringify(await dump())}`);
+};
+
+/**
+ * One chat's log, reduced to what the ACP port reads and writes (W10 EA-S2).
+ *
+ * The host's semantics, not a merging stub: each turn has its own user-message
+ * marker, `remember` merges into *that turn's* marker only, and a turn's
+ * `state` is the newest marker that names an ACP session
+ * (`externalSessionOf`). A partial record on a later turn therefore reads back
+ * as the older, whole one — which is the defect a merging stub hid.
+ *
+ * @param chatId - The chat every turn belongs to.
+ * @returns A turn factory, the markers and the appended events.
+ */
+const durableChat = (
+  chatId: string,
+): {
+  readonly markers: ReadonlyArray<Record<string, JsonValue>>;
+  readonly eventsOf: (runId: string) => readonly AgentLogEvent[];
+  readonly turn: (runId: string, text: string, signal?: AbortSignal) => ExternalAgentTurn;
+} => {
+  const markers: Array<Record<string, JsonValue>> = [];
+  const events: Array<AgentLogEvent & { readonly runId: string }> = [];
+  return {
+    markers,
+    eventsOf: (runId) => events.filter((event) => event.runId === runId),
+    turn: (runId, text, signal = new AbortController().signal) => {
+      const state = markers.findLast((marker) => typeof marker['acpSessionId'] === 'string');
+      const marker: Record<string, JsonValue> = {};
+      markers.push(marker);
+      return {
+        agentId: 'codex',
+        agent: { kind: 'acp', id: 'codex' },
+        chatId,
+        runId,
+        message: { id: `user-${runId}`, role: 'user', content: text },
+        ...(state === undefined ? {} : { state: { ...state } }),
+        /* The record is the marker; the port's history fallbacks read envelopes this fake does not mint. */
+        history: [],
+        signal,
+        append: async (appended) => {
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log fills base fields; this fake records bodies.
+          events.push(...(appended as readonly AgentLogEvent[]).map((event) => ({ ...event, runId })));
+        },
+        remember: async (remembered) => {
+          Object.assign(marker, remembered);
+        },
+        approve: async () => ({ interruptId: 'stub', outcome: 'approved' }),
+      };
+    },
+  };
+};
+
+/** The per-turn usage every assistant message of these events stamped. */
+const usageOf = (events: readonly AgentLogEvent[]): ReadonlyArray<NonNullable<ProviderMessage['metadata']>['usage']> =>
+  events.flatMap((event) =>
+    event.type === 'message.appended' && event.message.role === 'assistant' && event.message.metadata?.usage
+      ? [event.message.metadata.usage]
+      : [],
+  );
+
+/** Pids the fake agent recorded in its pid file (adapter first, then any grandchild). */
+const recordedPids = async (file: string): Promise<readonly number[]> => {
+  let text = '';
+  try {
+    text = await readFile(file, 'utf8');
+  } catch {
+    /* Not written yet: no pids. */
+  }
+  return text
+    .split('\n')
+    .filter((line) => line !== '')
+    .map(Number);
+};
+
+/** Whether every recorded pid has exited. */
+const allExited = async (file: string): Promise<boolean> => {
+  const pids = await recordedPids(file);
+  return pids.every((pid) => !isAlive(pid));
+};
+
+/** How many pids the fake agent has recorded. */
+const pidCount = async (file: string): Promise<number> => {
+  const pids = await recordedPids(file);
+  return pids.length;
+};
+
+/** A turn that may be cancelled or refused: the test reads its effects, not its answer. */
+const settleQuietly = async (turn: Promise<unknown>): Promise<void> => {
+  try {
+    await turn;
+  } catch {
+    /* Its answer is not what this test checks. */
+  }
+};
+
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * An adapter whose processes record their pids, and are killed at teardown whatever the test left.
+ *
+ * @param mode - `TAU_FAKE_AGENT_MODE`, comma-separated.
+ * @returns The adapter and its pid file.
+ */
+const trackedAdapter = async (mode: string): Promise<{ readonly adapter: AcpAdapter; readonly pids: string }> => {
+  const directory = await mkdtemp(join(tmpdir(), 'tau-acp-pids-'));
+  roots.push(directory);
+  const pids = join(directory, 'pids');
+  closers.push(async () => {
+    for (const pid of await recordedPids(pids)) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        /* Already gone, which is the assertion's happy path. */
+      }
+    }
+  });
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+  return { adapter: { ...fakeAgent, spawnEnv: { TAU_FAKE_AGENT_MODE: mode, TAU_FAKE_AGENT_PIDS: pids } }, pids };
 };
 
 describe('the external agent run kind', () => {
@@ -815,16 +949,24 @@ describe('the external agent run kind', () => {
       'utf8',
     );
 
+    /* The takeover only records what it knows: the host driving this run is
+     * gone (I4). It re-asks the vendor nothing on its own. */
     const attached = await launcher.execute({ type: 'attach', commandId: 'cmd-1', payload: { chatId } });
 
     expect(attached).toMatchObject({ status: 'applied', details: { takeover: true } });
+    const abandoned = await readLog(workspaceRoot, chatId);
+    expect(abandoned.at(-1)).toMatchObject({ detail: { code: 'RUN_ABANDONED' } });
+    expect(sent(frames, 'initialize')).toBe(0);
+
+    await launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } });
     await until(
-      async () => lifecycleOf(await readLog(workspaceRoot, chatId)).includes('failed'),
+      async () => lifecycleOf(await readLog(workspaceRoot, chatId)).at(-1) === 'failed',
       'the ambiguous resumed run to fail',
       { dump: async () => readLog(workspaceRoot, chatId) },
     );
-    /* The vendor session is resumed, not recreated, but ACP exposes no
-     * idempotency key or turn-status query that could prove this turn's result. */
+    /* The person's Resume re-enters the vendor session, not a new one, but ACP
+     * exposes no idempotency key or turn-status query that could prove this
+     * turn's result, so nothing is prompted. */
     expect(sent(frames, 'session/resume')).toBe(1);
     expect(sent(frames, 'session/new')).toBe(0);
     const resumedEvents = await readLog(workspaceRoot, chatId);
@@ -1095,9 +1237,9 @@ describe('the external agent run kind', () => {
             details: { agentId: 'codex', failure: { category: 'limit', title: 'rate', actions: ['retry'] } },
           },
         },
-        { ...base, sequence: 4, type: 'run.lifecycle', state: 'admitted' },
+        /* A resume reopens the run with `running` alone… */
+        { ...base, sequence: 4, type: 'run.lifecycle', state: 'running' },
         /* …and the daemon died here, with that resume still in flight. */
-        { ...base, sequence: 5, type: 'run.lifecycle', state: 'running' },
       ]
         .map((event) => JSON.stringify(event))
         .join('\n'),
@@ -1105,6 +1247,9 @@ describe('the external agent run kind', () => {
     );
 
     await launcher.execute({ type: 'attach', commandId: 'cmd-1', payload: { chatId } });
+    const abandoned = await readLog(workspaceRoot, chatId);
+    expect(abandoned.at(-1)).toMatchObject({ detail: { code: 'RUN_ABANDONED' } });
+    await launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } });
     await until(
       async () => lifecycleOf(await readLog(workspaceRoot, chatId)).at(-1) === 'failed',
       'the ambiguous resumed run to fail again',
@@ -2137,46 +2282,16 @@ describe('restoring a session a cold start lost', () => {
   it('retains the cumulative usage baseline when a new port restores the session', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-restored-usage-'));
     roots.push(workspaceRoot);
-    let remembered: JsonObject = {};
-    const run = async (
-      port: ReturnType<typeof createAcpExternalAgentPort>,
-      runId: string,
-    ): Promise<AgentLogEvent[]> => {
-      const appended: AgentLogEvent[] = [];
-      await port.run({
-        agentId: 'codex',
-        agent: { kind: 'acp', id: 'codex' },
-        chatId: 'chat-restored-usage',
-        runId,
-        message: { id: `user-${runId}`, role: 'user', content: 'noask' },
-        state: remembered,
-        history: [],
-        signal: new AbortController().signal,
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log fills base fields; this test records event bodies.
-        append: async (events) => {
-          appended.push(...(events as readonly AgentLogEvent[]));
-        },
-        remember: async (state) => {
-          remembered = { ...remembered, ...state };
-        },
-        approve: async () => ({ interruptId: 'stub', outcome: 'approved' }),
-      });
-      return appended;
-    };
+    const chat = durableChat('chat-restored-usage');
 
     const first = createAcpExternalAgentPort({ agents: [fakeAgent], workspaceRoot });
-    await run(first, 'run-1');
+    await first.run(chat.turn('run-1', 'noask'));
     await first.closeChat?.('chat-restored-usage');
     const restored = createAcpExternalAgentPort({ agents: [fakeAgent], workspaceRoot });
-    const events = await run(restored, 'run-2');
+    await restored.run(chat.turn('run-2', 'noask'));
     await restored.closeChat?.('chat-restored-usage');
 
-    const usage = events.flatMap((event) =>
-      event.type === 'message.appended' && event.message.role === 'assistant' && event.message.metadata?.usage
-        ? [event.message.metadata.usage]
-        : [],
-    );
-    expect(usage.at(-1)).toMatchObject({ input: 1200, output: 300, totalTokens: 1500 });
+    expect(usageOf(chat.eventsOf('run-2')).at(-1)).toMatchObject({ input: 1200, output: 300, totalTokens: 1500 });
   }, 30_000);
 
   it('falls back to session/load, and appends nothing it replays', async () => {
@@ -2684,7 +2799,8 @@ describe('external turns through the revision port', () => {
 
   it('refuses an agent write under Tau’s own control metadata and still serves the read', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-mask-'));
-    roots.push(cwd);
+    /* Not in `roots`: its `events.jsonl` is a placeholder the fence guards, not a chat log to validate. */
+    onTestFinished(async () => rm(cwd, { recursive: true, force: true }));
     await mkdir(join(cwd, '.tau', 'chats', 'chat-1'), { recursive: true });
     await mkdir(join(cwd, '.git'), { recursive: true });
     await writeFile(join(cwd, '.tau', 'chats', 'chat-1', 'events.jsonl'), '{"type":"run.lifecycle"}\n', 'utf8');
@@ -2756,4 +2872,253 @@ describe('external turns through the revision port', () => {
     await writeSessionTextFile(cwd, { path: 'src/parts/bracket.scad', content: 'cube(2);\n' });
     await expect(readFile(join(cwd, 'src', 'parts', 'bracket.scad'), 'utf8')).resolves.toBe('cube(2);\n');
   });
+});
+
+/*
+ * W10 EA-S2: the port's session ownership (I33) and the durable session
+ * record, each red on the port before M3 (external-agents blueprint F2–F5, F7,
+ * F8, F10).
+ */
+describe('ACP session ownership', () => {
+  /* F2, EA-A2: eviction ran only when a session opened, so turns that overlap
+   * past the limit and then end leave every session open for its idle time. */
+  it('keeps at most the limit open after concurrent turns end', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-limit-'));
+    roots.push(workspaceRoot);
+    const frames: AcpWireFrame[] = [];
+    const port = createAcpExternalAgentPort({
+      agents: [fakeAgent],
+      workspaceRoot,
+      onFrame: (frame) => frames.push(frame),
+    });
+    const chats = Array.from({ length: acpLiveSessionLimit + 1 }, (_, index) =>
+      durableChat(`chat-limit-${String(index)}`),
+    );
+    closers.push(async () => {
+      await Promise.all(chats.map(async (_, index) => port.closeChat?.(`chat-limit-${String(index)}`)));
+    });
+    const controllers = chats.map(() => new AbortController());
+    const runs = chats.map(async (chat, index) =>
+      settleQuietly(port.run(chat.turn(`run-${String(index)}`, 'slow', controllers[index]?.signal))),
+    );
+    await until(async () => sent(frames, 'session/prompt') === chats.length, 'every turn prompting at once');
+    for (const controller of controllers) {
+      controller.abort();
+    }
+    await Promise.all(runs);
+
+    await until(async () => sent(frames, 'session/close') >= 1, 'the least recently used session to close', {
+      budget: 8000,
+    });
+    expect(sent(frames, 'session/close')).toBe(1);
+  }, 60_000);
+
+  /* F5, EA-A10: a second turn reused a lent session and prompted it concurrently. */
+  it('refuses a second turn for a chat whose session is lent', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-lent-'));
+    roots.push(workspaceRoot);
+    const frames: AcpWireFrame[] = [];
+    const port = createAcpExternalAgentPort({
+      agents: [fakeAgent],
+      workspaceRoot,
+      onFrame: (frame) => frames.push(frame),
+    });
+    closers.push(async () => port.closeChat?.('chat-lent'));
+    const chat = durableChat('chat-lent');
+    const controller = new AbortController();
+    const first = settleQuietly(port.run(chat.turn('run-1', 'slow', controller.signal)));
+    await until(async () => sent(frames, 'session/prompt') === 1, 'the first turn prompting');
+
+    await expect(port.run(chat.turn('run-2', 'noask'))).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
+    expect(sent(frames, 'session/prompt')).toBe(1);
+    controller.abort();
+    await first;
+  }, 60_000);
+
+  /* F3, EA-A3: a cancelled open sent SIGTERM and forgot the key, so the next
+   * turn spawned a second adapter beside one that ignored the signal. */
+  it('does not open a second adapter for a key that is still closing', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-closing-key-'));
+    roots.push(workspaceRoot);
+    const { adapter, pids } = await trackedAdapter('silent,stubborn');
+    let firstAliveAtSecondSpawn: boolean | undefined;
+    const frames: AcpWireFrame[] = [];
+    const port = createAcpExternalAgentPort({
+      agents: [adapter],
+      workspaceRoot,
+      onFrame: (frame) => {
+        frames.push(frame);
+        if (sent(frames, 'initialize') === 2 && firstAliveAtSecondSpawn === undefined) {
+          const [first] = readFileSync(pids, 'utf8').split('\n').map(Number);
+          firstAliveAtSecondSpawn = first !== undefined && isAlive(first);
+        }
+      },
+    });
+    const chat = durableChat('chat-closing-key');
+    const cancelFirst = new AbortController();
+    const first = port.run(chat.turn('run-1', 'noask', cancelFirst.signal));
+    /* Booted, SIGTERM handler installed, and its initialize unanswered. */
+    await until(
+      async () => (await pidCount(pids)) === 1 && sent(frames, 'initialize') === 1,
+      'the first unanswered initialize',
+    );
+    cancelFirst.abort();
+    await expect(first).rejects.toBeDefined();
+
+    const cancelSecond = new AbortController();
+    const second = port.run(chat.turn('run-2', 'noask', cancelSecond.signal));
+    await until(async () => sent(frames, 'initialize') === 2, 'the second adapter to start', { budget: 15_000 });
+    cancelSecond.abort();
+    await expect(second).rejects.toBeDefined();
+
+    expect(firstAliveAtSecondSpawn).toBe(false);
+  }, 60_000);
+
+  /* F3 and F10, EA-A3: the bootstrap abort sent SIGTERM to the adapter alone,
+   * with no escalation, and nothing reached the processes it started. */
+  it('escalates a cancelled open to SIGKILL of the process group', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-cancel-open-'));
+    roots.push(workspaceRoot);
+    const { adapter, pids } = await trackedAdapter('silent,stubborn,grandchild');
+    const frames: AcpWireFrame[] = [];
+    const port = createAcpExternalAgentPort({
+      agents: [adapter],
+      workspaceRoot,
+      onFrame: (frame) => frames.push(frame),
+    });
+    const controller = new AbortController();
+    const run = port.run(durableChat('chat-cancel-open').turn('run-1', 'noask', controller.signal));
+    await until(async () => (await pidCount(pids)) === 2 && sent(frames, 'initialize') === 1, 'the open');
+    controller.abort();
+    await expect(run).rejects.toBeDefined();
+
+    await until(async () => allExited(pids), 'the whole group to die', {
+      budget: 10_000,
+    });
+  }, 60_000);
+
+  /* F10: an idle close killed the adapter alone; a process it started outlived it. */
+  it("closes an idle session's whole process group", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-close-group-'));
+    roots.push(workspaceRoot);
+    const { adapter, pids } = await trackedAdapter('grandchild');
+    const port = createAcpExternalAgentPort({ agents: [adapter], workspaceRoot });
+    await port.run(durableChat('chat-close-group').turn('run-1', 'noask'));
+    const alive = await recordedPids(pids);
+    expect(alive.every((pid) => isAlive(pid))).toBe(true);
+
+    await port.closeChat?.('chat-close-group');
+
+    await until(async () => allExited(pids), 'the whole group to die', {
+      budget: 10_000,
+    });
+  }, 60_000);
+
+  /* F4, EA-A4: the capability was checked only when a turn began, so a prompt
+   * that outlived it lost Tau's tools partway through. */
+  it("should keep a long prompt's Tau tools past expiry", async () => {
+    let skew = 0;
+    const harness = await startHarness({ mcpNow: () => Date.now() + skew });
+    const gates = await mkdtemp(join(tmpdir(), 'tau-acp-gate-'));
+    roots.push(gates);
+    const gate = join(gates, 'go');
+    const chatId = 'chat-capability-expiry';
+    await harness.launcher.execute({
+      type: 'start',
+      commandId: 'cmd-start',
+      payload: {
+        trigger: 'submit',
+        chatId,
+        runId: 'run-expiry',
+        message: { id: 'user-1', role: 'user', content: `noask mcp mcp-when:${gate}` },
+        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      },
+    });
+    await until(async () => sent(harness.frames, 'session/prompt') === 1, 'the prompt in flight');
+    skew = hostMcpCapabilityLifetime + 60_000;
+    await writeFile(gate, 'go', 'utf8');
+    await until(
+      async () => lifecycleOf(await readLog(harness.workspaceRoot, chatId)).includes('completed'),
+      'the turn to finish',
+      { dump: async () => readLog(harness.workspaceRoot, chatId) },
+    );
+
+    const results = messagesOf(await readLog(harness.workspaceRoot, chatId)).filter(
+      (message) => message.role === 'tool-output' && message.toolName === 'test_model',
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ isError: false, content: { passed: 1, total: 1 } });
+  }, 60_000);
+
+  /* F7, EA-A8: a turn on a live session remembered usage, config and title
+   * without the session id, so the record read back was the opening turn's. */
+  it('remembers the whole session record on every turn outcome', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-record-'));
+    roots.push(workspaceRoot);
+    const port = createAcpExternalAgentPort({ agents: [fakeAgent], workspaceRoot });
+    closers.push(async () => port.closeChat?.('chat-record'));
+    const chat = durableChat('chat-record');
+
+    await port.run(chat.turn('run-1', 'noask'));
+    await port.run(chat.turn('run-2', 'noask'));
+    await expect(port.run(chat.turn('run-3', 'fail:rate noask'))).rejects.toMatchObject({
+      code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+    });
+
+    const [opening, reused, stopped] = chat.markers;
+    expect(typeof opening?.['acpSessionId']).toBe('string');
+    expect(reused).toMatchObject({ acpSessionId: opening?.['acpSessionId'], cwd: workspaceRoot });
+    expect(reused?.['acpPriorUsage']).toMatchObject({ totalTokens: 3000 });
+    expect(stopped).toMatchObject({ acpSessionId: opening?.['acpSessionId'], cwd: workspaceRoot });
+  }, 60_000);
+
+  /* F7, EA-A8: the turn after an eviction resumed with the opening turn's
+   * usage baseline and attributed two turns' tokens to one. */
+  it('attributes usage correctly after an eviction', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-usage-evicted-'));
+    roots.push(workspaceRoot);
+    const port = createAcpExternalAgentPort({ agents: [fakeAgent], workspaceRoot });
+    closers.push(async () => port.closeChat?.('chat-usage-evicted'));
+    const chat = durableChat('chat-usage-evicted');
+
+    await port.run(chat.turn('run-1', 'noask'));
+    await port.run(chat.turn('run-2', 'noask'));
+    await port.closeChat?.('chat-usage-evicted');
+    await port.run(chat.turn('run-3', 'noask'));
+
+    expect(usageOf(chat.eventsOf('run-3')).at(-1)).toMatchObject({ totalTokens: 1500 });
+  }, 60_000);
+
+  /* F8, EA-A7: a reset reported on `usage_update` lived only in the session's
+   * memory, so the stop after an eviction had no reset time to hold Resume on. */
+  it('restores a held limit reset after eviction', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-reset-evicted-'));
+    roots.push(workspaceRoot);
+    const port = createAcpExternalAgentPort({ agents: [fakeAgent], workspaceRoot });
+    closers.push(async () => port.closeChat?.('chat-reset-evicted'));
+    const chat = durableChat('chat-reset-evicted');
+
+    await port.run(chat.turn('run-1', 'reset:soon noask'));
+    await port.closeChat?.('chat-reset-evicted');
+    const stopped = await port.run(chat.turn('run-2', 'fail:quota')).catch((error: unknown) => error);
+
+    expect(stopped).toMatchObject({ code: 'EXTERNAL_AGENT_LIMIT_REACHED', details: { window: 'five_hour' } });
+    expect((stopped as { details?: { resetsAt?: unknown } }).details?.resetsAt).toBeGreaterThan(Date.now() / 1000);
+  }, 60_000);
+
+  it('restores a held limit reset after a host restart', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-reset-restart-'));
+    roots.push(workspaceRoot);
+    const chat = durableChat('chat-reset-restart');
+    const before = createAcpExternalAgentPort({ agents: [fakeAgent], workspaceRoot });
+    await before.run(chat.turn('run-1', 'reset:soon noask'));
+    await before.closeChat?.('chat-reset-restart');
+
+    const after = createAcpExternalAgentPort({ agents: [fakeAgent], workspaceRoot });
+    closers.push(async () => after.closeChat?.('chat-reset-restart'));
+    const stopped = await after.run(chat.turn('run-2', 'fail:quota')).catch((error: unknown) => error);
+
+    expect(stopped).toMatchObject({ code: 'EXTERNAL_AGENT_LIMIT_REACHED', details: { window: 'five_hour' } });
+    expect((stopped as { details?: { resetsAt?: unknown } }).details?.resetsAt).toBeGreaterThan(Date.now() / 1000);
+  }, 60_000);
 });

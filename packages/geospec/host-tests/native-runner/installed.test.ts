@@ -19,12 +19,10 @@ type NativeModule = {
     ingestMesh(request: Uint8Array<ArrayBuffer>, mesh: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
   };
   initialize?: () => Promise<void>;
-  canonicalize(input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
 };
 type InstalledClientModule = {
   createGeoSpecAssertionClient(options: {
     engine: GeoSpecNativeEngine;
-    canonicalize: NativeModule['canonicalize'];
     claimId: () => string;
     workUnitLimit: number;
   }): GeoSpecAssertionClient;
@@ -124,7 +122,7 @@ for (const route of routes) {
             code: `export const subject = ${JSON.stringify(subject)}; export const bounds = ${JSON.stringify(bounds)}; export const wrongBounds = ${JSON.stringify(wrongBounds)};`,
           },
         };
-        const options = { engine, canonicalize: native.canonicalize, workUnitLimit: 15 };
+        const options = { engine, workUnitLimit: 15 };
         const nativeCollector = createCollector({ nativeAssertions: options });
         expect(typeof nativeCollector.expectGeo(subject).toSatisfyRationalPlate).toBe('function');
         expect(typeof nativeCollector.expectGeo(subject).not.toSatisfyParallelPlaneDistance).toBe('function');

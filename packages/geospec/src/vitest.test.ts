@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { JSONValue } from '@taucad/runtime/types';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from '#assertion-client/index.js';
-import type { GeoSpecNativeEngine } from '#assertion-client/index.js';
+import type { GeoSpecNativeClaimEvaluation, GeoSpecNativeEngine } from '#assertion-client/index.js';
 import { geoSpecNativeMatcherDescriptors } from '#engine/matchers.js';
 import type { GeoSpecVolumeExpectation } from '#runner/types.js';
 import { createGeoSpecVitestAdapter } from '#vitest/index.js';
@@ -11,7 +11,6 @@ const hash = 'b'.repeat(64);
 const subject = { subjectHash: hash };
 const encode = (value: JSONValue): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
 const decode = (value: Uint8Array<ArrayBuffer>): JSONValue => JSON.parse(new TextDecoder().decode(value)) as JSONValue;
-const recordingCanonicalize = (input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => Uint8Array.from(input);
 
 const record = (value: JSONValue): Record<string, JSONValue> => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -21,15 +20,8 @@ const record = (value: JSONValue): Record<string, JSONValue> => {
 };
 
 class PolarityEngine implements GeoSpecNativeEngine {
-  #request?: Record<string, JSONValue>;
-
-  public canonicalPlan(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-    this.#request = record(decode(request));
-    return Uint8Array.from(request);
-  }
-
-  public evaluatePlan(_plan: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-    const plan = record(this.#request?.['plan'] ?? null);
+  public evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation {
+    const plan = record(record(decode(request))['plan'] ?? null);
     const { claims } = plan;
     const [claimValue] = Array.isArray(claims) ? claims : [];
     const claim = record(claimValue ?? null);
@@ -42,7 +34,7 @@ class PolarityEngine implements GeoSpecNativeEngine {
     const { polarity } = claim;
     const passed = positiveSatisfied === (polarity === 'positive');
     const diagnostic = (code: string): JSONValue[] => [{ code, severity: 'error', message: code.toLowerCase() }];
-    return encode({
+    const canonicalResult = encode({
       results: [
         disposition === 'refused'
           ? {
@@ -71,6 +63,7 @@ class PolarityEngine implements GeoSpecNativeEngine {
                 },
       ],
     });
+    return { canonicalClaim: encode(claim), canonicalPlan: Uint8Array.from(request), canonicalResult };
   }
 
   public processRequest(_request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
@@ -80,7 +73,6 @@ class PolarityEngine implements GeoSpecNativeEngine {
 
 const install = () => {
   const client = createGeoSpecAssertionClient({
-    canonicalize: recordingCanonicalize,
     engine: new PolarityEngine(),
     workUnitLimit: 10_000,
   });
@@ -99,7 +91,6 @@ describe('GeoSpec Vitest adapter', () => {
   it('returns the same canonical plan and result bytes as standalone assertions', async () => {
     const createClient = () =>
       createGeoSpecAssertionClient({
-        canonicalize: recordingCanonicalize,
         claimId: () => 'shared-parity-claim',
         engine: new PolarityEngine(),
         workUnitLimit: 10_000,

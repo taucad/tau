@@ -20,8 +20,7 @@ const testEngine = () => {
   );
   const releaseSubject = vi.fn(() => encode({ result: {} }));
   const engine: GeoSpecNativeModelEngine = {
-    canonicalPlan: (input) => input,
-    evaluatePlan: (input) => input,
+    evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
     processRequest: (input) => input,
     ingestSubject,
     subjectHandle,
@@ -155,8 +154,7 @@ describe('native model loader ownership', () => {
     const source = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
     const operations: string[] = [];
     const engine: GeoSpecNativeModelEngine = {
-      canonicalPlan: (input) => input,
-      evaluatePlan: (input) => input,
+      evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
       processRequest: (input) => input,
       ingestSubject: () => {
         operations.push('ingest');
@@ -197,8 +195,7 @@ describe('native model loader ownership', () => {
     const operations: string[] = [];
     let admission = 0;
     const engine: GeoSpecNativeModelEngine = {
-      canonicalPlan: (input) => input,
-      evaluatePlan: (input) => input,
+      evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
       processRequest: (input) => input,
       ingestSubject: () => {
         admission += 1;

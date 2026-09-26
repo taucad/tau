@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { canonicalize, Engine } from '@taucad/geospec-engine-native/node';
+import { Engine } from '@taucad/geospec-engine-native/node';
 import { createGeoSpecAssertionClient } from 'geospec/assertion-client';
 import { expect } from 'vitest';
 
@@ -156,14 +156,25 @@ export const createNativeFixture = (engineId) => {
     }
   };
   const transport = {
-    canonicalPlan: (request) =>
-      invokeBytes('canonical-plan', request, () => engine.canonicalPlan(Buffer.from(request))),
-    evaluatePlan: (plan) => invokeBytes('evaluate-plan', plan, () => engine.evaluatePlan(Buffer.from(plan))),
+    evaluateClaim: (request) => {
+      try {
+        const evaluation = engine.evaluateClaim(Buffer.from(request));
+        record('evaluate-claim', {
+          claim: byteRecord(evaluation.canonicalClaim),
+          input: byteRecord(request),
+          output: byteRecord(evaluation.canonicalResult),
+          plan: byteRecord(evaluation.canonicalPlan),
+        });
+        return evaluation;
+      } catch (error) {
+        record('evaluate-claim', { error: errorRecord(error), input: byteRecord(request) });
+        throw error;
+      }
+    },
     processRequest: (request) =>
       invokeBytes('process-request', request, () => engine.processRequest(Buffer.from(request))),
   };
-  const canonicalizeBytes = (input) => invokeBytes('canonicalize-claim', input, () => canonicalize(Buffer.from(input)));
-  const client = createGeoSpecAssertionClient({ canonicalize: canonicalizeBytes, engine: transport });
+  const client = createGeoSpecAssertionClient({ engine: transport });
 
   const admit = (fixture, name) => {
     const primary = readFileSync(resolve(workspaceRoot, fixture.path));

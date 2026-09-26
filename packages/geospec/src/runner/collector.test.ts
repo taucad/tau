@@ -435,8 +435,10 @@ describe('authoring helpers', () => {
     const passthrough = (input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => input;
     const collector = createCollector({
       nativeAssertions: {
-        canonicalize: passthrough,
-        engine: { canonicalPlan: passthrough, evaluatePlan: passthrough, processRequest: passthrough },
+        engine: {
+          evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
+          processRequest: passthrough,
+        },
       },
     });
     installCollector(collector);

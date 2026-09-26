@@ -30,6 +30,11 @@ export type {
   GeoSpecPmiQueryPayload,
   GeoSpecPmiQueryValue,
 } from '#engine/pmi.types.js';
-export type { GeoSpecCanonicalClaimReport, GeoSpecNativeEngine, GeoSpecNativeSubject } from '#engine/client.js';
+export type {
+  GeoSpecCanonicalClaimReport,
+  GeoSpecNativeClaimEvaluation,
+  GeoSpecNativeEngine,
+  GeoSpecNativeSubject,
+} from '#engine/client.js';
 export { geoSpecNativeMatcherDescriptors } from '#engine/matchers.js';
 export type { GeoSpecFixedNativeMatcherDescriptor, GeoSpecNativeMatcherName } from '#engine/matchers.js';

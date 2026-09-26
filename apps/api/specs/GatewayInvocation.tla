@@ -68,7 +68,9 @@ CONSTANTS
     \* @type: Bool;
     FenceGen,
     \* @type: Bool;
-    DeferGrace
+    DeferGrace,
+    \* @type: Bool;
+    CountRetries
 
 None == "none"
 
@@ -317,7 +319,7 @@ HostReprepare ==
     /\ host.ph = "lost"
     /\ runRetries < LostReplyRetries
     /\ reprepares' = reprepares + 1
-    /\ runRetries' = runRetries + 1
+    /\ runRetries' = IF CountRetries THEN runRetries + 1 ELSE runRetries
     /\ host' = [host EXCEPT !.ph = "ready"]
     /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, bound, shown, marker, settledRow,
                    runLosses, unrecorded>>

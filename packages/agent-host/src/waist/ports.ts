@@ -207,8 +207,6 @@ export type InvocationFunding =
   | { readonly type: 'unfunded' }
   | {
       readonly type: 'funded';
-      /** The signed-in account the gateway charges, when the transport knows it (W7 RA-S11, `MODEL_ATTEMPT_OTHER_ACCOUNT`). */
-      principal?: () => Promise<string | undefined>;
       /** Whether this provider/model selection uses Tau's funded gateway. */
       usesBillingAttempt(providerKind: ModelProviderKind | undefined): boolean;
       /**
@@ -216,6 +214,11 @@ export type InvocationFunding =
        * `UNAUTHENTICATED` as `stream` does; an answer this build cannot read throws `MALFORMED_RESPONSE`.
        */
       resolveInvocation(request: InvocationResolutionRequest): Promise<InvocationResolution>;
+      /**
+       * The signed-in account the gateway charges (W7 RA-S11, `MODEL_ATTEMPT_OTHER_ACCOUNT`); `undefined` means
+       * unknown, so the host cannot check the attempt's account.
+       */
+      principal(): Promise<string | undefined>;
     };
 
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */

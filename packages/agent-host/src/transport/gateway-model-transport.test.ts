@@ -821,6 +821,14 @@ describe('createGatewayModelTransport', () => {
       expect(fetchSpy).toHaveBeenCalledOnce();
     });
 
+    it('should report an unknown principal until the credential port supplies it', async () => {
+      const { funding } = createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: vi.fn() });
+      if (funding.type !== 'funded') {
+        throw new Error('Tau Cloud transport must be funded');
+      }
+      await expect(funding.principal()).resolves.toBeUndefined();
+    });
+
     it('should report a pending attempt without its operation', async () => {
       await expect(resolverFor(async () => json({ state: 'pending', operationId: 'operation-1' }))()).resolves.toEqual({
         status: 'pending',

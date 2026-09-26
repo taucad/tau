@@ -120,6 +120,14 @@
       "ref": "L4 D-086: a known attempt ends in an uncoded error",
       "fixedBy": "W0.16"
     },
+    "GatewayInvocation.uncounted-retry-LostReplyBound.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LostReplyBound"
+      },
+      "kind": "witness",
+      "ref": "mutant: a re-prepare that does not count its retry (CountRetries off) lets a live run prepare after more than LostReplyRetries charged losses"
+    },
     "GatewayInvocation.unfenced-finish-3.cfg": {
       "tier": "nightly",
       "expect": {

@@ -4,7 +4,7 @@ import type { ParameterDeclaration } from '#manifest.js';
 import type { JSONSchema7 } from '@taucad/json-schema';
 
 /** Input for projecting one admitted Draft-07 or 2020-12 schema into a native parameter declaration. @public */
-export type Draft7ParameterDeclarationInput = Readonly<{
+export type JsonSchemaParameterDeclarationInput = Readonly<{
   schema: JSONSchema7 | Readonly<Record<string, unknown>>;
   defaults: Readonly<Record<string, unknown>>;
   schemaId: string;
@@ -295,8 +295,8 @@ const createProjection = (
  * @returns An admitted immutable native parameter declaration.
  * @public
  */
-export const projectDraft7SchemaToParameterDeclaration = (
-  input: Draft7ParameterDeclarationInput,
+export const projectJsonSchemaToParameterDeclaration = (
+  input: JsonSchemaParameterDeclarationInput,
 ): ParameterDeclaration => {
   const { defaults, schema, schemaId, schemaName } = input;
   const schemaRecord = Object.fromEntries(Object.entries(schema));

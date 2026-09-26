@@ -7,7 +7,7 @@ import {
   admitParameterValues,
   compileParameterManifest,
   parameterManifestProfile,
-  projectDraft7SchemaToParameterDeclaration,
+  projectJsonSchemaToParameterDeclaration,
   projectParameterSchema,
   resolveParameterBinding,
 } from '@taucad/parameters';
@@ -1360,7 +1360,7 @@ describe('2020-12 parameter schema view', () => {
       throw new Error('expected a usable view');
     }
 
-    const readmitted = projectDraft7SchemaToParameterDeclaration({
+    const readmitted = projectJsonSchemaToParameterDeclaration({
       schema: view.schema,
       defaults: producer.defaults,
       schemaId: 'urn:taucad:test:view',

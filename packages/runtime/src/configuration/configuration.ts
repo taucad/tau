@@ -5,7 +5,7 @@ import { admitJsonSchema, resolveLocalSchema, validateJsonSchemaValue } from '@t
 import type { JsonSchema } from '@taucad/parameters/schema';
 import { assertBoundedJson, cloneBoundedJson } from '@taucad/parameters/json';
 import { configurationIconIds } from '#configuration/configuration-icons.generated.js';
-import { admitParameterDeclaration, projectDraft7SchemaToParameterDeclaration } from '@taucad/parameters';
+import { admitParameterDeclaration, projectJsonSchemaToParameterDeclaration } from '@taucad/parameters';
 import type { ParameterDeclaration } from '@taucad/parameters';
 
 /** Widgets admitted by configuration manifest version one. @public */
@@ -542,7 +542,7 @@ const createNativeConfigurationDeclaration = (
   try {
     return {
       status: 'usable',
-      declaration: projectDraft7SchemaToParameterDeclaration({
+      declaration: projectJsonSchemaToParameterDeclaration({
         schema,
         defaults,
         schemaId: `urn:taucad:configuration:${encodeURIComponent(source.id)}:${encodeURIComponent(source.version)}:${direction}`,

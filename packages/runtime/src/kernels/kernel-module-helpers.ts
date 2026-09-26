@@ -13,7 +13,7 @@ import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
 import { assertRootedPath } from '@taucad/utils/path';
-import { projectDraft7SchemaToParameterDeclaration } from '@taucad/parameters';
+import { projectJsonSchemaToParameterDeclaration } from '@taucad/parameters';
 import type { ParameterDeclaration } from '@taucad/parameters';
 import type { JSONSchema7 } from '@taucad/json-schema';
 
@@ -200,7 +200,7 @@ export const createKernelParameterDeclaration = (
   schema: JSONSchema7 | Readonly<Record<string, unknown>>,
   identity: Readonly<{ id: string; name: string }>,
 ): ParameterDeclaration =>
-  projectDraft7SchemaToParameterDeclaration({
+  projectJsonSchemaToParameterDeclaration({
     defaults,
     schema,
     schemaId: identity.id,

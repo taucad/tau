@@ -43,6 +43,7 @@
  * | 33 | `initialSync → failed` + parent `childToast` | **L2-F8**: a toast reaches the root, not only a subscriber of this child |
  * | 34 | `reading → connected` invokes `readStorage` | **D18**: a reopened project shows its usage without connecting again |
  * | 35 | `connected`, `readStorage` fails | **D18**: a usage read that fails leaves the connection and its figure alone |
+ * | 36 | `connected --quotaRefused-->` after `readStorage` | **D18**: a refusal's figures keep the retained-packs figure it does not carry |
  *
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
@@ -897,6 +898,25 @@ describe('remoteMachine', () => {
     expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
       error: undefined,
       storage: { used: 2_100_000_000, quota: 10_000_000_000 },
+    });
+    actor.stop();
+  });
+
+  it('36 (D18): keeps the retained-packs figure when a refusal replaces what is used', async () => {
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async (): Promise<RemoteStorage | undefined> => ({ used: 1, quota: 1024 ** 3, retained: 5 * 1024 ** 2 }),
+      }),
+    });
+    await settle();
+
+    actor.send({ type: 'quotaRefused', paths: ['huge.bin'], used: 1024 ** 3 + 1, quota: 1024 ** 3 });
+
+    expect(selectRemoteFacet(actor.getSnapshot()).storage).toStrictEqual({
+      used: 1024 ** 3 + 1,
+      quota: 1024 ** 3,
+      retained: 5 * 1024 ** 2,
     });
     actor.stop();
   });

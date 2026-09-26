@@ -798,11 +798,18 @@ export const readRemoteStorageOverHttp = async (
     return undefined;
   }
   const body = (await response.json()) as Readonly<Record<string, unknown>>;
-  const { storageBytes, lfsBytes, storageLimitBytes } = body;
+  const { storageBytes, lfsBytes, storageLimitBytes, retainedBytes } = body;
   if (typeof storageBytes !== 'number' || typeof lfsBytes !== 'number' || typeof storageLimitBytes !== 'number') {
     return undefined;
   }
-  return storageLimitBytes > 0 ? { used: storageBytes + lfsBytes, quota: storageLimitBytes } : undefined;
+  if (storageLimitBytes <= 0) {
+    return undefined;
+  }
+  const used = storageBytes + lfsBytes;
+  /* An API that predates the column sends no `retainedBytes`: no second figure. */
+  return typeof retainedBytes === 'number' && retainedBytes > 0
+    ? { used, quota: storageLimitBytes, retained: retainedBytes }
+    : { used, quota: storageLimitBytes };
 };
 
 /**

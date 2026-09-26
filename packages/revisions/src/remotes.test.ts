@@ -752,6 +752,19 @@ describe('the Tau Cloud publish and register legs', () => {
     }
   });
 
+  it('should read retained packs as their own figure, outside what is used', async () => {
+    const answered = capture(200, { storageBytes: 300, lfsBytes: 40, storageLimitBytes: 1024, retainedBytes: 500 });
+    try {
+      expect(await readRemoteStorageOverHttp('https://api.test', { kind: 'cookie' }, 'p1')).toStrictEqual({
+        used: 340,
+        quota: 1024,
+        retained: 500,
+      });
+    } finally {
+      answered.restore();
+    }
+  });
+
   it('should draw no figure for a collaborator, a plan that cannot sync or an answer it cannot read', async () => {
     for (const [status, body] of [
       [403, { code: 'PROJECT_ROLE_INSUFFICIENT' }],

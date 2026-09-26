@@ -221,7 +221,7 @@ describe('RevisionSyncRegion', () => {
     );
 
     /* Round 18: under 75 % the figure rides the backup line; the meter waits until storage is worth watching. */
-    expect(screen.getByText('2.1 GB of 10.0 GB')).toBeInTheDocument();
+    expect(screen.getByText('2.1 GB of 10 GB')).toBeInTheDocument();
     expect(screen.queryByRole('meter', { name: 'Storage used against your plan' })).not.toBeInTheDocument();
     expect(screen.getByText('Tau Cloud')).toBeInTheDocument();
     expect(screen.queryByText('https://api.tau.new/v1/git/p1.git')).not.toBeInTheDocument();
@@ -990,6 +990,91 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     expect(region.upgrade).toHaveBeenCalled();
     /* The whole point of the gate: nothing is registered on the server. */
     expect(region.connect).not.toHaveBeenCalled();
+  });
+
+  /* D16: an entitled account is told what its plan includes, not what it withholds. */
+  it('should name the included allowance on the Tau Cloud choice instead of a plan gate', () => {
+    renderRegion(facet(), syncFacet(), { storageLimitBytes: 1024 ** 3 });
+
+    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeEnabled();
+    expect(screen.getByText('1 GB included')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Available on Pro/u })).not.toBeInTheDocument();
+  });
+
+  /* D18: the figure the usage route answered, in the words a later 413 quotes. */
+  it('should show a free account’s usage as x of 1 GB', () => {
+    renderRegion(facet({ kind: 'tau', phase: 'connected', storage: { used: 340 * 1024 ** 2, quota: 1024 ** 3 } }));
+
+    expect(screen.getByRole('status', { name: 'Backup status' })).toHaveTextContent('340.0 MB of 1 GB');
+  });
+
+  /*
+   * D17: the quota refusal's one action follows the viewer's relationship. The
+   * owner who can grow the plan is offered Upgrade; an owner with no larger
+   * plan (the pane withholds `onUpgrade`) and a collaborator get the sentence
+   * and the file list alone.
+   */
+  describe('quota refusal by relationship (D17)', () => {
+    const overQuota = facet({
+      kind: 'tau',
+      phase: 'connected',
+      storage: { used: 1024 ** 3, quota: 1024 ** 3 },
+      overQuota: ['inputs/enclosure-scan.step', 'inputs/reference.stl'],
+    });
+    const refused = (error: string): SyncFacet =>
+      syncFacet({ state: 'failed', pendingCount: 1, error, reason: 'quota' });
+
+    it('should offer the owner on Free exactly one action, Upgrade', () => {
+      renderRegion(
+        overQuota,
+        refused('This push needs more room than your 1 GB storage plan has left, so it was not backed up.'),
+        { role: 'owner' },
+      );
+
+      const row = screen.getByRole('status', { name: 'Backup status' });
+      expect(row).toHaveTextContent('your 1 GB storage plan');
+      expect(
+        within(row)
+          .getAllByRole('button')
+          .map((button) => button.textContent.trim()),
+      ).toStrictEqual(['Pro Upgrade']);
+      expect(screen.getByText('These files are over your plan and were not backed up:')).toBeInTheDocument();
+    });
+
+    it('should give an owner on the top tier the file list and no plan action', () => {
+      renderRegion(
+        overQuota,
+        refused(
+          'This push needs more room than your 100 GB storage plan has left, so it was not backed up. Remove or stop tracking the largest files to make room.',
+        ),
+        { role: 'owner', onUpgrade: undefined },
+      );
+
+      const row = screen.getByRole('status', { name: 'Backup status' });
+      expect(within(row).queryByRole('button')).not.toBeInTheDocument();
+      expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toStrictEqual([
+        'inputs/enclosure-scan.step',
+        'inputs/reference.stl',
+      ]);
+    });
+
+    it('should direct a write collaborator to the owner with no plan action', () => {
+      const region = renderRegion(
+        overQuota,
+        refused(
+          "This push needs more room than the project owner's storage plan has left, so it was not backed up. Ask the owner to make room.",
+        ),
+        { role: 'write' },
+      );
+
+      const row = screen.getByRole('status', { name: 'Backup status' });
+      expect(row).toHaveTextContent('Ask the owner to make room.');
+      expect(within(row).queryByRole('button', { name: /Upgrade/u })).not.toBeInTheDocument();
+      expect(
+        screen.getByText('These files did not fit in the project owner’s plan and were not backed up:'),
+      ).toBeInTheDocument();
+      expect(region.upgrade).not.toHaveBeenCalled();
+    });
   });
 
   it('offers Sync exports beside Sync chats on a connected project (C14, EQ7)', async () => {

@@ -414,6 +414,7 @@ export const selectStripVerbs = ({
   undoable,
   canUndo = false,
   canWrite,
+  canUpgrade = true,
 }: Readonly<{
   status: RevisionStatusProjection | undefined;
   where: RevisionWhere;
@@ -428,6 +429,12 @@ export const selectStripVerbs = ({
    */
   canUndo?: boolean;
   canWrite: boolean;
+  /**
+   * *Upgrade* is this viewer's to take (D17): the owner, on a plan a larger one
+   * exists for. A collaborator's and a top-tier owner's storage refusal names
+   * no plan action, on this strip as in the Sync row.
+   */
+  canUpgrade?: boolean;
 }>): Readonly<{ primary: StripVerb | undefined; secondary: readonly StripVerb[] }> => {
   if (status === undefined || !canWrite || status.conflicts.length > 0 || status.sync.state === 'conflicted') {
     return { primary: undefined, secondary: [] };
@@ -450,7 +457,7 @@ export const selectStripVerbs = ({
     return { primary: 'Sign in', secondary };
   }
   if (sync.state === 'failed' && (sync.reason === 'quota' || sync.reason === 'notEntitled')) {
-    return { primary: 'Upgrade', secondary };
+    return { primary: canUpgrade ? 'Upgrade' : undefined, secondary };
   }
   return { primary: undefined, secondary };
 };

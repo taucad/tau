@@ -33,7 +33,11 @@ const resetClippingGroup = (group: ClippingGroup): void => {
 };
 
 const applyClippingGroupPlane = (group: ClippingGroup, plane: THREE.Plane | undefined): void => {
-  group.clippingPlanes = plane ? [plane] : [];
+  // Runs every frame. three re-projects the list's planes each frame and tracks only its length, so the
+  // list is replaced only when the committed plane changes.
+  if (group.clippingPlanes[0] !== plane) {
+    group.clippingPlanes = plane ? [plane] : [];
+  }
   group.enabled = Boolean(plane);
 };
 

@@ -287,6 +287,84 @@ describe('SectionClippingGroup', () => {
     });
   });
 
+  it('should keep the ClippingGroup plane list until the committed plane changes (WebGPU)', async () => {
+    const stubGl = createStubWebGlRenderer();
+    const canvas = stubGl.domElement;
+    const innerRef = React.createRef<ActualThree.Group>();
+    const model = (
+      <group ref={innerRef}>
+        <primitive
+          object={new ActualThree.Mesh(new ActualThree.BoxGeometry(1, 1, 1), new ActualThree.MeshStandardMaterial())}
+        />
+      </group>
+    );
+    const snapshotStore = createSectionViewSafeSnapshotStore();
+    const commit = (identity: string, plane: ActualThree.Plane): void => {
+      commitSectionViewSafeSnapshot(snapshotStore, {
+        identity,
+        sourceIdentity: 'test-source',
+        kind: 'complete',
+        plane,
+      });
+    };
+    commit('first', testPlane);
+
+    document.body.append(canvas);
+    const root = createRoot(canvas);
+    await act(async () => {
+      await root.configure({
+        camera: new ActualThree.PerspectiveCamera(75, 800 / 600, 0.1, 100_000),
+        gl: stubGl,
+        size: { height: 600, left: 0, top: 0, width: 800 },
+      });
+    });
+    // Each render re-applies the committed plane, as every frame does.
+    const renderClippingGroup = (plane: ActualThree.Plane): void => {
+      root.render(
+        <ThreeGraphicsBackendProvider value='webgpu'>
+          <SectionClippingGroup
+            enableLines
+            enableMesh
+            enabled
+            innerRef={innerRef}
+            plane={plane}
+            snapshotRef={{ current: snapshotStore }}
+          >
+            {model}
+          </SectionClippingGroup>
+        </ThreeGraphicsBackendProvider>,
+      );
+    };
+
+    try {
+      await act(async () => {
+        renderClippingGroup(testPlane);
+      });
+      const group = innerRef.current?.parent as ClippingGroup;
+      const firstList = group.clippingPlanes;
+      expect(firstList).toHaveLength(1);
+      expect(firstList[0]).toBe(snapshotStore.committed?.plane);
+
+      await act(async () => {
+        renderClippingGroup(new ActualThree.Plane(new ActualThree.Vector3(0, 0, 1), 0.25));
+      });
+      expect(group.clippingPlanes).toBe(firstList);
+
+      commit('second', new ActualThree.Plane(new ActualThree.Vector3(0, 0, 1), 0.5));
+      await act(async () => {
+        renderClippingGroup(new ActualThree.Plane(new ActualThree.Vector3(0, 0, 1), 0.5));
+      });
+      expect(group.clippingPlanes).not.toBe(firstList);
+      expect(group.clippingPlanes).toHaveLength(1);
+      expect(group.clippingPlanes[0]).toBe(snapshotStore.committed?.plane);
+    } finally {
+      act(() => {
+        root.unmount();
+        canvas.remove();
+      });
+    }
+  });
+
   it('should not re-traverse the model when only the plane moves (WebGL)', async () => {
     const stubGl = createStubWebGlRenderer();
     const canvas = stubGl.domElement;

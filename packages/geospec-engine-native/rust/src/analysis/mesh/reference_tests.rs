@@ -79,7 +79,8 @@ fn weld(positions: &[Vec3]) -> Vec<u32> {
     canonical
 }
 
-fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
+/// The reference quality and, separately, its per-triangle rows.
+fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> (MeshQuality, Vec<MeshTriangle>) {
     let mut triangles = Vec::with_capacity(record.triangles.len());
     let mut non_finite_vertices = Vec::new();
     let mut degenerate_triangles = Vec::new();
@@ -138,18 +139,23 @@ fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
         triangles.push(triangle);
     }
 
-    MeshQuality {
+    let quality = MeshQuality {
         triangle_count: triangles.len() as u32,
         non_finite_vertices,
         degenerate_triangles,
-        triangles,
         surface_area,
         signed_volume,
         center_of_mass: (signed_volume.is_finite() && signed_volume != 0.0)
             .then(|| centroid.map(|value| value / signed_volume)),
+        names: record
+            .primitives
+            .iter()
+            .map(|primitive| primitive.name.as_str().into())
+            .collect(),
         record,
         duplicate_faces: OnceCell::new(),
-    }
+    };
+    (quality, triangles)
 }
 
 fn duplicate_faces(record: &MeshAnalysisRecord, triangles: &[MeshTriangle]) -> Vec<DuplicateFace> {
@@ -534,8 +540,8 @@ struct_bits! {
     DegenerateTriangle { primitive, triangle_index, area, center }
     DuplicateFace { primitive, triangle_index, first_triangle_index }
     MeshQuality {
-        triangle_count, non_finite_vertices, degenerate_triangles, triangles, surface_area,
-        signed_volume, center_of_mass
+        triangle_count, non_finite_vertices, degenerate_triangles, surface_area, signed_volume,
+        center_of_mass
     }
     Piece { primitive_vertices, aabb, vertices }
 }
@@ -575,11 +581,20 @@ fn assert_matches_reference(record: MeshAnalysisRecord, label: &str) {
         "{label}: watertight"
     );
     let quality = analysis.mesh_quality();
-    let expected_quality = mesh_quality(Rc::clone(&record));
+    let (expected_quality, expected_rows) = mesh_quality(Rc::clone(&record));
     assert_eq!(text(&*quality), text(&expected_quality), "{label}: quality");
+    let rows: Vec<_> = quality.triangles().collect();
+    assert_eq!(text(&rows), text(&expected_rows), "{label}: rows");
+    for row in &expected_rows {
+        assert_eq!(
+            text(&quality.triangle_center(row.triangle_index)),
+            text(&Some(row.center)),
+            "{label}: row centre"
+        );
+    }
     assert_eq!(
         text(&*quality.duplicate_faces()),
-        text(&duplicate_faces(&record, &expected_quality.triangles)),
+        text(&duplicate_faces(&record, &expected_rows)),
         "{label}: duplicate faces"
     );
     // Pieces are the only changed input of the unchanged component analysis.

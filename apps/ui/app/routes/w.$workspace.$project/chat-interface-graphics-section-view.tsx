@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Box, PenLine, Ruler } from 'lucide-react';
 import { convertLength, toUcumLengthCode } from '#constants/length-units.js';
 import type { LengthSymbol } from '#constants/length-units.js';
@@ -33,6 +33,8 @@ const angleProjection: ParameterFieldProjection = {
   adornment: '°',
   guessed: false,
 };
+
+const transientEdit = { kind: 'transient' } as const;
 
 type PlaneButtonConfig = {
   id: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
@@ -116,31 +118,20 @@ function getPlaneButtonsForUpDirection(upDirection: 'x' | 'y' | 'z'): PlaneButto
 
 export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
   const graphicsActor = useGraphics();
-  const {
-    selectedSectionViewId,
-    sectionViewTranslation,
-    sectionViewRotation,
-    sectionViewDirection,
-    planeName,
-    enableClippingLines,
-    enableClippingMesh,
-    geometryRadius,
-    geometryCenter,
-    displayLengthSymbol,
-    upDirection,
-  } = useGraphicsSelector((s) => ({
-    selectedSectionViewId: s.context.selectedSectionViewId,
-    sectionViewTranslation: s.context.sectionViewTranslation,
-    sectionViewRotation: s.context.sectionViewRotation,
-    sectionViewDirection: s.context.sectionViewDirection,
-    planeName: s.context.planeName,
-    enableClippingLines: s.context.enableClippingLines,
-    enableClippingMesh: s.context.enableClippingMesh,
-    geometryRadius: s.context.geometryRadius,
-    geometryCenter: s.context.geometryCenter,
-    displayLengthSymbol: s.context.displayUnits.length.symbol,
-    upDirection: s.context.upDirection,
-  }));
+  // One primitive (or stable reference) per selector: the panel re-renders only when a value it shows changes.
+  const selectedSectionViewId = useGraphicsSelector((s) => s.context.selectedSectionViewId);
+  const sectionViewTranslation = useGraphicsSelector((s) => s.context.sectionViewTranslation);
+  const rotationDegreesX = useGraphicsSelector((s) => toDegrees(s.context.sectionViewRotation[0]));
+  const rotationDegreesY = useGraphicsSelector((s) => toDegrees(s.context.sectionViewRotation[1]));
+  const rotationDegreesZ = useGraphicsSelector((s) => toDegrees(s.context.sectionViewRotation[2]));
+  const sectionViewDirection = useGraphicsSelector((s) => s.context.sectionViewDirection);
+  const planeName = useGraphicsSelector((s) => s.context.planeName);
+  const enableClippingLines = useGraphicsSelector((s) => s.context.enableClippingLines);
+  const enableClippingMesh = useGraphicsSelector((s) => s.context.enableClippingMesh);
+  const geometryRadius = useGraphicsSelector((s) => s.context.geometryRadius);
+  const geometryCenter = useGraphicsSelector((s) => s.context.geometryCenter);
+  const displayLengthSymbol = useGraphicsSelector((s) => s.context.displayUnits.length.symbol);
+  const upDirection = useGraphicsSelector((s) => s.context.upDirection);
 
   const translationControl = useMemo(
     () =>
@@ -169,10 +160,36 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
     }),
     [displayLengthSymbol],
   );
-  const rotationDegrees = useMemo(() => {
-    const [rx, ry, rz] = sectionViewRotation;
-    return { x: toDegrees(rx), y: toDegrees(ry), z: toDegrees(rz) };
-  }, [sectionViewRotation]);
+
+  /* Stable handlers keep each row's props unchanged while another row is dragged. A rotation row reads
+   * the other two axes when it sends, so it needs no re-render when they change. */
+  const handleTranslationChange = useCallback(
+    (value: number) => {
+      graphicsActor.send({ type: 'setSectionViewTranslation', payload: value });
+    },
+    [graphicsActor],
+  );
+  const handleRotationChangeX = useCallback(
+    (value: number) => {
+      const [, ry, rz] = graphicsActor.getSnapshot().context.sectionViewRotation;
+      graphicsActor.send({ type: 'setSectionViewRotation', payload: [toRadians(value), ry, rz] });
+    },
+    [graphicsActor],
+  );
+  const handleRotationChangeY = useCallback(
+    (value: number) => {
+      const [rx, , rz] = graphicsActor.getSnapshot().context.sectionViewRotation;
+      graphicsActor.send({ type: 'setSectionViewRotation', payload: [rx, toRadians(value), rz] });
+    },
+    [graphicsActor],
+  );
+  const handleRotationChangeZ = useCallback(
+    (value: number) => {
+      const [rx, ry] = graphicsActor.getSnapshot().context.sectionViewRotation;
+      graphicsActor.send({ type: 'setSectionViewRotation', payload: [rx, ry, toRadians(value)] });
+    },
+    [graphicsActor],
+  );
 
   const rotationDisabled = useMemo(() => {
     if (selectedSectionViewId === 'xy') {
@@ -268,16 +285,14 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
               </div>
               <ParametersNumber
                 enableContinualOnChange
-                edit={{ kind: 'transient' }}
+                edit={transientEdit}
                 fieldProjection={translationProjection}
                 value={sectionViewTranslation}
                 defaultValue={0}
                 step={translationControl.stepMeters}
                 min={translationControl.minMeters}
                 max={translationControl.maxMeters}
-                onChange={(value) => {
-                  graphicsActor.send({ type: 'setSectionViewTranslation', payload: value });
-                }}
+                onChange={handleTranslationChange}
               />
             </div>
           </div>
@@ -290,18 +305,15 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 </div>
                 <ParametersNumber
                   enableContinualOnChange
-                  edit={{ kind: 'transient' }}
+                  edit={transientEdit}
                   fieldProjection={angleProjection}
-                  value={rotationDegrees.x}
+                  value={rotationDegreesX}
                   defaultValue={0}
                   min={-180}
                   max={180}
                   step={1}
                   disabled={rotationDisabled.x}
-                  onChange={(value) => {
-                    const [, ry, rz] = sectionViewRotation;
-                    graphicsActor.send({ type: 'setSectionViewRotation', payload: [toRadians(value), ry, rz] });
-                  }}
+                  onChange={handleRotationChangeX}
                 />
               </div>
               <div className='grid grid-cols-[20px_1fr] items-center gap-2'>
@@ -310,18 +322,15 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 </div>
                 <ParametersNumber
                   enableContinualOnChange
-                  edit={{ kind: 'transient' }}
+                  edit={transientEdit}
                   fieldProjection={angleProjection}
-                  value={rotationDegrees.y}
+                  value={rotationDegreesY}
                   defaultValue={0}
                   min={-180}
                   max={180}
                   step={1}
                   disabled={rotationDisabled.y}
-                  onChange={(value) => {
-                    const [rx, , rz] = sectionViewRotation;
-                    graphicsActor.send({ type: 'setSectionViewRotation', payload: [rx, toRadians(value), rz] });
-                  }}
+                  onChange={handleRotationChangeY}
                 />
               </div>
               <div className='grid grid-cols-[20px_1fr] items-center gap-2'>
@@ -330,18 +339,15 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 </div>
                 <ParametersNumber
                   enableContinualOnChange
-                  edit={{ kind: 'transient' }}
+                  edit={transientEdit}
                   fieldProjection={angleProjection}
-                  value={rotationDegrees.z}
+                  value={rotationDegreesZ}
                   defaultValue={0}
                   min={-180}
                   max={180}
                   step={1}
                   disabled={rotationDisabled.z}
-                  onChange={(value) => {
-                    const [rx, ry] = sectionViewRotation;
-                    graphicsActor.send({ type: 'setSectionViewRotation', payload: [rx, ry, toRadians(value)] });
-                  }}
+                  onChange={handleRotationChangeZ}
                 />
               </div>
             </div>

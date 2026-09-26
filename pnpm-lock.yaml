@@ -2573,6 +2573,9 @@ importers:
       '@taucad/json-schema':
         specifier: workspace:*
         version: link:../../libs/json-schema
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../../packages/kinematics
       '@taucad/lsp':
         specifier: workspace:*
         version: link:../libs/lsp

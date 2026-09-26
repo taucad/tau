@@ -18,8 +18,10 @@ import {
 import { recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
+import { kinematicsMachine } from '#machines/kinematics.machine.js';
 
 export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
+export type KinematicsRef = ActorRefFrom<typeof kinematicsMachine>;
 
 export type ModelPointerClickSuppressionReason = 'measureTool';
 
@@ -208,6 +210,8 @@ export type GraphicsContext = {
   modelInteractionRef: ModelInteractionRef;
   ownsModelInteractionRef: boolean;
   modelInteractionUnitId?: string;
+  /** Per-view mechanism pose, keyed by the same unit ids as model interaction. */
+  kinematicsRef: KinematicsRef;
 
   // Geometry data from CAD
   geometry: Geometry | undefined;
@@ -609,6 +613,7 @@ function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number,
 const graphicsActors = {
   probeWebGpu: createAsyncLogic({ run: async () => probeWebGpuSupport() }),
   modelInteraction: modelInteractionMachine,
+  kinematics: kinematicsMachine,
 };
 
 type GraphicsEnqueue = EnqueueObject<GraphicsEvent, GraphicsEmitted, SystemRegistry, typeof graphicsActors>;
@@ -892,6 +897,7 @@ export const graphicsMachine = setup({
       modelInteractionRef,
       ownsModelInteractionRef,
       modelInteractionUnitId: undefined,
+      kinematicsRef: spawn(actors.kinematics, { id: 'kinematics', input: {} }),
 
       // Shapes
       geometry: undefined,
@@ -907,6 +913,7 @@ export const graphicsMachine = setup({
     if (context.ownsModelInteractionRef) {
       enq.stop(context.modelInteractionRef);
     }
+    enq.stop(context.kinematicsRef);
   },
   initial: 'operational',
   states: {

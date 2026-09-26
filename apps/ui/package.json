@@ -34,6 +34,7 @@
     "@taucad/image": "workspace:*",
     "@taucad/jscad": "workspace:*",
     "@taucad/json-schema": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/lsp": "workspace:*",
     "@taucad/lsp-fs": "workspace:*",
     "@taucad/manifold": "workspace:*",

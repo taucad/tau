@@ -15,6 +15,7 @@
 #include <BRepExtrema_SupportType.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <IMeshTools_Parameters.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <IMeshData_Status.hxx>
 #include <BRepTools_WireExplorer.hxx>
@@ -4933,7 +4934,15 @@ uint64_t float_bits(double value) {
 
 void mesh_shape(const TopoDS_Shape& shape, double linear, double angular,
                 bool run_parallel = false) {
-  BRepMesh_IncrementalMesh mesher(shape, linear, false, angular, run_parallel);
+  // DEFAULT would read CSF_MeshAlgo on every Perform (GeoSpec policy section 16);
+  // the other fields are the five-argument constructor's.
+  IMeshTools_Parameters parameters;
+  parameters.MeshAlgo = IMeshTools_MeshAlgoType_Watson;
+  parameters.Deflection = linear;
+  parameters.Angle = angular;
+  parameters.Relative = false;
+  parameters.InParallel = run_parallel;
+  BRepMesh_IncrementalMesh mesher(shape, parameters);
   if (!mesher.IsDone()) throw Standard_Failure("Tessellation failed.");
   // IsDone is set after collecting face/wire failures; it is not completeness.
   const int incomplete = IMeshData_OpenWire | IMeshData_SelfIntersectingWire |

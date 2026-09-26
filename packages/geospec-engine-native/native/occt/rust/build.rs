@@ -41,14 +41,23 @@ fn main() {
         .cpp(true)
         .std("c++17")
         .warnings(true)
+        .flag("-Werror=deprecated-declarations")
+        // Installed-header `__FILE__` strings must not carry the builder's prefix path.
+        .flag(format!("-ffile-prefix-map={}=occt", prefix.display()))
         .include(&include)
         .include("../bridge")
         .file("../bridge/geospec_occt_bridge.cpp")
         .compile("geospec_occt_bridge");
 
+    // em++ links the prefix archives itself, so the Emscripten staticlib must not re-bundle their members.
+    let kind = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("emscripten") {
+        "static:-bundle"
+    } else {
+        "static"
+    };
     println!("cargo:rustc-link-search=native={}", library.display());
     for toolkit in toolkits {
-        println!("cargo:rustc-link-lib=static={toolkit}");
+        println!("cargo:rustc-link-lib={kind}={toolkit}");
     }
 }
 

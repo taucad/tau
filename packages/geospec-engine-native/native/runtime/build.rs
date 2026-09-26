@@ -992,6 +992,15 @@ fn semantic_rustflags() -> Vec<String> {
             index += PYTHON_DARWIN_SYMBOL_LOOKUP.len();
             continue;
         }
+        // Path remapping only rewrites embedded source paths; the identity must not carry the checkout path.
+        if flags[index] == "--remap-path-prefix" {
+            index += 2;
+            continue;
+        }
+        if flags[index].starts_with("--remap-path-prefix=") {
+            index += 1;
+            continue;
+        }
         semantic.push(flags[index].clone());
         index += 1;
     }

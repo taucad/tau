@@ -346,8 +346,9 @@ const main = (): void => {
       const cmakeCache = resolve(mtPrefix, 'build/CMakeCache.txt');
       const cmakeFlags = readFileSync(cmakeCache, 'utf8');
       if (
-        !/^CMAKE_C_FLAGS:STRING=.*-pthread$/m.test(cmakeFlags) ||
-        !/^CMAKE_CXX_FLAGS:STRING=.*-pthread$/m.test(cmakeFlags)
+        // The builder appends its path map after the recipe's flags, so -pthread is any token of the value.
+        !/^CMAKE_C_FLAGS:STRING=(?:.*\s)?-pthread(?:\s.*)?$/m.test(cmakeFlags) ||
+        !/^CMAKE_CXX_FLAGS:STRING=(?:.*\s)?-pthread(?:\s.*)?$/m.test(cmakeFlags)
       ) {
         throw new Error('MT OCCT CMake cache lacks pthread flags on C or C++ objects.');
       }

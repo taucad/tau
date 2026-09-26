@@ -271,7 +271,7 @@ catalog:
   isomorphic-git: 1.38.5
   xstate: 6.0.0-alpha.59
   zod: ^4.4.3
-  nanoraster: ^0.5.3
+  nanoraster: ^0.5.4
   n8ao: 1.10.2
   postprocessing: 6.39.1
   '@hatchet-dev/typescript-sdk': 1.29.2

@@ -142,7 +142,7 @@ function OrientationStrip({
   const commands = useRevisionCommands();
   const { restore, undo, isBusy } = useRestoreToPoint();
   const saveRevision = useSaveRevisionRequest();
-  const { requestUpgrade } = useCommercialFeatures();
+  const { requestUpgrade, canUpgradePlan } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
   const isAnonymous = useAnonymousRevisions(workspace);
   const isUnknown = line.kind === 'unknown';
@@ -156,6 +156,8 @@ function OrientationStrip({
     undoable: status?.restore.undoable === true,
     canUndo: status?.restore.canUndo === true,
     canWrite,
+    /* D17: the plan is the owner's, and only a plan with a larger one to buy. */
+    canUpgrade: canUpgradePlan && role !== 'write',
   });
   /* A29: the chooser is already open below, so Back up would repeat it. */
   const primary = verbs.primary === 'Back up' && isSyncOpen ? undefined : verbs.primary;
@@ -909,7 +911,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   /* A29: *Sync* appears when a remote exists, or when the person opens it. */
   const [isConnectOpen, setIsConnectOpen] = useState(false);
   /* N4: the plan, read once here — the region itself stays presentational. */
-  const { canSyncFiles, canConnectGitHub, requestUpgrade } = useCommercialFeatures();
+  const { canSyncFiles, canConnectGitHub, storageLimitBytes, canUpgradePlan, requestUpgrade } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
   const chatNames = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.name])), [chats]);
   const chatCheckoutIds = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.checkoutId])), [chats]);
@@ -1028,7 +1030,8 @@ export function RevisionsPanelBody(): React.JSX.Element {
             }}
             canSyncFiles={canSyncFiles}
             canConnectGitHub={canConnectGitHub}
-            onUpgrade={requestUpgrade}
+            onUpgrade={canUpgradePlan ? requestUpgrade : undefined}
+            storageLimitBytes={storageLimitBytes}
             signInHref={signIn}
             role={projectRole}
             projectId={projectId}

@@ -62,6 +62,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
   publishFailureMessage,
   publishOverHttp,
+  readRemoteStorageOverHttp,
   readRevisionDiff,
   readRevisionLog,
   registerProjectFailureMessage,
@@ -734,6 +735,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     remoteUrl: (id) => {
       const apiBaseUrl = options.apiBaseUrl?.();
       return apiBaseUrl === undefined ? undefined : tauRemoteUrl(apiBaseUrl, id);
+    },
+    /* D18: the owner's usage for the Sync region, with the page's own session. */
+    remoteStorage: async () => {
+      const apiBaseUrl = options.apiBaseUrl?.();
+      return apiBaseUrl === undefined
+        ? undefined
+        : readRemoteStorageOverHttp(apiBaseUrl, { kind: 'cookie' }, projectId);
     },
     /* P51: connecting registers the project before anything asks the remote
      * for an advertisement it would otherwise answer `404`. */

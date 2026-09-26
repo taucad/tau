@@ -172,7 +172,7 @@ fn admit(engine: &mut Engine, corpus: &Corpus) -> Value {
     observe(
         engine.ingest_subject(
             request.as_bytes(),
-            corpus.primary_utf8.as_bytes().to_vec(),
+            corpus.primary_utf8.as_bytes(),
             Vec::new(),
         ),
         &corpus.admission_utf8,

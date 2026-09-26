@@ -174,11 +174,12 @@ fn subject_key(fields: &[(String, Json)]) -> Result<(String, &'static str, &str)
 }
 
 impl Engine {
-    /// Owns primary/resource buffers in one transfer; geometry never enters JSON.
+    /// Borrows the primary bytes and copies them only when the subject retains
+    /// its source; owns resource buffers. Geometry never enters JSON.
     pub fn ingest_subject(
         &mut self,
         request: &[u8],
-        primary: Vec<u8>,
+        primary: &[u8],
         resources: Vec<Vec<u8>>,
     ) -> Result<Vec<u8>, ProtocolError> {
         let value = decode(request)?;
@@ -300,8 +301,9 @@ impl Engine {
                     return Err(invalid("Rational plate entry requires z-up/mm, unchanged coordinates and no resources."));
                 }
                 self.observations.add(WorkCounter::Parses, 1);
-                let source = crate::certificates::plate_syntax::PlateSource::decode(primary)
-                    .map_err(|error| invalid(error.to_string()))?;
+                let source =
+                    crate::certificates::plate_syntax::PlateSource::decode(primary.to_vec())
+                        .map_err(|error| invalid(error.to_string()))?;
                 self.observations.add(WorkCounter::IdentityBuilds, 1);
                 let identity = SubjectIdentity::rational_plate(&source).map_err(backend)?;
                 let mut retained = Subject::new(
@@ -323,7 +325,7 @@ impl Engine {
                     string_field(frame, "outputUnit")?,
                 )
                 .map_err(backend)?;
-                let primary_hash = crate::identity::digest(&primary);
+                let primary_hash = crate::identity::digest(primary);
                 let (closure_key, resource_hashes) = mesh_closure_key(
                     format,
                     string_field(frame, "sourceUnit")?,
@@ -352,9 +354,9 @@ impl Engine {
                 }
                 self.observations.add(WorkCounter::Parses, 1);
                 let decoded = if format == "gltf" {
-                    decode_gltf(&primary, &bundle, applied.uniform_scale())
+                    decode_gltf(primary, &bundle, applied.uniform_scale())
                 } else {
-                    decode_glb(&primary, &bundle, applied.uniform_scale())
+                    decode_glb(primary, &bundle, applied.uniform_scale())
                 }
                 .map_err(|error| invalid(error.to_string()))?;
                 if decoded.record.positions.len() as u64
@@ -420,12 +422,12 @@ impl Engine {
                     .as_ref()
                     .ok_or_else(|| invalid("This engine composition has no BRep connector."))?;
                 let profile = connector.identity_profile();
-                let primary_hash = crate::identity::digest(&primary);
+                let primary_hash = crate::identity::digest(primary);
                 for key in self.step_sources.get(&primary_hash).into_iter().flatten() {
                     let Some(subject) = self.subjects.get(key) else {
                         continue;
                     };
-                    if subject.pmi_source_bytes() != Some(primary.as_slice()) {
+                    if subject.pmi_source_bytes() != Some(primary) {
                         continue;
                     }
                     let identity = subject.semantic_identity.get().expect("admitted identity");
@@ -445,7 +447,7 @@ impl Engine {
                     }
                 }
                 self.observations.add(WorkCounter::Parses, 1);
-                let document = connector.open_step(&primary).map_err(backend)?;
+                let document = connector.open_step(primary).map_err(backend)?;
                 let facts = document.admission_facts().map_err(backend)?;
                 if facts.occurrence_count as u64 > u64::from(self.config.binary.max_occurrences) {
                     return Err(limit(
@@ -471,19 +473,19 @@ impl Engine {
                 let _ = retained.semantic_identity.set(identity);
                 retained.display_name = step_name.unwrap_or("step").into();
                 retained.brep = Some(document);
+                // Hash and kernel admission read the borrowed bytes; a retained
+                // source is the one copy, at exactly its length.
                 if primary.len() <= crate::certificates::parallel_plane::MAX_SOURCE_BYTES
-                    && primary.capacity() as u64 <= self.config.analysis.max_mesh_bytes
+                    && primary.len() as u64 <= self.config.analysis.max_mesh_bytes
                 {
-                    // Hash and kernel admission already consumed the borrowed bytes.
-                    // Retain this allocation as the exact source owner, with no copy.
                     retained.parallel_plane = Some(
-                        crate::certificates::parallel_plane::SourceProof::new(primary),
+                        crate::certificates::parallel_plane::SourceProof::new(primary.to_vec()),
                     );
                 } else if primary.len()
                     <= crate::analysis::parallel_plane_distance::inventory::MAX_SOURCE_BYTES
-                    && primary.capacity() as u64 <= self.config.analysis.max_mesh_bytes
+                    && primary.len() as u64 <= self.config.analysis.max_mesh_bytes
                 {
-                    retained.pmi_source = Some(primary);
+                    retained.pmi_source = Some(primary.to_vec());
                 }
                 retained
             }

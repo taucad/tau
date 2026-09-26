@@ -380,7 +380,7 @@ fn connector_trait_dispatch_keeps_exact_facts_and_uses_the_bounded_worker() {
     .unwrap();
     let admission: Value = serde_json::from_slice(
         &engine
-            .ingest_subject(&request, regular_input.to_vec(), vec![])
+            .ingest_subject(&request, regular_input, vec![])
             .unwrap(),
     )
     .unwrap();

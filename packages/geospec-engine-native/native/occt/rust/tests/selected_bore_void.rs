@@ -101,7 +101,7 @@ fn selected_bore_void_original_four_requests_and_budget_refusal() {
         let bytes = std::fs::read(input().join("guide.step")).unwrap();
         let frozen_ingest = std::fs::read(input().join(format!("{i}.ingest.json"))).unwrap();
         let admission = engine
-            .ingest_subject(&bind_ingest(&frozen_ingest), bytes, vec![])
+            .ingest_subject(&bind_ingest(&frozen_ingest), &bytes, vec![])
             .unwrap();
         eprintln!(
             "BORE_VOID_ADMISSION {i} {}",

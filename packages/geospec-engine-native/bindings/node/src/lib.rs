@@ -101,14 +101,14 @@ impl Engine {
         primary: Buffer,
         resources: Vec<Buffer>,
     ) -> Result<Buffer, &'static str> {
-        self.engine()?.observe_input_copy(primary.len());
+        // The primary buffer stays borrowed; the engine copies what it retains.
         for bytes in &resources {
             self.engine()?.observe_input_copy(bytes.len());
         }
         self.engine_mut()?
             .ingest_subject(
                 request.as_ref(),
-                primary.to_vec(),
+                primary.as_ref(),
                 resources.into_iter().map(|bytes| bytes.to_vec()).collect(),
             )
             .map(Buffer::from)

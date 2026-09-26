@@ -52,7 +52,7 @@ fn current_registry_f1_plan_reaches_independent_verifier_after_fresh_admission()
         &engine
             .ingest_subject(
                 &serde_json::to_vec(&admission_request).unwrap(),
-                primary.to_vec(),
+                primary,
                 vec![],
             )
             .unwrap(),

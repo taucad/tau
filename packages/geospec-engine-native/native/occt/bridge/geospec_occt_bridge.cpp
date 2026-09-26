@@ -42,6 +42,7 @@
 #include <STEPConstruct_Tool.hxx>
 #include <STEPConstruct_ExternRefs.hxx>
 #include <STEPConstruct_UnitContext.hxx>
+#include <Standard_ArrayStreamBuffer.hxx>
 #include <Standard_Failure.hxx>
 #include <StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext.hxx>
 #include <StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx.hxx>
@@ -5953,7 +5954,9 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     reader.SetMetaMode(false);
     reader.SetColorMode(false);
     skip_semantic_check(reader);
-    std::istringstream stream(std::string(reinterpret_cast<const char*>(bytes), length));
+    // Zero-copy: the caller's bytes stay borrowed until ReadStream has parsed them.
+    Standard_ArrayStreamBuffer buffer(reinterpret_cast<const char*>(bytes), length);
+    std::istream stream(&buffer);
     if (reader.ReadStream("memory.step", step_read_parameters(), stream) != IFSelect_RetDone) {
       return fail(GEOSPEC_OCCT_READ_FAILED, "STEP read failed.", error);
     }

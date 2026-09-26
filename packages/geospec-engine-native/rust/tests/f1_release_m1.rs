@@ -51,9 +51,7 @@ fn releases_verified_plate_capacity_in_healthy_sessions() {
     let mut engine = Engine::new();
     let mut observations = Vec::new();
     for cycle in 0..40 {
-        let admission = engine
-            .ingest_subject(&request, primary.to_vec(), vec![])
-            .unwrap();
+        let admission = engine.ingest_subject(&request, primary, vec![]).unwrap();
         assert_eq!(
             admission,
             corpus["admissionUtf8"].as_str().unwrap().as_bytes()

@@ -125,7 +125,7 @@ fn rational_plate_engine_matches_frozen_fullwire_cold_and_warm() {
             let admission = observe(
                 engine.ingest_subject(
                     ingest_request.as_bytes(),
-                    case.primary_utf8.as_bytes().to_vec(),
+                    case.primary_utf8.as_bytes(),
                     Vec::new(),
                 ),
                 &case.admission_utf8,

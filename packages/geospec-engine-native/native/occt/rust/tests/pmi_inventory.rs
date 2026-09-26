@@ -92,12 +92,8 @@ fn pmi_inventory_actual_query_cold_warm_budget_polarity_and_output_refusal() {
         "ingestOptions": {}, "primaryByteLength": source.len(), "resources": []
     }))
     .unwrap();
-    let admission: Value = serde_json::from_slice(
-        &engine
-            .ingest_subject(&ingest, source.to_vec(), vec![])
-            .unwrap(),
-    )
-    .unwrap();
+    let admission: Value =
+        serde_json::from_slice(&engine.ingest_subject(&ingest, source, vec![]).unwrap()).unwrap();
     assert_eq!(admission["requestId"], "pmi");
     let subject = &admission["result"]["subject"];
     assert_eq!(subject["format"], "step");
@@ -279,12 +275,8 @@ fn pmi_inventory_actual_query_cold_warm_budget_polarity_and_output_refusal() {
         error.to_string(),
         "Subject for slot 'part' must first be ingested into this Engine."
     );
-    let readmission: Value = serde_json::from_slice(
-        &engine
-            .ingest_subject(&ingest, source.to_vec(), vec![])
-            .unwrap(),
-    )
-    .unwrap();
+    let readmission: Value =
+        serde_json::from_slice(&engine.ingest_subject(&ingest, source, vec![]).unwrap()).unwrap();
     assert_eq!(readmission, admission);
     let renewed: Value =
         serde_json::from_slice(&engine.subject_handle(&handle_request).unwrap()).unwrap();

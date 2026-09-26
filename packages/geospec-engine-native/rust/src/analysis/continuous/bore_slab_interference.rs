@@ -178,15 +178,22 @@ pub(crate) fn bound(
         return Err(no().into());
     }
     let denominator = mul(&sl, &cl)?;
-    for panels in [256_usize, 512, 1024, 2048, 4096, 8192] {
+    // Level 2p's even left endpoints are level p's points (equal exact
+    // rationals), so each refinement adds only its odd points to the carried
+    // sum: the same order-free exact sum with half the certified roots.
+    let mut sum = R::zero();
+    for (level, panels) in [256_usize, 512, 1024, 2048, 4096, 8192]
+        .into_iter()
+        .enumerate()
+    {
         // Includes two <=2240-bit integer roots and <=32 guarded rational
         // operations per endpoint; no data-dependent uncharged refinement.
         budget
             .charge((panels as u64) * 1024)
             .map_err(Error::Budget)?;
         let width = div(&r, &R::from_integer(BigInt::from(panels)))?;
-        let mut sum = R::zero();
-        for i in 0..panels {
+        let (first, step) = if level == 0 { (0, 1) } else { (1, 2) };
+        for i in (first..panels).step_by(step) {
             let at = mul(&width, &R::from_integer(BigInt::from(i)))?;
             let at2 = square(&at)?;
             let (_, w) = root(&sub(&r2, &at2)?)?;

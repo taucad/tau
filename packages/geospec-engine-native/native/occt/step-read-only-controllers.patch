@@ -1,0 +1,119 @@
+--- a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_Controller.cxx
++++ b/src/DataExchange/TKDESTEP/STEPControl/STEPControl_Controller.cxx
+@@ -24,6 +24,7 @@
+ #include <Interface_Static.hxx>
+ #include <RWHeaderSection.hxx>
+ #include "../RWStepAP214/RWStepAP214.pxx"
++#include <Standard_NotImplemented.hxx>
+ #include <Standard_Type.hxx>
+ #include <Standard_Version.hxx>
+ #include <DESTEP_Parameters.hxx>
+@@ -340,16 +341,10 @@
+ 
+     init = true;
+   }
+-
+-  occ::handle<STEPControl_ActorWrite> ActWrite = new STEPControl_ActorWrite;
+-  myAdaptorWrite                               = ActWrite;
+ 
+-  ActWrite->SetShapeFixParameters(DESTEP_Parameters::GetDefaultShapeFixParameters(),
+-                                  XSAlgo_ShapeProcessor::ParameterMap{});
+-  ShapeProcess::OperationsFlags aDefaultProcFlags;
+-  aDefaultProcFlags.set(ShapeProcess::Operation::SplitCommonVertex);
+-  aDefaultProcFlags.set(ShapeProcess::Operation::DirectFaces);
+-  ActWrite->SetShapeProcessFlags(aDefaultProcFlags);
++  // GeoSpec reads STEP and never writes it: no write actor is created, so the writer translation
++  // (ActorWrite, TopoDSToStep, GeomToStep) is never linked. A null write actor is the controller's
++  // "cannot write" state (XSControl_Controller::RecognizeWriteShape).
+ 
+   occ::handle<StepSelect_WorkLibrary> swl = new StepSelect_WorkLibrary;
+   swl->SetDumpLabel(1);
+@@ -449,40 +444,14 @@
+ //  ####    PROVISOIRE ???   ####
+ 
+ IFSelect_ReturnStatus STEPControl_Controller::TransferWriteShape(
+-  const TopoDS_Shape&                          shape,
+-  const occ::handle<Transfer_FinderProcess>&   FP,
+-  const occ::handle<Interface_InterfaceModel>& model,
+-  const int                                    modeshape,
+-  const Message_ProgressRange&                 theProgress) const
++  const TopoDS_Shape&,
++  const occ::handle<Transfer_FinderProcess>&,
++  const occ::handle<Interface_InterfaceModel>&,
++  const int,
++  const Message_ProgressRange&) const
+ {
+-  if (modeshape < 0 || modeshape > 4)
+-  {
+-    return IFSelect_RetError;
+-  }
+-  occ::handle<STEPControl_ActorWrite> ActWrite =
+-    occ::down_cast<STEPControl_ActorWrite>(myAdaptorWrite);
+-  //    A PRESENT ON PASSE PAR LE PROFILE
+-  occ::handle<StepData_StepModel> aModel = occ::down_cast<StepData_StepModel>(model);
+-  if (!ActWrite.IsNull())
+-  {
+-    ActWrite->SetGroupMode(aModel->InternalParameters.WriteAssembly);
+-  }
+-  TopoDS_Shape                                                             aShape = shape;
+-  NCollection_DataMap<TopoDS_Shape, TopoDS_Shape, TopTools_ShapeMapHasher> aModifedMap;
+-  if (aModel->InternalParameters.WriteNonmanifold)
+-  {
+-    ShapeUpgrade_RemoveLocations aRemLoc;
+-    aRemLoc.SetRemoveLevel(TopAbs_COMPOUND);
+-    aRemLoc.Remove(aShape);
+-    aShape      = aRemLoc.GetResult();
+-    aModifedMap = aRemLoc.GetModifiedShapesMap();
+-  }
+-  const IFSelect_ReturnStatus aStatus =
+-    XSControl_Controller::TransferWriteShape(aShape, FP, model, modeshape, theProgress);
+-  XSAlgo_ShapeProcessor::MergeShapeTransferInfo(FP,
+-                                                aModifedMap,
+-                                                occ::handle<ShapeExtend_MsgRegistrator>());
+-  return aStatus;
++  // GeoSpec never writes STEP (see the constructor).
++  throw Standard_NotImplemented("STEPControl_Controller::TransferWriteShape - STEP writing is not built");
+ }
+ 
+ bool STEPControl_Controller::Init()
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Controller.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Controller.cxx
+@@ -27,8 +27,7 @@
+ 
+ STEPCAFControl_Controller::STEPCAFControl_Controller()
+ {
+-  occ::handle<STEPCAFControl_ActorWrite> ActWrite = new STEPCAFControl_ActorWrite;
+-  myAdaptorWrite                                  = ActWrite;
++  // GeoSpec never writes STEP: no write actor (see STEPControl_Controller).
+ }
+ 
+ //=================================================================================================
+--- a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
+@@ -20,6 +20,7 @@
+ #include <Interface_ParamType.hxx>
+ #include <Interface_ReaderLib.hxx>
+ #include "RWStepAP214_ReadWriteModule.pxx"
++#include <Standard_NotImplemented.hxx>
+ #include <Standard_Transient.hxx>
+ #include <Standard_Type.hxx>
+ #include <StepData_StepReaderData.hxx>
+@@ -11367,6 +11368,12 @@
+                                             StepData_StepWriter&                   SW,
+                                             const occ::handle<Standard_Transient>& ent) const
+ {
++  // GeoSpec never writes STEP: the per-entity writers below stay unlinked.
++  (void)CN;
++  (void)SW;
++  (void)ent;
++  throw Standard_NotImplemented("RWStepAP214_ReadWriteModule::WriteStep - STEP writing is not built");
++#if 0
+   if (CN == 0)
+   {
+     return;
+@@ -16251,4 +16258,5 @@
+     default:
+       return;
+   }
++#endif
+ }

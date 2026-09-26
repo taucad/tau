@@ -270,12 +270,21 @@ const contentEngine = () => {
   const decodeRequest = (bytes: Uint8Array<ArrayBuffer>): Record<string, unknown> =>
     JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
   const released: string[] = [];
+  let refusals = 0;
   const ingestSubject = vi.fn(
     (
       _request: Uint8Array<ArrayBuffer>,
       primary: Uint8Array<ArrayBuffer>,
       _resources: ReadonlyArray<Uint8Array<ArrayBuffer>>,
-    ) => encode({ result: { subject: { subjectHash: String(primary[0]).repeat(64) } } }),
+    ) => {
+      if (refusals > 0) {
+        refusals -= 1;
+        throw Object.assign(new Error('Engine exceeds the configured retained subject count.'), {
+          code: 'limit-exceeded',
+        });
+      }
+      return encode({ result: { subject: { subjectHash: String(primary[0]).repeat(64) } } });
+    },
   );
   const engine: GeoSpecNativeModelEngine = {
     evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
@@ -297,6 +306,9 @@ const contentEngine = () => {
     ingestSubject,
     readSource,
     released,
+    refuseNext: () => {
+      refusals += 1;
+    },
   };
 };
 
@@ -317,5 +329,46 @@ describe('native model loader freshness', () => {
       { subjectHash: '1'.repeat(64) },
       { subjectHash: '9'.repeat(64) },
     ]);
+  });
+});
+
+describe('native model loader carried scopes', () => {
+  it('should keep a scope for the next one and release only the subjects it did not load again', async () => {
+    const { engine, readSource, released } = contentEngine();
+    const carried = new Map<string, unknown>();
+    const first = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+    await first({ source: 'a.step', format: 'step' });
+    await first({ source: 'b.step', format: 'step' });
+    await first.releaseAll();
+
+    expect(released).toStrictEqual([]);
+    expect([...carried.keys()]).toStrictEqual(['1'.repeat(64), '2'.repeat(64)]);
+
+    const second = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+    await second({ source: 'b.step', format: 'step' });
+    await second({ source: 'c.step', format: 'step' });
+    await second.releaseAll();
+
+    expect(released).toStrictEqual(['1']);
+    expect([...carried.keys()]).toStrictEqual(['2'.repeat(64), '3'.repeat(64)]);
+  });
+
+  it('should free stale carried subjects and retry once when the engine is full', async () => {
+    const { engine, readSource, refuseNext, released } = contentEngine();
+    const carried = new Map<string, unknown>();
+    const first = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+    await first({ source: 'a.step', format: 'step' });
+    await first({ source: 'b.step', format: 'step' });
+    await first.releaseAll();
+
+    const second = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+    await second({ source: 'b.step', format: 'step' });
+    refuseNext();
+    await expect(second({ source: 'c.step', format: 'step' })).resolves.toStrictEqual({ subjectHash: '3'.repeat(64) });
+    expect(released).toStrictEqual(['1']);
+    expect([...carried.keys()]).toStrictEqual(['2'.repeat(64)]);
+
+    refuseNext();
+    await expect(second({ source: 'a.step', format: 'step' })).rejects.toMatchObject({ code: 'limit-exceeded' });
   });
 });

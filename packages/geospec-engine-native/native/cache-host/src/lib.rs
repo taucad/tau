@@ -9,9 +9,9 @@ use std::{
 
 use geospec_engine_native_core::{
     cache::{EvidenceAddress, OverlapEvidenceCache},
-    canonicalize,
+    canonicalize, hex, sha256_hex,
 };
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -193,7 +193,7 @@ impl AuthenticatedOverlapCache {
         )
         .ok()?;
         if payload.len() as u64 != envelope.content_byte_length
-            || digest(&payload) != envelope.content_sha256
+            || sha256_hex(&payload) != envelope.content_sha256
         {
             return None;
         }
@@ -201,7 +201,7 @@ impl AuthenticatedOverlapCache {
     }
 
     fn publish_inner(&self, address: &EvidenceAddress, payload: &[u8]) -> io::Result<()> {
-        let content_sha256 = digest(payload);
+        let content_sha256 = sha256_hex(payload);
         let content = self
             .root
             .join("content")
@@ -226,7 +226,7 @@ impl AuthenticatedOverlapCache {
         mac.update(&envelope_bytes);
         let record = ActionRecord {
             envelope,
-            hmac_sha256: encode_hex(&mac.finalize().into_bytes()),
+            hmac_sha256: hex(&mac.finalize().into_bytes()),
         };
         let bytes = canonicalize(&serde_json::to_vec(&record).map_err(io::Error::other)?)
             .map_err(io::Error::other)?;
@@ -257,7 +257,7 @@ fn load_or_create_secret(root: &Path) -> io::Result<[u8; SECRET_BYTES]> {
     fill_random(&mut secret)?;
     let mut suffix = [0_u8; 8];
     fill_random(&mut suffix)?;
-    let temporary = authority.join(format!(".install-secret-{}", encode_hex(&suffix)));
+    let temporary = authority.join(format!(".install-secret-{}", hex(&suffix)));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -286,7 +286,7 @@ fn load_or_create_secret(root: &Path) -> io::Result<[u8; SECRET_BYTES]> {
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut suffix = [0_u8; 8];
     fill_random(&mut suffix)?;
-    let temporary = path.with_extension(format!("tmp-{}", encode_hex(&suffix)));
+    let temporary = path.with_extension(format!("tmp-{}", hex(&suffix)));
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -326,24 +326,16 @@ fn remove_if_present(path: &Path) -> io::Result<()> {
     }
 }
 
-fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
 fn domain_id(domain: &[u8], secret: &[u8]) -> String {
     let mut hash = Sha256::new();
     hash.update(domain);
     hash.update(secret);
-    format!("sha256:{:x}", hash.finalize())
+    format!("sha256:{}", hex(&hash.finalize()))
 }
 
 fn fill_random(bytes: &mut [u8]) -> io::Result<()> {
     getrandom::getrandom(bytes)
         .map_err(|error| io::Error::other(format!("operating-system randomness failed: {error}")))
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn decode_hex_32(value: &str) -> Option<[u8; 32]> {

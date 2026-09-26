@@ -2,10 +2,9 @@
 //! This module is registered through the existing rational_plate_producer test
 //! crate to avoid an incidental change to the verifier's Cargo source closure.
 
-use geospec_engine_native_core::{canonicalize, Engine, ProtocolError};
+use geospec_engine_native_core::{canonicalize, sha256_hex, Engine, ProtocolError};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
 const CORPUS_SHA256: &str = "b1b605506f72304ccec2484506a39786f203d89e793eaab5e0125d246388d5a3";
@@ -33,10 +32,6 @@ struct Case {
     canonical_plan_utf8: String,
     neutral_result_utf8: String,
     submit_response_utf8: String,
-}
-
-fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn verifier_source_hash() -> String {
@@ -67,7 +62,7 @@ fn current_result(value: &str, plan: &str) -> String {
         &mut value
     };
     result["numericProfile"] = json!(NUMERIC_PROFILE);
-    let plan_hash = sha256(plan.as_bytes());
+    let plan_hash = sha256_hex(plan.as_bytes());
     let verifier_source_hash = verifier_source_hash();
     for row in result["results"].as_array_mut().unwrap() {
         if row["evidence"].is_object() {
@@ -82,7 +77,7 @@ fn observe(result: Result<Vec<u8>, ProtocolError>, expected: &str) -> Value {
     match result {
         Ok(bytes) => json!({
             "passed": bytes == expected.as_bytes(),
-            "actualSha256": sha256(&bytes),
+            "actualSha256": sha256_hex(&bytes),
             "actualUtf8": String::from_utf8(bytes).unwrap(),
             "expectedUtf8": expected,
         }),
@@ -102,7 +97,7 @@ fn rational_plate_engine_matches_frozen_fullwire_cold_and_warm() {
     let expected_hash =
         std::env::var("GEOSPEC_F1_ENGINE_CORPUS_SHA256").unwrap_or_else(|_| CORPUS_SHA256.into());
     assert_eq!(expected_hash, CORPUS_SHA256, "stale control hash binding");
-    assert_eq!(sha256(&bytes), CORPUS_SHA256);
+    assert_eq!(sha256_hex(&bytes), CORPUS_SHA256);
     let corpus: Corpus = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(corpus.cases.len(), 12);
     assert!(!corpus.authority.is_empty());
@@ -112,7 +107,10 @@ fn rational_plate_engine_matches_frozen_fullwire_cold_and_warm() {
     );
     let mut records = Vec::new();
     for case in corpus.cases {
-        assert_eq!(sha256(case.primary_utf8.as_bytes()), case.primary_sha256);
+        assert_eq!(
+            sha256_hex(case.primary_utf8.as_bytes()),
+            case.primary_sha256
+        );
         let ingest_request = current_request(&case.ingest_request_utf8);
         let submit_request = current_request(&case.submit_request_utf8);
         let canonical_plan = current_plan(&case.canonical_plan_utf8);

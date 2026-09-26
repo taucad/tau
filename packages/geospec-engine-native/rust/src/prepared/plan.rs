@@ -287,11 +287,10 @@ impl PreparedPlan {
                 Payload::RationalPlate | Payload::ParallelPlane
             )
         }) {
-            use sha2::{Digest, Sha256};
             let bytes = crate::codec::encode(&crate::protocol::canonical_plan_envelope(
                 self.normalized_plan(),
             ))?;
-            format!("{:x}", Sha256::digest(bytes))
+            crate::identity::sha256_hex(&bytes)
         } else {
             String::new()
         };

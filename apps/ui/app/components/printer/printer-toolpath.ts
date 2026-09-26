@@ -1,11 +1,14 @@
 /**
- * Toolpath rendering: one `LineSegments` for the whole program, revealed
+ * Toolpath rendering: one `LineSegments` per filter group, each revealed
  * through its draw range, plus a short fresh-filament trail.
  *
- * The program's `positions` buffer uploads as-is (two vertices per segment);
- * colours are baked once per segment kind and height, and only the active
- * layer's range is recoloured when the layer changes. Nothing here allocates
- * inside the frame loop.
+ * The program's `positions` buffer uploads as-is (two vertices per segment)
+ * and every group shares it and one colour buffer; a group owns only an index
+ * buffer of its segments in program order, so hiding a group is one
+ * `visible` flag and revealing it is one binary search per frame. Colours are
+ * baked once per segment kind and height, and only the active layer's range is
+ * recoloured when the layer changes. Nothing here allocates inside the frame
+ * loop.
  *
  * @module
  */
@@ -15,6 +18,86 @@ import { segmentAtTime, toolpathSegmentKinds } from '@taucad/slicer/toolpath';
 import type { ToolpathProgram, ToolpathSegmentKind } from '@taucad/slicer/toolpath';
 import { printerToolpath } from '#components/printer/printer-colors.constants.js';
 import { layerAtTime } from '#components/printer/printer-playback.js';
+
+/** What the G-code filter shows and hides; every segment belongs to exactly one group. */
+export const toolpathGroups = [
+  'preparation',
+  'walls',
+  'infill',
+  'support',
+  'skirt-brim',
+  'other',
+  'wipe',
+  'travel',
+] as const;
+
+/** One filter group. */
+export type ToolpathGroup = (typeof toolpathGroups)[number];
+
+/** The filter's name for each group. */
+export const toolpathGroupLabels: Readonly<Record<ToolpathGroup, string>> = {
+  preparation: 'Preparation',
+  walls: 'Walls',
+  infill: 'Infill',
+  support: 'Support',
+  'skirt-brim': 'Skirt and brim',
+  other: 'Other extrusion',
+  wipe: 'Wipes',
+  travel: 'Travel',
+};
+
+/** Moves that lay down no filament start hidden. */
+export const defaultHiddenToolpathGroups: ReadonlySet<ToolpathGroup> = new Set(['travel', 'wipe']);
+
+const kindGroup: Readonly<Record<ToolpathSegmentKind, ToolpathGroup>> = {
+  travel: 'travel',
+  // Zero-length extruder moves draw nothing; they ride with travel.
+  retract: 'travel',
+  wipe: 'wipe',
+  'outer-wall': 'walls',
+  'inner-wall': 'walls',
+  // The parser folds top and bottom surfaces, bridges and ironing into infill.
+  infill: 'infill',
+  support: 'support',
+  skirt: 'skirt-brim',
+  brim: 'skirt-brim',
+  // Purge lines, flushes and the prime tower prepare the nozzle; they are not the part.
+  purge: 'preparation',
+  unknown: 'other',
+};
+const kindGroupIndex = toolpathSegmentKinds.map((kind) => toolpathGroups.indexOf(kindGroup[kind]));
+const preparationGroup = toolpathGroups.indexOf('preparation');
+const movingGroups: ReadonlySet<number> = new Set([toolpathGroups.indexOf('travel'), toolpathGroups.indexOf('wipe')]);
+
+/** The group of every segment, and how many segments each group holds. */
+export type ToolpathGrouping = Readonly<{
+  /** Index into {@link toolpathGroups} per segment. */
+  groupOf: Uint8Array<ArrayBuffer>;
+  /** Segments per group, in {@link toolpathGroups} order. */
+  counts: readonly number[];
+}>;
+
+/**
+ * Sort every segment into one filter group. Extrusion in the start sequence
+ * (before the first layer annotation) is preparation whatever its label; its
+ * moves stay travel and wipes.
+ *
+ * @param program - Kinds, segment count and preamble length.
+ * @returns The group per segment and the group sizes.
+ */
+export const groupToolpath = (
+  program: Pick<ToolpathProgram, 'segmentCount' | 'kinds' | 'preambleSegmentCount'>,
+): ToolpathGrouping => {
+  const groupOf = new Uint8Array(program.segmentCount);
+  const counts = toolpathGroups.map(() => 0);
+  for (let segment = 0; segment < program.segmentCount; segment += 1) {
+    const group = kindGroupIndex[program.kinds[segment]!] ?? kindGroupIndex.at(-1)!;
+    const resolved = segment < program.preambleSegmentCount && !movingGroups.has(group) ? preparationGroup : group;
+    groupOf[segment] = resolved;
+    counts[resolved]! += 1;
+  }
+  return { groupOf, counts };
+};
 
 /** Tint per segment kind. */
 export type ToolpathPalette = Readonly<Record<ToolpathSegmentKind, THREE.Color>> &
@@ -52,7 +135,11 @@ export const createToolpathPalette = (filament: string, theme: 'light' | 'dark')
 
 /** Renderer-owned toolpath objects; `dispose` releases everything allocated here. */
 export type ToolpathReveal = {
-  readonly lines: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+  /** Holds one `LineSegments` per non-empty group. */
+  readonly lines: THREE.Group;
+  /** Per {@link toolpathGroups} entry; `undefined` for a group the program never uses. */
+  readonly groupLines: ReadonlyArray<THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | undefined>;
+  readonly groupOf: Uint8Array<ArrayBuffer>;
   readonly trail: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
   readonly baseColors: Float32Array;
   readonly colors: THREE.BufferAttribute;
@@ -65,7 +152,11 @@ const kindOf = (program: Pick<ToolpathProgram, 'kinds'>, segment: number): Toolp
   toolpathSegmentKinds[program.kinds[segment]!] ?? 'unknown';
 
 /** Allocate the toolpath objects for one program. */
-export const createToolpathReveal = (program: ToolpathProgram, palette: ToolpathPalette): ToolpathReveal => {
+export const createToolpathReveal = (
+  program: ToolpathProgram,
+  palette: ToolpathPalette,
+  { groupOf, counts }: ToolpathGrouping = groupToolpath(program),
+): ToolpathReveal => {
   const vertexCount = program.segmentCount * 2;
   const baseColors = new Float32Array(vertexCount * 3);
   // Fade by layer rather than Z: end sequences lift the head far above the last printed layer.
@@ -73,18 +164,38 @@ export const createToolpathReveal = (program: ToolpathProgram, palette: Toolpath
   const color = new THREE.Color();
   for (let segment = 0; segment < program.segmentCount; segment += 1) {
     const height = Math.min(1, program.layers[segment]! / topLayer);
-    color.copy(palette[kindOf(program, segment)]).lerp(palette.muted, depthFade * (1 - height));
+    const tint = groupOf[segment] === preparationGroup ? palette.purge : palette[kindOf(program, segment)];
+    color.copy(tint).lerp(palette.muted, depthFade * (1 - height));
     color.toArray(baseColors, segment * 6);
     color.toArray(baseColors, segment * 6 + 3);
   }
   const colors = new THREE.BufferAttribute(new Float32Array(baseColors), 3);
   colors.setUsage(THREE.DynamicDrawUsage);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(program.positions, 3));
-  geometry.setAttribute('color', colors);
-  geometry.setDrawRange(0, 0);
-  const lines = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ vertexColors: true }));
-  lines.frustumCulled = false;
+  const position = new THREE.BufferAttribute(program.positions, 3);
+  const material = new THREE.LineBasicMaterial({ vertexColors: true });
+  const indices = counts.map((count) => new Uint32Array(count * 2));
+  const filled = counts.map(() => 0);
+  for (let segment = 0; segment < program.segmentCount; segment += 1) {
+    const group = groupOf[segment]!;
+    indices[group]![filled[group]!] = segment * 2;
+    indices[group]![filled[group]! + 1] = segment * 2 + 1;
+    filled[group]! += 2;
+  }
+  const lines = new THREE.Group();
+  const groupLines = indices.map((index) => {
+    if (index.length === 0) {
+      return undefined;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', position);
+    geometry.setAttribute('color', colors);
+    geometry.setIndex(new THREE.BufferAttribute(index, 1));
+    geometry.setDrawRange(0, 0);
+    const object = new THREE.LineSegments(geometry, material);
+    object.frustumCulled = false;
+    lines.add(object);
+    return object;
+  });
 
   const trailPositions = new THREE.BufferAttribute(new Float32Array(trailSegmentCount * 6), 3);
   trailPositions.setUsage(THREE.DynamicDrawUsage);
@@ -100,18 +211,49 @@ export const createToolpathReveal = (program: ToolpathProgram, palette: Toolpath
 
   return {
     lines,
+    groupLines,
+    groupOf,
     trail,
     baseColors,
     colors,
     trailPositions,
     activeLayer: -1,
     dispose: () => {
-      geometry.dispose();
-      lines.material.dispose();
+      for (const object of groupLines) {
+        object?.geometry.dispose();
+      }
+      material.dispose();
       trailGeometry.dispose();
       trail.material.dispose();
     },
   };
+};
+
+/** Show every group except the hidden ones; the next reveal skips hidden segments in the trail too. */
+export const setToolpathVisibility = (reveal: ToolpathReveal, hidden: ReadonlySet<ToolpathGroup>): void => {
+  for (const [group, object] of reveal.groupLines.entries()) {
+    if (object) {
+      object.visible = !hidden.has(toolpathGroups[group]!);
+    }
+  }
+};
+
+const isShown = (reveal: ToolpathReveal, segment: number): boolean =>
+  reveal.groupLines[reveal.groupOf[segment]!]?.visible === true;
+
+/** How many entries of an ascending index buffer fall below a vertex. */
+const verticesBefore = (index: ArrayLike<number>, vertex: number): number => {
+  let low = 0;
+  let high = index.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (index[middle]! < vertex) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
 };
 
 const recolorLayer = (
@@ -188,7 +330,11 @@ export const updateToolpathReveal = ({
   // `times` is float32, so the last end can round above the float64 duration; the end draws everything.
   const completed =
     time >= program.duration ? program.segmentCount : Math.min(program.segmentCount, Math.max(0, segment));
-  reveal.lines.geometry.setDrawRange(0, completed * 2);
+  for (const object of reveal.groupLines) {
+    if (object) {
+      object.geometry.setDrawRange(0, verticesBefore(object.geometry.index!.array, completed * 2));
+    }
+  }
 
   const layer = layerAtTime(program, time);
   if (layer !== reveal.activeLayer) {
@@ -200,7 +346,7 @@ export const updateToolpathReveal = ({
 
   const trail = reveal.trailPositions.array as Float32Array;
   let count = 0;
-  if (segment >= 0 && segment < program.segmentCount && program.extrusion[segment]! > 0) {
+  if (segment >= 0 && segment < program.segmentCount && program.extrusion[segment]! > 0 && isShown(reveal, segment)) {
     const offset = segment * 6;
     trail[0] = program.positions[offset]!;
     trail[1] = program.positions[offset + 1]!;
@@ -212,7 +358,7 @@ export const updateToolpathReveal = ({
   }
   const floor = Math.max(0, completed - trailLookback);
   for (let index = completed - 1; index >= floor && count < trailSegmentCount; index -= 1) {
-    if (program.extrusion[index]! <= 0) {
+    if (program.extrusion[index]! <= 0 || !isShown(reveal, index)) {
       continue;
     }
     trail.set(program.positions.subarray(index * 6, index * 6 + 6), count * 6);

@@ -9,9 +9,19 @@
 
 import { parseGcode } from '@taucad/slicer/toolpath';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
-import { extractGcode } from '#components/printer/printer-file.js';
+import { readPrinterFile } from '#components/printer/printer-file.js';
 import type { PrinterFileKind } from '#components/printer/printer-file.js';
+import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 
-/** Parse the G-code inside a printer file. */
-export const loadPrinterProgram = (bytes: Uint8Array<ArrayBuffer>, kind: PrinterFileKind): ToolpathProgram =>
-  parseGcode(extractGcode(bytes, kind));
+/** A parsed printer file. */
+export type PrinterProgram = Readonly<{
+  program: ToolpathProgram;
+  /** The X1C plate the file was sliced for; `undefined` when it names none Tau knows. */
+  slicedPlate: PrinterPlateModel | undefined;
+}>;
+
+/** Parse the G-code inside a printer file and resolve the plate it was sliced for. */
+export const loadPrinterProgram = (bytes: Uint8Array<ArrayBuffer>, kind: PrinterFileKind): PrinterProgram => {
+  const { gcode, slicedPlate } = readPrinterFile(bytes, kind);
+  return { program: parseGcode(gcode), slicedPlate };
+};

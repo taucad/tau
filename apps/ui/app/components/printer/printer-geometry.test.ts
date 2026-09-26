@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { parseGcode } from '@taucad/slicer/toolpath';
 import {
   derivePrinterGeometry,
+  framedPlateBox,
   framedPrintBox,
   framePrinterCamera,
   partBounds,
+  shownExtrusionBounds,
   plateOffsetForHeight,
   printerCameraFov,
   toolheadLiftForHeight,
 } from '#components/printer/printer-geometry.js';
 import type { PrinterBounds, PrinterCameraPose, PrinterGeometry } from '#components/printer/printer-geometry.js';
 import { fixtureProgram } from '#components/printer/testing/toolpath-fixture.js';
+import { defaultHiddenToolpathGroups, groupToolpath } from '#components/printer/printer-toolpath.js';
 import { resolvePrinterManifest, x1cReferenceGeometry } from '#components/printer/printer-manifest.fixture.js';
 import type { PrinterManifest } from '#components/printer/printer-manifest.fixture.js';
 
@@ -203,5 +206,54 @@ describe('partBounds', () => {
     const program = parseGcode('M104 S200\nG28\nG90\nM83\nG1 X10 Y10 Z0.2 F3000\nG1 X20 Y10 E1\n');
     expect(program.segmentCount).toBe(2);
     expect(partBounds(program)).toBeUndefined();
+  });
+});
+
+describe('framing the plate', () => {
+  const x1c = derivePrinterGeometry(x1cReferenceGeometry);
+  const program = fixtureProgram({ layers: 5, size: 30 });
+  const grouping = groupToolpath(program);
+
+  it('should frame the part and the shown purge line, never travel or the end lift', () => {
+    // The fixture purges along the front from X20 to X120 at Y5 before printing the part at 108–138.
+    expect(shownExtrusionBounds(program, grouping, defaultHiddenToolpathGroups)).toEqual({
+      min: [20, 5, 0],
+      max: [138, 138, 1],
+    });
+    expect(shownExtrusionBounds(program, grouping, new Set())).toEqual({ min: [20, 5, 0], max: [138, 138, 1] });
+    expect(shownExtrusionBounds(program, grouping, new Set(['preparation', 'travel']))).toEqual(partBounds(program));
+    expect(shownExtrusionBounds(program, grouping, new Set(['preparation', 'walls', 'infill']))).toBeUndefined();
+  });
+
+  it('should keep plate around a small part and reach just above the nozzle', () => {
+    const part: PrinterBounds = { min: [108, 108, 0], max: [138, 138, 24] };
+    expect(framedPlateBox(x1c, { shown: part, part })).toEqual({ min: [78, 78, -4], max: [168, 168, 36] });
+    const nothing = { shown: undefined, part: undefined };
+    expect(framedPlateBox(x1c, nothing)).toEqual({ min: [0, 0, -4], max: [256, 256, 12] });
+  });
+
+  it('should centre the part and reach out to the shown purge line on both sides', () => {
+    const part: PrinterBounds = { min: [108, 108, 0], max: [138, 138, 1] };
+    const box = framedPlateBox(x1c, { shown: { min: [20, 5, 0], max: [138, 138, 1] }, part });
+    // Centred on the part at 123: the purge line 103 mm to its left sets the reach on both sides.
+    expect(box).toEqual({ min: [20, 5, -4], max: [226, 241, 13] });
+    // Only the purge line shown: it is the subject.
+    const purge: PrinterBounds = { min: [20, 5, 0], max: [120, 5, 0.2] };
+    expect(framedPlateBox(x1c, { shown: purge, part: undefined })).toEqual({
+      min: [20, -40, -4],
+      max: [120, 50, 12.2],
+    });
+  });
+
+  it('should fill the pane from the front right with no enclosure to step out of', () => {
+    const part: PrinterBounds = { min: [108, 108, 0], max: [158, 158, 24] };
+    const box = framedPlateBox(x1c, { shown: part, part });
+    for (const aspect of [0.59, 1.78]) {
+      const pose = framePrinterCamera(undefined, box, aspect);
+      expect(pose.position[0]).toBeGreaterThan(pose.target[0]);
+      expect(pose.position[1]).toBeLessThan(pose.target[1]);
+      const corners = project(pose, box, aspect);
+      expect(Math.max(...corners.flat().map((value) => Math.abs(value)))).toBeCloseTo(0.88, 6);
+    }
   });
 });

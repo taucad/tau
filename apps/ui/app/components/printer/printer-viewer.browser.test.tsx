@@ -1,6 +1,6 @@
 import '#styles/global.css';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeBambuContainer } from '@taucad/slicer/container';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -9,11 +9,13 @@ import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
 /**
- * Framing evidence for the printer simulation scene: the print framed wide and
- * in a narrow pane, light and dark, the pane from the manual dry run, a zoom
- * the person made surviving a resize until they frame the print again, and the
- * viewer following a live run. The print's extent is measured from the
- * rendered pixels; PNGs land under `out/research/.../K/`.
+ * Framing evidence for the printer simulation scene: the plate-focus view
+ * framed wide and in a narrow pane, light and dark, the pane from the manual
+ * dry run, a zoom the person made surviving a resize until they frame the
+ * print again, the viewer following a live run, the part alone with the
+ * preparation hidden, the whole printer, and each X1C plate. The print's
+ * extent is measured from the rendered pixels; PNGs land under
+ * `out/research/.../K/`.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -173,6 +175,21 @@ const pauseAt = async (frame: HTMLElement, share: number, layer: RegExp): Promis
   await nextFrames(6);
 };
 
+/** Pick one item from the pane's More menu. */
+const chooseFromMore = async (
+  frame: HTMLElement,
+  role: 'menuitem' | 'menuitemcheckbox' | 'menuitemradio',
+  name: string,
+) => {
+  await userEvent.click(within(frame).getByRole('button', { name: 'More' }));
+  await userEvent.click(await screen.findByRole(role, { name }));
+  // Closing the menu returns focus to its button, whose tooltip would cover the filter in the capture.
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+  await nextFrames(60);
+};
+
 const capture = async (frame: HTMLElement, file: string): Promise<void> => {
   const path = await page.screenshot({ element: frame, path: `${evidenceDirectory}/${file}` });
   expect(path).toContain(file);
@@ -190,12 +207,12 @@ describe('Printer viewer framing', () => {
       mocks.live = idleLive;
       const { frame, scene } = await mount(theme, [1280, 720]);
       await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
-      await capture(frame, `printer-wide-${theme}.png`);
+      await capture(frame, `plate-focus-1280-${theme}.png`);
       expectFramed(await measurePrint(scene), 0.1);
 
       resize(frame, [570, 720]);
       await nextFrames(8);
-      await capture(frame, `printer-570-${theme}.png`);
+      await capture(frame, `plate-focus-570-${theme}.png`);
       expectFramed(await measurePrint(scene), 0.1);
     });
   }
@@ -237,13 +254,46 @@ describe('Printer viewer framing', () => {
     const afterResize = await measurePrint(scene);
     expect(afterResize.width, 'a resize leaves the zoom alone').toBeGreaterThan(framed.width * 1.3);
 
-    fireEvent.click(within(frame).getByRole('button', { name: 'Frame the print' }));
-    await nextFrames(60);
+    await chooseFromMore(frame, 'menuitem', 'Frame the print');
     const reframed = await measurePrint(scene);
     expectFramed(reframed, 0.1);
     expect(reframed.width).toBeLessThan(afterResize.width);
     await capture(frame, 'printer-reframed-light.png');
   });
+
+  it('frames the part alone, larger, once the preparation is hidden', async () => {
+    mocks.live = idleLive;
+    const { frame, scene } = await mount('dark', [1280, 720]);
+    await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+    const withPreparation = await measurePrint(scene);
+    const filter = within(frame).getByRole('region', { name: 'G-code filter' });
+    await userEvent.click(within(filter).getByRole('checkbox', { name: 'Preparation' }));
+    await nextFrames(60);
+    await capture(frame, 'plate-focus-no-preparation-dark.png');
+    const partOnly = await measurePrint(scene);
+    expectFramed(partOnly, 0.2);
+    expect(partOnly.width).toBeGreaterThan(withPreparation.width);
+  });
+
+  it('shows the whole printer from the More menu', async () => {
+    mocks.live = idleLive;
+    const { frame, scene } = await mount('dark', [1280, 720]);
+    await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+    await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
+    await capture(frame, 'whole-printer-dark.png');
+    expectFramed(await measurePrint(scene), 0.05);
+  });
+
+  for (const plate of ['Cool Plate', 'Engineering Plate', 'High Temp Plate', 'Textured PEI Plate']) {
+    it(`draws the ${plate}`, async () => {
+      mocks.live = idleLive;
+      const { frame, scene } = await mount('dark', [1280, 720]);
+      await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+      await chooseFromMore(frame, 'menuitemradio', plate);
+      await capture(frame, `plate-${plate.toLowerCase().replaceAll(' ', '-')}-dark.png`);
+      expectFramed(await measurePrint(scene), 0.1);
+    });
+  }
 
   it('captures the scene following a live run in dark', async () => {
     mocks.live = printingLive;

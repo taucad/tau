@@ -264,19 +264,109 @@ describe('PrinterViewer', () => {
     expect(mocks.liveDigest).toBe(await digestBytes(container));
   });
 
-  it('should frame the print again from the pane actions without touching playback', async () => {
+  it('should frame the print again from the More menu without touching playback', async () => {
     const user = userEvent.setup();
     renderViewer();
     await screen.findByRole('region', { name: `Printer simulation: ${name}` });
     const initial = latestSceneProps();
     const actions = screen.getByRole('group', { name: `File actions for ${name}` });
-    const frame = within(actions).getByRole('button', { name: 'Frame the print' });
-    await user.click(frame);
+    await user.click(within(actions).getByRole('button', { name: 'More' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Frame the print' }));
     expect(latestSceneProps().frameRequest).toBe(initial.frameRequest + 1);
-    await user.click(frame);
+    await user.click(within(actions).getByRole('button', { name: 'More' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Frame the print' }));
     expect(latestSceneProps().frameRequest).toBe(initial.frameRequest + 2);
     expect(latestSceneProps().store).toBe(initial.store);
     expect(initial.store.getSnapshot().isPlaying).toBe(true);
+  });
+
+  it('should focus on the plate by default and show the whole printer from the More menu', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    await screen.findByRole('region', { name: `Printer simulation: ${name}` });
+    const initial = latestSceneProps();
+    expect(initial.isWholePrinter).toBe(false);
+    expect(initial.plate.id).toBe('textured-pei');
+
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    const menu = await screen.findByRole('menu');
+    const whole = within(menu).getByRole('menuitemcheckbox', { name: 'Show the whole printer' });
+    expect(whole).toHaveAttribute('aria-checked', 'false');
+    const plates = within(menu).getByRole('group', { name: 'Build plate' });
+    expect(
+      within(plates)
+        .getAllByRole('menuitemradio')
+        .map((item) => item.textContent),
+    ).toEqual([
+      'As sliced (Textured PEI Plate)',
+      'Cool Plate',
+      'Engineering Plate',
+      'High Temp Plate',
+      'Textured PEI Plate',
+    ]);
+    expect(within(plates).getByRole('menuitemradio', { name: 'As sliced (Textured PEI Plate)' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await user.click(whole);
+    // A different scene is framed afresh.
+    expect(latestSceneProps()).toMatchObject({ isWholePrinter: true, frameRequest: initial.frameRequest + 1 });
+
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'High Temp Plate' }));
+    expect(latestSceneProps().plate.id).toBe('high-temperature');
+    expect(latestSceneProps().store).toBe(initial.store);
+  });
+
+  it('should say when the file records no plate and draw the Textured PEI Plate', async () => {
+    const user = userEvent.setup();
+    const unrecorded = writeBambuContainer({ gcode: fixtureGcode({ layers: 3 }), modelName: 'fixture' });
+    render(
+      <TooltipProvider>
+        <PrinterViewer
+          name={name}
+          kind='container'
+          revision={1}
+          readAll={async () => unrecorded}
+          renderPane={renderPane}
+        />
+      </TooltipProvider>,
+    );
+    await screen.findByRole('region', { name: `Printer simulation: ${name}` });
+    expect(latestSceneProps().plate.id).toBe('textured-pei');
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    expect(
+      await screen.findByRole('menuitemradio', { name: 'As sliced (not recorded; Textured PEI Plate)' }),
+    ).toBeInTheDocument();
+  });
+
+  it('should list the G-code the file contains and hide the groups the person clears', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    const filter = await screen.findByRole('region', { name: 'G-code filter' });
+    const shown = (): Record<string, boolean> =>
+      Object.fromEntries(
+        within(filter)
+          .getAllByRole('checkbox')
+          .map((box): [string, boolean] => [
+            box.closest('label')?.textContent ?? '',
+            box.getAttribute('aria-checked') === 'true',
+          ]),
+      );
+    // The fixture has a purge line, walls, infill and moves; no support, skirt or wipes.
+    expect(shown()).toEqual({ Preparation: true, Walls: true, Infill: true, Travel: false });
+    expect(latestSceneProps().hiddenGroups).toEqual(new Set(['travel', 'wipe']));
+
+    await user.click(within(filter).getByRole('checkbox', { name: 'Preparation' }));
+    expect(latestSceneProps().hiddenGroups).toEqual(new Set(['travel', 'wipe', 'preparation']));
+    await user.click(within(filter).getByRole('checkbox', { name: 'Travel' }));
+    expect(latestSceneProps().hiddenGroups).toEqual(new Set(['wipe', 'preparation']));
+
+    const heading = within(filter).getByRole('button', { name: 'G-code' });
+    expect(heading).toHaveAttribute('aria-expanded', 'true');
+    await user.click(heading);
+    expect(heading).toHaveAttribute('aria-expanded', 'false');
+    expect(within(filter).queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
   it('should report a file that cannot be read', async () => {

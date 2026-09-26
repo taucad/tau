@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons';
 import type CameraControlsImpl from 'camera-controls';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
@@ -9,22 +10,27 @@ import { readGraphicsBackendQueryOverride } from '#components/geometry/graphics/
 import { TauCameraControls } from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
 import { printerBackground, printerBody } from '#components/printer/printer-colors.constants.js';
 import {
+  framedPlateBox,
   framedPrintBox,
   framePrinterCamera,
   partBounds,
   plateOffsetForHeight,
   printerCameraFov,
+  shownExtrusionBounds,
   toolheadLiftForHeight,
 } from '#components/printer/printer-geometry.js';
 import type { PrinterBounds, PrinterBox, PrinterGeometry, PrinterPanel } from '#components/printer/printer-geometry.js';
 import { eventValueAt } from '#components/printer/printer-playback.js';
 import type { PlaybackStore } from '#components/printer/printer-playback.js';
+import { plateModelMatrix } from '#components/printer/printer-plates.js';
+import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 import {
   createToolpathPalette,
   createToolpathReveal,
+  setToolpathVisibility,
   updateToolpathReveal,
 } from '#components/printer/printer-toolpath.js';
-import type { ToolpathReveal } from '#components/printer/printer-toolpath.js';
+import type { ToolpathGroup, ToolpathGrouping, ToolpathReveal } from '#components/printer/printer-toolpath.js';
 
 export type PrinterSceneProps = Readonly<{
   program: ToolpathProgram;
@@ -40,6 +46,13 @@ export type PrinterSceneProps = Readonly<{
   liveNozzleTarget: number | undefined;
   /** Bumped by "Frame the print": frame the print again and follow the pane size from here. */
   frameRequest: number;
+  /** The whole machine around the plate, or only the plate, the toolpath and the nozzle. */
+  isWholePrinter: boolean;
+  plate: PrinterPlateModel;
+  /** The filter group of every segment. */
+  grouping: ToolpathGrouping;
+  /** Groups the G-code filter hides; a stable set per change. */
+  hiddenGroups: ReadonlySet<ToolpathGroup>;
   onContextLost: () => void;
 }>;
 
@@ -60,6 +73,19 @@ const plateGridPitch = 10;
 const wallViewMargin = 50;
 /** The lit chamber light's glow, in the units of the scene's directional lights. */
 const chamberLampIntensity = 0.9;
+/** Millimetres the plate's edge stands out around the printable area, and the radius of its corners. */
+const plateMargin = 3;
+const plateCornerRadius = 8;
+/** Millimetres above the plate the nozzle waits before the program moves it. */
+const plateFocusParkHeight = 10;
+/** Millimetres of heat sink drawn above the heater block when only the plate is shown. */
+const hotendHeatSinkLength = 24;
+const plateRoughness: Readonly<Record<PrinterPlateModel['finish'], number>> = {
+  smooth: 0.3,
+  matte: 0.65,
+  textured: 0.9,
+};
+const gltfLoader = new GLTFLoader();
 
 const boxMesh = (box: PrinterBox, material: THREE.Material): THREE.Mesh => {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(...box.size), material);
@@ -124,7 +150,12 @@ const buildMachine = ({
   program,
   theme,
   filamentColor,
-}: Pick<PrinterSceneProps, 'geometry' | 'program' | 'theme' | 'filamentColor'>): MachineParts => {
+  isWholePrinter,
+  grouping,
+}: Pick<
+  PrinterSceneProps,
+  'geometry' | 'program' | 'theme' | 'filamentColor' | 'isWholePrinter' | 'grouping'
+>): MachineParts => {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
   const own = <T extends THREE.Material>(material: T): T => {
@@ -140,58 +171,8 @@ const buildMachine = ({
     return object;
   };
   const root = new THREE.Group();
-
-  // Enclosure: opaque base, translucent panels, frame edges, doors with an inset frame.
+  const walls: EnclosureWall[] = [];
   const frameMaterial = own(new THREE.LineBasicMaterial({ color: printerBody.frame[theme] }));
-  const glassMaterial = own(
-    new THREE.MeshStandardMaterial({
-      color: printerBody.glass[theme],
-      transparent: true,
-      opacity: 0.12,
-      depthWrite: false,
-      roughness: 0.15,
-      metalness: 0.05,
-    }),
-  );
-  const bodyMaterial = own(new THREE.MeshStandardMaterial({ color: printerBody.base[theme], roughness: 0.7 }));
-  root.add(track(boxMesh(geometry.base, bodyMaterial)));
-  // Walls on the eye's side hide each frame with their edges (a cutaway): the print is never seen through
-  // glass or behind a frame line, and the far walls stay as the chamber around it.
-  const walls = geometry.panels.map((panel): EnclosureWall => {
-    const object = new THREE.Group();
-    object.add(track(boxMesh(panel.box, glassMaterial)), track(boxEdges(panel.box, frameMaterial)));
-    if (panel.isDoor) {
-      object.add(track(boxEdges(panel.box, frameMaterial, 12)));
-    }
-    root.add(object);
-    return {
-      face: panel.face,
-      object,
-      point: new THREE.Vector3(...panel.box.center),
-      inward: new THREE.Vector3(...inwardNormals[panel.face]),
-    };
-  });
-
-  // Gantry: rails, the moving beam and the toolhead carriage with its nozzle.
-  const railMaterial = own(new THREE.MeshStandardMaterial({ color: printerBody.rail, roughness: 0.4, metalness: 0.6 }));
-  for (const rail of geometry.gantry.rails) {
-    root.add(track(boxMesh(rail, railMaterial)));
-  }
-  const [centerX, centerY] = geometry.enclosure.center;
-  let beam: THREE.Mesh | undefined;
-  if (geometry.gantry.kind !== 'delta') {
-    beam = boxMesh(
-      { center: [centerX, centerY, geometry.gantry.beamZ], size: geometry.gantry.beamSize },
-      own(new THREE.MeshStandardMaterial({ color: printerBody.beam, roughness: 0.4, metalness: 0.5 })),
-    );
-    root.add(track(beam));
-  }
-  const toolhead = new THREE.Group();
-  const carriage = new THREE.Mesh(
-    new THREE.BoxGeometry(...geometry.gantry.carriageSize),
-    own(new THREE.MeshStandardMaterial({ color: printerBody.carriage, roughness: 0.5, metalness: 0.3 })),
-  );
-  carriage.position.z = geometry.gantry.beamZ;
   const nozzleMaterial = own(
     new THREE.MeshStandardMaterial({
       color: printerBody.nozzle,
@@ -201,70 +182,143 @@ const buildMachine = ({
       metalness: 0.8,
     }),
   );
-  const heater = new THREE.Mesh(new THREE.BoxGeometry(18, 14, 10), nozzleMaterial);
-  heater.position.z = geometry.toolhead.nozzleLength + 5;
-  const nozzle = new THREE.Mesh(new THREE.ConeGeometry(4, geometry.toolhead.nozzleLength, 12), nozzleMaterial);
-  nozzle.rotation.x = -Math.PI / 2;
-  nozzle.position.z = geometry.toolhead.nozzleLength / 2;
-  toolhead.add(carriage, heater, nozzle);
-  root.add(track(toolhead));
-
-  // Material unit on the lid, purge chute at the rear, chamber light at the front.
-  if (geometry.materialUnit) {
-    const unit = geometry.materialUnit;
-    // A clear lid like the real unit's, so the spools inside read through it.
-    const unitMaterial = own(
-      new THREE.MeshStandardMaterial({
-        color: printerBody.materialUnit[theme],
-        transparent: true,
-        opacity: 0.3,
-        depthWrite: false,
-        roughness: 0.4,
-        side: THREE.DoubleSide,
-      }),
-    );
-    root.add(track(boxMesh(unit.box, unitMaterial)), track(boxEdges(unit.box, frameMaterial)));
-    const spoolMaterial = own(new THREE.MeshStandardMaterial({ color: printerBody.spool[theme], roughness: 0.8 }));
-    const spoolGeometry = new THREE.CylinderGeometry(unit.spoolRadius, unit.spoolRadius, unit.spoolWidth, 24);
-    for (const [x, y, z] of unit.spools) {
-      const spool = new THREE.Mesh(spoolGeometry, spoolMaterial);
-      spool.position.set(x, y, z);
-      // Spools sit in a row across the unit with their axles along X.
-      spool.rotation.z = Math.PI / 2;
-      root.add(track(spool));
-    }
-  }
-  root.add(track(boxMesh(geometry.purgeChute, own(new THREE.MeshStandardMaterial({ color: printerBody.chute })))));
   const lightMaterial = own(
     new THREE.MeshStandardMaterial({ color: printerBody.lightOff, emissive: new THREE.Color(printerBody.lightOn) }),
   );
-  // The strip hangs behind the front frame and leaves with it in the cutaway; its glow stays on the chamber.
+  let beam: THREE.Mesh | undefined;
   let lamp: THREE.PointLight | undefined;
-  if (geometry.light) {
-    const strip = track(boxMesh(geometry.light, lightMaterial));
-    (walls.find(({ face }) => face === 'front')?.object ?? root).add(strip);
-    lamp = new THREE.PointLight(printerBody.lightOn, 0, 0, 0);
-    lamp.position.set(...geometry.light.center);
-    root.add(lamp);
+
+  // The hotend: a glowing nozzle under its heater block, on the gantry's carriage when the whole printer
+  // shows and under its heat sink when only the plate does.
+  const { nozzleLength } = geometry.toolhead;
+  const toolhead = new THREE.Group();
+  const heater = new THREE.Mesh(
+    new THREE.BoxGeometry(16, 12, 8),
+    own(new THREE.MeshStandardMaterial({ color: printerBody.carriage, roughness: 0.45, metalness: 0.6 })),
+  );
+  heater.position.z = nozzleLength + 4;
+  const nozzle = new THREE.Mesh(new THREE.ConeGeometry(3.5, nozzleLength, 16), nozzleMaterial);
+  nozzle.rotation.x = -Math.PI / 2;
+  nozzle.position.z = nozzleLength / 2;
+  toolhead.add(heater, nozzle);
+  if (!isWholePrinter) {
+    const heatSink = new THREE.Mesh(
+      new THREE.CylinderGeometry(5.5, 5.5, hotendHeatSinkLength, 20),
+      own(new THREE.MeshStandardMaterial({ color: printerBody.rail, roughness: 0.4, metalness: 0.6 })),
+    );
+    heatSink.rotation.x = Math.PI / 2;
+    heatSink.position.z = nozzleLength + 8 + hotendHeatSinkLength / 2;
+    toolhead.add(heatSink);
   }
 
-  // The envelope stays put in world space; the plate group carries the plate, its grid and the toolpath.
-  root.add(
-    track(
-      boxEdges(
-        geometry.envelope,
-        own(new THREE.LineBasicMaterial({ color: printerBody.envelope, transparent: true, opacity: 0.35 })),
+  if (isWholePrinter) {
+    // Enclosure: opaque base, translucent panels, frame edges, doors with an inset frame.
+    const glassMaterial = own(
+      new THREE.MeshStandardMaterial({
+        color: printerBody.glass[theme],
+        transparent: true,
+        opacity: 0.12,
+        depthWrite: false,
+        roughness: 0.15,
+        metalness: 0.05,
+      }),
+    );
+    const bodyMaterial = own(new THREE.MeshStandardMaterial({ color: printerBody.base[theme], roughness: 0.7 }));
+    root.add(track(boxMesh(geometry.base, bodyMaterial)));
+    // Walls on the eye's side hide each frame with their edges (a cutaway): the print is never seen through
+    // glass or behind a frame line, and the far walls stay as the chamber around it.
+    for (const panel of geometry.panels) {
+      const object = new THREE.Group();
+      object.add(track(boxMesh(panel.box, glassMaterial)), track(boxEdges(panel.box, frameMaterial)));
+      if (panel.isDoor) {
+        object.add(track(boxEdges(panel.box, frameMaterial, 12)));
+      }
+      root.add(object);
+      walls.push({
+        face: panel.face,
+        object,
+        point: new THREE.Vector3(...panel.box.center),
+        inward: new THREE.Vector3(...inwardNormals[panel.face]),
+      });
+    }
+
+    // Gantry: rails, the moving beam and the toolhead carriage.
+    const railMaterial = own(
+      new THREE.MeshStandardMaterial({ color: printerBody.rail, roughness: 0.4, metalness: 0.6 }),
+    );
+    for (const rail of geometry.gantry.rails) {
+      root.add(track(boxMesh(rail, railMaterial)));
+    }
+    const [centerX, centerY] = geometry.enclosure.center;
+    if (geometry.gantry.kind !== 'delta') {
+      beam = boxMesh(
+        { center: [centerX, centerY, geometry.gantry.beamZ], size: geometry.gantry.beamSize },
+        own(new THREE.MeshStandardMaterial({ color: printerBody.beam, roughness: 0.4, metalness: 0.5 })),
+      );
+      root.add(track(beam));
+    }
+    const carriage = new THREE.Mesh(
+      new THREE.BoxGeometry(...geometry.gantry.carriageSize),
+      own(new THREE.MeshStandardMaterial({ color: printerBody.carriage, roughness: 0.5, metalness: 0.3 })),
+    );
+    carriage.position.z = geometry.gantry.beamZ;
+    toolhead.add(carriage);
+
+    // Material unit on the lid, purge chute at the rear, chamber light at the front.
+    if (geometry.materialUnit) {
+      const unit = geometry.materialUnit;
+      // A clear lid like the real unit's, so the spools inside read through it.
+      const unitMaterial = own(
+        new THREE.MeshStandardMaterial({
+          color: printerBody.materialUnit[theme],
+          transparent: true,
+          opacity: 0.3,
+          depthWrite: false,
+          roughness: 0.4,
+          side: THREE.DoubleSide,
+        }),
+      );
+      root.add(track(boxMesh(unit.box, unitMaterial)), track(boxEdges(unit.box, frameMaterial)));
+      const spoolMaterial = own(new THREE.MeshStandardMaterial({ color: printerBody.spool[theme], roughness: 0.8 }));
+      const spoolGeometry = new THREE.CylinderGeometry(unit.spoolRadius, unit.spoolRadius, unit.spoolWidth, 24);
+      for (const [x, y, z] of unit.spools) {
+        const spool = new THREE.Mesh(spoolGeometry, spoolMaterial);
+        spool.position.set(x, y, z);
+        // Spools sit in a row across the unit with their axles along X.
+        spool.rotation.z = Math.PI / 2;
+        root.add(track(spool));
+      }
+    }
+    root.add(track(boxMesh(geometry.purgeChute, own(new THREE.MeshStandardMaterial({ color: printerBody.chute })))));
+    // The strip hangs behind the front frame and leaves with it in the cutaway; its glow stays on the chamber.
+    if (geometry.light) {
+      const strip = track(boxMesh(geometry.light, lightMaterial));
+      (walls.find(({ face }) => face === 'front')?.object ?? root).add(strip);
+      lamp = new THREE.PointLight(printerBody.lightOn, 0, 0, 0);
+      lamp.position.set(...geometry.light.center);
+      root.add(lamp);
+    }
+
+    // The envelope stays put in world space.
+    root.add(
+      track(
+        boxEdges(
+          geometry.envelope,
+          own(new THREE.LineBasicMaterial({ color: printerBody.envelope, transparent: true, opacity: 0.35 })),
+        ),
       ),
-    ),
-  );
+    );
+  }
+  root.add(track(toolhead));
+
+  // The plate group carries the plate surface, the whole printer's grid and the toolpath.
   const plateGroup = new THREE.Group();
-  plateGroup.add(
-    track(
-      boxMesh(geometry.plate, own(new THREE.MeshStandardMaterial({ color: printerBody.plate[theme], roughness: 0.9 }))),
-    ),
-    track(plateGrid(geometry, own(new THREE.LineBasicMaterial({ color: printerBody.plateGrid[theme] })))),
-  );
-  const reveal = createToolpathReveal(program, createToolpathPalette(filamentColor, theme));
+  if (isWholePrinter) {
+    plateGroup.add(
+      track(plateGrid(geometry, own(new THREE.LineBasicMaterial({ color: printerBody.plateGrid[theme] })))),
+    );
+  }
+  const reveal = createToolpathReveal(program, createToolpathPalette(filamentColor, theme), grouping);
   plateGroup.add(reveal.lines, reveal.trail);
   root.add(plateGroup);
 
@@ -291,6 +345,126 @@ const buildMachine = ({
   };
 };
 
+/** A flat stand-in for a plate: the printable area with a rounded edge around it, its top at z = 0. */
+const createFlatPlate = (
+  geometry: Pick<PrinterGeometry, 'buildVolume' | 'plate'>,
+  plate: PrinterPlateModel,
+): Readonly<{ object: THREE.Object3D; dispose: () => void }> => {
+  const [width, depth] = geometry.buildVolume;
+  const thickness = geometry.plate.size[2];
+  const [left, front, right, back] = [-plateMargin, -plateMargin, width + plateMargin, depth + plateMargin];
+  const radius = plateCornerRadius;
+  const outline = new THREE.Shape()
+    .moveTo(left + radius, front)
+    .lineTo(right - radius, front)
+    .quadraticCurveTo(right, front, right, front + radius)
+    .lineTo(right, back - radius)
+    .quadraticCurveTo(right, back, right - radius, back)
+    .lineTo(left + radius, back)
+    .quadraticCurveTo(left, back, left, back - radius)
+    .lineTo(left, front + radius)
+    .quadraticCurveTo(left, front, left + radius, front);
+  const slab = new THREE.ExtrudeGeometry(outline, { depth: thickness, bevelEnabled: false, curveSegments: 6 });
+  const material = new THREE.MeshStandardMaterial({
+    color: plate.color,
+    roughness: plateRoughness[plate.finish],
+    metalness: plate.finish === 'textured' ? 0.35 : 0.1,
+  });
+  const mesh = new THREE.Mesh(slab, material);
+  mesh.position.z = -thickness;
+  return {
+    object: mesh,
+    dispose: () => {
+      slab.dispose();
+      material.dispose();
+    },
+  };
+};
+
+/** Every geometry, material and texture a loaded GLB owns; it is never shared with another view. */
+const disposeLoadedModel = (scene: THREE.Object3D): void => {
+  const resources = new Set<{ dispose: () => void }>();
+  scene.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      const { geometry, material: materials } = child as THREE.Mesh;
+      resources.add(geometry);
+      for (const material of Array.isArray(materials) ? materials : [materials]) {
+        resources.add(material);
+        for (const value of Object.values(material) as unknown[]) {
+          if (value instanceof THREE.Texture) {
+            resources.add(value);
+          }
+        }
+      }
+    }
+  });
+  for (const resource of resources) {
+    resource.dispose();
+  }
+};
+
+/**
+ * The selected plate on the plate group: its GLB once one is published and
+ * loaded, the flat stand-in until then or when loading fails.
+ */
+function PrinterPlateSurface({
+  geometry,
+  plate,
+  parent,
+}: Readonly<{ geometry: PrinterGeometry; plate: PrinterPlateModel; parent: THREE.Group }>): undefined {
+  'use no memo'; // R3F owns imperative Three.js objects.
+  const invalidate = useThree((state) => state.invalidate);
+  const flat = useMemo(() => createFlatPlate(geometry, plate), [geometry, plate]);
+  const [loaded, setLoaded] = useState<Readonly<{ plate: PrinterPlateModel; scene: THREE.Object3D }>>();
+  useEffect(
+    () => () => {
+      flat.dispose();
+    },
+    [flat],
+  );
+  useEffect(() => {
+    const url = plate.model;
+    if (!url) {
+      return;
+    }
+    let scene: THREE.Object3D | undefined;
+    let isActive = true;
+    const load = async (): Promise<void> => {
+      try {
+        const gltf = await gltfLoader.loadAsync(url.href);
+        scene = gltf.scene;
+      } catch {
+        // The flat plate stays when the model cannot load.
+        return;
+      }
+      // The one transform from glTF's Y-up metres into the plate frame.
+      scene.applyMatrix4(plateModelMatrix);
+      if (isActive) {
+        setLoaded({ plate, scene });
+      } else {
+        disposeLoadedModel(scene);
+      }
+    };
+    // async-iife: bootstrap — React effects cannot await the load; the cleanup flag owns its lifecycle.
+    void load();
+    return () => {
+      isActive = false;
+      if (scene) {
+        disposeLoadedModel(scene);
+      }
+    };
+  }, [plate]);
+  const surface = loaded?.plate === plate ? loaded.scene : flat.object;
+  useEffect(() => {
+    parent.add(surface);
+    invalidate();
+    return () => {
+      parent.remove(surface);
+    };
+  }, [invalidate, parent, surface]);
+  return undefined;
+}
+
 function PrinterObjects({
   program,
   geometry,
@@ -300,13 +474,17 @@ function PrinterObjects({
   chamberLight,
   isReducedMotion,
   liveNozzleTarget,
-}: Omit<PrinterSceneProps, 'onContextLost'>): React.JSX.Element {
+  isWholePrinter,
+  plate,
+  grouping,
+  hiddenGroups,
+}: Omit<PrinterSceneProps, 'onContextLost' | 'frameRequest'>): React.JSX.Element {
   'use no memo'; // R3F owns imperative Three.js poses, buffers and uniforms.
   const { invalidate, scene } = useThree();
   const [eye] = useState(() => new THREE.Vector3());
   const machine = useMemo(
-    () => buildMachine({ geometry, program, theme, filamentColor }),
-    [geometry, program, theme, filamentColor],
+    () => buildMachine({ geometry, program, theme, filamentColor, isWholePrinter, grouping }),
+    [geometry, program, theme, filamentColor, isWholePrinter, grouping],
   );
   useEffect(
     () => () => {
@@ -327,6 +505,10 @@ function PrinterObjects({
     invalidate();
   }, [chamberLight, invalidate, machine]);
   useEffect(() => store.subscribe(invalidate), [invalidate, store]);
+  useEffect(() => {
+    setToolpathVisibility(machine.reveal, hiddenGroups);
+    invalidate();
+  }, [hiddenGroups, invalidate, machine]);
 
   useFrame((state, delta) => {
     for (const wall of machine.walls) {
@@ -338,9 +520,13 @@ function PrinterObjects({
     const { segment } = updateToolpathReveal({ reveal: machine.reveal, program, time, head });
     if (segment < 0) {
       head.set(...geometry.toolhead.home);
+      if (!isWholePrinter) {
+        head.z = plateFocusParkHeight;
+      }
     }
-    machine.plateGroup.position.z = plateOffsetForHeight(geometry, head.z);
-    const headZ = toolheadLiftForHeight(geometry, head.z);
+    // With only the plate drawn, the plate stays put and the nozzle climbs with the print.
+    machine.plateGroup.position.z = isWholePrinter ? plateOffsetForHeight(geometry, head.z) : 0;
+    const headZ = isWholePrinter ? toolheadLiftForHeight(geometry, head.z) : head.z;
     machine.toolhead.position.set(head.x, head.y, headZ);
     if (machine.beam) {
       machine.beam.position.y = head.y;
@@ -356,7 +542,13 @@ function PrinterObjects({
     }
   });
 
-  return <primitive object={machine.root} />;
+  return (
+    <>
+      {/* Keyed: R3F keeps the first object when a primitive's `object` alone changes. */}
+      <primitive key={machine.root.uuid} object={machine.root} />
+      <PrinterPlateSurface geometry={geometry} plate={plate} parent={machine.plateGroup} />
+    </>
+  );
 }
 
 /**
@@ -369,7 +561,8 @@ function PrinterCamera({
   frameRequest,
   isReducedMotion,
 }: Readonly<{
-  geometry: PrinterGeometry;
+  /** The machine whose enclosure the eye stays outside; `undefined` when only the plate is drawn. */
+  geometry: PrinterGeometry | undefined;
   box: PrinterBounds;
   frameRequest: number;
   isReducedMotion: boolean;
@@ -399,13 +592,24 @@ function PrinterCamera({
   return <TauCameraControls ref={controls} makeDefault onControl={release} />;
 }
 
-/** The printer, its toolpath and the camera for one program. */
+/** The printer or its plate alone, the toolpath and the camera for one program. */
 export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
-  const { geometry, program, frameRequest, isReducedMotion, onContextLost } = props;
+  const { geometry, program, frameRequest, isReducedMotion, onContextLost, isWholePrinter, grouping, hiddenGroups } =
+    props;
   // Public viewers stay on WebGL; the existing internal override is used for parity checks.
   const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
   const gl = useMemo(() => createTauR3fGlProp(backend), [backend]);
-  const box = useMemo(() => framedPrintBox(geometry, partBounds(program) ?? program.bounds), [geometry, program]);
+  // The whole printer frames the plate and its travel; the plate alone frames the shown filament.
+  const box = useMemo(
+    () =>
+      isWholePrinter
+        ? framedPrintBox(geometry, partBounds(program) ?? program.bounds)
+        : framedPlateBox(geometry, {
+            shown: shownExtrusionBounds(program, grouping, hiddenGroups),
+            part: shownExtrusionBounds(program, grouping, new Set([...hiddenGroups, 'preparation'])),
+          }),
+    [geometry, grouping, hiddenGroups, isWholePrinter, program],
+  );
   return (
     <Canvas
       key={backend}
@@ -422,7 +626,12 @@ export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
       <hemisphereLight intensity={0.35} position={[0, 0, 1]} />
       <directionalLight intensity={1.1} position={[300, -400, 600]} />
       <directionalLight intensity={0.35} position={[-300, 200, 300]} />
-      <PrinterCamera geometry={geometry} box={box} frameRequest={frameRequest} isReducedMotion={isReducedMotion} />
+      <PrinterCamera
+        geometry={isWholePrinter ? geometry : undefined}
+        box={box}
+        frameRequest={frameRequest}
+        isReducedMotion={isReducedMotion}
+      />
       <PrinterObjects {...props} />
     </Canvas>
   );

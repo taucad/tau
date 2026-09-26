@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { writeBambuContainer } from '@taucad/slicer/container';
-import { extractGcode, hasZipSignature, isPrinterFileName, printerFileKind } from '#components/printer/printer-file.js';
+import {
+  hasZipSignature,
+  readPrinterFile,
+  isPrinterFileName,
+  printerFileKind,
+} from '#components/printer/printer-file.js';
 import { loadPrinterProgram } from '#components/printer/printer-program.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 
@@ -25,24 +30,34 @@ describe('printer file recognition', () => {
   });
 });
 
-describe('extractGcode and loadPrinterProgram', () => {
+describe('readPrinterFile and loadPrinterProgram', () => {
   it('should read the plate member out of a Bambu container and parse it', () => {
     const gcode = fixtureGcode({ layers: 3 });
     const container = writeBambuContainer({ gcode, modelName: 'fixture', plate: 'textured-pei' });
     expect(printerFileKind('fixture.gcode.3mf', container.subarray(0, 8))).toBe('container');
-    expect(new TextDecoder().decode(extractGcode(container, 'container'))).toBe(gcode);
-    const program = loadPrinterProgram(container, 'container');
+    expect(new TextDecoder().decode(readPrinterFile(container, 'container').gcode)).toBe(gcode);
+    const { program, slicedPlate } = loadPrinterProgram(container, 'container');
     expect(program.layerTable).toHaveLength(3);
     expect(program.coverage.complete).toBe(true);
+    expect(slicedPlate?.id).toBe('textured-pei');
   });
 
   it('should pass text G-code through untouched', () => {
     const bytes = new TextEncoder().encode(fixtureGcode({ layers: 2 }));
-    expect(extractGcode(bytes, 'gcode')).toBe(bytes);
-    expect(loadPrinterProgram(bytes, 'gcode').layerTable).toHaveLength(2);
+    expect(readPrinterFile(bytes, 'gcode')).toEqual({ gcode: bytes, slicedPlate: undefined });
+    expect(loadPrinterProgram(bytes, 'gcode').program.layerTable).toHaveLength(2);
   });
 
   it('should refuse a container without the plate member', () => {
-    expect(() => extractGcode(zipHead, 'container')).toThrow();
+    expect(() => readPrinterFile(zipHead, 'container')).toThrow();
+  });
+
+  it("should take the plate from Bambu Studio's config block when the container names none Tau knows", () => {
+    const gcode = `; HEADER_BLOCK_START\n; CONFIG_BLOCK_START\n; curr_bed_type = High Temp Plate\n; CONFIG_BLOCK_END\n${fixtureGcode({ layers: 2 })}`;
+    const unspecified = writeBambuContainer({ gcode, modelName: 'fixture' });
+    expect(readPrinterFile(unspecified, 'container').slicedPlate?.id).toBe('high-temperature');
+    expect(readPrinterFile(new TextEncoder().encode(gcode), 'gcode').slicedPlate?.id).toBe('high-temperature');
+    const cool = writeBambuContainer({ gcode, modelName: 'fixture', plate: 'cool_plate' });
+    expect(readPrinterFile(cool, 'container').slicedPlate?.id).toBe('cool');
   });
 });

@@ -21,7 +21,6 @@ export const printerBody = {
   frame: { light: '#5b6470', dark: '#9aa3ad' },
   base: { light: '#2b2f36', dark: '#23272d' },
   glass: { light: '#7fa5bc', dark: '#8fb2c9' },
-  plate: { light: '#3b4048', dark: '#2f343b' },
   plateGrid: { light: '#6b7280', dark: '#4b515a' },
   envelope: printerAccent,
   rail: '#7c8792',

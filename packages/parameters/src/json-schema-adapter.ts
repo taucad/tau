@@ -36,11 +36,13 @@ const schemaKeywords = new Set([
   'then',
 ]);
 const semanticKeywords = new Set([
+  'x-ogc-definition',
   'x-ogc-unit',
   'x-tau-quantity-kind',
   'x-tau-reference',
   'x-tau-space',
   'x-tau-symbol',
+  'x-tau-symbols',
   'x-tau-unit',
 ]);
 
@@ -88,14 +90,10 @@ const withoutStringPatterns = (root: Record<string, unknown>): Record<string, un
   return projected;
 };
 
-const declaredUnit = (schema: Record<string, unknown>): string | undefined => {
-  const tauUnit = schema['x-tau-unit'];
-  const ogcUnit = schema['x-ogc-unit'];
-  if (typeof tauUnit === 'string' && typeof ogcUnit === 'string' && tauUnit !== ogcUnit) {
-    throw new TypeError('NATIVE_PROJECTION_UNSUPPORTED: conflicting Tau and OGC unit annotations');
-  }
-  return typeof tauUnit === 'string' ? tauUnit : typeof ogcUnit === 'string' ? ogcUnit : undefined;
-};
+// Admission has refused disagreeing unit and quantity-kind spellings, so either spelling is the claim.
+const declaredUnit = (schema: Record<string, unknown>): unknown => schema['x-tau-unit'] ?? schema['x-ogc-unit'];
+const declaredKind = (schema: Record<string, unknown>): unknown =>
+  schema['x-ogc-definition'] ?? schema['x-tau-quantity-kind'];
 
 type BindingMode = 'definition' | 'exact' | 'unsupported';
 type VisitInput = Readonly<{
@@ -157,7 +155,7 @@ const createProjection = (
         semanticDefinitions.add(value);
       } else {
         referencedDefinitions.add(value);
-        const quantityKind = value['x-tau-quantity-kind'];
+        const quantityKind = declaredKind(value);
         const space = value['x-tau-space'];
         const reference = value['x-tau-reference'];
         if (
@@ -255,12 +253,16 @@ const createProjection = (
       projected[key] = structuredClone(child);
     }
     const unit = declaredUnit(value);
-    if (unit !== undefined) {
+    if (typeof unit === 'string') {
       projected['ucumUnit'] = unit;
     }
     const symbol = value['x-tau-symbol'];
     if (typeof symbol === 'string') {
       projected['symbol'] = symbol;
+    }
+    const symbols = value['x-tau-symbols'];
+    if (isRecord(symbols)) {
+      projected['symbols'] = structuredClone(symbols);
     }
     return emit ? projected : undefined;
   };

@@ -37,7 +37,7 @@ import { restoreMachine, selectRestoreBusy, selectRestoreNeedsConfirmation } fro
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncMachineEvent } from '#sync.machine.js';
 import type { SyncFacet, SyncPushOutcome } from '#sync.types.js';
-import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
+import type { CheckoutRecord, ConflictRecord, RevisionPortErrorCode } from '#revision-port.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnFailureCode, TurnOutcome, TurnSettlement } from '#turn.machine.js';
 import type {
@@ -62,6 +62,8 @@ export type ProjectRevisionsMachineInput = Readonly<{
 type ProjectRevisionsMachineContextFields = Readonly<{
   projectId: string;
   checkouts: readonly CheckoutRecord[];
+  /** Every conflicted revision no decision has landed yet, from the registry's last listing (D14). */
+  conflicts: readonly ConflictRecord[];
   /** Local branch refs learned from fetch that do not need a checkout yet. */
   availableBranches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
   checkoutStatus: Readonly<Record<string, CheckoutStatusEntry>>;
@@ -105,7 +107,7 @@ export interface ProjectRevisionsMachineContext extends ProjectRevisionsMachineC
 
 /** Events accepted by projectRevisionsMachine. @public */
 export type ProjectRevisionsMachineEvent =
-  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
+  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[]; conflicts: readonly ConflictRecord[] }>
   | Readonly<{
       type: 'branchesFetched';
       branches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
@@ -444,22 +446,19 @@ const dropTurn = (
 };
 
 /*
- * One `resolution` child per conflicted branch head (S33, A38).
+ * One `resolution` child per unresolved conflicted revision (S33, A38, D14).
  *
- * Spawned from the *records*, so a reload rebuilds exactly the cards the
- * store still justifies (I3), and stopped the moment a head stops being
- * conflicted — which is what `finish` and a second merge both do.
+ * Spawned from the conflict lines, so a reload rebuilds exactly the cards the
+ * store still justifies (I3), and stopped the moment the line it decides
+ * contains the revision — which is what `finish` does, here or on another
+ * device.
  */
 const syncResolutions = (
   context: ProjectRevisionsMachineContext,
   enq: ProjectRevisionsEnqueue,
   self: ProjectRevisionsSelf,
 ): ProjectRevisionsPatch => {
-  const wanted = new Map(
-    context.checkouts
-      .filter((checkout) => checkout.conflicted === true && checkout.headRevisionId !== undefined)
-      .map((checkout) => [checkout.headRevisionId ?? '', checkout.branch]),
-  );
+  const wanted = new Map(context.conflicts.map((conflict) => [conflict.revisionId, conflict.line]));
   for (const [id, ref] of Object.entries(context.resolutionRefs)) {
     if (!wanted.has(id)) {
       enq.stop(ref);
@@ -472,7 +471,7 @@ const syncResolutions = (
       input: {
         projectId: context.projectId,
         revisionId: id,
-        ...(branch === undefined ? {} : { branch }),
+        branch,
         parentRef: self,
       },
     });
@@ -645,6 +644,7 @@ const projectRevisionsMachineDefinition = setup({
   context: ({ input }) => ({
     projectId: input.projectId,
     checkouts: [],
+    conflicts: [],
     availableBranches: [],
     checkoutStatus: {},
     liveCheckoutId: input.liveCheckoutId,
@@ -734,7 +734,18 @@ const projectRevisionsMachineDefinition = setup({
   states: {
     ready: {
       on: {
-        branchesFetched: { context: ({ event }) => ({ availableBranches: event.branches }) },
+        /* A fetch can bring a conflict line from another device, or drop one
+         * the owner removed, so the registry re-reads whenever either is in
+         * play (D14). Most fetches carry neither and re-read nothing. */
+        branchesFetched: ({ context, event }, enq) => {
+          if (
+            context.conflicts.length > 0 ||
+            event.branches.some((branch) => branch.name === 'conflicts' || branch.name.startsWith('conflicts/'))
+          ) {
+            enq.sendTo('checkouts', { type: 'open' });
+          }
+          return { context: { availableBranches: event.branches } };
+        },
         checkoutsChanged: ({ context, event, self }, enq) => {
           const known = new Set(event.checkouts.map((checkout) => checkout.id));
           for (const [id, ref] of Object.entries(context.checkoutRefs)) {
@@ -778,6 +789,7 @@ const projectRevisionsMachineDefinition = setup({
           let next: ProjectRevisionsMachineContext = {
             ...context,
             checkouts: event.checkouts,
+            conflicts: event.conflicts,
             checkoutRefs: kept,
             chatCheckouts: Object.fromEntries(
               Object.entries(context.chatCheckouts).filter(([, checkoutId]) => known.has(checkoutId)),
@@ -799,7 +811,7 @@ const projectRevisionsMachineDefinition = setup({
           ) {
             announceSelection(next, enq);
           }
-          /* One conflict card per conflicted head the records justify (S33). */
+          /* One conflict card per conflicted revision the conflict lines justify (S33, D14). */
           next = { ...next, ...syncResolutions(next, enq, self) };
           /* `branch` delegated *New branch* and *Discard* to the registry, so
            * the registry's own answer is what settles them. */
@@ -823,6 +835,7 @@ const projectRevisionsMachineDefinition = setup({
           return {
             context: {
               checkouts: next.checkouts,
+              conflicts: next.conflicts,
               checkoutRefs: next.checkoutRefs,
               chatCheckouts: next.chatCheckouts,
               liveCheckoutId: next.liveCheckoutId,
@@ -1114,6 +1127,12 @@ const projectRevisionsMachineDefinition = setup({
         checkoutChanged: ({ context, event }, enq) => {
           const ref = context.checkoutRefs[event.checkoutId];
           if (ref !== undefined) {
+            /* A line that moved can land a decision made on another device: the
+             * conflicted revision is then this line's ancestor and its card goes
+             * (D14). Only re-read while a conflict is listed. */
+            if (context.conflicts.length > 0) {
+              enq.sendTo('checkouts', { type: 'open' });
+            }
             /* A live Switch keeps the checkout id and moves its line (N9). */
             if (event.branch !== undefined) {
               enq.sendTo(ref, { type: 'lineChanged', branch: event.branch });
@@ -1434,35 +1453,32 @@ export const selectRevisionStatus = (
 };
 
 /**
- * Every conflicted branch, with what a person has chosen on it so far.
+ * Every undecided conflicted revision, with what a person has chosen on it so far.
  *
- * Two sources on purpose, each answering what only it can: the *records* say a
- * conflict exists (so a reload still shows the card), and the conflicted
+ * Two sources on purpose, each answering what only it can: the conflict lines
+ * say a conflict exists (so a reload, or another device, still shows the card), and the conflicted
  * revision's own `resolution` child says which files are left and which side
  * each has been given. Before that child has read the conflict the card renders
  * with no rows, which is exactly what is known.
  *
  * @param snapshot - Current root snapshot.
- * @returns One facet per conflicted branch head.
+ * @returns One facet per undecided conflicted revision.
  */
 const selectConflicts = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>): readonly RevisionConflictFacet[] => {
   const { context } = snapshot;
-  return context.checkouts.flatMap((checkout) => {
-    if (checkout.conflicted !== true || checkout.headRevisionId === undefined) {
-      return [];
-    }
-    const child = context.resolutionRefs[checkout.headRevisionId]?.getSnapshot();
+  return context.conflicts.map((conflict) => {
+    const child = context.resolutionRefs[conflict.revisionId]?.getSnapshot();
     const facet = child === undefined ? undefined : selectResolutionFacet(child);
-    return [
-      {
-        revisionId: checkout.headRevisionId,
-        branch: checkout.branch,
-        labels: facet?.labels,
-        paths: facet?.paths ?? [],
-        busy: facet?.busy ?? true,
-        ready: facet?.ready ?? false,
-      },
-    ];
+    return {
+      revisionId: conflict.revisionId,
+      branch: conflict.line,
+      into: conflict.into,
+      foreign: conflict.foreign,
+      labels: facet?.labels,
+      paths: facet?.paths ?? [],
+      busy: facet?.busy ?? true,
+      ready: facet?.ready ?? false,
+    };
   });
 };
 
@@ -1494,9 +1510,24 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
         ],
   );
   const known = new Set(checkedOut.map((branch) => branch.name));
+  /* A conflict line is listed while it holds a decision nobody landed, and
+   * hidden once the line it decides contains it (D14). */
+  const undecided = new Map<string, string>();
+  for (const conflict of context.conflicts) {
+    if (!undecided.has(conflict.line)) {
+      undecided.set(conflict.line, conflict.revisionId);
+    }
+  }
+  const isConflictLine = (name: string): boolean => name === 'conflicts' || name.startsWith('conflicts/');
+  const refOnly = [
+    ...context.availableBranches.filter((branch) => !isConflictLine(branch.name) || undecided.has(branch.name)),
+    ...[...undecided]
+      .filter(([line]) => !context.availableBranches.some((branch) => branch.name === line))
+      .map(([name, head]) => ({ name, head })),
+  ];
   return [
     ...checkedOut,
-    ...context.availableBranches
+    ...refOnly
       .filter((branch) => !known.has(branch.name))
       .map((branch) => ({
         name: branch.name,

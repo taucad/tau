@@ -9,7 +9,7 @@ import { checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
 import { RevisionPortError } from '#revision-port.js';
-import type { CheckoutRecord } from '#revision-port.js';
+import type { CheckoutRecord, ConflictRecord } from '#revision-port.js';
 import { remoteMachine } from '#remote.machine.js';
 import { resolutionMachine } from '#resolution.machine.js';
 import { restoreMachine } from '#restore.machine.js';
@@ -114,12 +114,11 @@ const linked: CheckoutRecord = {
   leaseChatIds: [],
 };
 
-/** The same linked checkout, but its head is a conflicted revision (W10). */
-const conflictedLinked: CheckoutRecord = {
-  ...linked,
-  headRevisionId: 'rev-conflict',
-  conflicted: true,
-};
+/** This device's conflict line for `main` (D14). */
+const conflictLine = 'conflicts/main/device-a';
+
+/** One undecided conflicted revision on it. */
+const undecided: ConflictRecord = { revisionId: 'rev-conflict', line: conflictLine, into: 'main', foreign: false };
 
 type Harness = Readonly<{
   actor: ReturnType<typeof createActor<typeof projectRevisionsMachine>>;
@@ -214,18 +213,23 @@ const start = (): Harness => {
   return { actor, promises, callbacks, emitted };
 };
 
-const registerCheckouts = (harness: Harness, checkouts: readonly CheckoutRecord[] = [live, linked]): void => {
-  harness.actor.send({ type: 'checkoutsChanged', checkouts });
+const registerCheckouts = (
+  harness: Harness,
+  checkouts: readonly CheckoutRecord[] = [live, linked],
+  conflicts: readonly ConflictRecord[] = [],
+): void => {
+  harness.actor.send({ type: 'checkoutsChanged', checkouts, conflicts });
 };
 
 /** Bring the invoked `checkouts` child to `ready` through its own records. */
 const readyRegistry = async (
   harness: Harness,
   checkouts: readonly CheckoutRecord[] = [live, linked],
+  conflicts: readonly ConflictRecord[] = [],
 ): Promise<void> => {
   harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
   await flush();
-  harness.promises.settle('listCheckouts', { output: { checkouts } });
+  harness.promises.settle('listCheckouts', { output: { checkouts, conflicts } });
   await flush();
 };
 
@@ -1264,7 +1268,7 @@ describe('projectRevisionsMachine', () => {
     harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
     harness.promises.settle('listCheckouts', {
-      output: { checkouts: [{ ...live, headRevisionId: 'rev-9' }, linked] },
+      output: { checkouts: [{ ...live, headRevisionId: 'rev-9' }, linked], conflicts: [] },
     });
     await flush();
 
@@ -1452,7 +1456,7 @@ describe('projectRevisionsMachine', () => {
     harness.promises.settle('sweepLeases', { output: { retiredRunIds: ['run-0'] } });
     await flush();
     harness.promises.settle('listCheckouts', {
-      output: { checkouts: [live, { ...linked, removable: true }] },
+      output: { checkouts: [live, { ...linked, removable: true }], conflicts: [] },
     });
     await flush();
 
@@ -1895,10 +1899,10 @@ describe('projectRevisionsMachine', () => {
   });
 
   /* 25–28: the conflict cards (W10, S33). */
-  it('spawns one resolution child per conflicted head and retires it when the head moves', async () => {
+  it('spawns one resolution child per undecided conflict and retires it once the line contains it (D14)', async () => {
     const harness = start();
 
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
 
     expect(Object.keys(harness.actor.getSnapshot().context.resolutionRefs)).toEqual(['rev-conflict']);
@@ -1906,12 +1910,12 @@ describe('projectRevisionsMachine', () => {
       { projectId: 'project-1', revisionId: 'rev-conflict' },
     ]);
     /* Not spawned twice for the same head. */
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
     expect(harness.promises.inputsFor('loadConflict')).toHaveLength(1);
 
-    /* The head moved off the conflicted revision: the card, and its child, go. */
-    registerCheckouts(harness, [live, { ...linked, headRevisionId: 'rev-resolved' }]);
+    /* A decision landed: the listing no longer holds it, and the card and its child go. */
+    registerCheckouts(harness, [live, linked], []);
     await flush();
     expect(harness.actor.getSnapshot().context.resolutionRefs).toEqual({});
 
@@ -1921,11 +1925,20 @@ describe('projectRevisionsMachine', () => {
   it('projects the conflict card from the records and its child, and counts it as attention', async () => {
     const harness = start();
 
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
     /* Before the child has read anything, the card exists and says so. */
     expect(selectRevisionStatus(harness.actor.getSnapshot()).conflicts).toEqual([
-      { revisionId: 'rev-conflict', branch: 'agent/b', labels: undefined, paths: [], busy: true, ready: false },
+      {
+        revisionId: 'rev-conflict',
+        branch: conflictLine,
+        into: 'main',
+        foreign: false,
+        labels: undefined,
+        paths: [],
+        busy: true,
+        ready: false,
+      },
     ]);
     const projectedPathCounts: number[] = [];
     const subscription = harness.actor.subscribe((snapshot) => {
@@ -1934,10 +1947,10 @@ describe('projectRevisionsMachine', () => {
 
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'agent/b',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
-        checkoutId: 'checkout-b',
+        checkoutId: 'checkout-live',
       },
     });
     await flush();
@@ -1946,7 +1959,9 @@ describe('projectRevisionsMachine', () => {
     expect(status.conflicts).toEqual([
       {
         revisionId: 'rev-conflict',
-        branch: 'agent/b',
+        branch: conflictLine,
+        into: 'main',
+        foreign: false,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true, side: undefined }],
         busy: false,
@@ -1964,14 +1979,14 @@ describe('projectRevisionsMachine', () => {
   it('routes a per-file verb to the conflicted revision it names', async () => {
     const harness = start();
 
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'agent/b',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
-        checkoutId: 'checkout-b',
+        checkoutId: 'checkout-live',
       },
     });
     await flush();
@@ -2001,13 +2016,13 @@ describe('projectRevisionsMachine', () => {
   it('re-emits a resolved conflict and asks the registry to read again', async () => {
     const harness = start();
 
-    await readyRegistry(harness, [live, conflictedLinked]);
+    await readyRegistry(harness, [live, linked], [undecided]);
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'agent/b',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
-        checkoutId: 'checkout-b',
+        checkoutId: 'checkout-live',
       },
     });
     await flush();
@@ -2019,13 +2034,13 @@ describe('projectRevisionsMachine', () => {
     harness.promises.settle('applyResolution', { output: undefined });
     await flush();
     harness.actor.send({ type: 'resolution', revisionId: 'rev-conflict', event: { type: 'finish' } });
-    harness.promises.settle('finishMerge', { output: { revisionId: 'rev-resolved', branch: 'agent/b' } });
+    harness.promises.settle('finishMerge', { output: { revisionId: 'rev-resolved', branch: conflictLine } });
     await flush();
 
     expect(harness.emitted.find((event) => event.type === 'conflictResolved')).toEqual({
       type: 'conflictResolved',
       revisionId: 'rev-resolved',
-      branch: 'agent/b',
+      branch: conflictLine,
     });
     /* The registry is re-read, which is what retires the card (one writer). */
     expect(harness.promises.inputsFor('listCheckouts')).toHaveLength(2);
@@ -2036,13 +2051,13 @@ describe('projectRevisionsMachine', () => {
   it('re-emits a child toast, so a refused finish reaches the host with its reason (L2-F8)', async () => {
     const harness = start();
 
-    await readyRegistry(harness, [live, conflictedLinked]);
+    await readyRegistry(harness, [live, linked], [undecided]);
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'agent/b',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
-        checkoutId: 'checkout-b',
+        checkoutId: 'checkout-live',
       },
     });
     await flush();
@@ -2092,7 +2107,6 @@ describe('projectRevisionsMachine', () => {
 
   it('tells the scheduler a conflict was composed, so `Needs resolution` is not sticky (W13 review 2 R6/P37)', async () => {
     const harness = start();
-    const conflictedLive: CheckoutRecord = { ...live, headRevisionId: 'rev-conflict', conflicted: true };
 
     /* The scheduler rehydrates, pulls, and finds the two lines diverged. */
     harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
@@ -2111,16 +2125,16 @@ describe('projectRevisionsMachine', () => {
       leaseChatIds: [],
     });
     harness.promises.settle('syncMerge', {
-      output: { status: 'conflicted', branch: 'main', into: 'main', paths: ['enclosure.ts'] },
+      output: { status: 'conflicted', branch: conflictLine, into: 'main', paths: ['enclosure.ts'] },
     });
     await flush();
-    await readyRegistry(harness, [conflictedLive]);
+    await readyRegistry(harness, [live], [undecided]);
     expect(selectRevisionStatus(harness.actor.getSnapshot()).sync.state).toBe('conflicted');
 
-    /* W10's resolution settles on the branch the scheduler tracks. */
+    /* W10's resolution settles on the conflict line the scheduler recorded. */
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'main',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
         checkoutId: 'checkout-live',
@@ -2135,7 +2149,7 @@ describe('projectRevisionsMachine', () => {
     harness.promises.settle('applyResolution', { output: undefined });
     await flush();
     harness.actor.send({ type: 'resolution', revisionId: 'rev-conflict', event: { type: 'finish' } });
-    harness.promises.settle('finishMerge', { output: { revisionId: 'rev-resolved', branch: 'main' } });
+    harness.promises.settle('finishMerge', { output: { revisionId: 'rev-resolved', branch: conflictLine } });
     await flush();
 
     /* Pulling again, not still `Needs resolution`: whether the remote takes the
@@ -2149,14 +2163,14 @@ describe('projectRevisionsMachine', () => {
   it('re-emits a request to have a chat resolve one', async () => {
     const harness = start();
 
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'agent/b',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
-        checkoutId: 'checkout-b',
+        checkoutId: 'checkout-live',
       },
     });
     await flush();
@@ -2171,6 +2185,45 @@ describe('projectRevisionsMachine', () => {
       checkoutId: 'checkout-b',
       paths: ['enclosure.ts'],
     });
+
+    harness.actor.stop();
+  });
+
+  it('re-reads the registry when a fetch brings a conflict line, and lists only undecided lines (D14)', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    /* Another device's line arrives with the fetch; a line already decided rides along. */
+    harness.promises.settle('syncFetch', {
+      output: {
+        leases: {},
+        integration: 'upToDate',
+        branches: [
+          { name: 'main', head: 'rev-1' },
+          { name: 'conflicts/main/device-b', head: 'rev-foreign' },
+          { name: 'conflicts/main/device-c', head: 'rev-decided' },
+        ],
+      },
+    });
+    await flush();
+    expect(harness.promises.inputsFor('listCheckouts')).toHaveLength(2);
+    harness.promises.settle('listCheckouts', {
+      output: {
+        checkouts: [live],
+        conflicts: [{ revisionId: 'rev-foreign', line: 'conflicts/main/device-b', into: 'main', foreign: true }],
+      },
+    });
+    await flush();
+
+    const status = selectRevisionStatus(harness.actor.getSnapshot());
+    expect(status.conflicts.map(({ branch, into, foreign }) => ({ branch, into, foreign }))).toEqual([
+      { branch: 'conflicts/main/device-b', into: 'main', foreign: true },
+    ]);
+    expect(status.branches.map((branch) => branch.name)).toEqual(['main', 'conflicts/main/device-b']);
 
     harness.actor.stop();
   });

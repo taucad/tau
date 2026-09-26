@@ -30,8 +30,8 @@ import {
   captureRevisionTree,
   createCaptureMemo,
   ImmutableRevisionTree,
+  mergeFilePreferring,
   mergeRevisionTrees,
-  renderConflictMarkers,
   revisionId,
 } from '#algorithms/index.js';
 import type { CaptureMemo, ParameterRecordCodec, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
@@ -42,8 +42,15 @@ import { revisionTreeId } from '#git-tree-id.js';
 import { createHandles } from '#handle-table.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
 import type { TreeIdMemo } from '#tree-id-memo.js';
-import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
-import type { RevisionConflictTerms } from '#revision-conflict.js';
+import {
+  conflictLabels,
+  conflictLineOf,
+  isReservedBranchName,
+  materializeConflict,
+  parseConflictLine,
+  readConflictTerms,
+} from '#revision-conflict.js';
+import type { ConflictPerspective, RevisionConflictTerms } from '#revision-conflict.js';
 import { integrationOf, mergeBaseHeads, mergeBaseOf } from '#revision-log-order.js';
 import { resolutionMachine } from '#resolution.machine.js';
 import type {
@@ -157,10 +164,12 @@ import { RevisionPortError } from '#revision-port.js';
 import type {
   Checkout,
   CheckoutRecord,
+  ConflictRecord,
   RevisionPortErrorCode,
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionPort,
+  RevisionRecord,
   RevisionTag,
 } from '#revision-port.js';
 import { turnCutSettlementMilliseconds, turnMachine } from '#turn.machine.js';
@@ -616,7 +625,38 @@ export type RevisionActors = Readonly<{
    * has to wait for this first.
    */
   settled: () => Promise<void>;
+  /** Record an editor's overlapping edit as a conflicted revision (D14); see {@link EditorConflictInput}. */
+  recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
 }>;
+
+/**
+ * An edit an editor could neither save nor merge (charter D14, RV-W5b2 R2-1).
+ *
+ * The text, not bytes: an editor holds a model's text, and the page speaks JSON.
+ *
+ * @public
+ */
+export type EditorConflictInput = Readonly<{
+  /** Checkout-relative path of the file. */
+  path: string;
+  /** What the editor's text was made from; `null` when the file was absent. */
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel the editor already carries.
+  base: string | null;
+  /** The editor's text. */
+  mine: string;
+}>;
+
+/**
+ * What recording an editor's edit did.
+ *
+ * `unchanged` means the file is back on the bytes the edit was made from (an
+ * apply rolled back), so the editor saves its text as usual.
+ *
+ * @public
+ */
+export type EditorConflictOutcome =
+  | Readonly<{ status: 'recorded'; revisionId: string; line: string; into: string }>
+  | Readonly<{ status: 'unchanged' }>;
 
 /**
  * One resolved conflicted path: which side won, and the bytes when a person typed them.
@@ -624,7 +664,12 @@ export type RevisionActors = Readonly<{
  * Held by the effects module rather than by `resolution.machine`, because a
  * machine's context carries choices and never bytes (I29).
  */
-type ChosenSide = Readonly<{ side: ResolutionSide; content?: Uint8Array<ArrayBuffer> }>;
+type ChosenSide = Readonly<{
+  side: ResolutionSide;
+  content?: Uint8Array<ArrayBuffer>;
+  /** The two sides an editor's text was made against; a finish refuses when either moved (RV-W6 F9). */
+  madeFrom?: Readonly<{ ours: Uint8Array<ArrayBuffer> | undefined; theirs: Uint8Array<ArrayBuffer> | undefined }>;
+}>;
 
 /**
  * A checkout an integration must leave alone for now (D12, rule 9).
@@ -681,6 +726,12 @@ const generatedSetupTree = new ImmutableRevisionTree([
  * `@taucad/revisions/revision-effects` keeps the surface it published. */
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- keeping a published `@public` symbol at its own subpath across an internal move; `unicorn/prefer-export-from` demands this form and `no-barrel-files` forbids it outside index.ts (the recorded conflict).
 export { revisionTreeId } from '#git-tree-id.js';
+
+/* Absent equals absent: a file that is gone on both sides is the same file. */
+const sameBytes = (left: Uint8Array<ArrayBuffer> | undefined, right: Uint8Array<ArrayBuffer> | undefined): boolean =>
+  left === undefined || right === undefined
+    ? left === right
+    : left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 
 /**
  * Build one project's actor implementations over a port and its checkouts.
@@ -1464,9 +1515,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const headRevisionId = await headOf(place);
     const headTreeId = await treeIdOf(headRevisionId);
     const mergedAt = headRevisionId === undefined ? undefined : merged.get(headRevisionId);
-    /* One commit read: a head that records a conflict is the whole of what
-     * *Needs resolution* needs to appear, on this host and after a reload. */
-    const conflicted = headRevisionId === undefined ? undefined : await port.conflicts(revisionId(headRevisionId));
     return Object.freeze<CheckoutRecord>({
       id: place.id,
       projectId: place.projectId,
@@ -1482,23 +1530,116 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       ...(place.kind === 'linked' && mergedAt !== undefined && now() - mergedAt > removalOfferMilliseconds
         ? { removable: true }
         : {}),
-      ...(conflicted === undefined ? {} : { conflicted: true }),
     });
   };
 
+  /** Which conflict line each listed conflicted revision is on, refilled by every listing. */
+  const lineOf = new Map<string, string>();
+
   /**
-   * The branch one revision is the head of, when one names it.
+   * Every conflicted revision no decision has landed yet (charter D14).
    *
-   * A conflicted revision is *on* a branch, and every verb that finishes it has
-   * to move that branch — so the name is read from the refs rather than carried
-   * through a machine's context, where a branch that moved would leave it stale.
+   * Read from the conflict lines, recorded here or fetched: each line is walked
+   * from its tip back through the third parent — the tip a conflict was
+   * recorded on — and the walk stops at the first revision the line it decides
+   * already contains, because a landed decision has that revision among its
+   * parents and everything older on the line is behind it too. So "resolved" is
+   * ancestry, and nothing records it. A decision another device landed counts
+   * once it is on the remote's copy of that line, even while this device's own
+   * copy has diverged from it (RV-W6 F6).
    *
-   * @param revision - The revision to look for.
-   * @returns The branch name, or `undefined` when no branch names it.
+   * @returns One record per unresolved conflicted revision, newest first per line.
    */
-  const branchNaming = async (revision: string): Promise<string | undefined> => {
-    const references = await port.listRefs();
-    return references.find((reference) => reference.head === revision)?.name;
+  const listConflicts = async (): Promise<readonly ConflictRecord[]> => {
+    const device = options.deviceId?.();
+    const records: ConflictRecord[] = [];
+    lineOf.clear();
+    const tracking = await port.listRefs('refs/remotes');
+    for (const reference of await port.listRefs('refs/heads/conflicts')) {
+      const line = reference.name.replace(/^refs\/heads\//u, '');
+      const parsed = parseConflictLine(line, device);
+      if (parsed === undefined) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one read per line; lines are few.
+      const intoHead = await port.readRef(parsed.into);
+      const decidedOn = [
+        ...(intoHead === undefined ? [] : [intoHead]),
+        /* `refs/remotes/<remote>/<into>`, for every remote. */
+        ...tracking
+          .filter((entry) => entry.name.replace(/^refs\/remotes\/[^/]+\//u, '') === parsed.into)
+          .map((entry) => String(entry.head)),
+      ];
+      let current: RevisionId | undefined = reference.head;
+      while (current !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- the chain is one revision per recorded conflict.
+        const record = await port.readRevision(current);
+        if (record?.receipt.conflicted !== true) {
+          break;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        if (await decidedOnAny(decidedOn, current)) {
+          break;
+        }
+        lineOf.set(current, line);
+        records.push(Object.freeze({ revisionId: current, line, into: parsed.into, foreign: parsed.foreign }));
+        current = record.parents[2];
+      }
+    }
+    return records;
+  };
+
+  /**
+   * Whether any of these heads' history holds `revision`.
+   *
+   * @param heads - Candidate tips.
+   * @param revision - The revision asked about.
+   * @returns `true` when one of them contains it.
+   */
+  const decidedOnAny = async (heads: readonly string[], revision: string): Promise<boolean> => {
+    for (const head of heads) {
+      // oxlint-disable-next-line no-await-in-loop -- one local and a remote or two, stopping at the first.
+      if (await lineContains(head, revision)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * Whether `head`'s history holds `revision`.
+   *
+   * @param head - A line's tip.
+   * @param revision - The revision asked about.
+   * @returns `true` when `revision` is `head` or one of its ancestors.
+   */
+  const lineContains = async (head: string, revision: string): Promise<boolean> => {
+    if (head === revision) {
+      return true;
+    }
+    const { behind } = await port.divergence({ head: revisionId(head), base: revisionId(revision) });
+    return behind === 0;
+  };
+
+  /**
+   * Where this device reads one conflicted revision from (D14): its own tip of
+   * the line the decision lands on, and whether it recorded the conflict.
+   *
+   * @param revision - A conflicted revision.
+   * @returns The perspective, or `undefined` for a revision on no conflict line.
+   */
+  const perspectiveOf = async (
+    revision: string,
+  ): Promise<(ConflictPerspective & Readonly<{ line: string; into: string }>) | undefined> => {
+    if (!lineOf.has(revision)) {
+      await listConflicts();
+    }
+    const line = lineOf.get(revision);
+    const parsed = line === undefined ? undefined : parseConflictLine(line, options.deviceId?.());
+    if (line === undefined || parsed === undefined) {
+      return undefined;
+    }
+    return { line, into: parsed.into, head: await port.readRef(parsed.into), recorder: !parsed.foreign };
   };
 
   /**
@@ -1510,7 +1651,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    */
   const conflictTermsOf = async (revision: string): Promise<RevisionConflictTerms> => {
     await ensureStore();
-    const terms = await readConflictTerms(port, revision, mergeOptions);
+    const terms = await readConflictTerms(port, revision, {
+      ...mergeOptions,
+      perspective: await perspectiveOf(revision),
+    });
     if (terms === undefined) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', 'That revision records no conflict to resolve.');
     }
@@ -1611,12 +1755,108 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     });
   };
 
+  /**
+   * Refuse a branch name conflict lines own (D14).
+   *
+   * @param name - The name a person asked for.
+   * @throws RevisionPortError When it is `conflicts` or under it.
+   */
+  const refuseReservedName = (name: string): void => {
+    if (isReservedBranchName(name)) {
+      throw new RevisionPortError(
+        'BRANCH_NAME_RESERVED',
+        '“conflicts” is kept for decisions that travel between devices. Choose another name.',
+      );
+    }
+  };
+
   type MergeBranchesInput = Readonly<{
     branch: string;
     into: string;
-    conflictBranch?: string;
     sourceLabel?: string;
   }>;
+
+  /**
+   * This device's conflict line for decisions landing on `into` (charter D14).
+   *
+   * @param into - The line the decision lands on.
+   * @returns `conflicts/<into>/<device>`.
+   * @throws RevisionPortError Before the host knows which device it is: a line
+   *   named for no device could collide with another's.
+   */
+  const ownConflictLine = (into: string): string => {
+    const device = options.deviceId?.();
+    if (device === undefined) {
+      throw new RevisionPortError(
+        'UNSUPPORTED_OPERATION',
+        'This device is not identified yet, so the decision cannot be recorded. Try again in a moment.',
+      );
+    }
+    return conflictLineOf(into, device);
+  };
+
+  /**
+   * The one conflict write (charter D14): sync, a branch merge and an editor all
+   * record here.
+   *
+   * The conflicted revision parents on the two diverged heads **and** on its
+   * line's tip, so the line only ever fast-forwards and pushes like any branch.
+   * The same divergence recorded twice — every re-pull reaches here — returns
+   * the tip it already has rather than minting a copy.
+   *
+   * @param input - The line decided on, both sides, their merge base, the labels
+   *   the markers carry, and the summary.
+   * @returns The conflicted revision and its line.
+   */
+  const recordConflict = async (
+    input: Readonly<{
+      into: string;
+      theirs: string;
+      ours: string;
+      base: string | undefined;
+      theirsLabel: string;
+      summary: string;
+    }>,
+  ): Promise<Readonly<{ revisionId: string; line: string }>> => {
+    const line = ownConflictLine(input.into);
+    const tip = await port.readRef(line);
+    if (tip !== undefined) {
+      const previous = await port.readRevision(revisionId(tip));
+      if (
+        previous?.receipt.conflicted === true &&
+        previous.parents[0] === input.theirs &&
+        previous.parents[1] === input.ours
+      ) {
+        return { revisionId: tip, line };
+      }
+    }
+    const [oursTreeId, baseTreeId, theirsTreeId, theirsTree] = await Promise.all([
+      treeIdOf(input.ours),
+      treeIdOf(input.base),
+      treeIdOf(input.theirs),
+      port.readTree(revisionId(input.theirs)),
+    ]);
+    if (theirsTree === undefined) {
+      throw new RevisionPortError('UNKNOWN_REVISION', 'This project no longer holds both sides of that conflict.');
+    }
+    const receipt = await port.writeRevision({
+      parents: [revisionId(input.theirs), revisionId(input.ours), ...(tip === undefined ? [] : [revisionId(tip)])],
+      tree: theirsTree,
+      provenance: provenanceOf('merge', []),
+      summary: Object.freeze({ generated: input.summary }),
+      conflict: {
+        /* Two sides with no common revision share the empty tree as their base. */
+        trees: [
+          oursTreeId ?? '',
+          baseTreeId ?? revisionTreeId(new ImmutableRevisionTree([]), await formatOf()),
+          theirsTreeId ?? '',
+        ],
+        labels: conflictLabels({ ours: input.into, theirs: input.theirsLabel }),
+      },
+    });
+    await publishMerge(line, tip, receipt.commitId);
+    return { revisionId: receipt.commitId, line };
+  };
 
   /**
    * Refuse to rewrite a checkout a turn holds (rule 9, D10): the merge waits for
@@ -1633,14 +1873,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   /**
-   * Compose one branch into another, recording conflicts on the source side.
+   * Compose one branch into another, recording a conflict on `into`'s conflict line (D14).
    *
    * `checkoutId` names the checkout a landed merge moved, so its actor can
    * re-head; it is absent when nothing moved.
+   *
+   * @param input - The branch to merge, the branch it lands on, and the source's label.
+   * @returns What landed, or the conflict line the decision was recorded on.
    */
   const mergeBranches = async (
     input: MergeBranchesInput,
-  ): Promise<BranchMergeActorOutput & Readonly<{ checkoutId?: string }>> => {
+  ): Promise<
+    | Readonly<{ status: 'merged'; revisionId: string; checkoutId?: string }>
+    | Readonly<{ status: 'conflicted'; line: string; paths: readonly string[] }>
+  > => {
     await ensureStore();
     if (input.into === '' || input.into === input.branch) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', 'A branch cannot be merged into itself.');
@@ -1719,30 +1965,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const merged = mergeRevisionTrees(baseTree, oursTree, theirsTree, mergeOptions);
     if (merged.status === 'conflicted') {
-      const [oursTreeId, baseTreeId, theirsTreeId] = await Promise.all([
-        treeIdOf(ours),
-        treeIdOf(base),
-        treeIdOf(theirs),
-      ]);
-      const receipt = await port.writeRevision({
-        parents: [theirs, ours],
-        tree: theirsTree,
-        provenance: provenanceOf('merge', []),
-        summary: Object.freeze({ generated: `Merging ${sourceLabel} into ${input.into} needs resolution` }),
-        conflict: {
-          trees: [oursTreeId ?? '', baseTreeId ?? '', theirsTreeId ?? ''],
-          labels: conflictLabels({ ours: input.into, theirs: sourceLabel }),
-        },
+      /* Neither branch moves and no checkout is made: the decision is a value
+       * on `into`'s conflict line, which travels (D14, I1). */
+      const { line } = await recordConflict({
+        into: input.into,
+        theirs,
+        ours,
+        base,
+        theirsLabel: sourceLabel,
+        summary: `Merging ${sourceLabel} into ${input.into} needs your decision`,
       });
-      const conflictBranch = input.conflictBranch ?? input.branch;
-      const previousConflictHead = conflictBranch === input.branch ? theirs : await port.readRef(conflictBranch);
-      const conflictRevision = revisionId(receipt.commitId);
-      await publishMerge(conflictBranch, previousConflictHead, conflictRevision);
-      const descriptor = await describePort();
-      if (conflictBranch !== input.branch && port.addCheckout !== undefined && descriptor.checkouts) {
-        await port.addCheckout({ branch: conflictBranch, from: conflictRevision });
-      }
-      return { status: 'conflicted', paths: merged.conflicts.map((conflict) => conflict.path) };
+      return { status: 'conflicted', line, paths: merged.conflicts.map((conflict) => conflict.path) };
     }
 
     const receipt = await port.writeRevision({
@@ -1758,8 +1991,115 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return { status: 'merged', revisionId: receipt.commitId, checkoutId: target.id };
   };
 
+  /**
+   * The newest revision on `head`'s first-parent line an editor's text can be
+   * said to be made from: the one whose `path` holds `base`, else the first
+   * whose `path` is not yet the other writer's bytes, else the oldest walked.
+   *
+   * ponytail: bounded at 20 revisions and read by whole trees; an editor
+   * conflict is rare. A `base` no revision ever held (typed and saved, never
+   * minted) makes the three-way coarser, never lossy: both whole texts still
+   * reach the decision.
+   *
+   * @param head - The live line's head.
+   * @param file - The file's `path`, what the editor's text was made from (`base`), and what it holds now (`theirs`).
+   * @returns The revision whose tree the editor's side starts from, and whether
+   *   that side must stand alone: when no walked revision differs from `theirs`,
+   *   parenting on any of them would make the terms clean and land *mine*
+   *   wholesale, so the side is an orphan and the path an add/add (RV-W6 F10).
+   */
+  const originOf = async (
+    head: string,
+    file: Readonly<{
+      path: string;
+      base: Uint8Array<ArrayBuffer> | undefined;
+      theirs: Uint8Array<ArrayBuffer> | undefined;
+    }>,
+  ): Promise<Readonly<{ revision: string; orphan: boolean }>> => {
+    const { path, base, theirs } = file;
+    let current: RevisionId | undefined = revisionId(head);
+    let fallback: string | undefined;
+    let last = head;
+    for (let step = 0; step < 20 && current !== undefined; step += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- a first-parent walk is sequential by nature.
+      const [tree, record]: [ImmutableRevisionTree | undefined, RevisionRecord | undefined] = await Promise.all([
+        port.readTree(current),
+        port.readRevision(current),
+      ]);
+      const bytes = tree?.get(path);
+      if (sameBytes(bytes, base)) {
+        return { revision: current, orphan: false };
+      }
+      if (fallback === undefined && !sameBytes(bytes, theirs)) {
+        fallback = current;
+      }
+      last = current;
+      current = record?.parents[0];
+    }
+    return fallback === undefined ? { revision: last, orphan: true } : { revision: fallback, orphan: false };
+  };
+
+  /*
+   * An overlapping editor edit, recorded durably (D14, RV-W5b2 R2-1, R2-3).
+   *
+   * Under the live checkout's fence, so it lands after any apply in flight:
+   * the other side is whatever the live line holds when the decision is made
+   * (read by `perspectiveOf` as this line's tip), and the editor's side is one
+   * revision on the conflict line only — its text on top of the revision it was
+   * made from. No bookkeeping revision reaches `main`; nothing is written into
+   * the files (I7).
+   */
+  const recordEditorConflict = async (input: EditorConflictInput): Promise<EditorConflictOutcome> => {
+    await ensureStore();
+    const places = await listPlaces();
+    const live = places.find((place) => place.kind === 'live');
+    const into = live?.branch;
+    if (live === undefined || into === undefined) {
+      throw new RevisionPortError('UNSUPPORTED_OPERATION', 'This project has no files open to record a decision on.');
+    }
+    return withCheckoutFence(live.id, async () => {
+      const captured = await capture(live);
+      const theirs = captured.get(input.path);
+      const base = input.base === null ? undefined : textEncoder.encode(input.base);
+      if (sameBytes(theirs, base)) {
+        return { status: 'unchanged' };
+      }
+      const head = await port.readRef(into);
+      if (head === undefined) {
+        throw new RevisionPortError('UNKNOWN_REVISION', `${into} has no revision yet.`);
+      }
+      const { revision: origin, orphan } = await originOf(head, { path: input.path, base, theirs });
+      const originTree = await port.readTree(revisionId(origin));
+      if (originTree === undefined) {
+        throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${origin}.`);
+      }
+      const mine = await port.writeRevision({
+        parents: orphan ? [] : [revisionId(origin)],
+        tree: new ImmutableRevisionTree([
+          ...originTree
+            .entries()
+            .filter((entry) => entry.path !== input.path)
+            .map((entry) => [entry.path, entry.content, entry.mode] as RevisionTreeInput),
+          [input.path, textEncoder.encode(input.mine), originTree.mode(input.path) ?? '100644'],
+        ]),
+        provenance: provenanceOf('save', []),
+        summary: Object.freeze({ generated: `Your edit to ${input.path}` }),
+      });
+      const recorded = await recordConflict({
+        into,
+        theirs: head,
+        ours: mine.commitId,
+        base: orphan ? undefined : origin,
+        theirsLabel: into,
+        summary: `Your edit to ${input.path} needs your decision`,
+      });
+      return { status: 'recorded', revisionId: recorded.revisionId, line: recorded.line, into };
+    });
+  };
+
   return {
     settled,
+    recordEditorConflict,
     checkout: {
       cut: fromAuthorityPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async ({ input }) => {
         const place = await placeOf(input.checkoutId);
@@ -2088,13 +2428,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const leases = await readLeases();
         const places = await listPlaces();
         const merged = await mergedHistory();
-        return { checkouts: await Promise.all(places.map(async (place) => recordOf(place, leases, merged))) };
+        return {
+          checkouts: await Promise.all(places.map(async (place) => recordOf(place, leases, merged))),
+          conflicts: await listConflicts(),
+        };
       }),
 
       addCheckout: fromAuthorityPromise<
         AddCheckoutActorOutput,
         Readonly<{ projectId: string; branch: string; from: string }>
       >(async ({ input }) => {
+        refuseReservedName(input.branch);
         if (port.addCheckout === undefined) {
           throw new RevisionPortError('UNSUPPORTED_OPERATION', 'This project cannot open another set of files.');
         }
@@ -2236,8 +2580,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         Readonly<{ projectId: string; branch: string; into: string }>
       >(async ({ input }) => {
         /* The registry is re-read on `branchMerged`, so the moved checkout stays this module's. */
-        const { checkoutId: _moved, ...outcome } = await mergeBranches(input);
-        return outcome;
+        const outcome = await mergeBranches(input);
+        return outcome.status === 'merged'
+          ? { status: 'merged', revisionId: outcome.revisionId }
+          : { status: 'conflicted', paths: outcome.paths };
       }),
       /* A rename is two ref writes, in the order that cannot lose the head: the
        * new name is born first, and only a ref that still points where we read
@@ -2246,6 +2592,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         BranchRenameActorOutput,
         Readonly<{ projectId: string; branch: string; name: string }>
       >(async ({ input }) => {
+        refuseReservedName(input.name);
         await ensureStore();
         const head = await port.readRef(input.branch);
         if (head === undefined) {
@@ -2282,36 +2629,27 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     resolution: {
       loadConflict: fromAuthorityPromise<ResolutionLoadActorOutput, ResolutionLoadActorInput>(async ({ input }) => {
         const terms = await conflictTermsOf(input.revisionId);
-        const references = await port.listRefs();
-        const branch = references.find((reference) => reference.head === input.revisionId)?.name;
-        /* A conflicted revision no branch names any more is finished or
-           abandoned, so the sides chosen for it are dead. `finishMerge` drops
-           its own; this drops the ones nobody ever finished (review R12). */
-        const named = new Set<string>(references.map((reference) => reference.head));
+        const perspective = await perspectiveOf(input.revisionId);
+        /* The sides chosen for a conflicted revision no line lists any more are
+           dead: it resolved or was removed (review R12). */
         for (const key of resolutions.keys()) {
-          if (!named.has(key)) {
+          if (!lineOf.has(key)) {
             resolutions.delete(key);
           }
         }
         const places = await listPlaces();
         return {
-          branch,
+          branch: perspective?.line,
           labels: terms.labels,
           paths: terms.conflicts.map((conflict) => ({
             path: conflict.path,
-            /* *Open in editor* only where there is text to edit: a binary or
-             * parametric file and a file-versus-directory collision are
-             * choose-one (A22, canvas "Conflicts"). */
-            openable:
-              conflict.type !== 'file-directory' &&
-              renderConflictMarkers({
-                base: terms.base.get(conflict.path),
-                ours: terms.ours.get(conflict.path),
-                theirs: terms.theirs.get(conflict.path),
-                labels: terms.labels,
-              }) !== undefined,
+            /* *Open in editor* only for text: a parametric or binary file and a
+             * file-versus-directory collision are choose-one (rule 8). */
+            openable: conflict.type === 'text',
+            ...(conflict.type === 'parameters' && conflict.pointers.length > 0 ? { keys: conflict.pointers } : {}),
           })),
-          checkoutId: branch === undefined ? undefined : places.find((place) => place.branch === branch)?.id,
+          checkoutId:
+            perspective === undefined ? undefined : places.find((place) => place.branch === perspective.into)?.id,
         };
       }),
 
@@ -2327,7 +2665,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const decoder = new TextDecoder();
         return {
           path: input.path,
-          text: await materializeConflict(port, input, mergeOptions),
+          text: await materializeConflict(port, input, {
+            ...mergeOptions,
+            perspective: await perspectiveOf(input.revisionId),
+          }),
           ours: decoder.decode(terms.ours.get(input.path)),
           theirs: decoder.decode(terms.theirs.get(input.path)),
         };
@@ -2354,6 +2695,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         chosen.set(input.path, {
           side: input.side,
           ...(input.content === undefined ? {} : { content: textEncoder.encode(input.content) }),
+          ...(input.side === 'editor'
+            ? { madeFrom: { ours: terms.ours.get(input.path), theirs: terms.theirs.get(input.path) } }
+            : {}),
         });
         resolutions.set(input.revisionId, chosen);
       }),
@@ -2362,6 +2706,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ResolutionFinishActorOutput,
         Readonly<{ projectId: string; revisionId: string }>
       >(async ({ input }) => {
+        const perspective = await perspectiveOf(input.revisionId);
+        if (perspective === undefined) {
+          throw new RevisionPortError('UNSUPPORTED_OPERATION', 'That decision is no longer on a conflict line.');
+        }
+        if (perspective.head === undefined) {
+          /* A decision about a line that is gone has nowhere to land (RV-W6 F11). */
+          throw new RevisionPortError(
+            'UNSUPPORTED_OPERATION',
+            `${perspective.into} no longer exists on this device, so this decision has nowhere to land. Remove it from Branches instead.`,
+          );
+        }
         const terms = await conflictTermsOf(input.revisionId);
         const chosen = resolutions.get(input.revisionId) ?? new Map<string, ChosenSide>();
         const entries = new Map(
@@ -2375,6 +2730,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             throw new RevisionPortError('UNSUPPORTED_OPERATION', `Choose a side for ${conflict.path} first.`);
           }
           if (choice.side === 'editor' && choice.content !== undefined) {
+            if (
+              !sameBytes(choice.madeFrom?.ours, terms.ours.get(conflict.path)) ||
+              !sameBytes(choice.madeFrom?.theirs, terms.theirs.get(conflict.path))
+            ) {
+              throw new RevisionPortError(
+                'UNSUPPORTED_OPERATION',
+                `${conflict.path} changed since you edited it. Open it again to decide with its newest text.`,
+              );
+            }
             entries.set(conflict.path, [conflict.path, choice.content, terms.ours.mode(conflict.path) ?? '100644']);
             continue;
           }
@@ -2390,7 +2754,22 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
             continue;
           }
-          const bytes = side.get(conflict.path);
+          /* Keep mine on text or a parameter record keeps the other side's
+           * clean hunks and keys: the chosen side wins only where both changed
+           * (RV-W5b2 R2-4). Anything else is the whole side. */
+          const preferred =
+            conflict.type === 'text' || conflict.type === 'parameters'
+              ? mergeFilePreferring(
+                  conflict.path,
+                  {
+                    base: terms.base.get(conflict.path) ?? new Uint8Array(),
+                    ours: terms.ours.get(conflict.path) ?? new Uint8Array(),
+                    theirs: terms.theirs.get(conflict.path) ?? new Uint8Array(),
+                  },
+                  { ...mergeOptions, prefer: choice.side === 'mine' ? 'ours' : 'theirs' },
+                )
+              : undefined;
+          const bytes = preferred ?? side.get(conflict.path);
           if (bytes === undefined) {
             /* That side deleted it, which is a resolution like any other. */
             entries.delete(conflict.path);
@@ -2399,32 +2778,69 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
         }
 
+        /*
+         * The decision lands on the line it decides, with the conflicted
+         * revision among the merge's parents (D14): that ancestry is what hides
+         * the conflict line, here and on every device that fetches it, and the
+         * line itself never moves. The terms were read against this line's tip,
+         * so the merge carries everything the line gained since the conflict.
+         */
+        const { into, head } = perspective;
+        const tree = new ImmutableRevisionTree(entries.values());
         const receipt = await port.writeRevision({
-          parents: [revisionId(input.revisionId)],
-          tree: new ImmutableRevisionTree(entries.values()),
+          parents: [revisionId(head), revisionId(input.revisionId)],
+          tree,
           provenance: provenanceOf('merge', []),
           summary: Object.freeze({
-            generated: `Resolved ${String(terms.conflicts.length)} ${terms.conflicts.length === 1 ? 'file' : 'files'} between ${terms.labels.ours} and ${terms.labels.theirs}`,
+            generated: `Resolved ${String(terms.conflicts.length)} ${terms.conflicts.length === 1 ? 'file' : 'files'} on ${into}`,
           }),
         });
-        const branch = await branchNaming(input.revisionId);
-        if (branch !== undefined) {
-          const places = await listPlaces();
-          const place = places.find((candidate) => candidate.branch === branch);
-          if (place === undefined) {
-            await publishMerge(branch, input.revisionId, receipt.commitId);
-          } else {
-            const tree = await port.readTree(revisionId(receipt.commitId));
-            if (tree === undefined) {
-              throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${receipt.commitId}.`);
-            }
-            await materializeTree(place, tree, {
-              publish: async () => publishMerge(branch, input.revisionId, receipt.commitId),
-            });
+        /* The terms were read against `head`; a line that moved since is new
+         * work this decision has not seen, never something to overwrite. */
+        const land = async (): Promise<void> => {
+          try {
+            await publishMerge(into, head, receipt.commitId);
+          } catch (error) {
+            throw error instanceof RevisionPortError && error.code === 'ENGINE_FAILED'
+              ? new RevisionPortError(
+                  'ENGINE_FAILED',
+                  `${into} has new work since this decision was opened. Open it again to decide with it.`,
+                )
+              : error;
           }
+        };
+        const places = await listPlaces();
+        const place = places.find((candidate) => candidate.branch === into);
+        if (place === undefined) {
+          await land();
+        } else {
+          /* Never over files no revision holds, and never under a running turn
+           * (I1, rule 9): the same refusals a branch merge gives, read from the
+           * files themselves rather than a remembered capture (RV-W6 F9). */
+          const headTreeId = await treeIdOf(head);
+          const refuseHeld = async (current?: ImmutableRevisionTree): Promise<void> => {
+            await refuseLeased(place);
+            if (current !== undefined && (await checkoutTreeId(place.id, current)) !== headTreeId) {
+              throw new CheckoutHeld({
+                hold: 'dirty',
+                checkoutId: place.id,
+                code: 'UNSUPPORTED_OPERATION',
+                message:
+                  'The files you have open have changes that are not in a revision yet. Save a revision before you finish this decision.',
+              });
+            }
+          };
+          await refuseHeld(await captureFresh(place));
+          await materializeTree(place, tree, {
+            validate: refuseHeld,
+            publish: async () => {
+              await refuseHeld();
+              await land();
+            },
+          });
         }
         resolutions.delete(input.revisionId);
-        return { revisionId: receipt.commitId, branch };
+        return { revisionId: receipt.commitId, branch: perspective.line };
       }),
 
       seedTurn: fromAuthorityPromise<
@@ -2432,10 +2848,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         Readonly<{ projectId: string; revisionId: string }>
       >(async ({ input }) => {
         const terms = await conflictTermsOf(input.revisionId);
-        const branch = await branchNaming(input.revisionId);
+        const perspective = await perspectiveOf(input.revisionId);
         const places = await listPlaces();
         return {
-          checkoutId: branch === undefined ? undefined : places.find((place) => place.branch === branch)?.id,
+          /* A turn resolves on the line the decision lands on (rule 8). */
+          checkoutId:
+            perspective === undefined ? undefined : places.find((place) => place.branch === perspective.into)?.id,
           paths: terms.conflicts.map((conflict) => conflict.path),
         };
       }),
@@ -2748,9 +3166,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           syncChats ? port.listRefs(chatRefPrefix) : Promise.resolve([]),
           syncLargeExports ? port.listRefs('refs/tau/evidence') : Promise.resolve([]),
         ]);
+        /* Another device's conflict line is that device's to push: offering a
+         * copy this host fetched earlier would only sink the atomic set when
+         * the owner has moved it on since (D14). */
+        const device = options.deviceId?.();
         const history = [...heads, ...tags]
           .map((entry) => entry.name)
-          .filter((name) => !isHostLocalRef(name) && offered(name));
+          .filter(
+            (name) => !isHostLocalRef(name) && offered(name) && parseConflictLine(name, device)?.foreign !== true,
+          );
         const records = [...chats, ...evidence]
           .map((entry) => entry.name)
           .filter((name) => offered(name) && !failedPreparation.has(name));
@@ -2981,7 +3405,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
           }
         }
+        const device = options.deviceId?.();
         for (const [branch, prior] of priorByBranch) {
+          /* This device's own conflict line is its record of a decision, not a
+           * copy of the remote's: another device's *Remove* drops only the
+           * tracking ref, so the next push offers the line again (D14, RV-W6 F2). */
+          if (!advertisedBranches.has(branch) && parseConflictLine(branch, device)?.foreign === false) {
+            // oxlint-disable-next-line no-await-in-loop -- paired cleanup for one remote branch.
+            await port.updateRef({ name: remoteTrackingRef(input.remote, branch), expectedHead: revisionId(prior) });
+            continue;
+          }
           if (
             branch === activeBranch ||
             advertisedBranches.has(branch) ||
@@ -3201,10 +3634,24 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 }
                 signal.throwIfAborted();
                 const expectedTreeId = await treeIdOf(expected);
-                const beforeTreeId = await checkoutTreeId(place.id, before);
-                const pristineTreeId = revisionTreeId(generatedSetupTree, await formatOf());
+                /*
+                 * An unborn line holds no work of its own when every file is
+                 * either setup Tau generated or already in the arriving tree with
+                 * the same bytes: an opener writes the remote's own `tau.json`
+                 * before this pull (E2E-D defect A). Minting that as a root
+                 * revision merged the remote in as unrelated history. A file
+                 * the remote does not hold, or holds differently, is still work
+                 * and is minted first (rule 6).
+                 */
                 const dirty =
-                  expectedTreeId === undefined ? beforeTreeId !== pristineTreeId : expectedTreeId !== beforeTreeId;
+                  expectedTreeId === undefined
+                    ? !before
+                        .entries()
+                        .every(
+                          ({ path, content }) =>
+                            sameBytes(content, target.get(path)) || sameBytes(content, generatedSetupTree.get(path)),
+                        )
+                    : expectedTreeId !== (await checkoutTreeId(place.id, before));
                 const leases = await readLeases();
                 const leased = leases.some((lease) => lease.checkoutId === place.id);
                 signal.throwIfAborted();
@@ -3259,14 +3706,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       ),
 
       merge: fromAuthorityPromise<SyncMergeActorOutput, SyncIntegrateActorInput>(async ({ input }) => {
-        const conflictBranch = `sync/${input.remote}/${input.branch}`;
         const tracking = remoteTrackingRef(input.remote, `refs/heads/${input.branch}`);
         let outcome: Awaited<ReturnType<typeof mergeBranches>>;
         try {
           outcome = await mergeBranches({
             branch: tracking,
             into: input.branch,
-            conflictBranch,
             sourceLabel: `${input.remote}/${input.branch}`,
           });
         } catch (error) {
@@ -3278,7 +3723,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           return held;
         }
         if (outcome.status === 'conflicted') {
-          return { status: 'conflicted', branch: conflictBranch, into: input.branch, paths: outcome.paths };
+          return { status: 'conflicted', branch: outcome.line, into: input.branch, paths: outcome.paths };
         }
         const treeId = outcome.checkoutId === undefined ? undefined : await treeIdOf(outcome.revisionId);
         return outcome.checkoutId === undefined || treeId === undefined
@@ -3409,7 +3854,12 @@ export type ProjectRevisionActorOptions = RevisionActorsOptions &
  */
 export const createProjectRevisionsActor = (
   options: ProjectRevisionActorOptions,
-): Readonly<{ actor: ProjectRevisionsActor; settled: () => Promise<void> }> => {
+): Readonly<{
+  actor: ProjectRevisionsActor;
+  settled: () => Promise<void>;
+  /** Record an editor's overlapping edit; the *Needs your decision* card follows (D14). */
+  recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
+}> => {
   const actors = createRevisionActors(options);
   const actor = createActor(
     projectRevisionsMachine.provide({
@@ -3433,7 +3883,18 @@ export const createProjectRevisionsActor = (
       },
     },
   );
-  return { actor, settled: actors.settled };
+  const recordEditorConflict = async (input: EditorConflictInput): Promise<EditorConflictOutcome> => {
+    const outcome = await actors.recordEditorConflict(input);
+    if (outcome.status === 'recorded') {
+      /* The registry re-reads, so the card exists without a reload; and the
+       * line is offered to the remote now rather than with the next save, so
+       * every device shows it (D14). */
+      actor.send({ type: 'mergeConflicted', branch: outcome.line, into: outcome.into, paths: [input.path] });
+      actor.send({ type: 'syncNow' });
+    }
+    return outcome;
+  };
+  return { actor, settled: actors.settled, recordEditorConflict };
 };
 
 /* How far each wait outlasts the bound it awaits, so the inner reason always lands first (rule 9). */

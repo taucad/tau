@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
-import { mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
+import { mergeFilePreferring, mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
 import type { ParameterRecordCodec } from '#algorithms/revision-merge.js';
 
 const tree = (files: Readonly<Record<string, string | Uint8Array<ArrayBuffer>>>): ImmutableRevisionTree =>
@@ -25,6 +25,31 @@ const modifyDeleteCases: ReadonlyArray<{
     theirs: tree({ 'part.scad': 'changed' }),
   },
 ];
+
+describe('mergeFilePreferring', () => {
+  const encode = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+  const sides = {
+    base: encode('one\ntwo\nthree\nfour\nfive\n'),
+    ours: encode('one\nTWO mine\nthree\nfour\nfive\n'),
+    theirs: encode('one\nTWO theirs\nthree\nfour\nFIVE\n'),
+  };
+
+  it('keeps the other side’s clean hunks and settles the collision on the chosen side (RV-W5b2 R2-4)', () => {
+    expect(new TextDecoder().decode(mergeFilePreferring('part.scad', sides, { prefer: 'ours' }))).toBe(
+      'one\nTWO mine\nthree\nfour\nFIVE\n',
+    );
+    expect(new TextDecoder().decode(mergeFilePreferring('part.scad', sides, { prefer: 'theirs' }))).toBe(
+      'one\nTWO theirs\nthree\nfour\nFIVE\n',
+    );
+  });
+
+  it('answers undefined for a binary file, which only a whole side can settle', () => {
+    const binary = new Uint8Array([0, 1, 2, 3]);
+    expect(
+      mergeFilePreferring('mesh.bin', { base: binary, ours: binary, theirs: encode('x') }, { prefer: 'ours' }),
+    ).toBeUndefined();
+  });
+});
 
 describe('mergeRevisionTrees', () => {
   it('deterministically composes non-overlapping UTF-8 line edits', () => {
@@ -397,6 +422,22 @@ describe('mergeRevisionTrees on a parameter record (D12)', () => {
     if (result.status === 'merged') {
       expect(text(result.tree, recordPath)).toBe(bytesOf(single({ a: 1, b: 2 })));
     }
+  });
+
+  it('should settle a key both sides changed on the chosen side, keeping the other side’s other keys (D14)', () => {
+    const bytes = (record: StoredRecord): Uint8Array<ArrayBuffer> => new TextEncoder().encode(bytesOf(record));
+    const sides = {
+      base: bytes(single({ depth: 5, height: 10, width: 20 })),
+      ours: bytes(single({ depth: 5, height: 12, width: 20 })),
+      theirs: bytes(single({ depth: 7, height: 14, width: 20 })),
+    };
+
+    const mine = mergeFilePreferring(recordPath, sides, { prefer: 'ours', parameters: codec });
+    const theirs = mergeFilePreferring(recordPath, sides, { prefer: 'theirs', parameters: codec });
+    expect(new TextDecoder().decode(mine)).toBe(bytesOf(single({ depth: 7, height: 12, width: 20 })));
+    expect(new TextDecoder().decode(theirs)).toBe(bytesOf(single({ depth: 7, height: 14, width: 20 })));
+    /* Without the codec nothing is validated, so only a whole side will do. */
+    expect(mergeFilePreferring(recordPath, sides, { prefer: 'ours' })).toBeUndefined();
   });
 
   it('should refuse a merge that activates a group the other side deleted', () => {

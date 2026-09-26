@@ -14,7 +14,7 @@ import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
-import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
+import type { CheckoutRecord, ConflictRecord, RevisionPortErrorCode } from '#revision-port.js';
 import type { TurnSettlement } from '#turn.machine.js';
 
 /** What a registry operation was doing when it failed or was refused. @public */
@@ -30,6 +30,8 @@ export type CheckoutsMachineInput = Readonly<{
 type CheckoutsMachineContextFields = Readonly<{
   projectId: string;
   checkouts: readonly CheckoutRecord[];
+  /** Every conflicted revision no decision has landed yet, as the last listing read them (D14). */
+  conflicts: readonly ConflictRecord[];
   /** Run ids awaiting retirement, served one at a time in arrival order. */
   pendingRetirements: readonly string[];
   /** Leases reported before the registry had records to put them on (R22). */
@@ -66,7 +68,7 @@ export type CheckoutsMachineEvent =
 
 /** Facts checkoutsMachine emits, and sends to its parent when they change the registry. @public */
 export type CheckoutsMachineEmitted =
-  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
+  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[]; conflicts: readonly ConflictRecord[] }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
   /* P4: a refusal crosses as a code; the page that shows it owns the words. */
@@ -76,7 +78,11 @@ export type CheckoutsMachineEmitted =
 export type SweepLeasesActorOutput = Readonly<{ retiredRunIds: readonly string[] }>;
 
 /** Output of the injected `listCheckouts` actor. @public */
-export type ListCheckoutsActorOutput = Readonly<{ checkouts: readonly CheckoutRecord[] }>;
+export type ListCheckoutsActorOutput = Readonly<{
+  checkouts: readonly CheckoutRecord[];
+  /** Read from the conflict lines by ancestry (D14). */
+  conflicts: readonly ConflictRecord[];
+}>;
 
 /** Output of the injected `addCheckout` actor. @public */
 export type AddCheckoutActorOutput = Readonly<{ checkout: CheckoutRecord }>;
@@ -112,7 +118,7 @@ const publish = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue, fact: 
 };
 
 const announceRegistry = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue): void => {
-  publish(context, enq, { type: 'checkoutsChanged', checkouts: context.checkouts });
+  publish(context, enq, { type: 'checkoutsChanged', checkouts: context.checkouts, conflicts: context.conflicts });
   for (const checkout of context.checkouts) {
     if (checkout.removable === true) {
       publish(context, enq, { type: 'removalOffered', checkoutId: checkout.id });
@@ -345,6 +351,7 @@ const checkoutsMachineDefinition = setup({
   context: ({ input }) => ({
     projectId: input.projectId,
     checkouts: [],
+    conflicts: [],
     pendingRetirements: [],
     pendingLeases: [],
     pendingVerbs: [],
@@ -402,7 +409,7 @@ const checkoutsMachineDefinition = setup({
         src: 'listCheckouts',
         input: ({ context }) => ({ projectId: context.projectId }),
         onDone: ({ context, event }, enq) => {
-          const patch = { checkouts: event.output.checkouts };
+          const patch = { checkouts: event.output.checkouts, conflicts: event.output.conflicts };
           announceRegistry({ ...context, ...patch }, enq);
           return { target: 'ready', context: patch };
         },

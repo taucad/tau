@@ -82,7 +82,9 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
     conflicts: [
       {
         revisionId: 'rev-conflict',
-        branch: 'feature',
+        branch: 'conflicts/main/device-a',
+        into: 'main',
+        foreign: false,
         labels: { ours: 'main', theirs: 'feature' },
         paths: [{ path: 'main.ts', openable: true, side: 'mine' }],
         busy: false,

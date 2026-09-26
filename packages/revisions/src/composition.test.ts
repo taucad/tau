@@ -177,7 +177,7 @@ const startTree = (options: Readonly<{ scheduler?: boolean }> = {}): Tree => {
 const openRegistry = async (tree: Tree, checkouts: readonly CheckoutRecord[] = [live]): Promise<void> => {
   tree.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
   await flush();
-  tree.promises.settle('listCheckouts', { output: { checkouts } });
+  tree.promises.settle('listCheckouts', { output: { checkouts, conflicts: [] } });
   await flush();
 };
 
@@ -346,8 +346,8 @@ describe('revision machine composition (S48 Node set)', () => {
     expect(tree.promises.inputsFor('writeRevision')).toEqual([]);
   });
 
-  /* 7 — the conflict path (AC14, W22 G4). A merge that collides mints on the
-   * source branch and leaves the target alone; what a person must then see is
+  /* 7 — the conflict path (AC14, W22 G4). A merge that collides records its
+   * revision on the conflict line and moves neither branch (D14); what a person must then see is
    * the *Needs resolution* card, **without reopening the project**. That makes
    * the registry re-read — and therefore the wire from `branch.machine`'s
    * `conflicted` state back to the root — the load-bearing link, and it is the
@@ -372,23 +372,24 @@ describe('revision machine composition (S48 Node set)', () => {
     tree.promises.settle('checkBranch', { output: { needsConfirmation: false } });
     await flush();
     tree.promises.settle('mergeBranch', {
-      output: { status: 'conflicted', revisionId: 'rev-conflicted', paths: ['src/bracket.ts'] },
+      output: { status: 'conflicted', paths: ['src/bracket.ts'] },
     });
     await flush();
 
-    /* The registry is re-read because the merge moved the source branch, and it
-       now answers with the conflicted head — the only record-derived fact the
-       card needs to exist (I3). */
+    /* The registry is re-read because the merge recorded on the conflict line,
+       and it now lists the undecided revision by ancestry — the only
+       record-derived fact the card needs to exist (I3, D14). */
     tree.promises.settle('listCheckouts', {
       output: {
-        checkouts: [live, { ...branched, headRevisionId: 'rev-conflicted', conflicted: true }],
+        checkouts: [live, branched],
+        conflicts: [{ revisionId: 'rev-conflicted', line: 'conflicts/main/device-a', into: 'main', foreign: false }],
       },
     });
     await flush();
 
     const status = selectRevisionStatus(tree.actor.getSnapshot());
     expect(status.conflicts).toEqual([
-      expect.objectContaining({ revisionId: 'rev-conflicted', branch: 'bracket-fillet' }),
+      expect.objectContaining({ revisionId: 'rev-conflicted', branch: 'conflicts/main/device-a', into: 'main' }),
     ]);
     expect(status.attention).toBe(1);
     expect(types(tree.emitted)).toContain('mergeConflicted');

@@ -1,29 +1,126 @@
 /**
- * Reading a conflicted revision back into the three trees it was made from.
+ * Conflict lines, and reading a conflicted revision back into its three trees.
  *
- * A conflicted revision is a value in the graph (A22): it sits on the source
- * branch, its tree is that branch's own tree — no marker bytes are ever written
- * into anyone's files — and its `jj:trees` header records the three terms in
- * Jujutsu's add/remove order (`ours`, `base`, `theirs`) with a label each.
+ * A conflicted revision is a value in the graph (A22, D14): it sits on its
+ * **conflict line** `refs/heads/conflicts/<branch>/<device>`, where `<branch>`
+ * is the line the decision lands on, its tree is the other side's own tree — no
+ * marker bytes are ever written into anyone's files (I7) — and its `jj:trees`
+ * header records the three terms in Jujutsu's add/remove order (`ours`, `base`,
+ * `theirs`) with a label each.
  *
- * The terms are addressed through the revision's **parents** rather than those
- * tree ids, because the port reads trees by revision and a bare tree id is not
- * something either engine exposes. A merge revision already names both sides —
- * `parents[0]` is the source branch it was minted on, `parents[1]` the branch it
- * collided with — and their merge base is the same graph question the merge
- * itself asked. The header stays authoritative for anything that reads this
- * repository without Tau.
+ * Its parents are the two diverged heads — `parents[0]` the other side,
+ * `parents[1]` the recording device's side — and then the line's previous tip,
+ * so the line only ever fast-forwards and travels like any history ref. The
+ * terms are addressed through those parents rather than the header's tree ids,
+ * because the port reads trees by revision; the header stays authoritative for
+ * anything that reads this repository without Tau.
  *
- * Nothing here is engine-specific: it is `readRevision`, `readTree`, `log` and
- * the three-way merge, so both legs answer identically by construction and the
- * conformance suite proves it once per row rather than twice per adapter.
+ * Nothing here is engine-specific: it is `readRevision`, `readTree`, `log`,
+ * `divergence` and the three-way merge, so both legs answer identically by
+ * construction and the conformance suite proves it once.
  */
 
 import { ImmutableRevisionTree, mergeRevisionTrees, renderConflictMarkers, revisionId } from '#algorithms/index.js';
-import type { ConflictMarkerLabels, MergeRevisionTreesOptions, RevisionTreeConflict } from '#algorithms/index.js';
+import type {
+  ConflictMarkerLabels,
+  MergeRevisionTreesOptions,
+  RevisionId,
+  RevisionTreeConflict,
+} from '#algorithms/index.js';
 import { mergeBaseHeads, mergeBaseOf } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
+
+/** The reserved branch prefix conflict lines live under (D14). */
+const conflictLinePrefix = 'conflicts';
+
+/**
+ * Whether a person may not name a branch this: `conflicts` and everything under
+ * it belong to decisions that travel between devices (D14).
+ *
+ * @param name - A proposed branch name, without `refs/heads/`.
+ * @returns `true` when the name is reserved.
+ * @public
+ */
+export const isReservedBranchName = (name: string): boolean =>
+  name === conflictLinePrefix || name.startsWith(`${conflictLinePrefix}/`);
+
+/* Bytes a segment keeps as they are; everything else is escaped. */
+const plainSegmentByte = /^[a-z0-9-]$/u;
+
+/**
+ * One device's id as a ref-name segment (D14, RV-W6 F7).
+ *
+ * An escape encoding, not a hash, so an engineer can still read whose line it
+ * is: lowercase letters, digits and `-` stay; every other UTF-8 byte — `_`,
+ * uppercase, `.`, `:` and anything a ref forbids — becomes `_` and two
+ * lowercase hex digits. Distinct ids give distinct segments (`_` is itself
+ * escaped), the result is always a valid ref component (no `.`, so no `..`,
+ * leading dot or `.lock`), and it has no case for a case-insensitive disk to
+ * fold. `host:user` reads `host_3auser`.
+ *
+ * @param deviceId - The host's device id.
+ * @returns The segment, stable for one id.
+ */
+const deviceSegment = (deviceId: string): string => {
+  if (deviceId === '') {
+    /* Not an escape any id produces, so it cannot collide. */
+    return '_';
+  }
+  let segment = '';
+  for (const byte of new TextEncoder().encode(deviceId)) {
+    const character = String.fromCodePoint(byte);
+    segment += plainSegmentByte.test(character) ? character : `_${byte.toString(16).padStart(2, '0')}`;
+  }
+  return segment;
+};
+
+/**
+ * The conflict line one device records its decisions about `branch` on (D14).
+ *
+ * @param branch - The line the decision lands on, e.g. `main`.
+ * @param deviceId - The recording device.
+ * @returns The branch name, without `refs/heads/`.
+ * @public
+ */
+export const conflictLineOf = (branch: string, deviceId: string): string =>
+  `${conflictLinePrefix}/${branch}/${deviceSegment(deviceId)}`;
+
+/**
+ * What a conflict line is about, or `undefined` for any other branch.
+ *
+ * @param line - A branch name, with or without `refs/heads/`.
+ * @param deviceId - This host's device id, to say whether the line is its own.
+ * @returns The line the decision lands on, and whether another device recorded it.
+ * @public
+ */
+export const parseConflictLine = (
+  line: string,
+  deviceId: string | undefined,
+): Readonly<{ into: string; foreign: boolean }> | undefined => {
+  const name = line.startsWith('refs/heads/') ? line.slice('refs/heads/'.length) : line;
+  const segments = name.split('/');
+  if (segments[0] !== conflictLinePrefix || segments.length < 3) {
+    return undefined;
+  }
+  return {
+    into: segments.slice(1, -1).join('/'),
+    foreign: deviceId === undefined || segments.at(-1) !== deviceSegment(deviceId),
+  };
+};
+
+/**
+ * Where a conflicted revision is read from (D14): this device's current tip of
+ * the line the decision lands on, and whether this device recorded it.
+ *
+ * @public
+ */
+export type ConflictPerspective = Readonly<{
+  /** `<branch>`'s head on this device, when it has one. */
+  head: string | undefined;
+  /** Whether the conflict line is this device's own. */
+  recorder: boolean;
+}>;
 
 /** What a conflicted revision's middle term is called. @public */
 const conflictBaseLabel = 'base';
@@ -67,12 +164,58 @@ export type MaterializeConflictInput = Readonly<{
 }>;
 
 /**
+ * Which two revisions one device compares, as mine and theirs (D14).
+ *
+ * On the recording device mine is its own recorded side and theirs the other;
+ * whichever of them `<branch>` already contains is read as `<branch>`'s tip, so
+ * work the line gained after the conflict was recorded is one of the terms and
+ * a resolution never drops it. On any other device mine is simply its own tip
+ * and theirs the recorded side that tip does not contain yet — the same card,
+ * from where it stands.
+ *
+ * @param port - The store.
+ * @param parents - `otherSide` is `parents[0]`, `recorderSide` is `parents[1]`.
+ * @param perspective - This device's tip, and whether it recorded the conflict.
+ * @returns The two revisions to merge.
+ */
+const sidesOf = async (
+  port: RevisionPort,
+  parents: Readonly<{ otherSide: RevisionId; recorderSide: RevisionId }>,
+  perspective: ConflictPerspective | undefined,
+): Promise<Readonly<{ mine: RevisionId; theirs: RevisionId }>> => {
+  const { otherSide, recorderSide } = parents;
+  const head = perspective?.head === undefined ? undefined : revisionId(perspective.head);
+  if (head === undefined || perspective === undefined) {
+    return { mine: recorderSide, theirs: otherSide };
+  }
+  const contains = async (revision: RevisionId): Promise<boolean> => {
+    if (revision === head) {
+      return true;
+    }
+    const { behind } = await port.divergence({ head, base: revision });
+    return behind === 0;
+  };
+  if (!perspective.recorder) {
+    /* Theirs is whichever recorded side this tip does not hold yet: the other
+     * device's work after a sync divergence, the merged branch after a branch
+     * merge (RV-W6 F1). */
+    return { mine: head, theirs: (await contains(otherSide)) ? recorderSide : otherSide };
+  }
+  if (await contains(recorderSide)) {
+    return { mine: head, theirs: otherSide };
+  }
+  return (await contains(otherSide)) ? { mine: recorderSide, theirs: head } : { mine: recorderSide, theirs: otherSide };
+};
+
+/**
  * Read one conflicted revision's three terms and re-derive what did not settle.
  *
  * @param port - The store holding the revision.
  * @param id - The conflicted revision.
  * @param options - The host's merge options: the same parameter codec the merge
- *   that recorded the conflict used, so the terms settle as it did (D12).
+ *   that recorded the conflict used, so the terms settle as it did (D12); and
+ *   `perspective`, this device's tip of the line the decision lands on. Without
+ *   it the terms are the two recorded sides.
  * @returns Its terms, or `undefined` when the revision records no conflict.
  * @throws RevisionPortError When the store does not hold the revision.
  * @public
@@ -90,20 +233,19 @@ export type MaterializeConflictInput = Readonly<{
 export const readConflictTerms = async (
   port: RevisionPort,
   id: string,
-  options: MergeRevisionTreesOptions = {},
+  options: MergeRevisionTreesOptions & Readonly<{ perspective?: ConflictPerspective }> = {},
 ): Promise<RevisionConflictTerms | undefined> => {
+  const { perspective } = options;
   const record = await port.readRevision(revisionId(id));
   if (record === undefined) {
     throw new RevisionPortError('UNKNOWN_REVISION', 'This project no longer holds that conflicted revision.');
   }
   const recorded = await port.conflicts(revisionId(id));
-  /* First parent is the branch the conflict was minted on — the one a person
-   * merged *from*, so its own first-parent line keeps counting — and the second
-   * is the branch they were on. "Mine" is therefore the second parent. */
-  const [theirRevision, ourRevision] = record.parents;
-  if (recorded === undefined || theirRevision === undefined || ourRevision === undefined) {
+  const [otherSide, recorderSide] = record.parents;
+  if (recorded === undefined || otherSide === undefined || recorderSide === undefined) {
     return undefined;
   }
+  const { mine: ourRevision, theirs: theirRevision } = await sidesOf(port, { otherSide, recorderSide }, perspective);
 
   const graph = await port.log({ heads: mergeBaseHeads(theirRevision, ourRevision) });
   const baseRevision = mergeBaseOf(graph, theirRevision, ourRevision);
@@ -143,7 +285,7 @@ export const readConflictTerms = async (
  *
  * @param port - The store holding the revision.
  * @param input - The conflicted revision and the path inside it.
- * @param options - The host's merge options, as {@link readConflictTerms} takes them.
+ * @param options - The host's merge options and this device's perspective, as {@link readConflictTerms} takes them.
  * @returns Marker text, or `undefined` when the path is binary, is not
  *   conflicted, or the revision records no conflict at all.
  * @public
@@ -151,7 +293,7 @@ export const readConflictTerms = async (
 export const materializeConflict = async (
   port: RevisionPort,
   input: MaterializeConflictInput,
-  options: MergeRevisionTreesOptions = {},
+  options: MergeRevisionTreesOptions & Readonly<{ perspective?: ConflictPerspective }> = {},
 ): Promise<string | undefined> => {
   const terms = await readConflictTerms(port, input.revisionId, options);
   if (terms === undefined || !terms.conflicts.some((conflict) => conflict.path === input.path)) {

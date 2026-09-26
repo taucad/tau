@@ -16,7 +16,7 @@
 export { revisionMetadataSchema } from '#algorithms/revision-metadata.js';
 export { ImmutableRevisionTree, revisionId } from '#algorithms/revision-tree.js';
 export type { RevisionId, RevisionTreeEntry, RevisionTreeInput } from '#algorithms/revision-tree.js';
-export { mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
+export { mergeFilePreferring, mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
 export type {
   AddAddConflict,
   BinaryConflict,

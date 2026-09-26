@@ -72,13 +72,15 @@ describe('remotes', () => {
       'refs/tau/retention/records/r1',
       'refs/tau/head',
       'refs/remotes/tau/main',
-      'refs/heads/sync',
     ]) {
       expect(isHostLocalRef(ref)).toBe(true);
     }
-    /* The record set is the half the design *does* push (D14, A15, A30). */
+    /* The record set is the half the design *does* push (D14, A15, A30), and a
+     * conflict line travels like any branch (charter D14). */
     for (const ref of [
       'refs/heads/main',
+      'refs/heads/conflicts/main/device-a',
+      'refs/heads/sync/tau/main',
       'refs/tags/v1',
       'refs/tau/chats/c1',
       'refs/tau/evidence/e1',
@@ -102,8 +104,7 @@ describe('remotes', () => {
     ].map((pattern) => [pattern, refPatternIsHostLocal(pattern)] as const);
 
     expect(answers).toStrictEqual([
-      /* The ordinary fetch refspec. It can expand to `refs/heads/sync`, which is
-       * never *offered* — a per-ref rule, enforced where the name is known. */
+      /* The ordinary fetch refspec. */
       ['refs/heads/*', false],
       ['refs/heads/main', false],
       ['refs/heads/sync', false],

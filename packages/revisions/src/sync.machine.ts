@@ -904,6 +904,10 @@ const syncMachineDefinition = setup({
      * where it can push, and remembered where it cannot — `reading`, `opening`,
      * `recording` — so the state that finishes acts on it. */
     close: { context: { pendingMint: true, pendingFlush: true } },
+    /* A decision landed while this machine was not `conflicted` — one fetched
+     * from another device (D14): the merge it minted is this device's own and
+     * unsent, so it is pushed like a mint. `conflicted` answers it itself. */
+    conflictResolved: { context: { pendingMint: true } },
     /* The same fallback once more (L2-F3): `reading`, `opening`, `pushing` and
      * `recording` are effects with no push edge of their own, and dropping a
      * correlated request there left `publish.machine` waiting out its 60 s and
@@ -1566,8 +1570,14 @@ const syncMachineDefinition = setup({
      * The remote moved under this host's lease (P18, A22).
      *
      * Not a failure and not a retry: history is the one thing a scheduler must
-     * never force. `Needs resolution` stands until the person, or W10's
-     * surface, composes the two lines — and every way out of here pulls first.
+     * never force. `Needs your decision` stands until a person lands the
+     * decision — here, or on another device, which a remote move brings in —
+     * and every way out of here pulls first.
+     *
+     * The decision itself travels (D14): the conflict line is offered alone on
+     * entry, because the line it decides has diverged and would sink it in the
+     * atomic set. A line the remote refused is offered again by the next pull,
+     * which reaches the same conflict.
      */
     conflicted: {
       entry: ({ context }, enq) => {
@@ -1577,7 +1587,31 @@ const syncMachineDefinition = setup({
           reason: context.error ?? 'The remote has work this device has not seen.',
         });
       },
+      invoke: {
+        src: 'push',
+        input: ({ context }) => ({
+          remote: context.remote ?? '',
+          branch: context.branch,
+          leases: context.leases,
+          refs: [context.conflictRef ?? historyRefOf(context.branch)],
+        }),
+        onDone: ({ context, event }) => ({
+          context: {
+            leases: {
+              ...context.leases,
+              ...Object.fromEntries(
+                event.output.refs.flatMap((entry) =>
+                  entry.status === 'rejected' || entry.head === undefined ? [] : [[entry.name, entry.head]],
+                ),
+              ),
+            },
+          },
+        }),
+        /* Offline, or refused: the card is still here, and the next pull offers it again. */
+        onError: {},
+      },
       on: {
+        remoteMoved: { target: 'opening' },
         syncNow: { target: 'opening', context: ({ event }) => ({ pushId: event.pushId }) },
         online: { target: 'opening', context: { online: true } },
         remoteConnected: { target: 'opening', context: ({ event }) => ({ remote: event.remote }) },

@@ -267,9 +267,9 @@ catalog:
   web-vitals: ^5.3.0
   ws: ^8.21.0
   isomorphic-git: 1.38.5
-  xstate: ^5.32.1
+  xstate: 6.0.0-alpha.59
   zod: ^4.4.3
-  nanoraster: ^0.5.1
+  nanoraster: ^0.5.3
   n8ao: 1.10.2
   postprocessing: 6.39.1
   '@cfworker/json-schema': 4.1.1
@@ -380,6 +380,7 @@ patchedDependencies:
   vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch
   zod@4.4.3: patches/zod@4.4.3.patch
   '@agentclientprotocol/codex-acp@1.7.0': patches/@agentclientprotocol__codex-acp@1.7.0.patch
+  n8ao@1.10.2: patches/n8ao@1.10.2.patch
 overrides:
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
   '@types/express': 'catalog:'

@@ -18,7 +18,6 @@ export type Entitlements = {
   readonly canUseProKernels: boolean;
   readonly canCreatePrivateShares: boolean;
   readonly canSyncFiles: boolean;
-  readonly canConnectGitHub: boolean;
   readonly canConnectEnterpriseGit: boolean;
   readonly apiCadGatewayMonthlyLimit: number;
   readonly conversionApiMonthlyLimit: number;
@@ -53,7 +52,6 @@ const freeEntitlements = {
   canUseProKernels: false,
   canCreatePrivateShares: false,
   canSyncFiles: false,
-  canConnectGitHub: false,
   canConnectEnterpriseGit: false,
   apiCadGatewayMonthlyLimit: 1000,
   conversionApiMonthlyLimit: 0,
@@ -72,7 +70,6 @@ const proEntitlements = {
   canUseProKernels: true,
   canCreatePrivateShares: true,
   canSyncFiles: true,
-  canConnectGitHub: true,
   canConnectEnterpriseGit: false,
   apiCadGatewayMonthlyLimit: 30_000,
   conversionApiMonthlyLimit: 50_000,

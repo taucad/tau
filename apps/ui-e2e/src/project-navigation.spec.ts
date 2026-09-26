@@ -458,10 +458,17 @@ test('chat navigation preserves ordering until an accepted user submit advances 
   await expect.poll(readActivityChatOrder).toEqual([chatNames.newer, chatNames.older]);
 
   const beforeNavigation = await readChatActivitySnapshot();
-  await openActivityChat(chatNames.newer);
-  const afterFirstFocus = await readChatActivitySnapshot();
   expect(beforeNavigation.chats.find(({ name }) => name === chatNames.newer)?.unread).toBe(true);
-  expect(afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.unread).toBe(false);
+  await openActivityChat(chatNames.newer);
+  /* `markViewed` writes the record once the chat's composer binds, after the row turns active. The
+   * repeated-focus read below stays immediate: once cleared, nothing may mark it unread again. */
+  await expect
+    .poll(async () => {
+      const snapshot = await readChatActivitySnapshot();
+      return snapshot.chats.find(({ name }) => name === chatNames.newer)?.unread;
+    })
+    .toBe(false);
+  const afterFirstFocus = await readChatActivitySnapshot();
   await openActivityChat(chatNames.older);
   await openActivityChat(chatNames.newer);
   const afterRepeatedFocus = await readChatActivitySnapshot();

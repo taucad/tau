@@ -77,11 +77,13 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.84.4",
     "@earendil-works/pi-ai": "0.84.4",
-    "@taucad/rpc": "workspace:*",
+    "@msgpack/msgpack": "catalog:",
     "uint8array-extras": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@taucad/nx": "workspace:*",
+    "@taucad/rpc": "workspace:*",
     "@vitest/browser-playwright": "catalog:",
     "vitest": "catalog:"
   }

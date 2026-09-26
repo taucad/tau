@@ -22,9 +22,10 @@ import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtim
 import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
-import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
+import { createActor, createCallbackLogic, createAsyncLogic, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
+import type { ParameterSetActors } from '@taucad/parameters/set-machine';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
@@ -760,19 +761,20 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           actors: {
             /* An agent edits the source between reads, so every load re-resolves; the manifest is
              * admitted only once per revision, and the sidecar bytes decide what changed. */
-            loadParameterSet: fromPromise(async ({ input, signal }) =>
-              loadParameterSnapshot({
-                target,
-                authority,
-                manifest,
-                ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
-                signal,
-              }),
-            ),
-            commitParameterSet: fromPromise(async ({ input: change, signal }) =>
-              commitParameterChange({ change, authority, signal }),
-            ),
-            observeParameterSet: fromCallback(({ sendBack }) =>
+            loadParameterSet: createAsyncLogic({
+              run: async ({ input, signal }) =>
+                loadParameterSnapshot({
+                  target,
+                  authority,
+                  manifest,
+                  ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+                  signal,
+                }),
+            }),
+            commitParameterSet: createAsyncLogic({
+              run: async ({ input: change, signal }) => commitParameterChange({ change, authority, signal }),
+            }),
+            observeParameterSet: createCallbackLogic(({ sendBack }) =>
               observe(
                 () => {
                   sendBack({ type: 'watch.changed' });
@@ -785,7 +787,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
                 },
               ),
             ),
-          },
+          } satisfies Partial<ParameterSetActors>,
         }),
         { input: { target } },
       );

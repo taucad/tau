@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createActor, waitFor, fromCallback } from 'xstate';
+import { createActor, waitFor, createCallbackLogic } from 'xstate';
 import { importGitHubMachine } from '#machines/import-github.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
@@ -57,10 +57,14 @@ function createTestActor(options?: {
   ref?: string;
   mainFile?: string;
   downloadThrows?: boolean;
+  metadataFailure?: Error;
 }) {
   const machine = importGitHubMachine.provide({
     actors: {
       getRepoMetadataActor: fromSafeAsync(async () => {
+        if (options?.metadataFailure !== undefined) {
+          throw options.metadataFailure;
+        }
         return { type: 'metadataRetrieved', metadata: stubMetadata };
       }),
       getBranchesActor: fromSafeAsync(async () => {
@@ -74,7 +78,7 @@ function createTestActor(options?: {
       getFilesActor: fromSafeAsync(async () => {
         return { type: 'filesRetrieved', files: stubFiles };
       }),
-      importWorkerActor: fromCallback(({ sendBack }) => {
+      importWorkerActor: createCallbackLogic(({ sendBack }) => {
         if (options?.downloadThrows) {
           queueMicrotask(() => {
             sendBack({ type: 'workerError', message: 'download failed', phase: 'download' });
@@ -199,6 +203,24 @@ describe('importGitHubMachine', () => {
       actor.start();
       await waitFor(actor, (s) => s.value === 'enteringDetails' && s.context.repoFiles.length > 0, { timeout: 5000 });
       expect(actor.getSnapshot().context.repoFiles).toEqual(stubFiles);
+      actor.stop();
+    });
+  });
+
+  describe('metadata failures', () => {
+    it.each([
+      [404, /couldn't find a public repository at this address/u],
+      [403, /rate limit for public reads/u],
+      [500, /couldn't read this repository from GitHub/u],
+    ])('should explain a %i from GitHub without its raw message', async (status, message) => {
+      const failure = Object.assign(new Error('Not Found - https://docs.github.com/rest/repos/repos'), { status });
+      const actor = createTestActor({ owner: 'octo', repo: 'private', metadataFailure: failure });
+      actor.start();
+
+      const snapshot = await waitFor(actor, (state) => state.context.error !== undefined);
+
+      expect(snapshot.context.error?.message).toMatch(message);
+      expect(snapshot.context.error?.message).not.toContain('docs.github.com');
       actor.stop();
     });
   });

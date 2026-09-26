@@ -8,11 +8,13 @@ import type { FastifyInstance } from 'fastify';
  * Content types that stock git POSTs. Fastify refuses a body it has no parser for,
  * so the git module registers a pass-through: the handler wants the raw stream,
  * not a parsed body (a pack is hundreds of megabytes and goes straight into the
- * child's stdin).
+ * child's stdin). An LFS object PUT through the proxy relay is the same kind of
+ * stream (D44).
  */
 const gitRequestContentTypes = [
   'application/x-git-upload-pack-request',
   'application/x-git-receive-pack-request',
+  'application/octet-stream',
 ] as const;
 
 /** Git-lfs's own media type for the batch and verify requests. */

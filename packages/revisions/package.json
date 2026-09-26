@@ -1,6 +1,6 @@
 {
   "name": "@taucad/revisions",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "description": "Host-neutral revision port, isomorphic-git and native-Git backends, and the revision lifecycle machines for Tau",
   "type": "module",
   "sideEffects": false,
@@ -143,10 +143,15 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
-    "xstate": "^5.0.0"
+    "xstate": "^6.0.0-alpha.59"
   },
   "devDependencies": {
     "@taucad/utils": "workspace:*",
     "xstate": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "xstate": {
+      "optional": true
+    }
   }
 }

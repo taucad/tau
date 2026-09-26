@@ -1,7 +1,7 @@
 import { useSelector } from '@xstate/react';
 import { CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History, Rewind } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { cn } from '@taucad/ui/utils/cn';
 import { StatusMark } from '#components/nav/status-mark.js';
@@ -14,7 +14,11 @@ import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-stat
 import { useChats } from '#hooks/use-chats.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { syncCopy } from '#routes/w.$workspace.$project/revision-sync-region.js';
+import {
+  isGithubRemote,
+  isRefusedWhileBackedUp,
+  syncCopy,
+} from '#routes/w.$workspace.$project/revision-sync-region.js';
 
 /** What the trigger draws for one state: one glyph in one tone, the mark it stands for, and the sentence. */
 export type RevisionFacts = Readonly<{
@@ -48,10 +52,40 @@ const failedBackupReasons: ReadonlySet<string> = new Set(['rejected', 'forbidden
 
 const revisionName = (n: number | undefined): string | undefined => (n === undefined ? undefined : `Rev ${String(n)}`);
 
-const backupAsks: Partial<Record<string, string>> = {
-  unauthorized: 'Sign in',
-  quota: 'Over your plan',
-  notEntitled: 'Backup is a Pro feature',
+/**
+ * What a failed backup asks the person for (R-U4).
+ *
+ * A refused credential is keyed on whose it was, as the Sync row's action is
+ * (D18): only Tau Cloud is reached with this device's own session, so only it
+ * asks to *Sign in*.
+ *
+ * @param status - The revision status projection.
+ * @returns The ask, or `undefined` when the backup needs nothing from the person.
+ */
+const backupAsk = ({ sync, remote }: RevisionStatusProjection): string | undefined => {
+  if (sync.state !== 'failed') {
+    return undefined;
+  }
+  switch (sync.reason) {
+    case 'unauthorized': {
+      return remote.kind === 'tau' ? 'Sign in' : isGithubRemote(remote) ? 'Reconnect GitHub' : 'Remote refused access';
+    }
+    case 'quota': {
+      return 'Over your plan';
+    }
+    case 'notEntitled': {
+      return 'Backup is a Pro feature';
+    }
+    case 'largeFiles': {
+      return 'Files too large for this remote';
+    }
+    case 'moved': {
+      return 'Repository moved';
+    }
+    default: {
+      return undefined;
+    }
+  }
 };
 
 /** Failed, then needs you: the two tiers that interrupt. */
@@ -73,10 +107,16 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
       sentence: branch === undefined ? 'Needs your decision' : `Needs your decision · both sides changed ${branch}`,
     };
   }
-  const ask = sync.state === 'failed' ? backupAsks[sync.reason ?? 'unknown'] : undefined;
+  const ask = backupAsk(status);
   return ask === undefined
     ? undefined
-    : { icon: CloudAlert, tone: 'text-warning', mark: 'attention', sentence: `Not backed up · ${ask}` };
+    : {
+        icon: CloudAlert,
+        tone: 'text-warning',
+        mark: 'attention',
+        /* D68: a refusal with nothing waiting has lost no work. */
+        sentence: `${isRefusedWhileBackedUp(sync) ? 'Backed up' : 'Not backed up'} · ${ask}`,
+      };
 };
 
 /** Work the person started, while it runs. */
@@ -116,7 +156,7 @@ const restingFacts = (status: RevisionStatusProjection, where: RevisionWhere): R
   if (where.head === undefined) {
     return { icon: History, tone: '', mark: 'none', sentence: 'Nothing saved yet' };
   }
-  const backup = syncCopy(status.sync);
+  const backup = syncCopy(status.sync, status.remote);
   return {
     icon: History,
     tone: '',
@@ -314,7 +354,7 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
             where={where}
             facts={facts}
             showing={where.latest === undefined ? undefined : head}
-            backup={syncCopy(status.sync) ?? 'No backup connected'}
+            backup={syncCopy(status.sync, status.remote) ?? 'No backup connected'}
             chat={hasDiverged && focusedChat !== undefined ? `${focusedChat.name} · on ${chatBranch}` : undefined}
             recent={revisions.slice(0, 3)}
           />

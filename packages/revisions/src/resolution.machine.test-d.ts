@@ -2,7 +2,8 @@ import { expectTypeOf } from 'vitest';
 import type { AnyStateMachine } from 'xstate';
 
 import { resolutionMachine } from '#resolution.machine.js';
-import type { ResolutionActors, ResolutionMachineInput, ResolutionSide } from '#resolution.machine.js';
+import type { ResolutionActors, ResolutionMachineInput } from '#resolution.machine.js';
+import type { ResolutionSide } from '#resolution.types.js';
 
 expectTypeOf(resolutionMachine).toExtend<AnyStateMachine>();
 /* One actor per conflicted revision, so the input names one (A38). */

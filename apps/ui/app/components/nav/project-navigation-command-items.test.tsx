@@ -7,10 +7,11 @@ const projects = [
   {
     id: 'project-one',
     name: 'Bracket Assembly',
+    description: '  Wall bracket with gussets ',
     lastActivityAt: 2,
     slugs: { workspaceSlug: 'home', projectSlug: 'Bracket Assembly' },
   },
-  { id: 'project-unresolved', name: 'Unresolved', lastActivityAt: 3 },
+  { id: 'project-unresolved', name: 'Unresolved', description: '', lastActivityAt: 3 },
 ];
 const chats = [
   {
@@ -35,6 +36,8 @@ const chats = [
 let registered: CommandPaletteItem[] = [];
 
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects }) }));
+vi.mock('#hooks/use-project-thumbnail.js', () => ({ useProjectThumbnail: () => undefined }));
+vi.mock('#utils/date.utils.js', () => ({ formatRelativeTime: () => 'just now' }));
 vi.mock('#hooks/use-all-chats.js', () => ({ useAllChats: () => ({ chats }) }));
 vi.mock('#components/layout/command-palette.js', () => ({
   useCommandPaletteItems: (_id: string, factory: () => CommandPaletteItem[]) => {
@@ -53,6 +56,7 @@ describe('ProjectNavigationCommandItems', () => {
     expect(registered[0]).toMatchObject({
       id: 'project-project-one',
       searchValue: 'Bracket Assembly',
+      details: ['home/Bracket Assembly · just now', 'Wall bracket with gussets'],
       link: '/w/home/Bracket%20Assembly',
     });
     expect(registered[1]).toMatchObject({ id: 'chat-chat/two' });

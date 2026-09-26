@@ -81,8 +81,16 @@ export const useAnonymousRevisions = (workspace: string): boolean =>
     () => false,
   );
 
-/** The signed-in person, as much of them as the session knows. @public */
-export type RevisionSessionUser = Readonly<{ id: string; name?: string; email?: string }>;
+/**
+ * The signed-in person, as much of them as a revision records.
+ *
+ * No account address: a revision's author travels with every push and export,
+ * so it is `<id>@users.noreply.tau.new` unless a linked forge supplies its own
+ * no-reply identity (D33).
+ *
+ * @public
+ */
+export type RevisionSessionUser = Readonly<{ id: string; name?: string }>;
 
 const sessionTopic = new Topic<void>({ name: 'revision-session-user' });
 let sessionUser: RevisionSessionUser | undefined;
@@ -100,7 +108,7 @@ let sessionUser: RevisionSessionUser | undefined;
  * @public
  */
 export const setRevisionSessionUser = (user: RevisionSessionUser | undefined): void => {
-  if (user?.id === sessionUser?.id && user?.name === sessionUser?.name && user?.email === sessionUser?.email) {
+  if (user?.id === sessionUser?.id && user?.name === sessionUser?.name) {
     return;
   }
   sessionUser = user;
@@ -151,7 +159,18 @@ const anonymousId = (workspace: string, subject: string): string => {
  * @public
  */
 export const revisionUserActor = (
-  input: Readonly<{ workspace: string; user: RevisionSessionUser | undefined; anonymous: boolean }>,
+  input: Readonly<{
+    workspace: string;
+    user: RevisionSessionUser | undefined;
+    anonymous: boolean;
+    /**
+     * The name and address commits are authored with instead of the session's,
+     * for a project linked to GitHub: GitHub declines a push that exposes a
+     * private address (GH007), so a linked project records the account's
+     * no-reply identity (D33). The actor id stays the Tau user.
+     */
+    commitIdentity?: Readonly<{ name: string; email: string }>;
+  }>,
 ): RevisionUserActor => {
   if (input.anonymous || input.user === undefined) {
     /*
@@ -167,10 +186,8 @@ export const revisionUserActor = (
     const subject = input.user === undefined ? `device:${deviceId()}` : `user:${input.user.id}`;
     return { kind: 'user', id: anonymousId(input.workspace, subject), name: 'Anonymous', anonymous: true };
   }
-  return {
-    kind: 'user',
-    id: input.user.id,
-    ...(input.user.name === undefined ? {} : { name: input.user.name }),
-    ...(input.user.email === undefined ? {} : { email: input.user.email }),
-  };
+  if (input.commitIdentity !== undefined) {
+    return { kind: 'user', id: input.user.id, ...input.commitIdentity };
+  }
+  return { kind: 'user', id: input.user.id, ...(input.user.name === undefined ? {} : { name: input.user.name }) };
 };

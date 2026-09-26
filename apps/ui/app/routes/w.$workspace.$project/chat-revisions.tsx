@@ -393,7 +393,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   /* A29: *Sync* appears when a remote exists, or when the person opens it. */
   const [isConnectOpen, setIsConnectOpen] = useState(false);
   /* N4: the plan, read once here — the region itself stays presentational. */
-  const { canSyncFiles, canConnectGitHub, requestUpgrade } = useCommercialFeatures();
+  const { canSyncFiles, requestUpgrade } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
   const chatNames = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.name])), [chats]);
   const chatCheckoutIds = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.checkoutId])), [chats]);
@@ -621,7 +621,6 @@ export function RevisionsPanelBody(): React.JSX.Element {
               void updateProject(projectId, { syncLargeExports: enabled });
             }}
             canSyncFiles={canSyncFiles}
-            canConnectGitHub={canConnectGitHub}
             onUpgrade={requestUpgrade}
             signInHref={signIn}
             /* D27: the account's role on the Tau Cloud project, which gates the

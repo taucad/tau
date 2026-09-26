@@ -1,4 +1,5 @@
 import { createActor } from 'xstate';
+import type { ActorRefFrom, AnyActorRef } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#project-revisions.machine.js';
@@ -680,6 +681,7 @@ describe('projectRevisionsMachine', () => {
       checkoutId: 'checkout-b',
       checkoutRoot: '/checkouts/checkout-b',
       branch: 'agent/b',
+      registrySettled: true,
       projectDirty: true,
       dirty: true,
       minting: false,
@@ -1201,7 +1203,10 @@ describe('projectRevisionsMachine', () => {
     });
     /* The checkout is the sole minter (F2), so the verb asks it and waits. */
     expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
-    expect(harness.actor.getSnapshot().children['checkout:checkout-live']?.getSnapshot().matches('minting')).toBe(true);
+    /* Spawned children are not in the typed `schemas.children` map, so they are read by id. */
+    const children: Readonly<Record<string, AnyActorRef | undefined>> = harness.actor.getSnapshot().children;
+    const liveCheckout: ActorRefFrom<typeof checkoutMachine> | undefined = children['checkout:checkout-live'];
+    expect(liveCheckout?.getSnapshot().matches('minting')).toBe(true);
 
     harness.actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-1' });
     await flush();
@@ -1230,6 +1235,35 @@ describe('projectRevisionsMachine', () => {
     expect(harness.promises.inputsFor('addCheckout')).toEqual([
       { projectId: 'project-1', branch: 'isolated-run', from: 'rev-1' },
     ]);
+
+    harness.actor.stop();
+  });
+
+  it('says whether the checkout registry has answered, so a rootless first projection is not read as no checkout (D41)', async () => {
+    const harness = start();
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).registrySettled).toBe(false);
+
+    await readyRegistry(harness, [live]);
+
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).registrySettled).toBe(true);
+    harness.actor.stop();
+  });
+
+  it('reads a checked-out branch row at the live head, not the lagging registry record (D47)', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
+    harness.actor.send({
+      type: 'checkoutStatusChanged',
+      checkoutId: 'checkout-live',
+      status: 'clean',
+      headRevisionId: 'rev-2',
+    });
+    await flush();
+
+    const status = selectRevisionStatus(harness.actor.getSnapshot());
+    expect(status.headRevisionId).toBe('rev-2');
+    expect(status.branches.find((row) => row.checkoutId === 'checkout-live')?.head).toBe('rev-2');
 
     harness.actor.stop();
   });
@@ -1510,6 +1544,33 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  it('D50: pulls the branch the live checkout switched to, not the one the project opened on', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'origin', branch: 'main' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'upToDate' } });
+    await flush();
+    expect(harness.promises.inputsFor('syncFetch').at(-1)).toMatchObject({ branch: 'main' });
+
+    harness.actor.send({
+      type: 'checkoutChanged',
+      checkoutId: live.id,
+      revisionId: 'rev-feature',
+      treeId: 'tree-feature',
+      branch: 'feature',
+    });
+    await flush();
+
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+    expect(harness.promises.inputsFor('syncFetch').at(-1)).toMatchObject({ branch: 'feature' });
+
+    harness.actor.stop();
+  });
+
   it('tells the scheduler a conflict was composed, so `Needs resolution` is not sticky (W13 review 2 R6/P37)', async () => {
     const harness = start();
     const conflictedLive: CheckoutRecord = { ...live, headRevisionId: 'rev-conflict', conflicted: true };
@@ -1615,6 +1676,6 @@ describe('root invokes notify the host on every child transition (P45)', () => {
   });
 
   it.each(children)('declares onSnapshot on %s so a child transition is a root snapshot', (id) => {
-    expect(entries.find((entry) => entry.id === id)?.onSnapshot).toStrictEqual({ actions: [] });
+    expect(entries.find((entry) => entry.id === id)?.onSnapshot).toStrictEqual({});
   });
 });

@@ -1,7 +1,7 @@
 /**
  * EQ6 / W10.6: the path policy reaches this package by injection, not by import.
  *
- * The mirror of `libs/filesystem`'s own `path-registry` rule (D6): the mask is
+ * The mirror of `packages/filesystem`'s own `path-registry` rule (D6): the mask is
  * the mechanism and a project's reserved layout is data, so the classifier is
  * given to `createRevisionActors` and carried to every site that asks. One
  * module may name the default — it pairs the classifier with the rows the

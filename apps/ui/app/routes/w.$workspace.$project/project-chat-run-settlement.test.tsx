@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserAgentHostRun } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { chatTurnSettle, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatTurnOutcome } from '#machines/chat-session.machine.js';
+import type { CadAgentExecution } from '@taucad/chat';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 
 const harness = {
   workspace: undefined as unknown,
@@ -33,6 +35,8 @@ const harness = {
   clearBrowserAgentHostRun: vi.fn(),
   /** What the settling host attested on the wire, as this tab holds it (W5). */
   finalizedTurns: [] as ReadonlyArray<{ runId: string }>,
+  /** The chat's persisted execution; `undefined` runs the build's default placement. */
+  activeExecution: undefined as CadAgentExecution | undefined,
 };
 
 const workspace = {
@@ -54,7 +58,7 @@ const session = {
   chat: { messages: [{ id: 'turn_1', role: 'user' }] },
   persistenceActorRef: {
     subscribe: () => ({ unsubscribe: () => undefined }),
-    getSnapshot: () => ({ context: { isLoadingChat: false } }),
+    getSnapshot: () => ({ context: { isLoadingChat: false, activeExecution: harness.activeExecution } }),
   },
 };
 
@@ -117,6 +121,7 @@ describe('ProjectChatRunSettlement', () => {
     /* This page admitted the turn it is settling, so it holds its claim. */
     harness.reclaim.mockResolvedValue(workspace);
     harness.finalizedTurns = [];
+    harness.activeExecution = undefined;
     harness.finalize.mockResolvedValue(undefined);
     harness.discard.mockResolvedValue(undefined);
     harness.prepare.mockResolvedValue(workspace);
@@ -253,6 +258,38 @@ describe('ProjectChatRunSettlement', () => {
     });
     expect(harness.finalize).toHaveBeenCalledWith('chat_1', 'run_1');
     expect(harness.discard).not.toHaveBeenCalled();
+  });
+
+  /**
+   * No page died here. A daemon runs every desktop Tau turn and every external
+   * agent: it leases its own checkout and settles every run it hosts, after the
+   * `completed` this settlement runs on, so nothing is attested yet and no claim
+   * ever was. Re-leasing asked desktop's authority, whose revisions the host
+   * serves, for a placement it cannot root, and a clean turn read "Failed ·
+   * This chat’s files could not be found."
+   */
+  const daemonTurns: ReadonlyArray<{ readonly label: string; readonly execution: CadAgentExecution }> = [
+    { label: 'a desktop Tau turn', execution: { kind: 'tau', model: 'gpt-6-luna', hostId: 'desktop' } },
+    { label: 'an external agent turn', execution: { kind: 'acp', hostId: 'host_paired', agentId: 'codex' } },
+  ];
+  it.each(daemonTurns)('should only release the hold on $label its daemon has yet to attest', async ({ execution }) => {
+    harness.activeExecution = execution;
+    harness.reclaim.mockResolvedValue(undefined);
+    harness.browserRun = { runId: 'req_1', state: 'completed', eventCount: 9, turnId: 'turn_1' };
+    harness.prepare.mockRejectedValue(
+      Object.assign(new Error(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description), {
+        code: 'PLACEMENT_UNROOTED',
+      }),
+    );
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn('completed', 'req_1');
+
+    expect(harness.prepare).not.toHaveBeenCalled();
+    expect(harness.finalize).not.toHaveBeenCalled();
+    expect(harness.persistBrowserTurnSettlement).not.toHaveBeenCalled();
+    expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'req_1' });
+    expect(harness.clearBrowserAgentHostRun).toHaveBeenCalledWith('chat_1');
   });
 
   /**

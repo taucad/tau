@@ -1,4 +1,4 @@
-import { BadGatewayException, UnauthorizedException } from '@nestjs/common';
+import { BadGatewayException, ServiceUnavailableException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Environment } from '#config/environment.config.js';
@@ -112,12 +112,13 @@ describe('RepositoriesService.listBranches', () => {
     );
   });
 
-  it('returns a 401-equivalent error when the API token is absent', async () => {
-    const { service } = createService(undefined);
+  it.each([undefined, ''])('should answer 503 GITHUB_API_TOKEN_UNAVAILABLE when the API token is %j', async (token) => {
+    const { service } = createService(token);
 
-    await expect(service.listBranches({ owner: 'o', repo: 'r', pageSize: 100 }, '203.0.113.7')).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
+    const rejection = service.listBranches({ owner: 'o', repo: 'r', pageSize: 100 }, '203.0.113.7');
+    await expect(rejection).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(rejection).rejects.toMatchObject({ response: { code: 'GITHUB_API_TOKEN_UNAVAILABLE' } });
+    expect(octokitHarness.graphql).not.toHaveBeenCalled();
   });
 
   it('maps Octokit failures to a bad gateway', async () => {

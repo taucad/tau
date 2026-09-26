@@ -97,7 +97,7 @@ const cadSnapshot = (): { context: Record<string, unknown> } => ({
 let cadState = cadSnapshot();
 const cadActor = {
   getSnapshot: () => cadState,
-  subscribe: (listener: () => void) => ({ unsubscribe: cadRenders.subscribe(listener) }),
+  subscribe: (observer: { next: () => void }) => ({ unsubscribe: cadRenders.subscribe(() => observer.next()) }),
 };
 
 /** The kernel renders the model again: a new geometry, as after an edit. */

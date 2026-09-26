@@ -34,9 +34,15 @@ vi.mock('#components/code/code-editor.client.js', () => ({
   CodeEditor: ({ value }: { readonly value?: string }) => <pre data-testid='conflict-buffer'>{value}</pre>,
 }));
 vi.mock('#components/code/diff-viewer.js', () => ({
-  DiffViewer: ({ originalContent, modifiedContent }: { originalContent: string; modifiedContent: string }) => (
-    <pre data-testid='conflict-diff'>{`${originalContent}|${modifiedContent}`}</pre>
-  ),
+  DiffViewer: ({
+    originalContent,
+    modifiedContent,
+    language,
+  }: {
+    originalContent: string;
+    modifiedContent: string;
+    language?: string;
+  }) => <pre data-testid='conflict-diff' data-language={language}>{`${originalContent}|${modifiedContent}`}</pre>,
 }));
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
@@ -49,7 +55,11 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getHostFinalizedTurns: () => settlements,
   subscribeHostFinalizedTurns: () => () => undefined,
 }));
-const chats = [{ id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' }];
+const chats = [
+  { id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' },
+  /* Unplaced: it works in the live checkout. */
+  { id: 'chat-2', name: 'Sketch lid', checkoutId: undefined },
+];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
 const placeChat = vi.fn(async () => undefined);
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
@@ -370,6 +380,7 @@ describe('Revisions pane', () => {
     /* A27/D19's third *Compare* surface, on the conflict row (review R9). */
     await user.click(screen.getByRole('button', { name: 'Compare src/bracket.ts' }));
     expect(screen.getByTestId('conflict-diff').textContent).toBe('thick = 4\n|thick = 6\n');
+    expect(screen.getByTestId('conflict-diff')).toHaveAttribute('data-language', 'typescript');
   });
 
   /*
@@ -750,6 +761,25 @@ describe('Revisions pane closeout', () => {
     renderPane();
 
     expect(await screen.findByText('Linked')).toBeInTheDocument();
+  });
+
+  it('places no chat on a remote-only branch, which has no checkout (D37)', async () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      checkoutId: 'live',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        { name: 'upstream-only', head: undefined, checkoutId: undefined, checkoutRoot: undefined, leaseChatIds: [] },
+      ],
+    };
+
+    renderPane();
+
+    const badge = await screen.findByText('Remote only');
+    const remote = badge.closest('li');
+    expect(remote).not.toBeNull();
+    expect(remote).not.toHaveTextContent('Sketch lid');
   });
 
   it('asks for no diff it does not render, including inside the closed Earlier fold (C52)', async () => {

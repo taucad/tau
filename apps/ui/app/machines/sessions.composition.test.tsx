@@ -27,7 +27,7 @@
 import { createContext, useContext, useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
-import { createActor, fromCallback, fromPromise } from 'xstate';
+import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -775,7 +775,7 @@ describe('sessions composition', () => {
    * silently stops persisting what its own actors hold, with every other row still green. */
   it('keeps writing the view settings of a live project that is not focused', async () => {
     const graphicsRef = createActor(
-      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: {} },
     ).start();
     viewGraphicsOf('pin-unfocused-1').set('view-1', graphicsRef);
@@ -1169,7 +1169,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
    * up. Everything else — the timer, the policy, the close — is the real pair
    * of machines. */
   const readyChild = (region: string) =>
-    fromCallback<EventObject, { projectId: string }>(({ sendBack }) => {
+    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
       sendBack({ type: 'childReady', region });
       return undefined;
     });

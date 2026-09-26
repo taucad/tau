@@ -3,7 +3,7 @@ title: 'TypeScript Policy'
 description: 'Type assertion rules, mock typing patterns, generic inference, and common gotchas for safe TypeScript usage across the Tau monorepo.'
 status: active
 created: '2026-03-09'
-updated: '2026-09-05'
+updated: '2026-09-25'
 related:
   - docs/policy/testing-policy.md
   - docs/research/typescript-overloads.md
@@ -115,9 +115,9 @@ const loadDataActor = fromSafeAsync<LoadedEvent, LoadInput>(async () => {
 
 ### 5. Match Mock Types Exactly in `provide()`
 
-When providing actor implementations via `machine.provide()`, the mock's input and return types must exactly match the placeholder actor's types. Use generic parameters on the mock's `fromSafeAsync` call.
+When providing actor implementations via `machine.provide()`, the mock's input and return types must exactly match the placeholder actor's types. Use generic parameters on the mock's `fromSafeAsync` call, and check the map with `satisfies Partial<MachineActors<typeof machine>>` (`#lib/xstate.lib.js`).
 
-**Why**: XState's `provide()` type system performs exact structural matching. Even subtle differences (e.g., `false` vs `boolean`, `string` vs `string | undefined`) cause type errors.
+**Why**: XState's `provide()` type system performs exact structural matching. Even subtle differences (e.g., `false` vs `boolean`, `string` vs `string | undefined`) cause type errors. Since XState v6, `provide()` infers the actors map from its own argument, so an inline logic gets no contextual input or output type; without explicit generics and the `satisfies` check, a mismatched stub surfaces far from the call.
 
 CORRECT — generic parameters match the original actor:
 
@@ -127,7 +127,7 @@ machine.provide({
     loadDataActor: fromSafeAsync<LoadedEvent, LoadInput>(async ({ input }) => {
       return { type: 'loaded', data: await fetchData(input.id) };
     }),
-  },
+  } satisfies Partial<MachineActors<typeof machine>>,
 });
 ```
 

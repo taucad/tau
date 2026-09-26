@@ -5,6 +5,42 @@
   "projectType": "application",
   "tags": ["scope:ui", "type:app", "layer:feature"],
   "targets": {
+    "render-calibration": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vite --config vite.calibration.config.ts --mode test"
+      }
+    },
+    "render-calibration-generate": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node apps/ui/scripts/render-calibration/generate.mts"
+      }
+    },
+    "render-calibration-compare": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node apps/ui/scripts/render-calibration/compare.mts"
+      }
+    },
+    "render-calibration-nano": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node apps/ui/scripts/render-calibration/render-nano.mts"
+      }
+    },
+    "render-calibration-check-server": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node apps/ui/scripts/render-calibration/check-server.mts"
+      }
+    },
     "bake-design-story": {
       "executor": "nx:run-commands",
       "cache": false,
@@ -84,7 +120,13 @@
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/desktop/build"],
-      "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
+      "inputs": [
+        "production",
+        "^production",
+        {
+          "env": "TAU_CLOUD_ENABLED"
+        }
+      ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
       "options": {
         "cwd": "{projectRoot}/desktop",
@@ -98,7 +140,13 @@
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/serve/build"],
-      "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
+      "inputs": [
+        "production",
+        "^production",
+        {
+          "env": "TAU_CLOUD_ENABLED"
+        }
+      ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
       "options": {
         "cwd": "{projectRoot}/serve",
@@ -242,6 +290,16 @@
           "npx -y @posthog/cli sourcemap upload --directory {projectRoot}/build/client --delete-after"
         ],
         "parallel": false
+      }
+    },
+    "render-calibration-lighting": {
+      "executor": "nx:run-commands",
+      "options": { "command": "node apps/ui/scripts/render-calibration/pack-lighting.mts" }
+    },
+    "render-calibration-physical": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx apps/ui/scripts/render-calibration/generate-physical.mts"
       }
     }
   }

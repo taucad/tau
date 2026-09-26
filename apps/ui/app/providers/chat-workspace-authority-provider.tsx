@@ -18,8 +18,9 @@ import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { useProject } from '#hooks/use-project.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
-import { useRevisionClient } from '#hooks/use-revision-status.js';
+import { getRevisionClient, useRevisionClient } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 import {
   getHostFinalizedTurns,
@@ -581,6 +582,34 @@ export const browserWorkspaceAuthorityTestApi = {
 };
 
 /** Places this project's browser turns on the worker's revision root. */
+/**
+ * The root's projection once its checkout registry has answered.
+ *
+ * The route opens the root only once its GitHub credential is minted (D36), so an
+ * attach composed at chat open can come before the checkout it must name; and the
+ * root's first projections name a checkout before the registry has said where
+ * its files are, which read as a checkout that is gone (D41).
+ *
+ * @param client - The project's revision client.
+ * @returns The projection.
+ */
+const settledStatus = async (client: RevisionClient): Promise<RevisionStatusProjection> => {
+  const current = client.status();
+  if (current?.registrySettled === true) {
+    return current;
+  }
+  return new Promise((resolve) => {
+    // ponytail: never settles if the root closes first; the attach is dropped with its chat.
+    const stop = client.subscribe(() => {
+      const status = client.status();
+      if (status?.registrySettled === true) {
+        stop();
+        resolve(status);
+      }
+    });
+  });
+};
+
 export function ChatWorkspaceAuthorityProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const { projectId } = useProject();
   const fileManager = useFileManager();
@@ -960,7 +989,14 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
        * resolves it — minus the `admitTurn` that would lease it. The root's own
        * checkout is the last resort: a chat with no turn yet has no checkout of
        * its own, and a project with no checkout at all has no log to attach to. */
-      const status = revisions?.status();
+      /* A slow first load reaches here before the file manager has its worker,
+       * and answering "no checkout" then failed the chat for good (D41); the
+       * attach waits for the worker, bounded like the bridge it rides on. */
+      const started = revisions === undefined ? await waitForRootedBridgeOpener(fileManager.fileManagerRef) : undefined;
+      const client =
+        revisions ??
+        (started?.worker === undefined ? undefined : getRevisionClient({ projectId, worker: started.worker }));
+      const status = client === undefined ? undefined : await settledStatus(client);
       const checkoutId = placed ?? state.conflicts.get(chatId)?.checkoutId ?? chat?.checkoutId ?? status?.checkoutId;
       if (checkoutId === undefined) {
         return undefined;
@@ -988,7 +1024,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       const { prepared } = await composeWorkspace(chatId, { checkoutId, root });
       return prepared;
     },
-    [composeWorkspace, getChat, revisions, state],
+    [composeWorkspace, fileManager.fileManagerRef, getChat, projectId, revisions, state],
   );
 
   const update = useCallback(

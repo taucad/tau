@@ -316,15 +316,24 @@ const appendUnion = (
   );
 };
 
+/**
+ * Three-way `chat.json`, against every ancestor both sides are known to share (D40).
+ *
+ * Two are known: the incoming commit's parent, and this device's own chat ref —
+ * what it last recorded. The second is the only one a device's own push has when
+ * it comes back, since a chat's first commit has no parent.
+ */
 const reconcileMetadata = (
   local: Uint8Array<ArrayBuffer> | undefined,
-  base: Uint8Array<ArrayBuffer> | undefined,
+  bases: ReadonlyArray<Uint8Array<ArrayBuffer> | undefined>,
   incoming: Uint8Array<ArrayBuffer> | undefined,
 ): Uint8Array<ArrayBuffer> | undefined => {
-  if (local === undefined || (base !== undefined && equalBytes(local, base))) {
+  const isBase = (bytes: Uint8Array<ArrayBuffer>): boolean =>
+    bases.some((base) => base !== undefined && equalBytes(bytes, base));
+  if (local === undefined || isBase(local)) {
     return incoming;
   }
-  if (incoming === undefined || equalBytes(local, incoming) || (base !== undefined && equalBytes(incoming, base))) {
+  if (incoming === undefined || equalBytes(local, incoming) || isBase(incoming)) {
     return local;
   }
   throw new RevisionPortError(
@@ -510,10 +519,22 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
     return unchanged;
   }
   if (sameTree(tree, base)) {
-    /* This device has nothing the base does not already hold. The local ref is
-     * left where it is: its tree is a subset of the base's, and the next write
-     * parents on it with every projected segment read back off disk, so nothing
-     * is lost by not re-pointing it here. */
+    /* This device has nothing the base does not already hold, so the base is
+     * this chat's head here too. Left on its own orphan commit, the local ref
+     * was offered again after every refusal and refused for the same reason
+     * forever; the base's tree is a superset of it, so moving it loses nothing. */
+    if (input.onto !== undefined && localHead !== input.onto) {
+      const adopted = await input.port.updateRef({ name: ref, expectedHead: localHead, head: input.onto });
+      if (adopted.status !== 'updated') {
+        return Object.freeze({
+          chatId: input.chatId,
+          ref,
+          status: 'conflicted',
+          head: adopted.actualHead,
+          expectedLocalHead: localHead,
+        });
+      }
+    }
     return unchanged;
   }
   const now = input.now ?? Date.now();
@@ -574,8 +595,14 @@ export const projectChats = async (input: ProjectChatsInput): Promise<readonly s
       const localRecord = await readFileOrUndefined(input.filesystem, `${directory}/${chatRecordFileName}`);
       const revision = await input.port.readRevision(ref.head);
       const base = revision?.parents[0] === undefined ? undefined : await input.port.readTree(revision.parents[0]);
+      const recorded = await input.port.readRef(chatRefName(chatId));
+      const own = recorded === undefined ? undefined : await input.port.readTree(recorded);
       const incomingRecord = tree.get(chatRecordFileName);
-      const metadata = reconcileMetadata(localRecord, base?.get(chatRecordFileName), incomingRecord);
+      const metadata = reconcileMetadata(
+        localRecord,
+        [base?.get(chatRecordFileName), own?.get(chatRecordFileName)],
+        incomingRecord,
+      );
       const changed = await writeEntries({
         filesystem: input.filesystem,
         directory,

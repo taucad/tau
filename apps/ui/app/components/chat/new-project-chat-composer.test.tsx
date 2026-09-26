@@ -33,18 +33,12 @@ vi.mock('#components/chat/kernel-selector.js', () => ({
 vi.mock('#components/filesystem/workspace-selector.js', () => ({
   WorkspaceSelector: ({
     variant,
-    isNested = false,
     'data-chat-textarea-focustrap': isInsideFocusTrap,
   }: {
     readonly variant: string;
-    readonly isNested?: boolean;
     readonly 'data-chat-textarea-focustrap'?: unknown;
   }) => (
-    <div
-      data-testid={`location-${variant}`}
-      data-is-nested={String(isNested)}
-      data-is-inside-focus-trap={String(Boolean(isInsideFocusTrap))}
-    >
+    <div data-testid={`location-${variant}`} data-is-inside-focus-trap={String(Boolean(isInsideFocusTrap))}>
       Location {variant}
     </div>
   ),

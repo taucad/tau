@@ -8,12 +8,12 @@
  * following the pattern from use-project.tsx.
  */
 
-import { setup, assign, emit, raise } from 'xstate';
+import { setup, types } from 'xstate';
 import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import { getRetryDelay } from '#utils/backoff.utils.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { ChatRequest } from '#machines/chat-session.machine.js';
 
 // Input types
@@ -292,16 +292,40 @@ const persistActiveKernelActor = fromSafeAsync<void, { chatId: string; activeKer
   },
 );
 
+/** The chat an event names, or the active chat when it names none. */
+const chatIdOf = (context: ChatPersistenceMachineContext, event: ChatPersistenceMachineEvents): string | undefined =>
+  'chatId' in event ? event.chatId : context.activeChatId;
+
+const hasValidChatId = (context: ChatPersistenceMachineContext, event: ChatPersistenceMachineEvents): boolean =>
+  Boolean(chatIdOf(context, event)?.startsWith('chat_'));
+
+const hasPendingMessages = (context: ChatPersistenceMachineContext): boolean =>
+  Boolean(context.pendingMessages && context.pendingMessages.length > 0 && context.pendingChatId);
+
+/* Can persist if: not loading AND has valid chatId. Queueing is allowed while
+ * loading (`hasValidChatId` alone), so a brand-new chat that's still hydrating
+ * can buffer the user's first message instead of swallowing it. */
+const canPersist = (context: ChatPersistenceMachineContext, event: ChatPersistenceMachineEvents): boolean =>
+  !context.isLoadingChat && hasValidChatId(context, event);
+
+const queuePending = {
+  context: ({
+    context,
+    event,
+  }: Readonly<{
+    context: ChatPersistenceMachineContext;
+    event: Extract<ChatPersistenceMachineEvents, { type: 'queuePersist' }>;
+  }>) => ({ pendingMessages: event.messages, pendingChatId: context.activeChatId }),
+};
+
+const clearPending = { target: 'idle', context: { pendingMessages: undefined, pendingChatId: undefined } } as const;
+
 export const chatPersistenceMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
-    context: {} as ChatPersistenceMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
-    events: {} as ChatPersistenceMachineEvents,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
-    emitted: {} as ChatPersistenceMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
-    input: {} as ChatPersistenceMachineInput,
+  schemas: {
+    context: types<ChatPersistenceMachineContext>(),
+    events: eventSchemas<ChatPersistenceMachineEvents>(),
+    emitted: eventSchemas<ChatPersistenceMachineEmitted>(),
+    input: types<ChatPersistenceMachineInput>(),
   },
   actors: {
     loadChatActor,
@@ -311,61 +335,32 @@ export const chatPersistenceMachine = setup({
     persistActiveExecutionActor,
     persistActiveKernelActor,
   },
-  guards: {
-    hasValidChatId({ context, event }) {
-      // Check event.chatId for setActiveChatId event, otherwise check context
-      const chatId = 'chatId' in event ? event.chatId : context.activeChatId;
-
-      return Boolean(chatId?.startsWith('chat_'));
-    },
-    hasPendingMessages: ({ context }) =>
-      Boolean(context.pendingMessages && context.pendingMessages.length > 0 && context.pendingChatId),
-    /**
-     * Allow `queuePersist` whenever a chat is selected — even while loading.
-     * The actual write is gated separately so a brand-new chat that's still
-     * hydrating can buffer the user's first message instead of swallowing it.
-     */
-    canQueuePersist({ context, event }) {
-      const chatId = 'chatId' in event ? event.chatId : context.activeChatId;
-      return Boolean(chatId?.startsWith('chat_'));
-    },
-    canPersist({ context, event }) {
-      // Can persist if: not loading AND has valid chatId
-      const chatId = 'chatId' in event ? event.chatId : context.activeChatId;
-
-      return !context.isLoadingChat && Boolean(chatId?.startsWith('chat_'));
-    },
-  },
   delays: {
     persistDebounce: 100,
     /**
-     * Computed at scheduling time off the post-`assign` `retryAttempt`
+     * Computed at scheduling time off the post-entry `retryAttempt`
      * counter, so each `retrying` re-entry advances the curve. See
      * {@link getRetryDelay} for the curve specification.
      */
-    streamRetryDelay({ context }) {
-      return getRetryDelay(context.retryAttempt);
-    },
+    streamRetryDelay: ({ context }) => getRetryDelay(context.retryAttempt),
   },
 }).createMachine({
   id: 'chatPersistence',
-  context({ input }) {
-    return {
-      activeChatId: input.activeChatId,
-      resourceId: input.resourceId,
-      isLoadingChat: false,
-      loadError: undefined,
-      pendingMessages: undefined,
-      pendingChatId: undefined,
-      persistedError: undefined,
-      pendingRequest: undefined,
-      activeExecution: undefined,
-      activeKernel: undefined,
-      retryAttempt: 0,
-      retryMaxAttempts: input.retryMaxAttempts ?? defaultRetryMaxAttempts,
-      preempting: false,
-    };
-  },
+  context: ({ input }) => ({
+    activeChatId: input.activeChatId,
+    resourceId: input.resourceId,
+    isLoadingChat: false,
+    loadError: undefined,
+    pendingMessages: undefined,
+    pendingChatId: undefined,
+    persistedError: undefined,
+    pendingRequest: undefined,
+    activeExecution: undefined,
+    activeKernel: undefined,
+    retryAttempt: 0,
+    retryMaxAttempts: input.retryMaxAttempts ?? defaultRetryMaxAttempts,
+    preempting: false,
+  }),
   type: 'parallel',
   states: {
     // Chat loading state
@@ -374,52 +369,37 @@ export const chatPersistenceMachine = setup({
       states: {
         idle: {
           on: {
-            setActiveChatId: {
-              target: 'loading',
-              guard: 'hasValidChatId',
-              actions: assign({
-                activeChatId: ({ event }) => event.chatId,
-                isLoadingChat: true,
-                loadError: undefined,
-              }),
-            },
+            setActiveChatId: ({ context, event }) =>
+              hasValidChatId(context, event)
+                ? {
+                    target: 'loading',
+                    context: { activeChatId: event.chatId, isLoadingChat: true, loadError: undefined },
+                  }
+                : undefined,
           },
         },
         loading: {
           invoke: {
             src: 'loadChatActor',
-            input: ({ context }) => ({
-              chatId: context.activeChatId!,
-            }),
-            onDone: {
-              target: 'idle',
-              actions: assign({
-                isLoadingChat: false,
-              }),
-            },
+            input: ({ context }) => ({ chatId: context.activeChatId! }),
+            onDone: { target: 'idle', context: { isLoadingChat: false } },
             onError: {
               target: 'idle',
-              actions: assign({
-                isLoadingChat: false,
-                loadError: ({ event }) => event.error as Error,
-              }),
+              context: ({ event }) => ({ isLoadingChat: false, loadError: event.error as Error }),
             },
           },
           on: {
             chatRetrieved: {
-              actions: assign({
-                persistedError: ({ event }) => event.chat?.error,
-                activeExecution: ({ event }) => event.chat?.activeExecution,
-                activeKernel: ({ event }) => event.chat?.activeKernel,
+              context: ({ event }) => ({
+                persistedError: event.chat?.error,
+                activeExecution: event.chat?.activeExecution,
+                activeKernel: event.chat?.activeKernel,
               }),
             },
             setActiveChatId: {
               target: 'loading',
               reenter: true,
-              actions: assign({
-                activeChatId: ({ event }) => event.chatId,
-                loadError: undefined,
-              }),
+              context: ({ event }) => ({ activeChatId: event.chatId, loadError: undefined }),
             },
           },
         },
@@ -431,38 +411,24 @@ export const chatPersistenceMachine = setup({
       states: {
         idle: {
           on: {
-            queuePersist: {
-              target: 'pending',
-              guard: 'canQueuePersist',
-              actions: assign({
-                pendingMessages: ({ event }) => event.messages,
-                pendingChatId: ({ context }) => context.activeChatId,
-              }),
-            },
+            queuePersist: ({ context, event }) =>
+              hasValidChatId(context, event)
+                ? {
+                    target: 'pending',
+                    context: { pendingMessages: event.messages, pendingChatId: context.activeChatId },
+                  }
+                : undefined,
           },
         },
         pending: {
           after: {
-            persistDebounce: {
-              target: 'persisting',
-              guard: 'hasPendingMessages',
-            },
+            persistDebounce: ({ context }) => (hasPendingMessages(context) ? { target: 'persisting' } : undefined),
           },
           on: {
             // Reset timer if new messages come in
-            queuePersist: {
-              target: 'pending',
-              reenter: true,
-              actions: assign({
-                pendingMessages: ({ event }) => event.messages,
-                pendingChatId: ({ context }) => context.activeChatId,
-              }),
-            },
+            queuePersist: { target: 'pending', reenter: true, ...queuePending },
             // Immediately bypass debounce and persist
-            flushNow: {
-              target: 'persisting',
-              guard: 'hasPendingMessages',
-            },
+            flushNow: ({ context }) => (hasPendingMessages(context) ? { target: 'persisting' } : undefined),
           },
         },
         persisting: {
@@ -476,29 +442,12 @@ export const chatPersistenceMachine = setup({
               chatId: context.pendingChatId!,
               messages: context.pendingMessages!,
             }),
-            onDone: {
-              target: 'idle',
-              actions: assign({
-                pendingMessages: undefined,
-                pendingChatId: undefined,
-              }),
-            },
-            onError: {
-              target: 'idle',
-              actions: assign({
-                pendingMessages: undefined,
-                pendingChatId: undefined,
-              }),
-            },
+            onDone: clearPending,
+            onError: clearPending,
           },
           on: {
             // Queue new messages while persisting
-            queuePersist: {
-              actions: assign({
-                pendingMessages: ({ event }) => event.messages,
-                pendingChatId: ({ context }) => context.activeChatId,
-              }),
-            },
+            queuePersist: queuePending,
           },
         },
       },
@@ -512,12 +461,9 @@ export const chatPersistenceMachine = setup({
       states: {
         idle: {
           on: {
-            startRequest: {
-              target: 'invoking',
-              actions: [
-                assign({ persistedError: undefined }),
-                emit(({ event }) => ({ type: 'dispatchRequest', request: event.request })),
-              ],
+            startRequest: ({ event }, enq) => {
+              enq.emit({ type: 'dispatchRequest', request: event.request });
+              return { target: 'invoking', context: { persistedError: undefined } };
             },
           },
         },
@@ -525,65 +471,49 @@ export const chatPersistenceMachine = setup({
           on: {
             // A new request while one is in flight: queue it, stop the in-flight one,
             // and resume the queued one in `requestFinished`.
-            startRequest: {
-              target: 'stopping',
-              actions: [
-                assign({
+            startRequest: ({ event }, enq) => {
+              enq.emit({ type: 'dispatchStop' });
+              return {
+                target: 'stopping',
+                context: {
                   persistedError: undefined,
-                  pendingRequest: ({ event }) => event.request,
+                  pendingRequest: event.request,
                   // User initiated a fresh action -- abandon any in-flight retry chain.
                   retryAttempt: 0,
-                }),
-                emit({ type: 'dispatchStop' }),
-              ],
+                },
+              };
             },
-            stopRequest: {
-              target: 'stopping',
-              actions: emit({ type: 'dispatchStop' }),
+            stopRequest: (_, enq) => {
+              enq.emit({ type: 'dispatchStop' });
+              return { target: 'stopping' };
             },
-            preemptRequest: {
-              target: 'stopping',
-              actions: [assign({ preempting: true, retryAttempt: 0 }), emit({ type: 'dispatchStop' })],
+            preemptRequest: (_, enq) => {
+              enq.emit({ type: 'dispatchStop' });
+              return { target: 'stopping', context: { preempting: true, retryAttempt: 0 } };
             },
-            streamResumed: {
-              actions: [assign({ retryAttempt: 0, persistedError: undefined }), raise({ type: 'clearPersistedError' })],
+            streamResumed: (_, enq) => {
+              enq.raise({ type: 'clearPersistedError' });
+              return { context: { retryAttempt: 0, persistedError: undefined } };
             },
-            // Three-way guarded transition:
+            // Three-way transition:
             //   1. Transient transport disconnect with budget remaining --> retrying
             //   2. Any other failure --> idle, leave persistedError so the banner stays up
             //   3. Success/abort --> idle, clear persistedError, reset retry counter
-            requestFinished: [
-              {
-                guard: ({ context, event }) =>
-                  event.isError && event.isDisconnect && context.retryAttempt < context.retryMaxAttempts,
-                target: 'retrying',
-              },
-              {
-                guard: ({ event }) => event.isError,
-                target: 'idle',
-                actions: [
-                  // Mid-stream errors keep persistedError (set by onError) visible.
-                  assign({ retryAttempt: 0 }),
-                  emit(({ event }) => ({
-                    type: 'applyFinishedRequest',
-                    messages: event.messages,
-                    cause: deriveFinishedRequestCause(event),
-                  })),
-                ],
-              },
-              {
-                target: 'idle',
-                actions: [
-                  // Success/abort clears persistedError and the retry counter.
-                  assign({ persistedError: undefined, retryAttempt: 0 }),
-                  emit(({ event }) => ({
-                    type: 'applyFinishedRequest',
-                    messages: event.messages,
-                    cause: deriveFinishedRequestCause(event),
-                  })),
-                ],
-              },
-            ],
+            requestFinished: ({ context, event }, enq) => {
+              if (event.isError && event.isDisconnect && context.retryAttempt < context.retryMaxAttempts) {
+                return { target: 'retrying' };
+              }
+              enq.emit({
+                type: 'applyFinishedRequest',
+                messages: event.messages,
+                cause: deriveFinishedRequestCause(event),
+              });
+              return event.isError
+                ? // Mid-stream errors keep persistedError (set by onError) visible.
+                  { target: 'idle', context: { retryAttempt: 0 } }
+                : // Success/abort clears persistedError and the retry counter.
+                  { target: 'idle', context: { persistedError: undefined, retryAttempt: 0 } };
+            },
           },
         },
         // Transparent auto-retry on transport-level disconnects.
@@ -593,30 +523,24 @@ export const chatPersistenceMachine = setup({
         // the in-flight stream as a `continue` request so partial assistant
         // parts stay in `chat.messages`.
         retrying: {
-          entry: assign({ retryAttempt: ({ context }) => context.retryAttempt + 1 }),
+          entry: ({ context }) => ({ context: { retryAttempt: context.retryAttempt + 1 } }),
           after: {
-            streamRetryDelay: {
-              target: 'invoking',
-              actions: emit({ type: 'dispatchRequest', request: { kind: 'continue' } }),
+            streamRetryDelay: (_, enq) => {
+              enq.emit({ type: 'dispatchRequest', request: { kind: 'continue' } });
+              return { target: 'invoking' };
             },
           },
           on: {
             // User submitted a fresh action mid-backoff -- exit `retrying`
             // (XState auto-cancels the `after` timer) and dispatch the new
             // request through the same path as `idle.startRequest`.
-            startRequest: {
-              target: 'invoking',
-              actions: [
-                assign({ persistedError: undefined, retryAttempt: 0 }),
-                emit(({ event }) => ({ type: 'dispatchRequest', request: event.request })),
-              ],
+            startRequest: ({ event }, enq) => {
+              enq.emit({ type: 'dispatchRequest', request: event.request });
+              return { target: 'invoking', context: { persistedError: undefined, retryAttempt: 0 } };
             },
             // User explicitly bailed during backoff -- drop the chain.
             // The `after` timer is auto-cancelled on state exit.
-            stopRequest: {
-              target: 'idle',
-              actions: assign({ retryAttempt: 0 }),
-            },
+            stopRequest: { target: 'idle', context: { retryAttempt: 0 } },
             // Late `streaming` status callbacks during the backoff window — ignore.
             streamResumed: {},
           },
@@ -626,62 +550,36 @@ export const chatPersistenceMachine = setup({
             // Allow the queued request to be replaced by a newer tap before the
             // stop completes. The newest pendingRequest wins.
             startRequest: {
-              actions: assign({
-                persistedError: undefined,
-                pendingRequest: ({ event }) => event.request,
-                preempting: false,
-              }),
+              context: ({ event }) => ({ persistedError: undefined, pendingRequest: event.request, preempting: false }),
             },
-            requestFinished: [
-              {
-                /* Pre-empted, not stopped: the transcript stays exactly as it
-                 * is and the queued turn dispatches from its own owner. */
-                guard: ({ context }) => context.preempting,
-                target: 'idle',
-                actions: [
-                  assign({ preempting: false }),
-                  emit(({ event }) => ({
-                    type: 'applyFinishedRequest',
-                    messages: event.messages,
-                    cause: 'preempt',
-                  })),
-                ],
-              },
-              {
-                guard: ({ context }) => context.pendingRequest !== undefined,
-                target: 'invoking',
-                actions: [
-                  emit(({ context, event }) => ({
-                    type: 'applyResumedRequest',
-                    messages: event.messages,
-                    pendingRequest: context.pendingRequest!,
-                    cause: 'preempt',
-                  })),
-                  emit(({ context }) => ({
-                    type: 'dispatchRequest',
-                    request: context.pendingRequest!,
-                  })),
-                  assign({ pendingRequest: undefined }),
-                ],
-              },
+            requestFinished: ({ context, event }, enq) => {
+              /* Pre-empted, not stopped: the transcript stays exactly as it
+               * is and the queued turn dispatches from its own owner. */
+              if (context.preempting) {
+                enq.emit({ type: 'applyFinishedRequest', messages: event.messages, cause: 'preempt' });
+                return { target: 'idle', context: { preempting: false } };
+              }
+              if (context.pendingRequest !== undefined) {
+                enq.emit({
+                  type: 'applyResumedRequest',
+                  messages: event.messages,
+                  pendingRequest: context.pendingRequest,
+                  cause: 'preempt',
+                });
+                enq.emit({ type: 'dispatchRequest', request: context.pendingRequest });
+                return { target: 'invoking', context: { pendingRequest: undefined } };
+              }
               // Empty-cancel: the user stopped before any assistant content
               // streamed in. Emit the restore variant so the store listener
               // lifts the user message back into the composer draft and
               // truncates `chat.messages` — see `restoreCancelledDraft`.
-              {
-                guard: ({ event }) => hasNoAssistantContent(event.messages),
-                target: 'idle',
-                actions: emit(({ event }) => buildRestoreCancelledDraftEmit(event.messages)),
-              },
-              {
-                target: 'idle',
-                actions: emit(({ event }) => ({
-                  type: 'applyStoppedRequest',
-                  messages: event.messages,
-                  cause: 'user_stop',
-                })),
-              },
-            ],
+              if (hasNoAssistantContent(event.messages)) {
+                enq.emit(buildRestoreCancelledDraftEmit(event.messages));
+                return { target: 'idle' };
+              }
+              enq.emit({ type: 'applyStoppedRequest', messages: event.messages, cause: 'user_stop' });
+              return { target: 'idle' };
+            },
           },
         },
       },
@@ -694,13 +592,10 @@ export const chatPersistenceMachine = setup({
       states: {
         idle: {
           on: {
-            setActiveExecution: {
-              target: 'persisting',
-              guard: 'hasValidChatId',
-              actions: assign({
-                activeExecution: ({ event }) => event.execution,
-              }),
-            },
+            setActiveExecution: ({ context, event }) =>
+              hasValidChatId(context, event)
+                ? { target: 'persisting', context: { activeExecution: event.execution } }
+                : undefined,
           },
         },
         persisting: {
@@ -714,14 +609,10 @@ export const chatPersistenceMachine = setup({
             onError: { target: 'idle' },
           },
           on: {
-            setActiveExecution: {
-              target: 'persisting',
-              reenter: true,
-              guard: 'hasValidChatId',
-              actions: assign({
-                activeExecution: ({ event }) => event.execution,
-              }),
-            },
+            setActiveExecution: ({ context, event }) =>
+              hasValidChatId(context, event)
+                ? { target: 'persisting', reenter: true, context: { activeExecution: event.execution } }
+                : undefined,
           },
         },
       },
@@ -733,13 +624,10 @@ export const chatPersistenceMachine = setup({
       states: {
         idle: {
           on: {
-            setActiveKernel: {
-              target: 'persisting',
-              guard: 'hasValidChatId',
-              actions: assign({
-                activeKernel: ({ event }) => event.kernel,
-              }),
-            },
+            setActiveKernel: ({ context, event }) =>
+              hasValidChatId(context, event)
+                ? { target: 'persisting', context: { activeKernel: event.kernel } }
+                : undefined,
           },
         },
         persisting: {
@@ -753,14 +641,10 @@ export const chatPersistenceMachine = setup({
             onError: { target: 'idle' },
           },
           on: {
-            setActiveKernel: {
-              target: 'persisting',
-              reenter: true,
-              guard: 'hasValidChatId',
-              actions: assign({
-                activeKernel: ({ event }) => event.kernel,
-              }),
-            },
+            setActiveKernel: ({ context, event }) =>
+              hasValidChatId(context, event)
+                ? { target: 'persisting', reenter: true, context: { activeKernel: event.kernel } }
+                : undefined,
           },
         },
       },
@@ -771,20 +655,12 @@ export const chatPersistenceMachine = setup({
       states: {
         idle: {
           on: {
-            setPersistedError: {
-              target: 'persisting',
-              guard: 'canPersist',
-              actions: assign({
-                persistedError: ({ event }) => event.error,
-              }),
-            },
-            clearPersistedError: {
-              target: 'clearing',
-              guard: 'canPersist',
-              actions: assign({
-                persistedError: undefined,
-              }),
-            },
+            setPersistedError: ({ context, event }) =>
+              canPersist(context, event)
+                ? { target: 'persisting', context: { persistedError: event.error } }
+                : undefined,
+            clearPersistedError: ({ context, event }) =>
+              canPersist(context, event) ? { target: 'clearing', context: { persistedError: undefined } } : undefined,
           },
         },
         persisting: {
@@ -794,71 +670,42 @@ export const chatPersistenceMachine = setup({
               chatId: context.activeChatId!,
               error: context.persistedError!,
             }),
-            onDone: {
-              target: 'idle',
-            },
-            onError: {
-              target: 'idle',
-            },
+            onDone: { target: 'idle' },
+            onError: { target: 'idle' },
           },
           on: {
             // If a new error comes in while persisting, update context and restart
             setPersistedError: {
               target: 'persisting',
               reenter: true,
-              actions: assign({
-                persistedError: ({ event }) => event.error,
-              }),
+              context: ({ event }) => ({ persistedError: event.error }),
             },
             // If clearing is requested while persisting, switch to clearing
-            clearPersistedError: {
-              target: 'clearing',
-              actions: assign({
-                persistedError: undefined,
-              }),
-            },
+            clearPersistedError: { target: 'clearing', context: { persistedError: undefined } },
           },
         },
         clearing: {
           invoke: {
             src: 'clearErrorActor',
-            input: ({ context }) => ({
-              chatId: context.activeChatId!,
-            }),
-            onDone: {
-              target: 'idle',
-              actions: assign({
-                persistedError: undefined,
-              }),
-            },
-            onError: {
-              target: 'idle',
-              actions: assign({
-                persistedError: undefined,
-              }),
-            },
+            input: ({ context }) => ({ chatId: context.activeChatId! }),
+            onDone: { target: 'idle', context: { persistedError: undefined } },
+            onError: { target: 'idle', context: { persistedError: undefined } },
           },
           on: {
             // If a new error comes in while clearing, switch to persisting
-            setPersistedError: {
-              target: 'persisting',
-              actions: assign({
-                persistedError: ({ event }) => event.error,
-              }),
-            },
+            setPersistedError: { target: 'persisting', context: ({ event }) => ({ persistedError: event.error }) },
           },
         },
       },
     },
   },
   on: {
-    turnRequested: {
-      actions: assign({ persistedError: undefined, retryAttempt: 0 }),
-    },
-    handleError: {
-      actions({ event }) {
+    turnRequested: { context: { persistedError: undefined, retryAttempt: 0 } },
+    handleError: ({ event }, enq) => {
+      enq(() => {
         console.error('Chat persistence error:', event.error);
-      },
+      });
+      return {};
     },
   },
 });

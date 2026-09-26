@@ -90,7 +90,12 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button variant='overlay' size='icon' className={cn('relative font-mono [&>span]:leading-none', className)}>
+            <Button
+              variant='overlay'
+              size='icon'
+              aria-label={`Grid ${localizedSmallGridSize} ${unit}, unit settings`}
+              className={cn('relative font-mono [&>span]:leading-none', className)}
+            >
               <span
                 className={cn(
                   getTextSizeClass(localizedSmallGridSize),

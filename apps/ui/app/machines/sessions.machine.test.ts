@@ -1,7 +1,7 @@
 /* eslint-disable no-await-in-loop -- settling is sequential by nature: each
    microtask turn has to land before the next one starts. */
 
-import { createActor, fromCallback } from 'xstate';
+import { createActor, createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -26,13 +26,13 @@ const harness = (options?: { readonly budget?: number; readonly closeNever?: boo
   const started: string[] = [];
   const stopped: string[] = [];
   const readyChild = (region: ProjectSessionRegion) =>
-    fromCallback<EventObject, { projectId: string }>(({ sendBack }) => {
+    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
       sendBack({ type: 'childReady', region });
       return () => undefined;
     });
   /* The compute child is this session's liveness probe: its cleanup runs when
    * — and only when — the session stops its children. */
-  const computeChild = fromCallback<EventObject, { projectId: string }>(({ input, sendBack }) => {
+  const computeChild = createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
     started.push(input.projectId);
     sendBack({ type: 'childReady', region: 'compute' });
     return () => stopped.push(input.projectId);

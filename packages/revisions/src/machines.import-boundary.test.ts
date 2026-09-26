@@ -40,6 +40,21 @@ const importsPackageContract = (specifier: string): boolean =>
  */
 const importsRefusalMarkers = (specifier: string): boolean => specifier === '#refusal-markers.js';
 
+/*
+ * The machines' shared `schemas` helpers. `machine-schemas.ts` imports nothing
+ * but XState's types: `eventSchemas()` returns an empty, type-only map, so a
+ * machine that calls it is no more coupled to a host than one that calls
+ * `types()` from XState itself. The row below pins the premise.
+ */
+const importsMachineSchemas = (specifier: string): boolean => specifier === '#machine-schemas.js';
+
+/**
+ * A machine's plain data types live beside it in `<name>.types.ts`, which imports
+ * no XState, so the package root can re-export them while `xstate` stays an
+ * optional peer. Machines take them type-only.
+ */
+const importsMachineTypes = (specifier: string): boolean => /^#[a-z-]+\.types\.js$/u.test(specifier);
+
 describe('revision machine import boundary', () => {
   it('finds every machine subpath module', () => {
     expect(
@@ -88,9 +103,27 @@ describe('revision machine import boundary', () => {
           !importsXstate(entry.specifier) &&
           !importsSiblingMachine(entry.specifier) &&
           !importsRefusalMarkers(entry.specifier) &&
-          !(importsPackageContract(entry.specifier) && entry.typeOnly),
+          !importsMachineSchemas(entry.specifier) &&
+          !(importsPackageContract(entry.specifier) && entry.typeOnly) &&
+          !(importsMachineTypes(entry.specifier) && entry.typeOnly),
       );
 
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps every machine types module free of XState and of machines', () => {
+    const typesModules = readdirSync(sourceDirectory).filter((name) => name.endsWith('.types.ts'));
+    const offenders = typesModules
+      .flatMap((name) => importsOf(join(sourceDirectory, name)))
+      .filter(
+        (entry) =>
+          !entry.typeOnly ||
+          importsXstate(entry.specifier) ||
+          importsSiblingMachine(entry.specifier) ||
+          importsMachineSchemas(entry.specifier),
+      );
+
+    expect(typesModules.length).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
 
@@ -98,6 +131,13 @@ describe('revision machine import boundary', () => {
     const leaf = readFileSync(join(sourceDirectory, 'refusal-markers.ts'), 'utf8');
 
     expect(leaf).not.toMatch(/^import\s/mu);
+  });
+
+  it('keeps the schema helpers to type-only XState imports, which is why they are allowed', () => {
+    const helpers = readFileSync(join(sourceDirectory, 'machine-schemas.ts'), 'utf8');
+    const imports = [...helpers.matchAll(/^import\s+(type\s+)?[^;]*?from\s+'([^']+)';$/gmu)];
+
+    expect(imports.map((match) => [match[1] !== undefined, match[2]])).toEqual([[true, 'xstate']]);
   });
 
   it('imports nothing from the filesystem, git, node builtins, React or the DOM', () => {

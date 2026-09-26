@@ -2,7 +2,7 @@
 
 Brandmark for [replicad](https://replicad.xyz), the browser CAD kernel this repository's `replicad` examples are built on. Two of replicad's own vases, side by side — the shape its documentation opens with, and the one the [`vase`](../vase/main.ts) example already builds.
 
-The mark is the part, not a picture of the part. `main.ts` returns a real `Shape3D`: the meridian revolved, shelled from the top face, and filleted on both top edges. `generate-logo.ts` renders that same meridian to SVG.
+The mark is the part, not a picture of the part. `main.ts` returns two real `Shape3D` parts: each meridian is revolved, shelled from the top face, and filleted on both top edges. `generate-logo.ts` renders that same meridian to SVG.
 
 ## Part Census
 
@@ -12,7 +12,7 @@ The mark is the part, not a picture of the part. `main.ts` returns a real `Shape
 | Meridian    |     3 | Cubic Bezier segments, plus the opening `hLine`      |
 | Fillet edge |     2 | Both `XY` circles at `z = height` — rim and bore     |
 
-Fused into one compound. There are no BRep interfaces or GeoSpec selectors.
+The disjoint vases are separate parts. There are no BRep interfaces or GeoSpec selectors.
 
 ## Construction Datums
 

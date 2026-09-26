@@ -13,7 +13,7 @@ import { useAnalytics } from '#hooks/use-analytics.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import type { RevisionFailureSubject } from '#lib/revision-failure-copy.js';
-import type { BranchOperation } from '@taucad/revisions/branch-machine';
+import type { BranchOperation } from '@taucad/revisions';
 
 /** What the question above a waiting branch verb asks. Document words only (A18, I12). */
 const branchVerbTitle: Readonly<Record<BranchOperation, string>> = {
@@ -46,6 +46,7 @@ const revisionFailureEvent: Readonly<Record<RevisionFailureSubject, string>> = {
   restore: 'revision_restore_failed',
   branch: 'revision_branch_failed',
   save: 'revision_save_failed',
+  resolution: 'revision_resolution_failed',
   /* Not raised here: a turn announces its own failure through `turn.failed`,
    * which `revision-outcomes.tsx` phrases from the same table (W9). */
   turn: 'revision_turn_failed',

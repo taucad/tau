@@ -337,7 +337,7 @@ export function ProjectRouteGate({
   const isProjectRoute = slugs !== undefined || requestedProjectId !== undefined;
 
   return (
-    <SharedWorkerGate placeholder={isProjectRoute ? <WorkspaceSkeleton withShellFrame /> : undefined}>
+    <SharedWorkerGate withShellFrame placeholder={isProjectRoute ? <WorkspaceSkeleton withShellFrame /> : undefined}>
       <ProjectRouteStateContext.Provider value={state}>
         <ProjectRouteRetryContext.Provider value={handleRetryLoad}>
           <div className='contents' inert={pending || undefined} aria-busy={pending}>

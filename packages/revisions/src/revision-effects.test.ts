@@ -992,7 +992,7 @@ for (const actorSet of actorSets) {
         authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
-      const running = createActor(heldActors.sync.fastForward!, {
+      const running = createActor(heldActors.sync.fastForward, {
         input: { remote: 'tau', branch: 'main' },
       });
       running.start();
@@ -1058,11 +1058,25 @@ for (const actorSet of actorSets) {
       expect(await context.filesystem.readFile('main.ts', 'utf8')).toBe('new local revision\n');
     }, 30_000);
 
-    it('does not advance a branch that another checkout has open', async () => {
+    /* Policy: fast-forward a clean checkout (D60 extends that to linked ones);
+     * a branch with work of its own is never moved by a fetch. */
+    it('does not advance another checkout’s branch that has work of its own', async () => {
       const context = await synchronized();
       const feature = await context.port.addCheckout?.({ branch: 'feature', from: context.base });
       expect(feature).toMatchObject({ kind: 'linked', branch: 'feature' });
       await context.port.updateRef({ name: 'refs/remotes/tau/feature', expectedHead: undefined, head: context.base });
+      const baseTree = (await context.port.readTree(revisionId(context.base))) ?? new ImmutableRevisionTree([]);
+      const own = await context.port.writeRevision({
+        parents: [revisionId(context.base)],
+        tree: baseTree,
+        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13, 4) },
+        summary: { generated: 'Work on feature' },
+      });
+      await context.port.updateRef({
+        name: 'feature',
+        expectedHead: revisionId(context.base),
+        head: revisionId(own.commitId),
+      });
       const wrappedPort: RevisionPort = {
         ...context.port,
         listRemoteRefs: async () => [
@@ -1086,7 +1100,7 @@ for (const actorSet of actorSets) {
       });
 
       await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
-      expect(await context.port.readRef('feature')).toBe(context.base);
+      expect(await context.port.readRef('feature')).toBe(own.commitId);
     }, 30_000);
   });
 }
@@ -1095,14 +1109,16 @@ describe('checkout fence cancellation', () => {
   it('keeps a later waiter behind the active owner when the middle waiter stops', async () => {
     const { actors } = await fixture();
     const { fence } = actors.checkout;
-    if (fence === undefined) {
-      throw new Error('The checkout fence actor is required.');
-    }
     const owner = (onGranted: () => void) =>
       createActor(
         createMachine({
           invoke: { src: fence, input: { checkoutId: 'live' } },
-          on: { fenceGranted: { actions: onGranted } },
+          on: {
+            fenceGranted: (_, enq) => {
+              enq(onGranted);
+              return {};
+            },
+          },
         }),
       );
     const firstGranted = Promise.withResolvers<void>();
@@ -1510,6 +1526,67 @@ for (const actorSet of actorSets) {
       ).resolves.toMatchObject({ paths: [{ path: 'a.txt' }] });
     }, 30_000);
 
+    /* D57: the resolution lands on the sync branch; the next pull has to carry it home. */
+    it('finishes a resolved sync conflict on the next pull and retires its branch', async () => {
+      const { port, actors, filesystem, theirs, ours } = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+      await port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: revisionId(theirs) });
+      const merge = async (): Promise<{ status: string; revisionId?: string }> =>
+        run(actors.sync.merge, { projectId: 'project-1', remote: 'tau', branch: 'main' });
+
+      await expect(merge()).resolves.toMatchObject({ status: 'conflicted' });
+      const conflict = (await port.readRef('sync/tau/main')) ?? '';
+      await run(actors.resolution.applyResolution, {
+        projectId: 'project-1',
+        revisionId: conflict,
+        path: 'a.txt',
+        side: 'theirs',
+      });
+      const finished = await run<{ revisionId: string }>(actors.resolution.finishMerge, {
+        projectId: 'project-1',
+        revisionId: conflict,
+      });
+
+      await expect(merge()).resolves.toStrictEqual({ status: 'merged', revisionId: finished.revisionId });
+      expect(await port.readRef('main')).toBe(finished.revisionId);
+      expect(new TextDecoder().decode(await filesystem.readFile('a.txt'))).toBe('theirs\n');
+      /* Both heads are in it, so the push that follows is a fast-forward. */
+      const walk = await port.log({ heads: [revisionId(finished.revisionId)] });
+      expect(walk.map((entry) => entry.id)).toEqual(expect.arrayContaining([theirs, ours]));
+      expect(await port.readRef('sync/tau/main')).toBeUndefined();
+      const checkouts = (await port.listCheckouts?.()) ?? [];
+      expect(checkouts.some((checkout) => checkout.branch === 'sync/tau/main')).toBe(false);
+    }, 30_000);
+
+    /* D55: from `conflicted`, Sync now and a reconnect pull again. */
+    it('answers a repeated sync pull with the conflict that is already waiting', async () => {
+      const { port, actors, theirs } = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+      await port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: revisionId(theirs) });
+      const merge = async (): Promise<{ status: string; paths?: readonly string[] }> =>
+        run(actors.sync.merge, { projectId: 'project-1', remote: 'tau', branch: 'main' });
+
+      await expect(merge()).resolves.toMatchObject({ status: 'conflicted', paths: ['a.txt'] });
+      const waiting = await port.readRef('sync/tau/main');
+      await expect(merge()).resolves.toMatchObject({ status: 'conflicted', paths: ['a.txt'] });
+      /* The same revision, so the sides already chosen for it still apply. */
+      expect(await port.readRef('sync/tau/main')).toBe(waiting);
+
+      /* The remote moved on: a new conflict, in the checkout the first one opened. */
+      const again = await port.writeRevision({
+        parents: [revisionId(theirs)],
+        tree: (await port.readTree(revisionId(theirs))) ?? new ImmutableRevisionTree([]),
+        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 14) },
+        summary: { generated: 'Theirs again' },
+      });
+      await port.updateRef({
+        name: 'refs/remotes/tau/main',
+        expectedHead: revisionId(theirs),
+        head: revisionId(again.commitId),
+      });
+      await expect(merge()).resolves.toMatchObject({ status: 'conflicted', paths: ['a.txt'] });
+      const moved = await port.readRevision(revisionId((await port.readRef('sync/tau/main')) ?? ''));
+      expect(moved?.parents[0]).toBe(again.commitId);
+    }, 30_000);
+
     it('records a merge revision and rewrites the target when the two lines settle', async () => {
       const { port, actors, filesystem, ours, theirs } = await twoLines({
         ours: 'base\n',
@@ -1651,6 +1728,25 @@ for (const actorSet of actorSets) {
         expect(before.head).toBe(context.ours);
         expect(before.tree).toBeDefined();
         expect(await captureMainAndLiveTrees(context.port, context.filesystem)).toStrictEqual(before);
+      }, 30_000);
+
+      /* D58: a card bound to a conflict the branch has moved past. */
+      it('refuses to finish a conflict no branch names any more, and writes nothing', async () => {
+        const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+        const revision = await conflicted(context);
+        await keep(context, { revisionId: revision, path: 'a.txt', side: 'mine' });
+        await context.port.updateRef({
+          name: 'feature',
+          expectedHead: revisionId(revision),
+          head: revisionId(context.theirs),
+        });
+        const before = await context.port.log();
+
+        await expect(
+          run(context.actors.resolution.finishMerge, { projectId: 'project-1', revisionId: revision }),
+        ).rejects.toMatchObject({ code: 'UNKNOWN_REVISION' });
+        expect(await context.port.readRef('feature')).toBe(context.theirs);
+        expect(await context.port.log()).toHaveLength(before.length);
       }, 30_000);
 
       it('takes the editor’s bytes when a person composed the two sides by hand', async () => {

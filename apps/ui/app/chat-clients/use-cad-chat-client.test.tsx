@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { createActor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { Actor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
 import type { CadAgentConfigInput, CadAgentExecution, MyUIMessage } from '@taucad/chat';
@@ -395,7 +395,7 @@ const renderClient = (): ReturnType<typeof renderHook<ReturnType<typeof useCadCh
   });
 
 /** Every binding actor a row started, stopped after it. */
-const bindings: Array<ActorRefFrom<typeof chatHostBinding>> = [];
+const bindings: Array<Actor<typeof chatHostBinding>> = [];
 
 /**
  * Run the chat's real host binding, as its session actor does.

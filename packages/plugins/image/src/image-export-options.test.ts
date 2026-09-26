@@ -36,6 +36,16 @@ describe('imageEdgeSchemas', () => {
         lines: true,
         axes: false,
         scaleBar: false,
+        lighting: {
+          lights: [
+            { direction: [1, 1, 1], color: [2.5, 2.5, 2.5] },
+            { direction: [2.3, 0, 3], color: [1, 1, 1] },
+          ],
+          ambient: 0.13,
+          environment: 'studio',
+          space: 'view',
+          exposure: 0.5,
+        },
         world: { up: '+z', forward: '-y', unit: 'meter' },
         mode: 'single',
         camera: {
@@ -281,6 +291,17 @@ describe('imageEdgeSchemas', () => {
         imageEdgeSchemas.png.safeParse({ lighting: { lights: [{ direction: [0, 0, 0], color: [1, 1, 1] }] } }).success,
       ).toBe(false);
       expect(imageEdgeSchemas.png.safeParse({ lighting: { lights: [], exposure: 17 } }).success).toBe(false);
+    });
+
+    it('should accept and bound ambient occlusion without changing the default', () => {
+      expect(imageEdgeSchemas.webp.parse({}).ao).toBeUndefined();
+      expect(imageEdgeSchemas.webp.parse({ ao: {} }).ao).toEqual({});
+      const ao = { radiusPixels: 12, intensity: 2, distanceFalloff: 0.25 };
+      expect(imageEdgeSchemas.webp.parse({ ao }).ao).toEqual(ao);
+      expect(imageEdgeSchemas.webp.safeParse({ ao: { radiusPixels: 0 } }).success).toBe(false);
+      expect(imageEdgeSchemas.webp.safeParse({ ao: { intensity: 9 } }).success).toBe(false);
+      expect(imageEdgeSchemas.webp.safeParse({ ao: { distanceFalloff: 0 } }).success).toBe(false);
+      expect(imageEdgeSchemas.webp.safeParse({ ao: { other: 1 } }).success).toBe(false);
     });
 
     it('should treat a supported label as its own switch and reject unsupported characters', () => {

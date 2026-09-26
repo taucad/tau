@@ -139,6 +139,18 @@ describe('HttpExceptionFilter OTEL integration', () => {
     expect(host.response.send).toHaveBeenCalledWith({ type: 'error', error: { type, message: 'refused' } });
   });
 
+  it('should send a structured refusal retry estimate as the Retry-After header', () => {
+    const host = createMockArgumentsHost();
+
+    filter.catch(
+      new HttpException({ code: 'GITHUB_RATE_LIMITED', retryAfterSeconds: 42 }, HttpStatus.TOO_MANY_REQUESTS),
+      host as any,
+    );
+
+    expect(host.response.header).toHaveBeenCalledWith('retry-after', '42');
+    expect(host.response.send).toHaveBeenCalledWith(expect.objectContaining({ code: 'GITHUB_RATE_LIMITED' }));
+  });
+
   it('should prefer the envelope own retry estimate over the static funded map', () => {
     const host = createMockArgumentsHost();
 

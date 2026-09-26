@@ -11,8 +11,11 @@
  * fence lock are injected actors the host supplies through `provide({ actors })`.
  */
 
-import { assign, enqueueActions, fromCallback, fromPromise, setup } from 'xstate';
-import type { AnyActorRef, AnyEventObject, SnapshotFrom } from 'xstate';
+import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
+import type { AnyActorRef, AnyEventObject, EnqueueObject, SnapshotFrom } from 'xstate';
+
+import { eventSchemas } from '#machine-schemas.js';
+import type { MachineActors } from '#machine-schemas.js';
 
 /** What asked for a cut. @public */
 export type CheckoutCutTrigger = 'turn' | 'save' | 'idle' | 'hidden' | 'close' | 'merge' | 'restore' | 'switch';
@@ -205,40 +208,151 @@ const requestFromEvent = (event: CheckoutMachineEvent): CheckoutCutRequest | und
       }
     : undefined;
 
-/**
- * Headless minting core for one checkout.
+type CheckoutEnqueue = EnqueueObject<CheckoutMachineEvent, CheckoutMachineEmitted>;
+
+/* Emit one addressed fact and send it to the parent; a fact with no pending request has no one to answer. */
+const announce = (
+  context: CheckoutMachineContext,
+  enq: CheckoutEnqueue,
+  fact: Parameters<typeof announcement>[1],
+): void => {
+  const addressed = announcement(context, fact);
+  if (addressed === undefined) {
+    return;
+  }
+  enq.emit(addressed);
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, addressed);
+  }
+};
+
+const recordWrite = (
+  context: CheckoutMachineContext,
+  event: Extract<CheckoutMachineEvent, { type: 'changed' }>,
+): Partial<CheckoutMachineContext> => ({
+  writeGeneration: Math.max(context.writeGeneration, event.generation),
+});
+
+const takeRequest = (
+  context: CheckoutMachineContext,
+  event: CheckoutMachineEvent,
+): Partial<CheckoutMachineContext> => ({
+  pending: requestFromEvent(event) ?? context.pending,
+  cutId: undefined,
+  cutTreeId: undefined,
+  revisionId: undefined,
+  reason: undefined,
+});
+
+/*
+ * R13: a burst of trigger-only requests is one request.
  *
- * @public
+ * `Mod+S` held down, an idle window that fires while the tab is being
+ * hidden, and `hidden` followed by `pagehide` all describe the same wish —
+ * "record what is on disk" — and the checkout can only honour it once. Two
+ * consecutive requests that no turn is waiting on therefore collapse, with
+ * the later trigger winning because it is the more specific one (`close`
+ * after `idle` is a close). A turn-bearing request never collapses: its
+ * requester is waiting for an answer addressed to its own turn id.
  */
-export const checkoutMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as CheckoutMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as CheckoutMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    emitted: {} as CheckoutMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as CheckoutMachineInput,
+const queueRequest = (
+  context: CheckoutMachineContext,
+  event: CheckoutMachineEvent,
+  enq: CheckoutEnqueue,
+): Partial<CheckoutMachineContext> => {
+  const request = requestFromEvent(event);
+  if (request === undefined) {
+    return {};
+  }
+  const last = context.queued.at(-1);
+  if (request.turnId === undefined && last !== undefined && last.turnId === undefined) {
+    return { queued: [...context.queued.slice(0, -1), request] };
+  }
+  if (context.queued.length >= checkoutQueuedCutLimit) {
+    announce({ ...context, pending: request }, enq, { type: 'cutFailed', reason: 'queue-full' });
+    return {};
+  }
+  return { queued: [...context.queued, request] };
+};
+
+/* The idle window has no requester, so the request is synthesised here
+ * rather than read off an event (S30). */
+const takeIdleRequest = {
+  pending: { trigger: 'idle', leaseIds: [] },
+  cutId: undefined,
+  cutTreeId: undefined,
+  revisionId: undefined,
+  reason: undefined,
+} satisfies Partial<CheckoutMachineContext>;
+
+const takeQueuedRequest = (context: CheckoutMachineContext): Partial<CheckoutMachineContext> => ({
+  pending: context.queued[0],
+  queued: context.queued.slice(1),
+  cutId: undefined,
+  cutTreeId: undefined,
+  revisionId: undefined,
+  reason: undefined,
+});
+
+/* R4: a request that waited behind a failed mint is still a request; the
+ * queue is drained here, so nothing waits for a mint that will not run. */
+const failQueuedRequests = (context: CheckoutMachineContext, enq: CheckoutEnqueue): Partial<CheckoutMachineContext> => {
+  for (const request of context.queued) {
+    announce({ ...context, pending: request }, enq, {
+      type: 'cutFailed',
+      reason: context.reason ?? 'The cut failed.',
+    });
+  }
+  return { queued: [] };
+};
+
+/* Send a settled status to the parent, which coalesces it into its projection. */
+const reportStatus = (context: CheckoutMachineContext, enq: CheckoutEnqueue, status: CheckoutStatus): void => {
+  if (context.parentRef === undefined) {
+    return;
+  }
+  const fact: CheckoutMachineEmitted = {
+    type: 'checkoutStatusChanged',
+    checkoutId: context.checkoutId,
+    status,
+    ...(context.headRevisionId === undefined ? {} : { headRevisionId: context.headRevisionId }),
+  };
+  enq.sendTo(context.parentRef, fact);
+};
+
+const checkoutMachineDefinition = setup({
+  schemas: {
+    context: types<CheckoutMachineContext>(),
+    events: eventSchemas<CheckoutMachineEvent>(),
+    emitted: eventSchemas<CheckoutMachineEmitted>(),
+    input: types<CheckoutMachineInput>(),
   },
   actors: {
-    cut: fromPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async () => {
-      throw new Error('checkoutMachine: the cut actor was not provided.');
+    cut: createAsyncLogic<CheckoutCutActorOutput, CheckoutCutActorInput>({
+      run: async () => {
+        throw new Error('checkoutMachine: the cut actor was not provided.');
+      },
     }),
-    writeRevision: fromPromise<Readonly<{ revisionId: string }>, CheckoutWriteRevisionActorInput>(async () => {
-      throw new Error('checkoutMachine: the writeRevision actor was not provided.');
+    writeRevision: createAsyncLogic<Readonly<{ revisionId: string }>, CheckoutWriteRevisionActorInput>({
+      run: async () => {
+        throw new Error('checkoutMachine: the writeRevision actor was not provided.');
+      },
     }),
-    casHead: fromPromise<CheckoutCasHeadActorOutput, CheckoutCasHeadActorInput>(async () => {
-      throw new Error('checkoutMachine: the casHead actor was not provided.');
+    casHead: createAsyncLogic<CheckoutCasHeadActorOutput, CheckoutCasHeadActorInput>({
+      run: async () => {
+        throw new Error('checkoutMachine: the casHead actor was not provided.');
+      },
     }),
-    readHead: fromPromise<CheckoutHead, CheckoutFenceActorInput>(async () => {
-      throw new Error('checkoutMachine: the readHead actor was not provided.');
+    readHead: createAsyncLogic<CheckoutHead, CheckoutFenceActorInput>({
+      run: async () => {
+        throw new Error('checkoutMachine: the readHead actor was not provided.');
+      },
     }),
     /*
      * The fence the mint runs under. It is a held resource, so it is a callback
      * actor: acquisition failure arrives as `fenceRefused`, never as `onError`.
      */
-    fence: fromCallback<AnyEventObject, CheckoutFenceActorInput>(({ sendBack }) => {
+    fence: createCallbackLogic<AnyEventObject, CheckoutFenceActorInput>(({ sendBack }) => {
       sendBack({ type: 'fenceRefused', reason: 'checkoutMachine: the fence actor was not provided.' });
       return () => undefined;
     }),
@@ -248,113 +362,10 @@ export const checkoutMachine = setup({
   },
   guards: {
     /* I5: a revision is minted only when the cut's tree differs from the head's. */
-    treeUnchanged: ({ context }, params: Readonly<{ treeId: string }>) => params.treeId === context.headTreeId,
+    treeUnchanged: (context: CheckoutMachineContext, treeId: string) => treeId === context.headTreeId,
     /* F4: a write that landed during the mint leaves the checkout dirty. */
-    writeGenerationUnchanged: ({ context }) => context.writeGeneration === context.cutGeneration,
-    casConflicted: (_, params: Readonly<{ status: 'updated' | 'conflicted' }>) => params.status === 'conflicted',
-    hasQueuedCut: ({ context }) => context.queued.length > 0,
-  },
-  actions: {
-    recordWrite: assign({
-      writeGeneration: ({ context, event }) =>
-        event.type === 'changed' ? Math.max(context.writeGeneration, event.generation) : context.writeGeneration,
-    }),
-    adoptHead: assign({
-      headRevisionId: ({ context, event }) =>
-        event.type === 'headChanged' ? event.revisionId : context.headRevisionId,
-      headTreeId: ({ context, event }) => (event.type === 'headChanged' ? event.treeId : context.headTreeId),
-    }),
-    takeRequest: assign({
-      pending: ({ context, event }) => requestFromEvent(event) ?? context.pending,
-      cutId: undefined,
-      cutTreeId: undefined,
-      revisionId: undefined,
-      reason: undefined,
-    }),
-    /*
-     * R13: a burst of trigger-only requests is one request.
-     *
-     * `Mod+S` held down, an idle window that fires while the tab is being
-     * hidden, and `hidden` followed by `pagehide` all describe the same wish —
-     * "record what is on disk" — and the checkout can only honour it once. Two
-     * consecutive requests that no turn is waiting on therefore collapse, with
-     * the later trigger winning because it is the more specific one (`close`
-     * after `idle` is a close). A turn-bearing request never collapses: its
-     * requester is waiting for an answer addressed to its own turn id.
-     */
-    queueRequest: enqueueActions(({ context, enqueue, event }) => {
-      const request = requestFromEvent(event);
-      if (request === undefined) {
-        return;
-      }
-      const last = context.queued.at(-1);
-      if (request.turnId === undefined && last !== undefined && last.turnId === undefined) {
-        enqueue.assign({ queued: [...context.queued.slice(0, -1), request] });
-        return;
-      }
-      if (context.queued.length >= checkoutQueuedCutLimit) {
-        const fact = announcement({ ...context, pending: request }, { type: 'cutFailed', reason: 'queue-full' });
-        if (fact !== undefined) {
-          enqueue.emit(fact);
-          if (context.parentRef !== undefined) {
-            enqueue.sendTo(context.parentRef, fact);
-          }
-        }
-        return;
-      }
-      enqueue.assign({ queued: [...context.queued, request] });
-    }),
-    /* The idle window has no requester, so the request is synthesised here
-     * rather than read off an event (S30). */
-    takeIdleRequest: assign({
-      pending: (): CheckoutCutRequest => ({ trigger: 'idle', leaseIds: [] }),
-      cutId: undefined,
-      cutTreeId: undefined,
-      revisionId: undefined,
-      reason: undefined,
-    }),
-    takeQueuedRequest: assign({
-      pending: ({ context }) => context.queued[0],
-      queued: ({ context }) => context.queued.slice(1),
-      cutId: undefined,
-      cutTreeId: undefined,
-      revisionId: undefined,
-      reason: undefined,
-    }),
-    /* R4: a request that waited behind a failed mint is still a request; the
-     * queue is drained here, so nothing waits for a mint that will not run. */
-    failQueuedRequests: enqueueActions(({ context, enqueue }) => {
-      for (const request of context.queued) {
-        const fact = announcement(
-          { ...context, pending: request },
-          {
-            type: 'cutFailed',
-            reason: context.reason ?? 'The cut failed.',
-          },
-        );
-        if (fact === undefined) {
-          continue;
-        }
-        enqueue.emit(fact);
-        if (context.parentRef !== undefined) {
-          enqueue.sendTo(context.parentRef, fact);
-        }
-      }
-      enqueue.assign({ queued: [] });
-    }),
-    /* Send a settled status to the parent, which coalesces it into its projection. */
-    reportStatus: enqueueActions(({ context, enqueue }, params: Readonly<{ status: CheckoutStatus }>) => {
-      if (context.parentRef === undefined) {
-        return;
-      }
-      const fact: CheckoutMachineEmitted = {
-        type: 'checkoutStatusChanged',
-        checkoutId: context.checkoutId,
-        status: params.status,
-        ...(context.headRevisionId === undefined ? {} : { headRevisionId: context.headRevisionId }),
-      };
-      enqueue.sendTo(context.parentRef, fact);
-    }),
+    writeGenerationUnchanged: (context: CheckoutMachineContext) => context.writeGeneration === context.cutGeneration,
+    hasQueuedCut: (context: CheckoutMachineContext) => context.queued.length > 0,
   },
 }).createMachine({
   id: 'checkout',
@@ -377,26 +388,35 @@ export const checkoutMachine = setup({
   initial: 'clean',
   on: {
     /* One event per content-change event, whatever its path count (A38, F9). */
-    changed: { actions: 'recordWrite' },
-    headChanged: { target: '.clean', actions: 'adoptHead' },
+    changed: { context: ({ context, event }) => recordWrite(context, event) },
+    headChanged: {
+      target: '.clean',
+      context: ({ event }) => ({ headRevisionId: event.revisionId, headTreeId: event.treeId }),
+    },
     /* Reached only from `minting`, `stale` and `rereading`; the resting states
      * below take `cut` straight into a mint. */
-    cut: { actions: 'queueRequest' },
+    cut: ({ context, event }, enq) => ({ context: queueRequest(context, event, enq) }),
   },
   states: {
     clean: {
-      entry: [{ type: 'reportStatus', params: { status: 'clean' } }],
-      always: { guard: 'hasQueuedCut', target: 'minting', actions: 'takeQueuedRequest' },
+      entry: ({ context }, enq) => {
+        reportStatus(context, enq, 'clean');
+      },
+      always: ({ context, guards }) =>
+        guards.hasQueuedCut(context) ? { target: 'minting', context: takeQueuedRequest(context) } : undefined,
       on: {
-        changed: { target: 'dirty', actions: 'recordWrite' },
-        cut: { target: 'minting', actions: 'takeRequest' },
+        changed: { target: 'dirty', context: ({ context, event }) => recordWrite(context, event) },
+        cut: { target: 'minting', context: ({ context, event }) => takeRequest(context, event) },
       },
     },
     dirty: {
-      entry: [{ type: 'reportStatus', params: { status: 'dirty' } }],
-      always: { guard: 'hasQueuedCut', target: 'minting', actions: 'takeQueuedRequest' },
+      entry: ({ context }, enq) => {
+        reportStatus(context, enq, 'dirty');
+      },
+      always: ({ context, guards }) =>
+        guards.hasQueuedCut(context) ? { target: 'minting', context: takeQueuedRequest(context) } : undefined,
       on: {
-        cut: { target: 'minting', actions: 'takeRequest' },
+        cut: { target: 'minting', context: ({ context, event }) => takeRequest(context, event) },
       },
       initial: 'quiet',
       states: {
@@ -415,19 +435,23 @@ export const checkoutMachine = setup({
          */
         quiet: {
           after: {
-            idleWindow: { target: '#checkout.minting', actions: 'takeIdleRequest' },
+            idleWindow: { target: '#checkout.minting', context: takeIdleRequest },
           },
           on: {
-            changed: { target: 'quiet', reenter: true, actions: 'recordWrite' },
+            changed: {
+              target: 'quiet',
+              reenter: true,
+              context: ({ context, event }) => recordWrite(context, event),
+            },
           },
         },
       },
     },
     minting: {
-      entry: [
-        assign({ cutGeneration: ({ context }) => context.writeGeneration }),
-        { type: 'reportStatus', params: { status: 'minting' } },
-      ],
+      entry: ({ context }, enq) => {
+        reportStatus(context, enq, 'minting');
+        return { context: { cutGeneration: context.writeGeneration } };
+      },
       invoke: {
         id: 'fence',
         src: 'fence',
@@ -440,7 +464,7 @@ export const checkoutMachine = setup({
             fenceGranted: { target: 'cutting' },
             fenceRefused: {
               target: '#checkout.failed',
-              actions: assign({ reason: ({ event }) => event.reason }),
+              context: ({ event }) => ({ reason: event.reason }),
             },
           },
         },
@@ -451,32 +475,16 @@ export const checkoutMachine = setup({
               checkoutId: context.checkoutId,
               trigger: context.pending?.trigger ?? 'save',
             }),
-            onDone: [
-              {
-                guard: { type: 'treeUnchanged', params: ({ event }) => ({ treeId: event.output.treeId }) },
-                target: 'settled',
-                actions: enqueueActions(({ context, enqueue }) => {
-                  const fact = announcement(context, { type: 'nothingToSave' });
-                  if (fact === undefined) {
-                    return;
-                  }
-                  enqueue.emit(fact);
-                  if (context.parentRef !== undefined) {
-                    enqueue.sendTo(context.parentRef, fact);
-                  }
-                }),
-              },
-              {
-                target: 'writing',
-                actions: assign({
-                  cutId: ({ event }) => event.output.cutId,
-                  cutTreeId: ({ event }) => event.output.treeId,
-                }),
-              },
-            ],
+            onDone: ({ context, event, guards }, enq) => {
+              if (guards.treeUnchanged(context, event.output.treeId)) {
+                announce(context, enq, { type: 'nothingToSave' });
+                return { target: 'settled' };
+              }
+              return { target: 'writing', context: { cutId: event.output.cutId, cutTreeId: event.output.treeId } };
+            },
             onError: {
               target: '#checkout.failed',
-              actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+              context: ({ event }) => ({ reason: describeFailure(event.error) }),
             },
           },
         },
@@ -494,11 +502,11 @@ export const checkoutMachine = setup({
             }),
             onDone: {
               target: 'publishing',
-              actions: assign({ revisionId: ({ event }) => event.output.revisionId }),
+              context: ({ event }) => ({ revisionId: event.output.revisionId }),
             },
             onError: {
               target: '#checkout.failed',
-              actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+              context: ({ event }) => ({ reason: describeFailure(event.error) }),
             },
           },
         },
@@ -511,57 +519,33 @@ export const checkoutMachine = setup({
               expectedHead: context.headRevisionId,
               head: context.revisionId ?? '',
             }),
-            onDone: [
-              {
-                guard: { type: 'casConflicted', params: ({ event }) => ({ status: event.output.status }) },
-                target: '#checkout.stale',
-                actions: enqueueActions(({ context, enqueue }) => {
-                  const fact = announcement(context, { type: 'casLost' });
-                  if (fact === undefined) {
-                    return;
-                  }
-                  enqueue.emit(fact);
-                  if (context.parentRef !== undefined) {
-                    enqueue.sendTo(context.parentRef, fact);
-                  }
-                }),
-              },
-              {
+            onDone: ({ context, event }, enq) => {
+              if (event.output.status === 'conflicted') {
+                announce(context, enq, { type: 'casLost' });
+                return { target: '#checkout.stale' };
+              }
+              announce(context, enq, { type: 'revisionMinted', revisionId: context.revisionId ?? '' });
+              return {
                 target: 'settled',
-                actions: [
-                  assign({
-                    headRevisionId: ({ context }) => context.revisionId,
-                    headTreeId: ({ context }) => context.cutTreeId,
-                  }),
-                  enqueueActions(({ context, enqueue }) => {
-                    const fact = announcement(context, {
-                      type: 'revisionMinted',
-                      revisionId: context.revisionId ?? '',
-                    });
-                    if (fact === undefined) {
-                      return;
-                    }
-                    enqueue.emit(fact);
-                    if (context.parentRef !== undefined) {
-                      enqueue.sendTo(context.parentRef, fact);
-                    }
-                  }),
-                ],
-              },
-            ],
+                context: { headRevisionId: context.revisionId, headTreeId: context.cutTreeId },
+              };
+            },
             onError: {
               target: '#checkout.failed',
-              actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+              context: ({ event }) => ({ reason: describeFailure(event.error) }),
             },
           },
         },
         settled: { type: 'final' },
       },
       /* F4: only an unchanged write generation may return to `clean`. */
-      onDone: [{ guard: 'writeGenerationUnchanged', target: 'clean' }, { target: 'dirty' }],
+      onDone: ({ context, guards }) =>
+        guards.writeGenerationUnchanged(context) ? { target: 'clean' } : { target: 'dirty' },
     },
     stale: {
-      entry: [{ type: 'reportStatus', params: { status: 'stale' } }],
+      entry: ({ context }, enq) => {
+        reportStatus(context, enq, 'stale');
+      },
       always: { target: 'rereading' },
     },
     rereading: {
@@ -570,43 +554,46 @@ export const checkoutMachine = setup({
         input: ({ context }) => ({ checkoutId: context.checkoutId }),
         onDone: {
           target: 'dirty',
-          actions: assign({
-            headRevisionId: ({ event }) => event.output.revisionId,
-            headTreeId: ({ event }) => event.output.treeId,
-          }),
+          context: ({ event }) => ({ headRevisionId: event.output.revisionId, headTreeId: event.output.treeId }),
         },
         onError: {
           target: 'failed',
-          actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+          context: ({ event }) => ({ reason: describeFailure(event.error) }),
         },
       },
     },
     /* Non-terminal: a full disk must not stop this checkout for good. */
     failed: {
-      entry: [
-        enqueueActions(({ context, enqueue }) => {
-          const fact = announcement(context, {
-            type: 'cutFailed',
-            reason: context.reason ?? 'The cut failed.',
-          });
-          if (fact === undefined) {
-            return;
-          }
-          enqueue.emit(fact);
-          if (context.parentRef !== undefined) {
-            enqueue.sendTo(context.parentRef, fact);
-          }
-        }),
-        'failQueuedRequests',
-        { type: 'reportStatus', params: { status: 'failed' } },
-      ],
+      entry: ({ context }, enq) => {
+        announce(context, enq, { type: 'cutFailed', reason: context.reason ?? 'The cut failed.' });
+        const drained = failQueuedRequests(context, enq);
+        reportStatus(context, enq, 'failed');
+        return { context: drained };
+      },
       on: {
-        changed: { target: 'dirty', actions: 'recordWrite' },
-        cut: { target: 'minting', actions: 'takeRequest' },
+        changed: { target: 'dirty', context: ({ context, event }) => recordWrite(context, event) },
+        cut: { target: 'minting', context: ({ context, event }) => takeRequest(context, event) },
       },
     },
   },
 });
+
+type CheckoutMachineDefinition = typeof checkoutMachineDefinition;
+
+/**
+ * The type of {@link checkoutMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface CheckoutMachine extends CheckoutMachineDefinition {}
+
+/**
+ * Headless minting core for one checkout.
+ *
+ * @public
+ */
+export const checkoutMachine: CheckoutMachine = checkoutMachineDefinition;
 
 /**
  * Selects whether this checkout has edits its head does not carry.
@@ -637,4 +624,4 @@ export const selectCheckoutHead = (snapshot: SnapshotFrom<typeof checkoutMachine
  *
  * @public
  */
-export type CheckoutActors = NonNullable<Parameters<typeof checkoutMachine.provide>[0]['actors']>;
+export type CheckoutActors = MachineActors<typeof checkoutMachine>;

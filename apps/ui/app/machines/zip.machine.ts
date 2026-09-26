@@ -1,7 +1,7 @@
-import { assign, assertEvent, setup } from 'xstate';
+import { setup, types } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import JSZip from 'jszip';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 
 /**
  * Zip Machine Context
@@ -61,6 +61,27 @@ const zipActors = {
   generateZipActor,
 } as const;
 
+type ZipFiles = ZipContext['files'];
+
+const withFile = (files: ZipFiles, filename: string, content: Uint8Array<ArrayBuffer>): ZipFiles => {
+  const updated = new Map(files);
+  updated.set(filename, { content, filename });
+  return updated;
+};
+
+const withFiles = (
+  files: ZipFiles,
+  added: ReadonlyArray<{ filename: string; content: Uint8Array<ArrayBuffer> }>,
+): ZipFiles => {
+  const updated = new Map(files);
+  for (const file of added) {
+    updated.set(file.filename, { content: file.content, filename: file.filename });
+  }
+  return updated;
+};
+
+const reset = { files: new Map(), zipBlob: undefined, error: undefined } satisfies Partial<ZipContext>;
+
 /**
  * Zip Machine
  *
@@ -73,75 +94,14 @@ const zipActors = {
  * - error: An error occurred during generation
  */
 export const zipMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as ZipContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as ZipEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as ZipInput,
+  schemas: {
+    context: types<ZipContext>(),
+    events: eventSchemas<ZipEvent>(),
+    input: types<ZipInput>(),
   },
   actors: zipActors,
   guards: {
-    hasFiles({ context }) {
-      return context.files.size > 0;
-    },
-  },
-  actions: {
-    setError: assign({
-      error({ event }) {
-        if ('error' in event && event.error instanceof Error) {
-          return event.error;
-        }
-
-        return new Error('Unknown error');
-      },
-    }),
-    clearError: assign({
-      error: undefined,
-    }),
-    addFile: assign({
-      files({ context, event }) {
-        assertEvent(event, 'addFile');
-        const updated = new Map(context.files);
-        updated.set(event.filename, {
-          content: event.content,
-          filename: event.filename,
-        });
-        return updated;
-      },
-    }),
-    addFiles: assign({
-      files({ context, event }) {
-        assertEvent(event, 'addFiles');
-        const updated = new Map(context.files);
-        for (const file of event.files) {
-          updated.set(file.filename, {
-            content: file.content,
-            filename: file.filename,
-          });
-        }
-
-        return updated;
-      },
-    }),
-    setZipBlob: assign({
-      zipBlob({ event }) {
-        assertEvent(event, 'zipGenerated');
-        return event.blob;
-      },
-    }),
-    clearFiles: assign({
-      files: new Map(),
-    }),
-    clearZipBlob: assign({
-      zipBlob: undefined,
-    }),
-    reset: assign({
-      files: new Map(),
-      zipBlob: undefined,
-      error: undefined,
-    }),
+    hasFiles: (context: ZipContext) => context.files.size > 0,
   },
 }).createMachine({
   id: 'zip',
@@ -157,25 +117,22 @@ export const zipMachine = setup({
     idle: {
       on: {
         addFile: {
-          actions: 'addFile',
+          context: ({ context, event }) => ({ files: withFile(context.files, event.filename, event.content) }),
         },
         addFiles: {
-          actions: 'addFiles',
+          context: ({ context, event }) => ({ files: withFiles(context.files, event.files) }),
         },
-        generate: {
-          target: 'generating',
-          guard: 'hasFiles',
-        },
+        generate: ({ context, guards }) => (guards.hasFiles(context) ? { target: 'generating' } : undefined),
         clear: {
-          actions: 'clearFiles',
+          context: { files: new Map() },
         },
         reset: {
-          actions: 'reset',
+          context: reset,
         },
       },
     },
     generating: {
-      entry: 'clearError',
+      entry: () => ({ context: { error: undefined } }),
       invoke: {
         src: 'generateZipActor',
         input: ({ context }) => ({
@@ -186,12 +143,14 @@ export const zipMachine = setup({
         },
         onError: {
           target: 'error',
-          actions: 'setError',
+          context: ({ event }) => ({
+            error: event.error instanceof Error ? event.error : new Error('Unknown error'),
+          }),
         },
       },
       on: {
         zipGenerated: {
-          actions: 'setZipBlob',
+          context: ({ event }) => ({ zipBlob: event.blob }),
         },
       },
     },
@@ -199,19 +158,22 @@ export const zipMachine = setup({
       on: {
         addFile: {
           target: 'idle',
-          actions: ['clearZipBlob', 'addFile'],
+          context: ({ context, event }) => ({
+            zipBlob: undefined,
+            files: withFile(context.files, event.filename, event.content),
+          }),
         },
         addFiles: {
           target: 'idle',
-          actions: ['clearZipBlob', 'addFiles'],
+          context: ({ context, event }) => ({ zipBlob: undefined, files: withFiles(context.files, event.files) }),
         },
         clear: {
           target: 'idle',
-          actions: ['clearFiles', 'clearZipBlob'],
+          context: { files: new Map(), zipBlob: undefined },
         },
         reset: {
           target: 'idle',
-          actions: 'reset',
+          context: reset,
         },
         generate: {
           target: 'generating',
@@ -220,17 +182,14 @@ export const zipMachine = setup({
     },
     error: {
       on: {
-        generate: {
-          target: 'generating',
-          guard: 'hasFiles',
-        },
+        generate: ({ context, guards }) => (guards.hasFiles(context) ? { target: 'generating' } : undefined),
         clear: {
           target: 'idle',
-          actions: ['clearFiles', 'clearError'],
+          context: { files: new Map(), error: undefined },
         },
         reset: {
           target: 'idle',
-          actions: 'reset',
+          context: reset,
         },
       },
     },

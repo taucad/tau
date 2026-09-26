@@ -461,6 +461,104 @@ describe('environmentSchema', () => {
     }
   });
 
+  it('should treat the empty GitHub repository App values of a copied .env.example as unconfigured', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: '',
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: '',
+      GITHUB_REPOSITORY_APP_SLUG: '',
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: '',
+      GITHUB_REPOSITORY_CONNECTION_KEY: '',
+    });
+
+    expect(result.error?.issues).toBeUndefined();
+    expect(result.data).toMatchObject({
+      GITHUB_REPOSITORY_APP_CLIENT_ID: undefined,
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: undefined,
+      GITHUB_REPOSITORY_APP_SLUG: undefined,
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: undefined,
+      GITHUB_REPOSITORY_CONNECTION_KEY: undefined,
+    });
+  });
+
+  it('should leave the App unconfigured when only the callback URL and connection key are set', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: '',
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: '',
+      GITHUB_REPOSITORY_APP_SLUG: '',
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: 'http://localhost:4000/v1/github/callback',
+      GITHUB_REPOSITORY_CONNECTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
+    });
+
+    expect(result.error?.issues).toBeUndefined();
+    expect(result.data).toMatchObject({
+      GITHUB_REPOSITORY_APP_CLIENT_ID: undefined,
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: undefined,
+      GITHUB_REPOSITORY_APP_SLUG: undefined,
+    });
+  });
+
+  it('should require the callback URL and connection key once the App credentials are set', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.local',
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: 'github-app-secret',
+      GITHUB_REPOSITORY_APP_SLUG: 'tau-local',
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: '',
+      GITHUB_REPOSITORY_CONNECTION_KEY: '',
+    });
+
+    expect(result.error?.issues.map((issue) => issue.path.join('.'))).toStrictEqual([
+      'GITHUB_REPOSITORY_APP_CALLBACK_URL',
+      'GITHUB_REPOSITORY_CONNECTION_KEY',
+    ]);
+  });
+
+  it('should reject an empty GitHub repository App value beside configured ones', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.local',
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: '',
+      GITHUB_REPOSITORY_APP_SLUG: 'tau-local',
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: 'http://localhost:4000/v1/github/callback',
+      GITHUB_REPOSITORY_CONNECTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
+    });
+
+    expect(result.error?.issues.map((issue) => issue.path.join('.'))).toStrictEqual([
+      'GITHUB_REPOSITORY_APP_CLIENT_SECRET',
+    ]);
+  });
+
+  it('should accept a connection key made by the documented openssl recipe and reject padded base64', () => {
+    // `openssl rand -base64 32 | tr '+/' '-_' | tr -d '='` yields the unpadded base64url form of 32 bytes.
+    const bytes = Buffer.alloc(32, 251);
+    const recipe = bytes.toString('base64').replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+    const parse = (key: string) =>
+      environmentSchema.safeParse({
+        ...withRequiredCookieSecret(process.env),
+        NODE_ENV: 'development',
+        GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.local',
+        GITHUB_REPOSITORY_APP_CLIENT_SECRET: 'github-app-secret',
+        GITHUB_REPOSITORY_APP_SLUG: 'tau-local',
+        GITHUB_REPOSITORY_APP_CALLBACK_URL: 'http://localhost:4000/v1/github/callback',
+        GITHUB_REPOSITORY_CONNECTION_KEY: key,
+      });
+
+    const accepted = parse(recipe);
+    const padded = parse(bytes.toString('base64'));
+
+    expect(recipe).toBe(bytes.toString('base64url'));
+    expect(accepted.success ? [] : accepted.error.issues).toStrictEqual([]);
+    expect(padded.success ? [] : padded.error.issues.map((issue) => issue.path.join('.'))).toStrictEqual([
+      'GITHUB_REPOSITORY_CONNECTION_KEY',
+    ]);
+  });
+
   it('should allow production without the optional GitHub repository App', () => {
     const result = environmentSchema.safeParse({
       ...withRequiredCookieSecret(process.env),

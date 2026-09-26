@@ -11,7 +11,10 @@ import {
   collectSectionSourceRecords,
   ownerKeyForRecord,
   resolveSectionSourceTint,
+  writeBorderSegments,
 } from '#components/geometry/graphics/three/react/section-contour-fill.js';
+import type { SectionHelperRecord } from '#components/geometry/graphics/three/react/section-contour-fill.js';
+import { createSectionContourOutlineMaterial } from '#components/geometry/graphics/three/materials/section-contour-outline-material.js';
 import { buildSectionCapBoundaryPositions } from '#components/geometry/graphics/three/utils/section-cap-boundary.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 import {
@@ -425,5 +428,37 @@ describe('SectionContourFills source records', () => {
     expect(capBoundary.stats.segmentCount).toBe(4);
     expect(capBoundary.positions.length).toBe(capBoundary.stats.segmentCount * 6);
     expect(capBoundary.stats.segmentCount).toBeLessThan(contours.closedContours[0]!.length);
+  });
+
+  it('keeps every outline segment drawable when a reused border gains segments', () => {
+    const root = new THREE.Group();
+    const helper = { borderSegments: undefined, borderBackend: undefined } as unknown as SectionHelperRecord;
+    const material = createSectionContourOutlineMaterial({
+      backend: 'webgl',
+      edgeColor: 0,
+      resolution: new THREE.Vector2(1, 1),
+    });
+    const write = (segmentCount: number): void => {
+      writeBorderSegments(root, helper, {
+        backend: 'webgl',
+        material,
+        renderOrder: 0,
+        positions: new Float32Array(segmentCount * 6),
+      });
+    };
+    // WebGL freezes an instanced geometry's draw count at its first draw until the geometry is disposed.
+    const drawnSegmentCount = (): number => {
+      const geometry = helper.borderSegments!.geometry as THREE.InstancedBufferGeometry & {
+        _maxInstanceCount?: number;
+      };
+      geometry._maxInstanceCount ??= geometry.instanceCount;
+      return Math.min(geometry.instanceCount, geometry._maxInstanceCount);
+    };
+
+    for (const segmentCount of [4, 12, 6, 12, 30]) {
+      write(segmentCount);
+      expect(drawnSegmentCount()).toBe(segmentCount);
+    }
+    expect(root.children).toHaveLength(1);
   });
 });

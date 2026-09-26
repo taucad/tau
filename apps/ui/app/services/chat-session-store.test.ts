@@ -1,6 +1,7 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
+import type { Actor } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
@@ -15,6 +16,7 @@ import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatRequest, ChatSessionActorRef, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
+import { spyOnSend } from '#lib/xstate-test.utils.js';
 import {
   chatTurnAdmission,
   chatTurnSettlement,
@@ -54,6 +56,19 @@ type FakeChatInstance = {
   '~registerStatusCallback': (onChange: () => void) => () => void;
   '~registerErrorCallback': (onChange: () => void) => () => void;
 };
+
+/**
+ * Finish a run that streamed a reply: the status walk the AI SDK makes before `onFinish`.
+ *
+ * @param chat - The chat whose request ends.
+ */
+function finishRun(chat: FakeChatInstance): void {
+  for (const status of ['submitted', 'streaming', 'ready'] as const) {
+    chat.status = status;
+    chat.emitStatusChange();
+  }
+  chat.finish();
+}
 
 const harness = vi.hoisted(() => ({
   created: [] as FakeChatInstance[],
@@ -650,7 +665,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
     const realSession = (projectId: string) => {
       const heard: Array<{ type: string; chatId?: string }> = [];
-      const chatReferences = new Map<string, ChatSessionActorRef>();
+      const chatReferences = new Map<string, Actor<typeof chatSessionMachine>>();
       const ref = mock<ProjectSessionActorRef>();
       const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>();
       Object.defineProperty(snapshot, 'context', {
@@ -1199,8 +1214,9 @@ describe('ChatSessionStore', () => {
     it('marks unattended terminal success and error, but not abort or disconnect', async () => {
       const { store, deps } = storeInProject();
 
+      store.retainDurableRun({ chatId: 'chat_success', runId: 'run_chat_success' });
+      finishRun(harness.created.at(-1)!);
       for (const [chatId, options] of [
-        ['chat_success', {}],
         ['chat_error', { isError: true }],
         ['chat_abort', { isAbort: true }],
         ['chat_disconnect', { isDisconnect: true }],
@@ -1275,6 +1291,30 @@ describe('ChatSessionStore', () => {
       expect(store.isUnread('chat_active')).toBe(false);
     });
 
+    /* An opened chat resumes, and a host holding no run for it closes the stream without a chunk. Its
+     * `onFinish` lands after focus has moved on, and marking it left a chat nothing ran in unread. */
+    it('should not mark a chat unread when its resume ends without output after focus moved away', async () => {
+      const { store, deps } = storeInProject();
+      store.acquire('chat_opened');
+      store.focusChat('chat_opened');
+      store.focusChat('chat_next');
+      store.blurChat('chat_opened');
+      const chat = harness.created[0]!;
+
+      for (const status of ['submitted', 'ready'] as const) {
+        chat.status = status;
+        chat.emitStatusChange();
+      }
+      chat.finish();
+
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledWith('chat_opened');
+      });
+      await settle();
+      expect(deps.client.json(unreadPath)).toBeUndefined();
+      expect(store.isUnread('chat_opened')).toBe(false);
+    });
+
     /* R3: every sidebar row holds a view of its chat, so a view alone is not the person reading it. */
     it('should mark a chat that finishes while another chat is focused in an active document', async () => {
       const { store, deps } = storeInProject();
@@ -1282,7 +1322,7 @@ describe('ChatSessionStore', () => {
       store.acquire('chat_focused');
       store.focusChat('chat_focused');
 
-      harness.created[0]!.finish();
+      finishRun(harness.created[0]!);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_listed: true } });
@@ -1297,7 +1337,7 @@ describe('ChatSessionStore', () => {
       store.focusChat('chat_next');
       store.blurChat('chat_left');
 
-      harness.created[0]!.finish();
+      finishRun(harness.created[0]!);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_left: true } });
@@ -1309,7 +1349,7 @@ describe('ChatSessionStore', () => {
       const { store, deps } = storeInProject();
       store.acquire('chat_hidden');
 
-      harness.created[0]!.finish();
+      finishRun(harness.created[0]!);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_hidden: true } });
@@ -4183,7 +4223,7 @@ describe('ChatSessionStore', () => {
       const store = createStore();
       const session = store.acquire('chat_r6');
       const fake = harness.created.find((entry) => entry.id === 'chat_r6')!;
-      const sendSpy = vi.spyOn(session.persistenceActorRef, 'send');
+      const sendSpy = spyOnSend(session.persistenceActorRef);
 
       const countStreamResumed = (): number =>
         sendSpy.mock.calls.filter((call) => call[0].type === 'streamResumed').length;
@@ -4302,7 +4342,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     const client = createMemoryClient();
     const first = openStore(client);
     first.store.acquire(chatId);
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
     await vi.waitFor(() => {
       expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
     });
@@ -4543,7 +4583,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     store.unreadRecordRef(projectId).on('writeFailed', failed);
     vi.spyOn(client, 'writeFile').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
 
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
 
     await vi.waitFor(() => {
       expect(failed).toHaveBeenCalledOnce();
@@ -4633,7 +4673,7 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     const client = createMemoryClient();
     const first = openStore(client);
     first.store.acquire(chatId, projectId);
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
     await vi.waitFor(() => {
       expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
     });
@@ -4691,7 +4731,7 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     await settle();
 
     await store.removeProject(projectId);
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
     await settle();
 
     expect(client.json(unreadPath)).toBeUndefined();

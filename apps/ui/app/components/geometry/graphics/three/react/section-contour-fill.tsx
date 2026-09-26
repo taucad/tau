@@ -113,7 +113,7 @@ export type SectionSourceRecord = Readonly<{
   baseTintHex: number;
 }>;
 
-type SectionHelperRecord = {
+export type SectionHelperRecord = {
   fillMesh: THREE.Mesh;
   borderSegments: ReturnType<typeof createGltfFatLineSegmentsFromPositions>;
   borderBackend: ResolvedGraphicsBackend | undefined;
@@ -669,7 +669,7 @@ function assignBorderMaterial(helper: SectionHelperRecord, material: GltfFatLine
   helper.borderSegments.renderOrder = renderOrder;
 }
 
-function writeBorderSegments(
+export function writeBorderSegments(
   root: THREE.Group,
   helper: SectionHelperRecord,
   parameters: {
@@ -685,7 +685,15 @@ function writeBorderSegments(
   }
 
   const existingGeometry = helper.borderSegments?.geometry;
-  if (helper.borderSegments && helper.borderBackend === parameters.backend && existingGeometry?.setPositions) {
+  // WebGL caps an instanced geometry's draws at the instance count of its first draw
+  // (`_maxInstanceCount`, cleared only on dispose), so an outline that gains segments on a reused
+  // geometry silently drops the extra edges. Reuse only while the outline does not grow.
+  if (
+    helper.borderSegments &&
+    helper.borderBackend === parameters.backend &&
+    existingGeometry?.setPositions &&
+    parameters.positions.length / 6 <= existingGeometry.instanceCount
+  ) {
     existingGeometry.setPositions(parameters.positions);
     (helper.borderSegments as unknown as { material: GltfFatLineMaterial }).material = parameters.material;
     helper.borderSegments.renderOrder = parameters.renderOrder;

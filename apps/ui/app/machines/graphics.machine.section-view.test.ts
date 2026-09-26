@@ -1,10 +1,12 @@
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import type { GraphicsInput } from '#machines/graphics.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const createGraphicsActor = (input: GraphicsInput) =>
-  createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), { input });
+  createActor(graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }), {
+    input,
+  });
 
 describe('graphics machine durable section view (E2)', () => {
   it('should restore a seeded cut into the active section-view state without re-deriving it', () => {

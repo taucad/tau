@@ -31,9 +31,20 @@ import {
   versionedChangePaths as classifiedChangePaths,
 } from '@taucad/revisions/revision-projection';
 import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
-import type { BranchOperation } from '@taucad/revisions/branch-machine';
-import type { PublishDraft } from '@taucad/revisions/publish-machine';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type {
+  BranchOperation,
+  GitRemoteCredential,
+  IsomorphicGitCheckoutOptions,
+  KeepalivePushOutcome,
+  PublishDraft,
+  RevisionDiffEntry,
+  RevisionLogRequest,
+  RevisionPort,
+  RevisionRow,
+  RevisionStatusProjection,
+  RevisionTag,
+  RevisionUserActor,
+} from '@taucad/revisions';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
   publishFailureMessage,
@@ -43,17 +54,6 @@ import {
   registerProjectFailureMessage,
   registerProjectOverHttp,
   tauRemoteUrl,
-} from '@taucad/revisions';
-import type {
-  GitRemoteCredential,
-  RevisionDiffEntry,
-  RevisionLogRequest,
-  RevisionPort,
-  RevisionRow,
-  RevisionTag,
-  RevisionUserActor,
-  IsomorphicGitCheckoutOptions,
-  KeepalivePushOutcome,
 } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import type { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
@@ -119,7 +119,7 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'confirmBranch' }>
   | Readonly<{ command: 'cancelBranch' }>
   /*
-   * The Sync region's four verbs (S26, S34).
+   * The Sync region's verbs (S26, S34).
    *
    * Named `…Remote` rather than the machine's own `authorized`/`cancel`: this
    * is one flat namespace per project and `cancel` already belongs to restore.
@@ -136,6 +136,9 @@ export type WorkerRevisionCommand =
     }>
   | Readonly<{ command: 'disconnectRemote' }>
   | Readonly<{ command: 'cancelRemote' }>
+  /* The page re-minted the credential a `reconnectRequired` remote was refused
+     with and sent its frame first; `remote.machine` re-validates (D3). */
+  | Readonly<{ command: 'authorizeRemote' }>
   | Readonly<{ command: 'syncNow' }>
   | Readonly<{ command: 'recordsChanged' }>
   /*
@@ -307,7 +310,7 @@ export type RevisionToast =
    */
   | Readonly<{
       type: 'error';
-      subject: 'restore' | 'branch' | 'save';
+      subject: 'restore' | 'branch' | 'save' | 'resolution';
       /* Which branch verb refused, so a caller correlating one *New branch*
        * does not take another verb's refusal for its own (finding 1). */
       operation?: BranchOperation;
@@ -750,6 +753,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       reason: failed.reason,
     });
   });
+  /* D56: a resolution child is spawned per conflict, so its failure crosses
+   * the root the way the facts above do. */
+  actor.on('resolutionFailed', (failed) => {
+    toasts.emit({ type: 'error', subject: 'resolution', message: failed.reason });
+  });
   actor.on('turnRequested', (requested) => {
     toasts.emit({
       type: 'resolveWithChat',
@@ -995,6 +1003,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         case 'cancelRemote': {
           actor.send({ type: 'remote', event: { type: 'cancel' } });
+          return;
+        }
+        case 'authorizeRemote': {
+          actor.send({ type: 'remote', event: { type: 'authorized' } });
           return;
         }
         case 'syncNow': {

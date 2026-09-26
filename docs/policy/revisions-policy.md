@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-20'
+updated: '2026-09-23'
 related:
   - docs/research/git-storage-substrate-charter.md
   - docs/architecture/revisions-cloud-handbook.md
@@ -133,10 +133,10 @@ Start `remote.machine` in `reading` and rehydrate it from Git's remotes list. Ac
 
 Apply these composition constraints:
 
-- Invoke always-on children for the root lifetime. Spawn variable-count children with stored typed refs; stop them with `stopChild` on removal and root exit.
+- Invoke always-on children for the root lifetime. Spawn variable-count children with stored typed refs; stop them with `enq.stop` on removal and root exit.
 - Pass `parentRef` through input and route sibling communication through the parent. Never use `systemId`; several live projects share one XState system.
 - Keep one minter per checkout and a monotonically increasing write generation so a write during minting leaves the checkout dirty.
-- Hold the checkout lease with a `fromCallback` actor. Supply all one-shot effects as abortable promise actors over `RevisionPort` or protected record writers.
+- Hold the checkout lease with a `createCallbackLogic` actor. Supply all one-shot effects as abortable promise actors over `RevisionPort` or protected record writers.
 - Give every invoked effect a failure edge. Never store functions or service callbacks in machine context.
 - Coalesce content changes at the adapter seam, debounce policy inside the owning machine, and emit only settled projection values. Never send token deltas or retry ticks through project machines.
 - Keep revision machines free of filesystem, Git, React, and DOM imports. Connect UI machines by events, not shared context.
@@ -234,7 +234,7 @@ Push the tag through the leased ref path before creating or re-pointing the publ
 
 ### 15. Preserve attribution and retention
 
-Use the signed-in user's stable identity when available. For anonymous work, use a stable per-workspace pseudonym with no email. For agents, record model, run id, and the user on whose behalf the agent acted. Map Git author to the user, committer to `Tau <noreply@tau.new>`, and preserve Tau actor, trigger, and metadata trailers. Never rewrite history when anonymity settings change.
+Use the signed-in user's stable identity when available. For anonymous work, use a stable per-workspace pseudonym with no email. For agents, record model, run id, and the user on whose behalf the agent acted. Map Git author to the user, committer to `Tau <noreply@tau.new>`, and never write the account email: the author address is `<user-id>@users.noreply.tau.new`, or the linked forge's no-reply address for a project linked to one (GitHub refuses pushes that expose a private address), and preserve Tau actor, trigger, and metadata trailers. Never rewrite history when anonymity settings change.
 
 Keep revisions and tags immutable while any ref reaches them. Do no local object garbage collection in this program; chat cards, run records, restore-by-id, and conflict evidence may retain revisions outside branches. Remove a linked checkout only through **Discard** after proving its tree equals its head. Offer merged checkouts for later removal; never remove them silently.
 
@@ -296,15 +296,16 @@ Keep only revision modules reachable from a package barrel and only barrel expor
 
 A server answer is never a network error. Classify every remote refusal once, in `packages/revisions/src/remotes.ts`, and let both the `isomorphic-git` and native legs raise the same typed `RevisionPortError`:
 
-| `code`                            | Raised for                                      |
-| --------------------------------- | ----------------------------------------------- |
-| `REMOTE_UNAUTHORIZED`             | 401                                             |
-| `REMOTE_NOT_ENTITLED`             | 403 `GIT_SYNC_NOT_ENTITLED`                     |
-| `REMOTE_FORBIDDEN`                | A 403 that is not `GIT_SYNC_NOT_ENTITLED`       |
-| `REMOTE_NOT_FOUND`                | 404                                             |
-| `REMOTE_QUOTA_EXCEEDED`           | 413, or a ceiling refusal, with the file list   |
-| `REMOTE_REJECTED`                 | A per-ref refusal, carrying the server's reason |
-| `REMOTE_REAUTHORIZATION_REQUIRED` | An expired or revoked third-party connection    |
+| `code`                            | Raised for                                                                                                                                       |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `REMOTE_UNAUTHORIZED`             | 401                                                                                                                                              |
+| `REMOTE_NOT_ENTITLED`             | 403 `GIT_SYNC_NOT_ENTITLED`                                                                                                                      |
+| `REMOTE_FORBIDDEN`                | A 403 that is not `GIT_SYNC_NOT_ENTITLED`                                                                                                        |
+| `REMOTE_NOT_FOUND`                | 404                                                                                                                                              |
+| `REMOTE_QUOTA_EXCEEDED`           | 413, or a ceiling refusal, with the file list                                                                                                    |
+| `REMOTE_REJECTED`                 | A per-ref refusal, carrying the server's reason                                                                                                  |
+| `REMOTE_REAUTHORIZATION_REQUIRED` | An expired or revoked third-party connection                                                                                                     |
+| `REMOTE_MOVED`                    | 409 `GIT_PROXY_REDIRECTED_CREDENTIAL`: the repository moved or was renamed; re-resolve it by stable id and re-point only after the user confirms |
 
 Carry the server's own sentence as the error `message` whenever the answer has one, and render that sentence rather than replacing it with generic copy. Reserve `ENGINE_FAILED 'could not be reached'` for a failure that produced no HTTP status at all.
 
@@ -331,11 +332,11 @@ A `pre-receive` refusal carries no HTTP status, so relay the hook's report-statu
 
 Apply that classification on both paths a hook refusal can take, through one shared predicate owned by an import-free leaf module (`packages/revisions/src/refusal-markers.ts`, whose `isCeilingRefusal` the package index re-exports while the string stays module-private): the thrown transport error on the native leg, and the per-ref push result on the `isomorphic-git` leg, which the sync scheduler tests before it settles a refused ref as `rejected`. A quota class that holds on only one leg gives the same refusal two different actions, and _Sync now_ cannot clear a ceiling.
 
-Treat `REMOTE_UNAUTHORIZED`, `REMOTE_NOT_ENTITLED`, `REMOTE_NOT_FOUND`, and `REMOTE_REAUTHORIZATION_REQUIRED` as terminal in `sync.machine`: enter `failed` or `reconnectRequired`, resume only on **Sync now**, a remote change, or a session change, and never re-enter a fetch-push cycle without passing through the queue's backoff.
+Treat `REMOTE_UNAUTHORIZED`, `REMOTE_NOT_ENTITLED`, `REMOTE_NOT_FOUND`, `REMOTE_MOVED`, and `REMOTE_REAUTHORIZATION_REQUIRED` as terminal in `sync.machine`: enter `failed` or `reconnectRequired`, resume only on **Sync now**, a remote change, or a session change, and never re-enter a fetch-push cycle without passing through the queue's backoff.
 
 Render the reason on every surface showing **Not backed up**, `failed`, `reconnectRequired`, or a connect error, with exactly one action matching the class — _Sign in_, _Upgrade_, _Reconnect GitHub_, _Sync now_, _Open Revisions_, or _Retry_.
 
-Consult `canSyncFiles` and `canConnectGitHub` before offering Tau Cloud or a Git remote. Show an unentitled account the existing upgrade affordance and never issue a connect on its behalf. Register nothing on the server before the plan admits it: a failed connect must leave no remote in Git config, no durable-queue mutation, and no server row.
+Consult `canSyncFiles` before offering Tau Cloud; a Git remote, GitHub included, is offered on every plan. Show an unentitled account the existing upgrade affordance and never issue a connect on its behalf. Register nothing on the server before the plan admits it: a failed connect must leave no remote in Git config, no durable-queue mutation, and no server row.
 
 Answer git-facing refusals as `text/plain` when the request carries no `Origin`, so stock Git prints the sentence; keep the JSON envelope for browsers and carry CORS headers on every 401.
 

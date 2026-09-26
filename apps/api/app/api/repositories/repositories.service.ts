@@ -6,7 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  UnauthorizedException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Octokit } from '@octokit/rest';
@@ -505,7 +505,10 @@ export class RepositoriesService {
     await this.consumeBranchSlot(ip);
     const token = this.configService.get('GITHUB_API_TOKEN', { infer: true });
     if (!token) {
-      throw new UnauthorizedException('GitHub API token is not configured. Branches list unavailable.');
+      throw new ServiceUnavailableException({
+        code: 'GITHUB_API_TOKEN_UNAVAILABLE',
+        message: 'GitHub branch listing is not configured on this server.',
+      });
     }
 
     const isFirstPage = query.cursor === undefined;

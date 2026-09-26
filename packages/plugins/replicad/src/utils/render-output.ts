@@ -2,7 +2,8 @@ import type { AnyShape, Drawing } from 'replicad';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { SetRequired } from 'type-fest';
 import type { GeometrySvg, RuntimeSpanTracer } from '@taucad/runtime/types';
-import type { InterfaceDeclarations } from '#annotations/index.js';
+import type { ShapeConfig } from '#model.js';
+import { addSurfaceCoordinates } from '#utils/surface-coordinates.js';
 import { normalizeColor } from '#utils/normalize-color.js';
 import type { GeometryReplicad } from '#replicad.types.js';
 import { resolveShapeName, uniqueShapeName } from '@taucad/geometry-core';
@@ -61,49 +62,8 @@ type SpanOperation<T> = {
   operation: () => T;
 };
 
-/**
- * A shape with optional display and material metadata for rendering.
- *
- * Returned from a Replicad model's `main()` function to control per-shape
- * appearance in both GLTF preview rendering and STEP export.
- *
- * @public
- *
- * @example <caption>Shape with PBR material properties</caption>
- * ```typescript
- * import { makeCylinder } from 'replicad';
- *
- * export default function main() {
- *   return {
- *     shape: makeCylinder(10, 30),
- *     color: '#C0C0C0',
- *     metalness: 0.9,
- *     roughness: 0.2,
- *     density: 7.85,
- *   };
- * }
- * ```
- */
-export type InputShape = {
-  shape: AnyShape;
-  name?: string;
-  /** CSS hex color string (e.g. `'#ff0000'`). Applied to GLTF baseColor and STEP surface color. */
-  color?: string;
-  /** Opacity from 0 (transparent) to 1 (opaque). Maps to GLTF alpha and STEP transparency. */
-  opacity?: number;
-  strokeType?: string;
-  /** PBR metalness factor (0 = dielectric, 1 = metal). Threaded to GLTF metallicFactor and STEP visual material. */
-  metalness?: number;
-  /** PBR roughness factor (0 = mirror, 1 = diffuse). Threaded to GLTF roughnessFactor and STEP visual material. */
-  roughness?: number;
-  /** Physical density in g/cm³. Written to STEP as XCAFDoc_Material for mass computation. */
-  density?: number;
-  /**
-   * GeoSpec interface declarations authored via
-   * `@taucad/replicad/annotations`.
-   */
-  interfaces?: InterfaceDeclarations;
-};
+/** Replicad authoring config used by the meshing adapter. */
+export type InputShape = { [Key in keyof ShapeConfig]: ShapeConfig[Key] };
 
 /** An input shape whose display name has been resolved and de-duplicated. @public */
 export type NamedInputShape = InputShape & { name: string };
@@ -121,9 +81,6 @@ type PrototypeGroup = {
   prototype: MeshableInstance;
   instances: MeshableInstance[];
 };
-
-/** Union of all valid return types from a Replicad model's main function. */
-export type MainResultShapes = AnyShape | AnyShape[] | InputShape | InputShape[] | undefined;
 
 const isSvgable = (shape: unknown): shape is Svgable => {
   return (
@@ -213,7 +170,13 @@ function createBasicShapeConfig(inputShapes: unknown, defaultName?: string): Arr
   return resolveReplicadShapeNames(shapeConfigs, defaultName);
 }
 
-function normalizeColorAndOpacity<T extends InputShape>(shape: T): InputShape {
+function normalizeColorAndOpacity(shape: InputShape): InputShape {
+  if (shape.material !== undefined) {
+    if (['color', 'opacity', 'metalness', 'roughness'].some((key) => shape[key as keyof InputShape] !== undefined)) {
+      throw new TypeError('Use material or legacy color/opacity/metalness/roughness, not both.');
+    }
+    return shape;
+  }
   const { color, opacity, ...rest } = shape;
 
   const normalizedColor: undefined | { color: string; alpha: number } = color ? normalizeColor(color) : undefined;
@@ -348,7 +311,7 @@ function withSpan<T>({ tracer, name, attributes, operation }: SpanOperation<T>):
 }
 
 function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptions) {
-  const { name, shape, color, opacity, metalness, roughness } = shapeConfig;
+  const { name, shape, color, opacity, metalness, roughness, material } = shapeConfig;
   const { tessellation, collectBrepEdges, tracer } = options;
   const geometry: GeometryReplicad = {
     format: 'replicad',
@@ -357,6 +320,7 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
     opacity,
     metalness,
     roughness,
+    material,
     faces: {
       triangles: [],
       vertices: [],
@@ -391,6 +355,8 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
       }),
   });
 
+  addSurfaceCoordinates(shape, geometry.faces, { material });
+
   if (collectBrepEdges) {
     geometry.edges = withSpan({
       tracer,
@@ -411,7 +377,7 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
 }
 
 function createEmptyReplicadGeometry(shapeConfig: MeshableConfiguration): GeometryReplicad {
-  const { name, color, opacity, metalness, roughness } = shapeConfig;
+  const { name, color, opacity, metalness, roughness, material } = shapeConfig;
   return {
     format: 'replicad',
     name,
@@ -419,6 +385,7 @@ function createEmptyReplicadGeometry(shapeConfig: MeshableConfiguration): Geomet
     opacity,
     metalness,
     roughness,
+    material,
     faces: {
       triangles: [],
       vertices: [],
@@ -568,6 +535,7 @@ function instanceFromConfig({
     opacity: config.opacity,
     metalness: config.metalness,
     roughness: config.roughness,
+    material: config.material,
     locationMatrix: info.locationMatrix,
     determinant: info.determinant,
     faceIds,
@@ -610,6 +578,13 @@ function renderPrototypeGroup({
     },
     operation: () => extractPrototypeFaces({ openCascade, shape: prototypeConfig.shape, tessellation }),
   });
+
+  for (const instance of group.instances) {
+    addSurfaceCoordinates(prototypeConfig.shape, prototypeGeometry.faces, {
+      material: instance.config.material,
+      prototype: true,
+    });
+  }
 
   if (collectBrepEdges) {
     prototypeGeometry.edges = withSpan({

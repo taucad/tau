@@ -10,9 +10,11 @@
  * the checkout, before the lease is written (R10).
  */
 
-import { assign, enqueueActions, fromCallback, fromPromise, setup } from 'xstate';
-import type { AnyActorRef, AnyEventObject, SnapshotFrom } from 'xstate';
+import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
+import type { AnyActorRef, AnyEventObject, EnqueueObject, SnapshotFrom } from 'xstate';
 
+import { eventSchemas } from '#machine-schemas.js';
+import type { MachineActors } from '#machine-schemas.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 
 /** How long `finalizing` waits for its checkout to settle the cut. @public */
@@ -224,43 +226,109 @@ const settlement = (context: TurnMachineContext): TurnSettlement => ({
   runIds: context.leaseIds,
 });
 
-/**
- * Headless lifecycle of one turn.
- *
- * @public
+type TurnEnqueue = EnqueueObject<TurnMachineEvent, TurnMachineEmitted>;
+
+/* Every invoked effect fails the turn the same way: a diagnostic plus the port's category (P4). */
+const failedFrom = (error: unknown): Partial<TurnMachineContext> => ({
+  outcome: 'failed',
+  reason: describeFailure(error),
+  code: describeFailureCode(error),
+});
+
+/*
+ * A refusal an event carries. `cutFailed` passes no code: the checkout answers
+ * a sentence and no code, so the page falls back rather than inventing a
+ * category (E5).
  */
-export const turnMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as TurnMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as TurnMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    emitted: {} as TurnMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as TurnMachineInput,
+const failedWith = (event: TurnMachineEvent, code?: TurnFailureCode): Partial<TurnMachineContext> => ({
+  outcome: 'failed',
+  reason: 'reason' in event && typeof event.reason === 'string' ? event.reason : 'The turn failed.',
+  code,
+});
+
+const announceRelease = (context: TurnMachineContext, enq: TurnEnqueue): void => {
+  if (context.parentRef === undefined) {
+    return;
+  }
+  enq.sendTo(context.parentRef, {
+    type: 'turnReleased',
+    turnId: context.turnId,
+    chatId: context.chatId,
+    checkoutId: context.checkoutId,
+    runId: context.runId,
+    outcome: context.outcome ?? 'failed',
+    /* The host phrases this for a person from the code, so the turn carries
+     * both rather than the host inferring "something went wrong" from a
+     * missing event — and never shows the diagnostic itself (P4, E5). */
+    reason: context.reason,
+    code: context.code,
+  });
+};
+
+const announceSettlement = (context: TurnMachineContext, enq: TurnEnqueue, type: TurnMachineEmitted['type']): void => {
+  const fact: TurnMachineEmitted = { type, ...settlement(context) };
+  enq.emit(fact);
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, fact);
+  }
+};
+
+/* `retiring` settles on whatever outcome the turn already reached, whether or not the retirement succeeded. */
+const settledOutcomeTarget = (context: TurnMachineContext) => {
+  switch (context.outcome) {
+    case 'conflicted': {
+      return { target: 'conflicted' };
+    }
+    case 'released': {
+      return { target: 'released' };
+    }
+    case 'failed': {
+      return { target: 'failed' };
+    }
+    default: {
+      return { target: 'finalized' };
+    }
+  }
+};
+
+const turnMachineDefinition = setup({
+  schemas: {
+    context: types<TurnMachineContext>(),
+    events: eventSchemas<TurnMachineEvent>(),
+    emitted: eventSchemas<TurnMachineEmitted>(),
+    input: types<TurnMachineInput>(),
   },
   actors: {
-    prepare: fromPromise<TurnPrepareActorOutput, TurnPrepareActorInput>(async () => {
-      throw new Error('turnMachine: the prepare actor was not provided.');
+    prepare: createAsyncLogic<TurnPrepareActorOutput, TurnPrepareActorInput>({
+      run: async () => {
+        throw new Error('turnMachine: the prepare actor was not provided.');
+      },
     }),
-    writeLease: fromPromise<Readonly<{ leaseIds: readonly string[] }>, TurnWriteLeaseActorInput>(async () => {
-      throw new Error('turnMachine: the writeLease actor was not provided.');
+    writeLease: createAsyncLogic<Readonly<{ leaseIds: readonly string[] }>, TurnWriteLeaseActorInput>({
+      run: async () => {
+        throw new Error('turnMachine: the writeLease actor was not provided.');
+      },
     }),
-    retireLease: fromPromise<void, TurnRetireLeaseActorInput>(async () => {
-      throw new Error('turnMachine: the retireLease actor was not provided.');
+    retireLease: createAsyncLogic<void, TurnRetireLeaseActorInput>({
+      run: async () => {
+        throw new Error('turnMachine: the retireLease actor was not provided.');
+      },
     }),
-    capture: fromPromise<Readonly<{ captureId: string }>, TurnCaptureActorInput>(async () => {
-      throw new Error('turnMachine: the capture actor was not provided.');
+    capture: createAsyncLogic<Readonly<{ captureId: string }>, TurnCaptureActorInput>({
+      run: async () => {
+        throw new Error('turnMachine: the capture actor was not provided.');
+      },
     }),
-    merge: fromPromise<
+    merge: createAsyncLogic<
       TurnMergeActorOutput,
       Readonly<{ checkoutId: string; captureId: string; baseRevisionId: string | undefined }>
-    >(async () => {
-      throw new Error('turnMachine: the merge actor was not provided.');
+    >({
+      run: async () => {
+        throw new Error('turnMachine: the merge actor was not provided.');
+      },
     }),
     /* The live-tree lease, held for the whole `leased` state. */
-    lease: fromCallback<AnyEventObject, TurnLeaseActorInput>(({ sendBack }) => {
+    lease: createCallbackLogic<AnyEventObject, TurnLeaseActorInput>(({ sendBack }) => {
       sendBack({ type: 'leaseRefused', reason: 'turnMachine: the lease actor was not provided.' });
       return () => undefined;
     }),
@@ -269,47 +337,7 @@ export const turnMachine = setup({
     cutSettlement: turnCutSettlementMilliseconds,
   },
   guards: {
-    outcomeIs: ({ context }, params: Readonly<{ outcome: TurnOutcome }>) => context.outcome === params.outcome,
-    mergeConflicted: (_, params: Readonly<{ status: 'recorded' | 'conflicted' }>) => params.status === 'conflicted',
-    completionRequested: ({ context }) => context.completionRequested,
-    casRetryAvailable: ({ context }) => context.casRetries < turnCasRetryLimit,
-  },
-  actions: {
-    failWith: assign({
-      outcome: 'failed',
-      reason: ({ event }) =>
-        'reason' in event && typeof event.reason === 'string' ? event.reason : 'The turn failed.',
-      /* `cutFailed` passes none: the checkout answers a sentence and no code,
-       * so the page falls back rather than inventing a category (E5). */
-      code: (_, params: Readonly<{ code?: TurnFailureCode }>) => params.code,
-    }),
-    announceRelease: enqueueActions(({ context, enqueue }) => {
-      if (context.parentRef === undefined) {
-        return;
-      }
-      enqueue.sendTo(context.parentRef, {
-        type: 'turnReleased',
-        turnId: context.turnId,
-        chatId: context.chatId,
-        checkoutId: context.checkoutId,
-        runId: context.runId,
-        outcome: context.outcome ?? 'failed',
-        /* The host phrases this for a person from the code, so the turn carries
-         * both rather than the host inferring "something went wrong" from a
-         * missing event — and never shows the diagnostic itself (P4, E5). */
-        reason: context.reason,
-        code: context.code,
-      });
-    }),
-    announceSettlement: enqueueActions(
-      ({ context, enqueue }, params: Readonly<{ type: TurnMachineEmitted['type'] }>) => {
-        const fact: TurnMachineEmitted = { type: params.type, ...settlement(context) };
-        enqueue.emit(fact);
-        if (context.parentRef !== undefined) {
-          enqueue.sendTo(context.parentRef, fact);
-        }
-      },
-    ),
+    casRetryAvailable: (context: TurnMachineContext) => context.casRetries < turnCasRetryLimit,
   },
 }).createMachine({
   id: 'turn',
@@ -337,8 +365,8 @@ export const turnMachine = setup({
       initial: 'resolving',
       /* R21: nothing is leased yet, so ending here retires nothing. */
       on: {
-        release: { target: 'released', actions: assign({ outcome: 'released' }) },
-        turnAbandoned: { target: 'released', actions: assign({ outcome: 'released' }) },
+        release: { target: 'released', context: { outcome: 'released' } },
+        turnAbandoned: { target: 'released', context: { outcome: 'released' } },
         /*
          * A fast turn finishes before its placement does.
          *
@@ -347,9 +375,9 @@ export const turnMachine = setup({
          * here used to be dropped — which left the turn leased until its bound
          * expired. Both hosts compensated by holding the completion until
          * `onPlacement`; the machine owns it instead, and `leased.held` replays
-         * it through the `completionRequested` guard R6 already added.
+         * it through the `completionRequested` check R6 already added.
          */
-        turnCompleted: { actions: assign({ completionRequested: true }) },
+        turnCompleted: { context: { completionRequested: true } },
       },
       states: {
         resolving: {
@@ -361,53 +389,46 @@ export const turnMachine = setup({
               runId: context.runId,
               ...(context.checkoutId === undefined ? {} : { checkoutId: context.checkoutId }),
             }),
-            onDone: {
-              target: 'basing',
-              actions: [
-                assign({
-                  checkoutId: ({ event }) => event.output.checkoutId,
-                  branch: ({ event }) => event.output.branch,
-                  baseRevisionId: ({ event }) => event.output.baseRevisionId,
-                  dirtyBase: ({ event }) => event.output.dirty,
-                }),
-                enqueueActions(({ context, enqueue, event }) => {
-                  if (context.parentRef === undefined) {
-                    return;
-                  }
-                  enqueue.sendTo(context.parentRef, {
-                    type: 'turnPrepared',
-                    turnId: context.turnId,
-                    chatId: context.chatId,
-                    checkoutId: event.output.checkoutId,
-                    branch: event.output.branch,
-                  });
-                  /* F13: a lease from a superseded epoch is retired on the next
-                   * prepare, and `checkouts` owns that retirement. */
-                  for (const runId of event.output.staleRunIds) {
-                    enqueue.sendTo(context.parentRef, { type: 'leaseStale', runId });
-                  }
-                }),
-              ],
+            onDone: ({ context, event }, enq) => {
+              if (context.parentRef !== undefined) {
+                enq.sendTo(context.parentRef, {
+                  type: 'turnPrepared',
+                  turnId: context.turnId,
+                  chatId: context.chatId,
+                  checkoutId: event.output.checkoutId,
+                  branch: event.output.branch,
+                });
+                /* F13: a lease from a superseded epoch is retired on the next
+                 * prepare, and `checkouts` owns that retirement. */
+                for (const runId of event.output.staleRunIds) {
+                  enq.sendTo(context.parentRef, { type: 'leaseStale', runId });
+                }
+              }
+              return {
+                target: 'basing',
+                context: {
+                  checkoutId: event.output.checkoutId,
+                  branch: event.output.branch,
+                  baseRevisionId: event.output.baseRevisionId,
+                  dirtyBase: event.output.dirty,
+                },
+              };
             },
             onError: {
               target: '#turn.failed',
-              actions: assign({
-                outcome: 'failed',
-                reason: ({ event }) => describeFailure(event.error),
-                code: ({ event }) => describeFailureCode(event.error),
-              }),
+              context: ({ event }) => failedFrom(event.error),
             },
           },
         },
         /* D17: the turn may not lease a dirty tree, and it may not mint one
          * either — `checkout.machine` is the sole minter (F2), so it asks. */
         basing: {
-          always: { guard: ({ context }) => !context.dirtyBase, target: 'writingLease' },
-          entry: enqueueActions(({ context, enqueue }) => {
+          always: ({ context }) => (context.dirtyBase ? undefined : { target: 'writingLease' }),
+          entry: ({ context }, enq) => {
             if (context.parentRef === undefined || !context.dirtyBase) {
               return;
             }
-            enqueue.sendTo(context.parentRef, {
+            enq.sendTo(context.parentRef, {
               /*
                * `turn`, not `save`: this mint is the first act of *this* turn.
                *
@@ -424,37 +445,29 @@ export const turnMachine = setup({
               checkoutId: context.checkoutId,
               leaseIds: context.leaseIds,
             });
-          }),
+          },
           on: {
             revisionMinted: {
               target: 'writingLease',
-              actions: assign({ baseRevisionId: ({ event }) => event.revisionId, dirtyBase: false }),
+              context: ({ event }) => ({ baseRevisionId: event.revisionId, dirtyBase: false }),
             },
-            nothingToSave: { target: 'writingLease', actions: assign({ dirtyBase: false }) },
-            cutFailed: { target: '#turn.failed', actions: { type: 'failWith', params: {} } },
+            nothingToSave: { target: 'writingLease', context: { dirtyBase: false } },
+            cutFailed: { target: '#turn.failed', context: ({ event }) => failedWith(event) },
             /* D24: the checkout re-read the head, so one re-ask records onto it. */
-            casLost: [
-              {
-                guard: 'casRetryAvailable',
-                target: 'basing',
-                reenter: true,
-                actions: assign({ casRetries: ({ context }) => context.casRetries + 1 }),
-              },
-              {
-                target: '#turn.failed',
-                actions: assign({ outcome: 'failed', reason: 'cas-lost', code: 'CAS_LOST' }),
-              },
-            ],
+            casLost: ({ context, guards }) =>
+              guards.casRetryAvailable(context)
+                ? { target: 'basing', reenter: true, context: { casRetries: context.casRetries + 1 } }
+                : { target: '#turn.failed', context: { outcome: 'failed', reason: 'cas-lost', code: 'CAS_LOST' } },
           },
           /* R21: a wait on another actor needs the same bound `requesting` has. */
           after: {
             cutSettlement: {
               target: '#turn.failed',
-              actions: assign({
+              context: {
                 outcome: 'failed',
                 reason: 'The checkout did not settle the base cut in time.',
                 code: 'BASE_CUT_TIMED_OUT',
-              }),
+              },
             },
           },
         },
@@ -468,32 +481,22 @@ export const turnMachine = setup({
               checkoutId: context.checkoutId ?? '',
               baseRevisionId: context.baseRevisionId,
             }),
-            onDone: {
-              target: '#turn.leased',
-              actions: [
-                assign({ leaseIds: ({ event }) => event.output.leaseIds }),
-                /* R1: the registry cannot see a lease it did not write itself,
-                 * so the D10 switch guard and the A25/I9 removal guard stay
-                 * blind unless the turn says so. */
-                enqueueActions(({ context, enqueue }) => {
-                  if (context.parentRef === undefined) {
-                    return;
-                  }
-                  enqueue.sendTo(context.parentRef, {
-                    type: 'leaseWritten',
-                    checkoutId: context.checkoutId,
-                    runId: context.runId,
-                  });
-                }),
-              ],
+            onDone: ({ context, event }, enq) => {
+              /* R1: the registry cannot see a lease it did not write itself,
+               * so the D10 switch guard and the A25/I9 removal guard stay
+               * blind unless the turn says so. */
+              if (context.parentRef !== undefined) {
+                enq.sendTo(context.parentRef, {
+                  type: 'leaseWritten',
+                  checkoutId: context.checkoutId,
+                  runId: context.runId,
+                });
+              }
+              return { target: '#turn.leased', context: { leaseIds: event.output.leaseIds } };
             },
             onError: {
               target: '#turn.failed',
-              actions: assign({
-                outcome: 'failed',
-                reason: ({ event }) => describeFailure(event.error),
-                code: ({ event }) => describeFailureCode(event.error),
-              }),
+              context: ({ event }) => failedFrom(event.error),
             },
           },
         },
@@ -506,9 +509,9 @@ export const turnMachine = setup({
         input: ({ context }) => ({ checkoutId: context.checkoutId ?? '', runId: context.runId }),
       },
       on: {
-        leaseRefused: { target: 'retiring', actions: { type: 'failWith', params: { code: 'LEASE_UNAVAILABLE' } } },
-        turnAbandoned: { target: 'retiring', actions: assign({ outcome: 'released' }) },
-        release: { target: 'retiring', actions: assign({ outcome: 'released' }) },
+        leaseRefused: { target: 'retiring', context: ({ event }) => failedWith(event, 'LEASE_UNAVAILABLE') },
+        turnAbandoned: { target: 'retiring', context: { outcome: 'released' } },
+        release: { target: 'retiring', context: { outcome: 'released' } },
       },
       initial: 'acquiring',
       states: {
@@ -517,11 +520,11 @@ export const turnMachine = setup({
         acquiring: {
           on: {
             leaseGranted: { target: 'held' },
-            turnCompleted: { actions: assign({ completionRequested: true }) },
+            turnCompleted: { context: { completionRequested: true } },
           },
         },
         held: {
-          always: { guard: 'completionRequested', target: '#turn.finalizing' },
+          always: ({ context }) => (context.completionRequested ? { target: '#turn.finalizing' } : undefined),
           on: { turnCompleted: { target: '#turn.finalizing' } },
         },
       },
@@ -529,8 +532,8 @@ export const turnMachine = setup({
     finalizing: {
       initial: 'capturing',
       on: {
-        release: { target: 'retiring', actions: assign({ outcome: 'released' }) },
-        turnAbandoned: { target: 'retiring', actions: assign({ outcome: 'released' }) },
+        release: { target: 'retiring', context: { outcome: 'released' } },
+        turnAbandoned: { target: 'retiring', context: { outcome: 'released' } },
       },
       states: {
         capturing: {
@@ -539,15 +542,11 @@ export const turnMachine = setup({
             input: ({ context }) => ({ checkoutId: context.checkoutId ?? '', turnId: context.turnId }),
             onDone: {
               target: 'merging',
-              actions: assign({ captureId: ({ event }) => event.output.captureId }),
+              context: ({ event }) => ({ captureId: event.output.captureId }),
             },
             onError: {
               target: '#turn.retiring',
-              actions: assign({
-                outcome: 'failed',
-                reason: ({ event }) => describeFailure(event.error),
-                code: ({ event }) => describeFailureCode(event.error),
-              }),
+              context: ({ event }) => failedFrom(event.error),
             },
           },
         },
@@ -559,51 +558,40 @@ export const turnMachine = setup({
               captureId: context.captureId ?? '',
               baseRevisionId: context.baseRevisionId,
             }),
-            onDone: [
-              {
-                guard: { type: 'mergeConflicted', params: ({ event }) => ({ status: event.output.status }) },
-                target: '#turn.retiring',
-                actions: assign({
-                  outcome: 'conflicted',
-                  revisionId: ({ event }) => event.output.conflictRevisionId,
-                }),
-              },
-              { target: 'requesting' },
-            ],
+            onDone: ({ event }) =>
+              event.output.status === 'conflicted'
+                ? {
+                    target: '#turn.retiring',
+                    context: { outcome: 'conflicted', revisionId: event.output.conflictRevisionId },
+                  }
+                : { target: 'requesting' },
             onError: {
               target: '#turn.retiring',
-              actions: assign({
-                outcome: 'failed',
-                reason: ({ event }) => describeFailure(event.error),
-                code: ({ event }) => describeFailureCode(event.error),
-              }),
+              context: ({ event }) => failedFrom(event.error),
             },
           },
         },
         /* The mint itself belongs to `checkout.machine`; this turn only asks. */
         requesting: {
-          entry: enqueueActions(({ context, enqueue }) => {
+          entry: ({ context }, enq) => {
             if (context.parentRef === undefined) {
               return;
             }
-            enqueue.sendTo(context.parentRef, {
+            enq.sendTo(context.parentRef, {
               type: 'cut',
               trigger: 'turn',
               turnId: context.turnId,
               checkoutId: context.checkoutId,
               leaseIds: context.leaseIds,
             });
-          }),
+          },
           on: {
             revisionMinted: {
               target: '#turn.retiring',
-              actions: assign({
-                outcome: 'finalized',
-                revisionId: ({ event }) => event.revisionId,
-              }),
+              context: ({ event }) => ({ outcome: 'finalized', revisionId: event.revisionId }),
             },
-            nothingToSave: { target: '#turn.retiring', actions: assign({ outcome: 'finalized' }) },
-            cutFailed: { target: '#turn.retiring', actions: { type: 'failWith', params: {} } },
+            nothingToSave: { target: '#turn.retiring', context: { outcome: 'finalized' } },
+            cutFailed: { target: '#turn.retiring', context: ({ event }) => failedWith(event) },
             /*
              * D24: one re-cut, then fail.
              *
@@ -613,27 +601,22 @@ export const turnMachine = setup({
              * is right: the previous wait was spent on a cut that was thrown
              * away.
              */
-            casLost: [
-              {
-                guard: 'casRetryAvailable',
-                target: 'requesting',
-                reenter: true,
-                actions: assign({ casRetries: ({ context }) => context.casRetries + 1 }),
-              },
-              {
-                target: '#turn.retiring',
-                actions: assign({ outcome: 'failed', reason: 'cas-lost', code: 'CAS_LOST' }),
-              },
-            ],
+            casLost: ({ context, guards }) =>
+              guards.casRetryAvailable(context)
+                ? { target: 'requesting', reenter: true, context: { casRetries: context.casRetries + 1 } }
+                : {
+                    target: '#turn.retiring',
+                    context: { outcome: 'failed', reason: 'cas-lost', code: 'CAS_LOST' },
+                  },
           },
           after: {
             cutSettlement: {
               target: '#turn.retiring',
-              actions: assign({
+              context: {
                 outcome: 'failed',
                 reason: 'The checkout did not settle the cut in time.',
                 code: 'CUT_TIMED_OUT',
-              }),
+              },
             },
           },
         },
@@ -648,37 +631,58 @@ export const turnMachine = setup({
           checkoutId: context.checkoutId,
           outcome: context.outcome ?? 'failed',
         }),
-        onDone: [
-          { guard: { type: 'outcomeIs', params: { outcome: 'conflicted' } }, target: 'conflicted' },
-          { guard: { type: 'outcomeIs', params: { outcome: 'released' } }, target: 'released' },
-          { guard: { type: 'outcomeIs', params: { outcome: 'failed' } }, target: 'failed' },
-          { target: 'finalized' },
-        ],
+        onDone: ({ context }) => settledOutcomeTarget(context),
         /* R7: the settlement is host-attested (A4) and the revision is already
          * on disk, so a failed lease cleanup may not retract it. The orphan
          * lease is `sweepLeases`' problem (F13). */
-        onError: [
-          { guard: { type: 'outcomeIs', params: { outcome: 'conflicted' } }, target: 'conflicted' },
-          { guard: { type: 'outcomeIs', params: { outcome: 'released' } }, target: 'released' },
-          { guard: { type: 'outcomeIs', params: { outcome: 'failed' } }, target: 'failed' },
-          { target: 'finalized' },
-        ],
+        onError: ({ context }) => settledOutcomeTarget(context),
       },
     },
     finalized: {
       type: 'final',
-      entry: [{ type: 'announceSettlement', params: { type: 'turnFinalized' } }],
+      entry: ({ context }, enq) => {
+        announceSettlement(context, enq, 'turnFinalized');
+      },
     },
     conflicted: {
       type: 'final',
-      entry: [{ type: 'announceSettlement', params: { type: 'turnConflicted' } }],
+      entry: ({ context }, enq) => {
+        announceSettlement(context, enq, 'turnConflicted');
+      },
     },
     /* R12: the root drops the turn ref and `checkouts` drops the lease only if
      * it hears that the turn ended. */
-    released: { type: 'final', entry: 'announceRelease' },
-    failed: { type: 'final', entry: 'announceRelease' },
+    released: {
+      type: 'final',
+      entry: ({ context }, enq) => {
+        announceRelease(context, enq);
+      },
+    },
+    failed: {
+      type: 'final',
+      entry: ({ context }, enq) => {
+        announceRelease(context, enq);
+      },
+    },
   },
 });
+
+type TurnMachineDefinition = typeof turnMachineDefinition;
+
+/**
+ * The type of {@link turnMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface TurnMachine extends TurnMachineDefinition {}
+
+/**
+ * Headless lifecycle of one turn.
+ *
+ * @public
+ */
+export const turnMachine: TurnMachine = turnMachineDefinition;
 
 /**
  * Selects whether this turn still holds its checkout.
@@ -709,4 +713,4 @@ export const selectTurnRevisionId = (snapshot: SnapshotFrom<typeof turnMachine>)
  *
  * @public
  */
-export type TurnActors = NonNullable<Parameters<typeof turnMachine.provide>[0]['actors']>;
+export type TurnActors = MachineActors<typeof turnMachine>;

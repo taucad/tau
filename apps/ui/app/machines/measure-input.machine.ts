@@ -1,4 +1,6 @@
-import { assign, assertEvent, setup } from 'xstate';
+import { setup, types } from 'xstate';
+
+import { eventSchemas } from '#lib/xstate.lib.js';
 
 export type MeasureInputResult = 'acceptPoint' | 'cancelCurrent' | 'ignore';
 
@@ -30,68 +32,57 @@ const resetPointerState = (result: MeasureInputResult): Partial<MeasureInputCont
   result,
 });
 
+const recordPointerDown = (
+  event: Extract<MeasureInputEvent, { type: 'pointerDown' }>,
+): Partial<MeasureInputContext> => {
+  if (event.button !== 0 && event.button !== 2) {
+    return { result: 'ignore' };
+  }
+
+  return {
+    isPointerDown: true,
+    pointerDownHadTarget: event.hasTarget,
+    discardGesture: event.cameraMoving,
+    result: undefined,
+  };
+};
+
+const resolvePointerUp = (
+  context: MeasureInputContext,
+  event: Extract<MeasureInputEvent, { type: 'pointerUp' }>,
+): Partial<MeasureInputContext> => {
+  if (!context.isPointerDown) {
+    return resetPointerState('ignore');
+  }
+
+  if (event.button === 2) {
+    const result = !context.discardGesture && event.hasCurrentStart ? 'cancelCurrent' : 'ignore';
+    return resetPointerState(result);
+  }
+
+  if (event.button !== 0 || context.discardGesture) {
+    return resetPointerState('ignore');
+  }
+
+  if (!context.pointerDownHadTarget && !event.hasActiveSnapTarget) {
+    return resetPointerState('ignore');
+  }
+
+  if (!event.hasTarget && !event.hasActiveSnapTarget) {
+    return resetPointerState('ignore');
+  }
+
+  if (event.isZeroLength) {
+    return resetPointerState('ignore');
+  }
+
+  return resetPointerState('acceptPoint');
+};
+
 export const measureInputMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as MeasureInputContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as MeasureInputEvent,
-  },
-  actions: {
-    recordPointerDown: assign(({ event }) => {
-      assertEvent(event, 'pointerDown');
-      if (event.button !== 0 && event.button !== 2) {
-        return { result: 'ignore' };
-      }
-
-      return {
-        isPointerDown: true,
-        pointerDownHadTarget: event.hasTarget,
-        discardGesture: event.cameraMoving,
-        result: undefined,
-      };
-    }),
-    markCameraMovement: assign(({ context }) =>
-      context.isPointerDown
-        ? {
-            discardGesture: true,
-            result: undefined,
-          }
-        : {},
-    ),
-    resolvePointerUp: assign(({ context, event }) => {
-      assertEvent(event, 'pointerUp');
-      if (!context.isPointerDown) {
-        return resetPointerState('ignore');
-      }
-
-      if (event.button === 2) {
-        const result = !context.discardGesture && event.hasCurrentStart ? 'cancelCurrent' : 'ignore';
-        return resetPointerState(result);
-      }
-
-      if (event.button !== 0 || context.discardGesture) {
-        return resetPointerState('ignore');
-      }
-
-      if (!context.pointerDownHadTarget && !event.hasActiveSnapTarget) {
-        return resetPointerState('ignore');
-      }
-
-      if (!event.hasTarget && !event.hasActiveSnapTarget) {
-        return resetPointerState('ignore');
-      }
-
-      if (event.isZeroLength) {
-        return resetPointerState('ignore');
-      }
-
-      return resetPointerState('acceptPoint');
-    }),
-    cancelInput: assign(() => resetPointerState('cancelCurrent')),
-    clearResult: assign({
-      result: undefined,
-    }),
+  schemas: {
+    context: types<MeasureInputContext>(),
+    events: eventSchemas<MeasureInputEvent>(),
   },
 }).createMachine({
   id: 'measureInput',
@@ -102,10 +93,12 @@ export const measureInputMachine = setup({
     result: undefined,
   },
   on: {
-    pointerDown: { actions: 'recordPointerDown' },
-    pointerUp: { actions: 'resolvePointerUp' },
-    cameraMoved: { actions: 'markCameraMovement' },
-    cancel: { actions: 'cancelInput' },
-    clearResult: { actions: 'clearResult' },
+    pointerDown: { context: ({ event }) => recordPointerDown(event) },
+    pointerUp: { context: ({ context, event }) => resolvePointerUp(context, event) },
+    cameraMoved: {
+      context: ({ context }) => (context.isPointerDown ? { discardGesture: true, result: undefined } : {}),
+    },
+    cancel: { context: resetPointerState('cancelCurrent') },
+    clearResult: { context: { result: undefined } },
   },
 });

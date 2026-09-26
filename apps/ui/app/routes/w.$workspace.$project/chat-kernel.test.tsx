@@ -143,11 +143,11 @@ describe('ChatKernel', () => {
     const { ChatKernel } = await import('./chat-kernel.js');
     render(<ChatKernel isExpanded setIsExpanded={vi.fn()} />);
 
-    expect(screen.getByRole('textbox', { name: 'Filter telemetry' })).toHaveAttribute(
+    expect(screen.getByRole('searchbox', { name: 'Filter telemetry' })).toHaveAttribute(
       'placeholder',
       'Filter telemetry...',
     );
-    expect(screen.getAllByRole('textbox', { name: 'Filter telemetry' })).toHaveLength(1);
+    expect(screen.getAllByRole('searchbox', { name: 'Filter telemetry' })).toHaveLength(1);
     expect(screen.getByText('No geometry units.')).toBeInTheDocument();
   });
 
@@ -174,7 +174,7 @@ describe('ChatKernel', () => {
     const { ChatKernel } = await import('./chat-kernel.js');
     render(<ChatKernel isExpanded setIsExpanded={vi.fn()} />);
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter telemetry' }), { target: { value: 'bundling' } });
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter telemetry' }), { target: { value: 'bundling' } });
     expect(screen.getAllByTestId('cu-timing').map((timing) => timing.dataset['query'])).toEqual([
       'bundling',
       'bundling',

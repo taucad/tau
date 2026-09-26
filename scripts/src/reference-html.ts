@@ -351,7 +351,18 @@ const semanticFromRaw = (node: RawDomNode, baseUrl: string, preformatted: boolea
   const childPreformatted = preformatted || tag === 'pre' || tag === 'code';
   let children = node.children.flatMap((child) => semanticFromRaw(child, baseUrl, childPreformatted));
   if (tag === 'pre') {
-    children = children.filter((child) => child.kind !== 'text' || child.value.trim() !== '');
+    // Trim only the edges: whitespace between highlighted token spans is code.
+    const blank = (child: SemanticNode | undefined): boolean => child?.kind === 'text' && child.value.trim() === '';
+    while (blank(children[0])) {
+      children = children.slice(1);
+    }
+    while (blank(children.at(-1))) {
+      children = children.slice(0, -1);
+    }
+    // Pandoc reads a bare <pre> (GitHub's highlighted markup) as a paragraph.
+    if (!children.some((child) => child.kind === 'element' && child.tag === 'code')) {
+      children = [{ kind: 'element', tag: 'code', attributes: { class: 'language-text' }, children }];
+    }
   }
   if (tag === 'img') {
     const alt = node.attributes['alt']?.replaceAll(/\s+/gu, ' ').trim();

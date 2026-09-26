@@ -104,6 +104,25 @@ describe('section cap performance debug helpers', () => {
     });
   });
 
+  it('should keep the frame that built the drawn caps as the latest frame while later frames skip', () => {
+    const built = createSectionCapFramePerformance(1, 0);
+    const skipped = createSectionCapFramePerformance(2, 16);
+    skipped.counters.skippedFrameCount = 1;
+
+    const summary = appendSectionCapPerformanceFrame(appendSectionCapPerformanceFrame(undefined, built), skipped);
+
+    expect(summary.latestFrame).toBe(built);
+    expect(summary.history).toEqual([built, skipped]);
+    expect(summary.aggregates.frameTotal.count).toBe(2);
+  });
+
+  it('should describe a skipped frame when no earlier frame built the drawn caps', () => {
+    const skipped = createSectionCapFramePerformance(1, 0);
+    skipped.counters.skippedFrameCount = 1;
+
+    expect(appendSectionCapPerformanceFrame(undefined, skipped).latestFrame).toBe(skipped);
+  });
+
   it('should expose the default bounded history size', () => {
     expect(sectionCapPerformanceHistoryLimit).toBe(120);
   });

@@ -81,6 +81,8 @@ export type SectionCapPerformanceCounters = {
   hiddenFillCount: number;
   diagnosticsCount: number;
   uploadedByteCount: number;
+  /** 1 on a frame that left the drawn caps as they were because nothing they are drawn from changed. */
+  skippedFrameCount: number;
 };
 
 export type SectionCapBooleanOperation = 'intersection' | 'union' | 'difference';
@@ -220,6 +222,7 @@ export const createSectionCapPerformanceCounters = (): SectionCapPerformanceCoun
   hiddenFillCount: 0,
   diagnosticsCount: 0,
   uploadedByteCount: 0,
+  skippedFrameCount: 0,
 });
 
 export const createSectionCapBooleanOperationStats = (): SectionCapBooleanOperationStats => ({
@@ -319,6 +322,10 @@ const buildAggregates = (history: readonly SectionCapFramePerformance[]): Sectio
   };
 };
 
+/**
+ * Appends a frame to the history the aggregates cover. A skipped frame joins the history, so the phases are measured
+ * over every rendered frame, but `latestFrame` stays the frame that built what is drawn.
+ */
 export const appendSectionCapPerformanceFrame = (
   previous: SectionCapPerformanceDebugSummary | undefined,
   frame: SectionCapFramePerformance,
@@ -327,7 +334,7 @@ export const appendSectionCapPerformanceFrame = (
   const boundedLimit = Math.max(1, historyLimit);
   const nextHistory = [...(previous?.history ?? []), frame].slice(-boundedLimit);
   return {
-    latestFrame: frame,
+    latestFrame: frame.counters.skippedFrameCount > 0 && previous ? previous.latestFrame : frame,
     history: nextHistory,
     aggregates: buildAggregates(nextHistory),
   };

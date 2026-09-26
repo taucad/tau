@@ -20,10 +20,24 @@ export const createSectionViewSafeSnapshotStore = (): SectionViewSafeSnapshotSto
   rejection: undefined,
 });
 
+/**
+ * Commits a certified section. Recommitting the committed identity keeps the committed snapshot and its plane object,
+ * so the clipping that reads it sees no change; the identity already names the plane to the precision it is keyed at.
+ */
 export const commitSectionViewSafeSnapshot = (
   store: SectionViewSafeSnapshotStore,
   snapshot: Omit<SectionViewSafeSnapshot, 'plane'> & Readonly<{ plane: THREE.Plane }>,
 ): void => {
+  const { committed } = store;
+  if (
+    !store.rejection &&
+    committed?.identity === snapshot.identity &&
+    committed.sourceIdentity === snapshot.sourceIdentity &&
+    committed.kind === snapshot.kind
+  ) {
+    return;
+  }
+
   store.committed = { ...snapshot, plane: snapshot.plane.clone() };
   store.rejection = undefined;
 };

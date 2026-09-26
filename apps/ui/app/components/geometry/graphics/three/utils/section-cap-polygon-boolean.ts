@@ -26,6 +26,9 @@ type TriangulateCapMultiPolygonOptions = Readonly<{
   meshWorldInverse: THREE.Matrix4;
 }>;
 
+const _world = /* @__PURE__ */ new THREE.Vector3();
+const _planeUv = { u: 0, v: 0 };
+
 export const defaultSectionCapBooleanBackend = createClipper2TsBackend();
 export const defaultSectionCapBooleanOperations = createSectionCapBooleanOperations(defaultSectionCapBooleanBackend);
 
@@ -72,8 +75,8 @@ const appendTriangulatedPolygon = (
   const allRings = [outer, ...polygon.slice(1)];
   for (const ring of allRings) {
     for (const point of ring) {
-      const world = capPointToWorld(point, options.basis).applyMatrix4(options.meshWorldInverse);
-      const planeUv = denormalizeCapPoint(point, options.basis);
+      const world = capPointToWorld(point, options.basis, _world).applyMatrix4(options.meshWorldInverse);
+      const planeUv = denormalizeCapPoint(point, options.basis, _planeUv);
       options.positions.push(world.x, world.y, world.z);
       options.planeUv.push(planeUv.u, planeUv.v);
     }

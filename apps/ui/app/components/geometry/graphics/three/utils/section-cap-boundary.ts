@@ -62,8 +62,8 @@ export const buildSectionCapBoundaryPositions = (options: {
       for (let index = 0; index < ring.length; index++) {
         const current = ring[index]!;
         const next = ring[(index + 1) % ring.length]!;
-        _firstWorld.copy(capPointToWorld(current, options.basis));
-        _secondWorld.copy(capPointToWorld(next, options.basis));
+        capPointToWorld(current, options.basis, _firstWorld);
+        capPointToWorld(next, options.basis, _secondWorld);
         if (bias !== 0) {
           _firstWorld.addScaledVector(options.basis.normal, bias);
           _secondWorld.addScaledVector(options.basis.normal, bias);

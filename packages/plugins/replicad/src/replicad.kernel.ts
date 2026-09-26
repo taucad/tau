@@ -22,7 +22,6 @@ import type {
   KernelStackFrame,
 } from '@taucad/runtime/types';
 import { SourceMapConsumer } from 'source-map-js';
-import { converter, serializeHex } from 'culori';
 import type { RawSourceMap } from 'source-map-js';
 import {
   asBuffer,
@@ -94,8 +93,6 @@ import {
 } from '@taucad/geometry-core';
 
 type NativeHandle = GlbResources & { shapes: NativeHandleEntry[] };
-
-const toSrgb = converter('rgb');
 
 const tracedStep = <T>(tracer: RuntimeSpanTracer, label: string, operation: () => T): T => {
   const span = tracer.startSpan(label);
@@ -454,7 +451,7 @@ export const replicadKernel = defineKernel({
   detectImport: replicadDetectPattern,
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
   name: 'ReplicadKernel',
-  version: '1.1.0',
+  version: '1.1.1',
   optionsSchema: replicadOptionsSchema,
   render: {
     optionsSchema: replicadRenderSchema,
@@ -993,29 +990,10 @@ export const replicadKernel = defineKernel({
                 ? nativeHandle.shapes.map((entry) => rotateNativeEntryToYup(entry))
                 : nativeHandle.shapes;
 
-            const stepShapes = shapes.map((s) => ({
-              shape: s.shape,
-              name: s.name,
-              color: s.material?.pbrMetallicRoughness?.baseColorFactor
-                ? serializeHex(
-                    toSrgb({
-                      mode: 'lrgb',
-                      r: s.material.pbrMetallicRoughness.baseColorFactor[0]!,
-                      g: s.material.pbrMetallicRoughness.baseColorFactor[1]!,
-                      b: s.material.pbrMetallicRoughness.baseColorFactor[2]!,
-                    }),
-                  )
-                : s.color,
-              alpha: s.material?.pbrMetallicRoughness?.baseColorFactor?.[3] ?? s.opacity,
-              metalness: s.material?.pbrMetallicRoughness?.metallicFactor ?? s.metalness,
-              roughness: s.material?.pbrMetallicRoughness?.roughnessFactor ?? s.roughness,
-              density: s.density,
-              resolvedInterfaces: s.resolvedInterfaces,
-            }));
             let stepBlob: Blob;
             try {
               stepBlob = await tracedPhase(runtime.tracer, 'export.exportSTEP', () =>
-                exportSTEP(context.openCascade, stepShapes, {
+                exportSTEP(context.openCascade, shapes, {
                   phase: (label, operation) => tracedStep(runtime.tracer, label, operation),
                 }),
               );

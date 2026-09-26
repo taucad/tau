@@ -639,14 +639,27 @@ const gltfRequestMatches = (context: GraphicsContext, event: Readonly<{ revision
   event.revision === context.gltfPresentation.requestedRevision && event.key === context.gltfPresentation.requestedKey;
 
 /* The displayed translation is the pivot's projection on the base axis, rounded
- * at the selected display-unit precision. Both callers read the pivot this
- * event started from, exactly as the property assigners they replace did. */
+ * at the selected display-unit precision. */
 const projectedTranslation = (context: GraphicsContext, pivot: [number, number, number]): number =>
   roundTranslationToUnitDecimals(
     dot(getBaseAxis(context.selectedSectionViewId), pivot),
     context.displayUnits.length.metersPerUnit,
     2,
   );
+
+/* A drag reports its position on every pointer move, often unchanged. Keeping the stored tuple for an
+ * equal value is what lets an unchanged step reach no selector, effect or persisted record. */
+const keepEqualTuple = (current: [number, number, number], next: [number, number, number]): [number, number, number] =>
+  current[0] === next[0] && current[1] === next[1] && current[2] === next[2] ? current : next;
+
+/** Moves the cut's pivot and its displayed projection; a step that lands where the cut already is changes nothing. */
+const moveSectionPivot = (context: GraphicsContext, pivot: [number, number, number]): { context?: GraphicsPatch } => {
+  const sectionViewPivot = keepEqualTuple(context.sectionViewPivot, pivot);
+  const sectionViewTranslation = projectedTranslation(context, sectionViewPivot);
+  return sectionViewPivot === context.sectionViewPivot && sectionViewTranslation === context.sectionViewTranslation
+    ? {}
+    : { context: { sectionViewPivot, sectionViewTranslation } };
+};
 
 const beginMeasureHoverSuppression = (context: GraphicsContext, enq: GraphicsEnqueue): GraphicsPatch => {
   if (!context.viewerHoverSuppressionReasons.includes('measureTool')) {
@@ -1047,7 +1060,9 @@ export const graphicsMachine = setup({
             viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, event.reason),
           }),
         },
-        markModelPointerGestureMoved: { context: { suppressNextModelPointerClick: true } },
+        // Sent on every step of a gizmo drag; only the first one changes anything.
+        markModelPointerGestureMoved: ({ context }) =>
+          context.suppressNextModelPointerClick ? {} : { context: { suppressNextModelPointerClick: true } },
         clearModelPointerClickGuard: { context: { suppressNextModelPointerClick: false } },
 
         // Geometry updates
@@ -1295,12 +1310,7 @@ export const graphicsMachine = setup({
           return {};
         },
         // Section view physical pivot updates.
-        setSectionViewPivot: {
-          context: ({ context, event }) => ({
-            sectionViewPivot: event.payload,
-            sectionViewTranslation: projectedTranslation(context, event.payload),
-          }),
-        },
+        setSectionViewPivot: ({ context, event }) => moveSectionPivot(context, event.payload),
 
         // Measurement events (available in all operational states)
         clearMeasurement: {
@@ -1372,46 +1382,41 @@ export const graphicsMachine = setup({
                     : { context: selectSectionView(context, event.payload) },
                 /* Move the pivot along the CURRENT rotated normal, preserving the component
                  * perpendicular to that normal so no jump occurs. The displayed translation is the
-                 * projection of the pivot this event started from, as it always was. */
-                setSectionViewTranslation: {
-                  context: ({ context, event }) => {
-                    // Round the physical metre value at the selected display-unit precision.
-                    const desired = roundTranslationToUnitDecimals(
-                      event.payload,
-                      context.displayUnits.length.metersPerUnit,
-                      2,
-                    );
+                 * moved pivot's projection, which is the rounded requested value. */
+                setSectionViewTranslation: ({ context, event }) => {
+                  // Round the physical metre value at the selected display-unit precision.
+                  const desired = roundTranslationToUnitDecimals(
+                    event.payload,
+                    context.displayUnits.length.metersPerUnit,
+                    2,
+                  );
 
-                    const a = getBaseAxis(context.selectedSectionViewId); // Base axis
-                    const r = normalize(rotateVectorByEuler(a, context.sectionViewRotation)); // Rotated normal
+                  const a = getBaseAxis(context.selectedSectionViewId); // Base axis
+                  const r = normalize(rotateVectorByEuler(a, context.sectionViewRotation)); // Rotated normal
 
-                    const p = context.sectionViewPivot;
-                    const pr = dot(p, r);
-                    const pParallelR = scale(r, pr);
-                    const pPerpR = sub(p, pParallelR);
+                  const p = context.sectionViewPivot;
+                  const pr = dot(p, r);
+                  const pParallelR = scale(r, pr);
+                  const pPerpR = sub(p, pParallelR);
 
-                    const denom = dot(a, r);
-                    const s = Math.abs(denom) > 1e-6 ? (desired - dot(a, pPerpR)) / denom : desired;
-                    return {
-                      sectionViewPivot: add(pPerpR, scale(r, s)),
-                      sectionViewTranslation: projectedTranslation(context, context.sectionViewPivot),
-                    };
-                  },
+                  const denom = dot(a, r);
+                  const s = Math.abs(denom) > 1e-6 ? (desired - dot(a, pPerpR)) / denom : desired;
+                  return moveSectionPivot(context, add(pPerpR, scale(r, s)));
                 },
                 /* Rotation does not change the pivot. Ensure displayed translation stays
                  * consistent with pivot projection onto the base axis. */
-                setSectionViewRotation: {
-                  context: ({ context, event }) => {
-                    const [rx, ry, rz] = event.payload;
-                    return {
-                      sectionViewRotation: [
-                        clampRadiansToNearestDegree(rx),
-                        clampRadiansToNearestDegree(ry),
-                        clampRadiansToNearestDegree(rz),
-                      ],
-                      sectionViewTranslation: projectedTranslation(context, context.sectionViewPivot),
-                    };
-                  },
+                setSectionViewRotation: ({ context, event }) => {
+                  const [rx, ry, rz] = event.payload;
+                  const sectionViewRotation = keepEqualTuple(context.sectionViewRotation, [
+                    clampRadiansToNearestDegree(rx),
+                    clampRadiansToNearestDegree(ry),
+                    clampRadiansToNearestDegree(rz),
+                  ]);
+                  const sectionViewTranslation = projectedTranslation(context, context.sectionViewPivot);
+                  return sectionViewRotation === context.sectionViewRotation &&
+                    sectionViewTranslation === context.sectionViewTranslation
+                    ? {}
+                    : { context: { sectionViewRotation, sectionViewTranslation } };
                 },
                 toggleSectionViewDirection: {
                   context: ({ context }) => ({ sectionViewDirection: context.sectionViewDirection === 1 ? -1 : 1 }),

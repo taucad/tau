@@ -76,13 +76,18 @@ type DesktopShell = {
 export type DesktopQuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };
 
 /**
- * The native half of one binding ceremony (D10): the secret and the address to
- * pin trust from. Both are absent for the simulator.
+ * The native half of one binding ceremony (D10). The host pins trust from the
+ * address discovery found the printer at, so `address` is informational. Without an
+ * `accessCode` the host reuses the code it saved for this printer, and refuses
+ * with `MACHINE_CREDENTIAL_REQUIRED` or `MACHINE_CREDENTIAL_TRUST_CHANGED` when
+ * none is saved or the printer's certificate changed. Both are absent for the
+ * simulator.
  * @public
  */
 export type DesktopMachineBindingCompletion = {
   readonly ceremonyId: string;
   readonly address?: string;
+  /** A newly typed code, which wins over a saved one. */
   readonly accessCode?: string;
 };
 
@@ -227,8 +232,10 @@ export type DesktopBridge = {
     /**
      * Complete a ceremony `beginBinding` answered with `operator-action-required`.
      *
-     * The access code goes straight to the utility's protected store and is
-     * never kept in page state; the outcome is the host's own.
+     * A typed access code goes straight to the host, which keeps it in the OS
+     * keychain once the printer accepts it, and is never kept in page state;
+     * the outcome is the host's own. A refusal reaches the page as a message
+     * that carries the host's code.
      */
     completeBinding(input: DesktopMachineBindingCompletion): Promise<MachineBindingOutcome>;
   };

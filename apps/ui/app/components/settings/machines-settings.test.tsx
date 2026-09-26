@@ -16,6 +16,7 @@ import {
   boundEntry,
   simulatedEntry,
   simulatorProvider,
+  workshopEntry,
   x1cProvider,
 } from '#components/settings/machine-details.fixture.js';
 
@@ -55,21 +56,32 @@ const candidate: MachineCandidate = {
   expiresAt: '2026-09-24T00:01:00.000Z',
 };
 
+/** A printer heard on the LAN whose access code the host already holds. */
+const savedCandidate: MachineCandidate = {
+  ...candidate,
+  id: 'bambu:00M1',
+  name: 'Workshop X1C',
+  endpoint: { address: '192.168.0.112', interface: 'udp4' },
+  claimedIdentity: { model: 'X1C', serial: '00M1' },
+  credential: 'saved',
+};
+
+const snapshotOf = (entries: readonly MachineDirectoryEntry[]): MachineDirectorySnapshot => ({
+  cursor: {
+    hostId: 'host',
+    authorityId: 'authority',
+    workspaceId: 'workspace',
+    generation: 'g1',
+    position: 0,
+    revision: 0,
+  },
+  entries,
+});
+
 /** A facet whose directory holds `entries`, whose host offers both Bambu providers, and whose ceremonies wait on the operator. */
 const facetWith = (entries: readonly MachineDirectoryEntry[]) => {
   const client = mock<MachineClient>();
-  const snapshot: MachineDirectorySnapshot = {
-    cursor: {
-      hostId: 'host',
-      authorityId: 'authority',
-      workspaceId: 'workspace',
-      generation: 'g1',
-      position: 0,
-      revision: 0,
-    },
-    entries,
-  };
-  client.list.mockResolvedValue(snapshot);
+  client.list.mockResolvedValue(snapshotOf(entries));
   client.listProviders.mockResolvedValue([x1cProvider, simulatorProvider]);
   // oxlint-disable-next-line require-yield -- a watch that only ends on abort yields nothing.
   client.watch.mockImplementation(async function* ({ signal }) {
@@ -107,7 +119,13 @@ describe('MachinesSettings', () => {
     const facet = facetWith([]);
     state.project = projectWith(facet);
     renderSettings();
-    expect(screen.getByText('No machines are bound to this project yet.')).toBeInTheDocument();
+    /* Printers belong to the computer, not the project that happens to be open. */
+    expect(screen.getByText('No printers yet.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Printers set up here are available in every project on this computer. Their access codes are kept in your Keychain.',
+      ),
+    ).toBeInTheDocument();
     const add = screen.getByRole('button', { name: 'Add simulated X1C' });
     await waitFor(() => {
       expect(add).toBeEnabled();
@@ -286,9 +304,12 @@ describe('MachinesSettings', () => {
     const list = await screen.findByRole('list', { name: 'Bound machines' });
     const rows = within(list).getAllByRole('listitem');
     expect(rows).toHaveLength(1);
-    /* The desktop dry-run spec reads exactly this line. */
+    /* The desktop dry-run spec reads exactly this line: Remove is an icon named for the printer, not row text. */
     expect(rows[0]?.textContent).toMatch(/^Simulated X1C\s*Bambu Lab X1C · Simulated$/u);
-    expect(screen.getByText('Removing a machine is not available yet.')).toBeInTheDocument();
+    expect(within(list).getByRole('button', { name: 'Remove Simulated X1C' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
     unmount();
 
     state.project = projectWith({ available: false, reason: 'unsupported' });
@@ -298,7 +319,7 @@ describe('MachinesSettings', () => {
 
     state.project = undefined;
     renderSettings();
-    expect(screen.getByText('Open a project to manage the machines it prints to.')).toBeInTheDocument();
+    expect(screen.getByText("Open any project to manage this computer's printers.")).toBeInTheDocument();
   });
 
   it('should open a bound machine onto its provider manifest and fold it away again', async () => {
@@ -339,5 +360,194 @@ describe('MachinesSettings', () => {
     expect(
       screen.getByText('This host no longer offers the retired-provider provider, so its manifest cannot be shown.'),
     ).toBeInTheDocument();
+  });
+
+  describe('saved access codes', () => {
+    /** Render with every discovery answering `heard`, then find it on the network. */
+    const findSaved = async (heard: MachineCandidate = savedCandidate) => {
+      const facet = facetWith([]);
+      facet.discover.mockImplementation(async function* () {
+        yield { type: 'found', candidate: heard };
+      });
+      state.project = projectWith(facet);
+      renderSettings();
+      const find = screen.getByRole('button', { name: 'Find on network' });
+      await waitFor(() => {
+        expect(find).toBeEnabled();
+      });
+      fireEvent.click(find);
+      await waitFor(() => {
+        expect(find).toBeEnabled();
+      });
+      return facet;
+    };
+    const submit = (): void => {
+      fireEvent.submit(screen.getByRole('form', { name: 'Bind a Bambu Lab X1C' }));
+    };
+
+    it('should bind a printer whose code is saved without asking for one', async () => {
+      const facet = await findSaved();
+
+      const code = screen.getByRole('group', { name: 'Access code' });
+      expect(code).toHaveTextContent('Saved in your Keychain');
+      /* The only thing named "Access code" is that line: no field asks for the code. */
+      expect(screen.getByLabelText('Access code')).toBe(code);
+      expect(screen.getByLabelText('Serial (optional)')).toHaveValue('00M1');
+      expect(screen.getByRole('button', { name: 'Bind' })).toHaveFocus();
+
+      submit();
+
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Workshop X1C is bound as bambu:sim.');
+      });
+      expect(facet.beginBinding).toHaveBeenCalledExactlyOnceWith({ candidate: savedCandidate, name: 'Workshop X1C' });
+      /* No code leaves the page: the host reuses the one it saved. */
+      expect(state.completeBinding).toHaveBeenCalledExactlyOnceWith({
+        ceremonyId: 'ceremony-1',
+        address: '192.168.0.112',
+      });
+    });
+
+    it('should ask for the code before any ceremony when none is typed and none is saved', async () => {
+      const facet = facetWith([]);
+      state.project = projectWith(facet);
+      renderSettings();
+      const bind = screen.getByRole('button', { name: 'Bind' });
+      await waitFor(() => {
+        expect(bind).toBeEnabled();
+      });
+      expect(screen.getByLabelText('Access code')).not.toBeRequired();
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'shop-x1c' } });
+      fireEvent.change(screen.getByLabelText('Address'), { target: { value: '10.0.0.5' } });
+
+      submit();
+
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Enter the access code shown on the printer.');
+      });
+      expect(facet.discover).toHaveBeenCalledOnce();
+      expect(facet.beginBinding).not.toHaveBeenCalled();
+      expect(state.completeBinding).not.toHaveBeenCalled();
+      /* Only the code is cleared, so the retry needs nothing but the code. */
+      expect(screen.getByLabelText('Name')).toHaveValue('shop-x1c');
+      expect(screen.getByLabelText('Address')).toHaveValue('10.0.0.5');
+    });
+
+    it('should send a newly typed code over the saved one after "Use a different code"', async () => {
+      await findSaved();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Use a different code' }));
+
+      const accessCode = screen.getByLabelText('Access code');
+      expect(accessCode).toHaveFocus();
+      expect(screen.queryByText('Saved in your Keychain')).not.toBeInTheDocument();
+      fireEvent.change(accessCode, { target: { value: '87654321' } });
+
+      submit();
+
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Workshop X1C is bound as bambu:sim.');
+      });
+      expect(state.completeBinding).toHaveBeenCalledExactlyOnceWith({
+        ceremonyId: 'ceremony-1',
+        address: '192.168.0.112',
+        accessCode: '87654321',
+      });
+      expect(screen.getByLabelText('Access code')).toHaveValue('');
+    });
+
+    it("should explain a changed certificate from the shell's refusal and ask for the code again", async () => {
+      state.completeBinding.mockRejectedValueOnce(
+        new Error(
+          "Error invoking remote method 'tau:machines:complete-binding': Error: MACHINE_CREDENTIAL_TRUST_CHANGED",
+        ),
+      );
+      await findSaved();
+
+      submit();
+
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent(
+          "The printer's certificate changed since the code was saved. Enter the access code to bind it again.",
+        );
+      });
+      expect(screen.getByLabelText('Access code')).toHaveAttribute('type', 'password');
+      expect(screen.queryByText('Saved in your Keychain')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Name')).toHaveValue('Workshop X1C');
+    });
+  });
+
+  describe('removing a printer', () => {
+    const renderWith = async (entries: readonly MachineDirectoryEntry[]) => {
+      const facet = facetWith(entries);
+      state.project = projectWith(facet);
+      renderSettings();
+      const remove = await screen.findByRole('button', { name: 'Remove Workshop X1C' });
+      /* From here on the host lists nothing: the removal, or the earlier one, took the printer away. */
+      facet.list.mockResolvedValue(snapshotOf([]));
+      return { facet, remove };
+    };
+
+    it('should remove a printer only once the person confirms what removing does', async () => {
+      const { facet, remove } = await renderWith([workshopEntry]);
+      facet.removeBinding.mockResolvedValue({ status: 'removed', machineId: 'workshop-x1c' });
+
+      fireEvent.click(remove);
+
+      expect(remove).toHaveAttribute('aria-expanded', 'true');
+      const confirmation = screen.getByRole('alertdialog', { name: 'Remove Workshop X1C?' });
+      expect(confirmation).toHaveAccessibleDescription(
+        'Tau stops watching it and forgets its saved access code. A print in progress keeps running on the printer.',
+      );
+      expect(within(confirmation).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+      expect(facet.removeBinding).not.toHaveBeenCalled();
+
+      fireEvent.click(within(confirmation).getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Workshop X1C is removed.');
+      });
+      expect(facet.removeBinding).toHaveBeenCalledExactlyOnceWith({ machineId: 'workshop-x1c' });
+      /* The list follows the host's directory. */
+      expect(await screen.findByText('No printers yet.')).toBeInTheDocument();
+      expect(screen.queryByRole('list', { name: 'Bound machines' })).not.toBeInTheDocument();
+    });
+
+    it('should keep a printer with pending requests and say what to resolve first', async () => {
+      const { facet, remove } = await renderWith([workshopEntry]);
+      facet.removeBinding.mockRejectedValue(new Error('MACHINE_BINDING_BUSY'));
+      facet.list.mockResolvedValue(snapshotOf([workshopEntry]));
+      fireEvent.click(remove);
+      const confirmation = screen.getByRole('alertdialog', { name: 'Remove Workshop X1C?' });
+
+      fireEvent.click(within(confirmation).getByRole('button', { name: 'Remove' }));
+
+      expect(await within(confirmation).findByRole('alert')).toHaveTextContent(
+        "Resolve this printer's pending print requests first.",
+      );
+      expect(within(confirmation).getByRole('button', { name: 'Remove' })).toBeEnabled();
+      expect(screen.getByRole('list', { name: 'Bound machines' })).toBeInTheDocument();
+
+      fireEvent.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      expect(remove).toHaveFocus();
+    });
+
+    it('should quietly re-read the list when the printer is already gone', async () => {
+      const { facet, remove } = await renderWith([workshopEntry]);
+      facet.removeBinding.mockRejectedValue(new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE'));
+      fireEvent.click(remove);
+
+      fireEvent.click(
+        within(screen.getByRole('alertdialog', { name: 'Remove Workshop X1C?' })).getByRole('button', {
+          name: 'Remove',
+        }),
+      );
+
+      expect(await screen.findByText('No printers yet.')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('');
+    });
   });
 });

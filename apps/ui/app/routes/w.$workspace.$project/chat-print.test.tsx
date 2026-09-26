@@ -1282,6 +1282,12 @@ describe('Print pane without printers', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'No printers yet' })).toBeInTheDocument();
+    /* Printers belong to the computer, so the pane never speaks of this project's printers. */
+    expect(
+      screen.getByText(
+        'Find a Bambu Lab printer on your network or add the simulated X1C in Settings. Printers set up there are available in every project on this computer.',
+      ),
+    ).toBeInTheDocument();
     /* Discovery and the access-code ceremony live in settings; the pane offers no binding form of its own. */
     expect(screen.queryByRole('button', { name: 'Discover' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Logical Id/u)).not.toBeInTheDocument();

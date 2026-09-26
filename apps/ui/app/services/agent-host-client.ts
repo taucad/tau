@@ -161,7 +161,8 @@ export type AgentHostClientOptions = {
   readonly gatewayBaseUrl: string;
   readonly systemPrompt: string;
   readonly systemPromptBlocks: AgentHostAdmissionConfig['systemPromptBlocks'];
-  readonly model: AgentHostModel;
+  /** Absent while the model catalog is unavailable; see `AgentHostWorkerInitializeRequest.model`. */
+  readonly model?: AgentHostModel | undefined;
   readonly runtimeConfig: UiRuntimeConfigInput;
   readonly testingEnabled?: boolean | undefined;
   readonly createWorker?: (() => Worker) | undefined;
@@ -627,7 +628,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
   if (!capability.supported) {
     throw new AgentHostWorkerError(capability.reason, `Browser agent host is unavailable: ${capability.reason}`);
   }
-  if (!isBrowserAgentHostProviderKind(options.model.providerKind)) {
+  if (options.model !== undefined && !isBrowserAgentHostProviderKind(options.model.providerKind)) {
     throw new AgentHostWorkerError(
       'MODEL_PROVIDER_UNSUPPORTED',
       `Browser host does not speak the ${options.model.providerKind} provider wire.`,

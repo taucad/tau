@@ -265,8 +265,12 @@ const localChatEntries = async (input: ChatRefContext & Readonly<{ chatId: strin
       ),
     ),
   ]);
+  /* A zero-byte log carries no record: a chat whose only logs are empty is a
+   * chat nobody wrote, not one to publish (the desktop registration probe once
+   * created exactly that on every project open). */
   return read
     .filter((entry): entry is readonly [string, Uint8Array<ArrayBuffer>] => entry[1] !== undefined)
+    .filter(([path, content]) => !(path.startsWith('events/') && content.byteLength === 0))
     .map(([path, content]) => [path, content] as const);
 };
 

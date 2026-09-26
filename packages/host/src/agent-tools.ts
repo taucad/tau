@@ -283,7 +283,9 @@ export const createHostNativeGeoSpecRunner = async (
     const filesystem = createNodeVmFileSystem(workspaceRoot);
     const runner = createNativeGeoSpecRunner({
       filesystem,
-      nativeAssertions: { engine: session.engine },
+      // PERF-OUTPUT-01: the product reads verdicts and localized failures, so
+      // it selects the bounded success evidence (ruling 13).
+      nativeAssertions: { engine: session.engine, evidenceProfile: 'bounded' },
       model: {
         projectPath: workspaceRoot,
         runtime: trackedRuntime,

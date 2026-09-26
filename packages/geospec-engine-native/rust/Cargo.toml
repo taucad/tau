@@ -35,6 +35,10 @@ name = "plan_conformance"
 path = "tests/plan_conformance.rs"
 
 [[test]]
+name = "evaluate_claim"
+path = "tests/evaluate_claim.rs"
+
+[[test]]
 name = "matcher_proofs"
 path = "tests/matcher_proofs.rs"
 

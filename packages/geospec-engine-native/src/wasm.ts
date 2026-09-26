@@ -1,7 +1,7 @@
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package module.
-import { callHost } from '#host-types.js';
+import { callHost, toHostClaimEvaluation } from '#host-types.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves in-package contract types.
-import type { HostBytes, HostEngine, HostSubjectLifecycle } from '#host-types.js';
+import type { HostBytes, HostClaimEvaluation, HostEngine, HostSubjectLifecycle } from '#host-types.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package module.
 import { MixedWasmBinding, canonicalizeMixedWasm, initializeMixedWasm } from '#mixed-wasm-loader.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves in-package contract types.
@@ -14,7 +14,7 @@ import type {
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- The host facade exposes the shared protocol-error identity.
 export { ProtocolError } from '#host-types.js'; // eslint-disable-line import-x/no-extraneous-dependencies -- Package import resolves an in-package public contract.
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- The host facade exposes the shared byte contract.
-export type { HostBytes, HostEngine, HostSubjectLifecycle } from '#host-types.js'; // eslint-disable-line import-x/no-extraneous-dependencies -- Package import resolves in-package public contract types.
+export type { HostBytes, HostClaimEvaluation, HostEngine, HostSubjectLifecycle } from '#host-types.js'; // eslint-disable-line import-x/no-extraneous-dependencies -- Package import resolves in-package public contract types.
 
 /** Input accepted by the compiled Emscripten module. @public */
 export type WasmInput = MixedWasmInput;
@@ -123,6 +123,15 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    */
   public evaluatePlan(plan: HostBytes): HostBytes {
     return callHost(() => this.#inner.evaluatePlan(plan));
+  }
+
+  /**
+   * Canonicalize and evaluate a one-claim request in one engine call.
+   * @param request - Exact submitClaims request bytes with exactly one claim.
+   * @returns Views of the exact canonical plan, claim and result bytes over one host copy.
+   */
+  public evaluateClaim(request: HostBytes): HostClaimEvaluation {
+    return toHostClaimEvaluation(callHost(() => this.#inner.evaluateClaim(request)));
   }
 }
 

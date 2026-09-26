@@ -109,7 +109,6 @@ describe('ordinary performance lab runner', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
       Engine: engineConstructor,
       initialize,
-      canonicalize: (value) => value,
     };
     await expect(
       runPerformanceLabCell(

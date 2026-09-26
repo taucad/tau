@@ -82,6 +82,11 @@ impl Engine {
     pub fn evaluate_plan(&self, plan: &[u8]) -> Result<Vec<u8>, JsValue> {
         self.inner.evaluate_plan(plan).map_err(fail)
     }
+
+    #[wasm_bindgen(js_name = evaluateClaim)]
+    pub fn evaluate_claim(&self, request: &[u8]) -> Result<Vec<u8>, JsValue> {
+        self.inner.evaluate_claim(request).map_err(fail)
+    }
 }
 
 #[wasm_bindgen]

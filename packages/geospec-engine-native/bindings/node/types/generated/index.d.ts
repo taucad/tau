@@ -12,6 +12,7 @@ export declare class Engine {
   processRequest(request: Buffer): Buffer
   canonicalPlan(request: Buffer): Buffer
   evaluatePlan(plan: Buffer): Buffer
+  evaluateClaim(request: Buffer): Buffer
   flushCache(): Buffer
   clearOverlapCache(): boolean
   cacheProducerIdentity(): Buffer

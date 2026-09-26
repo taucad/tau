@@ -128,8 +128,16 @@ const acknowledgeSuiteReport = (reports: Array<Record<string, unknown>>): void =
 const instrumentProductBinding = (binding: ProductBinding): ProductPhases => {
   const phases = emptyProductPhases();
   const { prototype } = binding.Engine;
-  const { processRequest, ingestMesh, ingestSubject, subjectHandle, canonicalPlan, evaluatePlan, releaseSubject } =
-    prototype;
+  const {
+    processRequest,
+    ingestMesh,
+    ingestSubject,
+    subjectHandle,
+    canonicalPlan,
+    evaluatePlan,
+    evaluateClaim,
+    releaseSubject,
+  } = prototype;
 
   prototype.processRequest = function (input) {
     const started = process.hrtime.bigint();
@@ -179,6 +187,17 @@ const instrumentProductBinding = (binding: ProductBinding): ProductPhases => {
       phases.evaluationNs += elapsed(started);
     }
   };
+  if (evaluateClaim) {
+    // One call canonicalizes and evaluates, so its whole time is evaluation.
+    prototype.evaluateClaim = function (input) {
+      const started = process.hrtime.bigint();
+      try {
+        return evaluateClaim.call(this, input);
+      } finally {
+        phases.evaluationNs += elapsed(started);
+      }
+    };
+  }
   prototype.releaseSubject = function (input) {
     const started = process.hrtime.bigint();
     try {
@@ -531,6 +550,8 @@ const createPublicClient = ({
       processRequest: (input) => engine.processRequest(input),
       canonicalPlan: (input) => engine.canonicalPlan(input),
       evaluatePlan: (input) => engine.evaluatePlan(input),
+      // The installed client calls whichever evaluation route its product ships.
+      ...(engine.evaluateClaim ? { evaluateClaim: engine.evaluateClaim.bind(engine) } : {}),
     },
     canonicalize: binding.canonicalize,
     claimId: () => claimId,

@@ -443,6 +443,42 @@ impl Engine {
         let prepared = PreparedPlan::prepare(field(envelope, "plan")?)?;
         encode(&self.evaluate_prepared(prepared)?)
     }
+
+    /// Canonicalizes and evaluates a one-claim submitClaims request in one call.
+    ///
+    /// Returns the bytes `canonical_plan`, `canonicalize` of that plan's claim and `evaluate_plan`
+    /// of that plan would return, framed as `plan length (u32 LE), claim length (u32 LE), plan,
+    /// claim, result`. The canonical plan itself is evaluated, exactly as `evaluate_plan` does.
+    pub fn evaluate_claim(&self, request: &[u8]) -> Result<Vec<u8>, ProtocolError> {
+        let value = decode(request)?;
+        let (_, plan) = submit_request(object(&value, "submitClaims request")?)?;
+        let normalized = PreparedPlan::prepare(plan)?.normalized_plan();
+        let [claim] = array(
+            field(object(&normalized, "plan")?, "claims")?,
+            "plan.claims",
+        )?
+        else {
+            return invalid_request("evaluateClaim requires exactly one claim.");
+        };
+        let claim = encode(claim)?;
+        let prepared = PreparedPlan::prepare(&normalized)?;
+        let plan = encode(&canonical_plan_envelope(normalized))?;
+        let result = encode(&self.evaluate_prepared(prepared)?)?;
+        let mut frame = Vec::with_capacity(8 + plan.len() + claim.len() + result.len());
+        for part in [&plan, &claim] {
+            let length = u32::try_from(part.len()).map_err(|_| {
+                ProtocolError::new(
+                    ErrorKind::InvalidRequest,
+                    "Canonical claim evaluation exceeds its u32 frame.",
+                )
+            })?;
+            frame.extend_from_slice(&length.to_le_bytes());
+        }
+        for part in [plan, claim, result] {
+            frame.extend_from_slice(&part);
+        }
+        Ok(frame)
+    }
 }
 
 impl Drop for Engine {

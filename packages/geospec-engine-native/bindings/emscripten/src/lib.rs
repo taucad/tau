@@ -412,6 +412,16 @@ pub extern "C" fn geospec_engine_native_evaluate_plan(
     invoke_engine(engine, plan, plan_length, Engine::evaluate_plan)
 }
 
+/// Canonicalize and evaluate one borrowed one-claim request through a retained engine.
+#[no_mangle]
+pub extern "C" fn geospec_engine_native_evaluate_claim(
+    engine: u32,
+    request: u32,
+    request_length: u32,
+) -> u32 {
+    invoke_engine(engine, request, request_length, Engine::evaluate_claim)
+}
+
 /// Return one when a result owns an error.
 #[no_mangle]
 pub extern "C" fn geospec_engine_native_result_is_error(result: u32) -> u32 {

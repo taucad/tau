@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import struct
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -32,9 +33,7 @@ class _NativeEngine(Protocol):
 
     def observations(self) -> bytes: ...
 
-    def canonical_plan(self, request: bytes) -> bytes: ...
-
-    def evaluate_plan(self, plan: bytes) -> bytes: ...
+    def evaluate_claim(self, request: bytes) -> bytes: ...
 
     def flush_cache(self) -> bytes: ...
 
@@ -623,22 +622,17 @@ class GeoSpecEngine:
             "canonicalProfile": self.canonical_profile,
             "plan": {"subjects": [subject.plan_entry()], "claims": [claim]},
         }
-        canonical_plan = bytes(native.canonical_plan(_json_bytes(request)))
-        parsed_plan = _decode_object(canonical_plan, "canonical plan")
-        plan = _required_object(parsed_plan, "plan", "canonical plan")
-        claims = plan.get("claims")
-        if (
-            not isinstance(claims, list)
-            or len(claims) != 1
-            or not isinstance(claims[0], dict)
-        ):
-            raise RuntimeError(
-                "GeoSpec canonical plan did not return exactly one claim."
-            )
-        canonical_claim = bytes(
-            self._native_module.canonicalize(_json_bytes(claims[0]))
-        )
-        canonical_result = bytes(native.evaluate_plan(canonical_plan))
+        # One engine call: u32le plan length, u32le claim length, plan, claim, result.
+        frame = bytes(native.evaluate_claim(_json_bytes(request)))
+        plan_length, claim_length = struct.unpack_from("<II", frame)
+        claim_start = 8 + plan_length
+        result_start = claim_start + claim_length
+        if result_start > len(frame):
+            raise RuntimeError("GeoSpec engine returned a malformed claim evaluation.")
+        canonical_plan = frame[8:claim_start]
+        canonical_claim = frame[claim_start:result_start]
+        canonical_result = frame[result_start:]
+        parsed_claim = _decode_object(canonical_claim, "canonical claim")
         parsed_result = _decode_object(canonical_result, "canonical result")
         results = parsed_result.get("results")
         if (
@@ -653,7 +647,7 @@ class GeoSpecEngine:
             canonical_claim,
             canonical_plan,
             canonical_result,
-            MappingProxyType(claims[0]),
+            MappingProxyType(parsed_claim),
             MappingProxyType(results[0]),
         )
 

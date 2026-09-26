@@ -783,6 +783,185 @@ describe('createGatewayModelTransport', () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
+  describe('resolveInvocation (GI-S4)', () => {
+    const json = (body: unknown, status = 200): Response =>
+      new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    const resolverFor = (fetch: typeof globalThis.fetch, auth?: () => Promise<string | undefined>) => {
+      const { funding } = createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch,
+        ...(auth === undefined ? {} : { auth }),
+      });
+      if (funding.type !== 'funded') {
+        throw new Error('Tau Cloud transport must be funded');
+      }
+      return async (attemptId = 'attempt-fixture-1', signal = new AbortController().signal) =>
+        funding.resolveInvocation({ attemptId, signal });
+    };
+
+    it('should report the charged amount when the attempt settled', async () => {
+      const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(new URL(input instanceof Request ? input.url : input).pathname).toBe(
+          '/v1/billing/attempts/gateway/attempt-fixture-1',
+        );
+        expect(init?.method ?? 'GET').toBe('GET');
+        return json({
+          state: 'terminal',
+          operationId: 'operation-fixture-1',
+          receipt: { customerState: 'settled', chargedCreditAtoms: '1200', futureField: 'ignored' },
+        });
+      });
+
+      await expect(resolverFor(fetchSpy)()).resolves.toEqual({
+        status: 'terminal',
+        operationId: 'operation-fixture-1',
+        outcome: 'settled',
+        chargedCreditAtoms: '1200',
+      });
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it('should report an unknown principal until the credential port supplies it', async () => {
+      const { funding } = createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: vi.fn() });
+      if (funding.type !== 'funded') {
+        throw new Error('Tau Cloud transport must be funded');
+      }
+      await expect(funding.principal()).resolves.toBeUndefined();
+    });
+
+    it('should report a pending attempt without its operation', async () => {
+      await expect(resolverFor(async () => json({ state: 'pending', operationId: 'operation-1' }))()).resolves.toEqual({
+        status: 'pending',
+      });
+    });
+
+    it('should report a voided attempt when the gateway never admitted it', async () => {
+      await expect(resolverFor(async () => json({ state: 'not_found', voided: true }))()).resolves.toEqual({
+        status: 'voided',
+      });
+      // RV5-F3: a bare not_found comes from an image that did not void the key, so nothing is proved yet.
+      await expect(resolverFor(async () => json({ state: 'not_found' }))()).resolves.toEqual({
+        status: 'unavailable',
+      });
+    });
+
+    it('should report unavailable when the lookup fails', async () => {
+      await expect(
+        resolverFor(async () => {
+          throw new TypeError('fetch failed');
+        })(),
+      ).resolves.toEqual({ status: 'unavailable' });
+      await expect(resolverFor(async () => json({ error: 'down' }, 503))()).resolves.toEqual({ status: 'unavailable' });
+      await expect(
+        resolverFor(async () => json({ state: 'unavailable', operationId: 'op', reason: 'authority_unavailable' }))(),
+      ).resolves.toEqual({ status: 'unavailable' });
+      const lookupDeadline = new AbortController();
+      const timedOut = new DOMException('The operation timed out.', 'TimeoutError');
+      lookupDeadline.abort(timedOut);
+      await expect(
+        resolverFor(async () => {
+          throw timedOut;
+        })('attempt-fixture-1', lookupDeadline.signal),
+      ).resolves.toEqual({ status: 'unavailable' });
+    });
+
+    it('should answer unavailable when the lookup outlasts its 10 s bound (RA-Q5)', async () => {
+      vi.useFakeTimers();
+      try {
+        let lookupSignal: AbortSignal | undefined;
+        const answer = resolverFor(
+          async (_input, init) =>
+            new Promise<Response>((_resolve, reject) => {
+              lookupSignal = init?.signal ?? undefined;
+              lookupSignal?.addEventListener('abort', () => {
+                reject(new DOMException('The operation timed out.', 'TimeoutError'));
+              });
+            }),
+        )();
+        await vi.advanceTimersByTimeAsync(9999);
+        expect(lookupSignal?.aborted).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(answer).resolves.toEqual({ status: 'unavailable' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should rethrow when the caller cancels the lookup', async () => {
+      const cancelled = new AbortController();
+      const reason = new DOMException('The operation was aborted.', 'AbortError');
+      cancelled.abort(reason);
+      await expect(
+        resolverFor(async () => {
+          throw reason;
+        })('attempt-fixture-1', cancelled.signal),
+      ).rejects.toBe(reason);
+    });
+
+    it('should resolve an attempt through a paired daemon', async () => {
+      const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(new Headers(init?.headers).get('authorization')).toBe('Bearer device-credential');
+        return json({ state: 'not_found', voided: true });
+      });
+
+      await expect(resolverFor(fetchSpy, async () => 'device-credential')()).resolves.toEqual({ status: 'voided' });
+    });
+
+    it('should map 401 to the auth code', async () => {
+      await expect(
+        resolverFor(async () => json({ type: 'error', error: { type: 'UNAUTHENTICATED' } }, 401))(),
+      ).rejects.toMatchObject({ name: 'GatewayModelTransportError', code: 'UNAUTHENTICATED', status: 401 });
+    });
+
+    it('should carry a 403 refusal as its own code, never as a sign-in failure', async () => {
+      const refused = async (body: unknown) => resolverFor(async () => json(body, 403))();
+      await expect(
+        refused({ type: 'error', error: { type: 'BILLING_ACCOUNT_CLOSED', message: 'closed' } }),
+      ).rejects.toMatchObject({ code: 'BILLING_ACCOUNT_CLOSED', status: 403 });
+      await expect(
+        refused({ type: 'error', error: { type: 'ORIGIN_NOT_ALLOWED', message: 'origin' } }),
+      ).rejects.toMatchObject({ code: 'ORIGIN_NOT_ALLOWED', status: 403 });
+      await expect(refused({ message: 'Forbidden' })).rejects.toMatchObject({
+        code: 'UNKNOWN_GATEWAY_ERROR',
+        status: 403,
+      });
+    });
+
+    it('should answer unavailable when the caller times out reading the body, and rethrow a cancel', async () => {
+      const failingBody = (reason: DOMException): Response =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(reason);
+            },
+          }),
+          { status: 200 },
+        );
+      const timedOut = new DOMException('The operation timed out.', 'TimeoutError');
+      const deadline = new AbortController();
+      deadline.abort(timedOut);
+      await expect(
+        resolverFor(async () => failingBody(timedOut))('attempt-fixture-1', deadline.signal),
+      ).resolves.toEqual({ status: 'unavailable' });
+
+      const cancelled = new DOMException('The operation was aborted.', 'AbortError');
+      const cancel = new AbortController();
+      cancel.abort(cancelled);
+      await expect(resolverFor(async () => failingBody(cancelled))('attempt-fixture-1', cancel.signal)).rejects.toBe(
+        cancelled,
+      );
+    });
+
+    it('should refuse an answer this build cannot read as MALFORMED_RESPONSE', async () => {
+      await expect(
+        resolverFor(async () => json({ state: 'terminal', operationId: 'op', receipt: { customerState: 'maybe' } }))(),
+      ).rejects.toMatchObject({ code: 'MALFORMED_RESPONSE' });
+      await expect(resolverFor(async () => new Response('<html>', { status: 200 }))()).rejects.toMatchObject({
+        code: 'MALFORMED_RESPONSE',
+      });
+    });
+  });
+
   /*
    * Direct-OpenAI catalog rows must leave over the Responses wire: gpt-5.6-luna
    * answers 400 to any /chat/completions request carrying function tools, and

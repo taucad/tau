@@ -576,6 +576,14 @@
       "fixedBy": "W6"
     },
     {
+      "id": "E31",
+      "bound": "Gateway attempt lookup (resolveInvocation), 10 s, then `unavailable` (RA-Q5)",
+      "site": "packages/agent-host/src/transport/tau-cloud-gateway-model-transport.ts",
+      "token": "attemptLookupTimeout",
+      "class": "External edge",
+      "owner": "W11"
+    },
+    {
       "id": "N1",
       "bound": "Not a timer: a parameter named after",
       "site": "packages/agent-host/src/harness/compaction.ts",

@@ -92,6 +92,8 @@ export type QualifiedAdmissionInput = {
 export type AdmissionDenial =
   | 'account_closed'
   | 'account_restricted'
+  /** A lookup voided this attempt key before it was admitted (GI-R3); the gateway answers 409 `ATTEMPT_VOIDED`. */
+  | 'attempt_voided'
   | 'debt'
   | 'insufficient_credit'
   | 'budget_unavailable'

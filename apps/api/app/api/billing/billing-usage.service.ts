@@ -20,7 +20,8 @@ import {
   wireUsageSnapshotSchema,
 } from '@taucad/billing';
 import type { WireBalanceExplanation, WireOpenHolds, WireOperationReceipt, WireUsageSnapshot } from '@taucad/billing';
-import { recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
+import { CreditLedgerService, recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
+import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
 import { DatabaseService } from '#database/database.service.js';
 import type { DatabaseType } from '#database/database.service.js';
 
@@ -388,6 +389,7 @@ export class BillingUsageService {
   public constructor(
     @Inject(DatabaseService) private readonly databaseService: { database: QueryDatabase },
     @Inject(ConfigService) private readonly configService: QueryConfig,
+    @Inject(CreditLedgerService) private readonly ledger: Pick<CreditLedgerService, 'resolveAttempt'>,
   ) {}
 
   /** Reads an immutable, account-revision-scoped usage snapshot. */
@@ -819,7 +821,7 @@ export class BillingUsageService {
     surface: string;
     attemptKey: string;
     rawQuery: unknown;
-  }): Promise<WireOperationReceipt | { state: 'not_found' }> {
+  }): Promise<WireOperationReceipt | { readonly state: 'not_found'; readonly voided: true }> {
     this.parseRawObject(input.rawQuery, []);
     if (
       !['gateway', 'project_name', 'commit_name', 'code_completion'].includes(input.surface) ||
@@ -827,30 +829,16 @@ export class BillingUsageService {
     ) {
       throw new BadRequestException('Invalid invocation attempt identity');
     }
-    const environment = this.configuredEnvironment();
-    const operationId = await this.databaseService.database.transaction(
-      async (transaction) => {
-        await transaction.execute(sql`select set_config('statement_timeout', ${statementTimeout.toString()}, true)`);
-        const [operation] = await rows<{ id: string }>(
-          transaction,
-          sql`
-        select o.id from billing.credit_operation o
-        join billing.billing_owner_binding b on b.account_id = o.account_id and b.environment = o.environment
-        where b.environment = ${environment} and b.auth_user_id = ${input.authUserId} and b.revoked_at is null
-          and o.surface = ${input.surface} and o.attempt_key = ${input.attemptKey}
-      `,
-        );
-        return operation?.id;
-      },
-      { isolationLevel: 'repeatable read', accessMode: 'read only' },
-    );
-    return operationId === undefined
-      ? { state: 'not_found' }
-      : this.getOperationReceipt({
-          authUserId: input.authUserId,
-          operationId,
-          rawQuery: {},
-        });
+    // GI-R3: a key with no row is voided before this answers, so `not_found` means "never admitted, and never will be".
+    const resolved = await this.ledger.resolveAttempt({
+      environment: this.configuredEnvironment(),
+      authUserId: input.authUserId,
+      surface: input.surface,
+      attemptKey: input.attemptKey,
+    });
+    return 'voided' in resolved
+      ? { state: 'not_found', voided: true }
+      : this.getOperationReceipt({ authUserId: input.authUserId, operationId: resolved.id, rawQuery: {} });
   }
 
   /** Reads one owner-scoped operation and a bounded correction page. */
@@ -1050,7 +1038,7 @@ export class BillingUsageService {
     );
   }
 
-  private configuredEnvironment(): string {
+  private configuredEnvironment(): BillingEnvironment {
     const environment = this.configService.get('BILLING_ENVIRONMENT', { infer: true });
     const parsed = financialEnvironmentSchema.safeParse(environment);
     if (!parsed.success) {

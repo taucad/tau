@@ -68,10 +68,14 @@ export const revisionStreamProjectId = (streamId: string): string | undefined =>
 export const revisionCommittedEventType = 'revision.committed';
 
 /**
- * One committed manifest (D13): its generation and the refs it moved, never
- * bytes. A client that receives it fetches over git.
+ * One committed manifest (D13): its generation, the refs it moved and each
+ * moved ref's new object id, never bytes. A client that receives it fetches
+ * over git, unless it already holds every head (W13e): the echo of its own push
+ * then costs no request at all.
  */
 export type RevisionCommittedPayload = {
   readonly generation: number;
   readonly refs: readonly string[];
+  /** The object id each moved ref now names; a ref the commit removed has none. */
+  readonly heads: Readonly<Record<string, string>>;
 };

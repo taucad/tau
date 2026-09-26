@@ -312,7 +312,7 @@ export class DurableEventsService implements OnModuleInit, OnModuleDestroy {
   public async appendRevision(
     input: RevisionCommittedPayload & { readonly projectId: string; readonly ownerId: string },
   ): Promise<DurableAppendOutcome> {
-    const payload: RevisionCommittedPayload = { generation: input.generation, refs: input.refs };
+    const payload: RevisionCommittedPayload = { generation: input.generation, refs: input.refs, heads: input.heads };
     const entry = {
       streamId: revisionStreamId(input.projectId),
       ownerId: input.ownerId,

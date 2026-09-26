@@ -662,4 +662,13 @@ describe('Tau Hosted Remote constants', () => {
   it('should spell the quota marker the way packages/revisions matches it', () => {
     expect(quotaRefusalMarker).toBe('Tau: storage quota exceeded');
   });
+
+  /* W13e: one account's desktop and browser share the per-project key, and their
+     busiest measured minute was 123 after W13d. The controller's D22 row proves
+     the last request of the budget passes and the next is a `429`. */
+  it('budgets 240 smart-HTTP requests per account and project a minute, and leaves LFS and the account total', () => {
+    expect(constants.gitRequestWindowSeconds).toBe(60);
+    expect(constants.gitRequestsPerWindow).toEqual({ rpc: 240, lfs: 1200 });
+    expect(constants.gitRequestsPerUserPerWindow).toBe(2400);
+  });
 });

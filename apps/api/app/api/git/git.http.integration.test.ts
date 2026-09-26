@@ -100,7 +100,11 @@ const state = {
 /** What one request cost the plan lookups, so the read path's cost is a fact. */
 const queries = { entitlements: 0, usage: 0 };
 /** Every committed manifest announced on the project's `revision` stream (D13), in order. */
-const announced: Array<{ readonly generation: number; readonly refs: readonly string[] }> = [];
+const announced: Array<{
+  readonly generation: number;
+  readonly refs: readonly string[];
+  readonly heads: Readonly<Record<string, string>>;
+}> = [];
 
 const runGit = async (
   args: readonly string[],
@@ -306,8 +310,8 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         {
           provide: DurableEventsService,
           useValue: {
-            appendRevision: async (entry: { generation: number; refs: readonly string[] }) => {
-              announced.push({ generation: entry.generation, refs: entry.refs });
+            appendRevision: async (entry: (typeof announced)[number]) => {
+              announced.push({ generation: entry.generation, refs: entry.refs, heads: entry.heads });
             },
           },
         },
@@ -422,8 +426,12 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(state.generation).toBe(1);
     expect(state.derivedGeneration).toBe(1);
     expect(state.storageBytes).toBeGreaterThan(0);
-    /* D13: the push is announced once, by generation and ref name only. */
-    expect(announced).toEqual([{ generation: 1, refs: ['refs/heads/main'] }]);
+    /* D13: the push is announced once, by generation, ref name and the head it
+       moved to (W13e) — the head is what lets the pusher skip its own echo. */
+    const pushedHead = await gitOk(['rev-parse', 'HEAD'], clone);
+    expect(announced).toEqual([
+      { generation: 1, refs: ['refs/heads/main'], heads: { 'refs/heads/main': pushedHead.stdout.trim() } },
+    ]);
 
     const second = path.join(workspace, 'second');
     await gitOk(['clone', remoteUrl, second], workspace);

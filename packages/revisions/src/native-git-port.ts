@@ -194,6 +194,8 @@ const refusalReason = (summary: string): string => (/stale info/iu.test(summary)
  * changes the answer.
  */
 const commitWalkSlack = 32;
+/** How many files a quota refusal names: the server's `refusedFileLimit` (RV-W8 F11). */
+const refusedFileLimit = 10;
 const branchRefPrefix = 'refs/heads';
 const tagRefPrefix = 'refs/tags';
 const symbolicRefPrefix = 'ref: ';
@@ -534,25 +536,40 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * store exists (`resolveGitLfs`), so this asks the tool rather than
    * re-implementing pointer detection here.
    *
+   * Largest first (RV-W8 F11), so a quota refusal's list reads like the
+   * server's. Sizes come from `--json` (git-lfs 3.3+); an older git-lfs
+   * answers `--name-only` and those paths keep ls-files' order after the sized ones.
+   *
    * @param references - The refs this push offers.
-   * @returns Their large files, deduplicated.
+   * @returns Their large files, deduplicated, largest first.
    */
   const largeObjectPaths = async (references: readonly RevisionPushRef[]): Promise<readonly string[]> => {
-    const paths = new Set<string>();
+    const sizes = new Map<string, number>();
     for (const reference of references) {
       // oxlint-disable-next-line no-await-in-loop -- one tip per offered ref, on the pre-push check only.
-      const listed = await run(['lfs', 'ls-files', '--name-only', reference.name]).catch(() => undefined);
-      if (listed?.exitCode !== 0) {
+      const listed = await run(['lfs', 'ls-files', '--json', reference.name]).catch(() => undefined);
+      if (listed?.exitCode === 0) {
+        const { files = [] } = JSON.parse(textDecoder.decode(listed.stdout)) as {
+          files?: ReadonlyArray<{ name: string; size: number }>;
+        };
+        for (const file of files) {
+          sizes.set(file.name, Math.max(file.size, sizes.get(file.name) ?? 0));
+        }
         continue;
       }
-      for (const line of textDecoder.decode(listed.stdout).split('\n')) {
+      // oxlint-disable-next-line no-await-in-loop -- the fallback for the same ref.
+      const named = await run(['lfs', 'ls-files', '--name-only', reference.name]).catch(() => undefined);
+      if (named?.exitCode !== 0) {
+        continue;
+      }
+      for (const line of textDecoder.decode(named.stdout).split('\n')) {
         const path = line.trim();
-        if (path !== '') {
-          paths.add(path);
+        if (path !== '' && !sizes.has(path)) {
+          sizes.set(path, -1);
         }
       }
     }
-    return [...paths];
+    return [...sizes].toSorted(([, left], [, right]) => right - left).map(([path]) => path);
   };
 
   /**
@@ -581,7 +598,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       return new LfsQuotaError({
         message: said === undefined || said === '' ? 'This project is over its storage plan.' : said,
         oids: Object.freeze([]),
-        paths: Object.freeze([...paths].toSorted()),
+        /* Largest first and at most the server's ten (RV-W8 F11). */
+        paths: Object.freeze(paths.slice(0, refusedFileLimit)),
       });
     }
     return (

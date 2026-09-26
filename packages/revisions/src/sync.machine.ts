@@ -1343,6 +1343,10 @@ const syncMachineDefinition = setup({
               },
             });
           }
+          /* F9: bytes reached the remote, so its stored figure is stale. */
+          if (event.output.refs.some((entry) => entry.status === 'updated') && context.parentRef !== undefined) {
+            enq.sendTo(context.parentRef, { type: 'remote', event: { type: 'pushed' } });
+          }
           return {
             target: 'recording',
             context: {

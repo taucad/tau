@@ -44,6 +44,8 @@
  * | 34 | `reading → connected` invokes `readStorage` | **D18**: a reopened project shows its usage without connecting again |
  * | 35 | `connected`, `readStorage` fails | **D18**: a usage read that fails leaves the connection and its figure alone |
  * | 36 | `connected --quotaRefused-->` after `readStorage` | **D18**: a refusal's figures keep the retained-packs figure it does not carry |
+ * | 37 | `connected --pushed--> connected.reading` | **RV-W8 F9**: a push re-reads the stored figure |
+ * | 38 | `connected.reading --quotaRefused(figures)--> connected.settled` | **RV-W8 F9**: a read that finishes after a refusal's figures cannot overwrite them |
  *
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
@@ -917,6 +919,55 @@ describe('remoteMachine', () => {
       used: 1024 ** 3 + 1,
       quota: 1024 ** 3,
       retained: 5 * 1024 ** 2,
+    });
+    actor.stop();
+  });
+
+  it('37 (F9): reads the stored figure again after a push', async () => {
+    let count = 0;
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async (): Promise<RemoteStorage | undefined> => {
+          count += 1;
+          return { used: count, quota: 1024 };
+        },
+      }),
+    });
+    await settle();
+    expect(selectRemoteFacet(actor.getSnapshot()).storage).toStrictEqual({ used: 1, quota: 1024 });
+
+    actor.send({ type: 'pushed' });
+    await settle();
+
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+      phase: 'connected',
+      storage: { used: 2, quota: 1024 },
+    });
+    actor.stop();
+  });
+
+  it('38 (F9): ignores a storage read that finishes after a refusal set the figures', async () => {
+    let answer: ((storage: RemoteStorage) => void) | undefined;
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async (): Promise<RemoteStorage | undefined> =>
+          new Promise<RemoteStorage>((resolve) => {
+            answer = resolve;
+          }),
+      }),
+    });
+    await settle();
+
+    actor.send({ type: 'quotaRefused', paths: ['huge.bin'], used: 1024 ** 3 + 1, quota: 1024 ** 3 });
+    answer?.({ used: 5, quota: 1024 ** 3 });
+    await settle();
+
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+      phase: 'connected',
+      overQuota: ['huge.bin'],
+      storage: { used: 1024 ** 3 + 1, quota: 1024 ** 3 },
     });
     actor.stop();
   });

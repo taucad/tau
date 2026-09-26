@@ -546,12 +546,6 @@ impl BrepSubject for Control {
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         unreachable!("C1 admission owns validity")
     }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        unreachable!("no extrema fallback")
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        unreachable!("no point classifier")
-    }
     fn classify_face_points(
         &self,
         _: BrepEntity,
@@ -559,15 +553,6 @@ impl BrepSubject for Control {
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
         unreachable!("no point classifier")
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        unreachable!("no solid fallback")
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
-        unreachable!("no wall fallback")
     }
     fn tessellate(
         &self,

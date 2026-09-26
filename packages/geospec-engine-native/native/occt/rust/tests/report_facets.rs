@@ -1,6 +1,6 @@
 //! Report facets share one copy+mesh generation and equal the combined report.
 
-use geospec_engine_native_occt::{BrepSubject, Document, ReportedBrepBundle};
+use geospec_engine_native_occt::{BrepEntity, BrepSubject, Document, ReportedBrepBundle};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -59,9 +59,11 @@ fn a_boolean_between_facets_keeps_the_first_generation() {
     let expected = combined(&bytes);
     let document = Document::from_step(&bytes).unwrap();
     let mesh = document.reported_mesh().unwrap().unwrap();
-    // This Common route may modify its source topology; the report generation
-    // is an isolated copy taken at the first report demand, as before.
-    document.common_volume(0, 1).unwrap();
+    // The report generation is an isolated copy taken at the first report
+    // demand; a source Boolean between facet demands leaves it in place.
+    document
+        .regular_solid_containment(BrepEntity::Occurrence(0), BrepEntity::Occurrence(1))
+        .unwrap();
     assert_eq!(render(&document.reported_facts(mesh).unwrap()), expected);
     assert_eq!(document.report_generation_builds(), 1);
 }

@@ -3,10 +3,9 @@ use std::{cell::Cell, rc::Rc};
 use super::*;
 use crate::backend::{
     brep::{
-        BrepEntity, CircularBoreCandidate, CircularBoreEnd, CircularBoreTopology, CommonVolume,
-        CylinderAxialExtent, EdgeFacts, Extrema, FaceFacts, LocatedFace, OccurrenceFacts,
-        PointState, ProductFacts, ShapeFacts, TessellationProfile, ValidityCheck, WallOptions,
-        WallThicknessOutcome,
+        BrepEntity, CircularBoreCandidate, CircularBoreEnd, CircularBoreTopology,
+        CylinderAxialExtent, EdgeFacts, FaceFacts, LocatedFace, OccurrenceFacts, PointState,
+        ProductFacts, ShapeFacts, TessellationProfile, ValidityCheck,
     },
     TriangleMesh,
 };
@@ -335,27 +334,12 @@ impl BrepSubject for RetainedBrep {
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         Ok(self.validity.clone())
     }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        Err(unused())
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        Err(unused())
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        Err(unused())
-    }
     fn classify_face_points(
         &self,
         _: BrepEntity,
         _: &[[f64; 3]],
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
-        Err(unused())
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
         Err(unused())
     }
     fn tessellate(

@@ -50,8 +50,6 @@ const nativeReport = (options: {
   };
 };
 
-const decodeBase64 = (value: string): Uint8Array<ArrayBuffer> => Uint8Array.from(Buffer.from(value, 'base64'));
-
 describe('model-facing diagnostics', () => {
   it('renders nested rejected warnings in plain-text reasons without dropping their structured originals', () => {
     const nested = [
@@ -95,7 +93,7 @@ describe('model-facing diagnostics', () => {
 });
 
 describe('native canonical reports', () => {
-  it('projects every passed, failed, and refused claim without changing canonical bytes', () => {
+  it('projects every passed, failed, and refused claim as JSON without canonical engine bytes', () => {
     const passedOne = nativeReport({ claimId: 'pass-1', status: 'passed', polarity: 'positive', seed: 10 });
     const passedTwo = nativeReport({ claimId: 'pass-2', status: 'passed', polarity: 'negative', seed: 20 });
     const failed = nativeReport({ claimId: 'fail-1', status: 'failed', polarity: 'positive', seed: 30 });
@@ -141,15 +139,15 @@ describe('native canonical reports', () => {
       [failing.failures[0]?.reports?.[0], failed],
       [failing.failures[0]?.reports?.[1], refused],
     ] as const) {
-      expect(projected).toMatchObject({
+      expect(projected).toStrictEqual({
+        claimId: original.claimId,
+        status: original.status,
+        polarity: original.polarity,
         claim: original.claim,
         result: original.result,
         diagnostics: original.diagnostics,
         evidence: original.evidence,
       });
-      expect(decodeBase64(projected!.canonicalClaimBase64)).toStrictEqual(original.canonicalClaim);
-      expect(decodeBase64(projected!.canonicalPlanBase64)).toStrictEqual(original.canonicalPlan);
-      expect(decodeBase64(projected!.canonicalResultBase64)).toStrictEqual(original.canonicalResult);
     }
   });
 

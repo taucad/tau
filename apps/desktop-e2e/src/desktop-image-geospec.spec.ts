@@ -200,21 +200,15 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
   }
 });
 
-const canonicalChatReport = (report: GeoSpecCanonicalClaimReport): NativeGeoSpecReport => {
-  const encode = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('base64');
-  return {
-    claimId: report.claimId,
-    status: report.status,
-    polarity: report.polarity,
-    claim: { ...report.claim },
-    result: { ...report.result },
-    diagnostics: [...report.diagnostics],
-    ...(report.evidence === undefined ? {} : { evidence: report.evidence }),
-    canonicalClaimBase64: encode(report.canonicalClaim),
-    canonicalPlanBase64: encode(report.canonicalPlan),
-    canonicalResultBase64: encode(report.canonicalResult),
-  };
-};
+const canonicalChatReport = (report: GeoSpecCanonicalClaimReport): NativeGeoSpecReport => ({
+  claimId: report.claimId,
+  status: report.status,
+  polarity: report.polarity,
+  claim: { ...report.claim },
+  result: { ...report.result },
+  diagnostics: [...report.diagnostics],
+  ...(report.evidence === undefined ? {} : { evidence: report.evidence }),
+});
 
 // Reuse the accepted 10 × 20 × 30 mm C2 box bytes in the actual chat VM.
 const nativeFixtureHash = '1321806f5b10c87126bece80cee96cf867c6c131db655a9f28558a39a086616d';
@@ -326,7 +320,6 @@ it('accepts the project Runtime mesh', async () => {
       }
     }
     const rows = [output.passes[0]!, output.failures[0]!, output.passes[1]!];
-    const subjects: string[] = [];
     for (const [index, row] of rows.entries()) {
       expect(row.targetFile).toBe('native.geospec.ts');
       expect(row.reports).toHaveLength(1);
@@ -334,24 +327,8 @@ it('accepts the project Runtime mesh', async () => {
       expect(report.claimId).toBe(`geospec-claim-${index + 1}`);
       expect(report.status).toBe(index === 1 ? 'failed' : 'passed');
       expect(report.polarity).toBe('positive');
-      const decode = (value: string): unknown => JSON.parse(Buffer.from(value, 'base64').toString('utf8'));
-      expect(decode(report.canonicalClaimBase64)).toEqual(report.claim);
-      expect(decode(report.canonicalResultBase64)).toMatchObject({ results: [report.result] });
       expect(report.result).toMatchObject({ claimId: report.claimId, status: report.status });
-      const plan = z
-        .object({
-          plan: z.object({
-            subjects: z
-              .array(z.object({ slot: z.literal('subject'), subjectHash: z.string().regex(/^[0-9a-f]{64}$/u) }))
-              .length(1),
-            claims: z.array(z.unknown()).length(1),
-          }),
-        })
-        .parse(decode(report.canonicalPlanBase64));
-      expect(plan.plan.claims).toEqual([report.claim]);
-      subjects.push(plan.plan.subjects[0]!.subjectHash);
     }
-    expect(subjects.slice(0, 2)).toEqual([apiSubjectHash, apiSubjectHash]);
     expect(rows.slice(0, 2).map((row) => row.reports![0])).toEqual(apiReports);
     await page.getByRole('button', { name: /^(?:Edited files, )?ran tests$/iu }).click();
     await expectVisible(page.getByText('Tested 3 requirements', { exact: true }));

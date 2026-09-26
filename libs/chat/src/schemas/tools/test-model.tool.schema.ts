@@ -108,8 +108,8 @@ const geometryDiagnosticSchema = z
 /**
  * JSON-safe projection of one complete native GeoSpec claim report.
  *
- * Canonical byte fields use standard padded Base64 so they cross chat and RPC
- * JSON without changing the engine-owned bytes.
+ * The model reads the claim, result and evidence as JSON. Canonical engine
+ * bytes stay with the engine-side report and never enter the model channel.
  *
  * @public
  */
@@ -121,9 +121,6 @@ export const nativeGeoSpecReportSchema = z.object({
   result: z.record(z.string(), jsonValueSchema),
   diagnostics: z.array(jsonValueSchema),
   evidence: jsonValueSchema.optional(),
-  canonicalClaimBase64: z.base64(),
-  canonicalPlanBase64: z.base64(),
-  canonicalResultBase64: z.base64(),
 });
 /** @public */
 export type NativeGeoSpecReport = z.infer<typeof nativeGeoSpecReportSchema>;

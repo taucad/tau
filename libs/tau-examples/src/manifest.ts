@@ -8,67 +8,13 @@ export type ExampleKind = 'model' | 'test-fixture' | 'spec-fixture' | 'reference
 /** Map of kernel names to their available example fixture names. */
 export type ExampleManifest = {
   build123d: 'v8-engine-brep';
-  jscad:
-    | 'cube'
-    | 'cube-cylinder-section-fixture'
-    | 'cylinder'
-    | 'edge-occlusion-fixture'
-    | 'gear'
-    | 'non-manifold-section-fixture'
-    | 'section-cap-fixture'
-    | 'section-overlap-fixture'
-    | 'section-overlap-heavy-planetary-fixture'
-    | 'section-overlap-heavy-v8-fixture'
-    | 'section-picking-fixture';
+  jscad: 'cube' | 'cube-cylinder-section-fixture' | 'cylinder' | 'edge-occlusion-fixture' | 'gear' | 'non-manifold-section-fixture' | 'section-cap-fixture' | 'section-overlap-fixture' | 'section-overlap-heavy-planetary-fixture' | 'section-overlap-heavy-v8-fixture' | 'section-picking-fixture';
   manifold: 'manifold-logo';
   occt: 'v8-engine-brep';
   opencascade: 'v8-engine-brep';
   openscad: 'kitchen-sink';
   picogk: 'boolean-shell' | 'multifile-asset' | 'parameterized-sphere';
-  replicad:
-    | 'bambu-plate'
-    | 'birdhouse'
-    | 'bottle'
-    | 'bundler-feature-matrix'
-    | 'card-holder'
-    | 'chair'
-    | 'copper-lampshade'
-    | 'cycloidal-gear'
-    | 'decorated-box'
-    | 'drinking-glass'
-    | 'flower-attachment-section-outline-fixture'
-    | 'gridfinity-box'
-    | 'helical-gear'
-    | 'hex-screwdriver'
-    | 'hollow-box'
-    | 'ibeam'
-    | 'jscad-logo'
-    | 'lego'
-    | 'libassimp-format-prism'
-    | 'logo'
-    | 'logo-keychain'
-    | 'nanoraster-logo'
-    | 'picovoxel-logo'
-    | 'planetary-gear-system'
-    | 'pot-plant'
-    | 'projection-test'
-    | 'rao-nozzle'
-    | 'replicad-logo'
-    | 'simple-tray'
-    | 'six-axis-arm'
-    | 'staircase'
-    | 'stress-test'
-    | 't-slot-rail'
-    | 'table'
-    | 'tau-wordmark'
-    | 'tray'
-    | 'turbofan'
-    | 'v8-engine'
-    | 'v8-engine-rev2'
-    | 'vase'
-    | 'wavy-vase'
-    | 'wedge-door-stopper'
-    | 'worm-gear-system';
+  replicad: 'bambu-plate' | 'birdhouse' | 'bottle' | 'bundler-feature-matrix' | 'card-holder' | 'chair' | 'copper-lampshade' | 'cycloidal-gear' | 'decorated-box' | 'drinking-glass' | 'flower-attachment-section-outline-fixture' | 'gridfinity-box' | 'helical-gear' | 'hex-screwdriver' | 'hollow-box' | 'ibeam' | 'jscad-logo' | 'lego' | 'libassimp-format-prism' | 'logo' | 'logo-keychain' | 'nanoraster-logo' | 'picovoxel-logo' | 'planetary-gear-system' | 'pot-plant' | 'projection-test' | 'rao-nozzle' | 'replicad-logo' | 'simple-tray' | 'six-axis-arm' | 'staircase' | 'stress-test' | 't-slot-rail' | 'table' | 'tau-wordmark' | 'tray' | 'turbofan' | 'v8-engine' | 'v8-engine-rev2' | 'vase' | 'wavy-vase' | 'wedge-door-stopper' | 'worm-gear-system';
 };
 
 /** Available kernel names. */

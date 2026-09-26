@@ -83,12 +83,6 @@ impl BrepSubject for Control {
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         unreachable!("query validates its own operands")
     }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        unreachable!("no extrema substitute")
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        unreachable!("no sampled containment")
-    }
     fn classify_face_points(
         &self,
         _: BrepEntity,
@@ -96,15 +90,6 @@ impl BrepSubject for Control {
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
         unreachable!("no sampled containment")
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        unreachable!("no common-volume substitute")
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
-        unreachable!("no wall query")
     }
     fn tessellate(
         &self,

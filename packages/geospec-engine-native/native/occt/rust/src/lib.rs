@@ -9,29 +9,28 @@ mod finite_contact_engagement_tests;
 pub use geospec_engine_native_core::backend::brep::{
     Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepSubject, CircularBoreCandidate,
     CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory, CircularBoreNonMember,
-    CircularBoreTermination, CircularBoreTopology, CircularBoreUnqualified, CommonVolume,
-    ContinuousWallDomain, ContinuousWallShape, CurveFacts, CylinderAttachmentProfile,
-    CylinderAxialExtent, CylinderBoundaryOrientation, CylinderBoundarySide, CylinderBoundaryUse,
+    CircularBoreTermination, CircularBoreTopology, CircularBoreUnqualified, ContinuousWallDomain,
+    ContinuousWallShape, CurveFacts, CylinderAttachmentProfile, CylinderAxialExtent,
+    CylinderBoundaryOrientation, CylinderBoundarySide, CylinderBoundaryUse,
     CylinderPeriodicAttachment, CylinderVertex, CylindricalBandBoundaryResidual,
     CylindricalBandProfile, CylindricalBandRim, DatumPlacementFacts, DocumentFacts, EdgeFacts,
     EdgeTreatmentBoundaryRole, EdgeTreatmentBoundaryUse, EdgeTreatmentCertificate,
     EdgeTreatmentCounts, EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind,
     EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
-    EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, Extrema, FaceFacts,
+    EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, FaceFacts,
     FiniteContactCircle, FiniteContactFace, LocatedFace, NominalCylindricalBand, OccurrenceFacts,
     PmiFacts, PmiKind, PointState, ProductFacts, RegularSolidContainment, ReportedBrepBundle,
     ResolvedSourceFace, SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts,
     SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
-    TessellationProfile, TopologyCounts, ValidityFacts, WallOptions, WallSupport, WallThickness,
-    WallThicknessOutcome, MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
-    MAX_EDGE_TREATMENT_BOUNDARY_USES, MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS,
-    MAX_EDGE_TREATMENT_ROWS,
+    TessellationProfile, TopologyCounts, ValidityFacts, MAX_CIRCULAR_BORE_CANDIDATES,
+    MAX_CIRCULAR_BORE_OWNED_BYTES, MAX_EDGE_TREATMENT_BOUNDARY_USES,
+    MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS, MAX_EDGE_TREATMENT_ROWS,
 };
 use geospec_engine_native_core::backend::pmi::{PmiFaceAssociation, PmiField, PmiFieldStatus};
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
 use std::{
     cell::{OnceCell, RefCell},
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     ffi::c_char,
     ptr::NonNull,
     rc::Rc,
@@ -189,21 +188,6 @@ impl Document {
             dedicated_width(grant_width)?,
         )?;
         Ok((Rc::new(mesh), parallel))
-    }
-
-    /// # Safety
-    /// The caller must own this private OCCT closure, initialize a pool cap
-    /// at least `grant_width`, and reserve the caller-inclusive grant until
-    /// the query returns.
-    pub unsafe fn common_volume_dedicated(
-        &self,
-        a: u32,
-        b: u32,
-        grant_width: u32,
-    ) -> Result<(CommonVolume, bool), BackendError> {
-        self.require_occurrence(a)?;
-        self.require_occurrence(b)?;
-        common_volume_with_control(self.raw.as_ptr(), a, b, dedicated_width(grant_width)?)
     }
 
     /// # Safety
@@ -813,33 +797,6 @@ impl BrepSubject for Document {
         Ok(validity)
     }
 
-    fn extrema(&self, a: BrepEntity, b: BrepEntity) -> Result<Extrema, BackendError> {
-        self.validate_entity(a)?;
-        self.validate_entity(b)?;
-        unsafe { extrema(self.raw.as_ptr(), a, b) }
-    }
-
-    fn classify_points(
-        &self,
-        occurrence: u32,
-        points: &[[f64; 3]],
-    ) -> Result<Vec<PointState>, BackendError> {
-        self.require_occurrence(occurrence)?;
-        unsafe { classify_points(self.raw.as_ptr(), occurrence, points) }
-    }
-
-    fn common_volume(&self, a: u32, b: u32) -> Result<CommonVolume, BackendError> {
-        if let Some(width) = self.parallel_grant_width {
-            // SAFETY: see the connector's lifetime permit contract.
-            let (facts, used_parallel) = unsafe { self.common_volume_dedicated(a, b, width)? };
-            require_grant_mode(width, used_parallel)?;
-            return Ok(facts);
-        }
-        self.require_occurrence(a)?;
-        self.require_occurrence(b)?;
-        unsafe { common_volume(self.raw.as_ptr(), a, b) }
-    }
-
     fn classify_face_points(
         &self,
         face: BrepEntity,
@@ -856,13 +813,6 @@ impl BrepSubject for Document {
             ));
         }
         unsafe { classify_face_points(self.raw.as_ptr(), face, points, tolerance_mm) }
-    }
-
-    fn minimum_wall_thickness(
-        &self,
-        options: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
-        unsafe { minimum_wall_thickness(self.raw.as_ptr(), options) }
     }
 
     fn tessellate(
@@ -2203,47 +2153,6 @@ unsafe fn validity_with_control(
     ))
 }
 
-unsafe fn extrema(
-    raw: *const ffi::Document,
-    a: BrepEntity,
-    b: BrepEntity,
-) -> Result<Extrema, BackendError> {
-    let mut value = ffi::Extrema::default();
-    let mut error = ErrorBuffer::new();
-    check(
-        ffi::geospec_occt_extrema(raw, a.into(), b.into(), &mut value, error.raw()),
-        &error,
-    )?;
-    Ok(Extrema {
-        distance: value.distance,
-        point_a: value.point_a,
-        point_b: value.point_b,
-    })
-}
-
-unsafe fn classify_points(
-    raw: *const ffi::Document,
-    occurrence: u32,
-    points: &[[f64; 3]],
-) -> Result<Vec<PointState>, BackendError> {
-    let flat = points.iter().flatten().copied().collect::<Vec<_>>();
-    let mut states = vec![0; points.len()];
-    let mut error = ErrorBuffer::new();
-    check(
-        ffi::geospec_occt_classify_points(
-            raw,
-            occurrence,
-            flat.as_ptr(),
-            points.len(),
-            states.as_mut_ptr(),
-            states.len(),
-            error.raw(),
-        ),
-        &error,
-    )?;
-    states.into_iter().map(point_state).collect()
-}
-
 unsafe fn classify_face_points(
     raw: *const ffi::Document,
     face: BrepEntity,
@@ -2267,44 +2176,6 @@ unsafe fn classify_face_points(
         &error,
     )?;
     states.into_iter().map(point_state).collect()
-}
-
-unsafe fn common_volume(
-    raw: *const ffi::Document,
-    a: u32,
-    b: u32,
-) -> Result<CommonVolume, BackendError> {
-    Ok(common_volume_with_control(raw, a, b, 0)?.0)
-}
-
-unsafe fn common_volume_with_control(
-    raw: *const ffi::Document,
-    a: u32,
-    b: u32,
-    grant_width: i32,
-) -> Result<(CommonVolume, bool), BackendError> {
-    let mut value = ffi::CommonVolume::default();
-    let mut used_parallel = 0;
-    let mut error = ErrorBuffer::new();
-    check(
-        ffi::geospec_occt_common_volume_dedicated(
-            raw,
-            a,
-            b,
-            grant_width,
-            &mut used_parallel,
-            &mut value,
-            error.raw(),
-        ),
-        &error,
-    )?;
-    Ok((
-        CommonVolume {
-            volume: value.volume,
-            centroid: value.centroid,
-        },
-        used_parallel != 0,
-    ))
 }
 
 unsafe fn regular_solid_containment(
@@ -3314,105 +3185,6 @@ unsafe fn edge_treatments(
     Ok(inventory)
 }
 
-fn rejection_counts(value: &ffi::WallResult) -> BTreeMap<String, u32> {
-    let mut result = BTreeMap::new();
-    for (name, count) in [
-        ("checkedPairs", value.checked_pairs),
-        ("extremaFailed", value.extrema_failed),
-        ("zeroLength", value.zero_length),
-        ("noMaterialInterval", value.no_material_interval),
-    ] {
-        if count != 0 {
-            result.insert(name.to_owned(), count);
-        }
-    }
-    result
-}
-
-unsafe fn minimum_wall_thickness(
-    raw: *const ffi::Document,
-    options: &WallOptions,
-) -> Result<WallThicknessOutcome, BackendError> {
-    let input = ffi::WallOptions {
-        work_unit_budget: options.work_unit_budget,
-        mesh_linear_tolerance_mm: options.mesh_linear_tolerance_mm,
-        mesh_angular_tolerance_degrees: options.mesh_angular_tolerance_degrees,
-    };
-    let mut value = ffi::WallResult::default();
-    let mut error = ErrorBuffer::new();
-    check(
-        ffi::geospec_occt_minimum_wall_thickness(raw, &input, &mut value, error.raw()),
-        &error,
-    )?;
-    let rejections = rejection_counts(&value);
-    match value.outcome {
-        0 => Ok(WallThicknessOutcome::Measured(WallThickness {
-            consumed: value.consumed,
-            value: value.value,
-            location: Some(value.location),
-            point_a: Some(value.point_a),
-            point_b: Some(value.point_b),
-            solid_index: Some(value.solid_index),
-            tie_count: Some(value.tie_count),
-            algorithm: "occt-exact-face-extrema-material-interval".to_owned(),
-            tolerance: 1e-6,
-            support_a: Some(WallSupport {
-                face_index: Some(value.face_a + 1),
-                surface_type: surface_name(value.surface_a),
-                support_type: support_name(value.support_a),
-            }),
-            support_b: Some(WallSupport {
-                face_index: Some(value.face_b + 1),
-                surface_type: surface_name(value.surface_b),
-                support_type: support_name(value.support_b),
-            }),
-            rejections,
-        })),
-        1 => Ok(WallThicknessOutcome::Empty {
-            consumed: value.consumed,
-            rejections,
-        }),
-        2 => Ok(WallThicknessOutcome::BudgetExceeded {
-            consumed: value.consumed,
-            limit: value.limit,
-        }),
-        _ => Err(backend_error("OCCT returned an unknown wall outcome.")),
-    }
-}
-
-fn surface_name(value: i32) -> Option<String> {
-    Some(
-        match value {
-            0 => "plane",
-            1 => "cylinder",
-            2 => "cone",
-            3 => "sphere",
-            4 => "torus",
-            5 => "bezier",
-            6 => "bspline",
-            7 => "revolution",
-            8 => "extrusion",
-            9 => "offset",
-            10 => "other",
-            _ => return None,
-        }
-        .to_owned(),
-    )
-}
-
-fn support_name(value: i32) -> Option<String> {
-    Some(
-        match value {
-            0 => "vertex",
-            1 => "edge",
-            2 => "face",
-            3 => "unknown",
-            _ => return None,
-        }
-        .to_owned(),
-    )
-}
-
 unsafe fn report_mesh(
     raw: *const ffi::Document,
     sizes: &ffi::ReportSizes,
@@ -3882,21 +3654,6 @@ mod ffi {
 
     #[derive(Clone, Copy, Default)]
     #[repr(C)]
-    pub struct Extrema {
-        pub distance: f64,
-        pub point_a: [f64; 3],
-        pub point_b: [f64; 3],
-    }
-
-    #[derive(Clone, Copy, Default)]
-    #[repr(C)]
-    pub struct CommonVolume {
-        pub volume: f64,
-        pub centroid: [f64; 3],
-    }
-
-    #[derive(Clone, Copy, Default)]
-    #[repr(C)]
     pub struct RegularSolidContainment {
         pub contained: i32,
         pub residual_solid_count: u32,
@@ -4015,38 +3772,6 @@ mod ffi {
         pub chamfer_reason: i32,
         pub fillet_disposition: i32,
         pub fillet_reason: i32,
-    }
-
-    #[derive(Clone, Copy, Default)]
-    #[repr(C)]
-    pub struct WallOptions {
-        pub work_unit_budget: u64,
-        pub mesh_linear_tolerance_mm: f64,
-        pub mesh_angular_tolerance_degrees: f64,
-    }
-
-    #[derive(Clone, Copy, Default)]
-    #[repr(C)]
-    pub struct WallResult {
-        pub outcome: i32,
-        pub consumed: u64,
-        pub limit: u64,
-        pub value: f64,
-        pub location: [f64; 3],
-        pub point_a: [f64; 3],
-        pub point_b: [f64; 3],
-        pub solid_index: u32,
-        pub tie_count: u32,
-        pub face_a: u32,
-        pub face_b: u32,
-        pub surface_a: i32,
-        pub surface_b: i32,
-        pub support_a: i32,
-        pub support_b: i32,
-        pub checked_pairs: u32,
-        pub extrema_failed: u32,
-        pub zero_length: u32,
-        pub no_material_interval: u32,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -4517,13 +4242,6 @@ mod ffi {
             reason: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_extrema(
-            document: *const Document,
-            a: Entity,
-            b: Entity,
-            extrema: *mut Extrema,
-            error: *mut StringBuffer,
-        ) -> i32;
         pub fn geospec_occt_cylinder_axial_extent(
             document: *const Document,
             face: Entity,
@@ -4592,15 +4310,6 @@ mod ffi {
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_edge_treatments_discard(document: *const Document);
-        pub fn geospec_occt_classify_points(
-            document: *const Document,
-            occurrence: u32,
-            points: *const f64,
-            point_count: usize,
-            states: *mut i32,
-            state_capacity: usize,
-            error: *mut StringBuffer,
-        ) -> i32;
         pub fn geospec_occt_classify_face_points(
             document: *const Document,
             face: Entity,
@@ -4611,15 +4320,6 @@ mod ffi {
             state_capacity: usize,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_common_volume_dedicated(
-            document: *const Document,
-            occurrence_a: u32,
-            occurrence_b: u32,
-            grant_width: i32,
-            used_parallel: *mut i32,
-            common: *mut CommonVolume,
-            error: *mut StringBuffer,
-        ) -> i32;
         pub fn geospec_occt_regular_solid_containment_dedicated(
             document: *const Document,
             subject: Entity,
@@ -4627,12 +4327,6 @@ mod ffi {
             grant_width: i32,
             used_parallel: *mut i32,
             result: *mut RegularSolidContainment,
-            error: *mut StringBuffer,
-        ) -> i32;
-        pub fn geospec_occt_minimum_wall_thickness(
-            document: *const Document,
-            options: *const WallOptions,
-            wall: *mut WallResult,
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_tessellate_dedicated(

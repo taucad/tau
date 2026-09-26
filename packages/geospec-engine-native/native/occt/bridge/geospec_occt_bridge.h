@@ -65,13 +65,6 @@ enum geospec_occt_point_state {
   GEOSPEC_OCCT_POINT_OUT = 2
 };
 
-enum geospec_occt_support_type {
-  GEOSPEC_OCCT_SUPPORT_VERTEX = 0,
-  GEOSPEC_OCCT_SUPPORT_EDGE = 1,
-  GEOSPEC_OCCT_SUPPORT_FACE = 2,
-  GEOSPEC_OCCT_SUPPORT_UNKNOWN = 3
-};
-
 enum geospec_occt_subshape_type {
   GEOSPEC_OCCT_SUBSHAPE_FACE = 0,
   GEOSPEC_OCCT_SUBSHAPE_EDGE = 1,
@@ -284,17 +277,6 @@ typedef struct geospec_occt_validity_facts {
   int closed_wires;
 } geospec_occt_validity_facts;
 
-typedef struct geospec_occt_extrema_result {
-  double distance;
-  double point_a[3];
-  double point_b[3];
-} geospec_occt_extrema_result;
-
-typedef struct geospec_occt_common_volume_result {
-  double volume;
-  double centroid[3];
-} geospec_occt_common_volume_result;
-
 typedef struct geospec_occt_regular_solid_containment_result {
   int contained;
   uint32_t residual_solid_count;
@@ -396,34 +378,6 @@ typedef struct geospec_occt_edge_treatment_row {
   int fillet_disposition;
   int fillet_reason;
 } geospec_occt_edge_treatment_row;
-
-typedef struct geospec_occt_wall_options {
-  uint64_t work_unit_budget;
-  double mesh_linear_tolerance_mm;
-  double mesh_angular_tolerance_degrees;
-} geospec_occt_wall_options;
-
-typedef struct geospec_occt_wall_result {
-  int outcome;
-  uint64_t consumed;
-  uint64_t limit;
-  double value;
-  double location[3];
-  double point_a[3];
-  double point_b[3];
-  uint32_t solid_index;
-  uint32_t tie_count;
-  uint32_t face_a;
-  uint32_t face_b;
-  int surface_a;
-  int surface_b;
-  int support_a;
-  int support_b;
-  uint32_t checked_pairs;
-  uint32_t extrema_failed;
-  uint32_t zero_length;
-  uint32_t no_material_interval;
-} geospec_occt_wall_result;
 
 typedef struct geospec_occt_report_sizes {
   size_t occurrence_count;
@@ -791,25 +745,6 @@ int geospec_occt_validity_dedicated(
     int* out_used_parallel, geospec_occt_validity_facts* out_validity,
     geospec_occt_string* reason,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_extrema(const geospec_occt_document* document,
-                         geospec_occt_entity a, geospec_occt_entity b,
-                         geospec_occt_extrema_result* out_extrema,
-                         geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_classify_points(
-    const geospec_occt_document* document, uint32_t occurrence,
-    const double* points, size_t point_count, int* states, size_t state_capacity,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_common_volume(
-    const geospec_occt_document* document, uint32_t occurrence_a,
-    uint32_t occurrence_b, geospec_occt_common_volume_result* out_common,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-// Private controls: caller proves a dedicated OCCT closure and exclusively
-// owns the caller-inclusive grant within its first-initialized pool cap.
-int geospec_occt_common_volume_dedicated(
-    const geospec_occt_document* document, uint32_t occurrence_a,
-    uint32_t occurrence_b, int grant_width, int* out_used_parallel,
-    geospec_occt_common_volume_result* out_common,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment(
     const geospec_occt_document* document, geospec_occt_entity subject,
     geospec_occt_entity target,
@@ -916,11 +851,6 @@ int geospec_occt_classify_face_points(
     const geospec_occt_document* document, geospec_occt_entity face,
     const double* points, size_t point_count, double tolerance,
     int* states, size_t state_capacity,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_minimum_wall_thickness(
-    const geospec_occt_document* document,
-    const geospec_occt_wall_options* options,
-    geospec_occt_wall_result* out_wall,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 int geospec_occt_tessellate(const geospec_occt_document* document,

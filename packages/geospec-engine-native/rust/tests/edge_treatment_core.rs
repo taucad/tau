@@ -4,10 +4,10 @@ use super::*;
 use crate::{
     backend::{
         brep::{
-            BrepEntity, CircularBoreInventory, CommonVolume, EdgeFacts, EdgeTreatmentBoundaryUse,
+            BrepEntity, CircularBoreInventory, EdgeFacts, EdgeTreatmentBoundaryUse,
             EdgeTreatmentCounts, EdgeTreatmentResidual, EdgeTreatmentRow, EdgeTreatmentSupport,
-            Extrema, FaceFacts, LocatedFace, PointState, ReportedBrepBundle, ShapeFacts,
-            TessellationProfile, ValidityFacts, WallOptions, WallThicknessOutcome,
+            FaceFacts, LocatedFace, PointState, ReportedBrepBundle, ShapeFacts,
+            TessellationProfile, ValidityFacts,
         },
         TriangleMesh,
     },
@@ -152,27 +152,12 @@ impl BrepSubject for EdgeTreatmentBrep {
             reason: None,
         }))
     }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        Err(unused())
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        Err(unused())
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        Err(unused())
-    }
     fn classify_face_points(
         &self,
         _: BrepEntity,
         _: &[[f64; 3]],
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
-        Err(unused())
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
         Err(unused())
     }
     fn tessellate(

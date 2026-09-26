@@ -4,9 +4,8 @@ use geospec_engine_native_core::{
     backend::{
         brep::{
             Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepIdentityProfile,
-            BrepSubject, CommonVolume, DocumentFacts, EdgeFacts, Extrema, LocatedFace, PointState,
-            ReportedBrepBundle, ShapeFacts, StepSubjectMetadata, TessellationProfile,
-            TopologyCounts, ValidityFacts, WallOptions, WallThicknessOutcome,
+            BrepSubject, DocumentFacts, EdgeFacts, LocatedFace, PointState, ReportedBrepBundle,
+            ShapeFacts, StepSubjectMetadata, TessellationProfile, TopologyCounts, ValidityFacts,
         },
         csg::{
             BooleanOp, CsgConnector, FillRule, MeshExport, Section, SectionOp, SolidId,
@@ -139,27 +138,12 @@ impl BrepSubject for ProjectionBrep {
             reason: None,
         }))
     }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        Err(unsupported())
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        Err(unsupported())
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        Err(unsupported())
-    }
     fn classify_face_points(
         &self,
         _: BrepEntity,
         _: &[[f64; 3]],
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
-        Err(unsupported())
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
         Err(unsupported())
     }
     fn tessellate(

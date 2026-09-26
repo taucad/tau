@@ -1,6 +1,6 @@
 use geospec_engine_native_occt::{
     BrepConnector, BrepEntity, BrepSubject, Document, OcctConnector, SurfaceFacts,
-    TessellationProfile, WallOptions, WallThicknessOutcome,
+    TessellationProfile,
 };
 use std::path::PathBuf;
 
@@ -157,14 +157,7 @@ fn original_validation_reuse_preserves_complete_facts_across_query_orders() {
     BrepSubject::tessellate(&reported, BrepEntity::Whole, COARSE).unwrap();
     let reported_validity = reported.validity().unwrap();
 
-    let boolean = Document::from_step(&bytes).unwrap();
-    let common = boolean.common_volume(0, 1).unwrap();
-    assert_eq!(common.volume.to_bits(), 0.0_f64.to_bits());
-    // First validity on a fresh document exercises the C++ fallback. A validity
-    // already retained in Rust's OnceCell intentionally remains unchanged.
-    let boolean_validity = boolean.validity().unwrap();
-
-    for actual in [direct_validity, reported_validity, boolean_validity] {
+    for actual in [direct_validity, reported_validity] {
         assert_eq!(actual.as_ref(), &expected);
         assert_eq!(
             actual.max_tolerance.map(f64::to_bits),
@@ -247,38 +240,6 @@ fn fixed_report_bundle_preserves_nominal_queries_and_copy_history_entities() {
 
     run_query_order(COARSE, FINE, "coarse-fine");
     run_query_order(FINE, COARSE, "fine-coarse");
-}
-
-#[test]
-fn wall_translation_preserves_actual_consumed_requests() {
-    let measured = Document::from_step(&fixture("ap242-box.step"))
-        .unwrap()
-        .minimum_wall_thickness(&WallOptions {
-            work_unit_budget: 100_000,
-            mesh_linear_tolerance_mm: 0.02,
-            mesh_angular_tolerance_degrees: 0.5,
-        })
-        .unwrap();
-    let WallThicknessOutcome::Measured(measured) = measured else {
-        panic!("closed box must yield measured wall evidence")
-    };
-    assert!(measured.consumed > 0);
-
-    let empty = Document::from_step(&fixture("regular-solid-controls.step"))
-        .unwrap()
-        .minimum_wall_thickness(&WallOptions {
-            work_unit_budget: 100_000,
-            mesh_linear_tolerance_mm: 0.02,
-            mesh_angular_tolerance_degrees: 0.5,
-        })
-        .unwrap();
-    let WallThicknessOutcome::Empty { consumed, .. } = empty else {
-        panic!("mixed regular-solid control must yield empty wall evidence")
-    };
-    eprintln!(
-        "wall-consumed measured={} empty={consumed}",
-        measured.consumed
-    );
 }
 
 #[test]

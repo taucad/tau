@@ -118,10 +118,8 @@ fn mesh_bytes(mesh: &geospec_engine_native_core::backend::TriangleMesh) -> Vec<u
 
 #[derive(Clone, Copy, Debug)]
 enum Operation {
-    Validity,
     Mesh,
     ReportMesh,
-    Common,
     Cut,
     Bore,
 }
@@ -134,7 +132,6 @@ struct Prepared {
 fn prepare(connector: &ParallelOcctConnector, operation: Operation) -> Vec<Prepared> {
     // A report mesh is built once per document, so each query needs its own.
     let count = match operation {
-        Operation::Validity => 24,
         Operation::ReportMesh => 3,
         _ => 1,
     };
@@ -148,9 +145,6 @@ fn prepare(connector: &ParallelOcctConnector, operation: Operation) -> Vec<Prepa
                 _ => include_bytes!("fixtures/regular-solid-controls.step"),
             };
             let document = connector.open_step(input).unwrap();
-            if matches!(operation, Operation::Validity) {
-                document.common_volume(0, 1).unwrap();
-            }
             let cut = matches!(operation, Operation::Cut).then(|| {
                 (
                     occurrence(document.as_ref(), "protruding"),
@@ -165,7 +159,6 @@ fn prepare(connector: &ParallelOcctConnector, operation: Operation) -> Vec<Prepa
 fn query(prepared: &Prepared, operation: Operation) -> Vec<u8> {
     let document = prepared.document.as_ref();
     match operation {
-        Operation::Validity => format!("{:?}", document.validity().unwrap()).into_bytes(),
         Operation::Mesh => {
             let mesh = document
                 .tessellate(
@@ -179,7 +172,6 @@ fn query(prepared: &Prepared, operation: Operation) -> Vec<u8> {
             mesh_bytes(&mesh)
         }
         Operation::ReportMesh => mesh_bytes(&document.reported_mesh().unwrap().unwrap()),
-        Operation::Common => format!("{:?}", document.common_volume(0, 1).unwrap()).into_bytes(),
         Operation::Cut => {
             let (subject, target) = prepared.cut.unwrap();
             serde_json::to_vec(&document.regular_solid_containment(subject, target).unwrap())
@@ -307,10 +299,8 @@ fn one_pool_bounds_width_one_two_four_and_preserves_exact_ordered_results() {
 
     let profiles = [(1, &serial), (2, &two), (4, &four)];
     for operation in [
-        Operation::Validity,
         Operation::Mesh,
         Operation::ReportMesh,
-        Operation::Common,
         Operation::Cut,
         Operation::Bore,
     ] {
@@ -319,7 +309,7 @@ fn one_pool_bounds_width_one_two_four_and_preserves_exact_ordered_results() {
             let (width, connector) = profiles[index];
             let prepared = prepare(connector, operation);
             let count = match operation {
-                Operation::Validity | Operation::ReportMesh => prepared.len(),
+                Operation::ReportMesh => prepared.len(),
                 Operation::Mesh => 3,
                 _ => 24,
             };
@@ -354,13 +344,20 @@ fn one_pool_bounds_width_one_two_four_and_preserves_exact_ordered_results() {
     }
 
     // SAFETY: this test still owns the closure; neither request may run at an
-    // unsafe width, and a failed Common must not invalidate admission reuse.
+    // unsafe width, and validity still reuses the admission proof.
     assert!(unsafe { ParallelOcctConnector::with_grant(5, 4) }.is_err());
     assert!(configure_thread_pool_width(2).is_err());
     let direct = geospec_engine_native_occt::Document::from_step(include_bytes!(
         "fixtures/regular-solid-controls.step"
     ))
     .unwrap();
-    assert!(unsafe { direct.common_volume_dedicated(0, 1, 5) }.is_err());
+    assert!(unsafe {
+        direct.regular_solid_containment_dedicated(
+            BrepEntity::Occurrence(0),
+            BrepEntity::Occurrence(1),
+            5,
+        )
+    }
+    .is_err());
     assert!(!unsafe { direct.validity_dedicated(4).unwrap().1 });
 }

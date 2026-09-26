@@ -5,7 +5,6 @@ import type {
   MachineBeginBindingInput,
   MachineClient,
   MachineControlRunInput,
-  MachineDirectoryCursor,
   MachineDirectoryEntry,
   MachinePreparePrintInput,
   PrintRequest,
@@ -22,13 +21,14 @@ import {
   requestPrintOptionKeys,
 } from '@taucad/chat';
 import { toolDescriptions, toolName } from '@taucad/chat/constants';
+import type { RpcFileSystem } from '@taucad/chat/rpc';
 import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
 import type { SlicerOptionsInput } from '@taucad/slicer';
 import { z } from 'zod';
 
 import { captureFilesToDataUrls } from '#capture/capture-data-urls.js';
-import { defaultBambuStudioEngine, describePrintProfiles } from '#registry/print-profiles.js';
-import type { BambuStudioEngine } from '#registry/print-profiles.js';
+import { defaultBambuStudioEngine, describePrintProfiles, readProjectPrintIntent } from '#registry/print-profiles.js';
+import type { BambuStudioEngine, PrintIntentFile } from '#registry/print-profiles.js';
 
 const identity = z.string().min(1).max(256);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
@@ -46,13 +46,11 @@ const candidate = z.strictObject({
   /* The host marks a discovered printer whose access code it already keeps; echoing it back is harmless. */
   credential: z.enum(['saved']).optional(),
 });
+/* The runtime's `MachineArtifactReference`. The host names the project, so a
+ * model may copy a reference whole from a print request, but its `projectId`
+ * is replaced rather than trusted. */
 const artifact = z.strictObject({
-  revision: z.strictObject({
-    authorityId: identity,
-    workspaceId: identity,
-    revisionId: identity,
-    treeDigest: digest,
-  }),
+  projectId: identity.optional().describe('Always this project; any value given is replaced.'),
   path: z.string().min(1).max(512),
   digest,
   length: z
@@ -139,7 +137,7 @@ const descriptions: Readonly<Record<MachineToolName, string>> = {
     'Run one bounded machine-provider discovery using non-secret provider configuration. Never provide credentials or certificate decisions.',
   begin_machine_binding:
     'Begin the trusted host-local binding ceremony for one discovered candidate. Credentials remain outside this tool.',
-  list_machines: 'List the current workspace machine directory, including freshness and observed run state.',
+  list_machines: "List this computer's machine directory, including freshness and observed run state.",
   [toolName.getMachine]: toolDescriptions[toolName.getMachine],
   [toolName.getPrintProfiles]: toolDescriptions[toolName.getPrintProfiles],
   [toolName.requestPrint]: toolDescriptions[toolName.requestPrint],
@@ -147,7 +145,7 @@ const descriptions: Readonly<Record<MachineToolName, string>> = {
   [toolName.listPrintRequests]: toolDescriptions[toolName.listPrintRequests],
   [toolName.cancelPrint]: toolDescriptions[toolName.cancelPrint],
   prepare_machine_print:
-    'Preflight one immutable revision-owned artifact against a machine: archive, digest, setup and materials are checked and nothing is transferred or started. Host paths and raw G-code are not accepted.',
+    'Preflight one project artifact, named by its path and digest, against a machine: archive, digest, setup and materials are checked and nothing is transferred or started. Host paths and raw G-code are not accepted.',
   upload_machine_print:
     'Transfer one preflighted artifact to the machine storage with a new caller-retained operation ID. Nothing starts; a start only happens through an accepted print request.',
   reconcile_machine_operation:
@@ -169,10 +167,11 @@ const asJson = (value: unknown): JsonValue => {
  *
  * Slices the named source through the runtime export route to `gcode.3mf` —
  * the same route `export_geometry` takes, so the artifact is recorded in the
- * project as a revision-owned reference — composes the provider's submission
- * configuration for the resolved machine (expected setup from what the machine
- * observes, since an agent cannot know a provider's schema), and summarizes the
- * toolpath (`@taucad/slicer/toolpath`) for the approval prompt.
+ * project and named by the project, its path and its digest — composes the
+ * provider's submission configuration for the resolved machine (expected setup
+ * from what the machine observes, since an agent cannot know a provider's
+ * schema), and summarizes the toolpath (`@taucad/slicer/toolpath`) for the
+ * approval prompt.
  *
  * @public
  */
@@ -184,8 +183,6 @@ export type MachinePrintPlanner = (
     targetFile: string;
     /** The machine the print is for, as the directory currently observes it. */
     machine: MachineDirectoryEntry;
-    /** Where the directory was read; qualifies the reference's authority and workspace. */
-    cursor: MachineDirectoryCursor;
     preset?: 'fast' | 'standard' | 'fine' | undefined;
     /** The plate the agent was told is installed; the machine's own report wins. */
     plate?: string | undefined;
@@ -195,6 +192,12 @@ export type MachinePrintPlanner = (
     profiles?: z.infer<typeof requestPrintInputSchema>['profiles'];
     /** Bambu Studio setting keys and values applied over the presets. */
     settings?: z.infer<typeof requestPrintInputSchema>['settings'];
+    /**
+     * The project's print intent file as this call read it, or undefined when
+     * the project has none. The planner applies it under the call's own
+     * choices when it names this machine's model.
+     */
+    intentFile?: PrintIntentFile | undefined;
     signal: AbortSignal;
   }>,
 ) => Promise<
@@ -203,6 +206,8 @@ export type MachinePrintPlanner = (
     /** The provider's submission configuration for this machine. */
     configuration: PrintRequest['configuration'];
     summary?: Omit<PrintRequestSummary, 'fileName'> | undefined;
+    /** What the project's print intent contributed, or why it was ignored, for the tool result. */
+    printIntent?: JsonObject | undefined;
   }>
 >;
 
@@ -210,9 +215,35 @@ export type MachinePrintPlanner = (
 export type MachineToolRegistryOptions = {
   /** Backs `request_print`; without it the tool is not offered rather than offered-and-failing. */
   readonly planPrint?: MachinePrintPlanner | undefined;
+  /**
+   * The `tau.json` id of the project the agent works in. `prepare_machine_print`
+   * names its artifact by this project whatever the model passed, and is not
+   * offered without one.
+   */
+  readonly projectId?: string | undefined;
+  /**
+   * The agent's project filesystem for one invocation. `request_print` and
+   * `get_print_profiles` read the project's print intent,
+   * `.tau/machines/printer.json`, through it as their defaults; without it no
+   * file applies.
+   */
+  readonly fileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
   /** Backs `get_print_profiles`; defaults to this host's `@taucad/slicer/bambu-studio`. */
   readonly bambuStudio?: BambuStudioEngine | undefined;
 };
+
+/**
+ * The project's print intent as this invocation reads it.
+ *
+ * @param options - The registry options; their filesystem is the agent's view of the project.
+ * @param signal - Cancels the read.
+ * @returns The file as read, or undefined when the project has none or no filesystem is wired.
+ */
+const readIntentFile = async (
+  options: MachineToolRegistryOptions,
+  signal: AbortSignal,
+): Promise<PrintIntentFile | undefined> =>
+  options.fileSystemFor === undefined ? undefined : readProjectPrintIntent(options.fileSystemFor(signal), signal);
 
 /** Request states in which there is nothing left to stop. */
 const settledStates = new Set<PrintRequest['state']>(['denied', 'withdrawn', 'rejected', 'failed']);
@@ -240,30 +271,30 @@ const describeMachines = (entries: readonly MachineDirectoryEntry[]): string =>
  * @param client - The negotiated machines facet.
  * @param machineId - The agent's choice, when it made one.
  * @param signal - Cancels the directory read.
- * @returns The directory entry the request targets and the cursor it was read at.
+ * @returns The directory entry the request targets.
  * @throws When the choice is unknown or ambiguous; the message lists what is bound.
  */
 const resolveMachine = async (
   client: MachineClient,
   machineId: string | undefined,
   signal: AbortSignal,
-): Promise<Readonly<{ entry: MachineDirectoryEntry; cursor: MachineDirectoryCursor }>> => {
-  const { cursor, entries } = await client.list({ signal });
+): Promise<MachineDirectoryEntry> => {
+  const { entries } = await client.list({ signal });
   // Models fill an optional field with a blank instead of omitting it.
   const wanted = machineId?.trim();
   if (wanted !== undefined && wanted !== '') {
     const found = entries.find((entry) => entry.machineId === wanted);
     if (found) {
-      return { entry: found, cursor };
+      return found;
     }
     throw new Error(`No machine ${wanted} is bound. Bound machines: ${describeMachines(entries) || 'none'}.`);
   }
   if (entries.length === 1) {
-    return { entry: entries[0]!, cursor };
+    return entries[0]!;
   }
   throw new Error(
     entries.length === 0
-      ? 'No machine is bound to this workspace; the person binds one in the Print pane.'
+      ? 'No machine is bound on this computer; the person binds one in the Print pane.'
       : `Several machines are bound; pass machineId. Bound machines: ${describeMachines(entries)}.`,
   );
 };
@@ -316,36 +347,43 @@ const requesterOf = (invocation: HostToolInvocation): PrintRequester =>
     : { kind: 'agent', id: 'tau', label: 'Tau agent' };
 
 /**
- * `request_print`: resolve the machine, plan, open the request, and gate it.
+ * `request_print`: resolve the machine, plan with the project's print intent,
+ * open the request, and gate it.
  *
- * @param host - The negotiated machines facet and the planner that slices for it.
+ * @param client - The negotiated machines facet.
+ * @param options - The planner that slices for it and the project filesystem.
  * @param invocation - The tool call, with its run approval when the host has one.
- * @param parsed - Validated tool input.
- * @returns The ledger's record, plus how the person answered when this call waited.
+ * @returns The ledger's record, plus how the person answered when this call
+ *   waited and what the project's print intent contributed.
  */
 const requestPrint = async (
-  host: { readonly client: MachineClient; readonly planPrint: MachinePrintPlanner },
+  client: MachineClient,
+  options: MachineToolRegistryOptions,
   invocation: HostToolInvocation,
-  parsed: z.infer<typeof inputs.request_print>,
 ): Promise<JsonValue> => {
-  const { client } = host;
+  const parsed = inputs.request_print.parse(invocation.input);
+  const { planPrint } = options;
+  if (!planPrint) {
+    throw new Error('This host cannot slice for printing.');
+  }
   const { signal } = invocation;
-  const { entry: machine, cursor } = await resolveMachine(client, parsed.machineId, signal);
+  const machine = await resolveMachine(client, parsed.machineId, signal);
   const machineName = machine.descriptor.name;
-  const plan = await host.planPrint({
+  const plan = await planPrint({
     toolCallId: invocation.toolCallId,
     targetFile: parsed.targetFile,
     machine,
-    cursor,
     preset: parsed.preset,
     plate: parsed.plate,
     // SAFETY: a zod record of JSON values is a JSON object.
     options: parsed.options as JsonObject | undefined,
     profiles: parsed.profiles,
     settings: parsed.settings,
+    intentFile: await readIntentFile(options, signal),
     signal,
   });
   signal.throwIfAborted();
+  const intent = plan.printIntent === undefined ? {} : { printIntent: plan.printIntent };
   /* Idempotent by the tool call: a retried call finds its own request rather
    * than opening a second one for the same intent. */
   const requestId = invocation.toolCallId;
@@ -361,13 +399,14 @@ const requestPrint = async (
   if (request.state !== 'awaiting-approval') {
     /* Preflight refused, or the retry found a request already past its
      * approval: the record says which. */
-    return asJson({ request, machineName });
+    return asJson({ request, machineName, ...intent });
   }
   if (invocation.approve === undefined) {
     return asJson({
       request,
       machineName,
       nextStep: `Waiting for a person to accept print request ${requestId} in Tau's Print pane; accepting uploads the file and starts the print. Do not retry; call get_print_request to observe it.`,
+      ...intent,
     });
   }
   const resolution = await invocation.approve({
@@ -390,7 +429,7 @@ const requestPrint = async (
       : resolution.outcome === 'denied'
         ? await client.resolvePrintRequest({ requestId, decision: 'deny', resolvedBy })
         : await client.withdrawPrintRequest({ requestId, resolvedBy });
-  return asJson({ request: settled, machineName, approval: resolution.outcome });
+  return asJson({ request: settled, machineName, approval: resolution.outcome, ...intent });
 };
 
 /**
@@ -460,13 +499,18 @@ const getPrintProfiles = async (
 ): Promise<JsonValue> => {
   const { signal } = invocation;
   const { machineId, ...rest } = inputs.get_print_profiles.parse(invocation.input);
-  const { entry } = await resolveMachine(client, machineId, signal);
+  const entry = await resolveMachine(client, machineId, signal);
   const providers = await client.listProviders({ signal });
   const provider = providers.find(({ id }) => id === entry.providerId);
   if (provider === undefined) {
     throw new Error(`No provider ${entry.providerId} backs ${entry.descriptor.name}.`);
   }
-  return describePrintProfiles(options.bambuStudio ?? defaultBambuStudioEngine, { provider, machine: entry, ...rest });
+  return describePrintProfiles(options.bambuStudio ?? defaultBambuStudioEngine, {
+    provider,
+    machine: entry,
+    ...rest,
+    intentFile: await readIntentFile(options, signal),
+  });
 };
 
 const invokeMachine = async (
@@ -504,18 +548,13 @@ const invokeMachine = async (
     }
     case 'get_machine': {
       const { machineId } = inputs.get_machine.parse(input);
-      const { entry } = await resolveMachine(client, machineId, signal);
-      return asJson(entry);
+      return asJson(await resolveMachine(client, machineId, signal));
     }
     case 'get_print_profiles': {
       return getPrintProfiles(client, options, invocation);
     }
     case 'request_print': {
-      const parsed = inputs.request_print.parse(input);
-      if (!options.planPrint) {
-        throw new Error('This host cannot slice for printing.');
-      }
-      return requestPrint({ client, planPrint: options.planPrint }, invocation, parsed);
+      return requestPrint(client, options, invocation);
     }
     case 'get_print_request': {
       const { requestId } = inputs.get_print_request.parse(input);
@@ -531,11 +570,16 @@ const invokeMachine = async (
     }
     case 'prepare_machine_print': {
       const parsed = inputs.prepare_machine_print.parse(input);
-      // SAFETY: the strict artifact schema validates the complete immutable-reference wire shape.
+      if (options.projectId === undefined) {
+        throw new Error('This host cannot name the project a print artifact belongs to, so it prepares no prints.');
+      }
+      /* The host names the project; the machine channel checks the reference's grammar. */
+      const artifact = { ...parsed.artifact, projectId: options.projectId };
+      // SAFETY: the strict artifact schema validates the reference's wire shape and its canonical sha256 digest.
       return asJson(
         await client.preparePrint({
           ...parsed,
-          artifact: parsed.artifact as MachineArtifactReference,
+          artifact: artifact as MachineArtifactReference,
           configuration: parsed.configuration as MachinePreparePrintInput['configuration'],
           signal,
         }),
@@ -603,7 +647,11 @@ export const createMachineToolRegistry = (
 ): ToolRegistry => ({
   list: () =>
     (Object.keys(inputs) as MachineToolName[])
-      .filter((name) => name !== 'request_print' || options.planPrint !== undefined)
+      .filter(
+        (name) =>
+          (name !== 'request_print' || options.planPrint !== undefined) &&
+          (name !== 'prepare_machine_print' || options.projectId !== undefined),
+      )
       .map((name) => definitionFor(name)),
   async invoke(invocation) {
     if (!toolNames.has(invocation.toolName)) {

@@ -1,5 +1,4 @@
 import type { HostToolResult, JsonObject } from '@taucad/agent-host';
-import type { RpcRevisionsClient } from '@taucad/chat/rpc';
 import type {
   MachineArtifactReference,
   MachineClient,
@@ -17,8 +16,15 @@ import { sha256Bytes } from '@taucad/utils/hash';
 import { z } from 'zod';
 
 import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
-import { bambuHints, defaultBambuStudioEngine, isBambuProvider, loadedMaterial } from '#registry/print-profiles.js';
-import type { BambuStudioEngine } from '#registry/print-profiles.js';
+import {
+  applyPrintIntent,
+  bambuHints,
+  defaultBambuStudioEngine,
+  isBambuProvider,
+  loadedMaterial,
+  printIntentHint,
+} from '#registry/print-profiles.js';
+import type { BambuStudioEngine, PrintChoices } from '#registry/print-profiles.js';
 
 /** The export target every print goes through (blueprint D3). */
 const printFormat = 'gcode.3mf';
@@ -26,13 +32,12 @@ const printFormat = 'gcode.3mf';
 /** What {@link createMachinePrintPlanner} borrows from its host. @public */
 export type MachinePrintPlannerDependencies = Readonly<{
   /**
-   * Names the revision the reference is qualified by. A daemon passes its
-   * revisions client; a browser worker, whose page owns the revision, passes
-   * the base its admitted turn runs on.
+   * The `tau.json` id of the project the agent works in. Every artifact
+   * reference the planner builds names it, and the machine host reads the
+   * slice from that project only. A host that cannot name its project passes
+   * no print context at all, so nothing guesses one.
    */
-  revisions: Readonly<{
-    describe(): Promise<Readonly<Pick<Awaited<ReturnType<RpcRevisionsClient['describe']>>, 'revisionId'>>>;
-  }>;
+  projectId: string;
   /** Supplies the provider manifest the expected setup is composed from. */
   machines: Pick<MachineClient, 'listProviders'>;
   /** Decides whether Bambu Studio slices for a Bambu printer; defaults to this host's `@taucad/slicer/bambu-studio`. */
@@ -184,19 +189,18 @@ const summarize = (bytes: Uint8Array<ArrayBuffer>): Omit<PrintRequestSummary, 'f
  * Anything else, or no Bambu Studio, slices with the reference engine exactly
  * as before; a real Bambu printer then refuses the file at preflight.
  *
- * @param deps - The planner's dependencies.
  * @param provider - The machine's provider.
- * @param input - The planner call, with the plate resolved.
+ * @param input - The choices to slice with, the project's print intent
+ *   already applied, and the machine with its plate resolved.
+ * @param bambuStudio - Whether Bambu Studio slices for this machine on this host.
  * @returns Slicer options for the export route.
  * @throws When the call's slicer fields do not fit the engine that slices.
  */
-const sliceOptions = async (
-  deps: MachinePrintPlannerDependencies,
+const sliceOptions = (
   provider: MachineProvider,
-  input: Parameters<MachinePrintPlanner>[0] & Readonly<{ plate: string }>,
-): Promise<JsonObject> => {
-  const bambuStudio =
-    isBambuProvider(provider) && (await (deps.bambuStudio ?? defaultBambuStudioEngine).findBambuStudio()) !== undefined;
+  input: PrintChoices & Readonly<{ machine: MachineDirectoryEntry; plate: string }>,
+  bambuStudio: boolean,
+): JsonObject => {
   const { machine, options, profiles, settings, preset, plate } = input;
   if (!bambuStudio) {
     if (profiles !== undefined || settings !== undefined) {
@@ -238,9 +242,9 @@ const sliceOptions = async (
  * Build the planner `request_print` slices with.
  *
  * Refuses before slicing when the request could never be accepted (no loaded
- * material, no revision to qualify by, no provider), then exports through the
- * host's own route, reads the bytes back for the digest the machine host
- * verifies, and qualifies the reference by the directory cursor's authority.
+ * material, no provider), then exports through the host's own route, reads the
+ * bytes back for the digest the machine host verifies, and names the artifact
+ * by this project, its path and that digest.
  *
  * @param deps - The host seams the planner borrows.
  * @returns The planner to pass as `planPrint`.
@@ -250,17 +254,18 @@ export const createMachinePrintPlanner =
   (deps: MachinePrintPlannerDependencies): MachinePrintPlanner =>
   async (input) => {
     const { machine, signal } = input;
-    const { revisionId } = await deps.revisions.describe();
-    if (revisionId === undefined) {
-      throw new Error('No revision qualifies a print yet; save a revision, then ask again.');
-    }
     const providers = await deps.machines.listProviders({ signal });
     const provider = providers.find((candidate) => candidate.id === machine.providerId);
     if (provider === undefined) {
       throw new Error(`No provider ${machine.providerId} backs ${machine.descriptor.name}.`);
     }
-    const { configuration, plate } = expectedSetup(provider, machine, input.plate);
-    const exportOptions = await sliceOptions(deps, provider, { ...input, plate });
+    const bambuStudio =
+      isBambuProvider(provider) &&
+      (await (deps.bambuStudio ?? defaultBambuStudioEngine).findBambuStudio()) !== undefined;
+    /* The call's own choices over the project's print intent, over the defaults. */
+    const { choices, printIntent } = applyPrintIntent(input.intentFile, { provider, machine, bambuStudio }, input);
+    const { configuration, plate } = expectedSetup(provider, machine, choices.plate);
+    const exportOptions = sliceOptions(provider, { ...choices, machine, plate }, bambuStudio);
     const result = await deps.exportGeometry({
       toolCallId: input.toolCallId,
       targetFile: input.targetFile,
@@ -271,7 +276,7 @@ export const createMachinePrintPlanner =
     const file = result.isError ? undefined : exported.safeParse(result.content).data?.files[0];
     if (file === undefined) {
       const reason = failure.safeParse(result.content).data?.message ?? 'no artifact was produced';
-      throw new Error(`Slicing ${input.targetFile} failed: ${reason}`);
+      throw new Error(`Slicing ${input.targetFile} failed: ${reason}${printIntentHint(printIntent)}`);
     }
     const bytes = await deps.readArtifact({ path: file.artifactPath, signal });
     // SAFETY: sha256Bytes returns the lowercase hex the digest brand describes.
@@ -285,14 +290,7 @@ export const createMachinePrintPlanner =
     }
     return {
       artifact: {
-        revision: {
-          authorityId: input.cursor.authorityId,
-          workspaceId: input.cursor.workspaceId,
-          // SAFETY: the revision graph hands out its own branded ids as plain strings.
-          revisionId: revisionId as MachineArtifactReference['revision']['revisionId'],
-          // ponytail: `describe` exposes no tree digest; the artifact digest identifies the bytes the host verifies.
-          treeDigest: digest,
-        },
+        projectId: deps.projectId,
         path: file.artifactPath,
         digest,
         length: bytes.byteLength,
@@ -302,5 +300,6 @@ export const createMachinePrintPlanner =
       },
       configuration,
       summary: summarize(bytes),
+      ...(printIntent === undefined ? {} : { printIntent }),
     };
   };

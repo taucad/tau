@@ -1,11 +1,15 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio setting keys are its own wire vocabulary */
 import { describe, expect, it, vi } from 'vitest';
+import type { JsonObject } from '@taucad/agent-host';
 import type { MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
+import { printIntentPath } from '@taucad/slicer';
+import type { PrintIntent } from '@taucad/slicer';
 import { writeBambuContainer } from '@taucad/slicer/container';
 import { quantityKinds } from '@taucad/units/quantity';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { createMachinePrintPlanner } from '#registry/machine-print-planner.js';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
+import type { PrintIntentFile } from '#registry/print-profiles.js';
 
 /* Three annotated layers; relative extrusion totals 5 mm. */
 const gcode = [
@@ -27,14 +31,7 @@ const container = writeBambuContainer({ gcode, modelName: 'pyramid' });
 const artifactPath = '.tau/artifacts/call-1__main.ts-gcode.3mf/pyramid.gcode.3mf';
 const mediaType = 'application/vnd.bambulab.gcode-3mf';
 const contract = { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 };
-const cursor = {
-  hostId: 'host-1',
-  authorityId: 'authority-1',
-  workspaceId: 'workspace-1',
-  generation: 'generation-1',
-  position: 1,
-  revision: 1,
-};
+const projectId = 'proj_000000000000000000001';
 const loaded = {
   bedType: 'textured-pei',
   materials: [{ slot: 2, state: 'loaded', materialId: 'PETG', profileId: 'GFG00' }],
@@ -72,6 +69,8 @@ const provider = {
   name: 'Bambu Lab',
   vendor: 'Bambu Lab',
   manifest: {
+    /* The manifest's spelling, which a print intent names; the descriptor says X1C. */
+    identity: { model: 'x1c' },
     toolhead: {
       filamentDiameter: { value: 1.75, unit: 'mm' },
       nozzles: [{ id: 'nozzle-0.4', diameter: { value: 0.4, unit: 'mm' } }],
@@ -103,9 +102,7 @@ const dependencies = () => ({
     }
     return container;
   }),
-  revisions: {
-    describe: async () => ({ branch: 'main', revisionNumber: 7, revisionId: 'revision-7', branches: [], line: '' }),
-  },
+  projectId,
   machines: { listProviders: async () => [provider] },
   /* No Bambu Studio on this host unless a test installs one. */
   bambuStudio: { findBambuStudio: async () => undefined },
@@ -116,19 +113,27 @@ type PlanCall = Parameters<ReturnType<typeof createMachinePrintPlanner>>[0];
 const plan = async (
   deps: MachinePrintPlannerDependencies,
   entry: MachineDirectoryEntry = machine(loaded),
-  call: Partial<Pick<PlanCall, 'plate' | 'preset' | 'options' | 'profiles' | 'settings'>> = {},
+  call: Partial<Pick<PlanCall, 'plate' | 'preset' | 'options' | 'profiles' | 'settings' | 'intentFile'>> = {},
 ) =>
   createMachinePrintPlanner(deps)({
     toolCallId: 'call-1',
     targetFile: 'main.ts',
     machine: entry,
-    cursor,
     ...call,
     signal: new AbortController().signal,
   });
 
 /** The same planner on a host where Bambu Studio is installed. */
 const withBambuStudio = () => ({ ...dependencies(), bambuStudio: { findBambuStudio: async () => install } });
+
+/** The project's print intent for this printer's model, as read. */
+const current = (intent: Partial<PrintIntent>): PrintIntentFile => ({
+  status: 'current',
+  intent: { model: 'x1c', ...intent },
+});
+
+const sliced = (deps: Pick<ReturnType<typeof dependencies>, 'exportGeometry'>): JsonObject | undefined =>
+  deps.exportGeometry.mock.calls[0]![0].exportOptions;
 
 describe('machine print planner', () => {
   it('slices through the export route and qualifies the artifact, the expected setup and the summary', async () => {
@@ -149,13 +154,9 @@ describe('machine print planner', () => {
         bedTemperature: 70,
       },
     });
+    /* Named by the host's project, never by anything the model or the directory said. */
     expect(result.artifact).toEqual({
-      revision: {
-        authorityId: 'authority-1',
-        workspaceId: 'workspace-1',
-        revisionId: 'revision-7',
-        treeDigest: digest,
-      },
+      projectId,
       path: artifactPath,
       digest,
       length: container.byteLength,
@@ -204,27 +205,14 @@ describe('machine print planner', () => {
     expect(result.artifact).toMatchObject({ digest: `sha256:${await sha256Bytes(garbage)}`, length: 4 });
   });
 
-  it('refuses before slicing when nothing is loaded, no revision exists or the provider is gone', async () => {
+  it('refuses before slicing when nothing is loaded or the provider is gone', async () => {
     const empty = dependencies();
     await expect(plan(empty, machine({ materials: [{ slot: 0, state: 'empty' }] }))).rejects.toThrow(
       'No material is loaded in Workshop X1C; load one, then ask again.',
     );
-    const unsaved = {
-      ...dependencies(),
-      revisions: {
-        describe: async () => ({
-          branch: undefined,
-          revisionNumber: undefined,
-          revisionId: undefined,
-          branches: [],
-          line: '',
-        }),
-      },
-    };
-    await expect(plan(unsaved)).rejects.toThrow('No revision qualifies a print yet; save a revision, then ask again.');
     const orphaned = { ...dependencies(), machines: { listProviders: async () => [] } };
     await expect(plan(orphaned)).rejects.toThrow('No provider bambu backs Workshop X1C.');
-    for (const deps of [empty, unsaved, orphaned]) {
+    for (const deps of [empty, orphaned]) {
       expect(deps.exportGeometry).not.toHaveBeenCalled();
     }
   });
@@ -313,6 +301,152 @@ describe('machine print planner', () => {
       producer: { name: '@taucad/slicer reference' },
       layers: 3,
       estimatedDuration: 3723,
+    });
+  });
+
+  describe("with the project's print intent", () => {
+    const intent: Partial<PrintIntent> = {
+      preset: 'fine',
+      printer: 'Bambu Lab X1 Carbon 0.4 nozzle',
+      process: '0.12mm Fine @BBL X1C',
+      filaments: { '0': 'Bambu PLA Basic @BBL X1C', '2': 'Bambu PETG Basic @BBL X1C' },
+      settings: { wall_loops: 3, sparse_infill_density: '15%' },
+      options: { walls: 4 },
+    };
+    const intentFile = current(intent);
+
+    it("should slice with the file's values under the call's own, and say which it used", async () => {
+      const deps = withBambuStudio();
+      const result = await plan(deps, machine(loaded), { settings: { sparse_infill_density: '25%' }, intentFile });
+      expect(sliced(deps)).toEqual({
+        engine: 'bambu-studio',
+        bambuStudio: {
+          printer: 'Bambu Lab X1 Carbon 0.4 nozzle',
+          process: '0.12mm Fine @BBL X1C',
+          /* Slot 2 is the loaded one, so its filament is the one used. */
+          filaments: ['Bambu PETG Basic @BBL X1C'],
+          plate: 'textured-pei',
+          settings: { wall_loops: 3, sparse_infill_density: '25%' },
+          hints: {
+            model: 'X1C',
+            nozzleDiameter: 0.4,
+            preset: 'fine',
+            plate: 'textured-pei',
+            materials: [{ slot: 2, materialId: 'PETG', profileId: 'GFG00' }],
+          },
+        },
+      });
+      /* Options are the reference engine's, so Bambu Studio leaves them in the file. */
+      expect(result.printIntent).toEqual({
+        path: printIntentPath,
+        applied: {
+          preset: 'fine',
+          printer: 'Bambu Lab X1 Carbon 0.4 nozzle',
+          process: '0.12mm Fine @BBL X1C',
+          filaments: { '2': 'Bambu PETG Basic @BBL X1C' },
+          settings: { wall_loops: 3 },
+        },
+      });
+    });
+
+    it("should keep none of the file's process or filaments for a printer the call names", async () => {
+      const deps = withBambuStudio();
+      const result = await plan(deps, machine(loaded), {
+        preset: 'fast',
+        profiles: { printer: 'Bambu Lab X1 Carbon 0.6 nozzle' },
+        intentFile,
+      });
+      expect(sliced(deps)).toEqual({
+        engine: 'bambu-studio',
+        bambuStudio: {
+          printer: 'Bambu Lab X1 Carbon 0.6 nozzle',
+          plate: 'textured-pei',
+          settings: { wall_loops: 3, sparse_infill_density: '15%' },
+          hints: expect.objectContaining({ preset: 'fast' }) as JsonObject,
+        },
+      });
+      expect(result.printIntent).toEqual({
+        path: printIntentPath,
+        applied: { settings: { wall_loops: 3, sparse_infill_density: '15%' } },
+      });
+    });
+
+    it.each<readonly [string, PrintIntentFile, string]>([
+      [
+        'a file for another model',
+        current({ model: 'X1C', preset: 'fine' }),
+        "It is for model X1C, not this printer's x1c, so none of its values apply.",
+      ],
+      [
+        'a file that is not a print intent',
+        { status: 'invalid-preserved' },
+        'It is not a valid print intent (broken JSON, an unknown key or a bad value), so none of its values apply.',
+      ],
+    ])('should ignore %s, saying why, and slice as without one', async (_case, file, ignored) => {
+      const bare = withBambuStudio();
+      const without = await plan(bare);
+      const deps = withBambuStudio();
+      const result = await plan(deps, machine(loaded), { intentFile: file });
+      expect(sliced(deps)).toEqual(sliced(bare));
+      expect(result.printIntent).toEqual({ path: printIntentPath, ignored });
+      expect(without.printIntent).toBeUndefined();
+    });
+
+    it("should apply only the file's quality preset and options when the reference engine slices", async () => {
+      const deps = dependencies();
+      const result = await plan(deps, machine(loaded), {
+        options: { walls: 3 },
+        intentFile: current({ ...intent, options: { walls: 4, infillPercent: 30 } }),
+      });
+      /* The file's Bambu Studio values never reach the reference engine, and never refuse. */
+      expect(sliced(deps)).toEqual({
+        plate: 'textured-pei',
+        nozzleDiameter: 0.4,
+        filamentDiameter: 1.75,
+        nozzleTemperature: 250,
+        bedTemperature: 70,
+        walls: 3,
+        infillPercent: 30,
+        preset: 'fine',
+      });
+      expect(result.printIntent).toEqual({
+        path: printIntentPath,
+        applied: { preset: 'fine', options: { infillPercent: 30 } },
+      });
+    });
+
+    it("should stand the file's plate in for one the printer does not report, never for one it does", async () => {
+      const deps = dependencies();
+      const unreported = await plan(deps, machine({ materials: loaded.materials }), {
+        intentFile: current({ plate: 'high-temperature' }),
+      });
+      expect(unreported.configuration).toMatchObject({
+        expectedBedType: 'high-temperature',
+        operatorConfirmedBedType: 'high-temperature',
+      });
+      expect(unreported.printIntent).toEqual({ path: printIntentPath, applied: { plate: 'high-temperature' } });
+
+      const reported = await plan(dependencies(), machine(loaded), {
+        intentFile: current({ plate: 'high-temperature' }),
+      });
+      expect(reported.configuration).toMatchObject({ expectedBedType: 'textured-pei' });
+      expect(reported.configuration).not.toHaveProperty('operatorConfirmedBedType');
+      expect(reported.printIntent).toEqual({ path: printIntentPath, applied: {} });
+    });
+
+    it('should name the file when a slice it supplied values to fails', async () => {
+      const deps = {
+        ...withBambuStudio(),
+        exportGeometry: async () => ({
+          isError: true,
+          content: { errorCode: 'EXPORT_FAILED', message: 'Bambu Studio has no process preset "0.12mm Old @BBL X1C".' },
+        }),
+      };
+      await expect(
+        plan(deps, machine(loaded), { intentFile: current({ process: '0.12mm Old @BBL X1C' }) }),
+      ).rejects.toThrow(
+        `Slicing main.ts failed: Bambu Studio has no process preset "0.12mm Old @BBL X1C". The project's ${printIntentPath} supplied process; edit it there, or pass your own.`,
+      );
     });
   });
 

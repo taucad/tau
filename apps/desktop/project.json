@@ -87,6 +87,7 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
+        "check-renderer-payload",
         { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos"
@@ -101,6 +102,7 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
+        "check-renderer-payload",
         { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos"
@@ -115,6 +117,7 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
+        "check-renderer-payload",
         { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos"
@@ -155,7 +158,19 @@
     },
     "check-renderer-payload": {
       "executor": "nx:run-commands",
-      "cache": false,
+      "cache": true,
+      "metadata": {
+        "description": "Renderer ownership gate: fails when the renderer bundle carries kernel, converter or host payloads (only KCL and Clipper WASM are allowed). Every package target depends on it. Cached on the bytes it checks, the renderer build and the main and preload bundles; `dist/dev-electron`, the branded Electron that `dev` and `serve` create, is left out of the key."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{projectRoot}/scripts/check-renderer-payload.mts",
+        {
+          "dependentTasksOutputFiles": "{apps/ui/desktop/build,apps/desktop/dist/main,apps/desktop/dist/preload}/**",
+          "transitive": true
+        }
+      ],
+      "outputs": [],
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/check-renderer-payload.mts"

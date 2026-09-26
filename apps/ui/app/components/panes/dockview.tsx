@@ -173,7 +173,8 @@ export const dockviewStyleOverrides = cn(
   // ═══════════════════════════════════════════════════════════════════════════
 
   '[&_.dv-tab]:rounded-sm',
-  '[&_.dv-tab]:transition-colors',
+  // Hover is instant: the close action and its opaque scrim appear in one frame, so a
+  // fading tab background would show them as a grey patch over a half-lit tab.
   '[&_.dv-tab:not(.dv-active-tab):hover]:!bg-accent',
   '[&_.dv-tab:not(.dv-active-tab):hover]:!text-muted-foreground',
   '[&_.dv-tab:focus-visible]:focus-outline',

@@ -138,7 +138,6 @@ export function PaneviewHeader({
          * `bg-card` needs the compound variants to yield to the lit states. */
         className={cn(
           'group/paneview-header mx-2 my-1 flex h-8 min-w-0 items-center overflow-hidden rounded-lg border border-transparent bg-transparent pr-1 text-[13px] select-none',
-          'transition-colors duration-150 motion-reduce:transition-none',
           'hover:bg-sidebar-accent focus-within:bg-sidebar-accent has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
           'data-[state=open]:border-border data-[state=open]:bg-card data-[state=open]:hover:bg-sidebar-accent data-[state=open]:focus-within:bg-sidebar-accent data-[state=open]:has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
         )}
@@ -265,7 +264,7 @@ export function PaneviewHeaderAction({
       className={nestedActionVariants({
         className: cn(
           'flex size-6 items-center justify-center rounded-md',
-          'text-muted-foreground duration-150 motion-reduce:transition-none',
+          'text-muted-foreground',
           'outline-none focus-visible:bg-nested-action-hover focus-visible:text-foreground focus-visible:focus-outline',
           'disabled:pointer-events-none disabled:opacity-50',
           "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",

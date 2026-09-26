@@ -40,6 +40,7 @@ export const createLazyMachineFacet = (
         listProviders: async (input) => get().listProviders(input),
         discover: (input) => get().discover(input),
         beginBinding: async (input) => get().beginBinding(input),
+        removeBinding: async (input) => get().removeBinding(input),
         preparePrint: async (input) => get().preparePrint(input),
         uploadPrint: async (input) => get().uploadPrint(input),
         startPrint: async (input) => get().startPrint(input),

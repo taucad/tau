@@ -20,6 +20,7 @@ export const hostAdmissionOperations = [
   'machines.listProviders',
   'machines.discover',
   'machines.beginBinding',
+  'machines.removeBinding',
   'machines.list',
   'machines.pairing.begin',
   'machines.pairing.status',

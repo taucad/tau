@@ -698,6 +698,114 @@ describe('host-owned machine directory', () => {
     expect(closed).toHaveBeenCalledOnce();
   });
 
+  it.each(['disconnected', 'unreachable'] as const)(
+    'should tell the attacher once when its current session reports %s, keeping what it reported',
+    async (connection) => {
+      const { directory } = await fixture();
+      const device = sessionFixture();
+      const onLost = vi.fn();
+      await directory.attach({
+        workspaceId: 'workspace',
+        machineId: 'selected-id',
+        providerId: 'provider',
+        session: device.session,
+        onLost,
+      });
+      await device.started;
+      device.push({ ...observation, connection });
+      device.push({ ...observation, connection, observedAt: '2026-09-06T00:01:00Z' });
+      await vi.waitFor(() => {
+        expect(device.consumed).toHaveBeenCalledTimes(2);
+      });
+      expect(onLost).toHaveBeenCalledOnce();
+      await expect(directory.snapshot({ workspaceId: 'workspace' })).resolves.toMatchObject({
+        entries: [{ freshness: 'current', snapshot: { connection } }],
+      });
+      expect(device.session.close).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should tell the attacher at once when its session attaches already disconnected', async () => {
+    const { directory } = await fixture();
+    const device = sessionFixture();
+    vi.mocked(device.session.getSnapshot).mockResolvedValue({ ...observation, connection: 'disconnected' });
+    const onLost = vi.fn();
+    await directory.attach({
+      workspaceId: 'workspace',
+      machineId: 'selected-id',
+      providerId: 'provider',
+      session: device.session,
+      onLost,
+    });
+    expect(onLost).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [
+      'ends',
+      async function* (): AsyncGenerator<MachineObservation> {
+        yield* [];
+      },
+      [],
+    ],
+    [
+      'fails',
+      async function* (): AsyncGenerator<MachineObservation> {
+        yield* [];
+        throw new Error('observation failed');
+      },
+      ['observation failed'],
+    ],
+  ])(
+    'should mark the machine stale, close the session and tell the attacher once when its observation %s',
+    async (_outcome, observe, reported) => {
+      const { directory, errors } = await fixture();
+      const device = sessionFixture();
+      const onLost = vi.fn();
+      await directory.attach({
+        workspaceId: 'workspace',
+        machineId: 'selected-id',
+        providerId: 'provider',
+        session: { ...device.session, observe },
+        onLost,
+      });
+      await vi.waitFor(() => {
+        expect(device.session.close).toHaveBeenCalledOnce();
+      });
+      expect(onLost).toHaveBeenCalledOnce();
+      await expect(directory.snapshot({ workspaceId: 'workspace' })).resolves.toMatchObject({
+        entries: [{ freshness: 'stale' }],
+      });
+      expect(errors.mock.calls.map(([error]: unknown[]) => (error as Error).message)).toEqual(reported);
+    },
+  );
+
+  it('should never tell the attacher about a session the host replaced, removed or closed', async () => {
+    const { directory } = await fixture();
+    const attachWatched = async (machineId: string) => {
+      const device = sessionFixture();
+      const onLost = vi.fn();
+      await directory.attach({
+        workspaceId: 'workspace',
+        machineId,
+        providerId: 'provider',
+        session: device.session,
+        onLost,
+      });
+      await device.started;
+      return { device, onLost };
+    };
+    const replaced = await attachWatched('selected-id');
+    const removed = await attachWatched('selected-id');
+    const closed = await attachWatched('other-id');
+    await directory.remove({ workspaceId: 'workspace', machineId: 'selected-id' });
+    await directory.close();
+    for (const { device, onLost } of [replaced, removed, closed]) {
+      expect(device.session.close).toHaveBeenCalledOnce();
+      expect(onLost).not.toHaveBeenCalled();
+    }
+  });
+
   it('should validate committed record shape and bounds without invoking accessors', () => {
     const value = {
       type: 'machine-directory-stale',

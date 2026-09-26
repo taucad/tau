@@ -263,6 +263,12 @@ export type AttachMachineDirectorySessionInput = Readonly<{
   machineId: string;
   providerId: string;
   session: Pick<MachineSession, 'getDescriptor' | 'getSnapshot' | 'observe' | 'close'>;
+  /**
+   * Called at most once when this session stops being live while it is still the machine's session: it reports a
+   * connection other than `connected`, or its observation ends or fails. Never called for a replaced or removed
+   * session, or after the directory closes.
+   */
+  onLost?(): void;
 }>;
 /** Named workspace lookup. Admission remains the route owner's responsibility. @internal */
 export type MachineDirectoryReadInput = Readonly<{ workspaceId: string }>;
@@ -412,6 +418,7 @@ type OwnedSession = {
   observer?: Promise<void>;
   ready: PromiseWithResolvers<void>;
   stop?: Promise<void>;
+  lost: boolean;
 };
 
 /** Recover journaled machines as stale and own subsequent device observations in memory.
@@ -550,6 +557,18 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
     owned.stop ??= owned.input.session.close();
     return owned.stop;
   };
+  // Tell the attacher, once, that its still-current session stopped being live.
+  const lose = (owned: OwnedSession): void => {
+    if (owned.lost || !isCurrent(owned)) {
+      return;
+    }
+    owned.lost = true;
+    try {
+      owned.input.onLost?.();
+    } catch (error) {
+      report(error);
+    }
+  };
   const publish = async (owned: OwnedSession, entry: MachineDirectoryEntry): Promise<void> =>
     queue.queueFor(queueKey, async () => {
       assertOpen();
@@ -593,6 +612,9 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
           snapshot: parsed.snapshot,
           freshness: 'current',
         });
+        if (parsed.snapshot.connection !== 'connected') {
+          lose(owned);
+        }
       }
     } catch (error) {
       if (isCurrent(owned)) {
@@ -608,6 +630,7 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
         } catch (error) {
           report(error);
         }
+        lose(owned);
       }
       try {
         await stop(owned);
@@ -679,6 +702,7 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
         input: { ...attachment, workspaceId, machineId, providerId },
         abort: new AbortController(),
         ready: Promise.withResolvers<void>(),
+        lost: false,
       };
       sessions.set(key, owned);
       try {
@@ -728,6 +752,9 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
         await publish(owned, entry);
         if (isCurrent(owned)) {
           owned.observer = observe(owned, entry);
+          if (current.connection !== 'connected') {
+            lose(owned);
+          }
         }
       } catch (error) {
         await stop(owned);

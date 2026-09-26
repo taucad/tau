@@ -19,10 +19,12 @@ import type {
 import { exposeMachineChannel, parsePrintRequest } from '#machines/machine-channel.js';
 import type { MachineChannelEndpoint, MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type {
+  MachineBindingRemoval,
   MachineOperationReceipt,
   MachineOperationSnapshot,
   MachinePreparedPrint,
 } from '#machines/machine-client.js';
+import { machineCredentialReference } from '#machines/machine-credential.js';
 import type { PrintRequest } from '#machines/print-request.js';
 import { createMachineDirectory, parseMachineDirectoryEvent } from '#machines/machine-directory.js';
 import type { MachineDirectory, MachineDirectoryEvent, MachineDirectoryEntry } from '#machines/machine-directory.js';
@@ -90,6 +92,11 @@ const bindingEventSchema = z.strictObject({
     secretRef: identity,
     serviceTrust: z.record(identity, trustSchema).refine((value) => Object.keys(value).length <= 8),
   }),
+});
+const bindingRemovedEventSchema = z.strictObject({
+  type: z.literal('machine-binding-removed'),
+  workspaceId: identity,
+  machineId: identity,
 });
 const artifactSchema = z.strictObject({
   revision: z.strictObject({
@@ -290,6 +297,45 @@ const discoveryLimits = {
   maximumCharacters: 32_768,
 };
 const encoder = new TextEncoder();
+/**
+ * How long a binding without a live session waits before its next reconnect attempt: 2 s, 5 s, 10 s, 30 s, then
+ * every 60 s.
+ *
+ * @param attempts - Attempts since the last good connect.
+ * @returns Milliseconds.
+ */
+const reconnectDelay = (attempts: number): number => [2000, 5000, 10_000, 30_000][attempts] ?? 60_000;
+
+/**
+ * Whether a connect refusal needs a new binding rather than a retry: another printer answers at the bound address
+ * (`*_IDENTITY_CHANGED`), or its certificate no longer matches the pinned one (`*_CERTIFICATE_CHANGED`,
+ * `*_PIN_MISMATCH`).
+ *
+ * @param error - What the connect attempt threw.
+ * @returns Whether retrying is pointless until the machine is bound again.
+ */
+const needsRebind = (error: unknown): boolean =>
+  error instanceof Error && /_(?:IDENTITY_CHANGED|CERTIFICATE_CHANGED|PIN_MISMATCH)$/u.test(error.message);
+
+/**
+ * Settle after the delay, or as soon as `stopped` settles.
+ *
+ * @param retryDelay - Milliseconds.
+ * @param stopped - Settles when the wait is no longer wanted.
+ */
+const pause = async (retryDelay: number, stopped: Promise<void>): Promise<void> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, retryDelay);
+      }),
+      stopped,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const digestMachineSetup = async (entry: MachineDirectoryEntry): Promise<ContentDigest> =>
   digestContent({
@@ -361,6 +407,7 @@ const requestFailure = (error: unknown): NonNullable<PrintRequest['failure']> =>
 };
 type HostAuthorityIdentityEvent = Readonly<z.infer<typeof authorityIdentitySchema>>;
 type NodeMachineBindingEvent = Readonly<z.infer<typeof bindingEventSchema>>;
+type NodeMachineBindingRemovedEvent = Readonly<z.infer<typeof bindingRemovedEventSchema>>;
 type NodeMachinePreparedEvent = Readonly<z.infer<typeof preparedEventSchema>>;
 type NodeMachineEffectIntentEvent = Readonly<z.infer<typeof effectIntentSchema>>;
 type NodeMachineEffectSendingEvent = Readonly<z.infer<typeof effectSendingSchema>>;
@@ -374,6 +421,7 @@ type HostAuthorityEvent =
   | HostAuthorityIdentityEvent
   | MachineDirectoryEvent
   | NodeMachineBindingEvent
+  | NodeMachineBindingRemovedEvent
   | NodeMachinePreparedEvent
   | NodeMachineEffectEvent
   | NodeMachinePrintRequestEvent;
@@ -399,6 +447,11 @@ type ExecutableMachineDefinition = Readonly<{
 /** Host-owned network and secret capabilities used by generated machine providers. @public */
 export type NodeMachineRuntime = Readonly<{
   discovery: MachineDiscoveryRuntime;
+  /** Host credential custody: marks discovered candidates whose code is saved, and forgets a removed binding's code. */
+  credentials?: Readonly<{
+    has(reference: string): Promise<boolean>;
+    forget(reference: string): Promise<void>;
+  }>;
   connection(workspaceId: string): MachineConnectionRuntime;
 }>;
 
@@ -407,6 +460,12 @@ export type CompleteNodeMachineBindingInput = Readonly<{
   ceremonyId: string;
   secretRef: string;
   serviceTrust: MachineConnectionContext['serviceTrust'];
+}>;
+
+/** Trusted native removal of one committed binding, e.g. to roll back a binding whose credential could not be saved. @public */
+export type RemoveNodeMachineBindingInput = Readonly<{
+  workspaceId: string;
+  machineId: string;
 }>;
 
 /** One explicitly trusted, already-connected machine attachment. @public */
@@ -456,6 +515,9 @@ export type NodeMachineHost = Readonly<{
   admitRoute(input: Omit<ServeNodeMachineChannelInput, 'port'>): AdmittedHostRoute;
   serve(input: ServeNodeMachineChannelInput): NodeMachineChannelHandle;
   completeBinding(input: CompleteNodeMachineBindingInput): Promise<MachineBindingOutcome>;
+  /** The provider and candidate a pending ceremony will bind, or `undefined` for an unknown ceremony; never a secret. */
+  describeBinding(ceremonyId: string): Readonly<{ providerId: string; candidate: MachineCandidate }> | undefined;
+  removeBinding(input: RemoveNodeMachineBindingInput): Promise<MachineBindingRemoval>;
   close(): Promise<void>;
 }>;
 
@@ -495,6 +557,15 @@ const parseAuthorityEvent = (candidate: unknown): HostAuthorityEvent => {
     candidate['type'] === 'machine-binding-committed'
   ) {
     return Object.freeze(bindingEventSchema.parse(candidate));
+  }
+  if (
+    candidate !== null &&
+    typeof candidate === 'object' &&
+    !Array.isArray(candidate) &&
+    'type' in candidate &&
+    candidate['type'] === 'machine-binding-removed'
+  ) {
+    return Object.freeze(bindingRemovedEventSchema.parse(candidate));
   }
   if (
     candidate !== null &&
@@ -611,6 +682,10 @@ const readAuthorityState = async (
           bindings.set(JSON.stringify([record.event.workspaceId, record.event.machineId]), record.event);
           break;
         }
+        case 'machine-binding-removed': {
+          bindings.delete(JSON.stringify([record.event.workspaceId, record.event.machineId]));
+          break;
+        }
         case 'machine-print-prepared': {
           preparations.set(record.event.prepared.preparedId, record.event);
           break;
@@ -652,6 +727,14 @@ const terminalRequestStates: ReadonlySet<PrintRequest['state']> = new Set([
   'rejected',
   'started',
   'withdrawn',
+]);
+
+/** Request states whose host work still needs the binding; removal is refused until they settle. */
+const bindingBusyStates: ReadonlySet<PrintRequest['state']> = new Set([
+  'preparing',
+  'awaiting-approval',
+  'uploading',
+  'starting',
 ]);
 
 const connectionContextSchema = z.strictObject({
@@ -737,6 +820,9 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   const stillCaptureTimes = new Map<string, number>();
   const effectQueue = new ResourceQueue();
   const connectedSessions = new Map<string, MachineSession>();
+  /** One reconnect loop per supervised binding; aborting `stop` ends it. */
+  const supervisors = new Map<string, Readonly<{ stop: AbortController; done: Promise<void> }>>();
+  let closed = false;
   let journal: MachineEventLog<HostAuthorityEvent> | undefined;
   let directory: MachineDirectory | undefined;
   const commits = new Topic<void>({ name: 'node-machine-authority-commits', onError });
@@ -910,42 +996,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       // oxlint-disable-next-line eslint/no-await-in-loop -- trusted session ownership transfers in caller order.
       await directory.attach(attachment);
     }
-    if (input.runtime) {
-      for (const binding of committedBindings.values()) {
-        try {
-          // oxlint-disable-next-line eslint/no-await-in-loop -- one controller per binding reconnects in journal order.
-          const definition = await definitionOf(binding.providerId);
-          const abort = new AbortController();
-          // oxlint-disable-next-line eslint/no-await-in-loop -- provider connection must settle before directory ownership transfers.
-          const session = await definition.connect(
-            {
-              candidate: binding.candidate,
-              configuration: binding.configuration,
-              connection: binding.connection,
-              signal: abort.signal,
-            },
-            input.runtime.connection(binding.workspaceId),
-          );
-          // oxlint-disable-next-line eslint/no-await-in-loop -- recovered identity must be re-qualified before attachment.
-          const descriptor = await session.getDescriptor({ signal: abort.signal });
-          if (descriptor.id !== binding.physicalId) {
-            // oxlint-disable-next-line eslint/no-await-in-loop -- rejected recovered ownership closes before continuing.
-            await session.close();
-            throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CHANGED');
-          }
-          // oxlint-disable-next-line eslint/no-await-in-loop -- attachment serializes the recovered controller.
-          await directory.attach({
-            workspaceId: binding.workspaceId,
-            machineId: binding.machineId,
-            providerId: binding.providerId,
-            session,
-          });
-          connectedSessions.set(JSON.stringify([binding.workspaceId, binding.machineId]), session);
-        } catch (error) {
-          report(error);
-        }
-      }
-    }
   } catch (error) {
     const initializationError = error;
     const failedDirectory = directory;
@@ -979,6 +1029,141 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   const discovered = new Map<string, DiscoveredCandidate>();
   const ceremonies = new Map<string, PendingCeremony>();
   const scopedKey = (workspaceId: string, identity_: string): string => JSON.stringify([workspaceId, identity_]);
+  // Mark a candidate whose claimed identity already has a saved credential; a failed lookup leaves it unmarked.
+  const withCredentialFlag = async (providerId: string, candidate: MachineCandidate): Promise<MachineCandidate> => {
+    const { serial } = candidate.claimedIdentity;
+    const credentials = input.runtime?.credentials;
+    if (serial === undefined || !credentials) {
+      return candidate;
+    }
+    try {
+      return (await credentials.has(machineCredentialReference(providerId, serial)))
+        ? Object.freeze({ ...candidate, credential: 'saved' })
+        : candidate;
+    } catch (error) {
+      report(error);
+      return candidate;
+    }
+  };
+  // Connect a committed binding, check that the same printer answers, and swap the session into the directory on the
+  // machine's queue, so the session never changes under an in-flight upload, start or control. `lost` settles once
+  // the new session stops being live.
+  const connectBinding = async (
+    binding: NodeMachineBindingEvent,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ lost: Promise<void> }>> => {
+    const { runtime } = input;
+    if (!runtime) {
+      throw new Error('MACHINE_OPERATION_UNAVAILABLE');
+    }
+    const { workspaceId, machineId, providerId } = binding;
+    const definition = await definitionOf(providerId);
+    const session = await definition.connect(
+      { candidate: binding.candidate, configuration: binding.configuration, connection: binding.connection, signal },
+      runtime.connection(workspaceId),
+    );
+    const lost = Promise.withResolvers<void>();
+    try {
+      const descriptor = await session.getDescriptor({ signal });
+      if (descriptor.id !== binding.physicalId) {
+        throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CHANGED');
+      }
+      await effectQueue.queueFor(`machine:${workspaceId}:${machineId}`, async () => {
+        signal.throwIfAborted();
+        await ownedDirectory.attach({
+          workspaceId,
+          machineId,
+          providerId,
+          session,
+          onLost() {
+            lost.resolve();
+          },
+        });
+        connectedSessions.set(scopedKey(workspaceId, machineId), session);
+      });
+    } catch (error) {
+      await session.close().catch(() => undefined);
+      throw error;
+    }
+    return { lost: lost.promise };
+  };
+  // Keep one committed binding connected until it is removed, refused for good or the host closes. A live session is
+  // waited out; attempts then follow the backoff, and a good connect starts it over. An attempt only replaces the
+  // session, so an effect whose outcome was lost with the old one stays `unknown` until it is reconciled.
+  const keepConnected = async (
+    binding: NodeMachineBindingEvent,
+    signal: AbortSignal,
+    live: Promise<void> | undefined,
+  ): Promise<void> => {
+    const stopped = new Promise<void>((resolve) => {
+      signal.addEventListener(
+        'abort',
+        () => {
+          resolve();
+        },
+        { once: true },
+      );
+    });
+    // A call, not a property read, so the loop re-checks after each await.
+    const isAborted = (): boolean => signal.aborted;
+    let lost = live;
+    let attempts = 0;
+    while (!isAborted()) {
+      if (lost) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- a live session is waited out before any attempt.
+        await Promise.race([lost, stopped]);
+        // ponytail: a session lost right after connecting starts the backoff over, so a flapping printer is retried
+        // every 2 s; hold the reset until a session has stayed up if that shows up on real hosts.
+        attempts = 0;
+      }
+      // oxlint-disable-next-line eslint/no-await-in-loop -- attempts are spaced by the backoff.
+      await pause(reconnectDelay(attempts), stopped);
+      attempts += 1;
+      if (isAborted()) {
+        return;
+      }
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- one attempt at a time.
+        ({ lost } = await connectBinding(binding, signal));
+      } catch (error) {
+        lost = undefined;
+        if (isAborted()) {
+          return;
+        }
+        report(error);
+        if (needsRebind(error)) {
+          return;
+        }
+      }
+    }
+  };
+  // Supervise a committed binding in the background, replacing any loop an earlier binding of the same machine ran.
+  const supervise = (binding: NodeMachineBindingEvent, live: Promise<void> | undefined): void => {
+    if (closed) {
+      return;
+    }
+    const key = scopedKey(binding.workspaceId, binding.machineId);
+    supervisors.get(key)?.stop.abort();
+    const stop = new AbortController();
+    supervisors.set(key, { stop, done: keepConnected(binding, stop.signal, live) });
+  };
+  // Every recovered binding gets one attempt now, in journal order, then supervision unless it was refused for good
+  // or this host does not serve its provider.
+  if (input.runtime) {
+    for (const binding of committedBindings.values()) {
+      let live: Promise<void> | undefined;
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- recovered bindings connect in journal order.
+        ({ lost: live } = await connectBinding(binding, new AbortController().signal));
+      } catch (error) {
+        report(error);
+        if (needsRebind(error) || !providerSources.has(binding.providerId)) {
+          continue;
+        }
+      }
+      supervise(binding, live);
+    }
+  }
   const effectSnapshot = (state: NodeMachineEffectState): MachineOperationSnapshot =>
     Object.freeze({
       operationId: state.intent.operationId,
@@ -1156,7 +1341,9 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
               }),
             );
           }
-          yield event;
+          yield event.type === 'lost'
+            ? event
+            : Object.freeze({ ...event, candidate: await withCredentialFlag(source.id, event.candidate) });
         }
       },
       async beginBinding(operationInput) {
@@ -1169,7 +1356,8 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         if (
           !selected ||
           Date.parse(selected.candidate.expiresAt) <= Date.parse(input.runtime.discovery.clock.now()) ||
-          JSON.stringify(selected.candidate) !== JSON.stringify(operationInput.candidate)
+          // The saved-credential flag is this host's projection, not part of what the provider reported.
+          JSON.stringify(selected.candidate) !== JSON.stringify({ ...operationInput.candidate, credential: undefined })
         ) {
           throw new Error('MACHINE_BINDING_CANDIDATE_EXPIRED');
         }
@@ -1188,6 +1376,16 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         const ceremonyId = randomUUID();
         ceremonies.set(ceremonyId, Object.freeze({ ...selected, machineId }));
         return Object.freeze({ status: 'operator-action-required', ceremonyId });
+      },
+      async removeBinding(operationInput) {
+        return removeCommittedBinding({
+          workspaceId: operationInput.admitted.workspaceId,
+          machineId: operationInput.machineId,
+          assertCurrent() {
+            operationInput.signal.throwIfAborted();
+            operationInput.admitted.assertCurrent();
+          },
+        });
       },
       async preparePrint(operationInput) {
         if (!input.runtime) {
@@ -1877,7 +2075,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       .slice(0, 1024);
   const channels = new Set<NodeMachineChannelHandle>();
   let closing: Promise<void> | undefined;
-  let closed = false;
   const completeBinding = async (bindingInput: CompleteNodeMachineBindingInput): Promise<MachineBindingOutcome> => {
     if (closed || !input.runtime) {
       throw new Error('MACHINE_BINDING_UNAVAILABLE');
@@ -1906,6 +2103,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       },
       input.runtime.connection(pending.workspaceId),
     );
+    const lost = Promise.withResolvers<void>();
     try {
       const descriptor = await session.getDescriptor({ signal: abort.signal });
       if (pending.candidate.claimedIdentity.serial && pending.candidate.claimedIdentity.serial !== descriptor.id) {
@@ -1925,6 +2123,9 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         machineId: pending.machineId,
         providerId: pending.providerId,
         session,
+        onLost() {
+          lost.resolve();
+        },
       });
       const event = Object.freeze(
         bindingEventSchema.parse({
@@ -1946,6 +2147,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       }
       committedBindings.set(machineKey, event);
       connectedSessions.set(machineKey, session);
+      supervise(event, lost.promise);
       ceremonies.delete(ceremonyId);
       return Object.freeze({ status: 'bound', machineId: pending.machineId });
     } catch (error) {
@@ -1954,6 +2156,62 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       }
       throw error;
     }
+  };
+  // Unbind one machine and forget its credential once no other binding uses it. The directory entry goes first
+  // (removing it closes the session the directory owns), then the durable removal record: a crash between the two
+  // leaves a whole binding that reconnects, never a directory entry without one.
+  const removeCommittedBinding = async (
+    removal: RemoveNodeMachineBindingInput & Readonly<{ assertCurrent?(): void }>,
+  ): Promise<MachineBindingRemoval> => {
+    const workspaceId = identity.parse(removal.workspaceId);
+    const machineId = identity.parse(removal.machineId);
+    const machineKey = scopedKey(workspaceId, machineId);
+    // Queued behind this machine's in-flight upload, start or control.
+    return effectQueue.queueFor(`machine:${workspaceId}:${machineId}`, async () => {
+      if (closed) {
+        throw new Error('MACHINE_BINDING_UNAVAILABLE');
+      }
+      removal.assertCurrent?.();
+      const binding = committedBindings.get(machineKey);
+      if (!binding) {
+        throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
+      }
+      if (
+        [...requests.values()].some(
+          (owned) =>
+            owned.workspaceId === workspaceId &&
+            owned.request.machineId === machineId &&
+            bindingBusyStates.has(owned.request.state),
+        )
+      ) {
+        throw new Error('MACHINE_BINDING_BUSY');
+      }
+      // A retry after a refused removal record finds the directory entry already gone.
+      const listed = await ownedDirectory.snapshot({ workspaceId });
+      if (listed.entries.some((entry) => entry.machineId === machineId)) {
+        await ownedDirectory.remove({ workspaceId, machineId });
+      }
+      await ownedJournal.append(
+        bindingRemovedEventSchema.parse({ type: 'machine-binding-removed', workspaceId, machineId }),
+      );
+      committedBindings.delete(machineKey);
+      connectedSessions.delete(machineKey);
+      // Nothing reconnects a removed binding; an attempt in flight is abandoned.
+      supervisors.get(machineKey)?.stop.abort();
+      supervisors.delete(machineKey);
+      const { secretRef } = binding.connection;
+      if (
+        secretRef !== 'none' &&
+        ![...committedBindings.values()].some((other) => other.connection.secretRef === secretRef)
+      ) {
+        try {
+          await input.runtime?.credentials?.forget(secretRef);
+        } catch (error) {
+          report(error);
+        }
+      }
+      return Object.freeze({ status: 'removed', machineId });
+    });
   };
 
   return Object.freeze({
@@ -2004,11 +2262,22 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       return channel;
     },
     completeBinding,
+    describeBinding(ceremonyId) {
+      const pending = ceremonies.get(ceremonyId);
+      return pending ? Object.freeze({ providerId: pending.providerId, candidate: pending.candidate }) : undefined;
+    },
+    removeBinding: removeCommittedBinding,
     async close() {
       if (closing) {
         return closing;
       }
       closed = true;
+      // No reconnect starts from here on: pending retries are cancelled and attempts in flight abandoned.
+      const supervised = [...supervisors.values()];
+      supervisors.clear();
+      for (const { stop } of supervised) {
+        stop.abort();
+      }
       closing = closeOwned([
         async () => {
           const active = [...channels];
@@ -2017,6 +2286,9 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           }
           await Promise.allSettled(active.map(async (channel) => channel.closed));
           channels.clear();
+        },
+        async () => {
+          await Promise.allSettled(supervised.map(async ({ done }) => done));
         },
         async () => effectQueue.whenDrained(),
         async () => ownedDirectory.close(),

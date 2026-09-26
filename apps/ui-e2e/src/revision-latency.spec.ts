@@ -37,11 +37,11 @@
  * `timeStamp` in the page to the frame after the surface it budgets changed,
  * and records the harness's wall time beside it as `harnessDuration`.
  *
- * **B7 is deliberately not here.** "Mint → push request issued" needs a
+ * **B2 is deliberately not here.** "Mint → push request issued" needs a
  * connected remote, which needs a signed-in account and a live Tau Cloud API;
  * `apps/ui-e2e` boots neither (C60) and this lane may not make it. Its debounce
  * lives in `sync.machine.ts`, so under contract §7 — "benchmarks are owned by
- * the lane that owns the file under test" — B7 belongs beside that machine.
+ * the lane that owns the file under test" — B2 belongs beside that machine.
  */
 
 import { expect, test } from 'vitest';

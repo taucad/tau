@@ -24,7 +24,13 @@ import {
   MenuSliderItem,
   preventMenuSliderEscapeDismissal,
 } from '#components/ui/menu-slider-item.js';
-import { menuItemVariants, menuLabelVariants, menuSeparatorVariants } from '@taucad/ui/components/menu.variants';
+import {
+  ContextMenuDisclosureItem,
+  DropdownMenuDisclosureItem,
+  MenuDisclosureItem,
+} from '#components/ui/menu-disclosure-item.js';
+import type { MenuDisclosureItemProperties } from '#components/ui/menu-disclosure-item.js';
+import { menuItemVariants, menuSeparatorVariants } from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
@@ -154,7 +160,7 @@ function ModelComponentDropdownItems(data: ModelComponentActionMenuData): React.
 
   return (
     <>
-      <ModelComponentMaterialSummary node={data.node} />
+      <ModelComponentMenuHeader node={data.node} Row={DropdownMenuDisclosureItem} />
       {descriptors.map((descriptor) => renderDropdownActionDescriptor(descriptor))}
     </>
   );
@@ -165,7 +171,7 @@ function ModelComponentContextMenuItems(data: ModelComponentActionMenuData): Rea
 
   return (
     <>
-      <ModelComponentMaterialSummary node={data.node} />
+      <ModelComponentMenuHeader node={data.node} Row={ContextMenuDisclosureItem} />
       {descriptors.map((descriptor) => renderContextActionDescriptor(descriptor))}
     </>
   );
@@ -179,7 +185,7 @@ export function ModelComponentViewerMenuItems({
 
   return (
     <>
-      <ModelComponentMaterialSummary node={data.node} />
+      <ModelComponentMenuHeader node={data.node} Row={MenuDisclosureItem} />
       {descriptors.map((descriptor) => renderViewerActionDescriptor(descriptor, onRequestClose))}
     </>
   );
@@ -216,6 +222,67 @@ function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'me
   return labels.length === 1 ? labels[0]! : `Mixed: ${labels.join(', ')}`;
 }
 
+const numericFactor = (value: number | 'unavailable' | undefined): number => (typeof value === 'number' ? value : 1);
+
+/**
+ * A small lit sphere of a part's surface materials, so the menu row reads as that part at a glance:
+ * the base colour (a pie of colours when the surfaces differ), a highlight that tightens as
+ * roughness drops, and a darker rim as metalness rises.
+ */
+function MaterialSwatch({ materials }: { readonly materials: SurfaceMaterials }): React.JSX.Element {
+  const colors = [
+    ...new Set(
+      materials.map(({ color }) =>
+        color === undefined || color === 'unavailable' ? gltfDefaultBaseColorLabel : color,
+      ),
+    ),
+  ];
+  const fill =
+    colors.length === 1
+      ? colors[0]!
+      : `conic-gradient(${colors.map((color, index) => `${color} ${(index * 100) / colors.length}% ${((index + 1) * 100) / colors.length}%`).join(', ')})`;
+  const roughness = numericFactor(materials[0]?.roughness);
+  const metalness = numericFactor(materials[0]?.metalness);
+  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Light and shadow on a rendered material preview, not UI palette colours.
+  const highlight = `radial-gradient(circle at 32% 30%, rgb(255 255 255 / ${0.85 * (1 - roughness)}) 0, transparent ${35 + 35 * roughness}%)`;
+  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Light and shadow on a rendered material preview, not UI palette colours.
+  const rim = `radial-gradient(circle, transparent 50%, rgb(0 0 0 / ${0.1 + 0.3 * metalness}) 100%)`;
+  return (
+    <span
+      aria-hidden
+      data-slot='material-swatch'
+      className='size-3.5 shrink-0 rounded-full ring-1 ring-border'
+      style={{ background: `${highlight}, ${rim}, ${fill}` }}
+    />
+  );
+}
+
+/**
+ * The menu opens on the part it acts on: a row with its name and a material swatch that discloses
+ * the material factors, collapsed to keep the menu lean.
+ */
+function ModelComponentMenuHeader({
+  node,
+  Row,
+}: {
+  readonly node: GeometryComponentNode;
+  readonly Row: React.ComponentType<MenuDisclosureItemProperties>;
+}): React.JSX.Element {
+  const materials = node.appearance?.materials;
+  return (
+    <>
+      {materials?.length ? (
+        <Row label={node.name} trailing={<MaterialSwatch materials={materials} />}>
+          <ModelComponentMaterialSummary node={node} />
+        </Row>
+      ) : (
+        <Row label={node.name} />
+      )}
+      <div role='separator' className={menuSeparatorVariants()} />
+    </>
+  );
+}
+
 export function ModelComponentMaterialSummary({
   node,
 }: {
@@ -227,32 +294,28 @@ export function ModelComponentMaterialSummary({
   }
 
   return (
-    <>
-      <div role='group' aria-label={`Material for ${node.name}`}>
-        <div className={menuLabelVariants()}>Material factors</div>
-        <dl className='space-y-1 px-3 pb-2 text-xs text-foreground'>
-          <div className='flex justify-between gap-4'>
-            <dt className='text-muted-foreground'>Base color</dt>
-            <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
-              {formatMaterialValues(materials, 'color')}
-            </dd>
-          </div>
-          <div className='flex justify-between gap-4'>
-            <dt className='text-muted-foreground'>Metalness</dt>
-            <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
-              {formatMaterialValues(materials, 'metalness')}
-            </dd>
-          </div>
-          <div className='flex justify-between gap-4'>
-            <dt className='text-muted-foreground'>Roughness</dt>
-            <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
-              {formatMaterialValues(materials, 'roughness')}
-            </dd>
-          </div>
-        </dl>
-      </div>
-      <div role='separator' className={menuSeparatorVariants()} />
-    </>
+    <div role='group' aria-label={`Material for ${node.name}`}>
+      <dl className='space-y-1 pt-1 pr-3 pb-2 pl-8.5 text-xs text-foreground'>
+        <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground'>Base color</dt>
+          <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+            {formatMaterialValues(materials, 'color')}
+          </dd>
+        </div>
+        <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground'>Metalness</dt>
+          <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+            {formatMaterialValues(materials, 'metalness')}
+          </dd>
+        </div>
+        <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground'>Roughness</dt>
+          <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+            {formatMaterialValues(materials, 'roughness')}
+          </dd>
+        </div>
+      </dl>
+    </div>
   );
 }
 

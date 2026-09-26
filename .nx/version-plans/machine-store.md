@@ -16,4 +16,4 @@ The runtime API changes:
 
 `@taucad/host` drops `machineWorkspaceId` and `hostMachineWorkspaceId`, adds `readProjectId`, and takes a `projectId` for its print tools. Its daemon keeps serving without printers when another Tau app holds the store.
 
-`@taucad/slicer` adds `printIntentSchema`, `readPrintIntent` and `serializePrintIntent` for a project's `.tau/machines/printer.json`.
+`@taucad/slicer` adds `printIntentSchema`, `readPrintIntent` and `serializePrintIntent` for a project's `.tau/machines/printer.json`. `buildBambuSettingsSchema` no longer marks inferred settings with `x-tau-inferred`, which parameter schema admission rejects; they remain grouped under "All other settings".

@@ -287,10 +287,7 @@ const leafSchema = ({ descriptor, value, list }: Described): JSONSchema7 => {
     description: descriptor.description,
     default: value as JSONSchema7['default'],
   };
-  return Object.assign(schema, {
-    ...(descriptor.unit === undefined ? {} : { 'x-tau-unit': descriptor.unit }),
-    ...(descriptor.inferred ? { 'x-tau-inferred': true } : {}),
-  });
+  return descriptor.unit === undefined ? schema : Object.assign(schema, { 'x-tau-unit': descriptor.unit });
 };
 
 /**
@@ -298,7 +295,7 @@ const leafSchema = ({ descriptor, value, list }: Described): JSONSchema7 => {
  *
  * Leaves sit at `properties.<scope>.properties.<group>.properties.<key>` with `default` equal to the
  * preset's value. Groups follow Bambu Studio's tabs; keys without a Tau descriptor appear under
- * "All other settings" with `x-tau-inferred: true`.
+ * "All other settings".
  *
  * @param presets - Resolved process and filament presets as Bambu Studio writes them.
  * @returns The schema, the current values nested the same way, and the non-empty groups.

@@ -43,6 +43,7 @@ import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@t
 import { createProjectModelLoader, runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
+import type { Engine as NativeGeoSpecEngine } from '@taucad/geospec-engine-native/node';
 import { assertRootedPath } from '@taucad/utils/path';
 
 /* Not `@taucad/types`: that barrel is an `export type *` the dts bundler cannot
@@ -210,44 +211,79 @@ export const createHostGeoSpecRunner = async (
 };
 
 /**
+ * The native engine every `test_model` call in this process shares: the subjects the
+ * previous call admitted, and the tail of the queue that runs calls one at a time.
+ */
+type NativeGeoSpecSession = {
+  readonly engine: NativeGeoSpecEngine;
+  readonly carried: Map<string, unknown>;
+  tail: Promise<void>;
+};
+
+let nativeSession: Promise<NativeGeoSpecSession> | undefined;
+
+const openNativeGeoSpecSession = async (): Promise<NativeGeoSpecSession> => {
+  nativeSession ??= (async () => {
+    const { Engine } = await import('@taucad/geospec-engine-native/node');
+    return { engine: new Engine(), carried: new Map<string, unknown>(), tail: Promise.resolve() };
+  })();
+  try {
+    return await nativeSession;
+  } catch (error) {
+    // A failed import or construction is not cached: the next call tries again.
+    nativeSession = undefined;
+    throw error;
+  }
+};
+
+/**
  * Create an opt-in native runner for one tool call using the host's existing runtime.
- * The runtime is borrowed; closing this runner releases its subjects and engine only.
+ *
+ * Every call in this process shares one engine and runs after the previous call's runner
+ * closes. A call keeps its subjects admitted until the next call settles, which releases
+ * those it did not load again, so repeating `test_model` on unchanged models is digest-only.
+ * The runtime is borrowed; closing this runner hands the engine to the next call.
  *
  * @param workspaceRoot - Absolute project root the runner executes against.
  * @param runtime - Existing project runtime used to export authored models.
- * @returns The ordinary GeoSpec runner contract, owning its native engine.
+ * @returns The ordinary GeoSpec runner contract over the shared native engine.
  * @public
  */
 export const createHostNativeGeoSpecRunner = async (
   workspaceRoot: string,
   runtime: HostGeoSpecRuntimeClient,
 ): Promise<HostGeoSpecRunner> => {
-  const [nativeEngineModule, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }] = await Promise.all([
-    import('@taucad/geospec-engine-native/node'),
+  const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }] = await Promise.all([
+    openNativeGeoSpecSession(),
     import('geospec/runner/native'),
     import('@taucad/geospec-engine/node-filesystem'),
   ]);
-  const revisions = new Map<string, SourceRevision>();
-  const trackedRuntime = new Proxy(runtime, {
-    get(target, property, receiver: unknown): unknown {
-      if (property !== 'export') {
-        return Reflect.get(target, property, receiver) as unknown;
-      }
-      return async (...args: Parameters<HostGeoSpecRuntimeClient['export']>) => {
-        const result = await target.export(...args);
-        if (result.sourceRevision) {
-          revisions.set(result.sourceRevision.entry, result.sourceRevision);
-        }
-        return result;
-      };
-    },
+  const previous = session.tail;
+  let endTurn = (): void => undefined;
+  session.tail = new Promise<void>((resolve) => {
+    endTurn = resolve;
   });
-  const filesystem = createNodeVmFileSystem(workspaceRoot);
-  const engine = new nativeEngineModule.Engine();
+  await previous;
   try {
+    const revisions = new Map<string, SourceRevision>();
+    const trackedRuntime = new Proxy(runtime, {
+      get(target, property, receiver: unknown): unknown {
+        if (property !== 'export') {
+          return Reflect.get(target, property, receiver) as unknown;
+        }
+        return async (...args: Parameters<HostGeoSpecRuntimeClient['export']>) => {
+          const result = await target.export(...args);
+          if (result.sourceRevision) {
+            revisions.set(result.sourceRevision.entry, result.sourceRevision);
+          }
+          return result;
+        };
+      },
+    });
+    const filesystem = createNodeVmFileSystem(workspaceRoot);
     const runner = createNativeGeoSpecRunner({
       filesystem,
-      nativeAssertions: { engine },
+      nativeAssertions: { engine: session.engine },
       model: {
         projectPath: workspaceRoot,
         runtime: trackedRuntime,
@@ -257,6 +293,7 @@ export const createHostNativeGeoSpecRunner = async (
           }
           return filesystem.readFile(assertRootedPath(source));
         },
+        carried: session.carried,
       },
     });
     return {
@@ -266,12 +303,12 @@ export const createHostNativeGeoSpecRunner = async (
         try {
           await runner.close();
         } finally {
-          engine.close();
+          endTurn();
         }
       },
     };
   } catch (error) {
-    engine.close();
+    endTurn();
     throw error;
   }
 };

@@ -434,13 +434,6 @@ impl Subject {
         Ok(Some(faces))
     }
 
-    /// The address face tables under their former name, for a reader outside
-    /// this module (`relationships.rs` finite contact). ponytail: that caller
-    /// moves to `report_faces(false)`, then this alias goes.
-    pub(crate) fn report_bundle(&self) -> Result<Option<Rc<ReportedFaces>>, BackendError> {
-        self.report_faces(false)
-    }
-
     fn retained_report_bytes(&self) -> u64 {
         let shape = self
             .report_shape

@@ -14,7 +14,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::backend::{BackendError, BackendErrorKind};
+use crate::backend::BackendError;
 use crate::codec::compare_utf16;
 
 const SPATIAL_EPSILON: f64 = 1e-5;
@@ -127,16 +127,18 @@ pub struct DuplicateFace {
     pub first_triangle_index: u32,
 }
 
+/// Sums and failure lists only; per-triangle rows are derived on demand.
 #[derive(Debug)]
 pub struct MeshQuality {
     pub triangle_count: u32,
     pub non_finite_vertices: Vec<NonFiniteVertex>,
     pub degenerate_triangles: Vec<DegenerateTriangle>,
-    pub triangles: Vec<MeshTriangle>,
     pub surface_area: f64,
     pub signed_volume: f64,
     pub center_of_mass: Option<Vec3>,
     record: Rc<MeshAnalysisRecord>,
+    /// One shared name per primitive for every row that cites it.
+    names: Vec<Rc<str>>,
     duplicate_faces: OnceCell<Rc<Vec<DuplicateFace>>>,
 }
 
@@ -144,8 +146,38 @@ impl MeshQuality {
     pub fn duplicate_faces(&self) -> Rc<Vec<DuplicateFace>> {
         Rc::clone(
             self.duplicate_faces
-                .get_or_init(|| Rc::new(duplicate_faces(&self.record, &self.triangles))),
+                .get_or_init(|| Rc::new(duplicate_faces(&self.record, &self.names))),
         )
+    }
+
+    /// Per-triangle rows in source order, for `analyzeMesh` output only.
+    // ponytail: streamed rather than cached; no claim reads a row twice.
+    pub fn triangles(&self) -> impl Iterator<Item = MeshTriangle> + '_ {
+        let record = &self.record;
+        record
+            .triangles
+            .iter()
+            .zip(&record.triangle_primitives)
+            .enumerate()
+            .map(|(index, (&indices, &primitive))| {
+                let [a, b, c] = indices.map(|vertex| record.positions[vertex as usize]);
+                MeshTriangle {
+                    primitive: Rc::clone(&self.names[primitive as usize]),
+                    triangle_index: index as u32,
+                    a,
+                    b,
+                    c,
+                    center: triangle_center(a, b, c),
+                    area: triangle_area(a, b, c),
+                }
+            })
+    }
+
+    /// The centre a triangle's row reports.
+    pub fn triangle_center(&self, index: u32) -> Option<Vec3> {
+        let indices = *self.record.triangles.get(index as usize)?;
+        let [a, b, c] = indices.map(|vertex| self.record.positions[vertex as usize]);
+        Some(triangle_center(a, b, c))
     }
 }
 
@@ -253,6 +285,11 @@ pub struct MeshAnalysis {
     mesh_quality: OnceCell<Rc<MeshQuality>>,
     watertight: OnceCell<Rc<Watertight>>,
     pieces: OnceCell<Rc<Vec<Piece>>>,
+    /// The first connected-component result a prepared batch accepted, by
+    /// normalized tolerance bits; later plans on this subject reuse it.
+    // ponytail: one tolerance per subject bounds retention to one result; key a
+    // byte-bounded map by tolerance if specs alternate tolerances.
+    components: OnceCell<(u64, Rc<ConnectedComponents>)>,
 }
 
 impl MeshAnalysis {
@@ -316,6 +353,22 @@ impl MeshAnalysis {
     #[cfg(test)]
     pub fn connected_components(&self, tolerance_mm: f64) -> ConnectedComponents {
         ConnectedComponents::from_clusters(self.component_clusters(tolerance_mm))
+    }
+
+    /// A result an earlier plan accepted for these tolerance bits.
+    pub(crate) fn retained_components(
+        &self,
+        tolerance_bits: u64,
+    ) -> Option<Rc<ConnectedComponents>> {
+        self.components
+            .get()
+            .filter(|(bits, _)| *bits == tolerance_bits)
+            .map(|(_, value)| Rc::clone(value))
+    }
+
+    /// Retains an accepted result; refusals never reach here (policy §16).
+    pub(crate) fn retain_components(&self, tolerance_bits: u64, value: &Rc<ConnectedComponents>) {
+        let _ = self.components.set((tolerance_bits, Rc::clone(value)));
     }
 }
 
@@ -516,6 +569,10 @@ fn primitive_records(record: &MeshAnalysisRecord) -> Vec<PrimitiveRecord> {
         .collect()
 }
 
+fn triangle_center(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
+    std::array::from_fn(|axis| (a[axis] + b[axis] + c[axis]) / 3.0)
+}
+
 fn triangle_area(a: Vec3, b: Vec3, c: Vec3) -> f64 {
     let ux = b[0] - a[0];
     let uy = b[1] - a[1];
@@ -578,7 +635,6 @@ fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
         .iter()
         .map(|primitive| Rc::from(primitive.name.as_str()))
         .collect();
-    let mut triangles = Vec::with_capacity(record.triangles.len());
     let mut non_finite_vertices = Vec::new();
     let mut degenerate_triangles = Vec::new();
     let mut surface_area = 0.0;
@@ -594,15 +650,7 @@ fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
         let b = record.positions[indices[1] as usize];
         let c = record.positions[indices[2] as usize];
         let area = triangle_area(a, b, c);
-        let triangle = MeshTriangle {
-            primitive: Rc::clone(&names[primitive_index as usize]),
-            triangle_index: index as u32,
-            a,
-            b,
-            c,
-            center: std::array::from_fn(|axis| (a[axis] + b[axis] + c[axis]) / 3.0),
-            area,
-        };
+        let primitive = &names[primitive_index as usize];
         surface_area += area;
         let contribution = (a[0] * (b[1] * c[2] - b[2] * c[1])
             - a[1] * (b[0] * c[2] - b[2] * c[0])
@@ -615,7 +663,7 @@ fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
         for (corner, position) in [a, b, c].into_iter().enumerate() {
             if !position.into_iter().all(f64::is_finite) {
                 non_finite_vertices.push(NonFiniteVertex {
-                    primitive: Rc::clone(&triangle.primitive),
+                    primitive: Rc::clone(primitive),
                     vertex_index: (index * 3 + corner) as u32,
                     position,
                 });
@@ -623,30 +671,29 @@ fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
         }
         if area == 0.0 {
             degenerate_triangles.push(DegenerateTriangle {
-                primitive: Rc::clone(&triangle.primitive),
+                primitive: Rc::clone(primitive),
                 triangle_index: index as u32,
                 area: 0.0,
-                center: triangle.center,
+                center: triangle_center(a, b, c),
             });
         }
-        triangles.push(triangle);
     }
 
     MeshQuality {
-        triangle_count: triangles.len() as u32,
+        triangle_count: record.triangles.len() as u32,
         non_finite_vertices,
         degenerate_triangles,
-        triangles,
         surface_area,
         signed_volume,
         center_of_mass: (signed_volume.is_finite() && signed_volume != 0.0)
             .then(|| centroid.map(|value| value / signed_volume)),
         record,
+        names,
         duplicate_faces: OnceCell::new(),
     }
 }
 
-fn duplicate_faces(record: &MeshAnalysisRecord, triangles: &[MeshTriangle]) -> Vec<DuplicateFace> {
+fn duplicate_faces(record: &MeshAnalysisRecord, names: &[Rc<str>]) -> Vec<DuplicateFace> {
     let mut canonical = Vec::with_capacity(record.positions.len());
     let mut positions = FastMap::default();
     for (index, &point) in record.positions.iter().enumerate() {
@@ -666,7 +713,7 @@ fn duplicate_faces(record: &MeshAnalysisRecord, triangles: &[MeshTriangle]) -> V
         corners.sort_unstable();
         match seen.entry((primitive, corners)) {
             Entry::Occupied(first) => duplicate_faces.push(DuplicateFace {
-                primitive: Rc::clone(&triangles[index].primitive),
+                primitive: Rc::clone(&names[primitive as usize]),
                 triangle_index: index as u32,
                 first_triangle_index: *first.get(),
             }),
@@ -1211,11 +1258,11 @@ pub(crate) fn analyze_indexed(
     Ok(analysis)
 }
 
+/// Every caller passes a record validated at decode (GLB/glTF) or built valid
+/// by the engine (GSM1, STEP report soup, interference components), so the
+/// check is not repeated here.
 pub fn analyze(record: &Rc<MeshAnalysisRecord>) -> Result<MeshAnalysis, BackendError> {
-    record.validate().map_err(|message| BackendError {
-        kind: BackendErrorKind::InvalidInput,
-        message: format!("Invalid retained mesh analysis record: {message}."),
-    })?;
+    debug_assert_eq!(record.validate(), Ok(()));
     Ok(MeshAnalysis {
         vertex_count: record.positions.len() as u32,
         mesh_count: record.primitives.len() as u32,
@@ -1228,6 +1275,7 @@ pub fn analyze(record: &Rc<MeshAnalysisRecord>) -> Result<MeshAnalysis, BackendE
         mesh_quality: OnceCell::new(),
         watertight: OnceCell::new(),
         pieces: OnceCell::new(),
+        components: OnceCell::new(),
     })
 }
 
@@ -1598,6 +1646,66 @@ mod tests {
         let analysis = analyze(&Rc::new(record)).unwrap();
         assert_eq!(analysis.connected_components(0.999_999).count, 2);
         assert_eq!(analysis.connected_components(1.0).count, 1);
+    }
+
+    #[test]
+    fn later_plans_reuse_an_accepted_component_result_under_their_own_limits() {
+        use crate::{analysis::batch::BatchAnalysis, backend::AnalysisRetentionLimits};
+        let mut record = box_record(0.0);
+        let right = box_record(2.0);
+        record.positions.extend(right.positions);
+        record.triangles.extend(
+            right
+                .triangles
+                .into_iter()
+                .map(|triangle| triangle.map(|index| index + 8)),
+        );
+        record.triangle_primitives.extend(vec![1; 12]);
+        record.primitives.push(Primitive {
+            name: "right#0".into(),
+            vertex_start: 8,
+            vertex_count: 8,
+        });
+        let analysis = analyze(&Rc::new(record)).unwrap();
+        let plan = |tolerance: f64, max_mesh_bytes| {
+            let limits = AnalysisRetentionLimits {
+                max_mesh_bytes,
+                max_mesh_entries: 1,
+                max_solid_entries: 0,
+            };
+            BatchAnalysis::new([("s".to_owned(), tolerance.to_bits())], limits).unwrap()
+        };
+
+        let first = plan(0.0, u64::MAX)
+            .connected_components("s", 0.0, &analysis)
+            .unwrap();
+        let second = plan(-0.0, u64::MAX)
+            .connected_components("s", -0.0, &analysis)
+            .unwrap();
+        assert_eq!(first.count, 2);
+        assert!(
+            Rc::ptr_eq(&first, &second),
+            "a second plan must not rebuild"
+        );
+
+        // A plan whose limit the retained result exceeds still refuses it.
+        let refusal = plan(0.0, 1)
+            .connected_components("s", 0.0, &analysis)
+            .unwrap_err();
+        assert_eq!(
+            refusal.message,
+            "Connected-component results exceed the declared analysis retention byte limit."
+        );
+
+        // Another tolerance is built, not served from the retained result.
+        let joined = plan(1.0, u64::MAX)
+            .connected_components("s", 1.0, &analysis)
+            .unwrap();
+        assert_eq!(joined.count, 1);
+        assert!(Rc::ptr_eq(
+            &analysis.retained_components(0).unwrap(),
+            &first
+        ));
     }
 
     #[test]

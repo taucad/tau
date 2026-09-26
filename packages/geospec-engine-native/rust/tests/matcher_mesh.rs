@@ -576,3 +576,185 @@ fn point_normalization_center_diagnostic_keeps_source_schema_and_actual_numbers(
     }
     assert_eq!(rows[0], rows[1]);
 }
+
+/// Canonical claim results for every projected mesh family on crafted subjects
+/// whose integrity lists, watertight clusters and components are all non-empty.
+/// Pinned from M0 (446ff8ba0): the projection must move, not change, fields.
+#[test]
+fn projected_mesh_family_results_keep_their_bytes() {
+    use sha2::{Digest, Sha256};
+
+    // A closed box, a disjoint fin and a fan with a duplicate, a degenerate
+    // triangle and a non-finite corner.
+    let mut flawed = box_record(0.0);
+    flawed.positions.extend([
+        [5.0, 0.0, 0.0],
+        [6.0, 0.0, 0.0],
+        [5.0, 1.0, 0.0],
+        [f64::INFINITY, 0.0, 0.0],
+    ]);
+    flawed
+        .triangles
+        .extend([[8, 9, 10], [10, 9, 8], [8, 8, 9], [11, 9, 10]]);
+    flawed.triangle_primitives.extend([1; 4]);
+    flawed.primitives.push(Primitive {
+        name: "fan#0".into(),
+        vertex_start: 8,
+        vertex_count: 4,
+    });
+    // Two boxes and an open fin: finite, so every family can answer.
+    let mut parts = box_record(0.0);
+    let right = box_record(2.0);
+    parts.positions.extend(right.positions);
+    parts.triangles.extend(
+        right
+            .triangles
+            .into_iter()
+            .map(|triangle| triangle.map(|index| index + 8)),
+    );
+    parts.triangle_primitives.extend([1; 12]);
+    parts.primitives.push(Primitive {
+        name: "right#0".into(),
+        vertex_start: 8,
+        vertex_count: 8,
+    });
+    parts
+        .positions
+        .extend([[9.0, 0.0, 0.0], [10.0, 0.0, 0.0], [9.0, 1.0, 0.5]]);
+    parts.triangles.push([16, 17, 18]);
+    parts.triangle_primitives.push(2);
+    parts.primitives.push(Primitive {
+        name: "fin#0".into(),
+        vertex_start: 16,
+        vertex_count: 3,
+    });
+
+    let integrity_all = Json::object([
+        ("finitePositions", Json::Bool(true)),
+        (
+            "degenerateTriangles",
+            Json::object([("maxCount", Json::Number(0.0))]),
+        ),
+        (
+            "duplicateFaces",
+            Json::object([("maxCount", Json::Number(0.0))]),
+        ),
+        ("watertight", Json::Bool(true)),
+        ("triangleCount", Json::Number(16.0)),
+    ]);
+    let rows = [
+        (
+            flawed,
+            Capability::ToHaveMeshIntegrity,
+            payload("meshIntegrity", integrity_all.clone()),
+        ),
+        (
+            parts.clone(),
+            Capability::ToHaveMeshIntegrity,
+            payload("meshIntegrity", integrity_all),
+        ),
+        (
+            parts.clone(),
+            Capability::ToHaveMeshIntegrity,
+            payload(
+                "meshIntegrity",
+                Json::object([("finitePositions", Json::Bool(true))]),
+            ),
+        ),
+        (
+            parts.clone(),
+            Capability::ToBeWatertight,
+            payload("watertight", Json::Bool(true)),
+        ),
+        (
+            parts.clone(),
+            Capability::ToHaveConnectedComponents,
+            payload(
+                "connectedComponents",
+                Json::object([
+                    ("count", Json::Number(2.0)),
+                    ("toleranceMm", Json::Number(0.0)),
+                ]),
+            ),
+        ),
+        (
+            parts.clone(),
+            Capability::ToHaveVolume,
+            payload("volume", Json::object([("value", Json::Number(3.0))])),
+        ),
+        (
+            parts.clone(),
+            Capability::ToHaveMass,
+            payload(
+                "mass",
+                Json::object([("value", Json::Number(1.0)), ("density", Json::Number(2.0))]),
+            ),
+        ),
+        (
+            parts.clone(),
+            Capability::ToHaveSurfaceArea,
+            payload("surfaceArea", Json::object([("value", Json::Number(12.5))])),
+        ),
+        (
+            parts,
+            Capability::ToHaveCenterOfMass,
+            payload(
+                "centerOfMass",
+                Json::object([(
+                    "point",
+                    Json::Array(vec![
+                        Json::Number(0.0),
+                        Json::Number(0.0),
+                        Json::Number(0.0),
+                    ]),
+                )]),
+            ),
+        ),
+    ];
+    let mut actual = Vec::new();
+    for (record, capability, payload) in rows {
+        let prepared = prepare(capability, &payload).unwrap();
+        let subjects = [subject(record)];
+        let batch = BatchAnalysis::new(
+            prepared
+                .demand()
+                .connected_components_tolerance_bits
+                .map(|bits| (subjects[0].cache_identity().unwrap(), bits)),
+            AnalysisRetentionLimits {
+                max_mesh_bytes: 1_000_000,
+                max_mesh_entries: 1,
+                max_solid_entries: 0,
+            },
+        )
+        .unwrap();
+        let normalized = prepared.normalized_payload();
+        let budget = Budget::new(10_000);
+        let mut context =
+            EvaluationContext::new(&subjects, capability, "pin", &normalized, &budget, None)
+                .with_batch(&batch);
+        let evaluation = evaluate(&prepared, &mut context);
+        let result = crate::result::finish(
+            "pin",
+            capability,
+            crate::result::Polarity::Positive,
+            evaluation,
+        )
+        .unwrap();
+        let bytes = crate::codec::encode(&result).unwrap();
+        actual.push(format!("{:x}", Sha256::digest(bytes)));
+    }
+    assert_eq!(
+        actual,
+        [
+            "49a73b4ba21e56b8cc755028b3ef81ce829a365522219da2706b23b974f9d66b",
+            "6b6ea29d7cc0c8df55f01df07fb61d85e97ad9fd5aea9c202bd2388800a10414",
+            "f9342c063b8512ac79f7e4241fafe76d0ca3e8c313ed9ff2ce722bbc00583146",
+            "068054b2ffdcb2e3269d1549e725f5cc1ce0f717f5be07e3c6fe73ed2f049b3d",
+            "1a0d03d9de132def3069f578e48aa032bbc3fe2b10e78f313938b300b43eb973",
+            "a8e4c26aecdc3370d3f385b5bbb3e315eb6862762df11715a25fc273f165b731",
+            "c0160f0160e7000b68a84dcfe0e9f44a4eec98040802774c0b42dcf83a1f4904",
+            "564e601511264fd3a665dd981fd6255b45acf5c1571b21573ace7816fe9fe3be",
+            "3b4421ea05f1226057d5f86a734ab2035d0a5cca6bd9bfd398b808df9ca00e68",
+        ]
+    );
+}

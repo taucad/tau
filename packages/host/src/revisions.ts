@@ -766,9 +766,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * source (`watchWorkspace: false`) makes no such promise.
      *
      * Applies are not hidden from the feed: hiding them would let a write that
-     * raced an apply drop out of every later incremental cut. A restore or a
-     * switch therefore reads dirty until its idle cut finds nothing to record,
-     * as it does in the browser.
+     * raced an apply drop out of every later incremental cut. The checkout
+     * compares the tree after such a burst, so a restore, a switch or a pull
+     * reads clean again as soon as that comparison finds nothing changed.
      */
     completeChanges: options.watchWorkspace !== false,
     parameters: parameterCodec,

@@ -39,7 +39,36 @@ for (const off of ['NO_TCLTK', 'NO_GETTEXT']) {
   );
 }
 assert.ok(!payload.gitMakeVariables.some((variable) => variable.startsWith('NO_CURL')), 'HTTPS remotes need curl');
+for (const expected of ['NO_DARWIN_PORTS=YesPlease', 'NO_FINK=YesPlease', 'CURL_CONFIG=/usr/bin/curl-config']) {
+  assert.ok(
+    payload.gitMakeVariables.some((variable) => variable === expected),
+    `${expected} keeps package managers out of the payload`,
+  );
+}
 console.log('✓ git and git-lfs are pinned by version and SHA-256');
+
+/* The link check: only the OS's own libraries survive `otool -L`. */
+assert.deepEqual(
+  payload.foreignLibraries(
+    [
+      '/payload/bin/git:',
+      '\t/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)',
+      '\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 61439.0.0)',
+      '\t/opt/homebrew/opt/libiconv/lib/libiconv.2.dylib (compatibility version 9.0.0, current version 9.1.0)',
+      '/payload/libexec/git-core/git-remote-http:',
+      '\t/usr/lib/libcurl.4.dylib (compatibility version 7.0.0, current version 9.0.0)',
+      '\t/opt/homebrew/opt/libiconv/lib/libiconv.2.dylib (compatibility version 9.0.0, current version 9.1.0)',
+      '\t@rpath/libpcre2-8.0.dylib (compatibility version 14.0.0, current version 14.0.0)',
+      '',
+    ].join('\n'),
+  ),
+  ['/opt/homebrew/opt/libiconv/lib/libiconv.2.dylib', '@rpath/libpcre2-8.0.dylib'],
+);
+assert.deepEqual(
+  payload.foreignLibraries('/payload/bin/git:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n'),
+  [],
+);
+console.log('✓ a payload linking outside /usr/lib and /System is named');
 
 const root = await mkdtemp(join(tmpdir(), 'tau-git-payload-'));
 try {
@@ -70,6 +99,26 @@ try {
     /is not the pinned git source/u,
   );
   console.log('✓ only the pinned source is copied beside the payload');
+
+  /* The up-to-date check reads back exactly what the build wrote, from disk. */
+  const built = { target: 'darwin-arm64', gitSha256: 'a'.repeat(64), gitLfsSha256: 'b'.repeat(64) };
+  const manifestPath = join(root, 'tau-runtime-manifest.json');
+  const manifest = payload.gitPayloadManifest({
+    ...built,
+    probed: { git: 'git version 2.55.0', gitLfs: 'git-lfs/3.8.0' },
+  });
+  await writeFile(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
+  const written: unknown = JSON.parse(await readFile(manifestPath, 'utf8'));
+  assert.ok(payload.gitPayloadManifestIsCurrent(written, built), 'a written manifest reads as current');
+  assert.ok(
+    !payload.gitPayloadManifestIsCurrent(written, { ...built, gitSha256: 'c'.repeat(64) }),
+    'a changed binary is not',
+  );
+  assert.ok(
+    !payload.gitPayloadManifestIsCurrent({ ...payload.gitPayloadManifest(built), makeVariables: [] }, built),
+    'changed make variables are not',
+  );
+  console.log('✓ a written manifest reads as current, and a changed payload does not');
 } finally {
   await rm(root, { recursive: true, force: true });
 }

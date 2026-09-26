@@ -322,7 +322,7 @@ it('owns durable compute by admitted project and preserves generation across aut
         projectId: 'candidate-workspace',
       }),
     ).resolves.toEqual({
-      error: 'Compute store project authority does not match the active project.',
+      error: 'Compute store project authority does not match a live project.',
     });
     await Promise.all(
       (['computeStoreConnect', 'computeStoreControl'] as const).map(async (type) => {
@@ -364,7 +364,7 @@ it('owns durable compute by admitted project and preserves generation across aut
         action: 'inspect',
       }),
     ).resolves.toEqual({
-      error: 'Compute control project authority does not match the active project.',
+      error: 'Compute control project authority does not match a live project.',
     });
     await expect(
       rawComputeRequest(first.ready.context.worker!, {

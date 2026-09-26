@@ -192,13 +192,6 @@ type WorkerSession = {
   readonly providerBasePath: string;
   readonly projectId: string;
   readonly workspaceId: string;
-  /**
-   * The revision the most recently admitted turn runs on, as the page named it.
-   *
-   * Provenance only: a print request records it beside the artifact digest the
-   * machine host verifies. The worker never records a revision of its own.
-   */
-  readonly baseRevision: { current?: string | undefined };
 };
 
 /** OPFS sync access handles exist in workers and never on the main thread. */
@@ -855,11 +848,7 @@ const executeCommand = async (
        * placement the *page* owns the revision — `ChatWorkspaceAuthorityProvider`
        * prepares the turn's workspace in the selected mode and finalizes it —
        * so the worker would be recording a second, competing one. They ride the
-       * command only because one client object is sent to both transports. The
-       * base is kept as provenance for print requests, never recorded. */
-      if (command.baseRevisionId !== undefined) {
-        active.baseRevision.current = command.baseRevisionId;
-      }
+       * command only because one client object is sent to both transports. */
       const base = {
         chatId: command.chatId,
         runId: command.runId,
@@ -1753,7 +1742,6 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     mapRuntimeError: (error) => toRpcError(error),
     parameterActorFor,
   });
-  const baseRevision: WorkerSession['baseRevision'] = {};
   const toolRegistry: ToolRegistry = createChatToolRegistry({
     fileSystemFor: (signal) =>
       createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),
@@ -1765,8 +1753,8 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     geospec: geoSpecClient,
     machines: runtimeClient.machines,
     print: {
-      // ponytail: one worker serves every chat of a project, so this is the latest admitted base; key it by run if concurrent chats must differ.
-      revisions: { describe: async () => ({ revisionId: baseRevision.current }) },
+      /* The `tau.json` id every print request from this project's agent names (blueprint D5). */
+      projectId: request.authority.projectId,
       readArtifact: async ({ path, signal }) => {
         signal.throwIfAborted();
         const bytes = await recordView.readFile(assertRootedPath(path));
@@ -1872,7 +1860,6 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     providerBasePath: request.projectStorage.providerBasePath,
     projectId: request.authority.projectId,
     workspaceId: request.authority.workspaceId,
-    baseRevision,
   };
   activeReference.current = active;
   session = active;

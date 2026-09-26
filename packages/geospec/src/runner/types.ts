@@ -668,11 +668,15 @@ export type GeoSpecModuleBundleCache = Map<
     builtinIdentity: string;
     runToken: string;
     bundle: BundleResult;
-    /** Each filesystem read the bundler made while building `bundle`, with the answer it got. */
+    /**
+     * Each filesystem read the bundler made while building `bundle`, with the
+     * answer it got. Existence probes are reads too: they decide which file an
+     * import resolves to.
+     */
     bundlerReads: ReadonlyArray<{
-      question: 'utf8' | 'bytes';
+      question: 'exists' | 'utf8' | 'bytes';
       path: string;
-      answer: string | Uint8Array<ArrayBuffer>;
+      answer: boolean | string | Uint8Array<ArrayBuffer>;
     }>;
   }
 >;

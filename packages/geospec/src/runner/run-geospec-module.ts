@@ -46,8 +46,12 @@ const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer
 const sameAnswer = (left: BundlerRead['answer'], right: BundlerRead['answer']): boolean =>
   left instanceof Uint8Array && right instanceof Uint8Array ? bytesEqual(left, right) : left === right;
 
-const ask = async (filesystem: VmFileSystem, { question, path }: BundlerRead): Promise<BundlerRead['answer']> =>
-  question === 'utf8' ? filesystem.readFile(path, 'utf8') : filesystem.readFile(path);
+const ask = async (filesystem: VmFileSystem, { question, path }: BundlerRead): Promise<BundlerRead['answer']> => {
+  if (question === 'exists') {
+    return filesystem.exists(path);
+  }
+  return question === 'utf8' ? filesystem.readFile(path, 'utf8') : filesystem.readFile(path);
+};
 
 const cacheEntryIsCurrent = async (filesystem: VmFileSystem, reads: readonly BundlerRead[]): Promise<boolean> => {
   const comparisons = await Promise.all(
@@ -99,7 +103,7 @@ const recordBundlerReads = (
   // ponytail: exactly the VmFileSystem contract; record any read method the bundler gains (an optional stat) here too.
   return {
     filesystem: {
-      exists: async (path) => filesystem.exists(path),
+      exists: async (path) => observe('exists', path, filesystem.exists(path)),
       readFile: (async (path: string, encoding?: 'utf8') =>
         encoding === 'utf8'
           ? observe('utf8', path, filesystem.readFile(path, 'utf8'))

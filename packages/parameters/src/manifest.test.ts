@@ -7,7 +7,8 @@ import {
   admitParameterValues,
   compileParameterManifest,
   parameterManifestProfile,
-  projectParameterSchemaToDraft7,
+  projectDraft7SchemaToParameterDeclaration,
+  projectParameterSchema,
   resolveParameterBinding,
 } from '@taucad/parameters';
 import type { ParameterDeclaration, ParameterProvenance } from '@taucad/parameters';
@@ -388,7 +389,7 @@ describe('native parameter manifest', () => {
       properties: Record<string, unknown>;
     };
     delete projectable.properties['precise'];
-    const projected = projectParameterSchemaToDraft7(projectable);
+    const projected = projectParameterSchema({ schema: projectable, bindings: {} }, { dialect: 'draft-07' });
     expect(projected.status).toBe('usable');
     if (projected.status !== 'usable') {
       throw new Error('expected usable projection');
@@ -431,7 +432,7 @@ describe('native parameter manifest', () => {
         },
       },
     };
-    const projected = projectParameterSchemaToDraft7(schema);
+    const projected = projectParameterSchema({ schema, bindings: {} }, { dialect: 'draft-07' });
 
     expect(projected).toMatchObject({
       status: 'usable',
@@ -449,17 +450,23 @@ describe('native parameter manifest', () => {
   });
 
   it('marks decimal and wide-integer Draft-7 execution as unsupported', () => {
-    const projected = projectParameterSchemaToDraft7({
-      $schema: 'https://json-structure.org/meta/extended/v0/#',
-      $id: 'urn:taucad:test:unsupported-projection',
-      $uses: ['JSONSchemaUnits'],
-      name: 'UnsupportedProjection',
-      type: 'object',
-      properties: {
-        precise: { type: 'decimal', ucumUnit: 'm' },
-        count: { type: 'int64', ucumUnit: '1' },
+    const projected = projectParameterSchema(
+      {
+        schema: {
+          $schema: 'https://json-structure.org/meta/extended/v0/#',
+          $id: 'urn:taucad:test:unsupported-projection',
+          $uses: ['JSONSchemaUnits'],
+          name: 'UnsupportedProjection',
+          type: 'object',
+          properties: {
+            precise: { type: 'decimal', ucumUnit: 'm' },
+            count: { type: 'int64', ucumUnit: '1' },
+          },
+        },
+        bindings: {},
       },
-    });
+      { dialect: 'draft-07' },
+    );
     expect(projected.status).toBe('unsupported');
     expect(projected.diagnostics).toEqual(
       expect.arrayContaining([
@@ -1268,5 +1275,153 @@ describe('authored claims inside the native carrier', () => {
         defaults: {},
       }),
     ).not.toThrow();
+  });
+});
+
+// The outbound OGC-profile view. Fixtures are Tau's own; tests cite the OGC 23-058r2 requirement they exercise.
+describe('2020-12 parameter schema view', () => {
+  const lengthKind = 'http://qudt.org/vocab/quantitykind/Length';
+  const widthKind = 'http://qudt.org/vocab/quantitykind/Width';
+  const carrier = (properties: Readonly<Record<string, unknown>>, extra: Readonly<Record<string, unknown>> = {}) => ({
+    $schema: 'https://json-structure.org/meta/extended/v0/#',
+    $id: 'urn:taucad:test:view',
+    $uses: ['JSONSchemaUnits'],
+    name: 'View',
+    type: 'object',
+    properties,
+    ...extra,
+  });
+  const projectable = async () => {
+    const producer = structuredClone(declaration()) as unknown as {
+      schema: { properties: Record<string, unknown> };
+      defaults: Record<string, unknown>;
+    };
+    delete producer.schema.properties['precise'];
+    delete producer.defaults['precise'];
+    return compile(producer as unknown as ParameterDeclaration);
+  };
+
+  it('should emit the OGC profile with binding semantics and no $id (Requirements 1, 7, 8; Recommendation 1 G–L)', async () => {
+    const view = projectParameterSchema(await projectable());
+
+    expect(view).toEqual({
+      status: 'usable',
+      dialect: '2020-12',
+      diagnostics: [],
+      schema: {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        $defs: {
+          nullableLength: { type: 'number', format: 'double', 'x-ogc-unit': 'mm', 'x-ogc-unitLang': 'UCUM' },
+        },
+        properties: {
+          length: {
+            type: 'number',
+            format: 'double',
+            minimum: 0,
+            maximum: 100,
+            multipleOf: 0.5,
+            enum: [0.5, 2.5, 100],
+            'x-ogc-unit': 'mm',
+            'x-ogc-unitLang': 'UCUM',
+            'x-ogc-definition': lengthKind,
+            'x-tau-space': 'linear',
+            'x-tau-symbols': { default: 'mm', 'lang:en-NZ': 'millimetres' },
+          },
+          copies: { type: 'integer', format: 'int32', 'x-ogc-unit': '1', 'x-ogc-unitLang': 'UCUM' },
+          optionalLength: { anyOf: [{ $ref: '#/$defs/nullableLength' }, { type: 'null' }] },
+        },
+        required: ['length', 'copies'],
+      },
+    });
+  });
+
+  it('should keep the embedded Draft-07 view as the draft-07 dialect of the same function', async () => {
+    const manifest = await projectable();
+
+    expect(projectParameterSchema(manifest, { dialect: 'draft-07' })).toEqual(manifest.legacyProjection);
+  });
+
+  it('should round-trip through the JSON Schema adapter into the same carrier and bindings', async () => {
+    const producer: ParameterDeclaration = {
+      schema: carrier(
+        {
+          width: { type: 'double', ucumUnit: 'mm', symbol: 'w', minimum: 0 },
+          ratio: { type: 'float', ucumUnit: '1' },
+          teeth: { type: 'uint32', ucumUnit: '1' },
+        },
+        { required: ['width'] },
+      ),
+      defaults: { width: 4, ratio: 0.5, teeth: 12 },
+      bindings: { '/width': { quantityKind: widthKind, space: 'linear' } },
+    };
+    const view = projectParameterSchema(await compile(producer));
+    if (view.status !== 'usable') {
+      throw new Error('expected a usable view');
+    }
+
+    const readmitted = projectDraft7SchemaToParameterDeclaration({
+      schema: view.schema,
+      defaults: producer.defaults,
+      schemaId: 'urn:taucad:test:view',
+      schemaName: 'View',
+    });
+
+    expect(readmitted.schema).toEqual(producer.schema);
+    expect(readmitted.bindings).toEqual(producer.bindings);
+  });
+
+  it('should refuse numbers the carrier holds as strings and report keywords it cannot express', async () => {
+    const decimal = projectParameterSchema({
+      schema: carrier({ precise: { type: 'decimal', ucumUnit: 'm' }, count: { type: 'int64', ucumUnit: '1' } }),
+      bindings: {},
+    });
+
+    expect(decimal.status).toBe('unsupported');
+    expect(decimal.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'REPRESENTATION_UNSUPPORTED', schemaPointer: '/properties/precise/type' }),
+        expect.objectContaining({ code: 'LEGACY_PROJECTION_LOSS', schemaPointer: '/properties/count/type' }),
+      ]),
+    );
+    expect(
+      projectParameterSchema({
+        schema: carrier({ label: { type: 'string', altnames: { en: 'Label' } } }),
+        bindings: {},
+      }),
+    ).toMatchObject({
+      status: 'usable',
+      diagnostics: [
+        { code: 'LEGACY_PROJECTION_LOSS', severity: 'warning', schemaPointer: '/properties/label/altnames' },
+      ],
+    });
+  });
+
+  it('should never place semantics without a unit or from disagreeing bindings', async () => {
+    const unitless = await compile({
+      schema: carrier({ opaque: { type: 'double' } }),
+      defaults: { opaque: 1 },
+      bindings: { '/opaque': { quantityKind: lengthKind } },
+    });
+    const shared = await compile({
+      schema: carrier(
+        { depth: { type: { $ref: '#/definitions/span' } }, width: { type: { $ref: '#/definitions/span' } } },
+        { definitions: { span: { type: 'double', ucumUnit: 'mm' } } },
+      ),
+      defaults: { depth: 1, width: 1 },
+      bindings: { '/depth': { quantityKind: lengthKind }, '/width': { quantityKind: widthKind } },
+    });
+
+    expect(projectParameterSchema(unitless)).toMatchObject({
+      status: 'usable',
+      schema: { properties: { opaque: { type: 'number', format: 'double' } } },
+      diagnostics: [{ code: 'LEGACY_PROJECTION_LOSS', schemaPointer: '/properties/opaque' }],
+    });
+    expect(projectParameterSchema(shared)).toMatchObject({
+      status: 'usable',
+      schema: { $defs: { span: { type: 'number', format: 'double', 'x-ogc-unit': 'mm', 'x-ogc-unitLang': 'UCUM' } } },
+      diagnostics: [{ code: 'LEGACY_PROJECTION_LOSS', schemaPointer: '/definitions/span' }],
+    });
+    expect(JSON.stringify(projectParameterSchema(shared))).not.toContain('x-ogc-definition');
   });
 });

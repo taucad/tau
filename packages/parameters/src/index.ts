@@ -8,7 +8,7 @@ export {
   isParameterManifestShape,
   parameterManifestProfile,
   ParameterAdmissionError,
-  projectParameterSchemaToDraft7,
+  projectParameterSchema,
   resolveParameterBinding,
   resolveParameterBindingPointer,
 } from '#manifest.js';
@@ -33,13 +33,15 @@ export type {
   ParameterDeclaration,
   ParameterDiagnostic,
   ParameterIdentity,
-  ParameterLegacyProjection,
   ParameterManifest,
   ParameterProvenance,
   ParameterResolutionOptions,
+  ParameterSchemaProjection,
+  ParameterSchemaProjectionOptions,
   ParameterScope,
   ParameterSource,
 } from '#manifest.js';
+export type { JsonSchema, JsonSchemaDialect } from '#schema-admission.js';
 
 export { resolveParameterSnapshot } from '#snapshot.js';
 export type { ParameterSnapshot } from '#snapshot.js';

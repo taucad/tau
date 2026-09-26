@@ -172,6 +172,7 @@ vi.mock('xstate', async (importOriginal) => {
 });
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
+const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
 const createWrapper = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -226,8 +227,8 @@ describe('useProjectManager.duplicateProject', () => {
     await act(async () => result.current.duplicateProject(sourceProject.id));
 
     const targetId = mockDuplicate.mock.calls[0]?.[0].targetManifest.id ?? '';
-    expect(localStorage.getItem(`tau:tau-cloud-intent:${targetId}`)).toBe('default');
-    expect(localStorage.getItem(`tau:tau-cloud-intent:${sourceProject.id}`)).toBeNull();
+    expect(tauCloudIntent.get(targetId)).toBe('default');
+    expect(tauCloudIntent.get(sourceProject.id)).toBeUndefined();
   });
 
   it('journals only the project, never the control plane, records or cache beside it', async () => {

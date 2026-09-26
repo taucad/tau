@@ -3,13 +3,13 @@
  *
  * `GET /v1/projects` is the only place a client learns two facts D27 introduced:
  * which projects are *collaborations* rather than the caller's own, and which
- * role the caller holds on each. Three surfaces read it — the library's *From
- * Tau Cloud* section, the Sync region's invite gate, and the invitation accept
- * route — so the fetch, the query key and the open gesture live here once
- * rather than three times under three different cache keys.
+ * role the caller holds on each. Three surfaces read it — the one library
+ * (D20), the Sync region's invite gate, and the invitation accept route — so
+ * the fetch, the query key and the open gesture live here once rather than
+ * three times under three different cache keys.
  */
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
@@ -18,6 +18,9 @@ import type { ProjectCreationLocation } from '#types/project-creation-location.t
 import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
+import { toast } from '#components/ui/sonner.js';
+import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { KeyedMutex } from '#db/keyed-mutex.js';
 
 /** What this account may do with a project on Tau Cloud (D27). @public */
 export type ProjectRole = 'owner' | 'write' | 'read';
@@ -59,8 +62,21 @@ export const isSyncReadOnly = (remote: RemoteFacet | undefined, role: ProjectAcc
  */
 export type CloudProject = Readonly<{ id: string; name: string; role: ProjectRole; updatedAt?: number }>;
 
-/** One cache key for one listing: a role read here is the role the library shows. */
+/** The prefix every listing key starts with, so one invalidation reaches every account's listing. */
 export const cloudProjectsQueryKey = ['cloud-projects'] as const;
+
+/**
+ * One cache key per account (RV-W11 6): a listing read for one account is never
+ * answered to the next one signed in on this device.
+ *
+ * @param userId - The signed-in account, when there is one.
+ * @returns The listing's key.
+ * @public
+ */
+export const cloudProjectsQueryKeyFor = (userId: string | undefined): readonly unknown[] => [
+  ...cloudProjectsQueryKey,
+  userId ?? null,
+];
 
 const isRole = (value: unknown): value is ProjectRole => value === 'owner' || value === 'write' || value === 'read';
 
@@ -129,7 +145,7 @@ export const useCloudProjects = (
     isError,
     isFetching,
   } = useQuery({
-    queryKey: cloudProjectsQueryKey,
+    queryKey: cloudProjectsQueryKeyFor(useRevisionSessionUser()?.id),
     queryFn: fetchCloudProjects,
     enabled: options?.enabled ?? true,
     /* The set only changes when another device backs something up or an owner
@@ -179,11 +195,14 @@ export const useProjectAccessRole = (projectId: string, isTauRemote: boolean): P
 /**
  * What this device still owes one project's Tau Cloud backup (D19, D20).
  *
- * - `default`: a new project, backed up from its first revision once the
- *   account is signed in and entitled (D19).
- * - `notice`: backed up by default; *Where you are* says so beside its opt-out.
- * - `open`: brought to this device on sign-in (D20); its first open connects
- *   Tau Cloud and pulls, exactly what *Open* does for a cloud-only row.
+ * - `default`: a project born with no remote, whose person has not yet been told
+ *   it backs up (D19).
+ * - `noticed`: told, with the opt-out beside it (DESIGN: opt-out before
+ *   commitment); the only state a default connection is made from.
+ * - `connected`: backed up by default; *Where you are* keeps its line and opt-out.
+ * - `open`: brought to this device on sign-in (D20); its first open connects Tau
+ *   Cloud and pulls, exactly what *Open* does for a cloud-only row. Kept until
+ *   the connection lands.
  *
  * Per device and per project, like `githubProjectBinding`: whether a project is
  * backed up is recorded in its own git config once it is, and this is only what
@@ -191,12 +210,13 @@ export const useProjectAccessRole = (projectId: string, isTauRemote: boolean): P
  *
  * @public
  */
-export type TauCloudIntent = 'default' | 'notice' | 'open';
+export type TauCloudIntent = 'default' | 'noticed' | 'connected' | 'open';
 
-const intentKey = (projectId: string): string => `tau:tau-cloud-intent:${projectId}`;
+const intentKeyPrefix = 'tau:tau-cloud-intent:';
+const intentKey = (projectId: string): string => `${intentKeyPrefix}${projectId}`;
 const intentTopic = new Topic<void>({ name: 'tau-cloud-intent' });
 const isIntent = (value: unknown): value is TauCloudIntent =>
-  value === 'default' || value === 'notice' || value === 'open';
+  value === 'default' || value === 'noticed' || value === 'connected' || value === 'open';
 
 /** The per-project intent store. Storage failures read as "nothing owed". @public */
 export const tauCloudIntent = Object.freeze({
@@ -247,36 +267,41 @@ export type TauCloudEligibility = Readonly<{
   canSyncFiles: boolean;
 }>;
 
+/** What a project's session does about its intent now. @public */
+export type TauCloudStep = 'announce' | 'connect' | 'forget' | 'wait';
+
 /**
  * What a project's session does about its intent now.
  *
- * A project whose remote is already chosen owes nothing. `open` connects as
- * soon as there is a root to connect, like *Open*. `default` waits for a signed-in, entitled account and the project's first revision
- * (D19), and is forgotten for an account that is neither — or once somebody
- * picked a remote by hand. Only a new project carries it, and a new project has
- * no remote in its config, so the connect cannot race a remote being read back.
+ * `open` connects for a signed-in account and is forgotten only once Tau Cloud
+ * is connected (or another remote was chosen); a failed connect waits for the
+ * next open. `default` is first announced — the toast with its opt-out — and a
+ * connection is made only from `noticed`, after the first revision, for a
+ * signed-in, entitled account. Signed out waits: the project backs up once its
+ * person signs in. A plan without backup, or a remote chosen by hand, forgets.
  *
  * @param intent - The project's intent.
  * @param eligibility - The account, as far as it is known.
  * @param status - The project's revision projection, once the root answers.
- * @returns `connect`, `forget` or `wait`.
+ * @returns The step.
  * @public
  */
 export const nextTauCloudStep = (
   intent: TauCloudIntent | undefined,
   eligibility: TauCloudEligibility,
   status: RevisionStatusProjection | undefined,
-): 'connect' | 'forget' | 'wait' => {
-  if (status === undefined || intent === undefined || intent === 'notice') {
+): TauCloudStep => {
+  if (status === undefined || intent === undefined || intent === 'connected') {
     return 'wait';
   }
-  if (status.remote.kind !== 'none') {
-    return 'forget';
-  }
+  const { remote } = status;
   if (intent === 'open') {
-    return 'connect';
+    if (remote.kind === 'git' || (remote.kind === 'tau' && remote.phase === 'connected')) {
+      return 'forget';
+    }
+    return remote.kind === 'none' && remote.phase === 'none' && eligibility.auth === 'authed' ? 'connect' : 'wait';
   }
-  if (eligibility.auth === 'anonymous') {
+  if (remote.kind !== 'none') {
     return 'forget';
   }
   if (eligibility.auth !== 'authed' || !eligibility.isResolved) {
@@ -285,7 +310,39 @@ export const nextTauCloudStep = (
   if (!eligibility.canSyncFiles) {
     return 'forget';
   }
+  if (intent === 'default') {
+    return 'announce';
+  }
   return status.headRevisionId === undefined ? 'wait' : 'connect';
+};
+
+/** The opt-out's consequence, said wherever the opt-out is offered (RV-W11 8). @public */
+export const turnOffBackupConsequence = 'Stops backing up. The copy already on Tau Cloud stays.';
+
+/**
+ * *Turn off backup*, from the toast or the Revisions pane: one handler, reading
+ * the remote as it is now rather than as it was when the offer was drawn.
+ *
+ * @param projectId - The project.
+ * @param remote - The live remote facet, when the root has answered.
+ * @param commands - The session's disconnect and cancel verbs.
+ * @public
+ */
+export const turnOffBackupByDefault = (
+  projectId: string,
+  remote: Pick<RemoteFacet, 'kind' | 'phase'> | undefined,
+  commands: Readonly<{ disconnectRemote: () => void; cancelRemote: () => void }>,
+): void => {
+  tauCloudIntent.set(projectId, undefined);
+  if (remote?.kind !== 'tau') {
+    return;
+  }
+  /* A connection still being made is cancelled; one that stands is disconnected. */
+  if (remote.phase === 'connecting') {
+    commands.cancelRemote();
+  } else if (remote.phase !== 'disconnecting') {
+    commands.disconnectRemote();
+  }
 };
 
 /**
@@ -301,47 +358,84 @@ export const useTauCloudEligibility = (): TauCloudEligibility => {
 };
 
 /**
- * Act on a project's intent from inside its session: connect Tau Cloud through
- * the same verb the `cloudOpen` path sends, or forget the intent (W11).
+ * Act on a project's intent from inside its session (W11): announce backup by
+ * default with its opt-out, connect Tau Cloud through the same verb the
+ * `cloudOpen` path sends, or forget the intent.
  *
- * The intent is rewritten before the send — `notice` after a default
- * connection, nothing after a materialized open — so it connects once.
+ * Each step first checks the stored intent is still the one it was drawn for,
+ * so a second tab that already moved it on (or turned it off) is not repeated.
  *
- * @param input - The project, its intent, its revision projection and the
- * session's `connectRemote`.
+ * @param input - The project, its intent, its projection, how to read the
+ * remote live, and the session's remote verbs.
  * @public
  */
 export const useTauCloudIntentConnection = ({
   projectId,
   intent,
   status,
-  connectRemote,
+  readRemote,
+  commands,
 }: Readonly<{
   projectId: string;
   intent: TauCloudIntent;
   status: RevisionStatusProjection | undefined;
-  connectRemote: (kind: 'tau') => Promise<void>;
+  readRemote: () => Pick<RemoteFacet, 'kind' | 'phase'> | undefined;
+  commands: Readonly<{
+    connectRemote: (kind: 'tau') => Promise<void>;
+    disconnectRemote: () => void;
+    cancelRemote: () => void;
+  }>;
 }>): void => {
   const step = nextTauCloudStep(intent, useTauCloudEligibility(), status);
+  /* The toast's action outlives this render; it reads the verbs as they are then. */
+  const live = useRef({ readRemote, commands });
   useEffect(() => {
-    if (step === 'forget') {
-      tauCloudIntent.set(projectId, undefined);
+    live.current = { readRemote, commands };
+  });
+  const { connectRemote } = commands;
+  useEffect(() => {
+    if (tauCloudIntent.get(projectId) !== intent) {
       return;
     }
-    if (step !== 'connect') {
-      return;
+    switch (step) {
+      case 'forget': {
+        tauCloudIntent.set(projectId, undefined);
+        return;
+      }
+      case 'announce': {
+        tauCloudIntent.set(projectId, 'noticed');
+        toast('Backs up to Tau Cloud automatically after your first save.', {
+          description: turnOffBackupConsequence,
+          action: {
+            label: 'Turn off backup',
+            onClick: () => {
+              turnOffBackupByDefault(projectId, live.current.readRemote(), live.current.commands);
+            },
+          },
+        });
+        return;
+      }
+      case 'connect': {
+        /* `open` is kept until the connection lands; `noticed` becomes `connected` first, so it connects once. */
+        if (intent === 'noticed') {
+          tauCloudIntent.set(projectId, 'connected');
+        }
+        void connectRemote('tau');
+        break;
+      }
+      case 'wait': {
+        break;
+      }
     }
-    tauCloudIntent.set(projectId, intent === 'default' ? 'notice' : undefined);
-    void connectRemote('tau');
   }, [connectRemote, intent, projectId, step]);
 };
 
 /**
  * Whether *Where you are* carries the backup-by-default line, and in which form.
  *
- * `pending` is before the first revision, so the opt-out is visible before
- * anything leaves the device (DESIGN: first-connect opt-out before commitment);
- * `on` is after the default connection landed.
+ * `pending` is before the default connection, so the opt-out stays visible
+ * before anything leaves the device (DESIGN: first-connect opt-out before
+ * commitment); `on` is after the default connection landed.
  *
  * @param intent - The project's intent.
  * @param eligibility - The account, as far as it is known.
@@ -354,10 +448,10 @@ export const backupByDefaultNotice = (
   eligibility: TauCloudEligibility,
   remote: RemoteFacet | undefined,
 ): 'pending' | 'on' | undefined => {
-  if (intent === 'notice') {
+  if (intent === 'connected') {
     return remote?.kind === 'tau' && remote.phase !== 'disconnecting' ? 'on' : undefined;
   }
-  return intent === 'default' &&
+  return (intent === 'default' || intent === 'noticed') &&
     remote?.kind === 'none' &&
     eligibility.auth === 'authed' &&
     eligibility.isResolved &&
@@ -367,6 +461,7 @@ export const backupByDefaultNotice = (
 };
 
 const materializeKey = 'tau:materialize-cloud-projects';
+const materializedKey = 'tau:materialized-cloud-projects';
 const materializeTopic = new Topic<void>({ name: 'materialize-cloud-projects' });
 
 const readMaterializeLocation = (): ProjectCreationLocation | undefined => {
@@ -408,6 +503,49 @@ export const materializeOnSignIn = Object.freeze({
   subscribe: (listener: () => void): (() => void) => materializeTopic.subscribe(listener),
 });
 
+const readMaterialized = (): Set<string> => {
+  try {
+    const value: unknown = JSON.parse(globalThis.localStorage.getItem(materializedKey) ?? '[]');
+    return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []);
+  } catch {
+    return new Set();
+  }
+};
+
+/**
+ * The ids this device has already brought from Tau Cloud (RV-W11 5), so a
+ * project deleted here is not brought back on the next library visit.
+ *
+ * @public
+ */
+export const materializedCloudProjects = Object.freeze({
+  has(projectId: string): boolean {
+    return readMaterialized().has(projectId);
+  },
+  add(projectId: string): void {
+    const ids = readMaterialized();
+    ids.add(projectId);
+    try {
+      globalThis.localStorage.setItem(materializedKey, JSON.stringify([...ids]));
+    } catch {
+      // Without storage the next pass asks again; `createProject` refuses a held id.
+    }
+  },
+});
+
+/* Another tab's writes (RV-W11 7): its intent or setting change reaches this one. */
+if (typeof globalThis.addEventListener === 'function') {
+  globalThis.addEventListener('storage', (event: StorageEvent) => {
+    if (event.key === null || event.key.startsWith(intentKeyPrefix)) {
+      intentTopic.emit();
+    }
+    if (event.key === null || event.key === materializeKey) {
+      materializeLocation = readMaterializeLocation();
+      materializeTopic.emit();
+    }
+  });
+}
+
 /**
  * The materialize-on-sign-in destination, live.
  *
@@ -416,3 +554,23 @@ export const materializeOnSignIn = Object.freeze({
  */
 export const useMaterializeOnSignInLocation = (): ProjectCreationLocation | undefined =>
   useSyncExternalStore(materializeOnSignIn.subscribe, materializeOnSignIn.get, () => undefined);
+
+const documentLocks = new KeyedMutex<string>();
+
+/**
+ * Run `task` holding a named Web Lock, so two tabs of this origin never run it
+ * at once (RV-W11 3). Without the Locks API (a test document, an old engine)
+ * it runs under an in-document queue of the same name.
+ *
+ * @param name - The lock's name.
+ * @param task - The work.
+ * @returns What the task answered.
+ * @public
+ */
+export const withNamedLock = async <T>(name: string, task: () => Promise<T>): Promise<T> => {
+  const locks = (globalThis.navigator as Navigator | undefined)?.locks;
+  if (locks !== undefined) {
+    return locks.request(name, task);
+  }
+  return documentLocks.run(name, task);
+};

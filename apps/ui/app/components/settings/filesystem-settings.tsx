@@ -445,7 +445,7 @@ function TauCloudProjectsSetting({ workspaces }: { readonly workspaces: readonly
           {options.map((option) => (
             <label
               key={option.key}
-              className='flex cursor-action items-center gap-3 rounded-md border p-3 transition-colors hover:border-primary/50 hover:bg-accent/50 has-checked:border-primary'
+              className='flex cursor-action items-center gap-3 rounded-md border p-3 transition-colors hover:border-primary/50 hover:bg-accent/50 has-checked:border-primary has-[input:focus-visible]:focus-outline'
             >
               <input
                 className='accent-primary'

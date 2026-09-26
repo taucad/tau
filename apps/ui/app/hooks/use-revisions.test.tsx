@@ -195,12 +195,12 @@ describe('useRevisions', () => {
       expect(result.current.branchFacts?.get('feature')).toEqual({ revisionNumber: 2, ahead: 1, behind: 1 });
     });
     expect(result.current.branchFacts?.get('main')).toEqual({ revisionNumber: 2, ahead: 0, behind: 0 });
-    /* B2: the other branch costs its head's row and one count, never a walk of its history. */
+    /* B4: the other branch costs its head's row and one count, never a walk of its history. */
     expect(revisionStatusHarness.logRequests).toEqual(['main']);
     expect(revisionStatusHarness.rowRequests).toEqual(['feature-2']);
   });
 
-  it('opens History on its page while another branch is still being counted (B2)', async () => {
+  it('opens History on its page while another branch is still being counted (B4)', async () => {
     const base = row({ revisionId: 'base', revisionNumber: 1 });
     revisionStatusHarness.rows = [row({ revisionId: 'main-2', revisionNumber: 2 }), base];
     revisionStatusHarness.rowsByBranch.set('feature', [row({ revisionId: 'feature-2', revisionNumber: 2 }), base]);
@@ -583,7 +583,7 @@ describe('useRevisions after a mint (E6)', () => {
   });
 });
 
-describe('useRevisions over a long history (B2)', () => {
+describe('useRevisions over a long history (B4)', () => {
   /* 500 revisions on one line, newest first; every tenth one a turn. */
   const long = Array.from({ length: 500 }, (_, index) => {
     const n = 500 - index;
@@ -784,7 +784,7 @@ describe('useRevisionChanges', () => {
   });
 
   /*
-   * B9/C51: the view is one object until the graph moves.
+   * Rule 20's log cost, C51: the view is one object until the graph moves.
    *
    * `useQueries` without `combine` hands back a fresh array on every render, so
    * the memo below it never hit and the whole view — `revisions`, `byTurnId`,
@@ -814,7 +814,7 @@ describe('useRevisionChanges', () => {
   });
 
   /*
-   * B8: a marker flips to *Saved* on the settlement, without re-walking the graph.
+   * Rule 20's log cost: a marker flips to *Saved* on the settlement, without re-walking the graph.
    *
    * The host attests the turn it just recorded, and that card is enough for the
    * marker. Asking the graph again would cost a `log` per settled turn — which
@@ -822,7 +822,7 @@ describe('useRevisionChanges', () => {
    * render: the revision-log answer remembers the head it was read at, and a
    * settlement on the branch already loaded moves neither.
    */
-  it('flips a turn to its revision on the settlement alone, with no graph re-walk (B8)', async () => {
+  it('flips a turn to its revision on the settlement alone, with no graph re-walk (rule 20’s log cost)', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,

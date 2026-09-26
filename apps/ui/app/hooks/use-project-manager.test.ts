@@ -505,6 +505,7 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
+const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
 const createWrapper = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -2083,7 +2084,7 @@ describe('useProjectManager.createProject', () => {
     await act(async () => result.current.createProject({ ...options, location: { kind: 'home' } }));
 
     const createdId = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id ?? '';
-    expect(localStorage.getItem(`tau:tau-cloud-intent:${createdId}`)).toBe('default');
+    expect(tauCloudIntent.get(createdId)).toBe('default');
   });
 
   it('should not mark a project whose id the caller supplies (Tau Cloud open, linked GitHub import)', async () => {
@@ -2099,7 +2100,7 @@ describe('useProjectManager.createProject', () => {
       }),
     );
 
-    expect(localStorage.getItem('tau:tau-cloud-intent:proj_ccccccccccccccccccccc')).toBeNull();
+    expect(tauCloudIntent.get('proj_ccccccccccccccccccccc')).toBeUndefined();
   });
 
   /* Review R4: *Open* is offered from a 30 s cache against an asynchronous
@@ -2123,6 +2124,28 @@ describe('useProjectManager.createProject', () => {
       }),
     ).rejects.toThrow(/already on this device/iu);
     expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+  });
+
+  /* RV-W11 3: an *Open* racing materialize on sign-in (or a second tab) checks
+     the same id before either has written it; the per-id lock orders them. */
+  it('creates one project when two creations of the same id race, refusing the second', async () => {
+    const id = 'proj_ccccccccccccccccccccc';
+    /* The route config exists once a creation of that id has been prepared. */
+    mockGetProjectFileSystemConfig.mockImplementation(async (projectId: string) =>
+      mockPrepareProjectCreation.mock.calls.some(([input]) => input.manifest.id === projectId)
+        ? { projectId, backend: 'opfs', providerBasePath: 'already-here' }
+        : undefined,
+    );
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const create = async () =>
+      result.current.createProject({ id, project: fakeProject, files: {}, location: { kind: 'home' } });
+
+    const outcomes = await act(async () => Promise.allSettled([create(), create()]));
+
+    expect(outcomes.map((outcome) => outcome.status).toSorted()).toEqual(['fulfilled', 'rejected']);
+    const refused = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    expect(refused?.reason).toEqual(new Error(`That project is already on this device: ${id}`));
+    expect(mockPrepareProjectCreation.mock.calls.filter(([input]) => input.manifest.id === id)).toHaveLength(1);
   });
 
   /* Review R5: opening someone's project from Tau Cloud must not invent a chat

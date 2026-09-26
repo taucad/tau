@@ -233,10 +233,11 @@ export type WorkerRevisionCommand =
    * Which device this document is (W13, W17).
    *
    * Sent by the page rather than read here, because the id lives in
-   * `localStorage` and a worker cannot see it. It names a chat *log segment*, so
-   * a worker that has not been told writes no chat refs at all rather than
-   * guessing an id two profiles could share (`apps/ui/app/lib/device-id.ts` is
-   * the one source).
+   * `localStorage` and a worker cannot see it. It names no pushed record — chat
+   * segments name a random record device per actor form (`.git/ops-devices.json`)
+   * — but a worker that has not been told writes no chat refs at all, and the id
+   * counts as this host's own for a segment written before record devices
+   * existed (`apps/ui/app/lib/device-id.ts` is the one source).
    */
   | Readonly<{ command: 'setDeviceId'; deviceId: string }>
   /*

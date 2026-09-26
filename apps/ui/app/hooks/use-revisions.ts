@@ -7,7 +7,7 @@
  * never counted over chat membership. Deleting a chat therefore renumbers
  * nothing, because no number was ever a position in a transcript.
  *
- * History holds a page, not the whole line (B2): the first read is
+ * History holds a page, not the whole line (B4): the first read is
  * {@link revisionPageSize} rows and *Show more* reads the next page. A turn's
  * card is looked up by the revision its settlement names — the `turn.finalized`
  * record in the chat's own durable log, replayed on open — so a turn recorded
@@ -68,7 +68,7 @@ export type RevisionCard = {
 export type RevisionsView = {
   /** The loaded part of the selected branch's history, newest first. */
   readonly revisions: readonly RevisionCard[];
-  /** Older revisions exist below the loaded ones (B2). */
+  /** Older revisions exist below the loaded ones (B4). */
   readonly hasOlder: boolean;
   /** Read the next page of older revisions onto `revisions`. */
   readonly loadOlder: () => Promise<void>;
@@ -108,7 +108,7 @@ const hasOlderThan = (log: HeadLog | undefined): boolean => {
   );
 };
 
-/** History's first read, and each *Show more* after it (B2, E6). @public */
+/** History's first read, and each *Show more* after it (B4, E6). @public */
 export const revisionPageSize = 50;
 
 const unknownLine: RevisionLine = { kind: 'unknown' };
@@ -274,7 +274,7 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
 };
 
 /**
- * Rows for revisions a surface names by id, read one by one (B2).
+ * Rows for revisions a surface names by id, read one by one (B4).
  *
  * A revision is immutable and so is its first-parent ordinal, so each answer
  * is cached for the session. `Rev N` is the ordinal on the revision's own line,
@@ -290,7 +290,7 @@ const useRevisionRows = (
   projectId: string,
   ids: readonly string[],
 ): ReadonlyMap<string, RevisionRow> => {
-  /* An array, not a Map: `combine`'s structural sharing keeps it the same reference until a row arrives (B9). */
+  /* An array, not a Map: `combine`'s structural sharing keeps it the same reference until a row arrives (rule 20's log cost). */
   const rows = useQueries({
     queries: ids.map((id) => ({
       queryKey: ['revision-row', projectId, id],
@@ -316,7 +316,7 @@ const useRevisionRows = (
  * else — a restore, a merge, a switch, two mints at once — re-reads as many
  * rows as were loaded, with the rows still on screen.
  *
- * The first read is one page (B2); every other branch costs one row and one
+ * The first read is one page (B4); every other branch costs one row and one
  * `divergence` count, never its whole history.
  *
  * @returns The view every revision surface reads.
@@ -434,7 +434,7 @@ export function useRevisions(): RevisionsView {
   );
   /*
    * `combine` is not an optimisation here, it is the difference between this
-   * hook having a memo and not (B9, C51).
+   * hook having a memo and not (rule 20's log cost, C51).
    *
    * Without it, `QueriesObserver.getOptimisticResult` hands back a **fresh
    * array** on every render, so the `useMemo` below never hits and every
@@ -481,7 +481,7 @@ export function useRevisions(): RevisionsView {
     }
     const branchFacts = new Map<string, { revisionNumber: number | undefined; ahead: number; behind: number }>();
     for (const entry of status?.branches ?? []) {
-      /* Unknown until its walk answers, and read as no counts: History never waits on a branch it is not on (B2). */
+      /* Unknown until its walk answers, and read as no counts: History never waits on a branch it is not on (B4). */
       const count = divergences[others.findIndex((other) => other.name === entry.name)];
       branchFacts.set(
         entry.name,
@@ -526,7 +526,7 @@ export function useRevisions(): RevisionsView {
 /**
  * Cards for revisions a surface names by id, wherever they sit in the history:
  * the pinned rows History keeps visible below its loaded page, and the
- * revision a restore row brought back (B2).
+ * revision a restore row brought back (B4).
  *
  * @param ids - The revisions to read; leave out the ids the caller already holds.
  * @returns Each card found, by id.
@@ -542,7 +542,7 @@ export function useRevisionCards(ids: readonly string[]): ReadonlyMap<string, Re
 
 /**
  * The revisions among `ids` that belong to the selected line's history, read
- * one by one: History's pinned rows below its loaded page (B2). A revision
+ * one by one: History's pinned rows below its loaded page (B4). A revision
  * belongs when the head holds it — the port counts nothing in it the head
  * lacks — so a *View revision* from a chat on another branch pins nothing here.
  *
@@ -581,7 +581,7 @@ export function useRevisionsOnLine(ids: readonly string[]): readonly RevisionCar
 /**
  * The cards, plus each revision a restore among them brought back that they do
  * not hold, so `revisionTitle` names a restore by its target however far back
- * that target is (B2).
+ * that target is (B4).
  *
  * @param cards - The loaded cards a surface titles.
  * @returns The cards, then the looked-up restore targets.
@@ -603,7 +603,7 @@ export function useWithRestoreTargets(cards: readonly RevisionCard[]): readonly 
  *
  * The loaded page answers a recent turn; an older one is read on its own by the
  * id the `turn.finalized` record attested, so a turn recorded five hundred
- * revisions ago keeps its `Rev N` after a reload (B2). A turn a remote host
+ * revisions ago keeps its `Rev N` after a reload (B4). A turn a remote host
  * recorded, which this graph does not hold, keeps the settlement's own card.
  *
  * @param turnId - The user message that anchors the turn.

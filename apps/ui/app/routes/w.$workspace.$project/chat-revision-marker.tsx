@@ -62,7 +62,7 @@ const turnSave = (card: RevisionCard | undefined, baseRevisionId: string | undef
 function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): TurnRevisionState {
   const { projectId } = useProject();
   const { activeChatId } = useChatContext();
-  /* B2: the turn's own revision, looked up by the id its settlement names — not found by scanning a page. */
+  /* B4: the turn's own revision, looked up by the id its settlement names — not found by scanning a page. */
   const turnRevision = useTurnRevision(userMessageId);
   const { revisions } = useRevisions();
   const outcome = useTurnOutcomes(projectId).find((notice) => notice.turnId === userMessageId)?.kind;

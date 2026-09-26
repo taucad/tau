@@ -122,6 +122,9 @@ export function ProjectLibrary(): React.JSX.Element {
   const [showDeleted, setShowDeleted] = useSearchParameter(searchParameterName.trash, flagParameter);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<ProjectListItem | undefined>();
   const [repairTarget, setRepairTarget] = useState<WorkspaceBindingRepairGroup | undefined>();
+  /* Everything this device holds, the Trash included — one listing under the
+     same query key — so a trashed project is never offered as Tau Cloud's alone. */
+  const { projects: heldProjects } = useProjects({ includeDeleted: true });
   const {
     projects,
     conflicts,
@@ -139,9 +142,15 @@ export function ProjectLibrary(): React.JSX.Element {
   } = useProjects({ includeDeleted: showDeleted });
   const navigate = useNavigate();
   const projectManager = useProjectManager();
-  const { projects: cloudProjects, isSettled: isCloudSettled } = useCloudProjects();
+  const { projects: cloudProjects, isSettled: isCloudSettled, isFetching: isCloudFetching } = useCloudProjects();
   const openCloudProject = useOpenCloudProject();
-  useMaterializeCloudProjects({ cloud: cloudProjects, isSettled: isCloudSettled, projects, isLoading });
+  useMaterializeCloudProjects({
+    cloud: cloudProjects,
+    isSettled: isCloudSettled,
+    isFetching: isCloudFetching,
+    held: heldProjects,
+    isLoading,
+  });
   const handleOpenCloudProject = useCallback(
     async (entry: CloudProject): Promise<void> => {
       try {
@@ -512,7 +521,7 @@ export function ProjectLibrary(): React.JSX.Element {
         </div>
       ) : (
         <UnifiedProjectList
-          rows={toLibraryRows(projects, cloudProjects, !showDeleted)}
+          rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
           viewMode={viewMode}
           actions={actions}
           onOpenCloudProject={handleOpenCloudProject}
@@ -599,6 +608,8 @@ function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: Uni
   const table = useReactTable({
     data: rows,
     columns: createColumns(actions, onOpenCloudProject),
+    /* Stable across the cloud listing arriving, so a selection follows its project. */
+    getRowId: (row) => row.id,
     /* A project this device does not hold has nothing here to trash (D20). */
     enableRowSelection: (row) => !isCloudOnly(row.original),
     getCoreRowModel: getCoreRowModel(),

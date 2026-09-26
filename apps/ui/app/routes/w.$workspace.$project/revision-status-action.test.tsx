@@ -313,7 +313,7 @@ describe('RevisionStatusAction', () => {
     expect(card).toHaveTextContent('Restored Rev 3');
   });
 
-  it('names a restore by its target when that target is older than the loaded page (B2)', async () => {
+  it('names a restore by its target when that target is older than the loaded page (B4)', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-60', revisionNumber: 60, summary: 'Restore', source: 'restore', restoredFrom: 'rev-3' }),

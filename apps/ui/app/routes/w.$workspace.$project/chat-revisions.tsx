@@ -86,6 +86,8 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import {
   backupByDefaultNotice,
   tauCloudIntent,
+  turnOffBackupByDefault,
+  turnOffBackupConsequence,
   useTauCloudEligibility,
   useTauCloudIntent,
 } from '#hooks/use-cloud-projects.js';
@@ -128,10 +130,11 @@ export function ChatRevisions({
 }
 
 /**
- * Backup by default's one line (D19, NS8): what happens to a new project and
- * its per-project opt-out. Before the first revision it is the opt-out before
- * anything leaves the device; after, *Turn off backup* disconnects (the
- * revisions stay) and nothing reconnects it, because the intent is gone.
+ * Backup by default's lasting line (D19, NS8): what happens to a project born
+ * with no remote, and its per-project opt-out with what the opt-out does. Before
+ * the default connection it is the opt-out before anything leaves the device;
+ * after, *Turn off backup* disconnects (the revisions stay) and nothing
+ * reconnects it, because the intent is gone. One handler with the toast's.
  *
  * @param props - The project's intent.
  * @returns The line, or nothing when it does not apply.
@@ -139,23 +142,30 @@ export function ChatRevisions({
 function BackupByDefaultLine({ intent }: { readonly intent: TauCloudIntent }): React.JSX.Element | undefined {
   const { projectId } = useProject();
   const status = useRevisionStatus();
-  const { disconnectRemote } = useRevisionCommands();
+  const client = useRevisionClient();
+  const commands = useRevisionCommands();
   const notice = backupByDefaultNotice(intent, useTauCloudEligibility(), status?.remote);
   if (notice === undefined) {
     return undefined;
   }
   return (
-    <div data-slot='backup-by-default' className='flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
-      <Cloud aria-hidden className='size-3.5 shrink-0' />
-      <p className='min-w-0 flex-auto'>Backs up to Tau Cloud automatically.</p>
+    <div
+      data-slot='backup-by-default'
+      role='group'
+      aria-label='Backup by default'
+      className='flex min-w-0 items-start gap-1.5 text-xs text-muted-foreground'
+    >
+      <Cloud aria-hidden className='mt-px size-3.5 shrink-0' />
+      <div className='min-w-0 flex-auto'>
+        <p>Backs up to Tau Cloud automatically.</p>
+        <p>{turnOffBackupConsequence}</p>
+      </div>
       <Button
         size='xs'
         variant='ghost'
         onClick={() => {
-          if (notice === 'on') {
-            disconnectRemote();
-          }
-          tauCloudIntent.set(projectId, undefined);
+          /* The remote as it is now: a connection may have landed since this rendered. */
+          turnOffBackupByDefault(projectId, client?.status()?.remote ?? status?.remote, commands);
         }}
       >
         Turn off backup
@@ -554,7 +564,7 @@ const onHistoryKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
  * opened for you and any conflicted row never behind it; consecutive autosaves
  * fold; days divide. The list is one Tab stop (A1 item 14).
  *
- * The hook holds one page (B2): once the loaded rows are all shown, Show more
+ * The hook holds one page (B4): once the loaded rows are all shown, Show more
  * reads the next page. A row that must stay in view but sits below the page —
  * one opened for you from a chat — is read on its own and kept at the end of
  * the timeline, below Show more, until a page reaches it.
@@ -583,7 +593,7 @@ function HistoryList(): React.JSX.Element {
       setOpenRows((current) => new Set(current).add(revealed));
     }
   }
-  /* B2: what must stay in view but the page does not hold — the head, a row opened for you, a conflict on this
+  /* B4: what must stay in view but the page does not hold — the head, a row opened for you, a conflict on this
      line — read on its own and kept only if this line's head holds it; and the revisions restore rows name. */
   const loaded = useMemo(() => new Set(revisions.map((revision) => revision.revisionId)), [revisions]);
   const unloaded = (ids: ReadonlyArray<string | undefined>): string[] => [

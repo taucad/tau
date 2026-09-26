@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_3MEVtmRsZETjASPwp8gM0",
+  "name": "Six-Axis Arm",
+  "description": "A compact six-revolute industrial arm with a spherical wrist and a parallel gripper: turned pedestal and turntable, clevis shoulder, windowed twin-plate upper arm, rolling forearm and wrist clevis. The joint angles are parameters that pose the as-built model, and the declared mechanism carries realistic joint limits and a wave clip so the arm can be posed, played and dragged by its tool.",
+  "tags": ["assembly", "kinematics", "robotics", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -13,24 +13,40 @@ pnpm nx serve example-electron
 ## Build configuration
 
 The app is Tau's electron-vite 6 beta/Vite 8 qualification lane. Its config contains
-only application-owned roots, output directories, and Tailwind:
+only application-owned roots, output directories, Tailwind, and the main-process
+inputs:
 
 ```typescript
+import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
 
 export default defineConfig(
   electronRuntimeConfig({
-    main: {},
+    main: {
+      build: {
+        rolldownOptions: {
+          input: {
+            index: resolve(import.meta.dirname, 'src/main/index.ts'),
+            'kernel-host': resolve(import.meta.dirname, 'src/tau/kernel-host.ts'),
+          },
+        },
+      },
+    },
     preload: {},
     renderer: {},
   }),
 );
 ```
 
-`src/main/index.ts` imports `../tau/kernel-host?modulePath`; electron-vite owns
-the utility output path and runtime assets are emitted from their literal ESM
-URLs. No dependency exclusion list, multi-entry map, or asset copier is needed.
+Main and the utility process build as one graph: electron-vite emits
+`dist/main/kernel-host.js` beside `index.js`, where `src/main/main.ts` resolves it,
+and the runtime modules both processes import are emitted once under
+`dist/main/chunks`. On electron-vite 5/Vite 7 the same map goes under
+`rollupOptions`. Importing the utility with `?modulePath` instead would build it
+separately and bundle those shared modules a second time; that suits only a lone
+utility sharing no module with main. Runtime assets are emitted from their literal
+ESM URLs, so no dependency exclusion list or asset copier is needed.
 
 ## Topology
 

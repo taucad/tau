@@ -10,6 +10,7 @@ import type {
   GeoSpecCanonicalClaimReport,
   GeoSpecClaimPolarity,
   GeoSpecNativeEngine,
+  GeoSpecNativeEvidenceProfile,
   GeoSpecNativeSubject,
   GeoSpecQueryCapability,
 } from '#engine/client.js';
@@ -86,6 +87,8 @@ export type GeoSpecQueryOptions = {
 export type GeoSpecAssertionClientOptions = {
   readonly claimId?: (matcher: GeoSpecNativeMatcherName, sequence: number) => string;
   readonly engine: GeoSpecNativeEngine;
+  /** Success-evidence profile of every claim and query; omitted means `complete`. */
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile;
   readonly subjectSlot?: string;
   readonly workUnitLimit?: number;
 };
@@ -212,6 +215,7 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
         const context = {
           claimId,
           engine: options.engine,
+          ...(options.evidenceProfile === undefined ? {} : { evidenceProfile: options.evidenceProfile }),
           polarity,
           subject,
           subjectSlot,
@@ -241,6 +245,7 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
         capability: query.capability,
         claimId,
         engine: options.engine,
+        ...(options.evidenceProfile === undefined ? {} : { evidenceProfile: options.evidenceProfile }),
         payload: query.payload,
         subject: query.subject,
         subjectSlot,

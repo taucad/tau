@@ -101,7 +101,7 @@ describe('PrinterViewer', () => {
     vi.unstubAllGlobals();
   });
 
-  it('should mount a labelled simulation for a .gcode.3mf and autoplay it', async () => {
+  it('should mount a labelled simulation for a .gcode.3mf on the finished print', async () => {
     renderViewer();
     expect(screen.getByRole('status', { name: `Loading simulation of ${name}` })).toHaveAttribute('aria-busy', 'true');
 
@@ -111,11 +111,14 @@ describe('PrinterViewer', () => {
       '0',
     );
     const controls = within(region).getByRole('group', { name: 'Playback controls' });
-    expect(within(controls).getByRole('button', { name: 'Pause' })).toBeEnabled();
+    const props = latestSceneProps();
+    expect(within(controls).getByRole('button', { name: 'Play' })).toBeEnabled();
     expect(within(controls).getByRole('button', { name: 'Previous segment' })).toBeEnabled();
     expect(within(controls).getByRole('button', { name: 'Next segment' })).toBeEnabled();
     expect(within(controls).getByRole('button', { name: 'Reset' })).toBeEnabled();
-    expect(within(controls).getByRole('slider', { name: 'Time' })).toHaveValue('0');
+    expect(within(controls).getByRole('slider', { name: 'Time' })).toHaveValue(
+      String(Math.floor(props.program.duration)),
+    );
     expect(within(controls).getByRole('slider', { name: 'Layer' })).toHaveAttribute('max', '3');
     const speed = within(controls).getByRole('radiogroup', { name: 'Speed' });
     expect(
@@ -130,23 +133,20 @@ describe('PrinterViewer', () => {
     expect(controls).toHaveTextContent('No active run to follow');
 
     const hud = within(region).getByRole('region', { name: 'Print HUD' });
-    // The purge line before the first LAYER_CHANGE is the parser's layer 0, so the cursor starts on layer 1 of 3.
-    expect(within(hud).getByText('Layer').nextElementSibling).toHaveTextContent('1 / 3');
-    expect(within(hud).getByText('Nozzle').nextElementSibling).toHaveTextContent('220 °C');
-    expect(within(hud).getByText('Bed').nextElementSibling).toHaveTextContent('60 °C');
-    expect(within(hud).getByText('Elapsed').nextElementSibling).toHaveTextContent('0:00:00');
+    // The preview opens on the finished print: the last layer, with nothing left to run.
+    expect(within(hud).getByText('Layer').nextElementSibling).toHaveTextContent('3 / 3');
+    expect(within(hud).getByText('Remaining').nextElementSibling).toHaveTextContent('0:00:00');
     expect(within(hud).getByText('Filament').nextElementSibling).toHaveTextContent(/^\d+ mm \/ \d+ mm$/u);
     expect(within(hud).queryByText('Preview shows known motion only')).not.toBeInTheDocument();
 
-    const props = latestSceneProps();
-    expect(props.store.getSnapshot()).toMatchObject({ isPlaying: true, speed: 1, isLive: false });
+    expect(props.store.getSnapshot()).toMatchObject({ isPlaying: false, speed: 1, isLive: false });
     expect(props.isReducedMotion).toBe(false);
     expect(props.chamberLight).toBe('unknown');
     expect(props.filamentColor).toBe(printerAccent);
     expect(props.geometry.buildVolume).toEqual([256, 256, 256]);
   });
 
-  it('should not autoplay under reduced motion while scrubbing still works', async () => {
+  it('should open paused under reduced motion while scrubbing still works', async () => {
     mocks.isReducedMotion = true;
     renderViewer();
     const controls = await screen.findByRole('group', { name: 'Playback controls' });
@@ -155,9 +155,9 @@ describe('PrinterViewer', () => {
     expect(props.isReducedMotion).toBe(true);
     expect(props.store.getSnapshot().isPlaying).toBe(false);
 
-    fireEvent.change(within(controls).getByRole('slider', { name: 'Layer' }), { target: { value: '3' } });
-    expect(props.store.getTime()).toBe(props.program.layerTable[2]!.startTime);
-    expect(await within(screen.getByRole('region', { name: 'Print HUD' })).findByText('3 / 3')).toBeInTheDocument();
+    fireEvent.change(within(controls).getByRole('slider', { name: 'Layer' }), { target: { value: '2' } });
+    expect(props.store.getTime()).toBe(props.program.layerTable[1]!.startTime);
+    expect(await within(screen.getByRole('region', { name: 'Print HUD' })).findByText('2 / 3')).toBeInTheDocument();
   });
 
   it('should play, pause and step from the keyboard on the focused viewport', async () => {
@@ -168,17 +168,18 @@ describe('PrinterViewer', () => {
     const props = latestSceneProps();
 
     viewport.focus();
+    // Playing from the finished print restarts the run.
+    await user.keyboard(' ');
+    expect(within(controls).getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+    expect(props.store.getSnapshot().isPlaying).toBe(true);
+    expect(props.store.getTime()).toBe(0);
+
     await user.keyboard(' ');
     expect(within(controls).getByRole('button', { name: 'Play' })).toBeInTheDocument();
-    expect(props.store.getSnapshot().isPlaying).toBe(false);
-
     await user.keyboard('{ArrowRight}');
     expect(props.store.getTime()).toBe(props.program.times[2]);
     await user.keyboard('{ArrowLeft}');
     expect(props.store.getTime()).toBe(0);
-
-    await user.keyboard(' ');
-    expect(within(controls).getByRole('button', { name: 'Pause' })).toBeInTheDocument();
   });
 
   it('should change speed, reset, and pause when the document is hidden', async () => {
@@ -277,7 +278,7 @@ describe('PrinterViewer', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Frame the print' }));
     expect(latestSceneProps().frameRequest).toBe(initial.frameRequest + 2);
     expect(latestSceneProps().store).toBe(initial.store);
-    expect(initial.store.getSnapshot().isPlaying).toBe(true);
+    expect(initial.store.getSnapshot()).toMatchObject({ isPlaying: false, time: Math.floor(initial.program.duration) });
   });
 
   it('should focus on the plate by default and show the whole printer from the More menu', async () => {

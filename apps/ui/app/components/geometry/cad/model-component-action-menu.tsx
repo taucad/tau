@@ -229,7 +229,7 @@ const numericFactor = (value: number | 'unavailable' | undefined): number => (ty
  * the base colour (a pie of colours when the surfaces differ), a highlight that tightens as
  * roughness drops, and a darker rim as metalness rises.
  */
-function MaterialSwatch({ materials }: { readonly materials: SurfaceMaterials }): React.JSX.Element {
+export function MaterialSwatch({ materials }: { readonly materials: SurfaceMaterials }): React.JSX.Element {
   const colors = [
     ...new Set(
       materials.map(({ color }) =>

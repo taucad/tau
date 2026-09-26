@@ -109,11 +109,20 @@ const measurePrint = async (scene: HTMLElement): Promise<PrintExtent> => {
   }
   context.drawImage(bitmap, 0, 0);
   const { data, width, height } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+  // The G-code legend's swatches share the print's colours; its area over the scene is not the print.
+  const sceneBounds = scene.getBoundingClientRect();
+  const legendBounds = screen.getByRole('region', { name: 'G-code filter' }).getBoundingClientRect();
+  const scale = width / sceneBounds.width;
+  const isLegend = (x: number, y: number): boolean =>
+    x >= (legendBounds.left - sceneBounds.left) * scale &&
+    x <= (legendBounds.right - sceneBounds.left) * scale &&
+    y >= (legendBounds.top - sceneBounds.top) * scale &&
+    y <= (legendBounds.bottom - sceneBounds.top) * scale;
   let [left, right, top, bottom] = [width, -1, height, -1];
   for (let pixel = 0; pixel < width * height; pixel += 1) {
     const [red, green, blue] = [data[pixel * 4]!, data[pixel * 4 + 1]!, data[pixel * 4 + 2]!];
-    if (red > 110 && red > green * 1.6 && red > blue * 1.6) {
-      const [x, y] = [pixel % width, Math.floor(pixel / width)];
+    const [x, y] = [pixel % width, Math.floor(pixel / width)];
+    if (red > 110 && red > green * 1.6 && red > blue * 1.6 && !isLegend(x, y)) {
       [left, right, top, bottom] = [Math.min(left, x), Math.max(right, x), Math.min(top, y), Math.max(bottom, y)];
     }
   }
@@ -162,10 +171,10 @@ const resize = (frame: HTMLElement, [width, height]: readonly [number, number]):
   frame.style.height = `${height}px`;
 };
 
-/** Pause at a time share and wait for the HUD's layer to reach it. */
+/** Seek the paused preview, which opens on the finished print, to a time share and wait for the HUD's layer to reach it. */
 const pauseAt = async (frame: HTMLElement, share: number, layer: RegExp): Promise<void> => {
   const controls = within(frame).getByRole('group', { name: 'Playback controls' });
-  fireEvent.click(within(controls).getByRole('button', { name: 'Pause' }));
+  expect(within(controls).getByRole('button', { name: 'Play' })).toBeInTheDocument();
   const time = within(controls).getByRole('slider', { name: 'Time' });
   fireEvent.change(time, { target: { value: String(Math.round(Number(time.getAttribute('max')) * share)) } });
   const hud = within(frame).getByRole('region', { name: 'Print HUD' });
@@ -273,6 +282,21 @@ describe('Printer viewer framing', () => {
     const partOnly = await measurePrint(scene);
     expectFramed(partOnly, 0.2);
     expect(partOnly.width).toBeGreaterThan(withPreparation.width);
+  });
+
+  it('shades the plate from below so the print shows through it', async () => {
+    mocks.live = idleLive;
+    const { frame, scene } = await mount('light', [1280, 720]);
+    // Orbit under the plate: a real upward drag across the scene takes the camera to the underside.
+    const { width, height } = scene.getBoundingClientRect();
+    await userEvent.dragAndDrop(scene, scene, {
+      sourcePosition: { x: width / 2, y: height * 0.9 },
+      targetPosition: { x: width / 2, y: height * 0.05 },
+    });
+    await nextFrames(60);
+    await capture(frame, 'plate-underside-light.png');
+    const extent = await measurePrint(scene);
+    expect(extent.width, 'the finished print shows through the plate').toBeGreaterThan(0.05);
   });
 
   it('shows the whole printer from the More menu', async () => {

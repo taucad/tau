@@ -32,6 +32,8 @@ export const printerBody = {
   materialUnit: { light: '#d8dde3', dark: '#2c3238' },
   spool: { light: '#b9c1ca', dark: '#3b424a' },
   chute: '#3f454d',
+  /** The print surface lifts toward this so the empty build area reads against the toolpath. */
+  plateSurfaceLift: '#ffffff',
   lightOn: '#fff2c4',
   lightOff: '#4a4f57',
 } as const;
@@ -45,8 +47,8 @@ export const printerToolpath = {
   travel: { light: '#c9ced6', dark: '#3a3f47' },
   unknown: '#b45fc9',
   /**
-   * Layers below the active one drift toward this with depth. The plate is dark in both themes, so both
-   * drift toward shade: a light target washed the whole print out to pink on the light theme.
+   * Layers below the active one drift toward this with depth. Both themes drift toward shade, which reads
+   * against the lifted plate surface: a light target washed the whole print out to pink on the light theme.
    */
   muted: { light: '#3b4048', dark: '#2a2f36' },
   /** The active layer and the fresh-filament trail brighten toward this. */

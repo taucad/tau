@@ -46,6 +46,18 @@ export const toolpathGroupLabels: Readonly<Record<ToolpathGroup, string>> = {
   travel: 'Travel',
 };
 
+/** The segment kind whose tint stands for each group in the filter's legend. */
+export const toolpathGroupSwatchKind: Readonly<Record<ToolpathGroup, ToolpathSegmentKind>> = {
+  preparation: 'purge',
+  walls: 'outer-wall',
+  infill: 'infill',
+  support: 'support',
+  'skirt-brim': 'skirt',
+  other: 'unknown',
+  wipe: 'wipe',
+  travel: 'travel',
+};
+
 /** Moves that lay down no filament start hidden. */
 export const defaultHiddenToolpathGroups: ReadonlySet<ToolpathGroup> = new Set(['travel', 'wipe']);
 

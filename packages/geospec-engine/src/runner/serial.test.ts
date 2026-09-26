@@ -211,6 +211,22 @@ describe('createSerialGeoSpecRunner', () => {
     }
   });
 
+  it('should share file bundles across sequential runs but not with an overlapping run', async () => {
+    const runner = createSerialGeoSpecRunner(runnerOptions(twoFiles));
+    const bundleOf = async () => {
+      const result = await runner.run({ files: ['first.geospec.ts'] });
+      return result.files[0]?.result.bundle;
+    };
+
+    const cached = await bundleOf();
+    expect(cached).toBeDefined();
+    expect(await bundleOf()).toBe(cached);
+    const [sole, overlapping] = await Promise.all([bundleOf(), bundleOf()]);
+    expect(sole).toBe(cached);
+    expect(overlapping).not.toBe(cached);
+    await runner.close();
+  });
+
   it('should refuse to run once closed', async () => {
     const runner = createSerialGeoSpecRunner(runnerOptions(twoFiles));
     await runner.close();

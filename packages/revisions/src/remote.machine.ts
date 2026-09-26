@@ -196,6 +196,19 @@ const reconnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
     ? { target: 'disconnecting' }
     : { target: 'choosing', context: { kind: event.kind, error: undefined } };
 
+/* A refused push's file list and figures: the root's handler and `connected`'s share it. */
+const quotaRefusedContext = (
+  context: RemoteMachineContext,
+  event: Extract<RemoteMachineEvent, { type: 'quotaRefused' }>,
+): Partial<RemoteMachineContext> => ({
+  overQuota: event.paths,
+  quota: event.storage ?? context.quota,
+  storage:
+    event.used === undefined || event.quota === undefined
+      ? context.storage
+      : { ...context.storage, used: event.used, quota: event.quota },
+});
+
 /* A connect gesture before any remote is recorded: *No remote* is already the answer. */
 const firstConnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
   event.kind === 'none' ? {} : { target: 'choosing', context: { kind: event.kind, error: undefined } };
@@ -287,16 +300,7 @@ const remoteMachineDefinition = setup({
    * dropped with the only copy of its file list. `choosing` clears it for a new
    * destination. */
   on: {
-    quotaRefused: {
-      context: ({ context, event }) => ({
-        overQuota: event.paths,
-        quota: event.storage ?? context.quota,
-        storage:
-          event.used === undefined || event.quota === undefined
-            ? context.storage
-            : { ...context.storage, used: event.used, quota: event.quota },
-      }),
-    },
+    quotaRefused: { context: ({ context, event }) => quotaRefusedContext(context, event) },
   },
   initial: 'reading',
   states: {
@@ -472,15 +476,32 @@ const remoteMachineDefinition = setup({
        * without ever validating. A host that cannot say leaves the row out, and
        * a failed read is no reason to doubt a connection that already stands.
        */
-      invoke: {
-        src: 'readStorage',
-        input: ({ context }) => ({ remote: context.remote?.name ?? '', kind: context.kind }),
-        onDone: ({ context, event }) => ({ context: { storage: event.output ?? context.storage } }),
-        onError: {},
+      initial: 'reading',
+      states: {
+        reading: {
+          invoke: {
+            src: 'readStorage',
+            input: ({ context }) => ({ remote: context.remote?.name ?? '', kind: context.kind }),
+            onDone: ({ context, event }) => ({
+              target: 'settled',
+              context: { storage: event.output ?? context.storage },
+            }),
+            onError: { target: 'settled' },
+          },
+        },
+        settled: {},
       },
       on: {
         disconnect: { target: 'disconnecting' },
         connect: ({ event }) => reconnect(event),
+        /* F9: a push changed what is stored; read it again, dropping any read in flight. */
+        pushed: { target: '.reading', reenter: true },
+        /* F9: a refusal's own figures are newer than a read still in flight, so
+           leaving `reading` stops that read before its answer can overwrite them. */
+        quotaRefused: ({ context, event }) =>
+          event.used === undefined || event.quota === undefined
+            ? { context: quotaRefusedContext(context, event) }
+            : { target: '.settled', context: quotaRefusedContext(context, event) },
       },
     },
 
@@ -604,7 +625,8 @@ const phaseOf = (value: string): RemoteFacet['phase'] => {
 export const selectRemoteFacet = (snapshot: SnapshotFrom<typeof remoteMachine>): RemoteFacet => ({
   kind: snapshot.context.kind,
   url: snapshot.context.remote?.url,
-  phase: phaseOf(String(snapshot.value)),
+  /* `connected` has children (F9); the phase is the top-level state either way. */
+  phase: phaseOf(typeof snapshot.value === 'string' ? snapshot.value : (Object.keys(snapshot.value)[0] ?? '')),
   storage: snapshot.context.storage,
   overQuota: snapshot.context.overQuota,
   quota: snapshot.context.quota,

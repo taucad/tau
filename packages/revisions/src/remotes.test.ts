@@ -39,7 +39,12 @@ import type { PublishPublicationActorInput } from '#publish.types.js';
 /* The two W4 rows assert the *consequence* of the code, not only the code: a
    terminal class is what stops `sync.machine` retrying, and that classifier is
    the machine's, not this module's. */
-import { incompleteRepositoryMarker, isStorageRefusal, quotaRefusalMarker } from '#refusal-markers.js';
+import {
+  incompleteRepositoryMarker,
+  isCeilingRefusal,
+  isStorageRefusal,
+  quotaRefusalMarker,
+} from '#refusal-markers.js';
 import { syncFailureReason } from '#sync.machine.js';
 import { RevisionPortError } from '#revision-port.js';
 
@@ -305,6 +310,10 @@ describe('remoteTransportError', () => {
     expect(isStorageRefusal('Tau: repository size limit exceeded — …')).toBe(true);
     expect(isStorageRefusal('Tau: refused refs/heads/main — it does not fast-forward')).toBe(false);
     expect(isStorageRefusal(undefined)).toBe(false);
+    /* F2: the ceiling is the one storage refusal no plan clears. */
+    expect(isCeilingRefusal('Tau: repository size limit exceeded — …')).toBe(true);
+    expect(isCeilingRefusal(`${quotaRefusalMarker}\nTau: …`)).toBe(false);
+    expect(isCeilingRefusal(undefined)).toBe(false);
   });
 
   /* D18: a Git remote that cannot hold large objects is not a plan problem,

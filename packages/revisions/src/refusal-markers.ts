@@ -45,6 +45,20 @@ export const isStorageRefusal = (message: string | undefined): boolean =>
   message !== undefined && (message.includes(ceilingRefusalMarker) || message.includes(quotaRefusalMarker));
 
 /**
+ * Whether a refusal the remote wrote is D20's per-repository ceiling.
+ *
+ * The ceiling is the same on every plan, so no *Upgrade* clears it: a surface
+ * that offers a plan action for {@link isStorageRefusal} withholds it here and
+ * shows the file list alone (RV-W8 F2).
+ *
+ * @param message - The sentence the remote sent, verbatim.
+ * @returns True when it is the ceiling refusal.
+ * @public
+ */
+export const isCeilingRefusal = (message: string | undefined): boolean =>
+  message?.includes(ceilingRefusalMarker) ?? false;
+
+/**
  * The fixed first words of the hosted remote's `GIT_REPOSITORY_INCOMPLETE` refusal.
  *
  * The manifest names a pack the store does not hold, so no retry can repair

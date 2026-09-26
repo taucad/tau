@@ -122,4 +122,9 @@ export type RemoteMachineEvent =
       quota?: number;
       /** What the remote said about room, when it said anything (C13). */
       storage?: RemoteStorageRefusal;
-    }>;
+    }>
+  /**
+   * A push put bytes on the remote (RV-W8 F9): the stored figure is stale, so
+   * a connected remote reads it again. Forwarded by `sync.machine`.
+   */
+  | Readonly<{ type: 'pushed' }>;

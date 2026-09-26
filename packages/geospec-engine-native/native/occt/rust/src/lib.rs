@@ -425,8 +425,7 @@ impl BrepSubject for Document {
         };
         let occurrence_face_count =
             unsafe { ffi::geospec_occt_occurrence_query_face_count(self.raw.as_ptr(), occurrence) };
-        let occurrence_edge_count =
-            unsafe { ffi::geospec_occt_occurrence_edge_count(self.raw.as_ptr(), occurrence) };
+        let occurrence_edge_count = unsafe { edge_address_count(self.raw.as_ptr(), occurrence)? };
         if (face_count, edge_count) != expected_counts
             || !valid_association_map(&value.face_map[..face_count], occurrence_face_count)
             || !valid_association_map(&value.edge_map[..edge_count], occurrence_edge_count)
@@ -2118,11 +2117,25 @@ fn qualified_query_index(index: u32) -> Result<u32, BackendError> {
     Ok(index)
 }
 
+// The first edge demand maps the occurrence's edge addresses, which can fail.
+unsafe fn edge_address_count(
+    raw: *const ffi::Document,
+    occurrence: u32,
+) -> Result<usize, BackendError> {
+    let mut count = 0;
+    let mut error = ErrorBuffer::new();
+    check(
+        ffi::geospec_occt_occurrence_edge_count(raw, occurrence, &mut count, error.raw()),
+        &error,
+    )?;
+    Ok(count)
+}
+
 unsafe fn occurrence_edges(
     raw: *const ffi::Document,
     occurrence: u32,
 ) -> Result<Vec<EdgeFacts>, BackendError> {
-    let count = ffi::geospec_occt_occurrence_edge_count(raw, occurrence);
+    let count = edge_address_count(raw, occurrence)?;
     let mut result = Vec::with_capacity(count);
     for index in 0..count {
         let mut value = ffi::EdgeFacts::default();
@@ -4442,7 +4455,9 @@ mod ffi {
         pub fn geospec_occt_occurrence_edge_count(
             document: *const Document,
             occurrence: u32,
-        ) -> usize;
+            count: *mut usize,
+            error: *mut StringBuffer,
+        ) -> i32;
         pub fn geospec_occt_occurrence_edge(
             document: *const Document,
             occurrence: u32,

@@ -57,7 +57,8 @@ const facadePatterns = (): readonly ForbiddenPattern[] => [
 const vitestPlaywrightConfigs = (): ReadonlyArray<readonly [path: string, source: string]> =>
   textFiles().filter(
     ([path, source]) =>
-      /vitest(?:\.[^.]+)*\.config\.ts$/u.test(path) && source.includes("from '@vitest/browser-playwright'"),
+      // Match the provider call, not its import: configs may wrap `playwright()` to retype it for their Vitest copy.
+      /vitest(?:\.[^.]+)*\.config\.ts$/u.test(path) && /provider:\s*playwright(?:Provider)?\(/u.test(source),
   );
 
 describe('Vitest Browser test-runner ownership', () => {
@@ -101,18 +102,28 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-assimp.spec.ts',
       'apps/desktop-e2e/src/desktop-build123d.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-acp.spec.ts',
+      'apps/desktop-e2e/src/desktop-chat-in-project.spec.ts',
       'apps/desktop-e2e/src/desktop-converter.spec.ts',
-      'apps/desktop-e2e/src/desktop-demos.spec.ts',
       'apps/desktop-e2e/src/desktop-ephemeral-isolation.spec.ts',
+      'apps/desktop-e2e/src/desktop-kernel-utility-cap.spec.ts',
       'apps/desktop-e2e/src/desktop-main-editor-kernels.spec.ts',
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',
       'apps/desktop-e2e/src/support/desktop-app.ts',
       'apps/desktop-e2e/src/support/gateway-fixture.ts',
       'apps/desktop-e2e/src/support/scenario.ts',
       'apps/desktop-e2e/src/support/two-client/browser-client.ts',
+      'apps/desktop-e2e/src/support/two-client/git-faults.test.ts',
+      'apps/desktop-e2e/src/support/two-client/git-faults.ts',
+      'apps/desktop-e2e/src/two-client.spec.ts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
-      'apps/ui-e2e/src/support/browser-command.ts',
+      // Provider-context augmentations: `@vitest/browser-playwright` does not re-export `BrowserContext`.
+      'apps/react-e2e/support/vitest-playwright.d.ts',
+      'apps/ui-e2e/src/support/open-to-frame.ts',
+      'apps/ui-e2e/src/support/vitest-playwright.d.ts',
+      'packages/geospec-engine/e2e/browser-command.ts',
+      'packages/plugins/openrscad/e2e/vitest-playwright.d.ts',
+      'scripts/src/canvas-vite.config.test.ts',
       'scripts/src/check-pack-install.ts',
       'scripts/src/reference-html.test.ts',
       'scripts/src/reference-html.ts',

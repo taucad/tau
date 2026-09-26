@@ -1425,3 +1425,44 @@ describe('2020-12 parameter schema view', () => {
     expect(JSON.stringify(projectParameterSchema(shared))).not.toContain('x-ogc-definition');
   });
 });
+
+describe('data-valued keywords in schema views', () => {
+  // Every key here is also a carrier or view keyword; inside a data value each one is an ordinary property name.
+  const token = { unit: 'mm', value: 3, ucumUnit: 'mm', symbol: 'd', symbols: { default: 'd' }, type: 'int64' };
+  const other = { unit: 'in', value: 1, name: 'n', $uses: ['JSONSchemaUnits'], properties: { unit: 'in' } };
+  const valueSchema = { type: 'object', properties: { unit: { type: 'string' }, value: { type: 'double' } } };
+  const carrier = (properties: Readonly<Record<string, unknown>>) => ({
+    $schema: 'https://json-structure.org/meta/extended/v0/#',
+    $id: 'urn:taucad:test:data-values',
+    $uses: ['JSONSchemaUnits'],
+    name: 'DataValues',
+    type: 'object',
+    properties,
+  });
+
+  it.each(['draft-07', '2020-12'] as const)('should copy data-valued keywords verbatim into the %s view', (dialect) => {
+    const size = { ...valueSchema, default: token, const: token, enum: [token, other], examples: [token] };
+    const view = projectParameterSchema(
+      { schema: carrier({ size: structuredClone(size) }), bindings: {} },
+      { dialect },
+    );
+
+    expect(view).toMatchObject({
+      status: 'usable',
+      diagnostics: [],
+      schema: { properties: { size: { ...size, properties: { value: { type: 'number' } } } } },
+    });
+  });
+
+  it('should embed an object-valued default unchanged in the manifest legacy projection', async () => {
+    const length = { unit: 'mm', value: 3 };
+    const schema = carrier({ length: { ...valueSchema, default: structuredClone(length) } });
+    const manifest = await compile({ schema, defaults: { length }, bindings: {} });
+
+    expect(manifest.legacyProjection).toMatchObject({
+      status: 'usable',
+      diagnostics: [],
+      schema: { properties: { length: { default: length } } },
+    });
+  });
+});

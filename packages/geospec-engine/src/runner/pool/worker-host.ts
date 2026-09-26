@@ -11,6 +11,10 @@
  * Emscripten handle the very next shard is about to reuse through the loader
  * cache — the D-10 double-delete that aborts the whole wasm instance.
  *
+ * Native subjects are the exception: they are released after every shard and
+ * collection pass (per-load freshness), because the engine retains at most 32
+ * subjects and one large STEP subject holds hundreds of megabytes.
+ *
  * @module
  */
 
@@ -47,6 +51,9 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
   };
   const context = createSerialRunContext(runner);
   const bundleCache: GeoSpecModuleBundleCache = new Map();
+  const releaseNativeSubjects = async (): Promise<void> => {
+    await options.nativeModelLoader?.releaseAll();
+  };
 
   // Shards arrive one at a time, but the host may post the next one before the
   // previous reply is observed; the chain keeps execution strictly serial
@@ -91,7 +98,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
       let failure: unknown;
       try {
         await context.resourceScope.dispose();
-        await options.nativeModelLoader?.releaseAll();
+        await releaseNativeSubjects();
       } catch (error) {
         failed = true;
         failure = error;
@@ -141,6 +148,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
           message: errorMessage(error),
         });
       }
+      await releaseNativeSubjects();
       return;
     }
 
@@ -206,6 +214,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
     } finally {
       unsubscribe?.();
       context.setForensicSink();
+      await releaseNativeSubjects();
     }
   };
 

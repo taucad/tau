@@ -31,6 +31,38 @@ const testEngine = () => {
 };
 
 describe('native model loader ownership', () => {
+  it('should admit reader and Runtime export bytes as they are but snapshot caller-owned bytes', async () => {
+    const { engine, ingestSubject } = testEngine();
+    const read = Uint8Array.of(1);
+    const exported = Uint8Array.of(2);
+    const resource = Uint8Array.of(3);
+    const runtime: GeoSpecRuntimeClient = {
+      connect: vi.fn(async () => undefined),
+      export: vi.fn().mockResolvedValue({
+        success: true,
+        data: [
+          { name: 'model.glb', bytes: exported },
+          { name: 'model.bin', bytes: resource },
+        ],
+      }),
+      terminate: vi.fn(),
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime, readSource: async () => read });
+    const caller = Uint8Array.of(4);
+
+    await loader({ source: 'model.step', format: 'step' });
+    await loader({ file: 'main.ts', format: 'glb' });
+    await loader({ source: caller, format: 'step' });
+    await loader.releaseAll();
+
+    const admitted = ingestSubject.mock.calls.map(([, primary, resources]) => [primary, ...resources]);
+    expect(admitted[0]?.[0]).toBe(read);
+    expect(admitted[1]?.[0]).toBe(exported);
+    expect(admitted[1]?.[1]).toBe(resource);
+    expect(admitted[2]?.[0]).not.toBe(caller);
+    expect(admitted[2]?.[0]).toStrictEqual(caller);
+  });
+
   it('coalesces inline Runtime exports, drains release, and retries after failure', async () => {
     const { engine, ingestSubject, releaseSubject } = testEngine();
     const firstExport = Promise.withResolvers<Awaited<ReturnType<GeoSpecRuntimeClient['export']>>>();

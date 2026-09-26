@@ -24,12 +24,14 @@ import {
   performanceLabFixtures,
   performanceLabNativeQueries,
   performanceLabScaleCases,
+  performanceLabScaleQueries,
 } from '#bench/performance-lab';
 import type {
   LabFixture,
   PerformanceLabCase,
   PerformanceLabDifference,
   PerformanceLabQuery,
+  PerformanceLabScaleQuery,
 } from '#bench/performance-lab';
 import type { Artifact } from '#bench/lib';
 import type {
@@ -61,7 +63,7 @@ type Options = LabProducts & {
 };
 type Selection = {
   fixture: LabFixture;
-  cases: ReadonlyArray<PerformanceLabCase | PerformanceLabQuery>;
+  cases: ReadonlyArray<PerformanceLabCase | PerformanceLabQuery | PerformanceLabScaleQuery>;
 };
 type Cell = {
   sequence: number;
@@ -119,6 +121,7 @@ legacy cache control are pinned; no transitive closure is claimed.
 Results: run.json, artifacts.json, rows.jsonl, summary.json, cells/*/{result.json,stdout.log,stderr.log}.
 Cold: fresh child/module/engine/subject. Warm: fresh child prewarms its module, then times a new engine/subject.
 Cold processWall spans spawn through close; warm processWall includes the untimed prewarm and is not a warm latency.
+Cold harnessWall is processWall minus the runner total: Node start, TypeScript imports, SHA-256 checks and result writing.
 Warm timing.total spans the measured runner's startup/admission/evaluation/cleanup after module prewarm.
 maxRSS is process.resourceUsage().maxRSS * 1024 (KiB to bytes), child process only, through cleanup.
 Unsupported and unverified cells remain raw; unexpected statuses and worker errors exit 1.
@@ -235,7 +238,7 @@ export const parseCliArguments = (args: string[]): Options => {
 export const selectLabFixtures = (includeScale: boolean): Selection[] => {
   const cases = [
     ...performanceLabCases,
-    ...(includeScale ? performanceLabScaleCases : []),
+    ...(includeScale ? [...performanceLabScaleCases, ...performanceLabScaleQueries] : []),
     ...performanceLabNativeQueries,
   ];
   return performanceLabFixtures.flatMap((fixture) => {
@@ -619,6 +622,8 @@ const invokeCell = async (cell: Cell, options: Options) => {
     processWall,
     measuredWall: cell.condition === 'cold' ? processWall : report?.result?.timing.total,
     measuredWallScope: cell.condition === 'cold' ? 'spawn-through-close' : 'post-prewarm-runner-total',
+    harnessWall:
+      cell.condition === 'cold' && report?.result !== undefined ? processWall - report.result.timing.total : undefined,
     childExit,
     outputDir: outputDirectory,
   };
@@ -676,6 +681,8 @@ const runParent = async (options: Options): Promise<void> => {
     processWall: 'spawn through close; warm cells include untimed module prewarm and must not use this as warm latency',
     measuredWall:
       'cold: full child processWall; warm: second runner total after module prewarm, including new engine/subject admission and cleanup',
+    harnessWall:
+      'cold only: processWall minus the runner total (Node start, TypeScript imports, product and fixture SHA-256, result write); product time is result.timing',
     comparability:
       'per-case engine evaluations and per-fixture wall are descriptive; unsupported legacy work is never equal backend throughput',
     legacyPersistence: 'disabled through the unchanged installed evidence-cache module before engine import',

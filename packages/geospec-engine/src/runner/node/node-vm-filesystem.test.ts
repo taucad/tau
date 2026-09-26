@@ -33,6 +33,8 @@ describe('createNodeVmFileSystem', () => {
     expect(await filesystem.readFile('main.ts', 'utf8')).toBe('export default 1;\n');
     const bytes = await filesystem.readFile('main.ts');
     expect(bytes.byteLength).toBe(18);
+    expect(Buffer.isBuffer(bytes)).toBe(false);
+    expect(new TextDecoder().decode(bytes)).toBe('export default 1;\n');
 
     await filesystem.ensureDir('nested');
     await filesystem.writeFile('nested/deeper/out.txt', 'written');

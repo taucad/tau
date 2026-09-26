@@ -54,7 +54,15 @@ export type GeoSpecNativeLoadModelOptions<Code extends Record<string, string> = 
 /** Subject identity returned by native STEP/GLB admission. @public */
 export type GeoSpecNativeModelSubject = GeoSpecNativeSubject & { readonly subjectHash: string };
 
-/** Resolve a non-memory source into ordinary ArrayBuffer-backed bytes. @public */
+/**
+ * Resolve a non-memory source into ordinary ArrayBuffer-backed bytes.
+ *
+ * The loader takes ownership of the returned bytes and admits them without a
+ * copy, so a reader must return bytes that nothing mutates afterwards (a fresh
+ * read, not a view of a shared or reused buffer).
+ *
+ * @public
+ */
 export type GeoSpecNativeSourceReader = (source: LoadModelSourceOptions['source']) => Promise<Uint8Array<ArrayBuffer>>;
 
 /** Defaults and host dependencies for a managed native model loader. @public */
@@ -150,7 +158,7 @@ const directBytes = async (
     return new Uint8Array(await source.arrayBuffer());
   }
   if (readSource !== undefined) {
-    return Uint8Array.from(await readSource(source));
+    return readSource(source);
   }
   throw failure([
     diagnostic({
@@ -396,10 +404,11 @@ export const createGeoSpecNativeModelLoader = (
     if ('success' in honored) {
       throw failure(honored.diagnostics);
     }
+    // The export is consumed synchronously by admission, so its bytes need no copy.
     return admit({
       format,
-      primary: Uint8Array.from(primary.bytes),
-      resources: resources.map((resource) => ({ name: resource.name, bytes: Uint8Array.from(resource.bytes) })),
+      primary: primary.bytes,
+      resources,
       sourceUnit: honored.sourceUnit,
       ...(options.ingestOptions === undefined ? {} : { ingestOptions: options.ingestOptions }),
     });

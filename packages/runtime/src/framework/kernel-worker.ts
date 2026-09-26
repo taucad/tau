@@ -197,8 +197,10 @@ const mergeParameterDefaults = (
 ): Record<string, unknown> =>
   deepmerge(
     defaults,
-    schema?.additionalProperties === false && schema.properties
-      ? Object.fromEntries(Object.entries(parameters).filter(([key]) => Object.hasOwn(schema.properties!, key)))
+    // Admission drops an empty `properties` map and refuses `patternProperties`, so a closed schema without
+    // `properties` declares no keys at all.
+    schema?.additionalProperties === false
+      ? Object.fromEntries(Object.entries(parameters).filter(([key]) => Object.hasOwn(schema.properties ?? {}, key)))
       : parameters,
     {
       arrayMerge: (_target: unknown[], source: unknown[]) => source,

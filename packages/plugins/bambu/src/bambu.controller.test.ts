@@ -498,6 +498,11 @@ describe('Bambu read-only controller', () => {
     await expect(connect({ mqtt: { type: 'pinned', digest: pinnedDigest } })).rejects.toThrow(
       'BAMBU_MQTT_TRANSPORT_FAILED',
     );
+    // A pin mismatch is the one transport failure a retry cannot fix, so it keeps its own code.
+    vi.mocked(runtime.connectStream).mockRejectedValueOnce(new Error('MACHINE_TLS_PIN_MISMATCH'));
+    await expect(connect({ mqtt: { type: 'pinned', digest: pinnedDigest } })).rejects.toThrow(
+      'BAMBU_CERTIFICATE_CHANGED',
+    );
   });
 
   it('should refuse a firmware reply from a different physical serial', async () => {

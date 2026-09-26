@@ -181,10 +181,18 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true, force: true })));
 });
 
-/** Bind one simulator through the real Node host and hand back its admitted client. */
-const bindSimulator = async (simulator: BambuSimulator): Promise<MachineClient> => {
+const simulatorRoot = async (): Promise<string> => {
   const authorityRoot = await mkdtemp(join(tmpdir(), 'tau-bambu-simulator-host-'));
   temporaryDirectories.push(authorityRoot);
+  return authorityRoot;
+};
+
+/** Open the real Node host over one authority root, with a provider whose every connection is `simulator`. */
+const openSimulatorHost = async (
+  authorityRoot: string,
+  simulator: BambuSimulator,
+  onError: (error: unknown) => void = vi.fn(),
+) => {
   const clock = { now: () => new Date().toISOString() };
   const runtime: NodeMachineRuntime = {
     discovery: {
@@ -214,9 +222,15 @@ const bindSimulator = async (simulator: BambuSimulator): Promise<MachineClient> 
     admission,
     providers: [defineBambuSimulatorMachine({ simulator })()],
     runtime,
-    onError: vi.fn(),
+    onError,
   });
   hosts.push(host);
+  return { admission, host };
+};
+
+/** Bind one simulator through the real Node host and hand back its admitted client. */
+const bindSimulator = async (simulator: BambuSimulator, authorityRoot?: string): Promise<MachineClient> => {
+  const { admission, host } = await openSimulatorHost(authorityRoot ?? (await simulatorRoot()), simulator);
   const session = admission.issueTrustedSession({
     actor: { kind: 'user', id: 'operator' },
     authorityId: 'authority',
@@ -883,5 +897,27 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')(
         snapshot: { readiness: 'idle' },
       });
     });
+
+    it.each([
+      ['certificate-changed', 'BAMBU_CERTIFICATE_CHANGED', 0],
+      ['timeout', 'BAMBU_TIMEOUT', 1],
+    ] as const)(
+      'should report a %s handshake at restart as %s and keep %i reconnect pending',
+      async (fault, code, reconnects) => {
+        const authorityRoot = await simulatorRoot();
+        await bindSimulator(createBambuSimulator(), authorityRoot);
+        await hosts.pop()?.close();
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+          const onError = vi.fn();
+          await openSimulatorHost(authorityRoot, createBambuSimulator({ faults: [fault] }), onError);
+          expect(onError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: code }));
+          // A changed certificate needs a new binding; a timeout is retried after 2 s.
+          expect(vi.getTimerCount()).toBe(reconnects);
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
   },
 );

@@ -19,6 +19,7 @@ import {
   performanceLabNativeQueries,
   performanceLabQualifiedCases,
   performanceLabScaleCases,
+  performanceLabScaleQueries,
 } from '#bench/performance-lab';
 
 const root = resolve(import.meta.dirname, '../../..');
@@ -190,6 +191,41 @@ void describe('performance lab catalog', () => {
     );
     assert.ok(performanceLabCases.every((entry) => fixtures.get(entry.fixtureId)?.scale === false));
     assert.ok(performanceLabScaleCases.every((entry) => fixtures.get(entry.fixtureId)?.scale === true));
+  });
+
+  void it('runs one scale claim per capability family beside a tessellating analyzeMesh query', () => {
+    const fixtures = new Map(performanceLabFixtures.map((entry) => [entry.id, entry]));
+    for (const fixtureId of new Set(performanceLabScaleCases.map((entry) => entry.fixtureId))) {
+      assert.deepStrictEqual(
+        performanceLabScaleCases.filter((entry) => entry.fixtureId === fixtureId).map(({ matcher }) => matcher),
+        fixtures.get(fixtureId)?.format === 'step'
+          ? [
+              'toBeWatertight',
+              'toHaveVolume',
+              'toBeValidBrep',
+              'toHaveProductStructure',
+              'toHaveNoComponentInterference',
+              'toHaveMinimumWallThickness',
+            ]
+          : ['toBeWatertight', 'toHaveVolume'],
+        fixtureId,
+      );
+      assert.deepStrictEqual(
+        performanceLabScaleQueries.filter((entry) => entry.fixtureId === fixtureId).map(({ capability }) => capability),
+        ['analyzeMesh'],
+      );
+    }
+    assert.equal(new Set(performanceLabScaleCases.map((entry) => entry.fixtureId)).size, 9);
+    for (const entry of performanceLabScaleCases) {
+      const methods = createGeoSpecMatcherMethods({
+        subject: entry.fixtureId,
+        polarity: entry.claim.polarity,
+        invoke: (invocation) => invocation,
+      });
+      const method = methods[entry.matcher as keyof typeof methods];
+      const authored = Reflect.apply(method, methods, entry.arguments) as GeoSpecAuthoringInvocation;
+      assert.deepStrictEqual(entry.claim.payload, { kind: authored.kind, expected: authored.expected });
+    }
   });
 
   void it('pins accepted ancillary queries including PMI inventory', async () => {

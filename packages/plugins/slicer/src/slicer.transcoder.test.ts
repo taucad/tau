@@ -90,12 +90,7 @@ const cubeTriangles: Array<readonly [number, number, number]> = [
 ];
 
 const artifactFor = (bytes: Uint8Array<ArrayBuffer>, path: string): MachineArtifactReference => ({
-  revision: {
-    authorityId: 'authority',
-    workspaceId: 'workspace',
-    revisionId: 'revision' as MachineArtifactReference['revision']['revisionId'],
-    treeDigest: `sha256:${sha256(new TextEncoder().encode('tree'))}` as MachineArtifactReference['digest'],
-  },
+  projectId: 'proj_000000000000000000001',
   path,
   digest: `sha256:${sha256(bytes)}` as MachineArtifactReference['digest'],
   length: bytes.byteLength,

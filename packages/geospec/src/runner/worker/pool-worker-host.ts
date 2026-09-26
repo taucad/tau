@@ -9,6 +9,7 @@
 import { requireRegisteredGeoSpecHostBinding } from '#engine/registry.js';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from '#runner/pool/pool-messages.js';
 import type { RunGeoSpecModuleOptions } from '#runner/types.js';
+import type { ManagedGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 
 /**
  * Options accepted by {@link startGeoSpecPoolWorkerHost}.
@@ -20,6 +21,10 @@ export type GeoSpecPoolWorkerHostOptions = {
   filesystem: RunGeoSpecModuleOptions['filesystem'];
   /** Model loader exposed to authored tests through `geospec/model`. */
   modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
+  /** Native assertion client shared with this worker's model admissions. */
+  nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions'];
+  /** Managed native admissions drained before worker shutdown. */
+  nativeModelLoader?: ManagedGeoSpecNativeModelLoader;
   /** STEP loader exposed to authored tests through `geospec/step`. */
   stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
   /** Additional in-memory modules made available to the VM. */

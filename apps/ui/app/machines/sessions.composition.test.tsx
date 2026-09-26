@@ -59,6 +59,7 @@ const {
   installedCheckoutRoutes,
   revisionClientLifecycle,
   projectProviderInputs,
+  flushProducers,
 } = vi.hoisted(() => {
   const frames: Array<{ type: string; projectId?: string }> = [];
   const calls: string[] = [];
@@ -132,6 +133,8 @@ const {
     mounted: live,
     workerRef: { current: undefined as Worker | undefined },
     getProjectRouteAccess: vi.fn(),
+    /** `UnloadProvider`'s producer stage, as the quit hold reaches it; a test holds it open. */
+    flushProducers: vi.fn(async (): Promise<void> => undefined),
 
     chatStore: {
       get: () => ({
@@ -331,7 +334,10 @@ vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
   },
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => chatStore }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
+vi.mock('#hooks/use-flush-on-close.js', () => ({
+  useFlushOnClose: () => undefined,
+  useFlushProducers: () => flushProducers,
+}));
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
   MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
@@ -1386,6 +1392,65 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     delete (globalThis as { tau?: unknown }).tau;
+    flushProducers.mockReset();
+  });
+
+  /*
+   * W15: a Home draft still inside its debounce lives only in memory, and its
+   * write goes through the services utility main disposes once this renderer
+   * answers. `hidden` comes at window teardown — after that — so the quit hold
+   * runs the unload producers itself, before any session closes (A38's order).
+   */
+  it('should flush every producer before it closes a session or answers main', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const asks: Array<() => void> = [];
+    const order: string[] = [];
+    (globalThis as { tau?: unknown }).tau = {
+      quit: {
+        onAsk: (handler: () => void) => {
+          asks.push(handler);
+          return () => undefined;
+        },
+        reportQuiesced: () => order.push('quiesced'),
+      },
+    };
+    const producers = Promise.withResolvers<void>();
+    flushProducers.mockImplementationOnce(async () => {
+      order.push('producers');
+      await producers.promise;
+    });
+
+    vi.resetModules();
+    const freshSessions = await import('#hooks/use-sessions.js');
+    const freshStore = await import('#services/sessions-store.js');
+
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <freshSessions.SessionsProvider>
+          <span>app</span>
+        </freshSessions.SessionsProvider>
+      </QueryClientProvider>,
+    );
+    await settle();
+
+    await act(async () => {
+      asks[0]?.();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(order).toEqual(['producers']);
+    expect(freshStore.sessionsActor.getSnapshot().matches('ready')).toBe(true);
+
+    await act(async () => {
+      producers.resolve();
+      await Promise.resolve();
+    });
+    await settle(() => order.length === 2);
+
+    expect(order).toEqual(['producers', 'quiesced']);
+    expect(freshStore.sessionsActor.getSnapshot().matches('quiesced')).toBe(true);
+    view.unmount();
   });
 
   it('answers a quit ask buffered before the renderer mounted', async () => {

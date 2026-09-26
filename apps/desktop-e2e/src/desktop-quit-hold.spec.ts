@@ -91,8 +91,9 @@ describe('the desktop quit hold (S48(17), D31, P49)', () => {
  *
  * `draftMachine` debounces its edits, so a draft typed and abandoned inside that
  * window exists only in memory until something flushes it — which on quit is the
- * renderer hold's `flushNow` fan-out (`global-chat-flush-guard.tsx`). Removing
- * that fan-out leaves the file absent, which is exactly what this row reads.
+ * renderer hold running the unload producers (`useFlushProducers`), Home's own
+ * (`HomeNewProjectComposerProvider`) among them. Removing that flush leaves the
+ * file absent, which is exactly what this row reads.
  */
 it('flushes a pending composer record write before the shell exits', async () => {
   const draft = 'Quit before the debounce fires.';

@@ -25,6 +25,7 @@ import {
 } from '#services/sessions-store.js';
 import type { ProjectLivenessStatus } from '#services/sessions-store.js';
 import { useSharedFileManagerWorker } from '#hooks/use-file-manager.js';
+import { useFlushProducers } from '#hooks/use-flush-on-close.js';
 import { BudgetRefusedDialog } from '#components/nav/project-close-dialogs.js';
 
 type SessionsActor = ActorRefFrom<typeof sessionsMachine>;
@@ -69,10 +70,11 @@ export function SessionsProvider({ children }: { readonly children: ReactNode })
 /**
  * The quit hold's renderer half (D31, P49).
  *
- * Main asks; every live session runs its own `closing` — cancel the runs,
- * flush the sync through W13's seam, release the leases — and the person sees
- * what is being waited for and can cut it short. `quiesced` answers main,
- * which then quiesces the services utility and disposes.
+ * Main asks; the unload producers flush first (W15), then every live session
+ * runs its own `closing` — cancel the runs, flush the sync through W13's seam,
+ * release the leases — and the person sees what is being waited for and can
+ * cut it short. `quiesced` answers main, which then quiesces the services
+ * utility and disposes.
  *
  * The browser needs nothing here: `pagehide` is its quit, and W13's
  * `use-flush-on-close` already flushes every registrant there. A `quit` sent
@@ -82,6 +84,7 @@ export function SessionsProvider({ children }: { readonly children: ReactNode })
  */
 function SessionsQuitHold(): React.JSX.Element | undefined {
   const actor = useSessions();
+  const flushProducers = useFlushProducers();
   const [held, setHeld] = useState(false);
   const pending = useSelector(actor, (state) => sessionsPendingRevisions(state.context));
 
@@ -96,7 +99,12 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
   }, [actor]);
 
   useEffect(() => {
-    return onDesktopQuitRequested(() => {
+    return onDesktopQuitRequested(async () => {
+      /* A38's order: producers settle before any session's close cut. A Home
+       * draft still in its debounce writes through the services utility main
+       * disposes once this answers, and `hidden` only fires at window teardown
+       * — after that. Main's bound covers a producer that never settles. */
+      await flushProducers();
       if (actor.getSnapshot().status === 'done') {
         reportDesktopQuiesced(false);
         return;
@@ -104,7 +112,7 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
       setHeld(true);
       actor.send({ type: 'quit' });
     });
-  }, [actor]);
+  }, [actor, flushProducers]);
 
   if (!held) {
     return undefined;

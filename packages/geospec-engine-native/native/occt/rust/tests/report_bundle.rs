@@ -158,8 +158,14 @@ fn original_validation_reuse_preserves_complete_facts_across_query_orders() {
 fn fixed_report_bundle_preserves_nominal_queries_and_copy_history_entities() {
     let connector = OcctConnector;
     let identity = connector.identity_profile();
-    assert_eq!(identity.ingest_profile, "geospec-step-xde-report-v2");
-    assert_eq!(identity.backend_profile, "occt-8.1.0-dev1-3d097a-report-v2");
+    assert_eq!(
+        identity.ingest_profile,
+        "geospec-step-xde-report-authored-v5"
+    );
+    assert_eq!(
+        identity.backend_profile,
+        "occt-8.1.0-dev1-3d097a-report-authored-v5"
+    );
 
     let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
     let admission = document.admission_facts().unwrap();

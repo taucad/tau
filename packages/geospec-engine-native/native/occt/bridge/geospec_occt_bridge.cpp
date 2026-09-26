@@ -22,12 +22,14 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <DE_ShapeFixParameters.hxx>
 #include <DESTEP_Parameters.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom2dAdaptor_Curve.hxx>
 #include <HeaderSection_FileSchema.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <Interface_Check.hxx>
 #include <Interface_EntityIterator.hxx>
 #include <Interface_Graph.hxx>
 #include <Interface_InterfaceModel.hxx>
@@ -82,6 +84,7 @@
 #include <TopLoc_Location.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TransferBRep.hxx>
+#include <Transfer_Binder.hxx>
 #include <Transfer_TransientProcess.hxx>
 #include <NCollection_DataMap.hxx>
 #include <NCollection_IncAllocator.hxx>
@@ -99,6 +102,7 @@
 #include <TopoDS_Iterator.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
+#include <XSAlgo_ShapeProcessor.hxx>
 #include <XSControl_TransferReader.hxx>
 #include <XSControl_WorkSession.hxx>
 #include <gp_Ax1.hxx>
@@ -5692,6 +5696,34 @@ static DESTEP_Parameters step_read_parameters() {
   return p;
 }
 
+// The authored healing profile (ruling 1): shape processing completes the
+// translation (pcurves, same-parameter, seams, wire order) but never repairs
+// authored geometry, so an invalid model is evaluated as the model it is. The
+// 13 repair modes and face/shell reorientation are off, and a solid with an
+// open shell stays the open solid it was authored as instead of becoming a
+// shell. Every other field keeps the STEP default an empty map would get.
+static DE_ShapeFixParameters authored_fix_parameters() {
+  using Mode = DE_ShapeFixParameters::FixMode;
+  DE_ShapeFixParameters p = DESTEP_Parameters::GetDefaultShapeFixParameters();
+  p.FixSelfIntersectionMode = Mode::NotFix;
+  p.FixSelfIntersectingEdgeMode = Mode::NotFix;
+  p.FixIntersectingEdgesMode = Mode::NotFix;
+  p.FixNonAdjacentIntersectingEdgesMode = Mode::NotFix;
+  p.FixIntersectingWiresMode = Mode::NotFix;
+  p.FixSmallMode = Mode::NotFix;
+  p.FixSmallAreaWireMode = Mode::NotFix;
+  p.RemoveSmallAreaFaceMode = Mode::NotFix;
+  p.FixNotchedEdgesMode = Mode::NotFix;
+  p.FixLackingMode = Mode::NotFix;
+  p.FixConnectedMode = Mode::NotFix;
+  p.FixLoopWiresMode = Mode::NotFix;
+  p.FixSplitFaceMode = Mode::NotFix;
+  p.FixFaceOrientationMode = Mode::NotFix;
+  p.FixShellOrientationMode = Mode::NotFix;
+  p.CreateOpenSolidMode = Mode::Fix;
+  return p;
+}
+
 // OCCT initializes its data-exchange globals (controllers, LibCtl libraries,
 // Interface_Static standards, XSAlgo and ShapeProcess operators) unsynchronized
 // on first use. One reader construction does it before admissions may overlap;
@@ -5715,6 +5747,27 @@ static void skip_semantic_check(STEPCAFControl_Reader& reader) {
   seed->AddEntity(new StepBasic_ApplicationContext);
   session->SetModel(seed);
   session->ComputeGraph(true);
+}
+
+// Transfer fails only when no shape results. An entity that fails on its own
+// (an exception, a dead loop, a surface it cannot build) is recorded as a fail
+// on a transfer binder while the rest transfers without it. Returns the first
+// recorded fail as "<entity type>: <text>", or its text alone when OCCT
+// recorded it against no entity (a face surface that did not read is null).
+static std::optional<std::string> first_transfer_fail(STEPCAFControl_Reader& reader) {
+  const auto transfer_reader = reader.ChangeReader().WS()->TransferReader();
+  const auto process = transfer_reader.IsNull()
+                           ? occ::handle<Transfer_TransientProcess>{}
+                           : transfer_reader->TransientProcess();
+  for (int index = 1; !process.IsNull() && index <= process->NbMapped(); ++index) {
+    const occ::handle<Transfer_Binder> binder = process->MapItem(index);
+    if (binder.IsNull() || binder->Check()->NbFails() == 0) continue;
+    std::string text = binder->Check()->CFail(1, false);
+    text.erase(0, text.find_first_not_of(' '));  // OCCT texts start with a space
+    const occ::handle<Standard_Transient>& entity = process->Mapped(index);
+    return entity.IsNull() ? text : std::string(entity->DynamicType()->Name()) + ": " + text;
+  }
+  return std::nullopt;
 }
 
 int geospec_occt_open_step(const uint8_t* bytes, size_t length,
@@ -5752,6 +5805,9 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     if (reader.ReadStream("memory.step", step_read_parameters(), stream) != IFSelect_RetDone) {
       return fail(GEOSPEC_OCCT_READ_FAILED, "STEP read failed.", error);
     }
+    // ReadStream replaces the transfer actor, so parameters set before it land
+    // on nothing; set now they reach the actor that Transfer uses.
+    reader.SetShapeFixParameters(authored_fix_parameters(), XSAlgo_ShapeProcessor::ParameterMap());
 
     auto result = std::make_unique<geospec_occt_document>();
     result->schema = step_schema(reader);
@@ -5782,6 +5838,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
 
     if (!reader.Transfer(result->document)) {
       return fail(GEOSPEC_OCCT_TRANSFER_FAILED, "STEP XDE transfer failed.", error);
+    }
+    // A partial transfer is a degraded subject, never evidence (policy §16).
+    if (const auto lost = first_transfer_fail(reader)) {
+      return fail(GEOSPEC_OCCT_TRANSFER_FAILED, "STEP transfer lost an entity: " + *lost, error);
     }
     if (result->source_length_unit.empty()) {
       double unit_meters = 0.0;

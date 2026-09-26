@@ -680,7 +680,8 @@ fn clearance_finish_reservation(
 }
 
 pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
-    if let Err(evaluation) = context.brep_facts() {
+    // F3: the BRep unit and the source; no report facet.
+    if let Err(evaluation) = context.brep_gate() {
         return evaluation;
     }
     if context.subject().brep.is_none() {
@@ -1220,7 +1221,7 @@ fn prove_contact(
     // A target occurrence may contribute a real boundary face, never an
     // unrelated infinite support. Keep enumeration tied to its retained source
     // inventory, precharge all rows before testing, and bound it to 64 faces.
-    let bundle = context.subject().report_bundle()?.ok_or_else(|| {
+    let bundle = context.subject().report_faces(false)?.ok_or_else(|| {
         finite_contact_failure("Contact needs the actual located-face inventory.")
     })?;
     let mut targets = Vec::new();
@@ -3060,7 +3061,7 @@ mod tests {
                 &budget,
                 None,
             );
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             assert!(context
                 .set_cylindrical_band_output_bytes(prior_bytes)
                 .is_ok());

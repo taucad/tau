@@ -21,7 +21,7 @@ use crate::{
         brep::{
             Bounds, BrepAdmissionFacts, BrepEntity, BrepSubject, CircularBoreDisposition,
             CircularBoreInventory, CircularBoreTermination, ContinuousWallDomain,
-            ContinuousWallShape, DocumentFacts, EdgeTreatmentCounts, EdgeTreatmentDisposition,
+            ContinuousWallShape, DocumentRows, EdgeTreatmentCounts, EdgeTreatmentDisposition,
             EdgeTreatmentInventory, EdgeTreatmentKind, LocatedFace, NominalCylindricalBand,
             OccurrenceFacts, RegularSolidContainment, ReportedFaces, SelectedContinuousDomain,
             ShapeFacts, StepSubjectMetadata, SurfaceFacts, TessellationProfile,
@@ -87,8 +87,6 @@ pub(crate) struct Subject {
     report_shape: OnceCell<ShapeFacts>,
     /// Report face tables (F5); a measured transfer replaces an address one.
     report_faces: RefCell<Option<RetainedReportFaces>>,
-    /// Facts for readers of several facets at once (see `brep_facts`).
-    brep_facts: OnceCell<RetainedFacts>,
     /// Structure-only occurrences are replaced once bounds are demanded.
     source_occurrences: RefCell<Option<RetainedSourceOccurrences>>,
     circular_bores: OnceCell<Rc<CircularBoreInventory>>,
@@ -116,11 +114,6 @@ struct RetainedReportFaces {
     faces: Rc<ReportedFaces>,
     /// False for address tables, whose integrals and boxes are unmeasured.
     measured: bool,
-    bytes: u64,
-}
-
-struct RetainedFacts {
-    facts: Rc<DocumentFacts>,
     bytes: u64,
 }
 
@@ -177,7 +170,6 @@ impl Subject {
             report_mesh_bytes: OnceCell::new(),
             report_shape: OnceCell::new(),
             report_faces: RefCell::new(None),
-            brep_facts: OnceCell::new(),
             source_occurrences: RefCell::new(None),
             circular_bores: OnceCell::new(),
             edge_treatment_counts: OnceCell::new(),
@@ -450,55 +442,6 @@ impl Subject {
                     .as_ref()
                     .map_or(0, |value| value.bytes),
             )
-            .saturating_add(self.brep_facts.get().map_or(0, |value| value.bytes))
-    }
-
-    /// Facts for readers of several facets at once: the whole-shape report
-    /// facts, source occurrences with bounds, subshape names and datums, and
-    /// the admission units. Products, faces and PMI are not transferred (F10);
-    /// a reader of one facet demands that facet instead.
-    pub(crate) fn brep_facts(&self) -> Result<Option<Rc<DocumentFacts>>, BackendError> {
-        let Some(brep) = &self.brep else {
-            return Ok(None);
-        };
-        self.cache_identity()?;
-        if let Some(value) = self.brep_facts.get() {
-            self.observations.add(WorkCounter::DerivedHits, 1);
-            return Ok(Some(Rc::clone(&value.facts)));
-        }
-        // Both are Some for a BRep subject.
-        let shape = self.report_shape()?.cloned().expect("BRep report shape");
-        let occurrences = self.source_occurrences()?.expect("BRep source occurrences");
-        let rows = brep.document_rows()?;
-        let (source_length_unit, source_unit_to_millimeters) = self
-            .step_admission_facts
-            .as_ref()
-            .map(|facts| {
-                (
-                    facts.source_length_unit.clone(),
-                    facts.source_unit_to_millimeters,
-                )
-            })
-            .unwrap_or_default();
-        let facts = DocumentFacts {
-            source_length_unit,
-            source_unit_to_millimeters,
-            products: Vec::new(),
-            occurrences: occurrences.to_vec(),
-            shape,
-            faces: Vec::new(),
-            subshapes: rows.subshapes,
-            datum_placements: rows.datum_placements,
-            semantic_datums: rows.semantic_datums,
-        };
-        let bytes = document_facts_bytes(&facts);
-        self.check_f2_pending(bytes)?;
-        let facts = Rc::new(facts);
-        let _ = self.brep_facts.set(RetainedFacts {
-            facts: Rc::clone(&facts),
-            bytes,
-        });
-        Ok(Some(facts))
     }
 
     pub(crate) fn source_occurrences(&self) -> Result<Option<Rc<[OccurrenceFacts]>>, BackendError> {
@@ -1288,49 +1231,6 @@ fn report_faces_bytes(value: &ReportedFaces) -> u64 {
     bytes
 }
 
-/// The `brep_facts` composition; its products, faces and PMI are empty.
-fn document_facts_bytes(facts: &DocumentFacts) -> u64 {
-    let mut bytes = (size_of::<DocumentFacts>() + 2 * size_of::<usize>()) as u64;
-    bytes = bytes.saturating_add(text_bytes(&facts.source_length_unit));
-    bytes = bytes.saturating_add(vector_bytes(&facts.occurrences));
-    for value in &facts.occurrences {
-        for value in [
-            &value.label,
-            &value.product_label,
-            &value.name,
-            &value.path,
-            &value.product_name,
-        ] {
-            bytes = bytes.saturating_add(text_bytes(value));
-        }
-        bytes = bytes
-            .saturating_add(optional_text_bytes(&value.instance_name))
-            .saturating_add(vector_bytes(&value.ordinal_path));
-    }
-    bytes = bytes.saturating_add(vector_bytes(&facts.subshapes));
-    for value in &facts.subshapes {
-        bytes = bytes
-            .saturating_add(text_bytes(&value.occurrence_path))
-            .saturating_add(text_bytes(&value.name))
-            .saturating_add(optional_text_bytes(&value.shape_label));
-    }
-    bytes = bytes.saturating_add(vector_bytes(&facts.datum_placements));
-    for value in &facts.datum_placements {
-        bytes = bytes
-            .saturating_add(text_bytes(&value.occurrence_path))
-            .saturating_add(text_bytes(&value.name));
-    }
-    bytes = bytes.saturating_add(vector_bytes(&facts.semantic_datums));
-    for value in &facts.semantic_datums {
-        bytes = bytes
-            .saturating_add(text_bytes(&value.occurrence_path))
-            .saturating_add(text_bytes(&value.label))
-            .saturating_add(optional_text_bytes(&value.feature_name))
-            .saturating_add(vector_bytes(&value.face_indices));
-    }
-    bytes
-}
-
 /// The source-compatible f32 triangle soup of a report mesh (F9). A mesh
 /// already in soup layout (the OCCT report) moves its vectors; any other is
 /// expanded. Every position is checked to be a finite f32.
@@ -1499,9 +1399,15 @@ impl<'a> EvaluationContext<'a> {
         self.subject().mesh_analysis().map_err(backend_refusal)
     }
 
-    pub(crate) fn brep_facts(&mut self) -> Result<Option<Rc<DocumentFacts>>, Evaluation> {
+    /// Subshape names and datums (F8), transferred per demand and not retained.
+    pub(crate) fn document_rows(&mut self) -> Result<Option<DocumentRows>, Evaluation> {
         self.charge_brep_demand()?;
-        self.subject().brep_facts().map_err(backend_refusal)
+        self.subject()
+            .brep
+            .as_deref()
+            .map(BrepSubject::document_rows)
+            .transpose()
+            .map_err(backend_refusal)
     }
 
     /// A gate (F3): the single BRep unit and the connector, no report facet.

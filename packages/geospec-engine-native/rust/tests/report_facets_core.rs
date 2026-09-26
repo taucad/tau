@@ -5,8 +5,8 @@ use std::cell::Cell;
 
 use super::*;
 use crate::backend::brep::{
-    BrepIdentityProfile, EdgeFacts, PointState, ReportedBrepBundle, ReportedFaces, TopologyCounts,
-    ValidityFacts,
+    BrepIdentityProfile, DocumentFacts, EdgeFacts, PointState, ReportedBrepBundle, ReportedFaces,
+    TopologyCounts, ValidityFacts,
 };
 
 #[derive(Default)]
@@ -101,6 +101,17 @@ fn bundle(mesh: Rc<TriangleMesh>) -> ReportedBrepBundle {
 }
 
 impl BrepSubject for FacetBrep {
+    fn step_subject_metadata(
+        &self,
+    ) -> Result<Option<crate::backend::brep::StepSubjectMetadata>, BackendError> {
+        Ok(Some(crate::backend::brep::StepSubjectMetadata {
+            schema: None,
+            source_byte_length: 0,
+            free_shape_count: 0,
+            native_read_stream: true,
+        }))
+    }
+
     fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
         bump(&self.calls.combined);
         failure(self.fail_mesh, "mesh")?;
@@ -235,7 +246,7 @@ fn claim(subjects: &[Rc<Subject>], mesh: bool) -> (u64, Option<String>) {
     let result = if mesh {
         context.charge_mesh_demand()
     } else {
-        context.brep_facts().map(drop)
+        context.brep_shape().map(drop)
     };
     let refusal = match result {
         Ok(()) => None,
@@ -323,9 +334,9 @@ fn facts_demands_build_no_mesh_record_and_each_facet_builds_once() {
             + subjects[0].display_name.len()
             + 2) as u64;
         assert_eq!(subjects[0].retained_report_bytes(), facts_bytes + record);
-        // A combined connector reports once per facet slice: shape,
-        // occurrences and rows for the facts, then the mesh.
-        let expected = if facets { [0, 1, 1] } else { [4, 0, 0] };
+        // A combined connector reports once per facet slice: the shape for
+        // the facts, then the mesh.
+        let expected = if facets { [0, 1, 1] } else { [2, 0, 0] };
         assert_eq!(
             [&calls.combined, &calls.mesh, &calls.facts].map(Cell::get),
             expected
@@ -378,6 +389,32 @@ fn the_selector_index_reads_facts_facets_without_the_report_mesh() {
     assert_eq!(
         [&calls.combined, &calls.mesh, &calls.facts, &calls.faces].map(Cell::get),
         [0, 0, 1, 1]
+    );
+}
+
+#[test]
+fn step_analyze_mesh_reads_occurrences_and_rows_without_the_report_facts() {
+    // F8: a failing report facts facet cannot refuse analyzeMesh on STEP.
+    let (brep, calls) = brep(true, false, true);
+    let subjects = [subject(brep)];
+    let budget = Budget::new(10_000);
+    let expected = Json::Null;
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::AnalyzeMesh,
+        "mesh",
+        &expected,
+        &budget,
+        None,
+    );
+    let evaluation = crate::matchers::mesh::analyze_mesh(&mut context);
+    assert!(matches!(
+        evaluation,
+        Evaluation::Ancillary { success: true, .. }
+    ));
+    assert_eq!(
+        [&calls.combined, &calls.mesh, &calls.facts].map(Cell::get),
+        [0, 1, 0]
     );
 }
 

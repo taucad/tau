@@ -746,7 +746,7 @@ fn selected_public_ordinal_is_not_the_private_query_address() {
     band.private_query_face = 7;
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     let ((value, route), used) = with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         let route = cylindrical_band_face(&endpoint(&band)).ok().unwrap();
         (
             context
@@ -777,7 +777,7 @@ fn distinct_face_reuse_is_claim_local_and_cold_warm_charges_match() {
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     for _ in 0..2 {
         let (_, used) = with_context(&subject, 2, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             let a = context
                 .nominal_cylindrical_band(address(&band), 0)
                 .ok()
@@ -803,7 +803,7 @@ fn distinct_face_budget_precedes_query_and_never_inverts() {
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     for polarity in [Polarity::Positive, Polarity::Negative] {
         let (error, used) = with_context(&subject, 1, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             context
                 .nominal_cylindrical_band(address(&band), 0)
                 .err()
@@ -822,7 +822,7 @@ fn each_pair_pays_even_when_both_roles_reuse_one_face() {
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     for _ in 0..2 {
         let (_, used) = with_context(&subject, 4, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             for _ in 0..2 {
                 let (a, b) =
                     selected_cylindrical_band_pair(&endpoint(&band), &endpoint(&band), context)
@@ -836,7 +836,7 @@ fn each_pair_pays_even_when_both_roles_reuse_one_face() {
     assert_eq!(mock.calls.borrow().len(), 2);
     for polarity in [Polarity::Positive, Polarity::Negative] {
         let (error, used) = with_context(&subject, 2, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             selected_cylindrical_band_pair(&endpoint(&band), &endpoint(&band), context)
                 .err()
                 .unwrap()
@@ -865,7 +865,7 @@ fn missing_or_mismatched_selector_associations_have_no_fallback() {
     assert!(cylindrical_band_face(&whole).is_err());
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     let (error, used) = with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         context
             .nominal_cylindrical_band(address(&band), 1)
             .err()
@@ -895,7 +895,7 @@ fn backend_association_failures_and_unsupported_are_noninvertible() {
             }
             let (subject, mock) = control(band.clone(), Ok(wrong));
             let (error, used) = with_context(&subject, 2, |context| {
-                assert!(context.brep_facts().is_ok());
+                assert!(context.brep_gate().is_ok());
                 context
                     .nominal_cylindrical_band(address(&band), 0)
                     .err()
@@ -913,7 +913,7 @@ fn backend_association_failures_and_unsupported_are_noninvertible() {
             }),
         );
         let (error, _) = with_context(&subject, 2, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             context
                 .nominal_cylindrical_band(address(&band), 0)
                 .err()
@@ -928,7 +928,7 @@ fn clearance_capacity_counts_record_allocation_and_pointer_buffer() {
     let band = raw_certificate();
     let (subject, _) = control(band.clone(), Ok(band.clone()));
     with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         assert!(context
             .check_cylindrical_band_capacity(&[256 * 1024])
             .is_err());
@@ -955,7 +955,7 @@ fn exported_pre_call_reservation_counts_prior_live_and_checks_overflow() {
     let band = raw_certificate();
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         assert!(context.nominal_cylindrical_band(address(&band), 0).is_ok());
         let reservation = continuous::CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES as u64;
         assert!(context
@@ -975,7 +975,7 @@ fn exported_pre_call_reservation_counts_prior_live_and_checks_overflow() {
     });
     assert_eq!(mock.calls.borrow().len(), 1);
     let (_, used) = with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         let header = std::mem::size_of::<Vec<Rc<NominalCylindricalBand>>>() as u64;
         assert!(context
             .set_cylindrical_band_output_bytes(256 * 1024 - header)

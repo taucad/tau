@@ -510,6 +510,60 @@ describe('SectionViewControls', () => {
     }
   });
 
+  it('should dispose the selector geometries and body materials but not the shared label material on unmount', async () => {
+    const properties = baseProperties();
+    const { scene, rerender, cleanup } = await renderSectionViewControls(<SectionViewControls {...properties} />);
+
+    try {
+      const geometries = new Set<THREE.BufferGeometry>();
+      const bodyMaterials = new Set<THREE.Material>();
+      const labelMaterials = new Set<THREE.Material>();
+      scene.traverse((child) => {
+        if (!(child instanceof THREE.Mesh) || !hasSceneTag(child, sceneTag.sectionViewHelper)) {
+          return;
+        }
+
+        const mesh = child as THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
+        if (mesh.geometry.userData['selectorLabel']) {
+          geometries.add(mesh.geometry);
+          labelMaterials.add(mesh.material);
+        } else if (mesh.material instanceof THREE.MeshMatcapMaterial) {
+          geometries.add(mesh.geometry);
+          bodyMaterials.add(mesh.material);
+        }
+      });
+      expect(geometries.size).toBe(18);
+      expect(bodyMaterials.size).toBe(6);
+      expect(labelMaterials.size).toBe(1);
+
+      const disposed = new Set<THREE.BufferGeometry | THREE.Material>();
+      for (const geometry of geometries) {
+        geometry.addEventListener('dispose', () => disposed.add(geometry));
+      }
+
+      for (const material of bodyMaterials) {
+        material.addEventListener('dispose', () => disposed.add(material));
+      }
+
+      const labelMaterialDispose = vi.spyOn([...labelMaterials][0]!, 'dispose');
+
+      // Selecting a plane unmounts the six selectors.
+      await rerender(
+        <SectionViewControls
+          {...properties}
+          availablePlanes={[xyPlane]}
+          renderPivot={[0, 0, 0]}
+          selectedPlaneId='xy'
+        />,
+      );
+
+      expect([...geometries, ...bodyMaterials].filter((resource) => !disposed.has(resource))).toEqual([]);
+      expect(labelMaterialDispose).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+    }
+  });
+
   it('should send the first drag step of a frame at once, then only the latest step when the frame runs', async () => {
     const onSetRenderPivot = vi.fn<(value: [number, number, number]) => void>();
     const onTransformDragEnd = vi.fn<() => void>();

@@ -424,6 +424,26 @@ function PlaneSelector({
   React.useEffect(() => {
     setBorderedExtrusionRegionColor({ geometry: roundedRectangleGeometry, region: 'border', color: actualColor });
   }, [actualColor, roundedRectangleGeometry]);
+  // The selector owns the resources it builds above; the label material and matcap texture are shared.
+  React.useEffect(
+    () => () => {
+      roundedRectangleGeometry.dispose();
+    },
+    [roundedRectangleGeometry],
+  );
+  React.useEffect(
+    () => () => {
+      selectorBodyMaterial.dispose();
+    },
+    [selectorBodyMaterial],
+  );
+  React.useEffect(
+    () => () => {
+      selectorLabelFrontGeometry.dispose();
+      selectorLabelBackGeometry.dispose();
+    },
+    [selectorLabelBackGeometry, selectorLabelFrontGeometry],
+  );
   React.useEffect(() => {
     const cancellation = { cancelled: false };
 

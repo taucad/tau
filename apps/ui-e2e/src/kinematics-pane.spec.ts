@@ -254,7 +254,7 @@ async function openKinematicsPane(): Promise<void> {
   await target.expectVisible(selectors.getByTestId('kinematics-pane'), 30_000);
 }
 
-const dofField = (dofId: string) => selectors.getByTestId(`kinematics-dof-${dofId}`).getByRole('textbox');
+const dofField = (dofId: string) => selectors.getByTestId(`kinematics-dof-${dofId}`).getByRole('spinbutton');
 
 async function setDriver(dofId: string, value: number): Promise<void> {
   await target.fill(dofField(dofId), String(value));
@@ -285,6 +285,7 @@ test.describe('Kinematics pane', () => {
     expectIdentity(await readMatrix(planetary.ring), 'grounded ring');
     await target.expectValue(dofField('carrier'), '22.5');
     await target.expectValue(dofField('planet-1'), '-67.5');
+    await target.expectAttribute(dofField('sun'), 'aria-valuetext', '90 °');
 
     await target.focus(dofField('sun'));
     await target.keyboardPress('ArrowUp');

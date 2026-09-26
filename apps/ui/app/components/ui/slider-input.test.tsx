@@ -96,7 +96,7 @@ describe('SliderInput', () => {
       trailingAdornment: <span>%</span>,
     });
 
-    expect(screen.getByRole('textbox', { name: 'Amount' })).toHaveValue('50.0');
+    expect(screen.getByRole('spinbutton', { name: 'Amount' })).toHaveValue('50.0');
     expect(screen.getByText('Leading')).toBeInTheDocument();
     expect(screen.getByText('%')).toBeInTheDocument();
     expect(container.querySelector<HTMLElement>('[data-slot="slider-input-fill"]')).toHaveStyle({ width: '50%' });
@@ -106,6 +106,71 @@ describe('SliderInput', () => {
       'items-center',
       'justify-center',
     );
+  });
+
+  it('should expose the field as a spin button with its value, limits and value text', () => {
+    const { rerender } = renderSlider({ displayValue: '50.0' });
+    const input = screen.getByRole('spinbutton', { name: 'Amount' });
+
+    expect(input).toHaveAttribute('aria-valuenow', '50');
+    expect(input).toHaveAttribute('aria-valuemin', '0');
+    expect(input).toHaveAttribute('aria-valuemax', '100');
+    expect(input).toHaveAttribute('aria-valuetext', '50.0');
+
+    rerender(
+      <SliderInput {...defaultProperties} value={60} aria-valuetext='60 mm' hasMinimum={false} hasMaximum={false} />,
+    );
+    expect(input).toHaveAttribute('aria-valuenow', '60');
+    expect(input).toHaveAttribute('aria-valuetext', '60 mm');
+    expect(input).not.toHaveAttribute('aria-valuemin');
+    expect(input).not.toHaveAttribute('aria-valuemax');
+  });
+
+  it('should set the minimum and maximum with unmodified Home and End only', () => {
+    const onInputCommit = vi.fn();
+    const onParentKeyDown = vi.fn();
+    render(
+      <div onKeyDown={onParentKeyDown}>
+        <SliderInput {...defaultProperties} onInputCommit={onInputCommit} />
+      </div>,
+    );
+    const input = screen.getByRole('spinbutton', { name: 'Amount' });
+    act(() => {
+      input.focus();
+    });
+
+    // With a modifier the keys keep editing the text: not prevented, not committed, not stopped.
+    for (const modifier of ['shiftKey', 'ctrlKey', 'altKey', 'metaKey'] as const) {
+      expect(fireEvent.keyDown(input, { key: 'Home', [modifier]: true })).toBe(true);
+      expect(fireEvent.keyDown(input, { key: 'End', [modifier]: true })).toBe(true);
+    }
+    expect(onInputCommit).not.toHaveBeenCalled();
+    expect(onParentKeyDown).toHaveBeenCalledTimes(8);
+
+    expect(fireEvent.keyDown(input, { key: 'End' })).toBe(false);
+    expect(onInputCommit).toHaveBeenLastCalledWith(100);
+    expect(fireEvent.keyDown(input, { key: 'Home' })).toBe(false);
+    expect(onInputCommit).toHaveBeenLastCalledWith(0);
+    expect(onParentKeyDown).toHaveBeenCalledTimes(8);
+  });
+
+  it('should leave Home and End to the text at an end that is no limit, and while read-only', () => {
+    const onInputCommit = vi.fn();
+    const { rerender } = renderSlider({ hasMaximum: false, onInputCommit });
+    const input = screen.getByRole('spinbutton', { name: 'Amount' });
+    act(() => {
+      input.focus();
+    });
+
+    expect(fireEvent.keyDown(input, { key: 'End' })).toBe(true);
+    expect(onInputCommit).not.toHaveBeenCalled();
+    expect(fireEvent.keyDown(input, { key: 'Home' })).toBe(false);
+    expect(onInputCommit).toHaveBeenCalledExactlyOnceWith(0);
+
+    rerender(<SliderInput {...defaultProperties} isReadOnly onInputCommit={onInputCommit} />);
+    expect(fireEvent.keyDown(input, { key: 'Home' })).toBe(true);
+    expect(fireEvent.keyDown(input, { key: 'End' })).toBe(true);
+    expect(onInputCommit).toHaveBeenCalledOnce();
   });
 
   it('clamps fill width and handles a zero-width range', () => {
@@ -123,7 +188,7 @@ describe('SliderInput', () => {
   it('focuses and selects the text after a click below the drag threshold', () => {
     const { container } = renderSlider();
     const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
-    const input = screen.getByRole<HTMLInputElement>('textbox', {
+    const input = screen.getByRole<HTMLInputElement>('spinbutton', {
       name: 'Amount',
     });
     setSliderWidth(root);
@@ -143,7 +208,7 @@ describe('SliderInput', () => {
       leadingContent: <span>Opacity</span>,
       trailingAdornment: <span>%</span>,
     });
-    const input = screen.getByRole('textbox', { name: 'Amount' });
+    const input = screen.getByRole('spinbutton', { name: 'Amount' });
 
     await user.tab();
 
@@ -159,7 +224,7 @@ describe('SliderInput', () => {
     const onInputCommit = vi.fn();
     const onFocusChange = vi.fn();
     renderSlider({ onInputChange, onInputCommit, onFocusChange });
-    const input = screen.getByRole('textbox', { name: 'Amount' });
+    const input = screen.getByRole('spinbutton', { name: 'Amount' });
 
     await user.click(input);
     await user.clear(input);
@@ -177,7 +242,7 @@ describe('SliderInput', () => {
     const user = userEvent.setup();
     const onInputCommit = vi.fn();
     renderSlider({ onInputCommit });
-    const input = screen.getByRole('textbox', { name: 'Amount' });
+    const input = screen.getByRole('spinbutton', { name: 'Amount' });
 
     await user.click(input);
     await user.clear(input);
@@ -191,7 +256,7 @@ describe('SliderInput', () => {
     const user = userEvent.setup();
     const onInputCommit = vi.fn();
     renderSlider({ onInputCommit });
-    const input = screen.getByRole('textbox', { name: 'Amount' });
+    const input = screen.getByRole('spinbutton', { name: 'Amount' });
 
     await user.click(input);
     await user.clear(input);
@@ -206,7 +271,7 @@ describe('SliderInput', () => {
   it('syncs idle controlled values without overwriting active user text', async () => {
     const user = userEvent.setup();
     const { rerender } = renderSlider();
-    const input = screen.getByRole<HTMLInputElement>('textbox', {
+    const input = screen.getByRole<HTMLInputElement>('spinbutton', {
       name: 'Amount',
     });
 
@@ -226,7 +291,7 @@ describe('SliderInput', () => {
   it('shows an externally retained draft while idle', () => {
     renderSlider({ displayValue: '50', editingValue: 'invalid draft' });
 
-    expect(screen.getByRole('textbox', { name: 'Amount' })).toHaveValue('invalid draft');
+    expect(screen.getByRole('spinbutton', { name: 'Amount' })).toHaveValue('invalid draft');
     expect(screen.getByText('invalid draft')).toBeVisible();
   });
 
@@ -249,7 +314,7 @@ describe('SliderInput', () => {
     );
 
     expect(commitCount - initialCommitCount).toBe(1);
-    expect(screen.getByRole('textbox', { name: 'Amount' })).toHaveValue('60');
+    expect(screen.getByRole('spinbutton', { name: 'Amount' })).toHaveValue('60');
   });
 
   it('starts scrubbing only beyond the threshold and commits once on release', () => {
@@ -395,7 +460,7 @@ describe('SliderInput', () => {
         <SliderInput {...defaultProperties} value={99} onInputCommit={onInputCommit} />
       </div>,
     );
-    const input = screen.getByRole('textbox', { name: 'Amount' });
+    const input = screen.getByRole('spinbutton', { name: 'Amount' });
     act(() => {
       input.focus();
     });
@@ -420,7 +485,7 @@ describe('SliderInput', () => {
       onInputCommit,
     });
     const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
-    const input = screen.getByRole('textbox', { name: 'Amount' });
+    const input = screen.getByRole('spinbutton', { name: 'Amount' });
     setSliderWidth(root);
 
     scrub(root);

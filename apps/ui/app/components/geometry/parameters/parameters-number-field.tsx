@@ -14,6 +14,10 @@ type ParametersNumberFieldProperties = {
   readonly details?: readonly string[];
   readonly rangeMin: number;
   readonly rangeMax: number;
+  /** False when `rangeMin` only starts a scrub window rather than being the value's minimum. */
+  readonly hasMinimum?: boolean;
+  /** False when `rangeMax` only ends a scrub window rather than being the value's maximum. */
+  readonly hasMaximum?: boolean;
   readonly step: number;
   readonly id?: string;
   readonly shouldAutoFocus?: boolean;
@@ -93,6 +97,8 @@ export const ParametersNumberField = ({
   details = [],
   rangeMin,
   rangeMax,
+  hasMinimum,
+  hasMaximum,
   step,
   id,
   shouldAutoFocus,
@@ -126,6 +132,8 @@ export const ParametersNumberField = ({
         editingValue={editingValue}
         min={rangeMin}
         max={rangeMax}
+        hasMinimum={hasMinimum}
+        hasMaximum={hasMaximum}
         step={step}
         stepBase={0}
         inputId={id}
@@ -142,6 +150,7 @@ export const ParametersNumberField = ({
         )}
         aria-label={ariaLabel ?? 'Parameter value'}
         aria-describedby={describedBy || undefined}
+        aria-valuetext={unit ? `${formattedValue ?? String(value)} ${unit}` : undefined}
         onScrubChange={onSliderChange}
         onScrubCommit={onSliderRelease}
         onScrubCancel={onSliderCancel}

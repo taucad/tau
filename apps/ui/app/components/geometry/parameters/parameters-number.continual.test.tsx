@@ -92,7 +92,7 @@ describe('ParametersNumber continual transient scrub', () => {
 
     // The row already shows 14° although nothing has been sent.
     expect(onChange).not.toHaveBeenCalled();
-    expect(screen.getByRole('textbox', { name: 'Section angle' })).toHaveValue('14');
+    expect(screen.getByRole('spinbutton', { name: 'Section angle' })).toHaveValue('14');
 
     runFrames();
     expect(onChange).toHaveBeenCalledExactlyOnceWith(14);

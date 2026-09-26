@@ -15,7 +15,8 @@ export type MenuSliderItemProperties = {
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
-  readonly trailingAdornment?: React.ReactNode;
+  /** The unit shown after the value, such as `%`; also read aloud with it. */
+  readonly trailingAdornment?: string;
   readonly 'aria-label': string;
   readonly dataSlot: string;
 };
@@ -59,6 +60,7 @@ export const MenuSliderItem = ({
     }
     className={cn(menuItemVariants(), 'w-full focus-within:text-foreground', className)}
     aria-label={ariaLabel}
+    aria-valuetext={trailingAdornment ? `${value}${trailingAdornment}` : undefined}
     onScrubChange={onValueChange}
     onInputCommit={onValueChange}
     onPointerDown={stopPointerPropagation}

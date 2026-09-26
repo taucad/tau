@@ -29,7 +29,7 @@ describe('FovOverflowControl', () => {
   it('renders the degree adornment and dispatches typed and stepped values', async () => {
     const user = userEvent.setup();
     render(<FovOverflowControl />);
-    const input = screen.getByRole('textbox', { name: 'Field of View' });
+    const input = screen.getByRole('spinbutton', { name: 'Field of View' });
 
     expect(input).toHaveValue('42');
     expect(screen.getByText('°')).toBeInTheDocument();

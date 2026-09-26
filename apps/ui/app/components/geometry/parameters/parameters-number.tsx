@@ -366,6 +366,9 @@ export const ParametersNumber = React.memo(function ParametersNumber({
       }
       rangeMin={rangeMin}
       rangeMax={rangeMax}
+      // Without a declared bound, that end of the range is only a scrub window.
+      hasMinimum={min !== undefined}
+      hasMaximum={max !== undefined}
       step={currentStep}
       id={id}
       shouldAutoFocus={autoFocus}

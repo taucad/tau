@@ -98,14 +98,14 @@ describe('ParametersWidget number hardening', () => {
   it('should preserve the RJSF disabled and readonly contract', () => {
     const { rerender } = renderWidget(widgetProps({ value: 10, disabled: true }));
 
-    expect(screen.getByRole('textbox', { name: 'Input for Width' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Input for Width' })).toBeDisabled();
 
     rerender(
       <TooltipProvider>
         <ParametersWidget {...widgetProps({ value: 10, readonly: true })} />
       </TooltipProvider>,
     );
-    expect(screen.getByRole('textbox', { name: 'Input for Width' })).toHaveAttribute('readonly');
+    expect(screen.getByRole('spinbutton', { name: 'Input for Width' })).toHaveAttribute('readonly');
   });
 
   it('should keep unknown numbers unit-free', () => {
@@ -123,7 +123,7 @@ describe('ParametersWidget number hardening', () => {
     expect(screen.queryByText('mm')).toBeNull();
     expect(container.querySelector('[data-slot="slider-input"]')).toHaveClass('px-2');
     expect(container.querySelector('[data-slot="slider-input-adornment"]')).toBeNull();
-    const input = screen.getByRole('textbox', { name: 'Input for Width' });
+    const input = screen.getByRole('spinbutton', { name: 'Input for Width' });
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: '12' } });
     expect(onChange).not.toHaveBeenCalled();
@@ -157,6 +157,45 @@ describe('ParametersWidget number hardening', () => {
 
     expect(screen.getByText('px')).toBeInTheDocument();
     expect(screen.queryByText('mm')).toBeNull();
+  });
+
+  it('should announce the unit and declared minimum, and reach only a declared bound with Home and End', () => {
+    const onChange = vi.fn();
+    const props = widgetProps({ name: 'width', value: 10, onChange });
+    props.registry.formContext = {
+      ...formContext,
+      parameterManifest: {
+        bindings: {
+          '/width': {
+            parameter: { value: 'width', stability: 'stable' },
+            schema: { resource: 'urn:taucad:test:configuration', pointer: '/properties/width' },
+            representation: 'binary64',
+            optional: false,
+            nullable: false,
+            unit: '1',
+            symbol: 'px',
+            space: 'linear',
+            constraints: { minimum: 2 },
+          },
+        },
+        bindingDeclarations: {},
+        provenance: {},
+      } as unknown as RJSFContext['parameterManifest'],
+    };
+    renderWidget(props);
+    const input = screen.getByRole('spinbutton', { name: 'Input for Width' });
+
+    expect(input).toHaveAttribute('aria-valuenow', '10');
+    expect(input).toHaveAttribute('aria-valuetext', '10 px');
+    expect(input).toHaveAttribute('aria-valuemin', '2');
+    // No declared maximum: the range's upper end only sizes the scrub track.
+    expect(input).not.toHaveAttribute('aria-valuemax');
+
+    fireEvent.focus(input);
+    expect(fireEvent.keyDown(input, { key: 'End' })).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(fireEvent.keyDown(input, { key: 'Home' })).toBe(false);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(2);
   });
 });
 

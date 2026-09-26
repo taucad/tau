@@ -27,6 +27,10 @@ const state = vi.hoisted(() => ({
         fileSystemPort?: unknown;
       }),
   workers: [] as NodeWorker[],
+  /* What main asked to start; the built files themselves exist only under `dist/main`. */
+  workerEntries: [] as string[],
+  kernelUtilityEntry: undefined as string | undefined,
+  servicesUtilityEntry: undefined as string | undefined,
   userData: '',
   servicesDispose: vi.fn(async () => undefined),
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
@@ -54,7 +58,9 @@ vi.mock('node:worker_threads', async (importOriginal) => {
   const actual = await importOriginal<typeof WorkerThreads>();
   class ObservedWorker extends actual.Worker {
     public constructor(filename: string | URL, options?: ConstructorParameters<typeof actual.Worker>[1]) {
-      super(filename, options);
+      state.workerEntries.push(String(filename));
+      // Main's only worker, run from the source its built entry is bundled from.
+      super(new URL('compute-store.worker.ts', import.meta.url), options);
       state.workers.push(this);
     }
   }
@@ -162,21 +168,19 @@ vi.mock('electron', () => ({
 
 vi.mock('@taucad/runtime/electron/main', () => ({
   installElectronRuntimeHeaders: vi.fn(),
-  registerElectronRuntimeMain: vi.fn((options: { maxUtilities?: number; resolveFork?: typeof state.resolveFork }) => {
-    state.resolveFork = options.resolveFork;
-    state.runtimeMaxUtilities = options.maxUtilities;
-    return { connect: vi.fn(), dispose: vi.fn(), prewarm: state.runtimePrewarm };
-  }),
+  registerElectronRuntimeMain: vi.fn(
+    (options: { maxUtilities?: number; resolveFork?: typeof state.resolveFork; utilityEntry: string }) => {
+      state.resolveFork = options.resolveFork;
+      state.runtimeMaxUtilities = options.maxUtilities;
+      state.kernelUtilityEntry = options.utilityEntry;
+      return { connect: vi.fn(), dispose: vi.fn(), prewarm: state.runtimePrewarm };
+    },
+  ),
 }));
 vi.mock('@taucad/host', () => ({
   defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
   discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
   externalAgentDescriptors: vi.fn(() => []),
-}));
-vi.mock('#tau/kernel-host.entry?modulePath', () => ({ default: '/kernel-host.entry.js' }));
-vi.mock('#tau/services-host.entry?modulePath', () => ({ default: '/services-host.entry.js' }));
-vi.mock('#main/compute-store.worker?modulePath', () => ({
-  default: new URL('compute-store.worker.ts', import.meta.url),
 }));
 vi.mock('#main/app-protocol.js', () => ({
   appOrigin: 'app://tau',
@@ -220,14 +224,17 @@ vi.mock('#main/navigation-policy.js', () => ({
 }));
 vi.mock('#main/services-broker.js', () => ({
   rendererServicesConcerns: ['nodeFs', 'agentHost'],
-  createServicesBroker: vi.fn(() => ({
-    post: vi.fn(),
-    connect: state.servicesConnect,
-    quiesce: state.servicesQuiesce,
-    dispose: state.servicesDispose,
-    computeProjectRoot: (root: string) =>
-      root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
-  })),
+  createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
+    state.servicesUtilityEntry = options.utilityEntry;
+    return {
+      post: vi.fn(),
+      connect: state.servicesConnect,
+      quiesce: state.servicesQuiesce,
+      dispose: state.servicesDispose,
+      computeProjectRoot: (root: string) =>
+        root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
+    };
+  }),
 }));
 vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => undefined),
@@ -254,6 +261,9 @@ vi.mock('#main/open-files.js', () => ({
 
 afterEach(async () => {
   await Promise.all(state.workers.splice(0).map(async (worker) => worker.terminate()));
+  state.workerEntries.length = 0;
+  state.kernelUtilityEntry = undefined;
+  state.servicesUtilityEntry = undefined;
   if (state.userData) {
     await rm(state.userData, { recursive: true, force: true });
   }
@@ -318,6 +328,21 @@ describe('desktop main compute owner', () => {
       const answer = state.handlers.get('tau:external-agents')!({ senderFrame: {} });
       discovery.resolve({ agents: [], refused: [] });
       await expect(answer).resolves.toEqual([]);
+    },
+    bootMilliseconds,
+  );
+
+  /* `electron.vite.config.ts` emits each entry as `<name>.js` beside `index.js`,
+   * the bundle main lands in. */
+  it(
+    'should start every utility and worker from its entry beside the main bundle',
+    async () => {
+      const projectRoot = await bootstrap();
+      state.resolveFork!({ projectRoot, computeMode: 'durable' });
+
+      expect(state.kernelUtilityEntry).toBe(join(import.meta.dirname, 'kernel-host.js'));
+      expect(state.servicesUtilityEntry).toBe(join(import.meta.dirname, 'services-host.js'));
+      expect(state.workerEntries).toEqual([join(import.meta.dirname, 'compute-store.worker.js')]);
     },
     bootMilliseconds,
   );

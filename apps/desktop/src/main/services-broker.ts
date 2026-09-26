@@ -40,7 +40,7 @@ export type ServicesQuiesceOutcome =
 
 /** Options for {@link createServicesBroker}. */
 export type ServicesBrokerOptions = {
-  /** Built utility entry (a `?modulePath` chunk). */
+  /** Built utility entry: `services-host.js` beside the main bundle. */
   readonly utilityEntry: string;
   /** Allowlisted environment for the fork. */
   readonly env: NodeJS.ProcessEnv;

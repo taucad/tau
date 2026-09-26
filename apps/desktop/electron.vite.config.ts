@@ -75,6 +75,17 @@ export default defineConfig(
           include: [...desktopExternalizedDependencies],
         },
         outDir: 'dist/main',
+        /* One graph for main and the processes it starts, so the chunks they
+         * share are bundled once. Each input is emitted as `<name>.js` in
+         * `dist/main`, where `main.ts` (bundled into `index.js`) starts it. */
+        rolldownOptions: {
+          input: {
+            index: resolve(import.meta.dirname, 'src/main/index.ts'),
+            'kernel-host': resolve(import.meta.dirname, 'src/tau/kernel-host.entry.ts'),
+            'services-host': resolve(import.meta.dirname, 'src/tau/services-host.entry.ts'),
+            'compute-store.worker': resolve(import.meta.dirname, 'src/main/compute-store.worker.ts'),
+          },
+        },
       },
     },
     preload: {

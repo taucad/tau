@@ -1,6 +1,6 @@
 //! Synchronous wasm32 C ABI for the configured GeoSpec native engine.
 
-use std::{cell::RefCell, collections::BTreeMap};
+use std::{cell::RefCell, collections::BTreeMap, mem::MaybeUninit};
 
 use geospec_engine_native_core::canonicalize as core_canonicalize;
 use geospec_engine_native_runtime::{create_engine, Engine, EngineConfig, ProtocolError};
@@ -57,9 +57,12 @@ impl<T> Arena<T> {
     }
 }
 
+/// Registered input regions, uninitialized until the private JS caller writes every
+/// byte (`copyInput`, the resource table). Engine calls read an input only after
+/// that write; `geospec_engine_native_input_free` drops a region without reading it.
 #[derive(Debug)]
 struct InputAllocations {
-    entries: BTreeMap<u32, Box<[u8]>>,
+    entries: BTreeMap<u32, Box<[MaybeUninit<u8>]>>,
 }
 
 impl InputAllocations {
@@ -70,7 +73,7 @@ impl InputAllocations {
     }
 
     fn allocate(&mut self, length: u32) -> Option<u32> {
-        let mut bytes = vec![0_u8; length as usize].into_boxed_slice();
+        let mut bytes = Box::<[u8]>::new_uninit_slice(length as usize);
         let pointer = u32::try_from(bytes.as_mut_ptr() as usize).ok()?;
         if pointer == 0 || self.entries.contains_key(&pointer) {
             return None;
@@ -86,7 +89,10 @@ impl InputAllocations {
             _ => {
                 let bytes = self.entries.get(&pointer)?;
                 if bytes.len() == length as usize {
-                    Some(bytes.as_ref())
+                    // SAFETY: the ABI caller wrote all `length` bytes before this engine call.
+                    Some(unsafe {
+                        std::slice::from_raw_parts(bytes.as_ptr().cast::<u8>(), bytes.len())
+                    })
                 } else {
                     None
                 }
@@ -94,15 +100,15 @@ impl InputAllocations {
         }
     }
 
-    fn take(&mut self, pointer: u32, length: u32) -> Option<Vec<u8>> {
+    fn take(&mut self, pointer: u32, length: u32) -> Option<Box<[MaybeUninit<u8>]>> {
         match (pointer, length) {
-            (0, 0) => Some(Vec::new()),
+            (0, 0) => Some(Box::new_uninit_slice(0)),
             (0, _) => None,
             _ => {
                 if self.entries.get(&pointer)?.len() != length as usize {
                     return None;
                 }
-                Some(self.entries.remove(&pointer)?.into_vec())
+                self.entries.remove(&pointer)
             }
         }
     }
@@ -147,7 +153,9 @@ fn with_input<R>(pointer: u32, length: u32, operation: impl FnOnce(&[u8]) -> R) 
 }
 
 fn adopt(pointer: u32, length: u32) -> Option<Vec<u8>> {
-    INPUTS.with(|inputs| inputs.borrow_mut().take(pointer, length))
+    let bytes = INPUTS.with(|inputs| inputs.borrow_mut().take(pointer, length))?;
+    // SAFETY: the ABI caller wrote all `length` bytes before transferring the input.
+    Some(unsafe { bytes.assume_init() }.into_vec())
 }
 
 fn input_table(pointer: u32, count: u32) -> Option<Vec<InputBuffer>> {
@@ -214,7 +222,7 @@ pub extern "C" fn geospec_engine_native_input_alloc(length: u32) -> u32 {
 /// `geospec_engine_native_input_alloc` exactly once. Unknown pairs are ignored.
 #[no_mangle]
 pub extern "C" fn geospec_engine_native_input_free(pointer: u32, length: u32) {
-    drop(adopt(pointer, length));
+    INPUTS.with(|inputs| drop(inputs.borrow_mut().take(pointer, length)));
 }
 
 /// Create the configured OCCT + Rust Manifold engine.

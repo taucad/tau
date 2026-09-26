@@ -24,6 +24,7 @@ import { createNativeGitRevisionPort } from '@taucad/revisions/node';
 import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
+import type { RevisionId } from '@taucad/revisions/algorithms';
 
 import {
   createProjectRevisionPort,
@@ -1720,6 +1721,57 @@ describe('a restore refusal over the host channel', () => {
     } finally {
       abort.abort();
       await reading.catch(() => undefined);
+      await revisions.release();
+    }
+  }, 30_000);
+});
+
+describe('an editor conflict over the host channel (D14)', () => {
+  it('records an unmergeable edit on this device’s conflict line, and says when there is nothing to record', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-editor-conflict-'));
+    roots.push(workspaceRoot);
+    const port = createIsomorphicGitRevisionPort({
+      filesystem: new NodeFsProvider(workspaceRoot),
+      checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const record = async (parents: readonly string[], content: string): Promise<RevisionId> => {
+      const { commitId } = await port.writeRevision({
+        parents: parents.map((parent) => revisionId(parent)),
+        tree: new ImmutableRevisionTree([['a.txt', new TextEncoder().encode(content)]]),
+        provenance: { source: 'user', actorId: 'test', createdAt: Date.UTC(2026, 8, 26) },
+        summary: { generated: content },
+      });
+      return revisionId(commitId);
+    };
+    const base = await record([], 'base\n');
+    const head = await record([base], 'theirs\n');
+    await port.updateRef({ name: 'main', expectedHead: undefined, head });
+    await port.setHead('main');
+    await writeFile(join(workspaceRoot, 'a.txt'), 'theirs\n');
+    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'project-1', port });
+    try {
+      await revisions.channel.request({ command: 'open' });
+
+      await expect(
+        revisions.channel.request({ command: 'recordEditorConflict', path: 'a.txt', base: 'theirs\n', mine: 'x\n' }),
+      ).resolves.toMatchObject({ result: { status: 'unchanged' } });
+      const answer = (await revisions.channel.request({
+        command: 'recordEditorConflict',
+        path: 'a.txt',
+        base: 'base\n',
+        mine: 'mine\n',
+      })) as unknown as { result: { status: string; line: string; into: string; revisionId: string } };
+
+      expect(answer.result).toMatchObject({ status: 'recorded', into: 'main' });
+      expect(answer.result.line).toMatch(/^conflicts\/main\/[\w.-]+$/u);
+      expect(await port.readRef(answer.result.line)).toBe(answer.result.revisionId);
+      const recorded = await port.readRevision(revisionId(answer.result.revisionId));
+      expect(recorded?.parents[0]).toBe(head);
+      /* Nothing reaches the files or main. */
+      expect(await port.readRef('main')).toBe(head);
+      expect(await readFile(join(workspaceRoot, 'a.txt'), 'utf8')).toBe('theirs\n');
+    } finally {
       await revisions.release();
     }
   }, 30_000);

@@ -99,7 +99,9 @@ export class ProjectsController {
    * Claim this project id for the caller and give it a bare repository.
    *
    * Idempotent: a second call from the owner is a no-op that still reconciles
-   * the repository's hooks, which is what makes *Connect* safe to retry.
+   * the repository's hooks, which is what makes *Connect* safe to retry. A
+   * collaborator's call on the project is the same answer with no side effect
+   * at all: no field, no plan check, no budget (FX2).
    *
    * Bounded twice (review R5), because this route is what made repository
    * creation reachable without a publish: a per-account ceiling on how many
@@ -112,7 +114,7 @@ export class ProjectsController {
    * @returns The registered project's id.
    * @throws BadRequestException When the id cannot name a repository.
    * @throws NotFoundException When the id belongs to an account the caller has no relation to (P55).
-   * @throws ForbiddenException When the caller is a collaborator rather than the owner, when the plan does not entitle syncing (N5), or when the account is at its project ceiling.
+   * @throws ForbiddenException When the plan does not entitle syncing (N5), or when the account is at its project ceiling.
    * @throws HttpException When the account is over its daily registration budget.
    */
   @Put(':projectId')
@@ -131,13 +133,19 @@ export class ProjectsController {
     const { database } = this.databaseService;
     /* D27: the id's existence is this route's question — it may have to create
        the row — but *whose* it is belongs to `ProjectAccessService`, the single
-       authority. Registration is the owner's act, so `owner` is the need: a
-       caller with no relation to the id gets the ruling-P55 `404`, and a
-       collaborator on somebody else's project is refused `403` — they already
-       know the project exists, so hiding it would only mislead. */
+       authority. A caller with no relation to the id gets the ruling-P55 `404`.
+
+       A member is answered as registered and nothing else happens (FX2): the
+       client's *Connect* always registers, so a collaborator opening a shared
+       project lands here. Their body is ignored, their plan is not asked (a
+       collaborator needs none, D27), and no budget is spent, because nothing
+       was registered. The git surface enforces what their role may do next. */
     const exists = await this.projectExists(projectId);
     if (exists) {
-      await this.access.authorize(projectId, userId, 'owner');
+      const { role } = await this.access.authorize(projectId, userId, 'read');
+      if (role !== 'owner') {
+        return { id: projectId };
+      }
     }
 
     /* Before the row and before the repository (N5). Registration is the write

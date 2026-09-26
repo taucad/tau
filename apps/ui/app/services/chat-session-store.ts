@@ -2369,6 +2369,12 @@ export class ChatSessionStore {
     if (next === undefined || next === lastState.phase) {
       return;
     }
+    /* The AI SDK sets `status` before `error`, so the `error` status arrives with no error yet.
+     * Reporting it then lost the reason for good ("Failed · the run failed"); the error callback
+     * that follows reports it with one. */
+    if (next === 'failed' && session.chat.error === undefined) {
+      return;
+    }
     const admission = admissionEnvelopeSchema.safeParse(session.activeRunBody?.['admission']);
     const runId = admission.success
       ? admission.data.idempotencyKey

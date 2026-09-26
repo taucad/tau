@@ -17,6 +17,7 @@ import { tauRemoteUrl } from '@taucad/revisions';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
+import type * as runtimeFilesystem from '@taucad/runtime/filesystem';
 
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
@@ -29,7 +30,7 @@ import type { HostJobWorkerFactory } from '#job-worker.js';
  * it: the captured thunk is the connection that child's bridge opens. */
 const runtimeFileSystemOpens = vi.hoisted(() => [] as Array<() => FileSystemBridgeConnection>);
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@taucad/runtime/filesystem')>();
+  const original = await importOriginal<typeof runtimeFilesystem>();
   return {
     ...original,
     fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => {

@@ -664,11 +664,7 @@ fn ingest_step(engine: &mut Engine) -> (String, String) {
     });
     let response: Value = serde_json::from_slice(
         &engine
-            .ingest_subject(
-                &serde_json::to_vec(&request).unwrap(),
-                bytes.clone(),
-                Vec::new(),
-            )
+            .ingest_subject(&serde_json::to_vec(&request).unwrap(), &bytes, Vec::new())
             .unwrap(),
     )
     .unwrap();
@@ -738,7 +734,7 @@ fn ingest_gltf(engine: &mut Engine) -> (String, String) {
         &engine
             .ingest_subject(
                 &serde_json::to_vec(&request).unwrap(),
-                primary.clone(),
+                &primary,
                 vec![buffer],
             )
             .unwrap(),

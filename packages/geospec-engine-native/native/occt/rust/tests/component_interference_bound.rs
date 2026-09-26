@@ -142,12 +142,12 @@ fn component_interference_bound_original_both_polarities_no_csg() {
         let source = std::fs::read(input().join("original.step")).unwrap();
         if i == 0 {
             let error = engine
-                .ingest_subject(&frozen_ingest, source.clone(), vec![])
+                .ingest_subject(&frozen_ingest, &source, vec![])
                 .unwrap_err();
             assert_eq!(error.code(), "unsupported-version");
         }
         let admission = engine
-            .ingest_subject(&bind_ingest(&frozen_ingest), source, vec![])
+            .ingest_subject(&bind_ingest(&frozen_ingest), &source, vec![])
             .unwrap();
         eprintln!(
             "COMPONENT_ADMISSION {i} {}",

@@ -22,7 +22,7 @@ fn six_independent_box_rows_match_complete_runtime_bytes_cold_and_warm() {
         let admission = engine
             .ingest_subject(
                 current(oracle["subject"]["ingestRequestUtf8"].as_str().unwrap()).as_bytes(),
-                include_bytes!("../../occt/rust/tests/fixtures/ap242-box.step").to_vec(),
+                include_bytes!("../../occt/rust/tests/fixtures/ap242-box.step"),
                 vec![],
             )
             .unwrap();

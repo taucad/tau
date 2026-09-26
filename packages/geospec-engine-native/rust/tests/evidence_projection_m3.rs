@@ -264,10 +264,10 @@ fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
     );
     let bytes = b"raw STEP A";
     let first = engine
-        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .ingest_subject(&step_request(bytes, None), bytes, vec![])
         .unwrap();
     let repeat = engine
-        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .ingest_subject(&step_request(bytes, None), bytes, vec![])
         .unwrap();
     assert_eq!(first, repeat);
     assert_eq!(opens.get(), 1);
@@ -276,11 +276,7 @@ fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
     invalid["frame"]["outputUnit"] = json!("m");
     assert_eq!(
         engine
-            .ingest_subject(
-                &serde_json::to_vec(&invalid).unwrap(),
-                bytes.to_vec(),
-                vec![]
-            )
+            .ingest_subject(&serde_json::to_vec(&invalid).unwrap(), bytes, vec![])
             .unwrap_err()
             .code(),
         "invalid-request"
@@ -288,18 +284,14 @@ fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
     assert_eq!(opens.get(), 1);
 
     let changed_bytes = engine
-        .ingest_subject(
-            &step_request(b"raw STEP B", None),
-            b"raw STEP B".to_vec(),
-            vec![],
-        )
+        .ingest_subject(&step_request(b"raw STEP B", None), b"raw STEP B", vec![])
         .unwrap();
     let named = engine
-        .ingest_subject(&step_request(bytes, Some("named")), bytes.to_vec(), vec![])
+        .ingest_subject(&step_request(bytes, Some("named")), bytes, vec![])
         .unwrap();
     alternate_profile.set(true);
     let changed_profile = engine
-        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .ingest_subject(&step_request(bytes, None), bytes, vec![])
         .unwrap();
     assert_ne!(first, changed_bytes);
     assert_ne!(first, named);
@@ -322,10 +314,10 @@ fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
         Box::new(UnusedCsg),
     );
     uncached
-        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .ingest_subject(&step_request(bytes, None), bytes, vec![])
         .unwrap();
     uncached
-        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .ingest_subject(&step_request(bytes, None), bytes, vec![])
         .unwrap();
     assert_eq!(opens.get(), 6);
 }
@@ -344,12 +336,10 @@ fn should_release_step_source_lookup_with_its_subject_generation() {
     for seed in 0..40 {
         let bytes = format!("raw STEP source {seed}").into_bytes();
         let request = step_request(&bytes, None);
-        let admission = engine
-            .ingest_subject(&request, bytes.clone(), vec![])
-            .unwrap();
+        let admission = engine.ingest_subject(&request, &bytes, vec![]).unwrap();
         assert_eq!(
             admission,
-            engine.ingest_subject(&request, bytes, vec![]).unwrap()
+            engine.ingest_subject(&request, &bytes, vec![]).unwrap()
         );
         let admission: Value = serde_json::from_slice(&admission).unwrap();
         let handle_request = serde_json::to_vec(&json!({
@@ -444,7 +434,7 @@ fn should_refuse_requested_validity_measurements_that_are_absent() {
     });
     let admitted: Value = serde_json::from_slice(
         &engine
-            .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, Vec::new())
+            .ingest_subject(&serde_json::to_vec(&request).unwrap(), &bytes, Vec::new())
             .unwrap(),
     )
     .unwrap();

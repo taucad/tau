@@ -30,7 +30,7 @@ fn admit(engine: &mut Engine, bytes: Vec<u8>) -> Value {
     value["resources"] = json!([]);
     serde_json::from_slice(
         &engine
-            .ingest_subject(&serde_json::to_vec(&value).unwrap(), bytes, vec![])
+            .ingest_subject(&serde_json::to_vec(&value).unwrap(), &bytes, vec![])
             .unwrap(),
     )
     .unwrap()

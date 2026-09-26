@@ -35,6 +35,7 @@
     "app/**/*.jsx",
     "build-environment.ts",
     "build-environment.test.ts",
+    "geospec-mt-assets.vite-plugin.test.ts",
     "desktop/**/*.ts",
     "serve/**/*.ts",
     "serve/**/*.tsx",

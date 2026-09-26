@@ -1,4 +1,7 @@
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
+// oxlint-disable-next-line no-restricted-imports -- Debug-only current-source authority overlay; frozen catalog stays intact.
+// eslint-disable-next-line @nx/enforce-module-boundaries -- Debug-only private current-source overlay.
+import currentAuthority from '../../../../packages/geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
 /* oxlint-disable no-restricted-imports -- Debug-only private benchmark source import; deliberately no public package export. */
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This debug-only adapter shares a private benchmark catalog; no package export is added.
 import {
@@ -15,10 +18,26 @@ import type {
 import type {
   PerformanceLabRunInput,
   PerformanceLabRunResult,
+  PerformanceLabWasmExecution,
 } from '../../../../packages/geospec-engine-native/bench/performance-lab-runner.js';
 /* oxlint-enable no-restricted-imports */
 
+declare const tauGeoSpecMtReceipts: Readonly<Record<number, string>>;
+
+export const availableMtPermits = (): readonly number[] =>
+  Object.keys(tauGeoSpecMtReceipts)
+    .map(Number)
+    .sort((left, right) => left - right);
+
+export const mtExecution = (permits: number): Extract<PerformanceLabWasmExecution, { variant: 'mt' }> | undefined => {
+  const path = tauGeoSpecMtReceipts[permits];
+  return path && typeof location !== 'undefined'
+    ? { variant: 'mt', permits, receipt: new URL(path, location.href).href }
+    : undefined;
+};
+
 export type PerformanceLabSelectionCase = CatalogCase | (typeof performanceLabNativeQueries)[number];
+const unverifiedV5 = new Set(currentAuthority.affectedCaseIds);
 
 export type PerformanceLabPortRequest = {
   id: number;
@@ -28,6 +47,11 @@ export type PerformanceLabPortRequest = {
 export type PerformanceLabPortResponse =
   | { id: number; type: 'result'; result: PerformanceLabRunResult }
   | { id: number; type: 'error'; message: string };
+
+/** Per-cell infrastructure deadline in milliseconds. */
+const cellTimeout = 300_000;
+const abortError = (signal: AbortSignal): Error =>
+  signal.reason instanceof Error ? signal.reason : new Error('Performance lab is closed.');
 
 const toRunCase = (value: PerformanceLabSelectionCase): PerformanceLabRunInput['cases'][number] =>
   'matcher' in value
@@ -41,7 +65,7 @@ const toRunCase = (value: PerformanceLabSelectionCase): PerformanceLabRunInput['
         subjectSlot: value.claim.subjectSlots[0],
         workUnitBudget: value.claim.workUnitBudget,
         polarity: value.claim.polarity,
-        expectedStatus: value.expectedStatus,
+        expectedStatus: unverifiedV5.has(value.id) ? 'unverified' : value.expectedStatus,
       }
     : {
         id: value.id,
@@ -53,7 +77,7 @@ const toRunCase = (value: PerformanceLabSelectionCase): PerformanceLabRunInput['
         subjectSlot: value.claim.subjectSlots[0],
         workUnitBudget: value.claim.workUnitBudget,
         polarity: 'positive',
-        expectedStatus: value.expectedStatus,
+        expectedStatus: unverifiedV5.has(value.id) ? 'unverified' : value.expectedStatus,
       };
 
 export const casesForFixture = (fixtureId: string): readonly PerformanceLabSelectionCase[] => [
@@ -76,6 +100,7 @@ export const runInput = ({
   cases,
   repeats,
   cache,
+  execution,
 }: {
   engine: PerformanceLabRunInput['engine'];
   fixture: LabFixture;
@@ -83,8 +108,10 @@ export const runInput = ({
   cases: readonly PerformanceLabSelectionCase[];
   repeats: number;
   cache: PerformanceLabRunInput['cache'];
+  execution?: PerformanceLabWasmExecution;
 }): PerformanceLabRunInput => ({
   engine,
+  ...(execution === undefined ? {} : { execution }),
   fixture: {
     id: fixture.id,
     format: fixture.format,
@@ -133,12 +160,14 @@ export const loadPreview = async (
 const awaitPort = async (
   port: Worker | MessagePort,
   request: PerformanceLabPortRequest,
+  signal: AbortSignal,
 ): Promise<PerformanceLabRunResult> =>
   new Promise((resolve, reject) => {
     const cleanup = (): void => {
       port.removeEventListener('message', onMessage as EventListener);
       port.removeEventListener('error', onError as EventListener);
       port.removeEventListener('messageerror', onMessageError as EventListener);
+      signal.removeEventListener('abort', onAbort);
     };
     const onMessage = (event: MessageEvent<PerformanceLabPortResponse>): void => {
       if (event.data.id !== request.id) {
@@ -159,9 +188,18 @@ const awaitPort = async (
       cleanup();
       reject(new Error('Performance worker returned an unreadable message.'));
     };
+    const onAbort = (): void => {
+      cleanup();
+      reject(abortError(signal));
+    };
+    if (signal.aborted) {
+      reject(abortError(signal));
+      return;
+    }
     port.addEventListener('message', onMessage as EventListener);
     port.addEventListener('error', onError as EventListener);
     port.addEventListener('messageerror', onMessageError as EventListener);
+    signal.addEventListener('abort', onAbort, { once: true });
     try {
       if ('start' in port) {
         port.start();
@@ -173,11 +211,43 @@ const awaitPort = async (
     }
   });
 
+const awaitConnection = async (connection: Promise<MessagePort>, signal: AbortSignal): Promise<MessagePort> => {
+  let onAbort: () => void = () => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      reject(abortError(signal));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    const port = await Promise.race([
+      connection.then((connected) => {
+        if (signal.aborted) {
+          connected.close();
+          throw abortError(signal);
+        }
+        return connected;
+      }),
+      aborted,
+    ]);
+    if (signal.aborted) {
+      port.close();
+      throw abortError(signal);
+    }
+    return port;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+};
+
 /** Browser worker plus optional desktop native port, owned by one debug-route mount. */
 export class GeoSpecPerformanceService {
-  readonly #workers = new Map<PerformanceLabRunInput['engine'], Worker>();
+  readonly #workers = new Map<string, Worker>();
+  readonly #activeWorkers = new Set<Worker>();
+  readonly #activePorts = new Set<MessagePort>();
+  readonly #activeRequests = new Set<AbortController>();
   #nativePort: MessagePort | undefined;
-  readonly #warmModules = new Set<PerformanceLabRunInput['engine']>();
+  readonly #warmModules = new Set<string>();
   #id = 0;
   #closed = false;
 
@@ -185,36 +255,77 @@ export class GeoSpecPerformanceService {
     if (this.#closed) {
       throw new Error('Performance lab is closed.');
     }
+    const controller = new AbortController();
+    this.#activeRequests.add(controller);
+    const cellTimeoutHandle = setTimeout(() => {
+      controller.abort(new Error(`Performance lab infrastructure timeout after ${cellTimeout} ms.`));
+    }, cellTimeout);
+    try {
+      return await this.#run(input, controller.signal);
+    } finally {
+      clearTimeout(cellTimeoutHandle);
+      this.#activeRequests.delete(controller);
+    }
+  }
+
+  public close(): void {
+    this.#closed = true;
+    for (const request of this.#activeRequests) {
+      request.abort(new Error('Performance lab is closed.'));
+    }
+    for (const worker of this.#activeWorkers) {
+      this.#retireWorker(worker);
+    }
+    this.#workers.clear();
+    this.#warmModules.clear();
+    for (const port of this.#activePorts) {
+      this.#retirePort(port);
+    }
+  }
+
+  async #run(input: PerformanceLabRunInput, signal: AbortSignal): Promise<PerformanceLabRunResult> {
     const id = ++this.#id;
+    const identity =
+      input.execution?.variant === 'mt'
+        ? `combined-wasm/mt/${input.execution.permits}/${input.execution.receipt}`
+        : `${input.engine}/${input.execution?.variant ?? 'st'}`;
     if (input.engine !== 'native-desktop') {
       const worker =
-        (input.cache === 'warm' ? this.#workers.get(input.engine) : undefined) ??
+        (input.cache === 'warm' ? this.#workers.get(identity) : undefined) ??
         new Worker(new URL('../workers/geospec-performance.worker.ts', import.meta.url), { type: 'module' });
+      this.#activeWorkers.add(worker);
       if (input.cache === 'warm') {
-        this.#workers.set(input.engine, worker);
+        this.#workers.set(identity, worker);
       }
       const actualInput: PerformanceLabRunInput =
-        input.cache === 'warm' && !this.#warmModules.has(input.engine) ? { ...input, cache: 'cold' } : input;
+        input.cache === 'warm' && !this.#warmModules.has(identity) ? { ...input, cache: 'cold' } : input;
       try {
-        const result = await awaitPort(worker, {
-          id,
-          type: 'run',
-          input: actualInput,
-        });
+        const result = await awaitPort(
+          worker,
+          {
+            id,
+            type: 'run',
+            input: actualInput,
+          },
+          signal,
+        );
+        if (signal.aborted) {
+          throw abortError(signal);
+        }
         if (input.cache === 'warm') {
-          this.#warmModules.add(input.engine);
+          this.#warmModules.add(identity);
         }
         return result;
       } catch (error) {
-        if (worker === this.#workers.get(input.engine)) {
-          worker.terminate();
-          this.#workers.delete(input.engine);
-          this.#warmModules.delete(input.engine);
+        if (worker === this.#workers.get(identity)) {
+          this.#workers.delete(identity);
+          this.#warmModules.delete(identity);
         }
+        this.#retireWorker(worker);
         throw error;
       } finally {
         if (input.cache === 'cold') {
-          worker.terminate();
+          this.#retireWorker(worker);
         }
       }
     }
@@ -222,33 +333,47 @@ export class GeoSpecPerformanceService {
     if (!bridge?.geoSpecPerformance) {
       throw new Error('Desktop native GeoSpec utility is unavailable.');
     }
-    this.#nativePort ??= await bridge.geoSpecPerformance.connect();
+    const port = this.#nativePort ?? (await awaitConnection(bridge.geoSpecPerformance.connect(), signal));
+    this.#activePorts.add(port);
+    this.#nativePort = port;
     const actualInput: PerformanceLabRunInput =
-      input.cache === 'warm' && !this.#warmModules.has(input.engine) ? { ...input, cache: 'cold' } : input;
+      input.cache === 'warm' && !this.#warmModules.has(identity) ? { ...input, cache: 'cold' } : input;
     try {
-      const result = await awaitPort(this.#nativePort, {
-        id,
-        type: 'run',
-        input: actualInput,
-      });
+      const result = await awaitPort(
+        port,
+        {
+          id,
+          type: 'run',
+          input: actualInput,
+        },
+        signal,
+      );
+      if (signal.aborted) {
+        throw abortError(signal);
+      }
       if (input.cache === 'warm') {
-        this.#warmModules.add(input.engine);
+        this.#warmModules.add(identity);
       }
       return result;
     } catch (error) {
-      this.#nativePort.close();
-      this.#nativePort = undefined;
-      this.#warmModules.delete(input.engine);
+      this.#retirePort(port);
+      this.#warmModules.delete(identity);
       throw error;
     }
   }
 
-  public close(): void {
-    this.#closed = true;
-    for (const worker of this.#workers.values()) {
+  #retireWorker(worker: Worker): void {
+    if (this.#activeWorkers.delete(worker)) {
       worker.terminate();
     }
-    this.#workers.clear();
-    this.#nativePort?.close();
+  }
+
+  #retirePort(port: MessagePort): void {
+    if (this.#nativePort === port) {
+      this.#nativePort = undefined;
+    }
+    if (this.#activePorts.delete(port)) {
+      port.close();
+    }
   }
 }

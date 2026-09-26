@@ -2,7 +2,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- OCJS embind exposes C++ PascalCase members and stock Replicad uses exportSTEP. */
 import type {
   OpenCascadeInstance,
-  Quantity_ColorRGBA,
   TCollection_ExtendedString,
   TCollection_HAsciiString,
   TDF_Label,
@@ -12,8 +11,11 @@ import type {
   XCAFDoc_ShapeTool,
 } from 'replicad-opencascadejs';
 import { cast } from 'replicad';
-import type { AnyShape, ShapeConfig, SimplePoint, SupportedUnit } from 'replicad';
+import type { AnyShape, SimplePoint, SupportedUnit } from 'replicad';
+import { srgbHexToLinearTuple } from '@taucad/geometry-core';
+import { cadMaterialDefaults } from '@taucad/runtime/types';
 
+import type { InputShape } from '#utils/render-output.js';
 import { inspectReplicadShapeIdentity } from '#utils/tessellation-instancing.js';
 import type { Meshable, ReplicadShapeIdentityInfo } from '#utils/tessellation-instancing.js';
 
@@ -33,8 +35,11 @@ type EntryDatumPlacements = {
   productName: string;
   datums: Array<Extract<ResolvedReplicadInterface, { kind: 'datum' }>>;
 };
-type PreparedStepOccurrence = ShapeConfig & {
-  resolvedInterfaces?: ResolvedReplicadInterface[];
+/** A native-handle entry: authored appearance fields as written, plus interfaces resolved on the live shape. */
+type StepShapeEntry = InputShape & { resolvedInterfaces?: ResolvedReplicadInterface[] };
+/** Linear RGBA base colour and metallic-roughness factors. */
+type StepAppearance = { baseColor: [number, number, number, number]; metalness: number; roughness: number };
+type PreparedStepOccurrence = StepShapeEntry & {
   index: number;
   occurrenceName: string;
   identity: ReplicadShapeIdentityInfo;
@@ -91,22 +96,6 @@ const wrapInlineAscii = (
 ): TCollectionAsciiStringLike | TCollection_HAsciiString => {
   const asciiCtor = (oc as unknown as ReplicadAdditionalBindings).TCollection_AsciiString;
   return asciiCtor ? new asciiCtor(value) : wrapAscii(oc, value);
-};
-
-const parseHexSlice = (hex: string, index: number): number =>
-  Number.parseInt(hex.slice(index * 2, (index + 1) * 2), 16);
-
-const colorFromHex = (hex: string): [number, number, number] => {
-  let color = hex.startsWith('#') ? hex.slice(1) : hex;
-  if (color.length === 3) {
-    color = color.replaceAll(/([\da-f])/gi, '$1$1');
-  }
-  return [parseHexSlice(color, 0), parseHexSlice(color, 1), parseHexSlice(color, 2)];
-};
-
-const wrapColor = (oc: OpenCascadeInstance, hex: string, alpha = 1): Quantity_ColorRGBA => {
-  const [r, g, b] = colorFromHex(hex);
-  return new oc.Quantity_ColorRGBA(r / 255, g / 255, b / 255, alpha);
 };
 
 const r6 = (value: number): number => {
@@ -278,19 +267,49 @@ const attachInterfaces = (options: {
   }
 };
 
+/**
+ * Resolves an entry's appearance as the glTF export renders it. An authored glTF material keeps the glTF
+ * defaults for omitted factors; legacy fields keep the CAD defaults the glTF export applies. A legacy entry
+ * without a colour has no appearance, so STEP readers keep their own default.
+ *
+ * @param entry - The native-handle entry whose authored appearance fields are resolved.
+ * @returns The linear appearance, or `undefined` when there is none to write.
+ */
+const resolveStepAppearance = (entry: StepShapeEntry): StepAppearance | undefined => {
+  if (entry.material) {
+    const factors = entry.material.pbrMetallicRoughness;
+    const [red = 1, green = 1, blue = 1, alpha = 1] = factors?.baseColorFactor ?? [];
+    return {
+      baseColor: [red, green, blue, alpha],
+      metalness: factors?.metallicFactor ?? 1,
+      roughness: factors?.roughnessFactor ?? 1,
+    };
+  }
+  if (!entry.color) {
+    return undefined;
+  }
+  return {
+    baseColor: srgbHexToLinearTuple(entry.color, entry.opacity ?? 1),
+    metalness: entry.metalness ?? cadMaterialDefaults.metalnessFactor,
+    roughness: entry.roughness ?? cadMaterialDefaults.roughnessFactor,
+  };
+};
+
 const attachVisualMaterial = (options: {
   oc: OpenCascadeInstance;
   productLabel: TDF_Label;
   name: string;
-  color?: string;
-  alpha?: number;
-  metalness?: number;
-  roughness?: number;
+  appearance: StepAppearance | undefined;
 }): void => {
-  const { oc, productLabel, color, alpha } = options;
+  const { oc, productLabel, appearance } = options;
+  if (!appearance) {
+    return;
+  }
+  // Quantity_ColorRGBA holds linear RGB, which the STEP writer encodes as sRGB.
+  const baseColor = new oc.Quantity_ColorRGBA(...appearance.baseColor);
   oc.XCAFDoc_DocumentTool.ColorTool(productLabel).SetColor(
     productLabel,
-    wrapColor(oc, color ?? '#f00', alpha ?? 1),
+    baseColor,
     oc.XCAFDoc_ColorType.XCAFDoc_ColorSurf,
   );
 
@@ -314,21 +333,16 @@ const attachVisualMaterial = (options: {
 
   const material = new materialCtor() as { SetPbrMaterial?: (pbr: unknown) => void };
   const pbr = new pbrCtor();
-  if (color) {
-    pbr['BaseColor'] = wrapColor(oc, color, alpha ?? 1);
-  }
-  pbr['Metallic'] = options.metalness ?? 0;
-  pbr['Roughness'] = options.roughness ?? 1;
+  pbr['BaseColor'] = baseColor;
+  pbr['Metallic'] = appearance.metalness;
+  pbr['Roughness'] = appearance.roughness;
   pbr['IsDefined'] = true;
   material.SetPbrMaterial?.(pbr);
   const materialLabel = tool.AddMaterial(material, wrapInlineAscii(oc, options.name));
   tool.SetShapeMaterial(productLabel, materialLabel);
 };
 
-const prepareStepProducts = (
-  oc: OpenCascadeInstance,
-  shapes: Array<ShapeConfig & { resolvedInterfaces?: ResolvedReplicadInterface[] }>,
-): PrototypeStepProduct[] => {
+const prepareStepProducts = (oc: OpenCascadeInstance, shapes: StepShapeEntry[]): PrototypeStepProduct[] => {
   const products: PrototypeStepProduct[] = [];
   const productsByHash = new Map<string, PrototypeStepProduct>();
 
@@ -400,14 +414,14 @@ const buildDocument = (
     const productLabel = shapeTool.AddShape(prototypeShape.wrapped, false);
     oc.TDataStd_Name.Set(productLabel, wrapString(oc, productName));
 
+    const appearances = occurrences.map((occurrence) => resolveStepAppearance(occurrence));
+    // An occurrence without its own appearance inherits the product's, so the product carries one only when
+    // every occurrence has its own.
     attachVisualMaterial({
       oc,
       productLabel,
       name: productName,
-      color: firstOccurrence.color,
-      alpha: firstOccurrence.alpha,
-      metalness: firstOccurrence.metalness,
-      roughness: firstOccurrence.roughness,
+      appearance: appearances.every((appearance) => appearance !== undefined) ? appearances[0] : undefined,
     });
 
     if (firstOccurrence.density !== undefined) {
@@ -430,7 +444,7 @@ const buildDocument = (
       interfaces,
     });
 
-    for (const occurrence of occurrences) {
+    for (const [index, occurrence] of occurrences.entries()) {
       const location = occurrence.shape.wrapped.Location();
       const instanceLabel = shapeTool.AddComponent(rootLabel, productLabel, location);
       location.delete();
@@ -439,10 +453,7 @@ const buildDocument = (
         oc,
         productLabel: instanceLabel,
         name: occurrence.occurrenceName,
-        color: occurrence.color,
-        alpha: occurrence.alpha,
-        metalness: occurrence.metalness,
-        roughness: occurrence.roughness,
+        appearance: appearances[index],
       });
     }
   }
@@ -511,7 +522,7 @@ const stepUnitScale = (modelUnit: string, writeUnit: string): number => {
 
 export const exportSTEP = (
   oc: OpenCascadeInstance,
-  shapes: Array<ShapeConfig & { resolvedInterfaces?: ResolvedReplicadInterface[] }>,
+  shapes: StepShapeEntry[],
   {
     unit,
     modelUnit,

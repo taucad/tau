@@ -159,7 +159,8 @@ fn authored_box_has_complete_directed_rectangle_certificate() {
         }
     }
     assert_eq!(before.as_ref(), doc.facts().unwrap().as_ref());
-    assert_eq!(faces.as_ref(), doc.faces().unwrap().as_ref());
+    // Whole faces leave their boxes unmeasured (NaN); Debug text compares them.
+    assert_eq!(format!("{faces:?}"), format!("{:?}", doc.faces().unwrap()));
     eprintln!("NOMINAL ap242-box.step unchanged {before:?}");
 }
 

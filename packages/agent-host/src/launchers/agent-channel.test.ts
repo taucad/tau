@@ -19,9 +19,9 @@ import { createChannelClient, wrapMessagePort, wrapWebSocket } from '@taucad/rpc
 import type { Channel, MessagePortLike, MessagePortMainLike, WireProtocolSchemas } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 
-import { serveAgentChannel } from '#launchers/node/agent-channel.js';
+import { serveAgentChannel } from '#launchers/agent-channel.js';
 import type { AgentChannelEndpoint } from '#channel/endpoint.js';
-import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
+import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import { agentLiveEventSchema, agentWireProtocolSchemas } from '#wire/frames.schema.js';
 import type { AgentWireProtocol } from '#wire/frames.schema.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
@@ -35,7 +35,7 @@ const answerFor = (command: HostCommand): CommandAnswer => ({
 });
 
 /** Records what the transport delivered, so both legs can be compared. */
-const recordingLauncher = (): NodeAgentLauncher & { readonly seen: HostCommand[] } => {
+const recordingLauncher = (): AgentLauncher & { readonly seen: HostCommand[] } => {
   const seen: HostCommand[] = [];
   return {
     seen,
@@ -57,7 +57,7 @@ const recordingLauncher = (): NodeAgentLauncher & { readonly seen: HostCommand[]
     }),
     pendingInterrupts: async () => [],
     close: async () => undefined,
-  } as unknown as NodeAgentLauncher & { readonly seen: HostCommand[] };
+  } as unknown as AgentLauncher & { readonly seen: HostCommand[] };
 };
 
 const build = 'test-build';

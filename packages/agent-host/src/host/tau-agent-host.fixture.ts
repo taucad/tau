@@ -6,7 +6,7 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
 import type { CreateTauAgentHostOptions } from '#host/tau-agent-host.js';
-import type { InterruptApprovalPort, ModelTransport, ToolRegistry } from '#waist/ports.js';
+import type { ModelTransport, ToolRegistry } from '#waist/ports.js';
 
 export const tauInternal = (message: ProviderMessage | undefined): JsonObject | undefined =>
   message?.metadata?.tauInternal;
@@ -103,12 +103,6 @@ export const settlementOnlySecondRun: SeededLogEvent = {
   reason: 'The turn ended before it recorded a revision.',
 };
 
-export const resolvedInterruptPort = (): InterruptApprovalPort => ({
-  pause: async (request) => ({ interruptId: request.interruptId, outcome: 'approved' }),
-  pending: async () => [],
-  resume: async () => undefined,
-});
-
 export const toolDefinition = {
   name: 'read_file',
   description: 'Read one workspace file.',
@@ -129,7 +123,6 @@ export const hostOptions = (input: {
   readonly openEventLog: MemoryLogFile['open'];
   readonly transport: ModelTransport;
   readonly toolRegistry: ToolRegistry;
-  readonly interruptPort?: InterruptApprovalPort | undefined;
   readonly idPrefix?: string | undefined;
 }): CreateTauAgentHostOptions => {
   const ids = createIds(input.idPrefix ?? 'message');
@@ -141,7 +134,6 @@ export const hostOptions = (input: {
     modelTransport: input.transport,
     toolRegistry: input.toolRegistry,
     openEventLog: async () => input.openEventLog(),
-    interruptPort: input.interruptPort ?? resolvedInterruptPort(),
     createId: ids,
     createLeaderEpoch: epochs,
     now: () => new Date(Date.UTC(2026, 8, 1, 0, 0, tick++)),

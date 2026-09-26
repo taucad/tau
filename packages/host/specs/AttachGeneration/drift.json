@@ -1,0 +1,33 @@
+{
+  "actions": {
+    "projectHost.closed": "Unmodelled",
+    "projectHost.closing.closed": "UCheck",
+    "projectHost.closing.connect": "Unmodelled",
+    "projectHost.closing.release": "URelStart",
+    "projectHost.closing.shutdown": "Unmodelled",
+    "projectHost.draining.connect": "Unmodelled",
+    "projectHost.draining.quiescent": "URelStart",
+    "projectHost.draining.release": "URelStart",
+    "projectHost.draining.shutdown": "Unmodelled",
+    "projectHost.openFailed": "Unmodelled",
+    "projectHost.opened": "Unmodelled",
+    "projectHost.opening.connect": "Unmodelled",
+    "projectHost.opening.openFailed": "Unmodelled",
+    "projectHost.opening.opened": "UConnect",
+    "projectHost.opening.release": "Unmodelled",
+    "projectHost.opening.shutdown": "Unmodelled",
+    "projectHost.quiescent": "Unmodelled",
+    "projectHost.serving.connect": "UConnect",
+    "projectHost.serving.release": "URelStart",
+    "projectHost.serving.shutdown": "Unmodelled",
+    "projectHost.xstate.error.*": "Unmodelled"
+  },
+  "alphabet": ["closed", "connect", "openFailed", "opened", "quiescent", "release", "shutdown"],
+  "specs": {
+    "AttachGeneration.tla": "aa9f974659b94e9efa708eea47444e764c1eb8c99382d61e2a2c7ed212a2a755"
+  },
+  "tables": {},
+  "versions": {
+    "projectHost": "2"
+  }
+}

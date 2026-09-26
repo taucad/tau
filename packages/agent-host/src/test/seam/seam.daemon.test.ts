@@ -21,9 +21,9 @@ import { createAgentChannelClient } from '#channel/agent-channel-client.js';
 import { agentChannelPort } from '#channel/endpoint.js';
 import type { AgentWireCompatProtocol, V1Addressed, V1Request, V1Response } from '#channel/wire-v1.js';
 import type { AgentChannelClient } from '#channel/agent-channel-client.js';
-import { serveAgentChannel } from '#launchers/node/agent-channel.js';
-import { createNodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
-import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
+import { serveAgentChannel } from '#launchers/agent-channel.js';
+import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
+import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
 import type { AgentLogEvent } from '#log/event-types.js';
@@ -91,8 +91,8 @@ const forever = async (): Promise<never> =>
 const harness = async (): Promise<Harness> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-seam-daemon-'));
   const fetch = vi.fn(async () => sseResponse()) as unknown as typeof globalThis.fetch;
-  const launch = (): NodeAgentLauncher =>
-    createNodeAgentLauncher({
+  const launch = (): AgentLauncher =>
+    createNodeLauncher({
       workspaceRoot: root,
       gatewayBaseUrl: 'https://gateway.example',
       model,
@@ -152,9 +152,9 @@ const harness = async (): Promise<Harness> => {
   };
 
   /** Serves whichever owner is current, with the fault the case armed. */
-  const proxy = (port: Port<unknown>): NodeAgentLauncher => {
-    const served: Pick<NodeAgentLauncher, 'execute' | 'read' | 'liveEvents'> & {
-      readonly host: NodeAgentLauncher['host'];
+  const proxy = (port: Port<unknown>): AgentLauncher => {
+    const served: Pick<AgentLauncher, 'execute' | 'read' | 'liveEvents'> & {
+      readonly host: AgentLauncher['host'];
     } = {
       get host() {
         return owner.host;
@@ -192,7 +192,7 @@ const harness = async (): Promise<Harness> => {
       liveEvents: (input) => owner.liveEvents(input),
     };
     // The seam serves only these three; the rest of a launcher is not the channel's.
-    return served as NodeAgentLauncher;
+    return served as AgentLauncher;
   };
 
   const httpServer: HttpServer = createServer();

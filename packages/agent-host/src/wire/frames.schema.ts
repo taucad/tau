@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { jsonValueSchema } from '#log/event-schema.js';
 import type { JsonValue } from '#log/event-types.js';
 import type { AgentLiveEvent } from '#waist/ports.js';
-import { commandAnswerSchema, commandFrameSchema, commandVerbs } from '#wire/commands.schema.js';
+import { chatIdSchema, commandAnswerSchema, commandFrameSchema, commandVerbs } from '#wire/commands.schema.js';
 import type { CommandAnswer, CommandFrame, CommandVerb } from '#wire/commands.schema.js';
 
 /** The agent protocol version the rpc hello carries as `wire`; today's unversioned protocol counts as 1. @public */
@@ -23,7 +23,7 @@ export type AgentWireHello = z.infer<typeof agentWireHelloSchema>;
 export const agentWireLimits = { batchRows: 16, batchBytes: 1_048_576 } as const;
 
 const position = z.number().int().nonnegative();
-const chatId = z.string().min(1);
+const chatId = chatIdSchema;
 
 /** A row's identity in the chat log: its term and its position in the term (W3's key). @public */
 export const rowKeySchema = z.strictObject({ leaderEpoch: z.string().min(1), sequence: position });

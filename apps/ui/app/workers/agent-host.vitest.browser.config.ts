@@ -60,11 +60,44 @@ export default defineConfig({
     // Vite 8's fs check must admit the monorepo root (worker + package imports).
     fs: { allow: [fileURLToPath(new URL('../../../..', import.meta.url))] },
   },
-  /* `isomorphic-git` and its `buffer`: RM-A22's worker; found late, they reload the run mid-test. */
-  optimizeDeps: { include: ['@taucad/gltf > draco3dgltf', 'buffer', 'isomorphic-git'] },
+  /* `isomorphic-git` and its `buffer`: RM-A22's worker; the kernel worker's dependencies, which a project host's
+   * runtime client loads. Each found late is optimised mid-run, and the reload that follows flakes the suite. */
+  optimizeDeps: {
+    include: [
+      '@taucad/gltf > draco3dgltf',
+      'buffer',
+      '@taucad/revisions > isomorphic-git',
+      '@jscad/modeling',
+      '@taucad/kcl-wasm-lib',
+      '@taulabs/openrscad-engine',
+      'culori',
+      'es-module-lexer',
+      'esbuild',
+      'esbuild-wasm',
+      '@taucad/assimp > libassimp',
+      'libcascade/multi/init',
+      'libcascade/single/init',
+      'manifold-3d',
+      'manifold-3d/lib/garbage-collector.js',
+      'manifold-3d/lib/gltf-io.js',
+      'manifold-3d/lib/gltf-node.js',
+      'manifold-3d/lib/level-of-detail.js',
+      'manifold-3d/lib/scene-builder.js',
+      'manifold-3d/lib/wasm.js',
+      'manifold-3d/manifoldCAD',
+      '@taucad/image > nanoraster/options',
+      '@taucad/brep > occt-import-js',
+      'replicad',
+      'replicad-opencascadejs/multi/init',
+      'replicad-opencascadejs/single/init',
+      '@taucad/rhino > rhino3dm',
+      'vitest-mock-extended',
+    ],
+  },
   test: {
     include: [
       'app/workers/agent-host.browser.test.ts',
+      'app/workers/agent-host-resident.browser.test.ts',
       'app/workers/agent-host-executor-view.browser.test.ts',
       'app/workers/seam.browser.test.ts',
       'app/workers/gltf-codec.browser.test.ts',

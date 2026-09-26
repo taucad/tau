@@ -29,6 +29,8 @@ export type ChatRunRegistryOptions = Readonly<{
   delays?: ChatRunDeps['delays'];
   /** Forwarded to every incarnation (MC-R4). */
   actorOptions?: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect'> | undefined;
+  /** Told each time a chat's incarnation becomes quiescent: no run, no command in flight, no settlement owed (RH-R8). */
+  onQuiescent?: ((chatId: string, quiescent: boolean) => void) | undefined;
 }>;
 
 /** What a claim found: whether the incarnation's opening abandoned an orphan (the attach answer's `takeover`). */
@@ -147,11 +149,22 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
       options.actorOptions ?? {},
     );
     actors.set(chatId, actor);
+    /* Undefined until the first snapshot: an incarnation reports its own value at open, never inherits one (RH-R8). */
+    let quiescent: boolean | undefined;
     actor.subscribe({
+      next: (snapshot) => {
+        const now = snapshot.status === 'active' && snapshot.hasTag('quiescent');
+        if (now !== quiescent) {
+          options.onQuiescent?.(chatId, now);
+        }
+        quiescent = now;
+      },
       complete: () => {
         if (actors.get(chatId) === actor) {
           actors.delete(chatId);
         }
+        /* A closed incarnation holds nothing: its chat is quiescent until the next claim. */
+        options.onQuiescent?.(chatId, true);
         const { context } = actor.getSnapshot();
         drain(chatId, context.cause, context.cause === 'openFailed' ? context.failure : undefined);
       },

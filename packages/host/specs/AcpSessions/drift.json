@@ -1,10 +1,10 @@
 {
   "actions": {
     "acpSession.busy.binding.adapterExited": "Unmodelled",
-    "acpSession.busy.binding.cancel": "Cancel",
+    "acpSession.busy.binding.cancel": "CancelBinding",
     "acpSession.busy.binding.close": "Cancel",
     "acpSession.busy.binding.lentFailed": "Unmodelled",
-    "acpSession.busy.binding.lentReady": "Stutter",
+    "acpSession.busy.binding.lentReady": "Bound",
     "acpSession.busy.binding.vendorRequest": "Stutter",
     "acpSession.busy.cancelling.adapterExited": "Unmodelled",
     "acpSession.busy.cancelling.callSettled": "CancelSettled",
@@ -98,7 +98,7 @@
     "vendorRequest"
   ],
   "specs": {
-    "AcpSessions.tla": "d858e5c6ecdb7096d5b2e1cc6f1bfbf8627102566b0ac0eb88c9aea1a5793530"
+    "AcpSessions.tla": "7418ac8ff24ffb2a12ac5a35b5f7a9d705d4c16810a6e5811df49a0c63b9ae4f"
   },
   "tables": {},
   "versions": {

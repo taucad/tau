@@ -23,9 +23,11 @@
 (*                write (W10.r1 finding 1: the child ignored it)           *)
 (*                                                                         *)
 (* Action names are M3's events (MC-R27): Acquire, Opened, Dequeued,       *)
-(* PromptAnswered, TurnEnded, IdleExpired, CloseChat, AdapterExited,       *)
-(* Cancel, CancelQueued, CancelSettled and CancelTimedOut; Tick is the     *)
-(* environment, and SoftCloseDone exists only for the HARD_CLOSE witness.  *)
+(* Bound, PromptAnswered, TurnEnded, IdleExpired, CloseChat,               *)
+(* AdapterExited, Cancel, CancelBinding, CancelQueued, CancelSettled and   *)
+(* CancelTimedOut;                                                          *)
+(* Tick is the environment, and SoftCloseDone exists only for the          *)
+(* HARD_CLOSE witness.                                                      *)
 (* `act` labels the step for the graph export.                             *)
 (*                                                                         *)
 (* Success-path labels: one machine transition carries one `meta.tla`, so  *)
@@ -54,13 +56,14 @@ VARIABLES
   proc,   \* [Procs -> [key, st, cap, bound, soft]]: one adapter process group and vendor session
   ent,    \* [Keys -> [pid, st]]: the parent's slot
   timer,  \* [Keys -> BOOLEAN]: an idle timer (target: the delayed raise idle:<key>) is armed
-  run,    \* [Runs -> [pc, key, pid, cx]]: one external turn inside the port; cx = a cancel was dropped
+  run,    \* [Runs -> [pc, key, pid, cx, bound]]: one external turn inside the port; cx = a cancel was
+          \* dropped; bound = the child's binding is active and the prompt sent
   next,   \* next unused process id
   act     \* the label of the step that produced this state
 
 vars == <<proc, ent, timer, run, next, act>>
 
-Free(k) == [pc |-> "free", key |-> k, pid |-> NoProc, cx |-> FALSE]
+Free(k) == [pc |-> "free", key |-> k, pid |-> NoProc, cx |-> FALSE, bound |-> FALSE]
 
 Init ==
   /\ proc = [p \in Procs |-> [key |-> AKey, st |-> "unused", cap |-> "fresh", bound |-> FALSE, soft |-> FALSE]]
@@ -75,7 +78,7 @@ TypeOK ==
                       /\ proc[p].cap \in {"fresh", "margin", "expired"}
   /\ \A k \in Keys : ent[k].st \in {"none", "busy", "idle", "closing"} /\ ent[k].pid \in Procs \cup {NoProc}
   /\ \A r \in Runs : run[r].pc \in {"free", "opening", "waitClose", "queued", "prompting", "cancelling", "finishing"}
-                    /\ run[r].cx \in BOOLEAN
+                    /\ run[r].cx \in BOOLEAN /\ run[r].bound \in BOOLEAN
   /\ next \in 1..(MaxProcs + 1)
 
 Max(a, b) == IF a > b THEN a ELSE b
@@ -186,6 +189,7 @@ Tick(p) ==
 (* The answer to `session/prompt`: the child enters `busy.flushing`.        *)
 PromptAnswered(r) ==
   /\ run[r].pc = "prompting"
+  /\ run[r].bound
   /\ run' = [run EXCEPT ![r].pc = "finishing"]
   /\ act' = "PromptAnswered"
   /\ UNCHANGED <<proc, ent, timer, next>>
@@ -267,6 +271,7 @@ CancelOpening(r) ==
 (* `cancel` while prompting: `session/cancel` is notified; the child waits. *)
 CancelPrompting(r) ==
   /\ run[r].pc = "prompting"
+  /\ run[r].bound
   /\ run' = [run EXCEPT ![r].pc = "cancelling"]
   /\ UNCHANGED <<proc, ent, timer, next>>
 
@@ -281,6 +286,26 @@ CancelQueuedLend(r) ==
             /\ UNCHANGED <<proc, ent, timer, next>>
 
 Cancel(r) == (CancelOpening(r) \/ CancelPrompting(r) \/ CancelQueuedLend(r)) /\ act' = "Cancel"
+
+(* The child's binding is active and its prompt sent (`busy.binding`'s     *)
+(* `lentReady`): from here a cancel is `session/cancel`, and only now can  *)
+(* the prompt be answered.                                                  *)
+Bound(r) ==
+  /\ run[r].pc = "prompting"
+  /\ ~run[r].bound
+  /\ run' = [run EXCEPT ![r].bound = TRUE]
+  /\ act' = "Bound"
+  /\ UNCHANGED <<proc, ent, timer, next>>
+
+(* `cancel` of a lend that is not yet bound (the child's `busy.binding`):  *)
+(* its prompt is not sent, so the child ends it with no `session/prompt`   *)
+(* and no `session/cancel`, and it finishes resting (W10-F1).              *)
+CancelBinding(r) ==
+  /\ run[r].pc = "prompting"
+  /\ ~run[r].bound
+  /\ run' = [run EXCEPT ![r].pc = "finishing"]
+  /\ act' = "CancelBinding"
+  /\ UNCHANGED <<proc, ent, timer, next>>
 
 (* The parent's `cancel` of an acquire queued on a closing key: it is     *)
 (* answered at once, and the key frees when the old process exits.         *)
@@ -310,8 +335,8 @@ CancelTimedOut(r) ==
 
 Next ==
   \/ \E r \in Runs, k \in Keys : Acquire(r, k)
-  \/ \E r \in Runs : Opened(r) \/ Dequeued(r) \/ PromptAnswered(r) \/ TurnEnded(r) \/ Cancel(r)
-                     \/ CancelQueued(r) \/ CancelSettled(r) \/ CancelTimedOut(r)
+  \/ \E r \in Runs : Opened(r) \/ Dequeued(r) \/ Bound(r) \/ PromptAnswered(r) \/ TurnEnded(r) \/ Cancel(r)
+                     \/ CancelBinding(r) \/ CancelQueued(r) \/ CancelSettled(r) \/ CancelTimedOut(r)
   \/ \E p \in Procs : Tick(p) \/ AdapterExited(p) \/ SoftCloseDone(p)
   \/ \E k \in Keys : IdleExpired(k) \/ CloseChat(k)
 

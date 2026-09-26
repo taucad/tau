@@ -8,7 +8,7 @@ const baseConfig: UserConfig = {
     'src/index.ts',
     'src/browser.ts',
     'src/node.ts',
-    'src/launchers/node/index.ts',
+    'src/launchers/index.ts',
     'src/channel/index.ts',
     'src/wire/index.ts',
   ],

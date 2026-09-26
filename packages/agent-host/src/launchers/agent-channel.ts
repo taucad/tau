@@ -1,12 +1,10 @@
 /**
- * The launcher→channel binding, deliberately free of any one transport.
+ * The launcher→channel binding, deliberately free of any one transport and of any platform (W6 RH-S2).
  *
- * One host, several launchers: `tau serve` hands this a WebSocket accepted on
- * `${pathPrefix}/agent`, and the Electron services utility hands it a
- * `MessagePortMain` minted by main. Both drive the *same*
- * {@link NodeAgentLauncher} through the *same* T0 vocabulary, so launcher 2 is
- * a consumer of this host rather than a second implementation of it — and the
- * client projection still cannot tell which transport it is talking to.
+ * `tau serve` hands this a WebSocket accepted on `${pathPrefix}/agent`, the Electron services utility a
+ * `MessagePortMain` minted by main, and the resident browser worker a transferred `MessagePort` per stream. All drive
+ * the *same* {@link AgentLauncher} through the *same* vocabulary, so the client projection cannot tell which transport
+ * or which host it is talking to.
  *
  * There is no new RPC layer here: `@taucad/rpc` channels are the substrate, and
  * this module is the only place in the package that value-imports them.
@@ -20,16 +18,12 @@ import type { AgentChannelEndpoint } from '#channel/endpoint.js';
 import { agentWireVersion } from '#wire/frames.schema.js';
 import { agentWireCompatSchemas } from '#channel/wire-v1.js';
 import type { AgentWireCompatProtocol, V1Request } from '#channel/wire-v1.js';
-import { createV1Session } from '#launchers/node/agent-wire-v1-session.js';
+import { createV1Session } from '#launchers/agent-wire-v1-session.js';
 import type { AgentChannelRevisionEvent, AgentWireProtocol } from '#wire/frames.schema.js';
 import type { CommandVerb, HostCommand } from '#wire/commands.schema.js';
 import type { RefusalCode } from '#wire/refusals.js';
 import type { JsonValue } from '#log/event-types.js';
-import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
-
-/** Re-exported so `@taucad/agent-host/node-launcher` keeps naming its own endpoint type. @public */
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- one type alias kept at its historical name, not a barrel.
-export type { AgentChannelEndpoint } from '#channel/endpoint.js';
+import type { AgentLauncher } from '#launchers/agent-launcher.js';
 
 /** Options for {@link serveAgentChannel}. @public */
 export type ServeAgentChannelOptions = {
@@ -55,9 +49,8 @@ const defaultKeepaliveInterval = 2000;
  * Serve one client on the agent channel: one call per verb answering `ans`, the long-poll `read`, the live deltas,
  * and this host's revision root.
  *
- * The returned handle owns only *this connection*. Disposing it ends the
- * client's streams and nothing else: runs the client started keep executing,
- * because always-on lives in the launcher, never on a socket.
+ * The returned handle owns only *this connection* (RH-R3). Disposing it ends the client's streams and nothing else:
+ * runs the client started keep executing, because always-on lives in the launcher, never on a connection (D17).
  *
  * @param endpoint - Socket, message port, or already-wrapped port.
  * @param launcher - The always-on host answering the vocabulary.
@@ -68,20 +61,19 @@ const defaultKeepaliveInterval = 2000;
  *
  * @example <caption>Serve one accepted WebSocket</caption>
  * ```typescript
- * import { serveAgentChannel } from '@taucad/agent-host/node-launcher';
+ * import { serveAgentChannel } from '@taucad/agent-host/launcher';
+ * import type { AgentLauncher } from '@taucad/agent-host/launcher';
+ * import type { AgentChannelEndpoint } from '@taucad/agent-host';
  *
- * import type { WebSocketLike } from '@taucad/rpc';
- * import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
- *
- * declare const socket: WebSocketLike;
- * declare const launcher: NodeAgentLauncher;
+ * declare const socket: AgentChannelEndpoint;
+ * declare const launcher: AgentLauncher;
  * const channel = serveAgentChannel(socket, launcher, { build: '1.2.3' });
  * channel.dispose('client gone');
  * ```
  */
 export const serveAgentChannel = (
   endpoint: AgentChannelEndpoint,
-  launcher: NodeAgentLauncher,
+  launcher: AgentLauncher,
   options: ServeAgentChannelOptions,
 ): ChannelServerHandle => {
   /* I32: the compatibility window is open, so this connection also answers a v1 client (`request`, `events`, and

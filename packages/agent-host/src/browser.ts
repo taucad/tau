@@ -2,9 +2,13 @@ import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
 import { parseEventLogBytes } from '#log/serialization.js';
-import type { AgentLogEvent } from '#log/event-types.js';
+import type { AgentLogEvent, StorageDurabilityClass } from '#log/event-types.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
+import type { HostClock } from '#harness/session.js';
+import { createBrowserLeadership } from '#browser/leadership.js';
+import { createChatStore, requireChatPathSegment } from '#launchers/chat-store.js';
+import type { ChatStore } from '#launchers/chat-store.js';
 
 type SyncAccessHandle = {
   getSize(): number;
@@ -265,3 +269,161 @@ export const createProviderAttachmentReader = (
     return (await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : undefined;
   },
 });
+
+// ── the browser chat store (W6 RH-S7) ─────────────────────────────────────────────────────────────
+
+/** Options for {@link createBrowserChatStore}. @public */
+export type BrowserChatStoreOptions = Readonly<{
+  projectId: string;
+  /** This worker's id among the origin's tabs (RH-R5). */
+  tabId: string;
+  /** The composition root's build identity: a tab on another build never runs this build's command (RH-R7). */
+  build: string;
+  /**
+   * Where the project's chat logs and their attachments live: the project's own OPFS directory, whose logs take the
+   * exclusive sync handle (`exclusive-append`), or the project's root filesystem, a provider or bridge proxy whose
+   * appends are fenced one at a time.
+   */
+  log:
+    | Readonly<{ kind: 'opfs'; directory: FileSystemDirectoryHandle }>
+    | Readonly<{
+        kind: 'provider';
+        fileSystem: ProviderEventLogOptions['fileSystem'];
+        /** The provider's durability class, stamped on each admission; `stream-append` when absent. */
+        durability?: StorageDurabilityClass | undefined;
+      }>;
+  /**
+   * The page's visibility, relayed to the worker: a hidden page never queues for a chat's lock (RH-R16), and a page
+   * shown again re-arms the heartbeat bounds it may have been frozen through.
+   */
+  visibility?:
+    | Readonly<{ visible: () => boolean; subscribe: (listener: (visible: boolean) => void) => () => void }>
+    | undefined;
+  /** The clock leadership's timers run on, and whose `now` measures a frozen tab's late timers; the worker's when absent. */
+  clock?: (HostClock & Readonly<{ now: () => number }>) | undefined;
+  /** Leadership's bounds in milliseconds, for tests; the substrate's values (`timeouts.json`) when absent. */
+  delays?:
+    | Partial<
+        Readonly<{
+          heartbeatInterval: number;
+          heartbeatTimeout: number;
+          recoveryDelay: number;
+          claimBound: number;
+          queuedWriteBound: number;
+        }>
+      >
+    | undefined;
+}>;
+
+const logName = 'events.jsonl';
+
+/**
+ * Chat logs for one project in a browser worker. A read never creates the chat, takes a lock or keeps a handle
+ * (RH-R1); a write opens only under the chat's Web Lock, which M2 holds while the chat needs a writer (EQ4).
+ *
+ * @param options - The project, this worker, and where the logs live.
+ * @returns The opaque store `createAgentLauncher` takes.
+ * @public
+ *
+ * @example <caption>One launcher per project in the resident worker</caption>
+ * ```typescript
+ * import { createBrowserChatStore } from '@taucad/agent-host/browser';
+ * import type { ProviderEventLogOptions } from '@taucad/agent-host/browser';
+ *
+ * declare const fileSystem: ProviderEventLogOptions['fileSystem'];
+ * const chats = createBrowserChatStore({
+ *   projectId: 'project-1',
+ *   tabId: 'tab-1',
+ *   build: '1.0.0',
+ *   log: { kind: 'provider', fileSystem },
+ * });
+ * ```
+ */
+export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatStore => {
+  const { log } = options;
+  const logPath = (chatId: string): string => `.tau/chats/${requireChatPathSegment(chatId)}/${logName}`;
+
+  /** A file under the OPFS project directory, by its root-relative path; `undefined` when it is not there. */
+  const opfsFile = async (
+    directory: FileSystemDirectoryHandle,
+    path: string,
+    create: boolean,
+  ): Promise<FileSystemFileHandle | undefined> => {
+    const segments = path.split('/');
+    const name = segments.pop()!;
+    try {
+      let parent = directory;
+      for (const segment of segments) {
+        // oxlint-disable-next-line no-await-in-loop -- each directory opens inside the one before it.
+        parent = await parent.getDirectoryHandle(segment, { create });
+      }
+      return await parent.getFileHandle(name, { create });
+    } catch (error) {
+      if (!create && (error as { readonly name?: unknown }).name === 'NotFoundError') {
+        return undefined;
+      }
+      throw error;
+    }
+  };
+
+  if (log.kind === 'opfs') {
+    const { directory } = log;
+    const bytesOf = async (path: string): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+      const file = await opfsFile(directory, path, false);
+      if (file === undefined) {
+        return undefined;
+      }
+      const blob = await file.getFile();
+      return new Uint8Array(await blob.arrayBuffer());
+    };
+    return createChatStore({
+      platform: 'browser',
+      durability: 'exclusive-append',
+      attachments: { read: async (chatId, path) => bytesOf(chatAttachmentPath(chatId, path)) },
+      readBytes: async (chatId) => (await bytesOf(logPath(chatId))) ?? new Uint8Array(),
+      openWriter: async (chatId) =>
+        createOpfsEventLog({ fileHandle: (await opfsFile(directory, logPath(chatId), true))!, access: 'write' }),
+      /* OPFS's exclusive handle cannot be stolen from a frozen holder (RH-R12). */
+      leadership: leadershipOf(options, false),
+    });
+  }
+
+  const { fileSystem } = log;
+  return createChatStore({
+    platform: 'browser',
+    durability: log.durability ?? 'stream-append',
+    attachments: createProviderAttachmentReader(fileSystem),
+    readBytes: async (chatId) => {
+      const filePath = logPath(chatId);
+      return (await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : new Uint8Array();
+    },
+    openWriter: async (chatId) => {
+      const filePath = logPath(chatId);
+      /* This open runs under the chat's Web Lock (M2), so a surviving marker is a dead or stolen holder's; the
+       * per-append fence refuses that holder's appends whatever the marker says (EQ2, RH-R12). */
+      await fileSystem.unlink(`${filePath}.lock`).catch(() => undefined);
+      return createProviderEventLog({
+        fileSystem,
+        filePath,
+        access: 'write',
+        lockName: `tau-log-append:${options.projectId}/${requireChatPathSegment(chatId)}`,
+      });
+    },
+    /* The provider leg fences each append, so a steal from a silent holder can serve (RH-R12). */
+    leadership: leadershipOf(options, true),
+  });
+};
+
+const leadershipOf = (
+  options: BrowserChatStoreOptions,
+  canSteal: boolean,
+): ReturnType<typeof createBrowserLeadership> =>
+  createBrowserLeadership({
+    projectId: options.projectId,
+    sender: options.tabId,
+    build: options.build,
+    canSteal,
+    visibility: options.visibility,
+    clock: options.clock,
+    delays: options.delays,
+  });

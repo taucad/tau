@@ -85,7 +85,7 @@ import type {
   TauApiCredential,
 } from '@taucad/revisions/node';
 import { publishPushMilliseconds } from '@taucad/revisions/publish-machine';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { AgentLauncher as NodeAgentLauncher } from '@taucad/agent-host/launcher';
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
@@ -519,16 +519,19 @@ const registryAnswered = async (actor: {
  *
  * @example <caption>Launcher 1, recording every turn</caption>
  * ```typescript
- * import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
- * import { createProjectRevisions } from '@taucad/host';
+ * import { createGatewayModelTransport } from '@taucad/agent-host';
  * import type { ToolRegistry } from '@taucad/agent-host';
+ * import { createAgentLauncher } from '@taucad/agent-host/launcher';
+ * import { createNodeChatStore } from '@taucad/agent-host/node';
+ * import { createProjectRevisions } from '@taucad/host';
  *
  * declare const toolRegistry: ToolRegistry;
  * const revisions = createProjectRevisions({ workspaceRoot: '/srv/project' });
  * const launcher = revisions.record(
- *   createNodeAgentLauncher({
- *     workspaceRoot: '/srv/project',
- *     gatewayBaseUrl: 'https://api.tau.new/',
+ *   createAgentLauncher({
+ *     chats: createNodeChatStore({ workspaceRoot: '/srv/project' }),
+ *     modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
+ *     credential: () => ({ mode: 'session' }),
  *     systemPrompt: 'You are Tau.',
  *     toolRegistry,
  *   }),

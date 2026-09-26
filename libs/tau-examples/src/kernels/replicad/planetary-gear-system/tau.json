@@ -1,0 +1,20 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_K56O7izOKVeumWMffxb7J",
+  "name": "Planetary Gear System",
+  "description": "An open, coaxial 4:1 planetary stage: a fixed 72-tooth ring, a 24-tooth sun on a keyed input shaft and three 24-tooth planets on a twin-plate carrier with stepped pins, bronze bushings, thrust hardware and socket screws. The model declares its mechanism, so the sun, carrier and planets turn together at the true gear ratios, and GeoSpec checks cover the envelope, planet positions and tooth clearance across mesh phases.",
+  "tags": [
+    "assembly",
+    "gears",
+    "kinematics",
+    "parametric",
+    "replicad",
+    "manufacturing"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

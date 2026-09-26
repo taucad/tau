@@ -3092,6 +3092,9 @@ importers:
       '@jscad/modeling':
         specifier: 'catalog:'
         version: 2.13.0
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../../packages/kinematics
       geospec:
         specifier: workspace:*
         version: link:../../packages/geospec

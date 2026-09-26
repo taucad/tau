@@ -364,6 +364,14 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "replicad",
+    "name": "planetary-gear-system",
+    "mainFile": "main.ts",
+    "files": ["DESIGN.md", "main.geospec.ts", "main.ts", "tau.json"]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
     "name": "pot-plant",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
@@ -399,6 +407,14 @@
     "name": "simple-tray",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "six-axis-arm",
+    "mainFile": "main.ts",
+    "files": ["DESIGN.md", "main.geospec.ts", "main.ts", "tau.json"]
   },
   {
     "kind": "model",

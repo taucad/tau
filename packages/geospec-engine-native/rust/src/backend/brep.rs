@@ -436,6 +436,44 @@ pub struct ValidityFacts {
     pub reason: Option<String>,
 }
 
+/// One body of exact connected components (M2): a top-level solid, free
+/// shell or free face of a requested occurrence, or of the whole shape.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComponentBody {
+    /// The requested occurrence; `None` for a whole-shape body.
+    pub occurrence: Option<u32>,
+    /// A solid, so a body inside its material is at distance zero.
+    pub solid: bool,
+    pub vertices: u32,
+    /// The fold of `faces`, bit-equal to the shape's exact bounds.
+    pub bounds: Bounds,
+    /// Each face's box from the per-located-face memo, in explorer order.
+    pub faces: Vec<Bounds>,
+}
+
+/// Exact narrow-phase verdicts over one set of component bodies. Callers
+/// charge each evaluation before asking; nothing here publishes a point.
+pub trait ComponentBodies {
+    fn bodies(&self) -> &[ComponentBody];
+    /// Whether two faces lie within `tolerance` (serial exact distance).
+    fn faces_within(
+        &self,
+        left: usize,
+        left_face: usize,
+        right: usize,
+        right_face: usize,
+        tolerance: f64,
+    ) -> Result<bool, BackendError>;
+    /// Whether two whole bodies lie within `tolerance`, a solid's interior
+    /// included; parallel under a grant, which leaves the distance exact.
+    fn bodies_within(
+        &self,
+        left: usize,
+        right: usize,
+        tolerance: f64,
+    ) -> Result<bool, BackendError>;
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PointState {
     In,
@@ -1169,6 +1207,17 @@ pub trait BrepSubject {
     /// `bounds` may be unmeasured (NaN); `face_optimal_bounds` measures one.
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
+    /// Component bodies of the listed occurrences, or of the whole shape
+    /// when the list is empty (M2).
+    fn component_bodies(
+        &self,
+        _occurrences: &[u32],
+    ) -> Result<Box<dyn ComponentBodies + '_>, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no exact component-body query.".into(),
+        })
+    }
     /// Classify against the located trimmed face. Off-surface points are Out.
     fn classify_face_points(
         &self,

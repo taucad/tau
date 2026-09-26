@@ -50,7 +50,8 @@ fn source_numerics_and_validity_do_not_depend_on_demand_order() {
         assert_eq!(validity(&validity_first), expected_validity, "{name}");
         assert_eq!(source_numerics(&validity_first), expected, "{name}");
 
-        // The copied report generation never fills or reads source slots.
+        // The copied report generation reads no source numeric slot; it fills
+        // only the source edge addresses whose per-face counts it reports.
         let report_first = Document::from_step(&bytes).unwrap();
         report_first.reported_facts_and_mesh().unwrap();
         assert_eq!(source_numerics(&report_first), expected, "{name}");

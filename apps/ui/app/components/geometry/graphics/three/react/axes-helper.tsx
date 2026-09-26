@@ -137,6 +137,7 @@ export function AxesWebGpuFatLine({
     void (async () => {
       try {
         await Promise.all([
+          // oxlint-disable-next-line react/immutability -- This mount owns the retained material; the version bump below schedules its node rebuild.
           compile.call(renderer, resources.group, cameraRig.perspectiveCamera),
           compile.call(renderer, resources.group, cameraRig.orthographicCamera),
         ]);
@@ -147,6 +148,11 @@ export function AxesWebGpuFatLine({
       if (cancellation.cancelled) {
         return;
       }
+      // Rebuild the node graph for the live frame target. `compileAsync` builds it outside a
+      // render — no frame target, zero samples, a viewport copy taken of the canvas — and the
+      // first axis drawn kept that build: it composited over a stale copy at about half its
+      // ink. The rebuilt WGSL matches, so the warmed pipeline is still reused.
+      resources.material.needsUpdate = true;
       invalidate();
     })();
 

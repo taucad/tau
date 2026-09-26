@@ -62,6 +62,63 @@ const startHost = (
 };
 
 describe('startGeoSpecPoolWorkerHost', () => {
+  it('should report a throwing shutdown callback without stranding the worker queue', async () => {
+    const host = startHost(
+      {},
+      {
+        onShutdown: () => {
+          throw new Error('engine close failed');
+        },
+      },
+    );
+    const replies = await host.send({ type: 'shutdown' }, ['initialization-error']);
+    expect(replies).toStrictEqual([{ type: 'initialization-error', message: 'engine close failed' }]);
+  });
+
+  it('should still close the native engine after admission release fails and report the release error', async () => {
+    const order: string[] = [];
+    const nativeModelLoader = Object.assign(async () => ({ subjectHash: 'unused' }), {
+      releaseAll: async () => {
+        order.push('release');
+        throw new Error('release failed');
+      },
+    });
+    const host = startHost(
+      {},
+      {
+        nativeModelLoader,
+        onShutdown: () => {
+          order.push('close-engine');
+        },
+      },
+    );
+    const replies = await host.send({ type: 'shutdown' }, ['initialization-error']);
+    expect(order).toStrictEqual(['release', 'close-engine']);
+    expect(replies).toStrictEqual([{ type: 'initialization-error', message: 'release failed' }]);
+  });
+
+  it('should release native admissions before closing the worker-owned engine', async () => {
+    const order: string[] = [];
+    const nativeModelLoader = Object.assign(async () => ({ subjectHash: 'unused' }), {
+      releaseAll: async () => {
+        order.push('release');
+      },
+    });
+    const host = startHost(
+      {},
+      {
+        nativeModelLoader,
+        onShutdown: () => {
+          order.push('close-engine');
+        },
+      },
+    );
+    host.deliver({ type: 'shutdown' });
+    await vi.waitFor(() => {
+      expect(order).toStrictEqual(['release', 'close-engine']);
+    });
+  });
+
   it('should announce readiness before any shard arrives', () => {
     const host = startHost({});
 

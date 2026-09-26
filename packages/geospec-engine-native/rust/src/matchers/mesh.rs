@@ -638,11 +638,11 @@ fn evaluate_bounds(
             };
         }
     }
-    let (bounds, primitives, source) = match context.brep_facts() {
+    let (bounds, primitives, source) = match context.brep_shape() {
         Err(result) => return result,
-        Ok(Some(facts)) => {
-            let min = facts.shape.bounds.min;
-            let max = facts.shape.bounds.max;
+        Ok(Some(shape)) => {
+            let min = shape.bounds.min;
+            let max = shape.bounds.max;
             let size = std::array::from_fn(|axis| max[axis] - min[axis]);
             let center = std::array::from_fn(|axis| (min[axis] + max[axis]) / 2.0);
             ([min, max, size, center], Json::Array(Vec::new()), "brep")
@@ -1000,15 +1000,15 @@ fn evaluate_scalar(
     context: &mut EvaluationContext<'_>,
 ) -> Evaluation {
     let (hash, mut diagnostics) = subject_meta(context);
-    let (measured, source, volume, signed_volume) = match context.brep_facts() {
+    let (measured, source, volume, signed_volume) = match context.brep_shape() {
         Err(result) => return result,
-        Ok(Some(facts)) => {
+        Ok(Some(shape)) => {
             let value = match kind {
-                ScalarKind::SurfaceArea => Some(facts.shape.surface_area),
-                ScalarKind::Volume => Some(facts.shape.volume),
-                ScalarKind::Mass => expected.density.map(|density| facts.shape.volume * density),
+                ScalarKind::SurfaceArea => Some(shape.surface_area),
+                ScalarKind::Volume => Some(shape.volume),
+                ScalarKind::Mass => expected.density.map(|density| shape.volume * density),
             };
-            (value, "brep", facts.shape.volume, None)
+            (value, "brep", shape.volume, None)
         }
         Ok(None) => {
             let analysis = match context.mesh_analysis() {
@@ -1125,9 +1125,9 @@ fn evaluate_center(
     context: &mut EvaluationContext<'_>,
 ) -> Evaluation {
     let (hash, mut diagnostics) = subject_meta(context);
-    let (measured, source) = match context.brep_facts() {
+    let (measured, source) = match context.brep_shape() {
         Err(result) => return result,
-        Ok(Some(facts)) => (Some(facts.shape.center_of_mass), "brep"),
+        Ok(Some(shape)) => (Some(shape.center_of_mass), "brep"),
         Ok(None) => {
             let analysis = match context.mesh_analysis() {
                 Ok(value) => value,

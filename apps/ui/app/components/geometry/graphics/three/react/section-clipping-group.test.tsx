@@ -287,6 +287,67 @@ describe('SectionClippingGroup', () => {
     });
   });
 
+  it('should not re-traverse the model when only the plane moves (WebGL)', async () => {
+    const stubGl = createStubWebGlRenderer();
+    const canvas = stubGl.domElement;
+    const innerRef = React.createRef<ActualThree.Group>();
+    const mesh = new ActualThree.Mesh(new ActualThree.BoxGeometry(1, 1, 1), new ActualThree.MeshStandardMaterial());
+    // The stage builds its model element once; a plane step re-renders only the section components.
+    const model = (
+      <group ref={innerRef}>
+        <primitive object={mesh} />
+      </group>
+    );
+
+    document.body.append(canvas);
+
+    const root = createRoot(canvas);
+
+    await act(async () => {
+      await root.configure({
+        camera: new ActualThree.PerspectiveCamera(75, 800 / 600, 0.1, 100_000),
+        gl: stubGl,
+        size: { height: 600, left: 0, top: 0, width: 800 },
+      });
+    });
+
+    const renderClippingGroup = (plane: ActualThree.Plane): void => {
+      root.render(
+        <ThreeGraphicsBackendProvider value='webgl'>
+          <SectionClippingGroup
+            enableLines
+            enableMesh
+            enabled
+            innerRef={innerRef}
+            plane={plane}
+            snapshotRef={testSnapshotRef}
+          >
+            {model}
+          </SectionClippingGroup>
+        </ThreeGraphicsBackendProvider>,
+      );
+    };
+
+    try {
+      await act(async () => {
+        renderClippingGroup(testPlane);
+      });
+      const traverse = vi.spyOn(innerRef.current!, 'traverse');
+
+      await act(async () => {
+        renderClippingGroup(new ActualThree.Plane(new ActualThree.Vector3(0, 0, 1), 0.5));
+      });
+
+      expect(traverse).not.toHaveBeenCalled();
+      expect(mesh.material.clippingPlanes?.[0]).toBe(testSnapshotStore.committed?.plane);
+    } finally {
+      act(() => {
+        root.unmount();
+        canvas.remove();
+      });
+    }
+  });
+
   it('keeps meshes unclipped but clips lines when enableMesh is false and enableLines is true (WebGL)', async () => {
     const stubGl = createStubWebGlRenderer();
     const canvas = stubGl.domElement;

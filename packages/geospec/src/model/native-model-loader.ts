@@ -75,7 +75,18 @@ export type CreateGeoSpecNativeModelLoaderOptions = {
   readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
 };
 
-/** Model loader injected into native VM runs. @public */
+/**
+ * Model loader injected into native VM runs.
+ *
+ * The freshness unit is one load: every call reads its source again (the
+ * source reader or a Runtime export) and the engine digests those exact bytes.
+ * Nothing is deduplicated per run or per scope; bytes equal to an admitted
+ * subject's reuse that subject by digest, length and descriptor, and edited
+ * bytes admit a new subject. Only concurrent identical inline-code Runtime
+ * loads share one in-flight export.
+ *
+ * @public
+ */
 export type GeoSpecNativeModelLoader = <Code extends Record<string, string> = Record<string, string>>(
   options: GeoSpecNativeLoadModelOptions<Code>,
 ) => Promise<GeoSpecNativeModelSubject>;

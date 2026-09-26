@@ -199,6 +199,7 @@ export function Parameters({
             <div className='flex w-full flex-row gap-1.5 border-b bg-sidebar px-2 py-1.5'>
               <SearchInput
                 ref={searchInputReference}
+                aria-label={searchPlaceholder}
                 placeholder={searchPlaceholder}
                 value={localFilterTerm}
                 className='h-6 w-full bg-background text-sm'

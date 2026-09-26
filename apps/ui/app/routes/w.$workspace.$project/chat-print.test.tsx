@@ -54,13 +54,13 @@ vi.mock('#hooks/use-file-manager.js', async () => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.fileManagerMock;
 });
-vi.mock('#routes/w.$workspace.$project/chat-converter.js', async () => {
+vi.mock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal) => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
-  return fixtures.converterMock;
+  return fixtures.converterMock(await importOriginal());
 });
-vi.mock('#components/geometry/parameters/parameters.js', async () => {
+vi.mock('#components/geometry/parameters/parameters.js', async (importOriginal) => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
-  return { Parameters: fixtures.ParametersFake };
+  return fixtures.parametersMock(await importOriginal());
 });
 vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
   const [actual, fixtures] = await Promise.all([
@@ -947,13 +947,13 @@ describe('Print pane Bambu Studio mode', () => {
     return { fixture, studio };
   };
 
-  /** Open Advanced and one settings group, returning the group's trigger. */
-  const openGroup = async (user: ReturnType<typeof userEvent.setup>, group: RegExp): Promise<void> => {
+  /** Open Advanced and one settings group of the shared Parameters form. */
+  const openGroup = async (user: ReturnType<typeof userEvent.setup>, group: string): Promise<void> => {
     if (screen.queryByRole('group', { name: 'Bambu Studio settings' }) === null) {
       await user.click(screen.getByRole('button', { name: /^Advanced/u }));
     }
     const settings = await screen.findByRole('group', { name: 'Bambu Studio settings' });
-    const trigger = within(settings).getByRole('button', { name: group });
+    const trigger = within(settings).getByRole('button', { name: `Group: ${group}` });
     if (trigger.getAttribute('aria-expanded') !== 'true') {
       await user.click(trigger);
     }
@@ -961,7 +961,7 @@ describe('Print pane Bambu Studio mode', () => {
 
   /** Type a value into a number or text setting and commit it the way a person does: leave the field. */
   const enter = (name: string, value: string): void => {
-    const field = screen.getByLabelText(name);
+    const field = screen.getByRole('textbox', { name: `Input for ${name}` });
     fireEvent.change(field, { target: { value } });
     fireEvent.blur(field);
   };
@@ -1027,57 +1027,62 @@ describe('Print pane Bambu Studio mode', () => {
   it('marks a changed setting as parameters do, and resets one setting or all of them', async () => {
     const user = userEvent.setup();
     await renderStudio();
-    await openGroup(user, /^Strength/u);
+    await openGroup(user, 'Strength');
     const settings = screen.getByRole('group', { name: 'Bambu Studio settings' });
-    expect(screen.getByLabelText('Wall loops')).toHaveValue(2);
-    expect(screen.getByText('Wall loops')).toHaveClass('text-muted-foreground');
-    expect(screen.queryByRole('button', { name: 'Reset Wall loops' })).not.toBeInTheDocument();
+    const wallLoops = (): HTMLElement => screen.getByRole('textbox', { name: 'Input for Wall Loops' });
+    expect(wallLoops()).toHaveValue('2');
+    expect(screen.queryByRole('button', { name: 'Reset Wall Loops' })).not.toBeInTheDocument();
 
-    enter('Wall loops', '3');
-    expect(await screen.findByRole('button', { name: 'Reset Wall loops' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Wall loops')).toHaveValue(3);
-    expect(screen.getByText('Wall loops')).toHaveClass('font-medium', 'text-foreground');
+    enter('Wall Loops', '3');
+    expect(await screen.findByRole('button', { name: 'Reset Wall Loops' })).toBeInTheDocument();
+    expect(wallLoops()).toHaveValue('3');
     expect(printIntentText()).toBe('{\n  "model": "x1c",\n  "settings": {\n    "wall_loops": 3\n  }\n}\n');
     // The pane's own vocabulary is gone: no count, dot, "(changed)" or reset-all of its own.
     expect(within(settings).queryByRole('status')).not.toBeInTheDocument();
     expect(screen.queryByText('(changed)')).not.toBeInTheDocument();
     expect(within(settings).queryByRole('button', { name: 'Reset all' })).not.toBeInTheDocument();
-    expect(within(settings).getByRole('button', { name: 'Strength' })).toBeInTheDocument();
+    expect(within(settings).getByRole('button', { name: 'Group: Strength' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Advanced/u })).toHaveTextContent(/^Advanced$/u);
-    await user.click(screen.getByRole('button', { name: 'Reset Wall loops' }));
+    await user.click(screen.getByRole('button', { name: 'Reset Wall Loops' }));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Reset Wall loops' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reset Wall Loops' })).not.toBeInTheDocument();
     });
-    expect(screen.getByLabelText('Wall loops')).toHaveValue(2);
+    await waitFor(() => {
+      expect(wallLoops()).toHaveValue('2');
+    });
     expect(printIntentText()).toBe('{\n  "model": "x1c"\n}\n');
 
     // Enumerations, switches and out-of-range numbers; the Prepare header resets them together.
-    await user.selectOptions(screen.getByLabelText('Sparse infill pattern'), 'Gyroid');
-    await openGroup(user, /^Support/u);
-    await user.click(screen.getByRole('checkbox', { name: 'Enable support' }));
-    enter('Wall loops', '-1');
-    expect(screen.getByLabelText('Wall loops')).toHaveValue(2);
+    // Radix Select captures the pointer, which jsdom does not implement.
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
+    Element.prototype.scrollIntoView = vi.fn();
+    await user.click(screen.getByRole('combobox', { name: 'Select for Sparse Infill Pattern' }));
+    await user.click(screen.getByRole('option', { name: 'Gyroid' }));
+    await openGroup(user, 'Support');
+    await user.click(screen.getByRole('switch', { name: 'Toggle for Enable Support' }));
+    // Out of range: the field says why, and nothing reaches the print intent.
+    enter('Wall Loops', '-1');
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
     await expectPrintIntent({ model: 'x1c', settings: { enable_support: true, sparse_infill_pattern: 'gyroid' } });
-    expect(screen.getByRole('button', { name: 'Reset Enable support' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset Enable Support' })).toBeInTheDocument();
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Reset print settings' }));
     await expectPrintIntent({ model: 'x1c' });
-    expect(screen.queryByRole('button', { name: 'Reset Enable support' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset Enable Support' })).not.toBeInTheDocument();
     expect(within(prepareRegion()).queryByRole('button', { name: 'Reset print settings' })).not.toBeInTheDocument();
   });
 
   it('slices with only the changed keys, and a setting changed after slicing makes the slice stale', async () => {
     const user = userEvent.setup();
     await renderStudio();
-    await openGroup(user, /^Strength/u);
+    await openGroup(user, 'Strength');
     const settings = screen.getByRole('group', { name: 'Bambu Studio settings' });
 
     // The filter opens every group with a match; a number-or-percent setting keeps its percent.
     await user.type(within(settings).getByRole('searchbox', { name: 'Filter settings' }), 'bridge');
-    expect(within(settings).queryByLabelText('Wall loops')).not.toBeInTheDocument();
-    enter('Bridge flow', 'lots');
-    expect(screen.getByLabelText('Bridge flow')).toHaveValue('1');
-    enter('Bridge flow', '95%');
+    expect(within(settings).queryByRole('textbox', { name: 'Input for Wall Loops' })).not.toBeInTheDocument();
+    enter('Bridge Flow', 'lots');
+    expect(screen.getByRole('textbox', { name: 'Input for Bridge Flow' })).toHaveValue('1');
+    enter('Bridge Flow', '95%');
     // eslint-disable-next-line @typescript-eslint/naming-convention -- a Bambu Studio setting key.
     await expectPrintIntent({ model: 'x1c', settings: { bridge_flow: '95%' } });
 
@@ -1102,8 +1107,8 @@ describe('Print pane Bambu Studio mode', () => {
 
     // A changed setting after slicing makes the slice stale, as a changed option does.
     await user.clear(within(settings).getByRole('searchbox', { name: 'Filter settings' }));
-    await openGroup(user, /^Strength/u);
-    enter('Wall loops', '4');
+    await openGroup(user, 'Strength');
+    enter('Wall Loops', '4');
     expect(
       await screen.findByText('Options changed since this slice. Slice again to send the current settings.'),
     ).toBeInTheDocument();
@@ -1174,9 +1179,9 @@ describe('Print pane Bambu Studio mode', () => {
   it('reloads the settings for another process or filament and drops overrides the new presets lack', async () => {
     const user = userEvent.setup();
     const { studio } = await renderStudio();
-    await openGroup(user, /^Quality/u);
-    enter('Ironing speed', '40');
-    enter('Layer height', '0.16');
+    await openGroup(user, 'Quality');
+    enter('Ironing Speed', '40');
+    enter('Layer Height', '0.16');
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
     await expectPrintIntent({ model: 'x1c', settings: { ironing_speed: 40, layer_height: 0.16 } });
 
@@ -1195,9 +1200,11 @@ describe('Print pane Bambu Studio mode', () => {
     expect(
       await screen.findByText('1 changed setting does not exist in these presets and was dropped.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reset Layer height' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Layer height')).toHaveValue(0.16);
-    expect(screen.queryByLabelText('Ironing speed')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset Layer Height' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Input for Layer Height' })).toHaveValue('0.16');
+    await waitFor(() => {
+      expect(screen.queryByRole('textbox', { name: 'Input for Ironing Speed' })).not.toBeInTheDocument();
+    });
     // Fine lacks ironing, so the slice leaves it out; the project's file keeps it for presets that have it.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
     await expectPrintIntent({ model: 'x1c', preset: 'fine', settings: { ironing_speed: 40, layer_height: 0.16 } });
@@ -1222,9 +1229,9 @@ describe('Print pane Bambu Studio mode', () => {
         filaments: ['Bambu PETG Basic @BBL X1C'],
       });
     });
-    await openGroup(user, /^Temperatures/u);
+    await openGroup(user, 'Filament · Temperatures');
     await waitFor(() => {
-      expect(screen.getByLabelText('Nozzle temperature')).toHaveValue(255);
+      expect(screen.getByRole('textbox', { name: 'Input for Nozzle Temperature' })).toHaveValue('255');
     });
   });
 
@@ -1373,11 +1380,11 @@ describe('Print pane print settings file', () => {
     await user.click(screen.getByRole('button', { name: /^Advanced/u }));
     await user.click(
       within(await screen.findByRole('group', { name: 'Bambu Studio settings' })).getByRole('button', {
-        name: 'Strength',
+        name: 'Group: Strength',
       }),
     );
-    expect(screen.getByLabelText('Wall loops')).toHaveValue(3);
-    expect(reset('Wall loops')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Input for Wall Loops' })).toHaveValue('3');
+    expect(reset('Wall Loops')).toBeInTheDocument();
 
     summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));

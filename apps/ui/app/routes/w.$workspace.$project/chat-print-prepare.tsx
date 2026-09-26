@@ -22,7 +22,6 @@ import { cn } from '@taucad/ui/utils/cn';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { randomUuid } from '@taucad/utils/id';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
-import { BambuSettingsForm } from '#components/print/bambu-settings-form.js';
 import { BambuStudioPresets } from '#components/print/bambu-studio-presets.js';
 import type { BambuTray } from '#components/print/bambu-studio-presets.js';
 import { isRealBambuPrinter, useBambuStudio } from '#components/print/use-bambu-studio.js';
@@ -1017,16 +1016,92 @@ function SliceControls({ prepare }: { readonly prepare: PrintPrepare }): React.J
   );
 }
 
+type BambuSettings = NonNullable<BambuStudioMode['settings']>;
+
+const asSchema = (value: unknown): JSONSchema7 | undefined =>
+  isRecordObject(value) ? (value as JSONSchema7) : undefined;
+
+/**
+ * Bambu Studio's settings as one level of groups, process then filament, for the shared Parameters
+ * form: its rows, search and reset marks are the parameters' own.
+ *
+ * @param settings - The schema and values of the selected presets, nested scope → group → key.
+ * @returns The grouped schema with the presets' values as defaults, and each setting's group.
+ */
+type BambuSettingsFormModel = Readonly<{ resolved: ResolvedSchema; groupOf: ReadonlyMap<string, string> }>;
+
+const bambuSettingsForm = (settings: BambuSettings): BambuSettingsFormModel => {
+  const properties: Record<string, JSONSchema7> = {};
+  const defaults: Record<string, unknown> = {};
+  const groupOf = new Map<string, string>();
+  for (const { id, label, scope } of settings.groups) {
+    const group = asSchema(asSchema(settings.schema.properties?.[scope])?.properties?.[id]);
+    if (group === undefined) {
+      continue;
+    }
+    properties[id] = { ...group, title: scope === 'filament' ? `Filament · ${label}` : label };
+    const values = asSchema(settings.values[scope]) as Record<string, unknown> | undefined;
+    defaults[id] = values?.[id] ?? {};
+    for (const key of Object.keys(group.properties ?? {})) {
+      groupOf.set(key, id);
+    }
+  }
+  return { resolved: { schema: { type: 'object', properties }, defaults }, groupOf };
+};
+
 /** Bambu Studio's settings for the selected presets, once they have loaded. */
 function BambuStudioSettings({ studio }: { readonly studio: BambuStudioMode }): React.JSX.Element {
-  return studio.settings ? (
-    <div className='rounded-lg border border-border/70 bg-card p-2'>
-      <BambuSettingsForm
-        settings={studio.settings}
-        defaults={studio.defaults}
-        overrides={studio.overrides}
-        onCommit={studio.setSetting}
-        onReset={studio.resetSetting}
+  const { settings, overrides, setSettings } = studio;
+  const form = useMemo(() => (settings ? bambuSettingsForm(settings) : undefined), [settings]);
+  const manifest = useCompiledConfigurationManifest('bambu-studio', 'print/settings', form?.resolved);
+  /* Other presets keep the last form on screen until theirs compiles, so open groups stay open. */
+  const [shown, setShown] = useState<Readonly<{ form: BambuSettingsFormModel; manifest: ParameterManifest }>>();
+  if (form !== undefined && manifest !== undefined && (shown?.form !== form || shown.manifest !== manifest)) {
+    setShown({ form, manifest });
+  }
+  const parameters = useMemo(() => {
+    const nested: Record<string, Record<string, unknown>> = {};
+    for (const [key, value] of Object.entries(overrides)) {
+      const group = shown?.form.groupOf.get(key);
+      if (group !== undefined) {
+        nested[group] = { ...nested[group], [key]: value };
+      }
+    }
+    return nested;
+  }, [shown, overrides]);
+  const change = useCallback(
+    (modified: Record<string, unknown>) => {
+      if (shown === undefined) {
+        return;
+      }
+      const values: Record<string, unknown> = {};
+      for (const group of Object.values(modified)) {
+        if (isRecordObject(group)) {
+          Object.assign(values, group);
+        }
+      }
+      // Only this form's settings: one these presets lack stays in the print intent for presets that have it.
+      setSettings(shown.form.groupOf.keys(), values);
+    },
+    [shown, setSettings],
+  );
+  return shown ? (
+    <div
+      role='group'
+      aria-label='Bambu Studio settings'
+      className='overflow-hidden rounded-lg border border-border/70 bg-card'
+    >
+      <Parameters
+        parameters={parameters}
+        defaultParameters={shown.form.resolved.defaults}
+        jsonSchema={shown.form.resolved.schema as RJSFSchema}
+        searchPlaceholder='Filter settings'
+        isInitialExpanded={false}
+        units={printUnits}
+        parameterManifest={shown.manifest}
+        parameterEdit={{ kind: 'transient' }}
+        emptyMessage='No Bambu Studio settings'
+        onParametersChange={change}
       />
     </div>
   ) : (

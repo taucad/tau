@@ -144,16 +144,14 @@ describe('framing the print', () => {
   const x1c = derivePrinterGeometry(x1cReferenceGeometry);
   const part: PrinterBounds = { min: [108, 108, 0], max: [158, 158, 24] };
 
-  it('should widen the part halfway to the plate and span the finished plate to the chamber above the toolhead', () => {
+  it('should frame the whole plate with the part on it, from the finished plate to just above the nozzle', () => {
     const box = framedPrintBox(x1c, part);
-    expect(box.min[0]).toBeCloseTo(108 * 0.5, 6);
-    expect(box.max[0]).toBeCloseTo(158 + 98 * 0.5, 6);
-    expect(box.min[1]).toBeCloseTo(108 * 0.5, 6);
-    // X1C: the plate descends 24 mm below the nozzle plane; the carriage tops out 44 mm above it, plus 50 mm of chamber.
+    expect([box.min[0], box.min[1], box.max[0], box.max[1]]).toEqual([0, 0, 256, 256]);
+    // X1C: the plate descends 24 mm below the nozzle plane, 4 mm thick; 12 mm above the nozzle stays in frame.
     expect(box.min[2]).toBe(-28);
-    expect(box.max[2]).toBe(94);
+    expect(box.max[2]).toBe(12);
     const slinger = framedPrintBox(derivePrinterGeometry(bedSlinger), { min: [90, 90, 0], max: [130, 130, 30] });
-    expect([slinger.min[2], slinger.max[2]]).toEqual([-4, 124]);
+    expect([slinger.min[2], slinger.max[2]]).toEqual([-4, 42]);
     // A toolpath that wanders off the plate never widens the framing past it.
     const wide = framedPrintBox(x1c, { min: [-40, 0, 0], max: [300, 265, 10] });
     expect([wide.min[0], wide.max[0], wide.max[1]]).toEqual([0, 256, 256]);

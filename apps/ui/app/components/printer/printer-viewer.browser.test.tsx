@@ -196,7 +196,7 @@ describe('Printer viewer framing', () => {
       resize(frame, [570, 720]);
       await nextFrames(8);
       await capture(frame, `printer-570-${theme}.png`);
-      expectFramed(await measurePrint(scene), 0.2);
+      expectFramed(await measurePrint(scene), 0.1);
     });
   }
 
@@ -205,7 +205,7 @@ describe('Printer viewer framing', () => {
     const { frame, scene } = await mount('dark', [420, 710]);
     await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
     await capture(frame, 'printer-420-dark.png');
-    expectFramed(await measurePrint(scene), 0.2);
+    expectFramed(await measurePrint(scene), 0.1);
   });
 
   it("keeps the person's zoom across a resize until they frame the print again", async () => {
@@ -213,7 +213,7 @@ describe('Printer viewer framing', () => {
     const { frame, scene } = await mount('light', [570, 720]);
     await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
     const framed = await measurePrint(scene);
-    expectFramed(framed, 0.2);
+    expectFramed(framed, 0.1);
 
     // Zoom in with the wheel until the print is clearly larger than framed; each step settles before the next.
     let zoomed = framed;
@@ -240,7 +240,7 @@ describe('Printer viewer framing', () => {
     fireEvent.click(within(frame).getByRole('button', { name: 'Frame the print' }));
     await nextFrames(60);
     const reframed = await measurePrint(scene);
-    expectFramed(reframed, 0.2);
+    expectFramed(reframed, 0.1);
     expect(reframed.width).toBeLessThan(afterResize.width);
     await capture(frame, 'printer-reframed-light.png');
   });
@@ -258,6 +258,6 @@ describe('Printer viewer framing', () => {
     expect(within(hud).getByText('Machine').nextElementSibling?.textContent).toContain('Workshop X1C');
     await nextFrames(6);
     await capture(frame, 'printer-live-dark.png');
-    expectFramed(await measurePrint(scene), 0.2);
+    expectFramed(await measurePrint(scene), 0.1);
   });
 });

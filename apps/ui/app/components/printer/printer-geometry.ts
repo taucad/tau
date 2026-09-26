@@ -267,17 +267,13 @@ export type PrinterCameraPose = Readonly<{
 
 /** The eye looks from the front right, above the plate: degrees round from the front, and up from level. */
 const viewAzimuth = 32;
-const viewElevation = 16;
+const viewElevation = 30;
 /** Share of the view the framed box fills on its binding axis. */
 const framingFill = 0.88;
-/** How far the framed box widens from the part toward the whole plate, 0 to 1. */
-const plateContext = 0.5;
-/** Millimetres of chamber kept in frame above the toolhead: the gantry, the lid and the base of the material unit. */
-const headroomContext = 50;
+/** Millimetres kept in frame above the nozzle plane, so the nozzle tip shows over the part. */
+const nozzleContext = 12;
 /** Millimetres the eye keeps outside the enclosure, so no near wall or door frame sits on the lens. */
 const enclosureClearance = 20;
-
-const clamp = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value));
 
 const corners = (box: PrinterBounds): Array<readonly [number, number, number]> =>
   [box.min[0], box.max[0]].flatMap((x) =>
@@ -285,31 +281,28 @@ const corners = (box: PrinterBounds): Array<readonly [number, number, number]> =
   );
 
 /**
- * The box the camera frames: the part, widened toward the plate for context,
- * from the plate at the finished height up to some chamber above the toolhead.
+ * The box the camera frames: the whole build plate with the part on it, from the plate at the
+ * finished height up to just above the nozzle. The model and the plate are the subject; the
+ * enclosure, gantry and material unit stay around them as context.
  *
  * @param geometry - The machine.
  * @param part - The part's bounds in the plate frame, or the whole toolpath's when the G-code labels no part.
  * @returns The box in world space.
  */
 export const framedPrintBox = (
-  geometry: Pick<PrinterGeometry, 'buildVolume' | 'motion' | 'gantry'>,
+  geometry: Pick<PrinterGeometry, 'buildVolume' | 'motion'>,
   part: PrinterBounds,
 ): PrinterBounds => {
   const [width, depth] = geometry.buildVolume;
   // ponytail: frames the finished part, not the end-of-print plate drop; a slicer that lowers the plate far
   // after the last layer takes the part below the frame for that final move.
   const height = Math.max(0, part.max[2]);
-  // Above the nozzle: the carriage, then some chamber.
-  const above = geometry.gantry.beamZ + geometry.gantry.carriageSize[2] / 2 + headroomContext;
   const [bottom, top] =
-    geometry.motion === 'plate-descends' ? [-height - plateThickness, above] : [-plateThickness, height + above];
-  // A toolpath that wanders off the plate (home, purge, park moves) never widens the framing past it.
-  const widen = (value: number, edge: number): number => value + (edge - value) * plateContext;
-  return {
-    min: [widen(clamp(part.min[0], 0, width), 0), widen(clamp(part.min[1], 0, depth), 0), bottom],
-    max: [widen(clamp(part.max[0], 0, width), width), widen(clamp(part.max[1], 0, depth), depth), top],
-  };
+    geometry.motion === 'plate-descends'
+      ? [-height - plateThickness, nozzleContext]
+      : [-plateThickness, height + nozzleContext];
+  // The whole plate, whatever the toolpath's home, purge or park moves reach.
+  return { min: [0, 0, bottom], max: [width, depth, top] };
 };
 
 /**

@@ -62,6 +62,7 @@ export type ExampleManifest = {
     | 'table'
     | 'tau-wordmark'
     | 'tray'
+    | 'turbofan'
     | 'v8-engine'
     | 'v8-engine-rev2'
     | 'vase'

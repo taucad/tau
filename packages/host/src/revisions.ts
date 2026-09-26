@@ -57,6 +57,7 @@ import {
   readRevisionLog,
   readRevisionPlace,
   publishOverHttp,
+  readRemoteStorageOverHttp,
   registerProjectOverHttp,
   tauRemoteUrl,
   watchRevisionStream,
@@ -789,6 +790,18 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
               },
               handlers,
             ),
+          /* D18: the owner's usage, for the Sync region's `x of 1 GB`; a
+           * signed-out host has no figure to show rather than an error. */
+          remoteStorage: async () => {
+            const credential = options.tauCredential?.();
+            return credential === undefined
+              ? undefined
+              : readRemoteStorageOverHttp(
+                  apiBaseUrl,
+                  { kind: 'bearer', authorization: credential.authorization },
+                  projectId,
+                );
+          },
           registerRemoteProject: async (id: string) => {
             const credential = options.tauCredential?.();
             if (credential === undefined) {

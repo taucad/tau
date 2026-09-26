@@ -49,7 +49,7 @@ describe('tauPlanCatalog', () => {
     expect(pro?.features).toContain('Tau Cloud backup and sync — 10 GB (Coming Soon)');
     expect(enterprise?.features).toContain('Tau Cloud backup and sync — 100 GB (Coming Soon)');
     /* EQ2: a free account may connect GitHub, so Pro inherits it through "Everything in Free". */
-    expect(free?.features).toContain('GitHub connection (Coming Soon)');
-    expect(pro?.features).not.toContain('GitHub connection (Coming Soon)');
+    expect(free?.features).toContain('GitHub connection');
+    expect(pro?.features).not.toContain('GitHub connection');
   });
 });

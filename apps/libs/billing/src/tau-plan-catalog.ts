@@ -64,7 +64,7 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
       'Export to all formats',
       'Public share links',
       backupFeature('free'),
-      'GitHub connection (Coming Soon)',
+      'GitHub connection',
     ],
     cta: { label: 'Start Creating Free', kind: 'signup' },
     popular: false,

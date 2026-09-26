@@ -211,19 +211,23 @@ describe('createSerialGeoSpecRunner', () => {
     }
   });
 
-  it('should share file bundles across sequential runs but not with an overlapping run', async () => {
+  it('should share file bundles across sequential and overlapping runs without sharing a binding', async () => {
     const runner = createSerialGeoSpecRunner(runnerOptions(twoFiles));
-    const bundleOf = async () => {
+    const runFirstFile = async () => {
       const result = await runner.run({ files: ['first.geospec.ts'] });
-      return result.files[0]?.result.bundle;
+      return result.files[0]?.result;
     };
 
-    const cached = await bundleOf();
+    const first = await runFirstFile();
+    const cached = first?.bundle;
     expect(cached).toBeDefined();
-    expect(await bundleOf()).toBe(cached);
-    const [sole, overlapping] = await Promise.all([bundleOf(), bundleOf()]);
-    expect(sole).toBe(cached);
-    expect(overlapping).not.toBe(cached);
+    const sequential = await runFirstFile();
+    expect(sequential?.bundle).toBe(cached);
+    const overlapping = await Promise.all([runFirstFile(), runFirstFile()]);
+    for (const result of overlapping) {
+      expect(result?.bundle).toBe(cached);
+      expect(result?.success && result.tests.map(({ name }) => name)).toStrictEqual(['passes']);
+    }
     await runner.close();
   });
 

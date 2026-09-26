@@ -5,7 +5,8 @@ use sha2::{Digest, Sha256};
 
 const CORPUS_SHA256: &str = "c46c089b0d5097e862e606ed2866dea53dd25a6df207c044c3172d6dc9e100c4";
 const VERIFIER_SOURCE_HASH: &str =
-    "79cf6bca840e45dd5703b6892e5c5a75e27e2ec67ff61d03703d602c41fb6ed4";
+    include_str!("fixtures/current-profile-v5/verifier-source-hash.txt");
+const NUMERIC_PROFILE: &str = include_str!("fixtures/current-profile-v5/numeric-profile.txt");
 
 fn verifier_source_hash() -> String {
     let value = std::env::var("GEOSPEC_F1_VERIFIER_SOURCE_HASH")
@@ -39,11 +40,11 @@ fn releases_verified_plate_capacity_in_healthy_sessions() {
     let mut plan: Value =
         serde_json::from_str(case["canonicalPlanUtf8"].as_str().unwrap()).unwrap();
     plan["registryVersion"] = json!(5);
-    plan["numericProfile"] = json!("geospec-st-prototypes-v4");
+    plan["numericProfile"] = json!(NUMERIC_PROFILE);
     let plan = canonicalize(&serde_json::to_vec(&plan).unwrap()).unwrap();
     let mut expected: Value =
         serde_json::from_str(case["neutralResultUtf8"].as_str().unwrap()).unwrap();
-    expected["numericProfile"] = json!("geospec-st-prototypes-v4");
+    expected["numericProfile"] = json!(NUMERIC_PROFILE);
     expected["results"][0]["evidence"]["planHash"] = json!(format!("{:x}", Sha256::digest(&plan)));
     expected["results"][0]["evidence"]["verifierSourceHash"] = json!(verifier_source_hash());
     let expected = canonicalize(&serde_json::to_vec(&expected).unwrap()).unwrap();

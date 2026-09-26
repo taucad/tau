@@ -1,5 +1,7 @@
 //! Pure, deterministic selector parsing and resolution over retained neutral facts.
 
+use std::collections::{HashMap, HashSet};
+
 use super::node24_hypot3;
 use crate::{
     backend::{
@@ -1785,20 +1787,31 @@ pub(crate) fn resolve_budgeted_with_brep(
             {
                 return within.unwrap();
             }
-            let allowed: Option<Vec<_>> = within.map(|selection| {
+            let allowed: Option<HashSet<_>> = within.map(|selection| {
                 selection
                     .entities
                     .into_iter()
                     .filter_map(|entity| entity.occurrence_path)
                     .collect()
             });
+            let occurrences: HashMap<_, _> = if of.is_some() {
+                // The former linear find selected the first row for duplicate paths.
+                index
+                    .occurrences
+                    .iter()
+                    .rev()
+                    .map(|row| (row.path.as_str(), row))
+                    .collect()
+            } else {
+                HashMap::new()
+            };
             let mut evaluated = Vec::new();
             for entity in query_pool(*kind, index) {
                 let in_scope = match of {
                     Some(scope) => match entity
                         .occurrence_path
                         .as_ref()
-                        .and_then(|path| index.occurrences.iter().find(|row| &row.path == path))
+                        .and_then(|path| occurrences.get(path.as_str()))
                     {
                         Some(row) => match occurrence_matches(row, scope, regex) {
                             Ok(value) => value,
@@ -2461,6 +2474,91 @@ mod tests {
         fn test(&self, pattern: &str, _: &str, value: &str) -> Result<bool, EcmaRegexError> {
             Ok(pattern == value)
         }
+    }
+
+    #[test]
+    fn query_path_lookup_matches_linear_selection_with_duplicate_paths() {
+        let mut index = SelectorIndex::default();
+        for number in 0..32 {
+            let path = format!("part{number}");
+            index.occurrences.push(OccurrenceRow {
+                path: path.clone(),
+                product_name: if number == 31 { "first" } else { "other" }.into(),
+                instance_name: None,
+                transform: [0.0; 12],
+                occurrence: number,
+                ordinal_path: vec![number],
+                bounds: None,
+            });
+            for face in 0..4 {
+                let mut entity = plane(&format!("face:{path}#{face}"), face, [0.0; 3]);
+                entity.occurrence_path = Some(path.clone());
+                entity.facts.area = Some(if face == 3 { 2.0 } else { 1.0 });
+                index.faces.push(entity);
+            }
+        }
+        let mut duplicate = index.occurrences[31].clone();
+        duplicate.product_name = "second".into();
+        index.occurrences.push(duplicate);
+
+        let within = Selector::Occurrence {
+            name: None,
+            path: Some(TextPattern::Exact("part31".into())),
+            expect: Cardinality::Many,
+        };
+        let allowed: Vec<_> = resolve(&within, &index, &TestRegex)
+            .entities
+            .into_iter()
+            .filter_map(|entity| entity.occurrence_path)
+            .collect();
+        let mut visits = 0;
+        for (scope, expected_status) in [
+            ("first", SelectionStatus::Resolved),
+            ("second", SelectionStatus::Unmatched),
+        ] {
+            let query = Query {
+                within: Some(Box::new(within.clone())),
+                area: Some(NumericRange::Near(1.0)),
+                ..Query::default()
+            };
+            let selector = Selector::Query {
+                kind: EntityType::Face,
+                of: Some(TextPattern::Exact(scope.into())),
+                query: query.clone(),
+                expect: Cardinality::Exactly(3),
+            };
+            let mut matches = Vec::new();
+            let mut near = Vec::new();
+            for entity in &index.faces {
+                let row = index.occurrences.iter().find(|row| {
+                    visits += 1;
+                    entity.occurrence_path.as_deref() == Some(row.path.as_str())
+                });
+                if row.is_some_and(|row| {
+                    occurrence_matches(row, &TextPattern::Exact(scope.into()), &TestRegex).unwrap()
+                }) && allowed.contains(entity.occurrence_path.as_ref().unwrap())
+                {
+                    if predicate_failure(&query, entity, None, None)
+                        .unwrap()
+                        .is_none()
+                    {
+                        matches.push(entity.clone());
+                    } else {
+                        near.push(entity.clone());
+                    }
+                }
+            }
+            let former = cardinality(
+                matches,
+                Cardinality::Exactly(3),
+                Stability::DerivedQuery,
+                near,
+            );
+            let current = resolve(&selector, &index, &TestRegex);
+            assert_eq!(current.status, expected_status);
+            assert_eq!(current, former);
+        }
+        assert_eq!(visits, 4_224);
     }
 
     struct ProbeBrep;

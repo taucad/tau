@@ -13,11 +13,118 @@
 # Optional env vars:
 #   GEOSPEC_DELIVERY_CACHE  Prepared source cache used by delivery materials.
 #   GEOSPEC_OCCT_PREFIX     Qualified OCCT prefix inventoried by the relink kit.
+#   GEOSPEC_MT_ASSET_RECEIPT        Explicit per-permit MT product asset receipt.
+#   GEOSPEC_MT_QUALIFICATION_RECEIPT  Independent Node/browser/pthread parity qualification.
 # A supported Node 24/26 and the workspace-selected pnpm must be on PATH.
 # Usage: pnpm nx run geospec-engine-native:assemble-package
 # Exit codes: 0 success; 1 missing build output or assembly failure.
 
 set -euo pipefail
+
+stage_mt_assets() {
+  if [[ -z "${GEOSPEC_MT_ASSET_RECEIPT:-}" && -z "${GEOSPEC_MT_QUALIFICATION_RECEIPT:-}" ]]; then
+    return
+  fi
+  if [[ -z "${GEOSPEC_MT_ASSET_RECEIPT:-}" || -z "${GEOSPEC_MT_QUALIFICATION_RECEIPT:-}" ]]; then
+    printf 'MT packaging requires both asset and qualification receipts.\n' >&2
+    exit 1
+  fi
+  node --input-type=module - "$GEOSPEC_MT_ASSET_RECEIPT" "$GEOSPEC_MT_QUALIFICATION_RECEIPT" "$1" <<'JS'
+import { createHash } from 'node:crypto';
+import { copyFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+
+const [assetPath, qualificationPath, stage] = process.argv.slice(2);
+const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const requireMatch = (condition, message) => {
+  if (!condition) throw new Error(`MT package closure: ${message}`);
+};
+requireMatch(basename(assetPath) === 'geospec_engine_native.mt.json', 'asset receipt filename');
+const product = realpathSync(dirname(assetPath));
+requireMatch(!realpathSync(qualificationPath).startsWith(`${product}/`), 'qualification must be independent of the build product');
+const assetBytes = readFileSync(assetPath);
+const asset = JSON.parse(assetBytes);
+const qualification = JSON.parse(readFileSync(qualificationPath));
+requireMatch(asset.schema === 'geospec-mixed-mt-assets-v1', 'asset receipt schema');
+requireMatch(Number.isSafeInteger(asset.permits) && asset.permits > 0 && asset.permits <= 4_294_967_295, 'permits');
+requireMatch(
+  qualification.schema === 'geospec-mt-qualification-v1' &&
+    qualification.verdict === 'passed' &&
+    qualification.permits === asset.permits &&
+    qualification.assetReceiptSha256 === sha256(assetBytes) &&
+    qualification.checks?.nodePthreads === true &&
+    qualification.checks?.browserPthreads === true &&
+    qualification.checks?.stParity === true,
+  'independent qualification receipt',
+);
+const assets = [
+  ['buildReceipt', 'build-receipt.json'],
+  ['glue', 'geospec_engine_native.mjs'],
+  ['wasm', 'geospec_engine_native.wasm'],
+];
+const verified = new Map();
+for (const [field, filename] of assets) {
+  const declared = asset[field];
+  requireMatch(
+    declared?.file === filename &&
+      Number.isSafeInteger(declared.bytes) &&
+      declared.bytes > 0 &&
+      /^[0-9a-f]{64}$/.test(declared.sha256),
+    `${field} declaration`,
+  );
+  const source = resolve(product, filename);
+  requireMatch(realpathSync(source) === source, `${field} must be a regular product file`);
+  const bytes = readFileSync(source);
+  requireMatch(bytes.length === declared.bytes && sha256(bytes) === declared.sha256, `${field} bytes`);
+  verified.set(filename, bytes);
+}
+requireMatch(
+  JSON.stringify(asset.worker) === JSON.stringify(asset.glue),
+  'pthread worker must be the verified main ES module',
+);
+const build = JSON.parse(verified.get('build-receipt.json'));
+requireMatch(
+    build.schema === 'geospec-mixed-build-receipt-mt-v1' &&
+    build.variant === 'mt' &&
+    isAbsolute(build.output) &&
+    build.mtSettings?.executionPermits === asset.permits &&
+    /^[0-9a-f]{40}$/.test(build.sourceRevision) &&
+    build.sourceRevision === qualification.sourceRevision &&
+    qualification.buildReceiptSha256 === asset.buildReceipt.sha256,
+  'qualified build identity',
+);
+for (const [field, filename] of assets.slice(1)) {
+  const declared = asset[field];
+  requireMatch(
+    build.artifacts?.some(
+      (entry) =>
+        entry.path === join(build.output, filename) &&
+        entry.bytes === declared.bytes &&
+        entry.sha256 === declared.sha256,
+    ),
+    `${field} build artifact`,
+  );
+}
+const target = join(stage, 'dist/bindings/mt-wasm', `permits-${asset.permits}`);
+mkdirSync(target, { recursive: true });
+for (const [, filename] of assets) copyFileSync(join(product, filename), join(target, filename));
+copyFileSync(assetPath, join(target, 'geospec_engine_native.mt.json'));
+copyFileSync(qualificationPath, join(target, 'qualification.json'));
+const manifestPath = join(stage, 'package.json');
+const manifest = JSON.parse(readFileSync(manifestPath));
+const exportName = `./mt-assets/permits-${asset.permits}/*`;
+const exportTarget = `./dist/bindings/mt-wasm/permits-${asset.permits}/*`;
+requireMatch(manifest.exports?.[exportName] === undefined, 'MT export already exists');
+manifest.exports[exportName] = exportTarget;
+manifest.publishConfig.exports[exportName] = exportTarget;
+writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+JS
+}
+
+if [[ "${1:-}" == '--stage-mt-assets' ]]; then
+  stage_mt_assets "${2:?Supply package staging root}"
+  exit 0
+fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PACKAGE_ROOT="$REPO_ROOT/packages/geospec-engine-native"
@@ -60,6 +167,7 @@ PY
 
 pnpm --dir "$PACKAGE_ROOT" pack --out "$ASSEMBLY_ROOT/source-pack.tgz"
 tar -xzf "$ASSEMBLY_ROOT/source-pack.tgz" -C "$STAGED_ROOT" --strip-components=1
+stage_mt_assets "$STAGED_ROOT"
 rm -rf "$STAGED_ROOT/licenses"
 cp -R "$ASSEMBLY_ROOT/licenses" "$STAGED_ROOT/licenses"
 pnpm --dir "$PACKAGE_ROOT" exec napi create-npm-dirs --cwd "$STAGED_ROOT" --npm-dir npm

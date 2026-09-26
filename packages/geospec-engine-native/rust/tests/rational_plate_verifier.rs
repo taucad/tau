@@ -13,7 +13,8 @@ use geospec_engine_native_core::certificates::{
 use serde_json::{json, Value};
 
 const VERIFIER_SOURCE_HASH: &str =
-    "79cf6bca840e45dd5703b6892e5c5a75e27e2ec67ff61d03703d602c41fb6ed4";
+    include_str!("fixtures/current-profile-v5/verifier-source-hash.txt");
+const NUMERIC_PROFILE: &str = include_str!("fixtures/current-profile-v5/numeric-profile.txt");
 
 fn verifier_source_hash() -> String {
     let value = std::env::var("GEOSPEC_F1_VERIFIER_SOURCE_HASH")
@@ -73,7 +74,7 @@ fn current_registry_f1_plan_reaches_independent_verifier_after_fresh_admission()
         .unwrap();
     let current: Value = serde_json::from_slice(&canonical).unwrap();
     assert_eq!(current["registryVersion"], 5);
-    assert_eq!(current["numericProfile"], "geospec-st-prototypes-v4");
+    assert_eq!(current["numericProfile"], NUMERIC_PROFILE);
     let mut observations = Vec::new();
     for registry in [5, 4] {
         let mut plan = current.clone();
@@ -126,7 +127,7 @@ fn current_registry_f1_plan_reaches_independent_verifier_after_fresh_admission()
     );
     assert_eq!(
         report["observations"][1]["independentVerifier"]["verified"], false,
-        "The independent verifier must reject the old registry4 profile"
+        "The independent verifier must reject the old registry4 envelope"
     );
     assert_eq!(
         report["observations"][1]["publicResult"]["errorCode"],
@@ -270,7 +271,7 @@ fn ordinary_bound_plans_verify_full_envelope_for_both_polarities() {
             let mut current: Value =
                 serde_json::from_str(plan["canonicalPlanUtf8"].as_str().unwrap()).unwrap();
             current["registryVersion"] = json!(5);
-            current["numericProfile"] = json!("geospec-st-prototypes-v4");
+            current["numericProfile"] = json!(NUMERIC_PROFILE);
             let current =
                 geospec_engine_native_core::canonicalize(&serde_json::to_vec(&current).unwrap())
                     .unwrap();

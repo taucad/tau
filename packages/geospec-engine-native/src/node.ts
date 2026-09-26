@@ -1,4 +1,5 @@
 import { Engine as NativeEngine, canonicalize as nativeCanonicalize } from '#native-binding';
+import { availableParallelism } from 'node:os';
 import {
   ProtocolError as HostProtocolError,
   appendHostObservationCopies,
@@ -25,9 +26,26 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
   #inner: NativeEngine | undefined;
   readonly #copies = { exact: true, inputCopies: 0n, inputBytes: 0n, outputCopies: 0n, outputBytes: 0n };
 
-  /** Create a resident-only engine or opt into authenticated filesystem cache storage. */
-  public constructor(cacheOptions?: HostCacheOptions) {
-    this.#inner = cacheOptions === undefined ? new NativeEngine() : new NativeEngine(cacheOptions);
+  /**
+   * Create a resident-only engine or opt into authenticated filesystem cache storage.
+   * @param cacheOptions - Optional authenticated cache location.
+   * @param executionPermits - Caller-inclusive CPU allocation; defaults to one.
+   */
+  public constructor(cacheOptions?: HostCacheOptions, executionPermits?: number) {
+    if (
+      executionPermits !== undefined &&
+      (!Number.isSafeInteger(executionPermits) || executionPermits < 1 || executionPermits > availableParallelism())
+    ) {
+      throw new HostProtocolError(
+        'invalid-request',
+        'Execution permits must be a positive integer including the caller and within the host cap.',
+      );
+    }
+    if (executionPermits === undefined) {
+      this.#inner = cacheOptions === undefined ? new NativeEngine() : new NativeEngine(cacheOptions);
+    } else {
+      this.#inner = new NativeEngine(cacheOptions, executionPermits);
+    }
   }
 
   /** Release the retained native engine and authenticated cache. */

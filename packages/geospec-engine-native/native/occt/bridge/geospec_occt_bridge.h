@@ -585,11 +585,21 @@ int geospec_occt_selected_continuous_domain(
     geospec_occt_selected_continuous_domain_result* output,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
+// STEP read and XDE transfer run under one process-wide lock. A document is
+// thread-confined: its const getters fill lazy slots and transfer buffers, so
+// only one thread at a time may use it (the Rust owner is !Send and !Sync).
 int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                            geospec_occt_document** out_document,
                            geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Private process-wide first-init handshake. Includes the calling thread.
+// A width mismatch refuses dedicated operations; ordinary calls stay serial.
+int geospec_occt_thread_pool_width(int requested, int* actual,
+                                   geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_release(geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 
+// Admission keeps source identity and addresses only. Source shape, occurrence
+// bounds, occurrence face/edge and whole-face numerics are computed on first
+// demand by their getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR.
 int geospec_occt_document_facts(const geospec_occt_document* document,
                                 geospec_occt_shape_facts* out_shape,
                                 double* out_source_unit_to_millimeters,
@@ -605,10 +615,28 @@ int geospec_occt_step_subject_metadata(
     size_t* out_free_shape_count, geospec_occt_string* schema,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
+enum geospec_occt_report_facet {
+  GEOSPEC_OCCT_REPORT_MESH = 1,
+  GEOSPEC_OCCT_REPORT_FACTS = 2
+};
+
+// Prepare the requested facets into the transfer slot. A successful copy+mesh
+// is retained with its history until a facts facet is prepared or the document
+// is freed, so facts after a mesh facet reuse the same meshed generation.
 int geospec_occt_report_prepare(
-    const geospec_occt_document* document,
+    const geospec_occt_document* document, uint32_t facets,
     geospec_occt_report_sizes* out_sizes,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Private control: caller proves a dedicated OCCT closure and exclusively owns
+// the caller-inclusive grant for this call. A copy+mesh built by the call runs
+// the mesher in the selected mode; facts stay serial. Zero is the plain call.
+int geospec_occt_report_prepare_dedicated(
+    const geospec_occt_document* document, uint32_t facets, int grant_width,
+    int* out_used_parallel, geospec_occt_report_sizes* out_sizes,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Diagnostic count of successful report copy+mesh generations.
+size_t geospec_occt_report_generation_builds(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_report_discard(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_report_document_facts(
@@ -653,6 +681,14 @@ int geospec_occt_occurrence(const geospec_occt_document* document, size_t index,
                             geospec_occt_string* product_label,
                             geospec_occt_string* name,
                             geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Same as geospec_occt_occurrence, but never computes the occurrence bounds;
+// out_occurrence->bounds is left zero.
+int geospec_occt_occurrence_structure(
+    const geospec_occt_document* document, size_t index,
+    geospec_occt_occurrence_facts* out_occurrence,
+    geospec_occt_string* label, geospec_occt_string* product_label,
+    geospec_occt_string* name,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_occurrence_identity(
     const geospec_occt_document* document, size_t index,
     geospec_occt_string* path, geospec_occt_string* product_name,
@@ -748,6 +784,13 @@ int geospec_occt_validity(const geospec_occt_document* document,
                           geospec_occt_validity_facts* out_validity,
                           geospec_occt_string* reason,
                           geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Private experiment: caller guarantees this OCCT library instance and a
+// caller-inclusive grant within its first-initialized pool cap for this call.
+int geospec_occt_validity_dedicated(
+    const geospec_occt_document* document, int grant_width,
+    int* out_used_parallel, geospec_occt_validity_facts* out_validity,
+    geospec_occt_string* reason,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_extrema(const geospec_occt_document* document,
                          geospec_occt_entity a, geospec_occt_entity b,
                          geospec_occt_extrema_result* out_extrema,
@@ -760,9 +803,21 @@ int geospec_occt_common_volume(
     const geospec_occt_document* document, uint32_t occurrence_a,
     uint32_t occurrence_b, geospec_occt_common_volume_result* out_common,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Private controls: caller proves a dedicated OCCT closure and exclusively
+// owns the caller-inclusive grant within its first-initialized pool cap.
+int geospec_occt_common_volume_dedicated(
+    const geospec_occt_document* document, uint32_t occurrence_a,
+    uint32_t occurrence_b, int grant_width, int* out_used_parallel,
+    geospec_occt_common_volume_result* out_common,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment(
     const geospec_occt_document* document, geospec_occt_entity subject,
     geospec_occt_entity target,
+    geospec_occt_regular_solid_containment_result* out_result,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_regular_solid_containment_dedicated(
+    const geospec_occt_document* document, geospec_occt_entity subject,
+    geospec_occt_entity target, int grant_width, int* out_used_parallel,
     geospec_occt_regular_solid_containment_result* out_result,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_cylinder_axial_extent(
@@ -789,6 +844,11 @@ int geospec_occt_circular_bores_prepare(
     const geospec_occt_document* document, size_t max_candidates,
     size_t retained_candidate_size, size_t retained_inventory_size,
     size_t* out_count,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_circular_bores_prepare_dedicated(
+    const geospec_occt_document* document, size_t max_candidates,
+    size_t retained_candidate_size, size_t retained_inventory_size,
+    int grant_width, int* out_used_parallel, size_t* out_count,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_circular_bore(
     const geospec_occt_document* document, size_t index,
@@ -866,6 +926,14 @@ int geospec_occt_minimum_wall_thickness(
 int geospec_occt_tessellate(const geospec_occt_document* document,
                             geospec_occt_entity entity,
                             double linear_deflection, double angular_deflection,
+                            double* positions, size_t position_capacity,
+                            uint32_t* triangles, size_t triangle_capacity,
+                            size_t* out_position_count, size_t* out_triangle_count,
+                            geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_tessellate_dedicated(const geospec_occt_document* document,
+                            geospec_occt_entity entity,
+                            double linear_deflection, double angular_deflection,
+                            int grant_width, int* out_used_parallel,
                             double* positions, size_t position_capacity,
                             uint32_t* triangles, size_t triangle_capacity,
                             size_t* out_position_count, size_t* out_triangle_count,

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import importlib
 import json
 import math
+import os
 import re
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol, Sequence
@@ -182,9 +183,23 @@ class GeoSpecEngine:
         work_unit_budget: int | None = None,
         cache_root: str | None = None,
         project_root: str | None = None,
+        execution_permits: int | None = None,
         native_engine: _NativeEngine | None = None,
         native_module: Any | None = None,
     ) -> None:
+        if execution_permits is not None:
+            process_cpu_count = getattr(os, "process_cpu_count", os.cpu_count)
+            host_cap = process_cpu_count() or 1
+            if (
+                type(execution_permits) is not int
+                or execution_permits < 1
+                or execution_permits > host_cap
+            ):
+                raise ValueError(
+                    "Execution permits must be a positive integer including the caller and within the host cap."
+                )
+            if native_engine is not None:
+                raise ValueError("execution_permits cannot configure an injected native_engine")
         if native_module is None:
             native_module = importlib.import_module("geospec_engine_native")
         self._native_module = native_module
@@ -193,9 +208,19 @@ class GeoSpecEngine:
         if native_engine is not None:
             native = native_engine
         elif cache_root is None:
-            native = native_module.Engine()
+            native = (
+                native_module.Engine()
+                if execution_permits is None
+                else native_module.Engine(execution_permits=execution_permits)
+            )
         else:
-            native = native_module.Engine(cache_root, project_root)
+            native = (
+                native_module.Engine(cache_root, project_root)
+                if execution_permits is None
+                else native_module.Engine(
+                    cache_root, project_root, execution_permits=execution_permits
+                )
+            )
         self._native: _NativeEngine | None = native
         self._next_claim = 0
         self._next_lifecycle = 0

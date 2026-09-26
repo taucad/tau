@@ -227,7 +227,8 @@ class PreparationContractTest(unittest.TestCase):
         for name, value in {'CACHE': self.cache, 'PACKAGE': self.package, 'RECIPE': self.recipe,
                             'RECIPE_PATH': self.recipe_path, 'SOURCE': self.cache / 'sources/occt',
                             'MIXED': self.prefix / 'install',
-                            'MIXED_INPUTS': self.cache / 'mixed-inputs-simd128.json'}.items():
+                            'MIXED_INPUTS': self.cache / 'mixed-inputs-simd128.json',
+                            'RUST': self.root / 'rust'}.items():
             self.stack.enter_context(patch.object(prepare, name, value))
         self.receipt_path = self.prefix / 'prefix-receipt.json'
         self.receipt = prepare.create_prefix_receipt(self.prefix, self.contract())
@@ -585,6 +586,53 @@ class PreparationContractTest(unittest.TestCase):
         self.assertNotIn(str(self.cache / 'occt-native/prefix-receipt.json'), inputs)
         for variable in prepare.SCHEDULING_VARIABLES:
             self.assertEqual(manifest['environment'][variable], '2')
+
+    def test_should_fetch_pinned_rust_src_registry_before_the_input_closure(self):
+        library = prepare.RUST / 'lib/rustlib/src/rust/library'
+        library.mkdir(parents=True)
+        (library / 'Cargo.toml').write_text('inert rust-src workspace')
+        lock = library / 'Cargo.lock'
+        events = []
+
+        def run(command, *args, **kwargs):
+            events.append(tuple(map(str, command[1:])))
+            # MT -Zbuild-std resolves the library members from the Rust prefix itself.
+            return json.dumps({'packages': [{'manifest_path': str(library / 'std/Cargo.toml')}]}) \
+                if 'metadata' in command else 'inert-head'
+
+        def prepare_with(pin):
+            with ExitStack() as mocked:
+                replacements = {
+                    'prepare_sources': None, 'validate_tools': None, 'prefix_context': self.context,
+                    'tool_paths': self.paths, 'environment': self.env, 'input_roots': [],
+                    'source_files': {self.recipe_path, self.builder}, 'libraries': [self.library],
+                }
+                for name, value in replacements.items():
+                    mocked.enter_context(patch.object(prepare, name, return_value=value))
+                mocked.enter_context(patch.object(prepare, 'RUST_SRC_LOCK_SHA256', pin))
+                mocked.enter_context(patch.object(prepare, 'run', side_effect=run))
+                closure = prepare.required_inputs
+                mocked.enter_context(patch.object(prepare, 'required_inputs', side_effect=lambda manifest:
+                                                  events.append(('closure',)) or closure(manifest)))
+                prepare.prepare_inputs(self.paths, self.env)
+
+        fetch = ('fetch', '--locked', '--manifest-path', str(library / 'Cargo.toml'))
+        lock.write_text('selected rust-src lock')
+        prepare_with(prepare.digest(lock))
+        self.assertLess(events.index(fetch), events.index(('closure',)))
+        self.assertTrue(prepare.MIXED_INPUTS.is_file())
+
+        prepare.MIXED_INPUTS.unlink()
+        events.clear()
+        with self.assertRaisesRegex(ValueError, 'Unselected rust-src library lock'):
+            prepare_with('0' * 64)
+        self.assertNotIn(fetch, events)
+        self.assertFalse(prepare.MIXED_INPUTS.exists())
+
+        # ST needs no rust-src; the MT builder refuses its absence before compiling.
+        lock.unlink()
+        prepare_with('0' * 64)
+        self.assertNotIn(fetch, events)
 
 
 class MixedRecipeMaterialTest(unittest.TestCase):

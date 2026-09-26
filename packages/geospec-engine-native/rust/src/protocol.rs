@@ -1,6 +1,6 @@
-// v4 admits the qualified prototype-preserving OCCT copy and fixed SIMD build.
-// Canonical equality is scoped to the certified producer/target profile.
-pub(crate) const NUMERIC_PROFILE: &str = "geospec-st-prototypes-v4";
+// v5 keeps the v4 prototype/SIMD arithmetic and qualifies evidence by demand.
+// Source-metadata verdicts no longer depend on unrelated report/mesh failures.
+pub(crate) const NUMERIC_PROFILE: &str = "geospec-demand-v5";
 
 use crate::{
     backend::{brep::BrepConnector, csg::CsgConnector},
@@ -196,6 +196,10 @@ impl Observations {
 pub struct Engine {
     pub(crate) observations: Rc<Observations>,
     pub(crate) subjects: HashMap<String, Rc<Subject>>,
+    /// Raw STEP digest to retained exact-source subjects; bounded by subject count.
+    pub(crate) step_sources: HashMap<String, Vec<String>>,
+    /// Full validated mesh closure to one successfully admitted subject.
+    pub(crate) mesh_sources: HashMap<String, String>,
     pub(crate) subject_generations: HashMap<String, u64>,
     pub(crate) owner: u64,
     pub(crate) next_generation: u64,
@@ -215,6 +219,8 @@ impl Default for Engine {
         Self {
             observations: Rc::default(),
             subjects: HashMap::new(),
+            step_sources: HashMap::new(),
+            mesh_sources: HashMap::new(),
             subject_generations: HashMap::new(),
             owner: next_engine_owner(),
             next_generation: 0,
@@ -291,6 +297,8 @@ impl Engine {
             brep: Some(brep),
             csg: RefCell::new(Some(csg)),
             subjects: HashMap::new(),
+            step_sources: HashMap::new(),
+            mesh_sources: HashMap::new(),
             subject_generations: HashMap::new(),
             owner: next_engine_owner(),
             next_generation: 0,

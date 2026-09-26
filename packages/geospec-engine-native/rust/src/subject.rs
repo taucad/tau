@@ -19,12 +19,13 @@ use crate::{
     },
     backend::{
         brep::{
-            Bounds, BrepEntity, BrepSubject, CircularBoreDisposition, CircularBoreInventory,
-            CircularBoreTermination, ContinuousWallDomain, ContinuousWallShape, DocumentFacts,
-            EdgeTreatmentCounts, EdgeTreatmentDisposition, EdgeTreatmentInventory,
-            EdgeTreatmentKind, LocatedFace, NominalCylindricalBand, RegularSolidContainment,
-            ReportedBrepBundle, SelectedContinuousDomain, StepSubjectMetadata, SurfaceFacts,
-            TessellationProfile, MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
+            Bounds, BrepAdmissionFacts, BrepEntity, BrepSubject, CircularBoreDisposition,
+            CircularBoreInventory, CircularBoreTermination, ContinuousWallDomain,
+            ContinuousWallShape, DocumentFacts, EdgeTreatmentCounts, EdgeTreatmentDisposition,
+            EdgeTreatmentInventory, EdgeTreatmentKind, LocatedFace, NominalCylindricalBand,
+            OccurrenceFacts, RegularSolidContainment, ReportedBrepBundle, SelectedContinuousDomain,
+            StepSubjectMetadata, SurfaceFacts, TessellationProfile, MAX_CIRCULAR_BORE_CANDIDATES,
+            MAX_CIRCULAR_BORE_OWNED_BYTES,
         },
         csg_scope::CsgScope,
         BackendError, BackendErrorKind, TriangleMesh,
@@ -62,6 +63,8 @@ pub(crate) struct Subject {
     pub semantic_identity: OnceCell<SubjectIdentity>,
     pub format: SubjectFormat,
     pub source_unit: String,
+    /// Verified source metadata from successful STEP admission, not report generation.
+    pub(crate) step_admission_facts: Option<BrepAdmissionFacts>,
     pub rational_plate: Option<crate::certificates::engine::RationalSubject>,
     pub parallel_plane: Option<crate::certificates::parallel_plane::SourceProof>,
     /// Original STEP bytes above the F2 source ceiling; never inferred from XDE doubles.
@@ -78,8 +81,13 @@ pub(crate) struct Subject {
     pub mesh_record: OnceCell<Rc<MeshAnalysisRecord>>,
     pub brep: Option<Box<dyn BrepSubject>>,
     mesh_analysis: OnceCell<Rc<MeshAnalysis>>,
+    /// Report mesh facet; its f32 projection is `mesh_record`.
+    report_mesh: OnceCell<RetainedReportMesh>,
+    /// Report facts facet, carrying the retained report mesh.
     report_bundle: OnceCell<Rc<ReportedBrepBundle>>,
     report_bytes: OnceCell<u64>,
+    /// Structure-only occurrences are replaced once bounds are demanded.
+    source_occurrences: RefCell<Option<RetainedSourceOccurrences>>,
     circular_bores: OnceCell<Rc<CircularBoreInventory>>,
     edge_treatment_counts: OnceCell<EdgeTreatmentCounts>,
     edge_treatments: OnceCell<Rc<EdgeTreatmentInventory>>,
@@ -98,6 +106,19 @@ struct RetainedTessellation {
     linear_bits: u64,
     angular_bits: u64,
     mesh: Rc<TriangleMesh>,
+    bytes: u64,
+}
+
+struct RetainedReportMesh {
+    mesh: Rc<TriangleMesh>,
+    /// The mesh plus its f32 soup projection.
+    bytes: u64,
+}
+
+struct RetainedSourceOccurrences {
+    facts: Rc<[OccurrenceFacts]>,
+    /// False for the structure route, whose `bounds` are unmeasured.
+    bounds: bool,
     bytes: u64,
 }
 
@@ -129,6 +150,7 @@ impl Subject {
             semantic_identity: OnceCell::new(),
             format,
             source_unit,
+            step_admission_facts: None,
             rational_plate: None,
             parallel_plane: None,
             pmi_source: None,
@@ -143,8 +165,10 @@ impl Subject {
             mesh_record: OnceCell::new(),
             brep: None,
             mesh_analysis: OnceCell::new(),
+            report_mesh: OnceCell::new(),
             report_bundle: OnceCell::new(),
             report_bytes: OnceCell::new(),
+            source_occurrences: RefCell::new(None),
             circular_bores: OnceCell::new(),
             edge_treatment_counts: OnceCell::new(),
             edge_treatments: OnceCell::new(),
@@ -197,7 +221,7 @@ impl Subject {
             }) {
                 return Ok(Rc::clone(&entry.mesh));
             }
-            let report_entry = u64::from(self.report_bundle.get().is_some());
+            let report_entry = u64::from(self.report_mesh.get().is_some());
             if retained.len() as u64 + report_entry
                 >= u64::from(self.retention_limits.max_mesh_entries)
             {
@@ -225,12 +249,13 @@ impl Subject {
         let mut retained = self.tessellations.borrow_mut();
         let total = retained.iter().fold(
             bytes
-                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.retained_report_bytes())
                 .saturating_add(self.continuous_owned_bytes())
                 .saturating_add(self.f2_owned_bytes())
                 .saturating_add(self.circular_bore_owned_bytes())
                 .saturating_add(self.edge_treatment_owned_bytes())
-                .saturating_add(self.step_metadata_owned_bytes()),
+                .saturating_add(self.step_metadata_owned_bytes())
+                .saturating_add(self.source_occurrence_owned_bytes()),
             |sum, entry| sum.saturating_add(entry.bytes),
         );
         if total > self.retention_limits.max_mesh_bytes {
@@ -297,6 +322,24 @@ impl Subject {
         })
     }
 
+    /// The report mesh facet alone, so a failure confined to report facts
+    /// cannot refuse mesh claims. Connectors without separate facets report
+    /// both together.
+    pub(crate) fn report_mesh(&self) -> Result<(), BackendError> {
+        let Some(brep) = &self.brep else {
+            return Ok(());
+        };
+        self.cache_identity()?;
+        if self.report_mesh.get().is_some() {
+            self.observations.add(WorkCounter::DerivedHits, 1);
+            return Ok(());
+        }
+        match brep.reported_mesh()? {
+            Some(mesh) => self.publish_report(Some(mesh), None).map(drop),
+            None => self.report_bundle().map(drop),
+        }
+    }
+
     pub(crate) fn report_bundle(&self) -> Result<Option<Rc<ReportedBrepBundle>>, BackendError> {
         let Some(brep) = &self.brep else {
             return Ok(None);
@@ -306,26 +349,61 @@ impl Subject {
             self.observations.add(WorkCounter::DerivedHits, 1);
             return Ok(Some(Rc::clone(value)));
         }
+        if let Some(retained) = self.report_mesh.get() {
+            let bundle = brep.reported_facts(Rc::clone(&retained.mesh))?;
+            return self.publish_report(None, Some(bundle));
+        }
         let bundle = brep.reported_facts_and_mesh()?;
-        let count = bundle.mesh.triangles.len();
-        let vertices = count.checked_mul(3).ok_or_else(report_limit)?;
-        if count as u64 > u64::from(self.binary_limits.max_triangles)
-            || vertices as u64 > u64::from(self.binary_limits.max_vertices)
-            || bundle.facts.occurrences.len() as u64 > u64::from(self.binary_limits.max_occurrences)
-            || bundle.occurrence_faces.len() != bundle.facts.occurrences.len()
+        self.publish_report(Some(Rc::clone(&bundle.mesh)), Some(bundle))
+    }
+
+    /// Checks, accounts and then publishes new report facets: `mesh` when no
+    /// mesh facet is retained, `facts` with the mesh it was reported with.
+    /// Nothing is retained unless every check passes.
+    fn publish_report(
+        &self,
+        mesh: Option<Rc<TriangleMesh>>,
+        facts: Option<ReportedBrepBundle>,
+    ) -> Result<Option<Rc<ReportedBrepBundle>>, BackendError> {
+        let mut vertices = 0;
+        if let Some(mesh) = &mesh {
+            let count = mesh.triangles.len();
+            vertices = count.checked_mul(3).ok_or_else(report_limit)?;
+            if count as u64 > u64::from(self.binary_limits.max_triangles)
+                || vertices as u64 > u64::from(self.binary_limits.max_vertices)
+            {
+                return Err(report_limit());
+            }
+        }
+        let occurrences = facts.as_ref().map_or_else(
+            || {
+                self.step_admission_facts
+                    .as_ref()
+                    .map_or(0, |facts| facts.occurrence_count)
+            },
+            |bundle| bundle.facts.occurrences.len(),
+        );
+        if occurrences as u64 > u64::from(self.binary_limits.max_occurrences)
+            || facts.as_ref().is_some_and(|bundle| {
+                bundle.occurrence_faces.len() != bundle.facts.occurrences.len()
+            })
         {
             return Err(report_limit());
         }
         // Account the source-compatible f32 soup projection before allocating it.
-        let projection_bytes = (vertices as u64)
-            .saturating_mul(24)
-            .saturating_add((count as u64).saturating_mul(16))
-            .saturating_add(size_of::<MeshAnalysisRecord>() as u64)
-            .saturating_add(size_of::<Primitive>() as u64)
-            .saturating_add(self.display_name.len() as u64 + 2);
-        let bytes = report_owned_bytes(&bundle).saturating_add(projection_bytes);
-        if self.tessellations.borrow().len() as u64
-            >= u64::from(self.retention_limits.max_mesh_entries)
+        let mesh_bytes = mesh.as_deref().map_or(0, |mesh| {
+            let projection_bytes = (vertices as u64)
+                .saturating_mul(24)
+                .saturating_add((mesh.triangles.len() as u64).saturating_mul(16))
+                .saturating_add(size_of::<MeshAnalysisRecord>() as u64)
+                .saturating_add(size_of::<Primitive>() as u64)
+                .saturating_add(self.display_name.len() as u64 + 2);
+            report_mesh_bytes(mesh).saturating_add(projection_bytes)
+        });
+        let facts_bytes = facts.as_ref().map_or(0, report_facts_bytes);
+        if mesh.is_some()
+            && self.tessellations.borrow().len() as u64
+                >= u64::from(self.retention_limits.max_mesh_entries)
         {
             return Err(report_limit());
         }
@@ -334,65 +412,122 @@ impl Subject {
             .borrow()
             .iter()
             .fold(0_u64, |sum, entry| sum.saturating_add(entry.bytes));
-        if bytes
+        if mesh_bytes
+            .saturating_add(facts_bytes)
+            .saturating_add(self.retained_report_bytes())
             .saturating_add(existing)
             .saturating_add(self.continuous_owned_bytes())
             .saturating_add(self.f2_owned_bytes())
             .saturating_add(self.circular_bore_owned_bytes())
             .saturating_add(self.edge_treatment_owned_bytes())
             .saturating_add(self.step_metadata_owned_bytes())
+            .saturating_add(self.source_occurrence_owned_bytes())
             > self.retention_limits.max_mesh_bytes
         {
             return Err(report_limit());
         }
-        let mut positions = Vec::with_capacity(vertices);
-        let mut triangles = Vec::with_capacity(count);
-        for triangle in &bundle.mesh.triangles {
-            let base = positions.len() as u32;
-            for index in triangle {
-                let point =
-                    bundle
-                        .mesh
-                        .positions
-                        .get(*index as usize)
-                        .ok_or_else(|| BackendError {
-                            kind: BackendErrorKind::ComputationFailed,
-                            message: "Report mesh index is outside its position buffer.".into(),
-                        })?;
-                let point = point.map(|value| f64::from(value as f32));
-                if !point.into_iter().all(f64::is_finite) {
-                    return Err(BackendError {
-                        kind: BackendErrorKind::ComputationFailed,
-                        message:
-                            "Report mesh cannot be represented by its declared finite f32 profile."
-                                .into(),
-                    });
-                }
-                positions.push(point);
-            }
-            triangles.push([base, base + 1, base + 2]);
+        let record = mesh
+            .as_deref()
+            .map(|mesh| report_mesh_record(mesh, vertices, &self.display_name))
+            .transpose()?;
+        // Publish only after all transfers, validation and accounting succeed.
+        if let (Some(mesh), Some(record)) = (mesh, record) {
+            let _ = self.mesh_record.set(Rc::new(record));
+            let _ = self.report_mesh.set(RetainedReportMesh {
+                mesh,
+                bytes: mesh_bytes,
+            });
+            self.observations.add(WorkCounter::MeshRecords, 1);
         }
-        let record = MeshAnalysisRecord {
-            positions,
-            triangles,
-            triangle_primitives: vec![0; count],
-            primitives: vec![Primitive {
-                name: format!("{}#0", self.display_name),
-                vertex_start: 0,
-                vertex_count: vertices as u32,
-            }],
+        let Some(bundle) = facts else {
+            return Ok(None);
         };
         let bundle = Rc::new(bundle);
-        // Publish only after all transfers, validation and accounting succeed.
-        let _ = self.mesh_record.set(Rc::new(record));
-        let _ = self.report_bytes.set(bytes);
+        let _ = self.report_bytes.set(facts_bytes);
         self.observations.add(WorkCounter::ReportBuilds, 1);
         let _ = self.report_bundle.set(Rc::clone(&bundle));
         Ok(Some(bundle))
     }
 
+    fn retained_report_bytes(&self) -> u64 {
+        self.report_bytes
+            .get()
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(self.report_mesh.get().map_or(0, |retained| retained.bytes))
+    }
+
     pub(crate) fn brep_facts(&self) -> Result<Option<Rc<DocumentFacts>>, BackendError> {
         Ok(self.report_bundle()?.map(|bundle| Rc::clone(&bundle.facts)))
+    }
+
+    pub(crate) fn source_occurrences(&self) -> Result<Option<Rc<[OccurrenceFacts]>>, BackendError> {
+        self.retained_source_occurrences(true)
+    }
+
+    /// Source occurrences whose `bounds` must not be read.
+    pub(crate) fn source_occurrence_structure(
+        &self,
+    ) -> Result<Option<Rc<[OccurrenceFacts]>>, BackendError> {
+        self.retained_source_occurrences(false)
+    }
+
+    fn retained_source_occurrences(
+        &self,
+        bounds: bool,
+    ) -> Result<Option<Rc<[OccurrenceFacts]>>, BackendError> {
+        let Some(brep) = self.brep.as_deref() else {
+            return Ok(None);
+        };
+        if let Some(retained) = self.source_occurrences.borrow().as_ref() {
+            if retained.bounds || !bounds {
+                return Ok(Some(Rc::clone(&retained.facts)));
+            }
+        }
+        let facts = if bounds {
+            brep.source_occurrences()?
+        } else {
+            brep.source_occurrence_structure()?
+        };
+        if facts.len() as u64 > u64::from(self.binary_limits.max_occurrences) {
+            return Err(report_limit());
+        }
+        let bytes = (size_of::<RetainedSourceOccurrences>() as u64)
+            .saturating_add(
+                (facts.len() as u64).saturating_mul(size_of::<OccurrenceFacts>() as u64),
+            )
+            .saturating_add(facts.iter().fold(0_u64, |sum, occurrence| {
+                sum.saturating_add(occurrence.label.capacity() as u64)
+                    .saturating_add(occurrence.product_label.capacity() as u64)
+                    .saturating_add(occurrence.name.capacity() as u64)
+                    .saturating_add(occurrence.path.capacity() as u64)
+                    .saturating_add(occurrence.product_name.capacity() as u64)
+                    .saturating_add(
+                        occurrence
+                            .instance_name
+                            .as_ref()
+                            .map_or(0, |name| name.capacity()) as u64,
+                    )
+                    .saturating_add(
+                        (occurrence.ordinal_path.capacity() as u64)
+                            .saturating_mul(size_of::<u32>() as u64),
+                    )
+            }));
+        // A bounded transfer replaces, not adds to, a retained structure transfer.
+        self.check_f2_pending(bytes.saturating_sub(self.source_occurrence_owned_bytes()))?;
+        *self.source_occurrences.borrow_mut() = Some(RetainedSourceOccurrences {
+            facts: Rc::clone(&facts),
+            bounds,
+            bytes,
+        });
+        Ok(Some(facts))
+    }
+
+    fn source_occurrence_owned_bytes(&self) -> u64 {
+        self.source_occurrences
+            .borrow()
+            .as_ref()
+            .map_or(0, |value| value.bytes)
     }
 
     /// Success-only inventory for this immutable subject/profile. The context
@@ -566,7 +701,7 @@ impl Subject {
         let bytes = step_metadata_owned_bytes(&metadata);
         let total = self.tessellations.borrow().iter().fold(
             bytes
-                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.retained_report_bytes())
                 .saturating_add(self.continuous_owned_bytes())
                 .saturating_add(self.f2_owned_bytes())
                 .saturating_add(self.circular_bore_owned_bytes())
@@ -596,12 +731,13 @@ impl Subject {
         let bytes = continuous_wall_owned_bytes();
         let retained = self.tessellations.borrow().iter().fold(
             bytes
-                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.retained_report_bytes())
                 .saturating_add(self.selected_continuous_bytes())
                 .saturating_add(self.f2_owned_bytes())
                 .saturating_add(self.circular_bore_owned_bytes())
                 .saturating_add(self.edge_treatment_owned_bytes())
-                .saturating_add(self.step_metadata_owned_bytes()),
+                .saturating_add(self.step_metadata_owned_bytes())
+                .saturating_add(self.source_occurrence_owned_bytes()),
             |sum, entry| sum.saturating_add(entry.bytes),
         );
         if retained > self.retention_limits.max_mesh_bytes {
@@ -653,11 +789,12 @@ impl Subject {
         let continuous = self.continuous_owned_bytes().saturating_add(bytes);
         let total = self.tessellations.borrow().iter().fold(
             continuous
-                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.retained_report_bytes())
                 .saturating_add(self.f2_owned_bytes())
                 .saturating_add(self.circular_bore_owned_bytes())
                 .saturating_add(self.edge_treatment_owned_bytes())
-                .saturating_add(self.step_metadata_owned_bytes()),
+                .saturating_add(self.step_metadata_owned_bytes())
+                .saturating_add(self.source_occurrence_owned_bytes()),
             |sum, entry| sum.saturating_add(entry.bytes),
         );
         if continuous > 32 * 1024 * 1024 || total > self.retention_limits.max_mesh_bytes {
@@ -711,11 +848,12 @@ impl Subject {
             .saturating_add(extra_bytes);
         let total = self.tessellations.borrow().iter().fold(
             continuous
-                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
+                .saturating_add(self.retained_report_bytes())
                 .saturating_add(self.f2_owned_bytes())
                 .saturating_add(self.circular_bore_owned_bytes())
                 .saturating_add(self.edge_treatment_owned_bytes())
-                .saturating_add(self.step_metadata_owned_bytes()),
+                .saturating_add(self.step_metadata_owned_bytes())
+                .saturating_add(self.source_occurrence_owned_bytes()),
             |sum, entry| sum.saturating_add(entry.bytes),
         );
         if continuous > 32 * 1024 * 1024 || total > self.retention_limits.max_mesh_bytes {
@@ -755,8 +893,9 @@ impl Subject {
                 .saturating_add(self.circular_bore_owned_bytes())
                 .saturating_add(self.edge_treatment_owned_bytes())
                 .saturating_add(self.continuous_owned_bytes())
-                .saturating_add(self.report_bytes.get().copied().unwrap_or(0))
-                .saturating_add(self.step_metadata_owned_bytes()),
+                .saturating_add(self.retained_report_bytes())
+                .saturating_add(self.step_metadata_owned_bytes())
+                .saturating_add(self.source_occurrence_owned_bytes()),
             |sum, entry| sum.saturating_add(entry.bytes),
         );
         if total > self.retention_limits.max_mesh_bytes {
@@ -1064,7 +1203,8 @@ fn report_limit() -> BackendError {
 /// Conservative logical payload accounting (including Vec/String capacity).
 /// Allocator metadata, original kernel storage and temporary kernel work are
 /// separate peak measurements, not covered by this core-owned payload ceiling.
-fn report_owned_bytes(bundle: &ReportedBrepBundle) -> u64 {
+/// Report facts bytes; the carried mesh is accounted by its mesh facet.
+fn report_facts_bytes(bundle: &ReportedBrepBundle) -> u64 {
     fn vector<T>(value: &Vec<T>) -> u64 {
         (value.capacity() as u64).saturating_mul(size_of::<T>() as u64)
     }
@@ -1149,9 +1289,60 @@ fn report_owned_bytes(bundle: &ReportedBrepBundle) -> u64 {
         bytes = bytes.saturating_add(faces(value));
     }
     bytes
-        .saturating_add(size_of::<TriangleMesh>() as u64)
-        .saturating_add(vector(&bundle.mesh.positions))
-        .saturating_add(vector(&bundle.mesh.triangles))
+}
+
+fn report_mesh_bytes(mesh: &TriangleMesh) -> u64 {
+    (size_of::<TriangleMesh>() as u64)
+        .saturating_add(
+            (mesh.positions.capacity() as u64).saturating_mul(size_of::<[f64; 3]>() as u64),
+        )
+        .saturating_add(
+            (mesh.triangles.capacity() as u64).saturating_mul(size_of::<[u32; 3]>() as u64),
+        )
+}
+
+/// The source-compatible f32 triangle soup of a report mesh.
+fn report_mesh_record(
+    mesh: &TriangleMesh,
+    vertices: usize,
+    display_name: &str,
+) -> Result<MeshAnalysisRecord, BackendError> {
+    let count = mesh.triangles.len();
+    let mut positions = Vec::with_capacity(vertices);
+    let mut triangles = Vec::with_capacity(count);
+    for triangle in &mesh.triangles {
+        let base = positions.len() as u32;
+        for index in triangle {
+            let point = mesh
+                .positions
+                .get(*index as usize)
+                .ok_or_else(|| BackendError {
+                    kind: BackendErrorKind::ComputationFailed,
+                    message: "Report mesh index is outside its position buffer.".into(),
+                })?;
+            let point = point.map(|value| f64::from(value as f32));
+            if !point.into_iter().all(f64::is_finite) {
+                return Err(BackendError {
+                    kind: BackendErrorKind::ComputationFailed,
+                    message:
+                        "Report mesh cannot be represented by its declared finite f32 profile."
+                            .into(),
+                });
+            }
+            positions.push(point);
+        }
+        triangles.push([base, base + 1, base + 2]);
+    }
+    Ok(MeshAnalysisRecord {
+        positions,
+        triangles,
+        triangle_primitives: vec![0; count],
+        primitives: vec![Primitive {
+            name: format!("{display_name}#0"),
+            vertex_start: 0,
+            vertex_count: vertices as u32,
+        }],
+    })
 }
 
 /// Families receive resolved subjects and a charged scope, never host objects.
@@ -1239,7 +1430,8 @@ impl<'a> EvaluationContext<'a> {
 
     pub(crate) fn charge_mesh_demand(&mut self) -> Result<(), Evaluation> {
         if self.subject().brep.is_some() {
-            self.brep_facts()?;
+            self.charge_brep_demand()?;
+            self.subject().report_mesh().map_err(backend_refusal)?;
         }
         if !self.mesh_charged {
             if let Some(record) = self.subject().mesh_record() {
@@ -1260,13 +1452,51 @@ impl<'a> EvaluationContext<'a> {
     }
 
     pub(crate) fn brep_facts(&mut self) -> Result<Option<Rc<DocumentFacts>>, Evaluation> {
+        self.charge_brep_demand()?;
+        self.subject().brep_facts().map_err(backend_refusal)
+    }
+
+    pub(crate) fn source_occurrences(
+        &mut self,
+    ) -> Result<Option<Rc<[OccurrenceFacts]>>, Evaluation> {
+        self.charge_brep_demand()?;
+        self.subject().source_occurrences().map_err(backend_refusal)
+    }
+
+    pub(crate) fn source_occurrence_structure(
+        &mut self,
+    ) -> Result<Option<Rc<[OccurrenceFacts]>>, Evaluation> {
+        self.charge_brep_demand()?;
+        self.subject()
+            .source_occurrence_structure()
+            .map_err(backend_refusal)
+    }
+
+    pub(crate) fn step_units_facts(&mut self) -> Result<Option<&BrepAdmissionFacts>, Evaluation> {
+        self.charge_brep_demand()?;
+        if self.subject().brep.is_none() {
+            return Ok(None);
+        }
+        self.subject()
+            .step_admission_facts
+            .as_ref()
+            .map(Some)
+            .ok_or_else(|| {
+                backend_refusal(BackendError {
+                    kind: BackendErrorKind::Unsupported,
+                    message: "The STEP subject has no verified admission facts for units.".into(),
+                })
+            })
+    }
+
+    fn charge_brep_demand(&mut self) -> Result<(), Evaluation> {
         if !self.brep_charged && self.subject().brep.is_some() {
             self.budget
                 .charge(1)
                 .map_err(|error| Evaluation::budget_exceeded(self.capability, error))?;
             self.brep_charged = true;
         }
-        self.subject().brep_facts().map_err(backend_refusal)
+        Ok(())
     }
 
     pub(crate) fn circular_bores(&mut self) -> Result<Rc<CircularBoreInventory>, Evaluation> {
@@ -1945,3 +2175,7 @@ pub(crate) fn continuous_refusal(error: continuous::ContinuousError) -> Evaluati
         diagnostics: vec![Diagnostic::error(code, error.message)],
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/report_facets_core.rs"]
+mod report_facets_core;

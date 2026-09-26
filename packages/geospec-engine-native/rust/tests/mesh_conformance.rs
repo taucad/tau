@@ -5,6 +5,8 @@ use sha2::{Digest, Sha256};
 const FIXTURES: &str = include_str!("fixtures/mesh-entry.json");
 const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
 const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d";
+const CURRENT_NUMERIC_PROFILE: &str =
+    include_str!("fixtures/current-profile-v5/numeric-profile.txt");
 
 fn fixtures() -> Value {
     serde_json::from_str(FIXTURES).expect("frozen fixture JSON")
@@ -46,8 +48,11 @@ fn binding<'a>(current: &'a Value, id: &str) -> &'a Value {
 }
 
 fn assert_response(actual: Vec<u8>, expected: &str, name: &str) {
+    // The frozen v3 corpus remains byte-pinned; only its envelope profile is
+    // rebound for the independently versioned current producer.
+    let expected = expected.replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE);
     let decoded: Value = serde_json::from_slice(&actual).expect("normal JSON response");
-    let expected_value: Value = serde_json::from_str(expected).expect("declared response");
+    let expected_value: Value = serde_json::from_str(&expected).expect("declared response");
     assert_eq!(decoded, expected_value, "{name}: full decoded result");
     assert_eq!(actual, expected.as_bytes(), "{name}: canonical bytes");
 }
@@ -64,6 +69,13 @@ fn assert_outcome(result: Result<Vec<u8>, ProtocolError>, expected: &Value, name
         let _: &dyn std::error::Error = &error;
         assert_eq!(error.code(), string(expected, "expectedCode"), "{name}");
         if let Some(message) = expected["expectedMessage"].as_str() {
+            // This v3 string-axis control predates the typed numeric parser;
+            // v5 keeps an exact error oracle without editing the frozen row.
+            let message = if name == "string-axis" {
+                "GeoSpec numeric expectation must be an object."
+            } else {
+                message
+            };
             assert_eq!(error.to_string(), message, "{name}: exact message");
         } else {
             assert!(!error.to_string().is_empty(), "{name}: diagnostic message");

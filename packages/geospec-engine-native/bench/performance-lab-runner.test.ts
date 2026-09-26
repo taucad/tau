@@ -7,6 +7,7 @@ import {
   parsePerformanceLabRunInput,
   runPerformanceLabCell,
 } from '#bench/performance-lab-runner';
+import type { PerformanceLabEngineModule, PerformanceLabWasmExecution } from '#bench/performance-lab-runner';
 
 const bytes = new TextEncoder().encode('ordinary fixture bytes');
 const sha256 = async (): Promise<string> =>
@@ -17,7 +18,13 @@ const sha256 = async (): Promise<string> =>
 const input = async () =>
   parsePerformanceLabRunInput({
     engine: 'legacy-wasm',
-    fixture: { id: 'ordinary-step', format: 'step', sourceUnit: 'auto', bytes, sha256: await sha256() },
+    fixture: {
+      id: 'ordinary-step',
+      format: 'step',
+      sourceUnit: 'auto',
+      bytes,
+      sha256: await sha256(),
+    },
     cases: [
       {
         id: 'bounds',
@@ -46,6 +53,74 @@ const input = async () =>
   });
 
 describe('ordinary performance lab runner', () => {
+  it('requires an explicit valid MT receipt and confines execution to combined WASM', async () => {
+    const ordinary = await input();
+    const combined = { ...ordinary, engine: 'combined-wasm' };
+    const mt = {
+      variant: 'mt',
+      permits: 4,
+      receipt: 'https://tau.example/geospec-mt/permits-4/geospec_engine_native.mt.json',
+    };
+    await expect(parsePerformanceLabRunInput({ ...combined, execution: mt })).resolves.toMatchObject({ execution: mt });
+    const desktop = {
+      ...mt,
+      receipt: 'app://tau/geospec-mt/permits-4/geospec_engine_native.mt.json',
+    };
+    await expect(parsePerformanceLabRunInput({ ...combined, execution: desktop })).resolves.toMatchObject({
+      execution: desktop,
+    });
+    await expect(
+      parsePerformanceLabRunInput({
+        ...combined,
+        execution: { variant: 'st' },
+      }),
+    ).resolves.toMatchObject({ execution: { variant: 'st' } });
+    for (const execution of [
+      { ...mt, permits: 0 },
+      { ...mt, permits: 4_294_967_296 },
+      { ...mt, receipt: '/relative.json' },
+      { ...mt, receipt: 'app://other/geospec_engine_native.mt.json' },
+      { ...mt, receipt: 'app://tau:123/geospec_engine_native.mt.json' },
+      { ...mt, receipt: 'app://user@tau/geospec_engine_native.mt.json' },
+      { ...mt, receipt: 'file:///tmp/geospec_engine_native.mt.json' },
+      { variant: 'mt', permits: 4 },
+      { variant: 'st', permits: 4 },
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- Each malformed request must be refused independently.
+      await expect(parsePerformanceLabRunInput({ ...combined, execution })).rejects.toThrow();
+    }
+    await expect(parsePerformanceLabRunInput({ ...ordinary, execution: mt })).rejects.toThrow();
+  });
+
+  it('passes the same MT selection to initialization and construction without ST fallback', async () => {
+    const execution: PerformanceLabWasmExecution = {
+      variant: 'mt',
+      permits: 4,
+      receipt: 'https://tau.example/geospec-mt/permits-4/geospec_engine_native.mt.json',
+    };
+    const initialize = vi.fn(async (_input?: undefined, selected?: PerformanceLabWasmExecution): Promise<void> => {
+      expect(selected).toEqual(execution);
+    });
+    const engineConstructor = function refusingEngine(selected?: PerformanceLabWasmExecution): never {
+      expect(selected).toEqual(execution);
+      throw new Error('MT construction refused');
+    } as unknown as PerformanceLabEngineModule['Engine'];
+    const combined: PerformanceLabEngineModule = {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
+      Engine: engineConstructor,
+      initialize,
+      canonicalize: (value) => value,
+    };
+    await expect(
+      runPerformanceLabCell(
+        { ...(await input()), engine: 'combined-wasm', execution },
+        {
+          combined: async () => combined,
+        },
+      ),
+    ).rejects.toThrow('MT construction refused');
+    expect(initialize).toHaveBeenCalledExactlyOnceWith(undefined, execution);
+  });
   it('should read numeric profile from the actual canonical result envelope', () => {
     const envelope = {
       numericProfile: 'geospec-st-prototypes-v4',
@@ -75,10 +150,16 @@ describe('ordinary performance lab runner', () => {
       })),
       ingestSubject: vi.fn<GeoSpecEngineProtocol['ingestSubject']>(async ({ requestId, contentHash }) => ({
         requestId,
-        subject: { kind: 'geometry-subject-reference', subjectId: 'subject-1', contentHash },
+        subject: {
+          kind: 'geometry-subject-reference',
+          subjectId: 'subject-1',
+          contentHash,
+        },
       })),
       submitClaims: vi.fn<GeoSpecEngineProtocol['submitClaims']>(({ requestId, claims }) => {
-        const claim = JSON.parse(new TextDecoder().decode(claims[0])) as { claimId: string };
+        const claim = JSON.parse(new TextDecoder().decode(claims[0])) as {
+          claimId: string;
+        };
         return {
           requestId,
           results: [

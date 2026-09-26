@@ -87,6 +87,28 @@ fn ingest(engine: &mut Engine, primary: Vec<u8>, buffer: Vec<u8>) -> String {
         .into()
 }
 
+#[test]
+fn repeated_mesh_closure_reuses_decode_but_changed_resource_does_not() {
+    let primary = document(
+        json!([{"mesh": 0, "name": "A"}]),
+        json!([{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}]),
+    );
+    let buffer = cube_buffer();
+    let mut engine = Engine::new();
+    let first = ingest(&mut engine, primary.clone(), buffer.clone());
+    assert_eq!(first, ingest(&mut engine, primary.clone(), buffer.clone()));
+    let observations: Value = serde_json::from_slice(&engine.observations()).unwrap();
+    assert_eq!(observations["physical"]["admissions"], "2");
+    assert_eq!(observations["physical"]["parses"], "1");
+    assert_eq!(observations["physical"]["meshRecords"], "1");
+
+    let mut changed = buffer;
+    changed[0..4].copy_from_slice(&0.25_f32.to_le_bytes());
+    assert_ne!(first, ingest(&mut engine, primary, changed));
+    let observations: Value = serde_json::from_slice(&engine.observations()).unwrap();
+    assert_eq!(observations["physical"]["parses"], "2");
+}
+
 fn claim(engine: &Engine, subject_hash: &str, capability: &str, payload: Value) -> Value {
     let request = json!({
         "method": "submitClaims",

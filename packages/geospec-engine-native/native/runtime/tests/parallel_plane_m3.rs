@@ -7,7 +7,7 @@ const CAPABILITY: &str = "toSatisfyParallelPlaneDistance";
 
 fn request(method: &str, id: &str) -> Value {
     json!({"method":method,"requestId":id,"protocolVersion":3,
-        "registryVersion":4,"canonicalProfile":"geospec-jcs-v1"})
+        "registryVersion":5,"canonicalProfile":"geospec-jcs-v1"})
 }
 
 fn claim(id: &str, polarity: &str, budget: u64) -> Value {
@@ -96,7 +96,7 @@ fn exact_source_planes_bind_runtime_polarity_budget_and_release() {
     let mut checks = Vec::new();
     for (id, source, positive) in cases {
         let units = 1 + source.len() as u64 + 8192 + 2048 + 8192 + 2;
-        let mut engine = create_engine(EngineConfig::entry());
+        let mut engine = create_engine(EngineConfig::entry()).unwrap();
         let admission = admit(&mut engine, source.as_bytes().to_vec());
         let hash = &admission["result"]["subject"]["subjectHash"];
         let authored = plan_request(

@@ -1,13 +1,16 @@
 //! Complete retained mesh analysis for owned indexed triangle records.
 
 mod gltf;
+#[cfg(test)]
+mod reference_tests;
 
 pub use gltf::{decode_glb, decode_gltf};
 
 use std::{
     cell::OnceCell,
     cmp::Ordering,
-    collections::{BTreeMap, HashMap},
+    collections::{hash_map::Entry, BTreeMap, HashMap, HashSet},
+    hash::{BuildHasherDefault, Hash, Hasher},
     rc::Rc,
 };
 
@@ -16,6 +19,48 @@ use crate::codec::compare_utf16;
 
 const SPATIAL_EPSILON: f64 = 1e-5;
 const CLUSTER_SAMPLE_LIMIT: usize = 4;
+
+/// Deterministic multiply-fold hasher for internal maps that are only probed,
+/// never iterated, so their order cannot reach any result.
+// ponytail: fixed seed trades SipHash's flooding resistance for speed; seed
+// per engine if hostile inputs ever need collision-cost guarantees.
+struct FoldHasher(u64);
+
+impl Default for FoldHasher {
+    fn default() -> Self {
+        Self(0x243f_6a88_85a3_08d3)
+    }
+}
+
+impl Hasher for FoldHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.write_u64(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.write_u64(value.into());
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        let product = u128::from(self.0 ^ value) * 0x9e37_79b9_7f4a_7c15;
+        self.0 = product as u64 ^ (product >> 64) as u64;
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.write_u64(value as u64);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FoldHasher>>;
+type FastSet<K> = HashSet<K, BuildHasherDefault<FoldHasher>>;
 
 pub type Vec3 = [f64; 3];
 
@@ -48,9 +93,10 @@ pub struct PrimitiveRecord {
     pub aabb: Aabb,
 }
 
+/// Per-triangle rows share their primitive's name instead of copying it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshTriangle {
-    pub primitive: String,
+    pub primitive: Rc<str>,
     pub triangle_index: u32,
     pub a: Vec3,
     pub b: Vec3,
@@ -61,14 +107,14 @@ pub struct MeshTriangle {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NonFiniteVertex {
-    pub primitive: String,
+    pub primitive: Rc<str>,
     pub vertex_index: u32,
     pub position: Vec3,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DegenerateTriangle {
-    pub primitive: String,
+    pub primitive: Rc<str>,
     pub triangle_index: u32,
     pub area: f64,
     pub center: Vec3,
@@ -76,7 +122,7 @@ pub struct DegenerateTriangle {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DuplicateFace {
-    pub primitive: String,
+    pub primitive: Rc<str>,
     pub triangle_index: u32,
     pub first_triangle_index: u32,
 }
@@ -262,8 +308,24 @@ impl MeshAnalysis {
             .get_or_init(|| Rc::new(sub_meshes(&self.record, self.canonical())))
     }
 
+    /// Sorted clusters, before their C(C-1)/2 pairwise gaps exist.
+    pub(crate) fn component_clusters(&self, tolerance_mm: f64) -> Vec<ClusterReport> {
+        component_clusters(self, self.pieces(), tolerance_mm)
+    }
+
+    #[cfg(test)]
     pub fn connected_components(&self, tolerance_mm: f64) -> ConnectedComponents {
-        connected_components(self, self.pieces(), tolerance_mm)
+        ConnectedComponents::from_clusters(self.component_clusters(tolerance_mm))
+    }
+}
+
+impl ConnectedComponents {
+    pub(crate) fn from_clusters(clusters: Vec<ClusterReport>) -> Self {
+        Self {
+            count: clusters.len() as u32,
+            gaps: cluster_gaps(&clusters),
+            clusters,
+        }
     }
 }
 
@@ -298,52 +360,63 @@ impl MeshAnalysisRecord {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum Cell {
-    Finite(u64),
-    PositiveInfinity,
-    NegativeInfinity,
-    Nan,
-}
-
-fn cell(value: f64) -> Cell {
+/// One epsilon cell per axis. The floor's bits (zero normalized) identify a
+/// finite cell; every NaN floor shares one NaN pattern and each infinity keeps
+/// its own, none of which a finite floor can have.
+fn cell(value: f64) -> u64 {
     let value = (value / SPATIAL_EPSILON).floor();
     if value.is_nan() {
-        Cell::Nan
-    } else if value == f64::INFINITY {
-        Cell::PositiveInfinity
-    } else if value == f64::NEG_INFINITY {
-        Cell::NegativeInfinity
+        f64::NAN.to_bits()
+    } else if value == 0.0 {
+        0
     } else {
-        Cell::Finite(if value == 0.0 { 0 } else { value.to_bits() })
+        value.to_bits()
     }
 }
 
-fn offset_cell(value: Cell, offset: i32) -> Cell {
-    match value {
-        Cell::Finite(bits) => {
-            let value = f64::from_bits(bits) + f64::from(offset);
-            Cell::Finite(if value == 0.0 { 0 } else { value.to_bits() })
+/// Non-finite cells are their own neighbours.
+fn offset_cell(cell: u64, offset: i32) -> u64 {
+    let value = f64::from_bits(cell);
+    if !value.is_finite() {
+        return cell;
+    }
+    let value = value + f64::from(offset);
+    if value == 0.0 {
+        0
+    } else {
+        value.to_bits()
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct CellKey<const N: usize>([u64; N]);
+
+impl<const N: usize> Hash for CellKey<N> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for cell in self.0 {
+            state.write_u64(cell);
         }
-        other => other,
     }
 }
 
 fn weld(positions: &[Vec3]) -> Vec<u32> {
     let mut canonical = Vec::with_capacity(positions.len());
-    let mut representatives: HashMap<[Cell; 3], u32> = HashMap::new();
+    let mut representatives: FastMap<CellKey<3>, u32> = FastMap::default();
+    // Exactly the (x, y) projections of the keys above, which are only ever
+    // added. An absent column skips three probes that could only miss.
+    let mut columns: FastSet<CellKey<2>> = FastSet::default();
     for (index, &[x, y, z]) in positions.iter().enumerate() {
         let cells = [cell(x), cell(y), cell(z)];
+        // The 27 neighbour keys, probed in their original first-match order.
+        let [xs, ys, zs] = cells.map(|cell| [-1, 0, 1].map(|offset| offset_cell(cell, offset)));
         let mut representative = None;
-        'neighbours: for ox in -1..=1 {
-            for oy in -1..=1 {
-                for oz in -1..=1 {
-                    let key = [
-                        offset_cell(cells[0], ox),
-                        offset_cell(cells[1], oy),
-                        offset_cell(cells[2], oz),
-                    ];
-                    if let Some(&candidate) = representatives.get(&key) {
+        'neighbours: for cx in xs {
+            for cy in ys {
+                if !columns.contains(&CellKey([cx, cy])) {
+                    continue;
+                }
+                for cz in zs {
+                    if let Some(&candidate) = representatives.get(&CellKey([cx, cy, cz])) {
                         let point = positions[candidate as usize];
                         if (point[0] - x).abs() <= SPATIAL_EPSILON
                             && (point[1] - y).abs() <= SPATIAL_EPSILON
@@ -358,7 +431,8 @@ fn weld(positions: &[Vec3]) -> Vec<u32> {
         }
         let representative = representative.unwrap_or(index as u32);
         if representative == index as u32 {
-            representatives.insert(cells, representative);
+            representatives.insert(CellKey(cells), representative);
+            columns.insert(CellKey([cells[0], cells[1]]));
         }
         canonical.push(representative);
     }
@@ -499,6 +573,11 @@ fn position_key(point: Vec3) -> [u64; 3] {
 }
 
 fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
+    let names: Vec<Rc<str>> = record
+        .primitives
+        .iter()
+        .map(|primitive| Rc::from(primitive.name.as_str()))
+        .collect();
     let mut triangles = Vec::with_capacity(record.triangles.len());
     let mut non_finite_vertices = Vec::new();
     let mut degenerate_triangles = Vec::new();
@@ -516,7 +595,7 @@ fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
         let c = record.positions[indices[2] as usize];
         let area = triangle_area(a, b, c);
         let triangle = MeshTriangle {
-            primitive: record.primitives[primitive_index as usize].name.clone(),
+            primitive: Rc::clone(&names[primitive_index as usize]),
             triangle_index: index as u32,
             a,
             b,
@@ -536,7 +615,7 @@ fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
         for (corner, position) in [a, b, c].into_iter().enumerate() {
             if !position.into_iter().all(f64::is_finite) {
                 non_finite_vertices.push(NonFiniteVertex {
-                    primitive: triangle.primitive.clone(),
+                    primitive: Rc::clone(&triangle.primitive),
                     vertex_index: (index * 3 + corner) as u32,
                     position,
                 });
@@ -544,7 +623,7 @@ fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
         }
         if area == 0.0 {
             degenerate_triangles.push(DegenerateTriangle {
-                primitive: triangle.primitive.clone(),
+                primitive: Rc::clone(&triangle.primitive),
                 triangle_index: index as u32,
                 area: 0.0,
                 center: triangle.center,
@@ -569,13 +648,13 @@ fn mesh_quality(record: Rc<MeshAnalysisRecord>) -> MeshQuality {
 
 fn duplicate_faces(record: &MeshAnalysisRecord, triangles: &[MeshTriangle]) -> Vec<DuplicateFace> {
     let mut canonical = Vec::with_capacity(record.positions.len());
-    let mut positions = HashMap::new();
+    let mut positions = FastMap::default();
     for (index, &point) in record.positions.iter().enumerate() {
         let key = position_key(point);
         let representative = *positions.entry(key).or_insert(index as u32);
         canonical.push(representative);
     }
-    let mut seen = HashMap::new();
+    let mut seen = FastMap::default();
     let mut duplicate_faces = Vec::new();
     for (index, (&indices, &primitive)) in record
         .triangles
@@ -585,15 +664,15 @@ fn duplicate_faces(record: &MeshAnalysisRecord, triangles: &[MeshTriangle]) -> V
     {
         let mut corners = indices.map(|vertex| canonical[vertex as usize]);
         corners.sort_unstable();
-        let key = (primitive, corners);
-        if let Some(&first_triangle_index) = seen.get(&key) {
-            duplicate_faces.push(DuplicateFace {
-                primitive: triangles[index].primitive.clone(),
+        match seen.entry((primitive, corners)) {
+            Entry::Occupied(first) => duplicate_faces.push(DuplicateFace {
+                primitive: Rc::clone(&triangles[index].primitive),
                 triangle_index: index as u32,
-                first_triangle_index,
-            });
-        } else {
-            seen.insert(key, index as u32);
+                first_triangle_index: *first.get(),
+            }),
+            Entry::Vacant(slot) => {
+                slot.insert(index as u32);
+            }
         }
     }
 
@@ -605,18 +684,33 @@ struct Edge {
     from: u32,
     to: u32,
     incident_triangle_count: u32,
-    primitives: Vec<u32>,
+    /// The creating triangle's primitive, then later distinct ones in order.
+    primitive: u32,
+    later_primitives: Vec<u32>,
+}
+
+impl Edge {
+    fn primitives(&self) -> impl Iterator<Item = u32> + '_ {
+        std::iter::once(self.primitive).chain(self.later_primitives.iter().copied())
+    }
 }
 
 fn edges(record: &MeshAnalysisRecord, canonical: &[u32]) -> Vec<Edge> {
-    let mut keys: HashMap<(String, u32, u32), usize> = HashMap::new();
-    let mut edges: Vec<Edge> = Vec::new();
-    for (index, (&indices, &primitive)) in record
-        .triangles
+    // Primitives group by base label content; equal labels share one id.
+    let mut labels: FastMap<&str, u32> = FastMap::default();
+    let components: Vec<u32> = record
+        .primitives
         .iter()
-        .zip(&record.triangle_primitives)
-        .enumerate()
-    {
+        .map(|primitive| {
+            let next = labels.len() as u32;
+            *labels
+                .entry(base_component_label(&primitive.name))
+                .or_insert(next)
+        })
+        .collect();
+    let mut keys: FastMap<(u32, u32, u32), usize> = FastMap::default();
+    let mut edges: Vec<Edge> = Vec::new();
+    for (&indices, &primitive) in record.triangles.iter().zip(&record.triangle_primitives) {
         let corners = indices.map(|vertex| canonical[vertex as usize]);
         if corners[0] == corners[1] || corners[1] == corners[2] || corners[0] == corners[2] {
             continue;
@@ -625,26 +719,26 @@ fn edges(record: &MeshAnalysisRecord, canonical: &[u32]) -> Vec<Edge> {
             let from = corners[corner];
             let to = corners[(corner + 1) % 3];
             let (from, to) = if from < to { (from, to) } else { (to, from) };
-            let component =
-                base_component_label(&record.primitives[primitive as usize].name).to_owned();
-            let key = (component, from, to);
-            if let Some(&edge_index) = keys.get(&key) {
-                let edge = &mut edges[edge_index];
-                edge.incident_triangle_count += 1;
-                if !edge.primitives.contains(&primitive) {
-                    edge.primitives.push(primitive);
+            match keys.entry((components[primitive as usize], from, to)) {
+                Entry::Occupied(entry) => {
+                    let edge = &mut edges[*entry.get()];
+                    edge.incident_triangle_count += 1;
+                    if edge.primitive != primitive && !edge.later_primitives.contains(&primitive) {
+                        edge.later_primitives.push(primitive);
+                    }
                 }
-            } else {
-                keys.insert(key, edges.len());
-                edges.push(Edge {
-                    from,
-                    to,
-                    incident_triangle_count: 1,
-                    primitives: vec![primitive],
-                });
+                Entry::Vacant(entry) => {
+                    entry.insert(edges.len());
+                    edges.push(Edge {
+                        from,
+                        to,
+                        incident_triangle_count: 1,
+                        primitive,
+                        later_primitives: Vec::new(),
+                    });
+                }
             }
         }
-        let _ = index;
     }
     edges
 }
@@ -665,23 +759,26 @@ fn irregular_clusters(
     kind: IrregularEdgeKind,
 ) -> Vec<IrregularEdgeCluster> {
     let mut parent: Vec<usize> = (0..selected.len()).collect();
-    let mut owner = HashMap::new();
+    let mut owner = FastMap::default();
     for (local_index, &edge_index) in selected.iter().enumerate() {
         let edge = &edges[edge_index];
         for endpoint in [edge.from, edge.to] {
-            if let Some(&existing) = owner.get(&endpoint) {
-                let left = find(&mut parent, existing);
-                let right = find(&mut parent, local_index);
-                if left != right {
-                    parent[left] = right;
+            match owner.entry(endpoint) {
+                Entry::Occupied(existing) => {
+                    let left = find(&mut parent, *existing.get());
+                    let right = find(&mut parent, local_index);
+                    if left != right {
+                        parent[left] = right;
+                    }
                 }
-            } else {
-                owner.insert(endpoint, local_index);
+                Entry::Vacant(slot) => {
+                    slot.insert(local_index);
+                }
             }
         }
     }
     let mut groups: Vec<Vec<usize>> = Vec::new();
-    let mut group_indices = HashMap::new();
+    let mut group_indices = FastMap::default();
     for (local_index, &edge_index) in selected.iter().enumerate() {
         let root = find(&mut parent, local_index);
         let group_index = *group_indices.entry(root).or_insert_with(|| {
@@ -708,7 +805,7 @@ fn irregular_clusters(
                     let edge = &edges[edge_index];
                     let start = record.positions[edge.from as usize];
                     let end = record.positions[edge.to as usize];
-                    let mut primitives = edge.primitives.clone();
+                    let mut primitives: Vec<_> = edge.primitives().collect();
                     primitives.sort_unstable();
                     IrregularEdgeSample {
                         start,
@@ -753,28 +850,34 @@ fn watertight(record: &MeshAnalysisRecord, canonical: &[u32]) -> Watertight {
         .enumerate()
         .filter_map(|(index, edge)| (edge.incident_triangle_count > 2).then_some(index))
         .collect();
-    let mut per_primitive = Vec::with_capacity(record.primitives.len());
-    for (primitive_index, primitive) in record.primitives.iter().enumerate() {
-        let owned: Vec<_> = open
-            .iter()
-            .filter(|&&edge| edges[edge].primitives.contains(&(primitive_index as u32)))
-            .collect();
-        let mut sum = [0.0; 3];
-        for &&edge_index in &owned {
-            let edge = &edges[edge_index];
-            let start = record.positions[edge.from as usize];
-            let end = record.positions[edge.to as usize];
+    // One pass over `open`: each primitive still sums its own edges in `open`
+    // order, once per edge, because an edge lists a primitive at most once.
+    let mut boundaries = vec![(0_usize, [0.0; 3]); record.primitives.len()];
+    for &edge_index in &open {
+        let edge = &edges[edge_index];
+        let start = record.positions[edge.from as usize];
+        let end = record.positions[edge.to as usize];
+        for primitive in edge.primitives() {
+            let (count, sum) = &mut boundaries[primitive as usize];
+            *count += 1;
             for axis in 0..3 {
                 sum[axis] += (start[axis] + end[axis]) / 2.0;
             }
         }
-        let count = owned.len().max(1) as f64;
-        per_primitive.push(WatertightPrimitiveBreakdown {
-            name: primitive.name.clone(),
-            boundary_edges: owned.len() as u32,
-            loop_centroid: sum.map(|value| value / count),
-        });
     }
+    let per_primitive: Vec<_> = record
+        .primitives
+        .iter()
+        .zip(boundaries)
+        .map(|(primitive, (count, sum))| {
+            let denominator = count.max(1) as f64;
+            WatertightPrimitiveBreakdown {
+                name: primitive.name.clone(),
+                boundary_edges: count as u32,
+                loop_centroid: sum.map(|value| value / denominator),
+            }
+        })
+        .collect();
     let total_edges = edges.len() as u32;
     let open_boundary_edges = open.len() as u32;
     let non_manifold_edges = non_manifold.len() as u32;
@@ -808,38 +911,41 @@ fn watertight(record: &MeshAnalysisRecord, canonical: &[u32]) -> Watertight {
 }
 
 fn sub_meshes(record: &MeshAnalysisRecord, canonical: &[u32]) -> Vec<Piece> {
+    const UNSET: usize = usize::MAX;
     let mut parent: Vec<usize> = (0..record.triangles.len()).collect();
-    let mut owner = HashMap::new();
+    // Canonical vertices and union roots are dense indices, so flat tables
+    // replace the probing maps.
+    let mut owner = vec![UNSET; record.positions.len()];
     for (triangle_index, triangle) in record.triangles.iter().enumerate() {
         for &vertex in triangle {
-            let vertex = canonical[vertex as usize];
-            if let Some(&existing) = owner.get(&vertex) {
-                let left = find(&mut parent, existing);
+            let existing = &mut owner[canonical[vertex as usize] as usize];
+            if *existing == UNSET {
+                *existing = triangle_index;
+            } else {
+                let left = find(&mut parent, *existing);
                 let right = find(&mut parent, triangle_index);
                 if left != right {
                     parent[left] = right;
                 }
-            } else {
-                owner.insert(vertex, triangle_index);
             }
         }
     }
     let mut groups: Vec<Vec<usize>> = Vec::new();
-    let mut group_indices = HashMap::new();
+    let mut group_indices = vec![UNSET; record.triangles.len()];
     for triangle_index in 0..record.triangles.len() {
-        let root = find(&mut parent, triangle_index);
-        let group_index = *group_indices.entry(root).or_insert_with(|| {
+        let group_index = &mut group_indices[find(&mut parent, triangle_index)];
+        if *group_index == UNSET {
+            *group_index = groups.len();
             groups.push(Vec::new());
-            groups.len() - 1
-        });
-        groups[group_index].push(triangle_index);
+        }
+        groups[*group_index].push(triangle_index);
     }
     groups
         .into_iter()
         .map(|members| {
             let mut aabb = empty_aabb();
             let mut primitive_vertices: Vec<(u32, u32)> = Vec::new();
-            let mut primitive_indices = HashMap::new();
+            let mut primitive_indices = FastMap::default();
             for triangle_index in &members {
                 for &vertex in &record.triangles[*triangle_index] {
                     expand(&mut aabb, record.positions[vertex as usize]);
@@ -910,11 +1016,64 @@ fn partial_cmp(left: f64, right: f64) -> Ordering {
     left.partial_cmp(&right).unwrap_or(Ordering::Equal)
 }
 
-fn connected_components(
+fn cluster_gaps(clusters: &[ClusterReport]) -> Vec<ClusterGap> {
+    // Cluster AABBs cover referenced triangles; primitive AABBs can also include
+    // unused vertices, so bounds for this search must come from primitives.
+    let bounds: Vec<_> = clusters
+        .iter()
+        .map(|cluster| {
+            let mut aabb = empty_aabb();
+            for primitive in &cluster.primitives {
+                expand(&mut aabb, primitive.aabb.min);
+                expand(&mut aabb, primitive.aabb.max);
+            }
+            aabb
+        })
+        .collect();
+    let mut gaps = Vec::new();
+    for left in 0..clusters.len() {
+        for right in left + 1..clusters.len() {
+            let from = &clusters[left];
+            let to = &clusters[right];
+            let mut best: Option<ClusterGap> = None;
+            for from_primitive in &from.primitives {
+                // Every target box lies inside bounds[right]. A later pair can
+                // replace the first minimum only with a strictly smaller gap.
+                if best.as_ref().is_some_and(|current| {
+                    dominant_gap(from_primitive.aabb, bounds[right]).1 >= current.gap_mm
+                }) {
+                    continue;
+                }
+                for to_primitive in &to.primitives {
+                    let (axis, gap) = dominant_gap(from_primitive.aabb, to_primitive.aabb);
+                    if best.as_ref().is_none_or(|current| gap < current.gap_mm) {
+                        best = Some(ClusterGap {
+                            from_label: from.label.clone(),
+                            to_label: to.label.clone(),
+                            axis: ['x', 'y', 'z'][axis],
+                            gap_mm: gap,
+                            from_primitive: from_primitive.name.clone(),
+                            to_primitive: to_primitive.name.clone(),
+                        });
+                    }
+                }
+            }
+            gaps.push(best.expect("clusters contain primitives"));
+        }
+    }
+    gaps.sort_by(|left, right| {
+        partial_cmp(left.gap_mm, right.gap_mm)
+            .then_with(|| compare_utf16(&left.from_label, &right.from_label))
+            .then_with(|| compare_utf16(&left.to_label, &right.to_label))
+    });
+    gaps
+}
+
+fn component_clusters(
     analysis: &MeshAnalysis,
     pieces: &[Piece],
     tolerance_mm: f64,
-) -> ConnectedComponents {
+) -> Vec<ClusterReport> {
     let mut parent: Vec<usize> = (0..pieces.len()).collect();
     let axis = sweep_axis(pieces);
     let mut order: Vec<usize> = (0..pieces.len()).collect();
@@ -1039,41 +1198,7 @@ fn connected_components(
             .cmp(&left.total_vertices)
             .then_with(|| compare_utf16(&left.label, &right.label))
     });
-
-    let mut gaps = Vec::new();
-    for left in 0..clusters.len() {
-        for right in left + 1..clusters.len() {
-            let from = &clusters[left];
-            let to = &clusters[right];
-            let mut best: Option<ClusterGap> = None;
-            for from_primitive in &from.primitives {
-                for to_primitive in &to.primitives {
-                    let (axis, gap) = dominant_gap(from_primitive.aabb, to_primitive.aabb);
-                    if best.as_ref().is_none_or(|current| gap < current.gap_mm) {
-                        best = Some(ClusterGap {
-                            from_label: from.label.clone(),
-                            to_label: to.label.clone(),
-                            axis: ['x', 'y', 'z'][axis],
-                            gap_mm: gap,
-                            from_primitive: from_primitive.name.clone(),
-                            to_primitive: to_primitive.name.clone(),
-                        });
-                    }
-                }
-            }
-            gaps.push(best.expect("clusters contain primitives"));
-        }
-    }
-    gaps.sort_by(|left, right| {
-        partial_cmp(left.gap_mm, right.gap_mm)
-            .then_with(|| compare_utf16(&left.from_label, &right.from_label))
-            .then_with(|| compare_utf16(&left.to_label, &right.to_label))
-    });
-    ConnectedComponents {
-        count: clusters.len() as u32,
-        clusters,
-        gaps,
-    }
+    clusters
 }
 
 /// GSM1 bounds use only referenced positions, while other analysis retains the
@@ -1226,6 +1351,82 @@ mod tests {
     }
 
     #[test]
+    fn cluster_gap_pruning_matches_nested_pair_search() {
+        let boxes = [
+            [(0.0, 1.0), (-30.0, -29.0), (0.0, 1.0), (30.0, 31.0)],
+            [(4.0, 5.0), (40.0, 41.0), (0.5, 1.5), (4.0, 5.0)],
+            [(1.0, 2.0), (-20.0, -19.0), (1.0, 2.0), (20.0, 21.0)],
+            [(0.0, 1.0), (10.0, 11.0), (-0.0, 1.0), (50.0, 51.0)],
+            [(8.0, 9.0), (-40.0, -39.0), (8.0, 9.0), (60.0, 61.0)],
+        ];
+        let labels = ["Z", "a", "😀", "A", "á"];
+        let clusters: Vec<_> = boxes
+            .into_iter()
+            .enumerate()
+            .map(|(index, boxes)| ClusterReport {
+                label: labels[index].into(),
+                primitives: boxes
+                    .into_iter()
+                    .enumerate()
+                    .map(|(part, (min, max))| PrimitiveRecord {
+                        name: format!("{}#{part}", labels[index]),
+                        color: None,
+                        vertices: 3,
+                        aabb: Aabb {
+                            min: [min, 0.0, 0.0],
+                            max: [max, 1.0, 1.0],
+                        },
+                    })
+                    .collect(),
+                // Referenced-triangle bounds need not include every primitive vertex.
+                aabb: Aabb {
+                    min: [0.0; 3],
+                    max: [0.0; 3],
+                },
+                centroid: [0.0; 3],
+                total_vertices: 12,
+            })
+            .collect();
+        let mut old = Vec::new();
+        for left in 0..clusters.len() {
+            for right in left + 1..clusters.len() {
+                let from = &clusters[left];
+                let to = &clusters[right];
+                let mut best: Option<ClusterGap> = None;
+                for from_primitive in &from.primitives {
+                    for to_primitive in &to.primitives {
+                        let (axis, gap) = dominant_gap(from_primitive.aabb, to_primitive.aabb);
+                        if best.as_ref().is_none_or(|current| gap < current.gap_mm) {
+                            best = Some(ClusterGap {
+                                from_label: from.label.clone(),
+                                to_label: to.label.clone(),
+                                axis: ['x', 'y', 'z'][axis],
+                                gap_mm: gap,
+                                from_primitive: from_primitive.name.clone(),
+                                to_primitive: to_primitive.name.clone(),
+                            });
+                        }
+                    }
+                }
+                old.push(best.unwrap());
+            }
+        }
+        old.sort_by(|left, right| {
+            partial_cmp(left.gap_mm, right.gap_mm)
+                .then_with(|| compare_utf16(&left.from_label, &right.from_label))
+                .then_with(|| compare_utf16(&left.to_label, &right.to_label))
+        });
+        let actual = cluster_gaps(&clusters);
+        assert_eq!(actual.len(), 10);
+        assert_eq!(actual, old);
+        for (actual, old) in actual.iter().zip(&old) {
+            assert_eq!(actual.gap_mm.to_bits(), old.gap_mm.to_bits());
+        }
+        assert!(actual.iter().any(|gap| gap.gap_mm < 0.0));
+        assert!(actual.iter().any(|gap| gap.gap_mm == 0.0));
+    }
+
+    #[test]
     fn preserves_unused_vertices_in_bounds_but_not_topology() {
         let mut record = box_record(0.0);
         record.positions.push([100.0, 100.0, 100.0]);
@@ -1234,6 +1435,116 @@ mod tests {
         assert_eq!(analysis.vertex_count, 9);
         assert_eq!(analysis.bounding_box().size, [100.0, 100.0, 100.0]);
         assert!(analysis.watertight().watertight);
+    }
+
+    #[test]
+    fn groups_edges_across_primitives_with_the_same_base_label() {
+        let record = MeshAnalysisRecord {
+            positions: vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ],
+            triangles: vec![[0, 1, 2], [4, 3, 5]],
+            triangle_primitives: vec![0, 1],
+            primitives: vec![
+                Primitive {
+                    name: "fin#0".into(),
+                    vertex_start: 0,
+                    vertex_count: 3,
+                },
+                Primitive {
+                    name: "fin#1".into(),
+                    vertex_start: 3,
+                    vertex_count: 3,
+                },
+            ],
+        };
+        let canonical = weld(&record.positions);
+        let actual: Vec<_> = edges(&record, &canonical)
+            .into_iter()
+            .map(|edge| {
+                (
+                    edge.from,
+                    edge.to,
+                    edge.incident_triangle_count,
+                    edge.primitives().collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                (0, 1, 2, vec![0, 1]),
+                (1, 2, 1, vec![0]),
+                (0, 2, 1, vec![0]),
+                (0, 5, 1, vec![1]),
+                (1, 5, 1, vec![1])
+            ]
+        );
+
+        let measured = watertight(&record, &canonical);
+        assert!(!measured.watertight);
+        assert_eq!(
+            (
+                measured.total_edges,
+                measured.irregular_edges,
+                measured.open_boundary_edges,
+                measured.non_manifold_edges
+            ),
+            (5, 4, 4, 0)
+        );
+        assert_eq!(measured.irregular_edge_fraction, 4.0 / 5.0);
+        assert_eq!(
+            measured.per_primitive,
+            vec![
+                WatertightPrimitiveBreakdown {
+                    name: "fin#0".into(),
+                    boundary_edges: 2,
+                    loop_centroid: [0.25, 0.5, 0.0]
+                },
+                WatertightPrimitiveBreakdown {
+                    name: "fin#1".into(),
+                    boundary_edges: 2,
+                    loop_centroid: [0.25, -0.5, 0.0]
+                },
+            ]
+        );
+        assert_eq!(measured.irregular_edge_clusters.len(), 1);
+        let cluster = &measured.irregular_edge_clusters[0];
+        assert_eq!(cluster.kind, IrregularEdgeKind::OpenBoundary);
+        assert_eq!(cluster.edge_count, 4);
+        assert_eq!(
+            cluster.aabb,
+            Aabb {
+                min: [0.0, -1.0, 0.0],
+                max: [1.0, 1.0, 0.0]
+            }
+        );
+        let samples: Vec<_> = cluster
+            .samples
+            .iter()
+            .map(|sample| {
+                (
+                    sample.start,
+                    sample.end,
+                    sample.incident_triangle_count,
+                    sample.primitives.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            samples,
+            [
+                ([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], 1, vec!["fin#0".into()]),
+                ([0.0, 0.0, 0.0], [0.0, -1.0, 0.0], 1, vec!["fin#1".into()]),
+                ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 1, vec!["fin#0".into()]),
+                ([1.0, 0.0, 0.0], [0.0, -1.0, 0.0], 1, vec!["fin#1".into()]),
+            ]
+        );
     }
 
     #[test]

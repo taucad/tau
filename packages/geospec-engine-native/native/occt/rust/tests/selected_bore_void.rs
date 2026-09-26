@@ -12,6 +12,8 @@ mod support;
 use support::current_profile::{bind_claim, bind_ingest};
 
 const QUALIFIED: &str = include_str!("fixtures/current-profile-01/qualified-results.json");
+const CURRENT_NUMERIC_PROFILE: &str =
+    include_str!("../../../../rust/tests/fixtures/current-profile-v5/numeric-profile.txt");
 
 fn qualified_record(index: usize) -> Value {
     let fixture: Value = serde_json::from_str(QUALIFIED).unwrap();
@@ -136,9 +138,13 @@ fn selected_bore_void_original_four_requests_and_budget_refusal() {
         let result =
             String::from_utf8(engine.process_request(request.as_bytes()).unwrap()).unwrap();
         eprintln!("BORE_VOID_ORIGINAL {i} {result}");
+        // Keep the frozen snapshot; project only its serialized numeric profile.
+        let expected = declared["expectedResponseUtf8"].as_str().unwrap().replace(
+            "\"numericProfile\":\"geospec-st-logical-requests-v3\"",
+            &format!("\"numericProfile\":\"{CURRENT_NUMERIC_PROFILE}\""),
+        );
         assert_eq!(
-            result,
-            declared["expectedResponseUtf8"].as_str().unwrap(),
+            result, expected,
             "complete candidate-derived regression snapshot; independent semantic review is separate"
         );
         let claim = claim_result(&result);

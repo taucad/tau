@@ -1009,6 +1009,22 @@ pub trait BrepSubject {
         })
     }
 
+    /// The report's mesh facet alone, from a retained copy+mesh generation that
+    /// a later `reported_facts` reuses. `None` means only the combined report
+    /// exists, so the caller demands `reported_facts_and_mesh` instead.
+    fn reported_mesh(&self) -> Result<Option<Rc<TriangleMesh>>, BackendError> {
+        Ok(None)
+    }
+
+    /// The report's facts facet from the generation that produced `mesh`; the
+    /// returned bundle carries that same mesh.
+    fn reported_facts(&self, mesh: Rc<TriangleMesh>) -> Result<ReportedBrepBundle, BackendError> {
+        Ok(ReportedBrepBundle {
+            mesh,
+            ..self.reported_facts_and_mesh()?
+        })
+    }
+
     /// Unqualified trims must refuse; world AABB projections are not evidence.
     fn cylinder_axial_extent(
         &self,
@@ -1130,6 +1146,21 @@ pub trait BrepSubject {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no qualified source-face transfer association.".into(),
         })
+    }
+
+    /// Ordered source occurrence metadata without preparing a report or
+    /// transferring whole-document face/PMI inventories.
+    fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no source occurrence metadata route.".into(),
+        })
+    }
+
+    /// `source_occurrences` without measuring occurrence bounds: every field
+    /// except `bounds`, which a connector may leave unmeasured (NaN).
+    fn source_occurrence_structure(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        self.source_occurrences()
     }
 
     fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError>;

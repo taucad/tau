@@ -51,6 +51,8 @@ MIXED_INPUTS = CACHE / 'mixed-inputs-simd128.json'
 PACKAGE_SKIP = {'target', 'node_modules', '.git', '__pycache__', 'out-tsc'}
 PREFIX_RECEIPT_SCHEMA = 'geospec-occt-prefix-receipt-v2'
 PREFIX_CACHE_OUTPUTS = ('build/CMakeCache.txt', 'static-toolkit-closure.txt')
+# rust-src library lock of the selected nightly; MT `-Zbuild-std` resolves it offline from CARGO_HOME.
+RUST_SRC_LOCK_SHA256 = '34656569ab979fdf259efffc99d2b68e253e73e0e6fba6762dc51e83df71aa76'
 SCHEDULING_VARIABLES = ('GEOSPEC_OCCT_JOBS', 'CARGO_BUILD_JOBS', 'EMCC_CORES', 'BINARYEN_CORES')
 
 
@@ -645,13 +647,19 @@ def prepare_inputs(paths, env):
     prefix_recovery = {'mixed': receipt.get('recovery')}
     # The standalone runtime build script also reads its own locked graph for
     # producer identity, independently of the consuming Emscripten binding.
-    for relative in ['bindings/emscripten/Cargo.toml', 'native/runtime/Cargo.toml']:
-        cargo_manifest = PACKAGE / relative
+    manifests = [PACKAGE / 'bindings/emscripten/Cargo.toml', PACKAGE / 'native/runtime/Cargo.toml']
+    rust_src = RUST / 'lib/rustlib/src/rust/library'
+    # ponytail: ST needs no rust-src; the MT build refuses a Rust prefix without it before compiling.
+    if (rust_src / 'Cargo.lock').exists():
+        require(digest(rust_src / 'Cargo.lock') == RUST_SRC_LOCK_SHA256,
+                f'Unselected rust-src library lock: {rust_src / "Cargo.lock"}')
+        manifests.append(rust_src / 'Cargo.toml')
+    for cargo_manifest in manifests:
         run([paths['cargo'], 'fetch', '--locked', '--manifest-path', cargo_manifest], env)
         metadata = json.loads(run([paths['cargo'], 'metadata', '--locked', '--offline', '--format-version', '1', '--manifest-path', cargo_manifest], env))
         for dependency in metadata['packages']:
             path = Path(dependency['manifest_path']).resolve()
-            require(path.is_relative_to(PACKAGE) or path.is_relative_to(CACHE / 'cargo/registry/src'),
+            require(any(path.is_relative_to(root) for root in [PACKAGE, RUST, CACHE / 'cargo/registry/src']),
                     f'Cargo dependency outside the recorded source roots: {path}')
     # Registry source and archive checksums are verified by Cargo's locked fetch.
     manifest = {

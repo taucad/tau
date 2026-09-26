@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 
 const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
 const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d";
+const CURRENT_NUMERIC_PROFILE: &str =
+    include_str!("fixtures/current-profile-v5/numeric-profile.txt");
 
 fn current() -> Value {
     assert_eq!(format!("{:x}", Sha256::digest(CURRENT)), CURRENT_SHA256);
@@ -40,6 +42,7 @@ fn assert_exact(
 ) -> Option<Value> {
     if let Some(bytes) = expected["expectedUtf8"].as_str() {
         let actual = actual.unwrap_or_else(|error| panic!("{name}: {error}"));
+        let bytes = bytes.replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE);
         assert_eq!(actual, bytes.as_bytes(), "{name}: canonical bytes");
         assert_eq!(canonicalize(&actual).unwrap(), actual, "{name}: canonical");
         Some(serde_json::from_slice(&actual).unwrap())

@@ -32,6 +32,8 @@
 #include <Interface_InterfaceModel.hxx>
 #include <Interface_Static.hxx>
 #include <NCollection_Sequence.hxx>
+#include <OSD_Parallel.hxx>
+#include <OSD_ThreadPool.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Precision.hxx>
@@ -78,6 +80,7 @@
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TransferBRep.hxx>
 #include <Transfer_TransientProcess.hxx>
+#include <NCollection_DataMap.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_List.hxx>
 #include <TopoDS.hxx>
@@ -120,6 +123,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -135,8 +139,8 @@ struct ProductFacts {
   std::string name;
 };
 
+// Private occurrence face address; its numerics are a document slot.
 struct LocatedFaceFacts {
-  geospec_occt_located_face_facts facts{};
   TopoDS_Face shape;
   std::vector<uint32_t> edge_indices;
   std::string shape_label;
@@ -167,10 +171,11 @@ struct OccurrenceFacts {
   size_t product = 0;
   TopoDS_Shape shape;
   gp_Trsf transform;
+  // Bounds stay unset here; the source value is a document slot.
   geospec_occt_occurrence_facts facts{};
   std::vector<LocatedFaceFacts> faces;
   std::vector<FaceView> public_faces;
-  std::vector<EdgeFacts> edges;
+  std::vector<TopoDS_Edge> edges;
 };
 
 struct SourceFaceFacts {
@@ -243,6 +248,7 @@ struct MeshData {
 };
 
 struct ReportData {
+  uint32_t facets = 0;
   geospec_occt_shape_facts shape{};
   std::vector<geospec_occt_occurrence_facts> occurrences;
   std::vector<geospec_occt_located_face_facts> whole_faces;
@@ -250,6 +256,7 @@ struct ReportData {
   MeshData mesh;
 };
 
+struct ReportGeneration;
 struct EdgeTreatmentTransferData;
 
 int write_string(const std::string& value, geospec_occt_string* output) noexcept {
@@ -311,6 +318,15 @@ std::string hascii(const occ::handle<TCollection_HAsciiString>& value) {
   return value.IsNull() ? std::string{} : value->ToCString();
 }
 
+// Same result as occ::down_cast<T>(entity). The full-model scans below test every
+// entity against one type, and a failing dynamic_cast (type_info string compares)
+// costs far more than OCCT's own IsKind walk.
+template <class T>
+occ::handle<T> entity_as(const occ::handle<Standard_Transient>& entity) {
+  return !entity.IsNull() && entity->IsKind(STANDARD_TYPE(T)) ? occ::down_cast<T>(entity)
+                                                              : occ::handle<T>{};
+}
+
 std::string step_schema(STEPCAFControl_Reader& reader) {
   const auto session = reader.ChangeReader().WS();
   if (session.IsNull() || session->Model().IsNull()) return {};
@@ -351,14 +367,14 @@ ProductIdentityIndex product_identity(STEPCAFControl_Reader& reader) {
   const auto process = session->TransferReader()->TransientProcess();
   int product_count = 0;
   for (int index = 1; index <= model->NbEntities(); ++index) {
-    const auto product = occ::down_cast<StepBasic_Product>(model->Value(index));
+    const auto product = entity_as<StepBasic_Product>(model->Value(index));
     if (!product.IsNull()) {
       ++product_count;
       const std::string id = hascii(product->Id());
       result.sole_product_name = id.empty() ? hascii(product->Name()) : id;
     }
     const auto shape_definition =
-        occ::down_cast<StepShape_ShapeDefinitionRepresentation>(model->Value(index));
+        entity_as<StepShape_ShapeDefinitionRepresentation>(model->Value(index));
     if (shape_definition.IsNull()) continue;
     const std::string name = product_name(
         occ::down_cast<StepRepr_ProductDefinitionShape>(
@@ -577,10 +593,12 @@ bool shape_is_valid(const TopoDS_Shape& shape) {
   return BRepCheck_Analyzer(shape).IsValid();
 }
 
-geospec_occt_shape_facts shape_facts(const TopoDS_Shape& shape,
-                                   bool include_optimal_bounds = true) {
+geospec_occt_shape_facts shape_facts(
+    const TopoDS_Shape& shape, bool include_optimal_bounds = true,
+    std::optional<bool> known_valid = std::nullopt) {
   geospec_occt_shape_facts result{};
-  result.valid = shape_is_valid(shape) ? 1 : 0;
+  // known_valid is an earlier shape_is_valid result for this same shape.
+  result.valid = (known_valid ? *known_valid : shape_is_valid(shape)) ? 1 : 0;
   if (include_optimal_bounds) result.bounds = bounds(shape);
 
   GProp_GProps volume;
@@ -629,11 +647,11 @@ int surface_type(GeomAbs_SurfaceType type) {
 }
 
 FaceFacts face_facts(const TopoDS_Face& face, uint32_t index,
-                     uint32_t query_index) {
+                     uint32_t query_index, bool include_optimal_bounds = true) {
   BRepAdaptor_Surface surface(face);
   FaceFacts result;
   result.shape = face;
-  result.bounds = bounds(face);
+  if (include_optimal_bounds) result.bounds = bounds(face);
   result.reversed = face.Orientation() == TopAbs_REVERSED ? 1 : 0;
   result.facts.index = index;
   result.facts.query_index = query_index;
@@ -802,13 +820,14 @@ EdgeFacts edge_facts(const TopoDS_Edge& edge, uint32_t index) {
   return result;
 }
 
+// Ordered private edge/face addresses, edge incidence and public faces. Their
+// numerics are filled on demand from these same ordered shapes.
 void populate_occurrence_geometry(OccurrenceFacts& occurrence) {
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
   TopExp::MapShapes(occurrence.shape, TopAbs_EDGE, edges);
   occurrence.edges.reserve(static_cast<size_t>(edges.Extent()));
   for (int index = 1; index <= edges.Extent(); ++index) {
-    occurrence.edges.push_back(
-        edge_facts(TopoDS::Edge(edges(index)), static_cast<uint32_t>(index)));
+    occurrence.edges.push_back(TopoDS::Edge(edges(index)));
   }
 
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
@@ -818,11 +837,6 @@ void populate_occurrence_geometry(OccurrenceFacts& occurrence) {
     const TopoDS_Face face = TopoDS::Face(faces(index));
     LocatedFaceFacts located;
     located.shape = face;
-    const FaceFacts local = face_facts(face, static_cast<uint32_t>(index),
-                                      static_cast<uint32_t>(index));
-    located.facts.face = local.facts;
-    located.facts.bounds = local.bounds;
-    located.facts.reversed = local.reversed;
 
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> face_edges;
     TopExp::MapShapes(face, TopAbs_EDGE, face_edges);
@@ -833,7 +847,6 @@ void populate_occurrence_geometry(OccurrenceFacts& occurrence) {
         located.edge_indices.push_back(static_cast<uint32_t>(occurrence_index));
       }
     }
-    located.facts.edge_count = located.edge_indices.size();
     occurrence.faces.push_back(std::move(located));
   }
 
@@ -897,7 +910,6 @@ void append_free_shape_occurrence(
   occurrence.shape.Location(location);
   occurrence.transform = location.Transformation();
   placement(occurrence.facts.placement, location);
-  occurrence.facts.bounds = bounds(occurrence.shape);
   occurrence.facts.parent = -1;
   occurrence.facts.product = static_cast<uint32_t>(occurrence.product);
   occurrence.facts.ordinal_count = occurrence.ordinal_path.size();
@@ -966,7 +978,6 @@ void append_occurrences(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
     occurrence.shape = placed;
     occurrence.transform = composed.Transformation();
     placement(occurrence.facts.placement, composed);
-    occurrence.facts.bounds = bounds(placed);
     occurrence.facts.parent = occurrence.parent;
     occurrence.facts.product = static_cast<uint32_t>(occurrence.product);
     occurrence.facts.ordinal_count = occurrence.ordinal_path.size();
@@ -1001,26 +1012,31 @@ void prepare_source_associations(
   const STEPConstruct_Tool tool(session);
   std::vector<uint32_t> source_nauo(occurrences.size(), 0);
   std::vector<bool> ambiguous_nauo(occurrences.size(), false);
+  // Last matching occurrence and match count per label: the NAUO loop below
+  // looked these up with a scan over all occurrences per NAUO.
+  NCollection_DataMap<TDF_Label, std::pair<size_t, size_t>> label_occurrences;
+  for (size_t occurrence = 0; occurrence < occurrences.size(); ++occurrence) {
+    std::pair<size_t, size_t>* seen =
+        label_occurrences.ChangeSeek(occurrences[occurrence].source_label);
+    if (seen == nullptr) {
+      label_occurrences.Bind(occurrences[occurrence].source_label, {occurrence, 1});
+    } else {
+      *seen = {occurrence, seen->second + 1};
+    }
+  }
 
   for (int index = 1; index <= model->NbEntities(); ++index) {
     const auto entity = model->Value(index);
-    const auto nauo =
-        occ::down_cast<StepRepr_NextAssemblyUsageOccurrence>(entity);
+    const auto nauo = entity_as<StepRepr_NextAssemblyUsageOccurrence>(entity);
     if (!nauo.IsNull()) {
       const int source_id = model->IdentLabel(nauo);
       if (source_id <= 0) continue;
       const TDF_Label label = STEPCAFControl_Reader::FindInstance(
           nauo, shape_tool, tool, reader.GetShapeLabelMap());
       if (label.IsNull()) continue;
-      size_t found = occurrences.size();
-      size_t count = 0;
-      for (size_t occurrence = 0; occurrence < occurrences.size(); ++occurrence) {
-        if (occurrences[occurrence].source_label.IsEqual(label)) {
-          found = occurrence;
-          ++count;
-        }
-      }
-      if (count != 1 || ambiguous_nauo[found]) continue;
+      const std::pair<size_t, size_t>* match = label_occurrences.Seek(label);
+      if (match == nullptr || match->second != 1 || ambiguous_nauo[match->first]) continue;
+      const size_t found = match->first;
       if (source_nauo[found] != 0) {
         source_nauo[found] = 0;
         occurrences[found].source_transfer_valid = false;
@@ -1038,7 +1054,7 @@ void prepare_source_associations(
       continue;
     }
 
-    const auto face = occ::down_cast<StepShape_AdvancedFace>(entity);
+    const auto face = entity_as<StepShape_AdvancedFace>(entity);
     if (face.IsNull()) continue;
     if (source_faces.size() == kMaxSourceFaces) {
       source_faces.clear();
@@ -1074,14 +1090,16 @@ void prepare_source_associations(
     std::reverse(route.begin(), route.end());
     occurrences[occurrence].source_route = std::move(route);
   }
-  for (size_t left = 0; left < occurrences.size(); ++left) {
-    if (!occurrences[left].source_transfer_valid) continue;
-    for (size_t right = left + 1; right < occurrences.size(); ++right) {
-      if (occurrences[right].source_transfer_valid &&
-          occurrences[left].source_route == occurrences[right].source_route) {
-        occurrences[left].source_transfer_valid = false;
-        occurrences[right].source_transfer_valid = false;
-      }
+  // A route shared by two or more valid occurrences is ambiguous for all of
+  // them; this is the set the former pairwise pass invalidated.
+  std::map<std::vector<uint32_t>, size_t> route_counts;
+  for (const OccurrenceFacts& occurrence : occurrences) {
+    if (occurrence.source_transfer_valid) ++route_counts[occurrence.source_route];
+  }
+  for (OccurrenceFacts& occurrence : occurrences) {
+    if (occurrence.source_transfer_valid &&
+        route_counts.at(occurrence.source_route) > 1) {
+      occurrence.source_transfer_valid = false;
     }
   }
 }
@@ -1234,7 +1252,7 @@ void append_semantic_datums(
     return changed;
   };
   for (int index = 1; index <= model->NbEntities(); ++index) {
-    const auto datum = occ::down_cast<StepDimTol_Datum>(model->Value(index));
+    const auto datum = entity_as<StepDimTol_Datum>(model->Value(index));
     if (datum.IsNull()) continue;
     const std::string letter = hascii(datum->Identification());
     if (!letter.empty()) append_letters(datum.get(), {letter});
@@ -1243,7 +1261,7 @@ void append_semantic_datums(
   std::vector<std::pair<const void*, const void*>> aspect_edges;
   for (int index = 1; index <= model->NbEntities(); ++index) {
     const auto relationship =
-        occ::down_cast<StepRepr_ShapeAspectRelationship>(model->Value(index));
+        entity_as<StepRepr_ShapeAspectRelationship>(model->Value(index));
     if (relationship.IsNull()) continue;
     const auto relating = relationship->RelatingShapeAspect();
     const auto related = relationship->RelatedShapeAspect();
@@ -1289,7 +1307,7 @@ void append_semantic_datums(
     };
 
     for (int index = 1; index <= model->NbEntities(); ++index) {
-      const auto usage = occ::down_cast<StepAP242_ItemIdentifiedRepresentationUsage>(
+      const auto usage = entity_as<StepAP242_ItemIdentifiedRepresentationUsage>(
           model->Value(index));
       if (usage.IsNull() ||
           !occ::down_cast<StepAP242_DraughtingModelItemAssociation>(usage)
@@ -1363,7 +1381,7 @@ void append_semantic_datums(
 
   std::map<std::pair<std::string, int>, bool> emitted;
   for (int index = 1; index <= model->NbEntities(); ++index) {
-    const auto datum = occ::down_cast<StepDimTol_Datum>(model->Value(index));
+    const auto datum = entity_as<StepDimTol_Datum>(model->Value(index));
     if (datum.IsNull()) continue;
     const std::string letter = hascii(datum->Identification());
     if (letter.empty()) continue;
@@ -1422,7 +1440,7 @@ void append_datum_placements(STEPCAFControl_Reader& reader,
       product_representations;
   for (int index = 1; index <= model->NbEntities(); ++index) {
     const auto definition =
-        occ::down_cast<StepShape_ShapeDefinitionRepresentation>(
+        entity_as<StepShape_ShapeDefinitionRepresentation>(
             model->Value(index));
     if (definition.IsNull() || definition->UsedRepresentation().IsNull()) {
       continue;
@@ -1438,7 +1456,7 @@ void append_datum_placements(STEPCAFControl_Reader& reader,
 
   for (int index = 1; index <= model->NbEntities(); ++index) {
     const auto constructive =
-        occ::down_cast<StepRepr_ConstructiveGeometryRepresentation>(
+        entity_as<StepRepr_ConstructiveGeometryRepresentation>(
             model->Value(index));
     if (constructive.IsNull() || constructive->Items().IsNull()) continue;
     const occ::handle<StepRepr_Representation> representation = constructive;
@@ -1540,11 +1558,11 @@ struct geospec_occt_document {
   size_t free_shape_count = 0;
   std::string source_length_unit;
   double source_unit_to_millimeters = 1.0;
-  geospec_occt_shape_facts shape_facts{};
   mutable bool admission_validity_reusable = true;
   std::vector<ProductFacts> products;
   std::vector<OccurrenceFacts> occurrences;
   std::vector<SourceFaceFacts> source_faces;
+  // Private whole-shape faces: shape and label only; numerics are a slot.
   std::vector<FaceFacts> faces;
   std::vector<FaceView> public_faces;
   std::vector<PmiFacts> pmi;
@@ -1552,13 +1570,125 @@ struct geospec_occt_document {
   std::vector<SemanticDatumFacts> semantic_datums;
   std::vector<DatumPlacementFacts> datum_placements;
   mutable std::optional<ReportData> report;
+  // N2-FACET report generation: the isolated copy+mesh that a mesh facet
+  // retains for a later facts facet; the transfer slot stays above.
+  mutable std::unique_ptr<ReportGeneration> report_generation;
+  mutable size_t report_generation_builds = 0;
   mutable std::optional<std::pair<MeshKey, MeshData>> transfer_mesh;
   mutable std::optional<std::vector<geospec_occt_circular_bore_candidate>>
       circular_bores;
   mutable std::unique_ptr<EdgeTreatmentTransferData> edge_treatments;
+  // N2-LAZY source numeric slots. Admission keeps XDE identity, order,
+  // placements and private/public addresses only. Each slot is computed once
+  // from this admitted source shape on first demand and stored only after it
+  // succeeds; common_volume completes all of them before it may modify inputs.
+  // Const getters write these unsynchronized slots: the document is confined
+  // to one thread at a time (see geospec_occt_open_step).
+  mutable std::optional<geospec_occt_shape_facts> shape_facts;
+  // The shape_facts validity check alone, for a validity demand that comes
+  // before any source shape facts.
+  mutable std::optional<bool> shape_valid;
+  mutable std::vector<std::optional<geospec_occt_bounds>> occurrence_bounds;
+  mutable std::vector<std::optional<std::vector<geospec_occt_edge_facts>>>
+      occurrence_edges;
+  mutable std::vector<
+      std::optional<std::vector<geospec_occt_located_face_facts>>>
+      occurrence_faces;
+  mutable std::vector<std::optional<FaceFacts>> query_faces;
 };
 
 namespace {
+
+// N2-LAZY slot fills. Each computes exactly what admission used to compute,
+// from the same admitted shapes in the same order, and assigns the slot only
+// after the computation has returned. OCCT failures propagate to the guard.
+const geospec_occt_shape_facts& source_shape_facts(
+    const geospec_occt_document& document) {
+  // A validity demand may already have proved this unmodified shape.
+  if (!document.shape_facts) {
+    document.shape_facts =
+        shape_facts(document.shape, true, document.shape_valid);
+  }
+  return *document.shape_facts;
+}
+
+bool source_shape_valid(const geospec_occt_document& document) {
+  if (document.shape_facts) return document.shape_facts->valid != 0;
+  if (!document.shape_valid) document.shape_valid = shape_is_valid(document.shape);
+  return *document.shape_valid;
+}
+
+const geospec_occt_bounds& source_occurrence_bounds(
+    const geospec_occt_document& document, size_t occurrence) {
+  std::optional<geospec_occt_bounds>& slot =
+      document.occurrence_bounds[occurrence];
+  if (!slot) slot = bounds(document.occurrences[occurrence].shape);
+  return *slot;
+}
+
+const std::vector<geospec_occt_edge_facts>& source_occurrence_edges(
+    const geospec_occt_document& document, size_t occurrence) {
+  auto& slot = document.occurrence_edges[occurrence];
+  if (!slot) {
+    const std::vector<TopoDS_Edge>& edges = document.occurrences[occurrence].edges;
+    std::vector<geospec_occt_edge_facts> values;
+    values.reserve(edges.size());
+    for (size_t index = 0; index < edges.size(); ++index) {
+      values.push_back(
+          edge_facts(edges[index], static_cast<uint32_t>(index + 1)).facts);
+    }
+    slot = std::move(values);
+  }
+  return *slot;
+}
+
+const std::vector<geospec_occt_located_face_facts>& source_occurrence_faces(
+    const geospec_occt_document& document, size_t occurrence) {
+  auto& slot = document.occurrence_faces[occurrence];
+  if (!slot) {
+    const std::vector<LocatedFaceFacts>& faces =
+        document.occurrences[occurrence].faces;
+    std::vector<geospec_occt_located_face_facts> values;
+    values.reserve(faces.size());
+    for (size_t index = 0; index < faces.size(); ++index) {
+      const uint32_t query_index = static_cast<uint32_t>(index + 1);
+      const FaceFacts local = face_facts(faces[index].shape, query_index, query_index);
+      geospec_occt_located_face_facts located{};
+      located.face = local.facts;
+      located.bounds = local.bounds;
+      located.reversed = local.reversed;
+      located.edge_count = faces[index].edge_indices.size();
+      values.push_back(located);
+    }
+    slot = std::move(values);
+  }
+  return *slot;
+}
+
+const FaceFacts& source_query_face(const geospec_occt_document& document,
+                                   uint32_t query_index) {
+  std::optional<FaceFacts>& slot = document.query_faces[query_index - 1];
+  if (!slot) {
+    slot = face_facts(document.faces[query_index - 1].shape, query_index,
+                      query_index);
+  }
+  return *slot;
+}
+
+// Admission's former order: whole shape, then each occurrence's bounds, edges
+// and faces, then the private whole faces.
+void complete_source_numerics(const geospec_occt_document& document) {
+  source_shape_facts(document);
+  for (size_t occurrence = 0; occurrence < document.occurrences.size();
+       ++occurrence) {
+    source_occurrence_bounds(document, occurrence);
+    source_occurrence_edges(document, occurrence);
+    source_occurrence_faces(document, occurrence);
+  }
+  for (size_t face = 1; face <= document.faces.size(); ++face) {
+    source_query_face(document, static_cast<uint32_t>(face));
+  }
+}
 
 bool resolve_entity(const geospec_occt_document& document,
                     geospec_occt_entity entity, TopoDS_Shape& output,
@@ -1961,7 +2091,7 @@ bool build_circular_bores(
     const geospec_occt_document& document, size_t max_candidates,
     size_t retained_candidate_size, size_t retained_inventory_size,
     std::vector<geospec_occt_circular_bore_candidate>& output,
-    std::string& message, bool& native_error) {
+    std::string& message, bool& native_error, bool run_parallel = false) {
   constexpr size_t kMaximumCandidates = 4096;
   constexpr size_t kMaximumOwnedBytes = 1024 * 1024;
   const size_t limit = std::min(max_candidates, kMaximumCandidates);
@@ -2196,7 +2326,7 @@ bool build_circular_bores(
     common.SetArguments(arguments);
     common.SetTools(tools);
     common.SetNonDestructive(true);
-    common.SetRunParallel(false);
+    common.SetRunParallel(run_parallel);
     common.Build();
     if (!common.IsDone() || common.HasErrors()) {
       std::ostringstream details;
@@ -4801,8 +4931,9 @@ uint64_t float_bits(double value) {
   return bits;
 }
 
-void mesh_shape(const TopoDS_Shape& shape, double linear, double angular) {
-  BRepMesh_IncrementalMesh mesher(shape, linear, false, angular, false);
+void mesh_shape(const TopoDS_Shape& shape, double linear, double angular,
+                bool run_parallel = false) {
+  BRepMesh_IncrementalMesh mesher(shape, linear, false, angular, run_parallel);
   if (!mesher.IsDone()) throw Standard_Failure("Tessellation failed.");
   // IsDone is set after collecting face/wire failures; it is not completeness.
   const int incomplete = IMeshData_OpenWire | IMeshData_SelfIntersectingWire |
@@ -4814,11 +4945,11 @@ void mesh_shape(const TopoDS_Shape& shape, double linear, double angular) {
 }
 
 MeshData compute_mesh(const TopoDS_Shape& shape, double linear,
-                      double angular) {
+                      double angular, bool run_parallel = false) {
   BRepBuilderAPI_Copy copy(shape, false, false);
   if (!copy.IsDone()) throw Standard_Failure("Tessellation shape copy failed.");
   const TopoDS_Shape isolated = copy.Shape();
-  mesh_shape(isolated, linear, angular);
+  mesh_shape(isolated, linear, angular, run_parallel);
 
   MeshData result;
   std::map<std::tuple<double, double, double>, uint32_t> index_by_point;
@@ -5069,7 +5200,7 @@ bool mapped_prototype_shape(const PrototypeReportCopy& copy,
 geospec_occt_located_face_facts reported_face(
     const TopoDS_Face& face, uint32_t index, uint32_t query_index,
     size_t edge_count) {
-  FaceFacts value = face_facts(face, index, query_index);
+  FaceFacts value = face_facts(face, index, query_index, false);
   // The source XDE face report explicitly excludes triangulation. Whole-shape
   // reporting retains its separate triangulation-enabled source rule.
   Bnd_Box box;
@@ -5085,10 +5216,21 @@ geospec_occt_located_face_facts reported_face(
   return result;
 }
 
-bool build_report(const geospec_occt_document& document,
-                  ReportData& report,
-                  std::string& message) {
-  std::optional<PrototypeReportCopy> prototype(std::in_place);
+// The isolated meshed report shape and the history that maps source addresses
+// onto it. Facts computed later on this same generation equal eager facts.
+struct ReportGeneration {
+  std::optional<PrototypeReportCopy> prototype;
+  std::unique_ptr<BRepBuilderAPI_Copy> copy;
+  TopoDS_Shape shape;
+};
+
+// Mesh facet prerequisite: copy or prototype-map, then mesh, exactly as before.
+// A dedicated caller may select the mesher's parallel mode under its grant.
+bool build_report_generation(const geospec_occt_document& document,
+                             ReportGeneration& generation,
+                             std::string& message, bool run_parallel) {
+  std::optional<PrototypeReportCopy>& prototype = generation.prototype;
+  prototype.emplace();
   bool use_prototype = prototype->build(document.shape);
   if (use_prototype) {
     // XDE report addresses must all resolve before the isolated shape is meshed.
@@ -5100,30 +5242,37 @@ bool build_report(const geospec_occt_document& document,
     for (const FaceView& face : document.public_faces)
       if (prototype->mapped(face.shape).IsNull()) use_prototype = false;
   }
-  std::unique_ptr<BRepBuilderAPI_Copy> copy;
   if (!use_prototype) {
     prototype.reset();
-    copy = std::make_unique<BRepBuilderAPI_Copy>(document.shape, false, false);
-    if (!copy->IsDone() || copy->Shape().IsNull()) {
+    generation.copy =
+        std::make_unique<BRepBuilderAPI_Copy>(document.shape, false, false);
+    if (!generation.copy->IsDone() || generation.copy->Shape().IsNull()) {
       message = "OCCT report shape copy failed.";
       return false;
     }
   }
-  const TopoDS_Shape isolated = use_prototype ? prototype->shape : copy->Shape();
+  generation.shape = use_prototype ? prototype->shape : generation.copy->Shape();
+  constexpr double pi = 3.141592653589793238462643383279502884;
+  mesh_shape(generation.shape, 0.01, 15.0 * pi / 180.0, run_parallel);
+  return true;
+}
+
+// Facts facet: the unchanged report facts on the retained meshed generation.
+bool build_report_facts(const geospec_occt_document& document,
+                        const ReportGeneration& generation,
+                        ReportData& report,
+                        std::string& message) {
+  const TopoDS_Shape& isolated = generation.shape;
   const auto map_report_shape = [&](const TopoDS_Shape& source,
                                     TopAbs_ShapeEnum expected_type,
                                     const std::string& identity,
                                     TopoDS_Shape& mapped) {
-    return use_prototype
-        ? mapped_prototype_shape(*prototype, source, expected_type, identity,
-                                 mapped, message)
-        : mapped_copy_shape(*copy, source, expected_type, identity,
+    return generation.prototype
+        ? mapped_prototype_shape(*generation.prototype, source, expected_type,
+                                 identity, mapped, message)
+        : mapped_copy_shape(*generation.copy, source, expected_type, identity,
                             mapped, message);
   };
-  constexpr double pi = 3.141592653589793238462643383279502884;
-  mesh_shape(isolated, 0.01, 15.0 * pi / 180.0);
-  report.mesh = report_triangle_soup(isolated);
-
   report.shape = shape_facts(isolated, false);
   report.shape.bounds = reporting_bounds(isolated);
 
@@ -5195,17 +5344,19 @@ bool build_report(const geospec_occt_document& document,
 }
 
 geospec_occt_validity_facts compute_validity(const geospec_occt_document& document,
-                                             std::string& reason) {
+                                             std::string& reason,
+                                             bool run_parallel = false) {
   const TopoDS_Shape& shape = document.shape;
   geospec_occt_validity_facts result{};
   std::optional<BRepCheck_Analyzer> analyzer;
-  // Admission already checked this exact shape with the same analyzer settings.
-  // IsValid recursively visits every child, including every solid. Reuse only
-  // that successful proof while no potentially destructive query has run.
-  if (document.admission_validity_reusable && document.shape_facts.valid) {
+  // The source shape facts check proves this exact shape with the same analyzer
+  // settings. IsValid recursively visits every child, including every solid.
+  // Reuse only that successful proof while no potentially destructive query
+  // has run; the proof is never computed after such a query.
+  if (document.admission_validity_reusable && source_shape_valid(document)) {
     result.valid = 1;
   } else {
-    analyzer.emplace(shape, true);
+    analyzer.emplace(shape, true, run_parallel, false);
     result.valid = analyzer->IsValid() ? 1 : 0;
   }
   result.same_parameter = 1;
@@ -5654,6 +5805,65 @@ geospec_occt_wall_result compute_wall(
 
 }  // namespace
 
+int geospec_occt_thread_pool_width(int requested, int* actual,
+                                   geospec_occt_string* error) noexcept {
+  if (requested < 1 || requested > OSD_Parallel::NbLogicalProcessors() ||
+      actual == nullptr) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Thread-pool width must be between one and the logical CPU count, including the caller.",
+                error);
+  }
+  return guarded(error, [&]() -> int {
+    static std::once_flag first_init;
+    static int first_requested = 0;
+    static int first_actual = 0;
+    std::call_once(first_init, [&] {
+      first_requested = requested;
+      first_actual = OSD_ThreadPool::DefaultPool(requested)->NbThreads();
+    });
+    *actual = first_actual;
+    if (first_requested != requested || first_actual != requested) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "OCCT thread pool was initialized with a different width.",
+                  error);
+    }
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+// Pin workers outside the caller-inclusive grant for the entire inner call.
+// OCCT's For/Boolean launchers pass explicit range sizes, so changing the
+// pool's default-launch width would not cap them. A retained Launcher locks
+// the unused workers without starting jobs, including across nested loops.
+static int dedicated_pool_scope(
+    int grant_width, int* used_parallel,
+    std::unique_ptr<OSD_ThreadPool::Launcher>& reservation,
+    geospec_occt_string* error) {
+  *used_parallel = 0;
+  if (grant_width == 0) return GEOSPEC_OCCT_OK;
+  const occ::handle<OSD_ThreadPool>& pool = OSD_ThreadPool::DefaultPool();
+  const int cap = pool->NbThreads();
+  int actual = 0;
+  if (grant_width < 1 || grant_width > cap ||
+      geospec_occt_thread_pool_width(cap, &actual, nullptr) != GEOSPEC_OCCT_OK ||
+      (grant_width >= 2 && !OSD_Parallel::ToUseOcctThreads())) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                "OCCT grant exceeds the owned pool or OCCT parallelism is unavailable.",
+                error);
+  }
+  const int unused_workers = cap - grant_width;
+  if (unused_workers > 0) {
+    reservation = std::make_unique<OSD_ThreadPool::Launcher>(
+        *pool, unused_workers + 1);
+    if (reservation->NbThreads() != unused_workers + 1) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "OCCT could not reserve every worker outside the grant.", error);
+    }
+  }
+  *used_parallel = grant_width >= 2 ? 1 : 0;
+  return GEOSPEC_OCCT_OK;
+}
+
 int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                            geospec_occt_document** output,
                            geospec_occt_string* error) noexcept {
@@ -5662,6 +5872,21 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
   }
   *output = nullptr;
   return guarded(error, [&]() -> int {
+    // Validation can initialize the global pool even with parallelism off.
+    // Default to one physical thread unless an explicit earlier grant won.
+    int pool_width = 0;
+    const int pool_status =
+        geospec_occt_thread_pool_width(1, &pool_width, nullptr);
+    if (pool_status != GEOSPEC_OCCT_OK && pool_status != GEOSPEC_OCCT_UNSUPPORTED)
+      return pool_status;
+    // The reader writes process-global Interface_Static options, and its
+    // read/transfer state is not proven safe beside another reader. Serialize
+    // the reader's whole lifetime; the lock is declared first so it is
+    // released after the reader is destroyed.
+    // ponytail: one process-wide lock serializes concurrent admissions; a
+    // parameter-local ReadStream needs its own whole-configuration parity.
+    static std::mutex step_reader_lock;
+    const std::lock_guard<std::mutex> step_reader_guard(step_reader_lock);
     STEPCAFControl_Reader reader;
     // Reader construction registers and resets this option on first use.
     Interface_Static::SetIVal("read.stepcaf.subshapes.name", 1);
@@ -5721,7 +5946,6 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     }
     result->shape = shape_tool->GetOneShape();
     if (result->shape.IsNull()) return fail(GEOSPEC_OCCT_NO_SHAPE, "STEP has no shape.", error);
-    result->shape_facts = shape_facts(result->shape);
 
     NCollection_Sequence<TDF_Label> products;
     shape_tool->GetShapes(products);
@@ -5769,11 +5993,11 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     TopExp::MapShapes(result->shape, TopAbs_FACE, faces);
     result->faces.reserve(static_cast<size_t>(faces.Extent()));
     for (int index = 1; index <= faces.Extent(); ++index) {
-      result->faces.push_back(face_facts(
-          TopoDS::Face(faces(index)), static_cast<uint32_t>(index),
-          static_cast<uint32_t>(index)));
+      FaceFacts face;
+      face.shape = TopoDS::Face(faces(index));
+      result->faces.push_back(std::move(face));
     }
-    result->public_faces.reserve(result->shape_facts.faces);
+    result->public_faces.reserve(static_cast<size_t>(faces.Extent()));
     for (TopExp_Explorer explorer(result->shape, TopAbs_FACE); explorer.More();
          explorer.Next()) {
       const TopoDS_Face face = TopoDS::Face(explorer.Current());
@@ -5801,6 +6025,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                            result->public_faces, result->semantic_datums);
     append_datum_placements(reader, result->occurrences,
                             result->datum_placements);
+    result->occurrence_bounds.resize(result->occurrences.size());
+    result->occurrence_edges.resize(result->occurrences.size());
+    result->occurrence_faces.resize(result->occurrences.size());
+    result->query_faces.resize(result->faces.size());
 
     *output = result.release();
     return GEOSPEC_OCCT_OK;
@@ -5817,9 +6045,11 @@ int geospec_occt_document_facts(const geospec_occt_document* document,
   if (document == nullptr || shape == nullptr || unit_to_millimeters == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Document/facts output is null.", error);
   }
-  *shape = document->shape_facts;
-  *unit_to_millimeters = document->source_unit_to_millimeters;
-  return write_string(document->source_length_unit, source_unit);
+  return guarded(error, [&]() -> int {
+    *shape = source_shape_facts(*document);
+    *unit_to_millimeters = document->source_unit_to_millimeters;
+    return write_string(document->source_length_unit, source_unit);
+  });
 }
 
 int geospec_occt_continuous_wall(
@@ -5900,18 +6130,58 @@ int geospec_occt_step_subject_metadata(
 }
 
 int geospec_occt_report_prepare(
-    const geospec_occt_document* document,
+    const geospec_occt_document* document, uint32_t facets,
     geospec_occt_report_sizes* sizes,
+    geospec_occt_string* error) noexcept {
+  int used_parallel = 0;
+  return geospec_occt_report_prepare_dedicated(document, facets, 0,
+                                               &used_parallel, sizes, error);
+}
+
+int geospec_occt_report_prepare_dedicated(
+    const geospec_occt_document* document, uint32_t facets, int grant_width,
+    int* used_parallel, geospec_occt_report_sizes* sizes,
     geospec_occt_string* error) noexcept {
   if (document == nullptr || sizes == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Document/report sizes output is null.", error);
   }
+  if (used_parallel == nullptr || grant_width < 0) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Report grant arguments are invalid.", error);
+  }
+  constexpr uint32_t all_facets =
+      GEOSPEC_OCCT_REPORT_MESH | GEOSPEC_OCCT_REPORT_FACTS;
+  if (facets == 0 || (facets & ~all_facets) != 0) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Report facets are invalid.",
+                error);
+  }
   document->report.reset();
   return guarded(error, [&]() -> int {
-    ReportData report;
+    // The grant is held for the whole prepare; only the mesher may use it.
+    std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
+    const int scope_status = dedicated_pool_scope(
+        grant_width, used_parallel, reservation, error);
+    if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
     std::string message;
-    if (!build_report(*document, report, message)) {
+    if (!document->report_generation) {
+      // Publish only a complete copy+mesh; a throw or refusal retains nothing.
+      auto generation = std::make_unique<ReportGeneration>();
+      if (!build_report_generation(*document, *generation, message,
+                                   *used_parallel != 0)) {
+        return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
+      }
+      document->report_generation = std::move(generation);
+      ++document->report_generation_builds;
+    }
+    ReportData report;
+    report.facets = facets;
+    if ((facets & GEOSPEC_OCCT_REPORT_MESH) != 0) {
+      report.mesh = report_triangle_soup(document->report_generation->shape);
+    }
+    if ((facets & GEOSPEC_OCCT_REPORT_FACTS) != 0 &&
+        !build_report_facts(*document, *document->report_generation, report,
+                            message)) {
       return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
     }
     size_t occurrence_face_count = 0;
@@ -5938,7 +6208,8 @@ int geospec_occt_report_prepare(
     sizes->occurrence_face_count = occurrence_face_count;
     sizes->position_count = report.mesh.positions.size();
     sizes->triangle_count = report.mesh.triangles.size();
-    sizes->shape_bytes = sizeof(report.shape);
+    sizes->shape_bytes =
+        (facets & GEOSPEC_OCCT_REPORT_FACTS) != 0 ? sizeof(report.shape) : 0;
     if (!bytes(report.occurrences.size(), sizeof(report.occurrences[0]),
                sizes->occurrence_bytes) ||
         !bytes(report.whole_faces.size(), sizeof(report.whole_faces[0]),
@@ -5954,6 +6225,10 @@ int geospec_occt_report_prepare(
                   "Reported transfer byte count exceeds addressable memory.",
                   error);
     }
+    // Facts were the generation's last consumer: release the copy and mesh.
+    if ((facets & GEOSPEC_OCCT_REPORT_FACTS) != 0) {
+      document->report_generation.reset();
+    }
     document->report.emplace(std::move(report));
     return GEOSPEC_OCCT_OK;
   });
@@ -5964,14 +6239,20 @@ void geospec_occt_report_discard(
   if (document != nullptr) document->report.reset();
 }
 
+size_t geospec_occt_report_generation_builds(
+    const geospec_occt_document* document) noexcept {
+  return document == nullptr ? 0 : document->report_generation_builds;
+}
+
 int geospec_occt_report_document_facts(
     const geospec_occt_document* document,
     geospec_occt_shape_facts* shape,
     double* unit_to_millimeters,
     geospec_occt_string* source_unit,
     geospec_occt_string* error) noexcept {
-  if (document == nullptr || !document->report.has_value() || shape == nullptr ||
-      unit_to_millimeters == nullptr) {
+  if (document == nullptr || !document->report.has_value() ||
+      (document->report->facets & GEOSPEC_OCCT_REPORT_FACTS) == 0 ||
+      shape == nullptr || unit_to_millimeters == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Prepared report/document facts output is unavailable.", error);
   }
@@ -6043,6 +6324,7 @@ int geospec_occt_report_mesh(
     size_t* position_count, size_t* triangle_count,
     geospec_occt_string* error) noexcept {
   if (document == nullptr || !document->report.has_value() ||
+      (document->report->facets & GEOSPEC_OCCT_REPORT_MESH) == 0 ||
       position_count == nullptr || triangle_count == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Prepared report mesh output is unavailable.", error);
@@ -6086,7 +6368,8 @@ size_t geospec_occt_occurrence_count(const geospec_occt_document* document) noex
   return document == nullptr ? 0 : document->occurrences.size();
 }
 
-int geospec_occt_occurrence(const geospec_occt_document* document, size_t index,
+static int write_occurrence(const geospec_occt_document* document, size_t index,
+                            bool with_bounds,
                             geospec_occt_occurrence_facts* occurrence,
                             geospec_occt_string* label,
                             geospec_occt_string* product_label,
@@ -6095,11 +6378,34 @@ int geospec_occt_occurrence(const geospec_occt_document* document, size_t index,
   if (document == nullptr || occurrence == nullptr || index >= document->occurrences.size()) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Occurrence index/output is invalid.", error);
   }
-  const OccurrenceFacts& value = document->occurrences[index];
-  *occurrence = value.facts;
-  int status = write_string(value.label, label);
-  status = copy_result(status, write_string(value.product_label, product_label));
-  return copy_result(status, write_string(value.name, name));
+  return guarded(error, [&]() -> int {
+    const OccurrenceFacts& value = document->occurrences[index];
+    geospec_occt_occurrence_facts facts = value.facts;
+    if (with_bounds) facts.bounds = source_occurrence_bounds(*document, index);
+    *occurrence = facts;
+    int status = write_string(value.label, label);
+    status = copy_result(status, write_string(value.product_label, product_label));
+    return copy_result(status, write_string(value.name, name));
+  });
+}
+
+int geospec_occt_occurrence(const geospec_occt_document* document, size_t index,
+                            geospec_occt_occurrence_facts* occurrence,
+                            geospec_occt_string* label,
+                            geospec_occt_string* product_label,
+                            geospec_occt_string* name,
+                            geospec_occt_string* error) noexcept {
+  return write_occurrence(document, index, true, occurrence, label,
+                          product_label, name, error);
+}
+
+int geospec_occt_occurrence_structure(
+    const geospec_occt_document* document, size_t index,
+    geospec_occt_occurrence_facts* occurrence, geospec_occt_string* label,
+    geospec_occt_string* product_label, geospec_occt_string* name,
+    geospec_occt_string* error) noexcept {
+  return write_occurrence(document, index, false, occurrence, label,
+                          product_label, name, error);
 }
 
 int geospec_occt_occurrence_identity(
@@ -6152,10 +6458,12 @@ int geospec_occt_face(const geospec_occt_document* document, size_t index,
     return fail(GEOSPEC_OCCT_UNSUPPORTED,
                 "Public face has no unique private query address.", error);
   }
-  *face = document->faces[static_cast<size_t>(query_index - 1)].facts;
-  face->index = static_cast<uint32_t>(index);
-  face->query_index = query_index;
-  return GEOSPEC_OCCT_OK;
+  return guarded(error, [&]() -> int {
+    *face = source_query_face(*document, query_index).facts;
+    face->index = static_cast<uint32_t>(index);
+    face->query_index = query_index;
+    return GEOSPEC_OCCT_OK;
+  });
 }
 
 int geospec_occt_face_location(const geospec_occt_document* document,
@@ -6172,11 +6480,12 @@ int geospec_occt_face_location(const geospec_occt_document* document,
     return fail(GEOSPEC_OCCT_UNSUPPORTED,
                 "Public face has no unique private query address.", error);
   }
-  const FaceFacts& query_face =
-      document->faces[static_cast<size_t>(query_index - 1)];
-  *out_bounds = query_face.bounds;
-  *out_reversed = query_face.reversed;
-  return GEOSPEC_OCCT_OK;
+  return guarded(error, [&]() -> int {
+    const FaceFacts& query_face = source_query_face(*document, query_index);
+    *out_bounds = query_face.bounds;
+    *out_reversed = query_face.reversed;
+    return GEOSPEC_OCCT_OK;
+  });
 }
 
 int geospec_occt_face_label(const geospec_occt_document* document,
@@ -6497,10 +6806,13 @@ int geospec_occt_occurrence_face(
                 "Occurrence public face has no unique private query address.",
                 error);
   }
-  *face = value.faces[static_cast<size_t>(query_index - 1)].facts;
-  face->face.index = static_cast<uint32_t>(index);
-  face->face.query_index = query_index;
-  return GEOSPEC_OCCT_OK;
+  return guarded(error, [&]() -> int {
+    *face = source_occurrence_faces(*document, occurrence)
+        [static_cast<size_t>(query_index - 1)];
+    face->face.index = static_cast<uint32_t>(index);
+    face->face.query_index = query_index;
+    return GEOSPEC_OCCT_OK;
+  });
 }
 
 int geospec_occt_occurrence_face_label(
@@ -6567,21 +6879,38 @@ int geospec_occt_occurrence_edge(
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Occurrence edge index/output is invalid.", error);
   }
-  *edge = document->occurrences[occurrence].edges[index].facts;
-  return GEOSPEC_OCCT_OK;
+  return guarded(error, [&]() -> int {
+    *edge = source_occurrence_edges(*document, occurrence)[index];
+    return GEOSPEC_OCCT_OK;
+  });
 }
 
 int geospec_occt_validity(const geospec_occt_document* document,
                           geospec_occt_validity_facts* validity,
                           geospec_occt_string* reason,
                           geospec_occt_string* error) noexcept {
-  if (document == nullptr || validity == nullptr) {
+  int used_parallel = 0;
+  return geospec_occt_validity_dedicated(
+      document, 0, &used_parallel, validity, reason, error);
+}
+
+int geospec_occt_validity_dedicated(
+    const geospec_occt_document* document, int grant_width,
+    int* used_parallel, geospec_occt_validity_facts* validity,
+    geospec_occt_string* reason, geospec_occt_string* error) noexcept {
+  if (document == nullptr || validity == nullptr || used_parallel == nullptr ||
+      grant_width < 0) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                "Document/validity output is null.", error);
+                "Document/validity control is invalid.", error);
   }
   return guarded(error, [&]() -> int {
+    std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
+    const int scope_status = dedicated_pool_scope(
+        grant_width, used_parallel, reservation, error);
+    if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
+    if (document->admission_validity_reusable) *used_parallel = 0;
     std::string message;
-    *validity = compute_validity(*document, message);
+    *validity = compute_validity(*document, message, *used_parallel != 0);
     return write_string(message, reason);
   });
 }
@@ -6647,7 +6976,18 @@ int geospec_occt_common_volume(
     uint32_t occurrence_b,
     geospec_occt_common_volume_result* common_result,
     geospec_occt_string* error) noexcept {
-  if (document == nullptr || common_result == nullptr ||
+  int used_parallel = 0;
+  return geospec_occt_common_volume_dedicated(
+      document, occurrence_a, occurrence_b, 0, &used_parallel, common_result, error);
+}
+
+int geospec_occt_common_volume_dedicated(
+    const geospec_occt_document* document, uint32_t occurrence_a,
+    uint32_t occurrence_b, int grant_width, int* used_parallel,
+    geospec_occt_common_volume_result* common_result,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || common_result == nullptr || used_parallel == nullptr ||
+      grant_width < 0 ||
       occurrence_a >= document->occurrences.size() ||
       occurrence_b >= document->occurrences.size()) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
@@ -6655,6 +6995,10 @@ int geospec_occt_common_volume(
   }
   return guarded(error, [&]() -> int {
     *common_result = {};
+    std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
+    const int scope_status = dedicated_pool_scope(
+        grant_width, used_parallel, reservation, error);
+    if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
     NCollection_List<TopoDS_Shape> arguments;
     arguments.Append(document->occurrences[occurrence_a].shape);
     NCollection_List<TopoDS_Shape> tools;
@@ -6662,9 +7006,11 @@ int geospec_occt_common_volume(
     BRepAlgoAPI_Common common;
     common.SetArguments(arguments);
     common.SetTools(tools);
-    common.SetRunParallel(false);
+    common.SetRunParallel(*used_parallel != 0);
     // This existing Boolean route permits OCCT to modify its input topology.
-    // Invalidate before execution, including if the operation later fails.
+    // Complete every source numeric slot from the unmodified shape first, then
+    // invalidate before execution, including if the operation later fails.
+    complete_source_numerics(*document);
     document->admission_validity_reusable = false;
     common.Build();
     if (!common.IsDone()) {
@@ -6686,12 +7032,24 @@ int geospec_occt_regular_solid_containment(
     geospec_occt_entity target_entity,
     geospec_occt_regular_solid_containment_result* result,
     geospec_occt_string* error) noexcept {
-  if (document == nullptr || result == nullptr) {
+  int used_parallel = 0;
+  return geospec_occt_regular_solid_containment_dedicated(
+      document, subject_entity, target_entity, 0, &used_parallel, result, error);
+}
+
+int geospec_occt_regular_solid_containment_dedicated(
+    const geospec_occt_document* document, geospec_occt_entity subject_entity,
+    geospec_occt_entity target_entity, int grant_width, int* used_parallel,
+    geospec_occt_regular_solid_containment_result* result,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || result == nullptr || used_parallel == nullptr ||
+      grant_width < 0) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Document/containment output is null.", error);
   }
   return guarded(error, [&]() -> int {
     *result = {};
+    *used_parallel = 0;
     TopoDS_Shape subject_shape;
     TopoDS_Shape target_shape;
     std::string message;
@@ -6705,6 +7063,10 @@ int geospec_occt_regular_solid_containment(
         !regular_solid_operand(target_shape, target, message)) {
       return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
     }
+    std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
+    const int scope_status = dedicated_pool_scope(
+        grant_width, used_parallel, reservation, error);
+    if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
 
     NCollection_List<TopoDS_Shape> arguments;
     arguments.Append(subject);
@@ -6714,7 +7076,7 @@ int geospec_occt_regular_solid_containment(
     cut.SetArguments(arguments);
     cut.SetTools(tools);
     cut.SetNonDestructive(true);
-    cut.SetRunParallel(false);
+    cut.SetRunParallel(*used_parallel != 0);
     cut.Build();
     if (!cut.IsDone() || cut.HasErrors()) {
       std::ostringstream details;
@@ -7193,19 +7555,35 @@ int geospec_occt_circular_bores_prepare(
     const geospec_occt_document* document, size_t max_candidates,
     size_t retained_candidate_size, size_t retained_inventory_size,
     size_t* count, geospec_occt_string* error) noexcept {
-  if (document == nullptr || count == nullptr) {
+  int used_parallel = 0;
+  return geospec_occt_circular_bores_prepare_dedicated(
+      document, max_candidates, retained_candidate_size, retained_inventory_size,
+      0, &used_parallel, count, error);
+}
+
+int geospec_occt_circular_bores_prepare_dedicated(
+    const geospec_occt_document* document, size_t max_candidates,
+    size_t retained_candidate_size, size_t retained_inventory_size,
+    int grant_width, int* used_parallel, size_t* count,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || count == nullptr || used_parallel == nullptr ||
+      grant_width < 0) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Document/circular bore count output is null.", error);
   }
   document->circular_bores.reset();
   return guarded(error, [&]() -> int {
+    std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
+    const int scope_status = dedicated_pool_scope(
+        grant_width, used_parallel, reservation, error);
+    if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
     std::vector<geospec_occt_circular_bore_candidate> candidates;
     std::string message;
     bool native_error = false;
     if (!build_circular_bores(*document, max_candidates,
                               retained_candidate_size,
                               retained_inventory_size, candidates, message,
-                              native_error)) {
+                              native_error, *used_parallel != 0)) {
       return fail(native_error ? GEOSPEC_OCCT_NATIVE_ERROR
                                : GEOSPEC_OCCT_UNSUPPORTED,
                   message, error);
@@ -7444,12 +7822,29 @@ int geospec_occt_tessellate(const geospec_occt_document* document,
                             uint32_t* triangles, size_t triangle_capacity,
                             size_t* position_count, size_t* triangle_count,
                             geospec_occt_string* error) noexcept {
+  int used_parallel = 0;
+  return geospec_occt_tessellate_dedicated(
+      document, entity, linear_deflection, angular_deflection, 0,
+      &used_parallel, positions, position_capacity, triangles,
+      triangle_capacity, position_count, triangle_count, error);
+}
+
+int geospec_occt_tessellate_dedicated(const geospec_occt_document* document,
+                            geospec_occt_entity entity,
+                            double linear_deflection, double angular_deflection,
+                            int grant_width, int* used_parallel,
+                            double* positions, size_t position_capacity,
+                            uint32_t* triangles, size_t triangle_capacity,
+                            size_t* position_count, size_t* triangle_count,
+                            geospec_occt_string* error) noexcept {
   if (document == nullptr || position_count == nullptr || triangle_count == nullptr ||
+      used_parallel == nullptr || grant_width < 0 ||
       !std::isfinite(linear_deflection) || !std::isfinite(angular_deflection) ||
       linear_deflection <= 0.0 || angular_deflection <= 0.0) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Tessellation arguments are invalid.", error);
   }
   return guarded(error, [&]() -> int {
+    *used_parallel = 0;
     TopoDS_Shape shape;
     std::string message;
     if (!resolve_entity(*document, entity, shape, message)) {
@@ -7458,10 +7853,19 @@ int geospec_occt_tessellate(const geospec_occt_document* document,
     const MeshKey key{entity.kind, entity.occurrence, entity.face,
                       float_bits(linear_deflection),
                       float_bits(angular_deflection)};
+    // A dedicated sizing call must execute the requested mesher, not reuse a
+    // prior serial transfer left by an interrupted two-phase query.
+    if (grant_width != 0 && positions == nullptr && triangles == nullptr)
+      document->transfer_mesh.reset();
     if (!document->transfer_mesh.has_value() ||
         !(document->transfer_mesh->first == key)) {
+      std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
+      const int scope_status = dedicated_pool_scope(
+          grant_width, used_parallel, reservation, error);
+      if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
       document->transfer_mesh = std::make_pair(
-          key, compute_mesh(shape, linear_deflection, angular_deflection));
+          key, compute_mesh(shape, linear_deflection, angular_deflection,
+                            *used_parallel != 0));
     }
     const MeshData& mesh = document->transfer_mesh->second;
 

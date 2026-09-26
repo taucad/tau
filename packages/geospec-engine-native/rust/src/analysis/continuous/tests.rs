@@ -341,7 +341,11 @@ fn channel() -> (Vec<SelectedContinuousDomain>, Bounds) {
     )
 }
 
-fn box_domain(occurrence: u32, minimum: [f64; 3], maximum: [f64; 3]) -> SelectedContinuousDomain {
+pub(super) fn box_domain(
+    occurrence: u32,
+    minimum: [f64; 3],
+    maximum: [f64; 3],
+) -> SelectedContinuousDomain {
     SelectedContinuousDomain {
         occurrence,
         domain: ContinuousWallDomain {

@@ -19,7 +19,9 @@ fn current_request(value: &str) -> Vec<u8> {
 fn current_plan(value: &str) -> Vec<u8> {
     let mut value: Value = serde_json::from_str(value).unwrap();
     value["registryVersion"] = json!(5);
-    value["numericProfile"] = json!("geospec-st-prototypes-v4");
+    value["numericProfile"] = json!(include_str!(
+        "fixtures/current-profile-v5/numeric-profile.txt"
+    ));
     canonicalize(&serde_json::to_vec(&value).unwrap()).unwrap()
 }
 

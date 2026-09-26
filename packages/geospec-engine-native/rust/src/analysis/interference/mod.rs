@@ -444,28 +444,8 @@ pub(crate) fn analyze_overlap(
         resident.borrow_mut().forget(&prepared_owner);
     }
 
-    let allowed: Option<BTreeMap<(u32, u32), &SelectedPair>> = selected.map(|pairs| {
-        pairs
-            .iter()
-            .map(|pair| ((pair.left.min(pair.right), pair.left.max(pair.right)), pair))
-            .collect()
-    });
     let selected_pairs = selected.map(|pairs| pairs.to_vec());
-    let mut candidates = Vec::new();
-    for left in 0..components.len() {
-        for right in left + 1..components.len() {
-            let a = &components[left];
-            let b = &components[right];
-            if allowed
-                .as_ref()
-                .is_some_and(|pairs| !pairs.contains_key(&(a.id, b.id)))
-                || !overlaps_within(a.bounds, b.bounds, tolerance)
-            {
-                continue;
-            }
-            candidates.push((left, right));
-        }
-    }
+    let candidates = overlap_candidates(components, selected, tolerance);
     if let (Some(store), Some(producer)) = (&subject.overlap_cache, &subject.producer_identity) {
         let context = cache::EvidenceContext {
             subject,
@@ -602,6 +582,44 @@ pub(crate) fn analyze_overlap(
         }
     }
     Ok(Analysis::Complete(evidence))
+}
+
+fn overlap_candidates(
+    components: &[Component],
+    selected: Option<&[SelectedPair]>,
+    tolerance: f64,
+) -> Vec<(usize, usize)> {
+    if let Some(pairs) = selected {
+        let mut candidates = Vec::with_capacity(pairs.len());
+        for pair in pairs {
+            let left_id = pair.left.min(pair.right);
+            let right_id = pair.left.max(pair.right);
+            let (Ok(left), Ok(right)) = (
+                components.binary_search_by_key(&left_id, |component| component.id),
+                components.binary_search_by_key(&right_id, |component| component.id),
+            ) else {
+                continue;
+            };
+            if left < right
+                && overlaps_within(components[left].bounds, components[right].bounds, tolerance)
+            {
+                candidates.push((left, right));
+            }
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        return candidates;
+    }
+
+    let mut candidates = Vec::new();
+    for left in 0..components.len() {
+        for right in left + 1..components.len() {
+            if overlaps_within(components[left].bounds, components[right].bounds, tolerance) {
+                candidates.push((left, right));
+            }
+        }
+    }
+    candidates
 }
 
 fn admission_diagnostic(component: &Component, error: &BackendError) -> Diagnostic {
@@ -1026,5 +1044,88 @@ mod tests {
         };
         assert!(overlaps_within(a, b, 0.001));
         assert!(!overlaps_within(a, b, 0.0009));
+    }
+
+    #[test]
+    fn sparse_selected_pairs_preserve_canonical_candidates_and_evidence_bytes() {
+        let components: Vec<_> = (0..256)
+            .map(|index| Component {
+                id: (index + 1) * 2,
+                label: format!("part-{index}"),
+                mesh: Rc::new(TriangleMesh {
+                    positions: Vec::new(),
+                    triangles: Vec::new(),
+                }),
+                bounds: Bounds {
+                    min: if index == 49 { [10.0; 3] } else { [0.0; 3] },
+                    max: if index == 49 { [11.0; 3] } else { [1.0; 3] },
+                },
+            })
+            .collect();
+        let selected: Vec<_> = [
+            (400, 4),
+            (350, 12),
+            (512, 2),
+            (4, 400),
+            (100, 102),
+            (4, 4),
+            (999, 2),
+        ]
+        .into_iter()
+        .map(|(left, right)| SelectedPair {
+            left,
+            right,
+            left_label: format!("selected-{left}"),
+            right_label: format!("selected-{right}"),
+        })
+        .collect();
+        let allowed: BTreeMap<_, _> = selected
+            .iter()
+            .map(|pair| ((pair.left.min(pair.right), pair.left.max(pair.right)), pair))
+            .collect();
+        let baseline: Vec<_> = (0..components.len())
+            .flat_map(|left| (left + 1..components.len()).map(move |right| (left, right)))
+            .filter(|&(left, right)| {
+                allowed.contains_key(&(components[left].id, components[right].id))
+                    && overlaps_within(components[left].bounds, components[right].bounds, 0.001)
+            })
+            .collect();
+        let actual = overlap_candidates(&components, Some(&selected), 0.001);
+        assert_eq!(actual, [(0, 255), (1, 199), (5, 174)]);
+        assert_eq!(actual, baseline);
+
+        let evidence_for = |candidates: &[(usize, usize)]| Evidence {
+            component_count: components.len(),
+            components: components
+                .iter()
+                .map(|component| ComponentEvidence {
+                    id: component.id,
+                    label: component.label.clone(),
+                    bounds: component.bounds,
+                })
+                .collect(),
+            selected_pairs: Some(selected.clone()),
+            checked_pairs: candidates.len(),
+            tolerance: 0.001,
+            overlaps: candidates
+                .iter()
+                .map(|&(left, right)| Overlap {
+                    left_component_id: components[left].id,
+                    right_component_id: components[right].id,
+                    left_label: components[left].label.clone(),
+                    right_label: components[right].label.clone(),
+                    intersection_volume: 1.0,
+                    witness_point: None,
+                })
+                .collect(),
+        };
+        assert_eq!(
+            crate::codec::encode(&evidence_json(&evidence_for(&actual))).unwrap(),
+            crate::codec::encode(&evidence_json(&evidence_for(&baseline))).unwrap()
+        );
+        assert_eq!(
+            overlap_candidates(&components, None, 0.001).len(),
+            255 * 254 / 2
+        );
     }
 }

@@ -220,12 +220,20 @@ pub extern "C" fn geospec_engine_native_input_free(pointer: u32, length: u32) {
 /// Create the configured OCCT + Rust Manifold engine.
 #[no_mangle]
 pub extern "C" fn geospec_engine_native_engine_new() -> u32 {
-    ENGINES.with(|engines| {
-        engines
-            .borrow_mut()
-            .insert(create_engine(EngineConfig::entry()))
-            .unwrap_or(0)
-    })
+    geospec_engine_native_engine_new_with_execution_permits(1)
+}
+
+/// Create an engine with a validated caller-inclusive allocation. No inner MT is enabled.
+/// Zero reports invalid configuration without allocating an engine handle.
+#[no_mangle]
+pub extern "C" fn geospec_engine_native_engine_new_with_execution_permits(permits: u32) -> u32 {
+    let Ok(config) = EngineConfig::entry().with_execution_permits(f64::from(permits)) else {
+        return 0;
+    };
+    let Ok(engine) = create_engine(config) else {
+        return 0;
+    };
+    ENGINES.with(|engines| engines.borrow_mut().insert(engine).unwrap_or(0))
 }
 
 /// Drop one retained engine.

@@ -10,7 +10,8 @@ use std::{
     rc::Rc,
 };
 
-const EXPECTED_INTERSECTION_VOLUME: f64 = 0.5;
+// Shipped Manifold WASM and repaired Rust Manifold agree on this exact bit pattern.
+const EXPECTED_INTERSECTION_VOLUME: f64 = f64::from_bits(0x3fdf_ffff_ffff_ffff);
 const MAIN_EVALUATIONS: usize = 1001;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -203,7 +204,7 @@ fn ingest(engine: &mut Engine, primary: Vec<u8>, buffer: Vec<u8>) -> String {
         "method": "ingestSubject",
         "requestId": "admit",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "format": "gltf",
         "frame": {"coordinateSystem": "z-up", "sourceUnit": "mm", "outputUnit": "mm"},
@@ -232,7 +233,7 @@ fn claim_request(subject_hash: &str, payload: Value) -> Vec<u8> {
         "method": "submitClaims",
         "requestId": "query",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "plan": {
             "subjects": [{"slot": "part", "subjectHash": subject_hash}],
@@ -286,14 +287,14 @@ fn write_json(root: Option<&Path>, name: &str, value: &Value) {
     write_evidence(root, name, &serde_json::to_vec_pretty(value).unwrap());
 }
 
-fn assert_counts(counts: Counts, queries: usize) {
+fn assert_counts(counts: Counts) {
     assert_eq!(
         counts,
         Counts {
             admissions: 2,
-            booleans: queries,
-            created: queries + 2,
-            released: queries,
+            booleans: 1,
+            created: 3,
+            released: 1,
             live: 2,
             peak: 3,
         }
@@ -350,7 +351,7 @@ fn repeated_overlap_queries_reuse_the_two_real_source_operands() {
         } else {
             first = Some(result.clone());
         }
-        assert_counts(observed, query + 1);
+        assert_counts(observed);
         counter_records.push(observed.json(query + 1));
         if query + 1 == MAIN_EVALUATIONS {
             write_evidence(root.as_deref(), "raw/main-last-result-a2.json", &result);
@@ -488,7 +489,7 @@ fn instance_identity_controls_retain_real_operands_cold_and_warm() -> Vec<Value>
             } else {
                 cold = Some(result.clone());
             }
-            assert_counts(observed, query + 1);
+            assert_counts(observed);
             records.push(observed.json(query + 1));
         }
         write_json(

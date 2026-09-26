@@ -1,10 +1,111 @@
 --- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
 +++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
-@@ -6227,15 +6227,6 @@
+@@ -6130,39 +6130,62 @@
+ //           with all representations, related to it.
+ //=======================================================================
+ 
++struct RepresentationAdjacency
++{
++  NCollection_Sequence<occ::handle<StepRepr_RepresentationItem>> Items;
++  NCollection_Sequence<occ::handle<StepShape_ShapeRepresentation>> Children;
++};
++
+ void collectRepresentationItems(
+   const Interface_Graph&                                          theGraph,
+   const occ::handle<StepShape_ShapeRepresentation>&               theRepresentation,
+-  NCollection_Sequence<occ::handle<StepRepr_RepresentationItem>>& theItems)
+-{
+-  for (NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>::Iterator anIter(
+-         theRepresentation->Items()->Array1());
+-       anIter.More();
+-       anIter.Next())
+-  {
+-    const occ::handle<StepRepr_RepresentationItem>& anReprItem = anIter.Value();
+-    if (anReprItem.IsNull())
+-    {
+-      continue;
+-    }
+-    theItems.Append(anReprItem);
+-  }
+-
+-  Interface_EntityIterator entIt =
+-    theGraph.TypedSharings(theRepresentation, STANDARD_TYPE(StepRepr_RepresentationRelationship));
+-  for (entIt.Start(); entIt.More(); entIt.Next())
+-  {
+-    occ::handle<StepRepr_RepresentationRelationship> aRelationship =
+-      occ::down_cast<StepRepr_RepresentationRelationship>(entIt.Value());
+-    if (aRelationship->Rep1() == theRepresentation)
+-    {
+-      occ::handle<StepShape_ShapeRepresentation> aRepr =
+-        occ::down_cast<StepShape_ShapeRepresentation>(aRelationship->Rep2());
+-      if (!aRepr.IsNull())
+-      {
+-        collectRepresentationItems(theGraph, aRepr, theItems);
+-      }
+-    }
++  NCollection_Sequence<occ::handle<StepRepr_RepresentationItem>>& theItems,
++  NCollection_DataMap<occ::handle<StepShape_ShapeRepresentation>, RepresentationAdjacency>& theAdjacency)
++{
++  if (!theAdjacency.IsBound(theRepresentation))
++  {
++    RepresentationAdjacency anEntry;
++    for (NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>::Iterator anIter(
++           theRepresentation->Items()->Array1());
++         anIter.More();
++         anIter.Next())
++    {
++      const occ::handle<StepRepr_RepresentationItem>& anReprItem = anIter.Value();
++      if (!anReprItem.IsNull()
++          && (anReprItem->IsKind(STANDARD_TYPE(StepShape_ManifoldSolidBrep))
++              || anReprItem->IsKind(STANDARD_TYPE(StepShape_ShellBasedSurfaceModel))))
++      {
++        anEntry.Items.Append(anReprItem);
++      }
++    }
++
++    Interface_EntityIterator entIt =
++      theGraph.TypedSharings(theRepresentation, STANDARD_TYPE(StepRepr_RepresentationRelationship));
++    for (entIt.Start(); entIt.More(); entIt.Next())
++    {
++      occ::handle<StepRepr_RepresentationRelationship> aRelationship =
++        occ::down_cast<StepRepr_RepresentationRelationship>(entIt.Value());
++      if (aRelationship->Rep1() == theRepresentation)
++      {
++        occ::handle<StepShape_ShapeRepresentation> aRepr =
++          occ::down_cast<StepShape_ShapeRepresentation>(aRelationship->Rep2());
++        if (!aRepr.IsNull())
++        {
++          anEntry.Children.Append(aRepr);
++        }
++      }
++    }
++    theAdjacency.Bind(theRepresentation, anEntry);
++  }
++
++  const RepresentationAdjacency& anEntry = theAdjacency.Find(theRepresentation);
++  for (int i = 1; i <= anEntry.Items.Length(); ++i)
++  {
++    theItems.Append(anEntry.Items.Value(i));
++  }
++  for (int i = 1; i <= anEntry.Children.Length(); ++i)
++  {
++    collectRepresentationItems(theGraph, anEntry.Children.Value(i), theItems, theAdjacency);
+   }
+ }
+ 
+@@ -6185,6 +6208,8 @@
+   }
+ 
+   const Interface_Graph& Graph = Reader().WS()->Graph();
++  NCollection_DataMap<occ::handle<StepShape_ShapeRepresentation>, RepresentationAdjacency>
++    anAdjacency;
+ 
+   for (NCollection_DataMap<TopoDS_Shape,
+                            occ::handle<StepBasic_ProductDefinition>,
+@@ -6227,15 +6252,6 @@
        continue;
      }
--
-+
+ 
 -    // Access representation items
 -    NCollection_Sequence<occ::handle<StepRepr_RepresentationItem>> aReprItems;
 -    collectRepresentationItems(Graph, aShapeRepr, aReprItems);
@@ -17,7 +118,7 @@
      if (!myMap.IsBound(aRootShape))
      {
        continue;
-@@ -6245,6 +6236,15 @@
+@@ -6245,6 +6261,15 @@
      // Do not add subshapes to assembly,
      // they will be processed with corresponding Shape_Product_Definition of necessary part.
      if (ShapeTool->IsAssembly(aRootLab))
@@ -27,7 +128,7 @@
 +
 +    // Access representation items
 +    NCollection_Sequence<occ::handle<StepRepr_RepresentationItem>> aReprItems;
-+    collectRepresentationItems(Graph, aShapeRepr, aReprItems);
++    collectRepresentationItems(Graph, aShapeRepr, aReprItems, anAdjacency);
 +
 +    if (aReprItems.Length() == 0)
      {

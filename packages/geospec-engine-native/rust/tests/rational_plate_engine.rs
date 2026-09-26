@@ -10,7 +10,8 @@ use std::{fs, path::Path};
 
 const CORPUS_SHA256: &str = "b1b605506f72304ccec2484506a39786f203d89e793eaab5e0125d246388d5a3";
 const VERIFIER_SOURCE_HASH: &str =
-    "79cf6bca840e45dd5703b6892e5c5a75e27e2ec67ff61d03703d602c41fb6ed4";
+    include_str!("fixtures/current-profile-v5/verifier-source-hash.txt");
+const NUMERIC_PROFILE: &str = include_str!("fixtures/current-profile-v5/numeric-profile.txt");
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,7 +55,7 @@ fn current_request(value: &str) -> String {
 fn current_plan(value: &str) -> String {
     let mut value: Value = serde_json::from_str(value).unwrap();
     value["registryVersion"] = json!(5);
-    value["numericProfile"] = json!("geospec-st-prototypes-v4");
+    value["numericProfile"] = json!(NUMERIC_PROFILE);
     String::from_utf8(canonicalize(&serde_json::to_vec(&value).unwrap()).unwrap()).unwrap()
 }
 
@@ -65,7 +66,7 @@ fn current_result(value: &str, plan: &str) -> String {
     } else {
         &mut value
     };
-    result["numericProfile"] = json!("geospec-st-prototypes-v4");
+    result["numericProfile"] = json!(NUMERIC_PROFILE);
     let plan_hash = sha256(plan.as_bytes());
     let verifier_source_hash = verifier_source_hash();
     for row in result["results"].as_array_mut().unwrap() {

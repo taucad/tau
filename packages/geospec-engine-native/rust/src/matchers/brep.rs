@@ -11,7 +11,8 @@ use crate::{
             DocumentFacts, EdgeTreatmentBoundaryRole, EdgeTreatmentCertificate,
             EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind,
             EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason,
-            EdgeTreatmentResidualKind, SurfaceFacts, TopologyCounts, ValidityFacts,
+            EdgeTreatmentResidualKind, OccurrenceFacts, SurfaceFacts, TopologyCounts,
+            ValidityFacts,
         },
         BackendError, BackendErrorKind,
     },
@@ -769,6 +770,67 @@ fn missing_brep_evidence(prepared: &Prepared) -> &'static str {
 }
 
 pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
+    if let Prepared::StepUnits(expected) = prepared {
+        let facts = match context.step_units_facts() {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                return refused(
+                    prepared.capability(),
+                    missing_brep_evidence(prepared),
+                    BREP_SUGGESTION,
+                )
+            }
+            Err(evaluation) => return evaluation,
+        };
+        let outcome = unit_outcome(
+            expected,
+            &facts.source_length_unit,
+            facts.source_unit_to_millimeters,
+        );
+        return geometric(prepared, &context.subject().content_hash, outcome);
+    }
+    if matches!(
+        prepared,
+        Prepared::ProductStructure(_) | Prepared::AssemblyOccurrences(_)
+    ) {
+        if let Prepared::AssemblyOccurrences(expected) = prepared {
+            if let Some(message) = &expected.regex_unsupported {
+                return refused(
+                    prepared.capability(),
+                    &format!("faithful ECMAScript regular-expression support ({message})"),
+                    "Use an exact string selector or a profile that qualifies this ECMAScript feature.",
+                );
+            }
+        }
+        // Product structure reads no occurrence bounds.
+        let occurrences = if matches!(prepared, Prepared::ProductStructure(_)) {
+            context.source_occurrence_structure()
+        } else {
+            context.source_occurrences()
+        };
+        let occurrences = match occurrences {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                return refused(
+                    prepared.capability(),
+                    missing_brep_evidence(prepared),
+                    BREP_SUGGESTION,
+                )
+            }
+            Err(evaluation) => return evaluation,
+        };
+        let outcome = match prepared {
+            Prepared::ProductStructure(expected) => evaluate_products(expected, &occurrences),
+            Prepared::AssemblyOccurrences(expected) => {
+                evaluate_occurrences(expected, &occurrences, &SelectorRegex::default())
+            }
+            _ => unreachable!(),
+        };
+        return match outcome {
+            Ok(outcome) => geometric(prepared, &context.subject().content_hash, outcome),
+            Err(error) => backend_refused(prepared.capability(), error),
+        };
+    }
     let facts = match context.brep_facts() {
         Ok(Some(value)) => value,
         Ok(None) => {
@@ -801,18 +863,8 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
         );
     };
     let outcome = match prepared {
-        Prepared::StepUnits(expected) => evaluate_units(expected, &facts),
-        Prepared::ProductStructure(expected) => evaluate_products(expected, &facts),
-        Prepared::AssemblyOccurrences(expected) => {
-            if let Some(message) = &expected.regex_unsupported {
-                return refused(
-                    prepared.capability(),
-                    &format!("faithful ECMAScript regular-expression support ({message})"),
-                    "Use an exact string selector or a profile that qualifies this ECMAScript feature.",
-                );
-            }
-            evaluate_occurrences(expected, &facts, &SelectorRegex::default())
-        }
+        Prepared::StepUnits(_) => unreachable!(),
+        Prepared::ProductStructure(_) | Prepared::AssemblyOccurrences(_) => unreachable!(),
         Prepared::ValidBrep(expected) => match brep.validity() {
             Ok(value) => evaluate_validity(expected, &value),
             Err(error) => return backend_refused(prepared.capability(), error),
@@ -1015,8 +1067,17 @@ fn geometric(prepared: &Prepared, content_hash: &str, outcome: MatchOutcome) -> 
     }
 }
 
+#[cfg(test)]
 fn evaluate_units(expected: &str, facts: &DocumentFacts) -> Result<MatchOutcome, BackendError> {
-    let measured = normalize_unit(&facts.source_length_unit, facts.source_unit_to_millimeters);
+    Ok(unit_outcome(
+        expected,
+        &facts.source_length_unit,
+        facts.source_unit_to_millimeters,
+    ))
+}
+
+fn unit_outcome(expected: &str, source_unit: &str, scale: f64) -> MatchOutcome {
+    let measured = normalize_unit(source_unit, scale);
     let positive = measured == expected;
     let diagnostics = if positive {
         Vec::new()
@@ -1031,15 +1092,12 @@ fn evaluate_units(expected: &str, facts: &DocumentFacts) -> Result<MatchOutcome,
             ]),
         )]
     };
-    Ok(MatchOutcome {
+    MatchOutcome {
         positive,
         measured: Json::string(&measured),
-        witnesses: Json::object([(
-            "sourceUnitToMillimeters",
-            Json::Number(facts.source_unit_to_millimeters),
-        )]),
+        witnesses: Json::object([("sourceUnitToMillimeters", Json::Number(scale))]),
         diagnostics,
-    })
+    }
 }
 
 fn normalize_unit(name: &str, scale: f64) -> String {
@@ -1067,10 +1125,9 @@ fn normalize_unit(name: &str, scale: f64) -> String {
 
 fn evaluate_products(
     expected: &ProductStructure,
-    facts: &DocumentFacts,
+    occurrences: &[OccurrenceFacts],
 ) -> Result<MatchOutcome, BackendError> {
-    let names: Vec<_> = facts
-        .occurrences
+    let names: Vec<_> = occurrences
         .iter()
         .map(|occurrence| occurrence.path.clone())
         .collect();
@@ -1091,8 +1148,7 @@ fn evaluate_products(
         ("productCount", Json::Number(names.len() as f64)),
     ]);
     let structure = Json::Array(
-        facts
-            .occurrences
+        occurrences
             .iter()
             .map(|occurrence| {
                 Json::object([
@@ -1161,10 +1217,10 @@ fn evaluate_products(
 
 fn evaluate_occurrences(
     expected: &AssemblyOccurrences,
-    facts: &DocumentFacts,
+    occurrences: &[OccurrenceFacts],
     regex: &dyn EcmaRegexEngine,
 ) -> Result<MatchOutcome, BackendError> {
-    if facts.occurrences.is_empty() {
+    if occurrences.is_empty() {
         return Err(BackendError {
             kind: BackendErrorKind::Unsupported,
             message: "The retained STEP document carries no measured assembly occurrences.".into(),
@@ -1173,7 +1229,7 @@ fn evaluate_occurrences(
     let mut failures = Vec::new();
     for rule in &expected.occurrences {
         let mut matches = Vec::new();
-        for occurrence in &facts.occurrences {
+        for occurrence in occurrences {
             let matched = rule
                 .name
                 .matches(&occurrence.path, Some(regex))
@@ -1203,7 +1259,7 @@ fn evaluate_occurrences(
     }
     if expected.unique_names {
         let mut seen = HashSet::new();
-        for occurrence in &facts.occurrences {
+        for occurrence in occurrences {
             if !seen.insert(occurrence.path.as_str()) {
                 failures.push(format!(
                     "occurrence name '{}' is not unique",
@@ -1213,13 +1269,9 @@ fn evaluate_occurrences(
         }
     }
     let positive = failures.is_empty();
-    let measured = Json::object([(
-        "occurrenceCount",
-        Json::Number(facts.occurrences.len() as f64),
-    )]);
+    let measured = Json::object([("occurrenceCount", Json::Number(occurrences.len() as f64))]);
     let inventory = Json::Array(
-        facts
-            .occurrences
+        occurrences
             .iter()
             .map(|value| {
                 Json::object([
@@ -1249,10 +1301,7 @@ fn evaluate_occurrences(
             "Re-export the assembly with the declared occurrences, or correct the census.",
             Json::object([
                 ("failures", strings_json(&failures)),
-                (
-                    "occurrenceCount",
-                    Json::Number(facts.occurrences.len() as f64),
-                ),
+                ("occurrenceCount", Json::Number(occurrences.len() as f64)),
             ]),
         )]
     };

@@ -1,7 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Emscripten exposes C symbols with leading underscores. */
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package module.
 import { appendHostObservationCopies, observeHostCopy, ProtocolError } from '#host-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package contract type.
 import type { HostBytes, HostCopyObservations } from '#host-types.js';
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -18,6 +16,11 @@ export type WasmInput =
 /** Ordered external binary resources paired with request metadata. @public */
 export type WasmResources = readonly HostBytes[];
 
+/** Requested WASM product and caller-inclusive execution budget. @public */
+export type WasmExecution =
+  | { readonly variant: 'st' }
+  | { readonly variant: 'mt'; readonly permits: number; readonly receipt: URL | string };
+
 type ModuleOptions = {
   readonly locateFile?: (path: string) => string;
   readonly wasmBinary?: HostBytes;
@@ -27,11 +30,14 @@ type ModuleFactory = (options?: ModuleOptions) => Promise<MixedWasmModule>;
 
 type MixedWasmModule = {
   readonly HEAPU8: Uint8Array<ArrayBuffer>;
+  /** MT only: the shared memory, whose buffer is current after a grow on any thread. */
+  readonly wasmMemory?: WebAssembly.Memory;
   _malloc(length: number): number;
   _free(pointer: number): void;
   _geospec_engine_native_input_alloc(length: number): number;
   _geospec_engine_native_input_free(pointer: number, length: number): void;
   _geospec_engine_native_engine_new(): number;
+  _geospec_engine_native_engine_new_with_execution_permits?(permits: number): number;
   _geospec_engine_native_engine_drop(engine: number): void;
   _geospec_engine_native_observations(engine: number): number;
   _geospec_engine_native_canonicalize(input: number, inputLength: number): number;
@@ -99,13 +105,178 @@ const moduleOptions = async (input?: WasmInput): Promise<ModuleOptions | undefin
 
 let modulePromise: Promise<MixedWasmModule> | undefined;
 let loadedModule: MixedWasmModule | undefined;
+const mtModules = new Map<string, { promise: Promise<MixedWasmModule>; module?: MixedWasmModule }>();
+
+const requireAvailableExecution = (execution?: WasmExecution): URL | undefined => {
+  if (execution?.variant !== 'mt') {
+    return undefined;
+  }
+  if (!Number.isSafeInteger(execution.permits) || execution.permits < 1 || execution.permits > 4_294_967_295) {
+    throw new ProtocolError('invalid-request', 'MT execution permits must be a positive wasm32 integer.');
+  }
+  const isNode = typeof process !== 'undefined' && typeof process.versions.node === 'string';
+  if (typeof SharedArrayBuffer === 'undefined' || (!isNode && !globalThis.crossOriginIsolated)) {
+    throw new ProtocolError(
+      'unsupported-capability',
+      'GeoSpec MT WASM requires a cross-origin-isolated browser worker.',
+    );
+  }
+  if (!execution.receipt) {
+    throw new ProtocolError(
+      'unsupported-capability',
+      `No MT build receipt was supplied for mt-permits-${execution.permits}.`,
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(execution.receipt);
+  } catch {
+    throw new ProtocolError('invalid-request', 'MT build receipt must be an absolute URL.');
+  }
+  if (isNode ? url.protocol !== 'file:' : url.origin !== location.origin) {
+    throw new ProtocolError(
+      'unsupported-capability',
+      'MT assets must use a local Node file or same-origin browser URL.',
+    );
+  }
+  return url;
+};
+
+type MtAsset = { file: string; bytes: number; sha256: string };
+const record = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const receiptAsset = (value: unknown, file: string): MtAsset => {
+  if (
+    !record(value) ||
+    value['file'] !== file ||
+    typeof value['bytes'] !== 'number' ||
+    !Number.isSafeInteger(value['bytes']) ||
+    value['bytes'] < 1 ||
+    typeof value['sha256'] !== 'string' ||
+    !/^[\da-f]{64}$/.test(value['sha256'])
+  ) {
+    throw new ProtocolError('unsupported-capability', `MT receipt has no valid ${file} asset.`);
+  }
+  return { file, bytes: value['bytes'], sha256: value['sha256'] };
+};
+
+const assetBytes = async (url: URL): Promise<Uint8Array<ArrayBuffer>> => {
+  if (url.protocol === 'file:') {
+    const { readFile } = await import('node:fs/promises');
+    return Uint8Array.from(await readFile(url));
+  }
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new ProtocolError('unsupported-capability', `MT asset is unavailable: ${url.href}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+};
+
+const verifiedAsset = async (base: URL, asset: MtAsset): Promise<Uint8Array<ArrayBuffer>> => {
+  const { file } = asset;
+  const bytes = await assetBytes(new URL(file, base));
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  if (bytes.byteLength !== asset.bytes || hash !== asset.sha256) {
+    throw new ProtocolError('unsupported-capability', `MT asset does not match its build receipt: ${file}`);
+  }
+  return bytes;
+};
+
+const loadMtModule = async (url: URL, permits: number): Promise<MixedWasmModule> => {
+  const receipt: unknown = JSON.parse(decoder.decode(await assetBytes(url)));
+  // A product linked for N caller-inclusive permits serves any smaller grant; its pthread pool is the cap.
+  if (
+    !record(receipt) ||
+    receipt['schema'] !== 'geospec-mixed-mt-assets-v1' ||
+    typeof receipt['permits'] !== 'number' ||
+    !Number.isSafeInteger(receipt['permits']) ||
+    receipt['permits'] < permits
+  ) {
+    throw new ProtocolError('unsupported-capability', `MT receipt does not describe mt-permits-${permits}.`);
+  }
+  const productPermits = receipt['permits'];
+  const glue = receiptAsset(receipt['glue'], 'geospec_engine_native.mjs');
+  const wasm = receiptAsset(receipt['wasm'], 'geospec_engine_native.wasm');
+  const worker = receiptAsset(receipt['worker'], 'geospec_engine_native.mjs');
+  const buildAsset = receiptAsset(receipt['buildReceipt'], 'build-receipt.json');
+  if (worker.bytes !== glue.bytes || worker.sha256 !== glue.sha256) {
+    throw new ProtocolError('unsupported-capability', `MT receipt does not describe mt-permits-${permits}.`);
+  }
+  const base = new URL('.', url);
+  const buildReceiptBytes = await verifiedAsset(base, buildAsset);
+  const buildReceipt: unknown = JSON.parse(decoder.decode(buildReceiptBytes));
+  if (
+    !record(buildReceipt) ||
+    buildReceipt['schema'] !== 'geospec-mixed-build-receipt-mt-v1' ||
+    !record(buildReceipt['mtSettings']) ||
+    buildReceipt['mtSettings']['executionPermits'] !== productPermits ||
+    !Array.isArray(buildReceipt['artifacts']) ||
+    ![glue, wasm].every((asset) =>
+      (buildReceipt['artifacts'] as unknown[]).some(
+        (entry) =>
+          record(entry) &&
+          typeof entry['path'] === 'string' &&
+          entry['path'].endsWith(`/${asset.file}`) &&
+          entry['bytes'] === asset.bytes &&
+          entry['sha256'] === asset.sha256,
+      ),
+    )
+  ) {
+    throw new ProtocolError('unsupported-capability', 'MT assets do not match their qualified build receipt.');
+  }
+  await verifiedAsset(base, glue);
+  const wasmBinary = await verifiedAsset(base, wasm);
+  const glueUrl = new URL(glue.file, base);
+  const binding = (await import(/* @vite-ignore */ glueUrl.href)) as { readonly default?: unknown };
+  if (typeof binding.default !== 'function') {
+    throw new ProtocolError('unsupported-capability', 'MT module has no initializer.');
+  }
+  const module = await (binding.default as ModuleFactory)({ wasmBinary });
+  if (typeof module._geospec_engine_native_engine_new_with_execution_permits !== 'function') {
+    throw new ProtocolError('unsupported-capability', 'MT module has no execution-permits constructor.');
+  }
+  // Without its shared memory, a view taken after a pthread grew memory can be stale; refuse such (pre-fix) products.
+  if (!(module.wasmMemory?.buffer instanceof SharedArrayBuffer)) {
+    throw new ProtocolError('unsupported-capability', 'MT module does not export wasmMemory; relink the MT product.');
+  }
+  return module;
+};
 
 /**
  * Initialize the single compiled mixed-WASM module instance.
  * @internal
  * @param input - Optional module bytes or artifact location.
+ * @param execution - Explicit ST or MT product selection.
  */
-export const initializeMixedWasm = async (input?: WasmInput): Promise<void> => {
+export const initializeMixedWasm = async (input?: WasmInput, execution?: WasmExecution): Promise<void> => {
+  const mtUrl = requireAvailableExecution(execution);
+  if (mtUrl !== undefined && execution?.variant === 'mt') {
+    if (input !== undefined) {
+      throw new ProtocolError('invalid-request', 'MT WASM bytes are selected by the build receipt.');
+    }
+    const key = `${execution.permits}:${mtUrl.href}`;
+    let entry = mtModules.get(key);
+    if (entry === undefined) {
+      const created = {
+        promise: loadMtModule(mtUrl, execution.permits),
+        module: undefined as MixedWasmModule | undefined,
+      };
+      entry = created;
+      mtModules.set(key, created);
+    }
+    try {
+      entry.module = await entry.promise;
+    } catch (error) {
+      if (mtModules.get(key) === entry) {
+        mtModules.delete(key);
+      }
+      throw error;
+    }
+    return;
+  }
   modulePromise ??= (async () => {
     const binding = (await import('#mixed-wasm-binding')) as {
       readonly default?: unknown;
@@ -119,7 +290,15 @@ export const initializeMixedWasm = async (input?: WasmInput): Promise<void> => {
   await modulePromise;
 };
 
-const initializedModule = (): MixedWasmModule => {
+const initializedModule = (execution?: WasmExecution): MixedWasmModule => {
+  const mtUrl = requireAvailableExecution(execution);
+  if (mtUrl !== undefined && execution?.variant === 'mt') {
+    const entry = mtModules.get(`${execution.permits}:${mtUrl.href}`);
+    if (entry?.module === undefined) {
+      throw new ProtocolError('invalid-request', 'Initialize the selected MT product before constructing an engine.');
+    }
+    return entry.module;
+  }
   if (modulePromise === undefined) {
     throw new ProtocolError('invalid-request', 'Call initialize() before using the GeoSpec WASM engine.');
   }
@@ -129,12 +308,41 @@ const initializedModule = (): MixedWasmModule => {
   return loadedModule;
 };
 
+/**
+ * Current byte view of module memory. A pthread that grows shared memory refreshes only its own views, so the
+ * main thread's HEAPU8 can cover the old length; take the view after the last call that can allocate.
+ * @param module - Initialized ST or MT module.
+ * @returns A view over the whole current memory.
+ */
+const heap = (module: MixedWasmModule): Uint8Array<ArrayBuffer> => {
+  const buffer = module.wasmMemory?.buffer;
+  return buffer === undefined || buffer === module.HEAPU8.buffer ? module.HEAPU8 : new Uint8Array(buffer);
+};
+
+/**
+ * Copy host bytes into one registered input; the caller never receives the pointer when the copy fails, so
+ * release it here.
+ * @param module - Module that registered the input.
+ * @param pointer - Registered input address.
+ * @param bytes - Exact host bytes.
+ */
+const copyInput = (module: MixedWasmModule, pointer: number, bytes: HostBytes): void => {
+  try {
+    heap(module).set(bytes, pointer);
+  } catch (error) {
+    if (pointer !== 0) {
+      module._geospec_engine_native_input_free(pointer, bytes.byteLength);
+    }
+    throw error;
+  }
+};
+
 const allocate = (module: MixedWasmModule, bytes: HostBytes, copies?: HostCopyObservations): number => {
   const pointer = module._geospec_engine_native_input_alloc(bytes.byteLength);
   if (bytes.byteLength !== 0 && pointer === 0) {
     throw new ProtocolError('limit-exceeded', 'Compiled GeoSpec WASM module could not register input bytes.');
   }
-  module.HEAPU8.set(bytes, pointer);
+  copyInput(module, pointer, bytes);
   if (copies) {
     observeHostCopy(copies, 'input', bytes.byteLength);
   }
@@ -146,7 +354,7 @@ const allocateTransferred = (module: MixedWasmModule, bytes: HostBytes, copies?:
   if (bytes.byteLength !== 0 && pointer === 0) {
     throw new ProtocolError('limit-exceeded', 'Compiled GeoSpec WASM module could not allocate binary input bytes.');
   }
-  module.HEAPU8.set(bytes, pointer);
+  copyInput(module, pointer, bytes);
   if (copies) {
     observeHostCopy(copies, 'input', bytes.byteLength);
   }
@@ -169,11 +377,11 @@ const copyResultBytes = (module: MixedWasmModule, result: number, access: Result
   }
   // Metadata calls can grow memory. Acquire the current view only afterward,
   // then copy synchronously before any observer, allocator or result drop.
-  const heap = module.HEAPU8;
-  if (pointer === 0 || pointer > heap.byteLength || byteLength > heap.byteLength - pointer) {
+  const view = heap(module);
+  if (pointer === 0 || pointer > view.byteLength || byteLength > view.byteLength - pointer) {
     throw new ProtocolError('invalid-request', 'Compiled GeoSpec WASM module returned an inconsistent byte range.');
   }
-  const bytes = Uint8Array.from(heap.subarray(pointer, pointer + byteLength));
+  const bytes = Uint8Array.from(view.subarray(pointer, pointer + byteLength));
   if (access.copies) {
     observeHostCopy(access.copies, 'output', byteLength);
   }
@@ -225,11 +433,16 @@ const withInput = (
 
 /** Exact byte transport over one retained mixed-WASM engine. @internal */
 export class MixedWasmBinding {
-  readonly #module = initializedModule();
+  readonly #module: MixedWasmModule;
   readonly #copies = { exact: true, inputCopies: 0n, inputBytes: 0n, outputCopies: 0n, outputBytes: 0n };
-  #engine = this.#module._geospec_engine_native_engine_new();
+  #engine: number;
 
-  public constructor() {
+  public constructor(execution?: WasmExecution) {
+    this.#module = initializedModule(execution);
+    this.#engine =
+      execution?.variant === 'mt'
+        ? (this.#module._geospec_engine_native_engine_new_with_execution_permits?.(execution.permits) ?? 0)
+        : this.#module._geospec_engine_native_engine_new();
     if (this.#engine === 0) {
       throw new ProtocolError('invalid-request', 'Compiled GeoSpec WASM module could not create an engine.');
     }
@@ -310,7 +523,7 @@ export class MixedWasmBinding {
             'Compiled GeoSpec WASM module could not allocate the resource table.',
           );
         }
-        const view = new DataView(this.#module.HEAPU8.buffer);
+        const view = new DataView(heap(this.#module).buffer);
         for (let index = 1; index < transferred.length; index += 1) {
           const resource = transferred[index];
           if (resource === undefined) {
@@ -422,13 +635,16 @@ export class MixedWasmBinding {
 }
 
 /**
- * Canonicalize bytes through the initialized compiled module.
+ * Canonicalize bytes through any initialized ST or MT compiled module.
  * @internal
  * @param input - Exact input bytes.
  * @returns Canonical JSON bytes.
  */
 export const canonicalizeMixedWasm = (input: HostBytes): HostBytes => {
-  const module = initializedModule();
+  // Canonicalization is engine-free core code compiled identically into every product, so an MT-only host
+  // canonicalizes through its MT module; the ST refusal remains when nothing is initialized.
+  const module =
+    loadedModule ?? [...mtModules.values()].find((entry) => entry.module !== undefined)?.module ?? initializedModule();
   return withInput(module, { bytes: input }, (pointer, length) =>
     module._geospec_engine_native_canonicalize(pointer, length),
   );

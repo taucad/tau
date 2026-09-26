@@ -42,17 +42,25 @@ pub struct Engine {
 
 impl Default for Engine {
     fn default() -> Self {
-        Self::new()
+        Self {
+            inner: CoreEngine::new(),
+        }
     }
 }
 
 #[wasm_bindgen]
 impl Engine {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
-        Self {
-            inner: CoreEngine::new(),
-        }
+    pub fn new(execution_permits: Option<f64>) -> Result<Self, JsValue> {
+        CoreEngine::with_execution_permits(execution_permits.unwrap_or(1.0))
+            .map(|inner| Self { inner })
+            .map_err(|message| {
+                ProtocolError {
+                    code: "invalid-request".into(),
+                    message: message.into(),
+                }
+                .into()
+            })
     }
 
     #[wasm_bindgen(js_name = ingestMesh)]

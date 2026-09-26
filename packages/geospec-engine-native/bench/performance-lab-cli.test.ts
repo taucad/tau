@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { it } from 'node:test';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import {
+  isHostContended,
   parseCliArguments,
   planLabCells,
   selectLabFixtures,
+  selectLabProducts,
   toRunCase,
   verifyLabArtifacts,
+  verifySourceAuthority,
   loadLegacyWithoutPersistence,
   summarizeLabCaseResults,
 } from '#bench/performance-lab-cli';
@@ -18,6 +22,8 @@ import {
   performanceLabNativeQueries,
   performanceLabScaleCases,
 } from '#bench/performance-lab';
+// oxlint-disable-next-line no-restricted-imports -- Test-only current-source overlay inventory.
+import currentAuthority from './fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
 
 void it('counts known differences separately and preserves unsupported, unverified and unexpected statuses', () => {
   const legacyCases = ['toHaveBoundingBox', 'toHaveCenterOfMass', 'toHaveCircularHole', 'toHaveChamferFeature'].map(
@@ -54,10 +60,30 @@ void it('counts known differences separately and preserves unsupported, unverifi
           expectedStatus: 'passed',
         }) as const,
     ),
-    { caseId: 'm3-toHaveCircularHole-positive', repeat: 0, status: 'failed', expectedStatus: 'failed' },
-    { caseId: 'm3-toHaveCircularHole-negative', repeat: 0, status: 'failed', expectedStatus: 'passed' },
-    { caseId: 'm3-toHaveBoundingBox-negative', repeat: 1, status: 'unsupported', expectedStatus: 'passed' },
-    { caseId: 'involute-gear-glb', repeat: 0, status: 'passed', expectedStatus: 'unverified' },
+    {
+      caseId: 'm3-toHaveCircularHole-positive',
+      repeat: 0,
+      status: 'failed',
+      expectedStatus: 'failed',
+    },
+    {
+      caseId: 'm3-toHaveCircularHole-negative',
+      repeat: 0,
+      status: 'failed',
+      expectedStatus: 'passed',
+    },
+    {
+      caseId: 'm3-toHaveBoundingBox-negative',
+      repeat: 1,
+      status: 'unsupported',
+      expectedStatus: 'passed',
+    },
+    {
+      caseId: 'involute-gear-glb',
+      repeat: 0,
+      status: 'passed',
+      expectedStatus: 'unverified',
+    },
   ]);
   assert.deepStrictEqual(mixed.counts, {
     expectedMatches: 1,
@@ -73,6 +99,18 @@ void it('counts known differences separately and preserves unsupported, unverifi
 });
 
 void it('plans the shared authored catalog and verifies a pinned ordinary input without loading engines', async () => {
+  await verifySourceAuthority();
+  await assert.rejects(
+    verifySourceAuthority(async (path) => ({
+      path,
+      sha256: path.endsWith('/authority-queries.json')
+        ? '0'.repeat(64)
+        : createHash('sha256')
+            .update(await readFile(path))
+            .digest('hex'),
+    })),
+    /Performance-lab source authority changed: .*authority-queries\.json/,
+  );
   const options = parseCliArguments([
     '--legacy-module=/installed/legacy.mjs',
     '--mixed-module=/installed/mixed.mjs',
@@ -81,6 +119,27 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
   ]);
   assert.equal(options.samples, 5);
   assert.equal(options.includeScale, false);
+  assert.equal(options.condition, 'cold');
+  assert.throws(
+    () =>
+      parseCliArguments([
+        '--native-module=/installed/native.mjs',
+        '--output-dir=out/reports/benchmarks/short',
+        '--samples=4',
+      ]),
+    /at least five --samples/,
+  );
+  assert.throws(
+    () =>
+      parseCliArguments([
+        '--legacy-module=/installed/legacy.mjs',
+        '--mixed-module=/installed/mixed.mjs',
+        '--native-module=/installed/native.mjs',
+        '--output-dir=out/reports/benchmarks/full',
+        '--include-scale',
+      ]),
+    /requires an explicit installed-product hash manifest/,
+  );
   assert.deepStrictEqual(
     options.modules.map(({ engine }) => engine),
     ['legacy-wasm', 'combined-wasm', 'native-desktop'],
@@ -88,6 +147,14 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
   assert.equal(options.outputDir, resolve(import.meta.dirname, '../../../out/reports/benchmarks/performance-lab'));
   const ordinary = selectLabFixtures(false);
   const selected = ordinary.flatMap(({ cases }) => cases);
+  const affected = selected.filter(({ id }) => currentAuthority.affectedCaseIds.includes(id));
+  assert.deepStrictEqual(affected.map(({ id }) => id).sort(), [...currentAuthority.affectedCaseIds].sort());
+  assert.ok(affected.every(({ expectedStatus }) => expectedStatus === 'unverified'));
+  assert.ok(
+    performanceLabCases
+      .filter(({ id }) => currentAuthority.affectedCaseIds.includes(id))
+      .every(({ expectedStatus }) => expectedStatus !== 'unverified'),
+  );
   assert.deepStrictEqual(
     new Set(selected.map(({ id }) => id)),
     new Set([...performanceLabCases, ...performanceLabNativeQueries].map(({ id }) => id)),
@@ -114,30 +181,49 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
   assert.ok(selected.some((entry) => entry.claim.subjectSlots[0] === 'part'));
   const cells = planLabCells(options);
   assert.deepStrictEqual(planLabCells(options), cells);
-  assert.equal(cells.length, ordinary.length * options.modules.length * options.samples);
+  assert.equal(cells.length, ordinary.length * options.modules.length * options.samples * 2);
   assert.equal(
-    new Set(cells.map(({ round, module, selection }) => `${round}/${module.engine}/${selection.fixture.id}`)).size,
+    new Set(
+      cells.map(
+        ({ round, condition, module, selection }) => `${round}/${condition}/${module.engine}/${selection.fixture.id}`,
+      ),
+    ).size,
     cells.length,
   );
   assert.equal(cells[0]?.module.engine, 'legacy-wasm');
-  assert.equal(cells[3]?.module.engine, 'combined-wasm');
-  assert.equal(cells[ordinary.length * 3]?.selection.fixture.id, ordinary[1]?.fixture.id);
-  assert.equal(cells[ordinary.length * 3]?.module.engine, 'native-desktop');
+  assert.deepStrictEqual(
+    cells.slice(0, 2).map(({ condition }) => condition),
+    ['cold', 'warm'],
+  );
+  assert.equal(cells[6]?.module.engine, 'combined-wasm');
+  assert.equal(cells[ordinary.length * 3 * 2]?.selection.fixture.id, ordinary[1]?.fixture.id);
+  assert.equal(cells[ordinary.length * 3 * 2]?.module.engine, 'native-desktop');
   assert.deepStrictEqual(
     [1, 2, 3, 4, 5].map(
       (round) =>
-        cells.find((cell) => cell.round === round && cell.selection.fixture.id === ordinary[0]?.fixture.id)?.module
-          .engine,
+        cells.find(
+          (cell) =>
+            cell.round === round && cell.condition === 'cold' && cell.selection.fixture.id === ordinary[0]?.fixture.id,
+        )?.module.engine,
     ),
     ['legacy-wasm', 'combined-wasm', 'native-desktop', 'legacy-wasm', 'combined-wasm'],
   );
   const scaleOptions = parseCliArguments([
     '--native-module=/installed/native.mjs',
     '--output-dir=out/reports/benchmarks/scale',
-    '--samples=2',
+    '--samples=5',
     '--include-scale',
   ]);
-  assert.equal(scaleOptions.samples, 2);
+  assert.equal(scaleOptions.samples, 5);
+  assert.equal(selectLabFixtures(true).length, 22);
+  assert.equal(
+    new Set(
+      selectLabFixtures(true).flatMap(({ cases }) =>
+        cases.map((entry) => ('matcher' in entry ? entry.matcher : entry.capability)),
+      ),
+    ).size,
+    31,
+  );
   assert.deepStrictEqual(
     new Set(
       selectLabFixtures(scaleOptions.includeScale)
@@ -167,5 +253,66 @@ void it('disables the selected legacy store before importing its entry module', 
     "import { getGeoSpecEvidenceStore } from './cache/evidence-cache.mjs'; export const geoSpecEngineImplementation = { disabledBeforeImport: getGeoSpecEvidenceStore() === undefined };",
   );
   const loaded = await loadLegacyWithoutPersistence(entry);
-  assert.deepStrictEqual(loaded.geoSpecEngineImplementation, { disabledBeforeImport: true });
+  assert.deepStrictEqual(loaded.geoSpecEngineImplementation, {
+    disabledBeforeImport: true,
+  });
+});
+
+void it('should load lane-built add-on, glue and ST binary overrides and disclose a contended host only on opt-in', async (context) => {
+  const options = parseCliArguments([
+    '--native-module=/installed/native.mjs',
+    '--native-addon=/lane/geospec-engine-native.node',
+    '--mixed-module=/installed/wasm.mjs',
+    '--mixed-binary=/lane/geospec_engine_native.wasm',
+    '--mixed-glue=/lane/geospec_engine_native.mjs',
+    '--output-dir=out/reports/benchmarks/lane',
+    '--contended-host',
+  ]);
+  assert.equal(options.nativeAddon, '/lane/geospec-engine-native.node');
+  assert.equal(options.mixedBinary, '/lane/geospec_engine_native.wasm');
+  assert.equal(options.mixedGlue, '/lane/geospec_engine_native.mjs');
+  assert.equal(options.contendedHost, true);
+  assert.equal(
+    parseCliArguments(['--native-module=/installed/native.mjs', '--output-dir=out/reports/benchmarks/x']).contendedHost,
+    false,
+  );
+  for (const args of [
+    ['--native-module=/installed/native.mjs', '--native-addon=lane.node'],
+    ['--native-module=/installed/native.mjs', '--mixed-binary=/lane/geospec_engine_native.wasm'],
+  ]) {
+    assert.throws(() => parseCliArguments([...args, '--output-dir=out/reports/benchmarks/x']), /absolute product file/);
+  }
+  const guards = { maxLoadPerCpu: 1, minFreeMemoryMiB: 1024 };
+  assert.equal(isHostContended({ loadAverage: 6, loadPerCpu: 0.5, freeMemoryMiB: 4096 }, guards), false);
+  assert.equal(isHostContended({ loadAverage: 24, loadPerCpu: 2, freeMemoryMiB: 4096 }, guards), true);
+  assert.equal(isHostContended({ loadAverage: 6, loadPerCpu: 0.5, freeMemoryMiB: 100 }, guards), true);
+
+  const directory = await mkdtemp(resolve(tmpdir(), 'geospec-lab-products-'));
+  const previousAddon = process.env['NAPI_RS_NATIVE_LIBRARY_PATH'];
+  context.after(async () => {
+    if (previousAddon === undefined) {
+      delete process.env['NAPI_RS_NATIVE_LIBRARY_PATH'];
+    } else {
+      process.env['NAPI_RS_NATIVE_LIBRARY_PATH'] = previousAddon;
+    }
+    await rm(directory, { recursive: true, force: true });
+  });
+  const glue = resolve(directory, 'lane-glue.mjs');
+  await writeFile(glue, "export default 'lane glue';");
+  const binary = resolve(directory, 'lane.wasm');
+  await writeFile(binary, new Uint8Array([0, 97, 115, 109, 7]));
+  const entry = resolve(directory, 'entry.mjs');
+  await writeFile(
+    entry,
+    "export const calls = []; export const initialize = async (bytes, execution) => { calls.push([Array.from(bytes), execution, (await import('#mixed-wasm-binding')).default]); };",
+  );
+  const load = selectLabProducts({
+    nativeAddon: '/lane/geospec-engine-native.node',
+    mixedGlue: glue,
+    mixedBinary: binary,
+  });
+  assert.equal(process.env['NAPI_RS_NATIVE_LIBRARY_PATH'], '/lane/geospec-engine-native.node');
+  const first = (await load(entry)) as unknown as { calls: unknown[] };
+  await load(entry);
+  assert.deepStrictEqual(first.calls, [[[0, 97, 115, 109, 7], { variant: 'st' }, 'lane glue']]);
 });

@@ -26,6 +26,9 @@ import type {
 import type { BambuPresetSummary, BambuStudioSelection, BambuStudioSettings } from '@taucad/slicer/bambu-studio';
 import type { Quantity } from '@taucad/units/quantity';
 import type { RJSFSchema } from '@rjsf/utils';
+import type { ParameterManifest } from '@taucad/parameters';
+import type * as ParametersModule from '#components/geometry/parameters/parameters.js';
+import type * as ChatConverter from '#routes/w.$workspace.$project/chat-converter.js';
 import { mergeFormDefaults } from '#components/geometry/parameters/rjsf-utils.js';
 import { projectFiles } from '#components/print/testing/project-files.js';
 import { formatDisplayLabel } from '#utils/string.utils.js';
@@ -97,7 +100,11 @@ const cadSnapshot = (): { context: Record<string, unknown> } => ({
 let cadState = cadSnapshot();
 const cadActor = {
   getSnapshot: () => cadState,
-  subscribe: (observer: { next: () => void }) => ({ unsubscribe: cadRenders.subscribe(() => observer.next()) }),
+  subscribe: (observer: { next: () => void }) => ({
+    unsubscribe: cadRenders.subscribe(() => {
+      observer.next();
+    }),
+  }),
 };
 
 /** The kernel renders the model again: a new geometry, as after an edit. */
@@ -139,12 +146,24 @@ export const fileManagerMock = {
   }),
 };
 
-export const converterMock = {
-  compileExportConfigurationManifest: async (): Promise<{ entryPath: string; manifest: Record<string, never> }> => ({
-    entryPath: 'print',
-    manifest: {},
-  }),
-};
+/**
+ * The converter the pane reads. Bambu Studio's settings compile for real, since the shared
+ * Parameters form renders them; every other schema gets an empty manifest for `ParametersFake`.
+ *
+ * @param actual - The real module.
+ * @returns The mocked module.
+ */
+export const converterMock = (actual: typeof ChatConverter): typeof ChatConverter => ({
+  ...actual,
+  async compileExportConfigurationManifest(provider, configuration, resolved) {
+    if (provider === 'bambu-studio') {
+      return actual.compileExportConfigurationManifest(provider, configuration, resolved);
+    }
+    const empty: unknown = {};
+    // SAFETY: `ParametersFake` stands in wherever this empty manifest is used and never reads it.
+    return { entryPath: 'print', manifest: empty as ParameterManifest };
+  },
+});
 
 /** The summary read from the exported container; a test names its producer with `mockReturnValueOnce`. */
 export const baseSliceSummary: SliceSummary = {
@@ -239,6 +258,29 @@ export function ParametersFake({
     </div>
   );
 }
+
+/**
+ * What the pane reads from the Parameters module: the fake wherever the manifest is the converter
+ * mock's empty one, and the real form for Bambu Studio's settings, whose manifest compiles.
+ *
+ * @param actual - The real module.
+ * @returns The mocked module.
+ */
+export const parametersMock = (actual: typeof ParametersModule): typeof ParametersModule => ({
+  ...actual,
+  Parameters(properties) {
+    return Object.keys(properties.parameterManifest).length === 0 ? (
+      <ParametersFake
+        parameters={properties.parameters}
+        defaultParameters={properties.defaultParameters}
+        jsonSchema={properties.jsonSchema ?? {}}
+        onParametersChange={properties.onParametersChange}
+      />
+    ) : (
+      <actual.Parameters {...properties} />
+    );
+  },
+});
 
 const millimetres = (value: number) => ({ value, unit: 'mm' });
 const celsius = (value: number) => ({ value, unit: 'Cel' });
@@ -805,10 +847,11 @@ export const bambuSettingsFor = (
             }),
             support: group('Support', { enable_support: { type: 'boolean', title: 'Enable support' } }),
             'process-all': group('All other settings', {
-              bridge_flow: annotated(
-                { type: ['number', 'string'], title: 'Bridge flow', pattern: '^-?(?:\\d+\\.?\\d*|\\.\\d+)%$' },
-                { 'x-tau-inferred': true },
-              ),
+              bridge_flow: {
+                type: ['number', 'string'],
+                title: 'Bridge flow',
+                pattern: '^-?(?:\\d+\\.?\\d*|\\.\\d+)%$',
+              },
             }),
           },
         },

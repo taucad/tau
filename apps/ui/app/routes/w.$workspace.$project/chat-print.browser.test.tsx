@@ -32,13 +32,13 @@ vi.mock('#hooks/use-file-manager.js', async () => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.fileManagerMock;
 });
-vi.mock('#routes/w.$workspace.$project/chat-converter.js', async () => {
+vi.mock('#routes/w.$workspace.$project/chat-converter.js', async (importOriginal) => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
-  return fixtures.converterMock;
+  return fixtures.converterMock(await importOriginal());
 });
-vi.mock('#components/geometry/parameters/parameters.js', async () => {
+vi.mock('#components/geometry/parameters/parameters.js', async (importOriginal) => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
-  return { Parameters: fixtures.ParametersFake };
+  return fixtures.parametersMock(await importOriginal());
 });
 vi.mock('#routes/w.$workspace.$project/chat-print-summary.js', async (importOriginal) => {
   const [actual, fixtures] = await Promise.all([
@@ -96,10 +96,10 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`);
     await screen.findByRole('group', { name: 'Bambu Studio presets' });
     await page.getByRole('button', { name: /^Advanced/u }).click();
-    await page.getByRole('button', { name: /^Quality/u }).click();
-    await page.getByLabelText('Layer height', { exact: true }).fill('0.16');
-    await page.getByLabelText('Ironing speed', { exact: true }).click();
-    await screen.findByRole('button', { name: /^Quality\W+1 changed$/u });
+    await page.getByRole('button', { name: 'Group: Quality' }).click();
+    await page.getByRole('textbox', { name: 'Input for Layer Height' }).fill('0.16');
+    await page.getByRole('textbox', { name: 'Input for Ironing Speed' }).click();
+    await screen.findByRole('button', { name: 'Reset Layer Height' });
   } else if (scenario === 'prepare') {
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
     await page.getByRole('region', { name: 'Prepare' }).getByRole('button', { name: 'Slice and preview' }).click();

@@ -5,7 +5,7 @@ import { projectParameterField, resolveParameterBinding } from '@taucad/paramete
 import { admitUnit } from '@taucad/units/unit';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
 import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
-import { ParametersString } from '#components/geometry/parameters/parameters-string.js';
+import { ParametersNumberOrString, ParametersString } from '#components/geometry/parameters/parameters-string.js';
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import { toUcumLengthCode } from '#constants/length-units.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
@@ -91,6 +91,31 @@ export function ParametersWidget(
       toast.error(error instanceof Error ? error.message : 'The parameter could not be saved.');
     }
   };
+
+  const types = Array.isArray(schema.type) ? schema.type.filter((candidate) => candidate !== 'null') : [];
+  if (types.includes('string') && (types.includes('number') || types.includes('integer'))) {
+    return (
+      <ParametersNumberOrString
+        id={id}
+        value={value}
+        pattern={schema.pattern}
+        minimum={schema.minimum}
+        maximum={schema.maximum}
+        isNullable={Array.isArray(schema.type) && schema.type.includes('null')}
+        disabled={disabled}
+        readOnly={readonly}
+        autoFocus={autofocus}
+        aria-label={`Input for ${prettyLabel}`}
+        onFocus={() => {
+          onFocus(id, value);
+        }}
+        onBlur={() => {
+          onBlur(id, value);
+        }}
+        onChange={handleChange}
+      />
+    );
+  }
 
   switch (type) {
     case 'boolean': {

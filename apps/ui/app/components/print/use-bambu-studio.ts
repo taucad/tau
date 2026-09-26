@@ -156,9 +156,11 @@ export type BambuStudioMode = Readonly<{
   defaults: Record<string, unknown>;
   /** Bambu key → value the print intent holds; each one is a modified setting. */
   overrides: Readonly<Record<string, unknown>>;
-  /** Save a setting; its preset value, or `undefined`, removes it from the print intent. */
-  setSetting: (key: string, value: unknown) => void;
-  resetSetting: (key: string) => void;
+  /**
+   * Save these settings in one write: each takes its value in `values`, and one that `values` lacks
+   * or holds at its preset value leaves the print intent. Settings outside `keys` are untouched.
+   */
+  setSettings: (keys: Iterable<string>, values: Readonly<Record<string, unknown>>) => void;
   /** Settings the print intent holds that these presets lack: kept in the file, left out of the slice. */
   dropped: number;
   error: string | undefined;
@@ -402,25 +404,22 @@ export const useBambuStudio = ({
   }, [catalog, hintsKey, partialKey, studio]);
 
   const defaults = loaded?.defaults;
-  const setSetting = useCallback(
-    (key: string, value: unknown) => {
+  const setSettings = useCallback(
+    (keys: Iterable<string>, values: Readonly<Record<string, unknown>>) => {
+      const replaced = new Set(keys);
       update(({ settings = noSettings, ...rest }) => {
-        const { [key]: _previous, ...others } = settings;
-        // SAFETY: the form parses each value against the setting's schema, and the serializer validates it again.
-        const next =
-          value === undefined || sameValue(value, defaults?.[key])
-            ? others
-            : { ...others, [key]: value as SettingValue };
+        const next = Object.fromEntries(Object.entries(settings).filter(([key]) => !replaced.has(key)));
+        for (const key of replaced) {
+          const value = values[key];
+          if (value !== undefined && !sameValue(value, defaults?.[key])) {
+            // SAFETY: the form parses each value against the setting's schema, and the serializer validates it again.
+            next[key] = value as SettingValue;
+          }
+        }
         return Object.keys(next).length === 0 ? rest : { ...rest, settings: next };
       });
     },
     [defaults, update],
-  );
-  const resetSetting = useCallback(
-    (key: string) => {
-      setSetting(key, undefined);
-    },
-    [setSetting],
   );
   const choosePrinter = useCallback(
     (printer: string) => {
@@ -501,8 +500,7 @@ export const useBambuStudio = ({
     settings: loaded?.settings,
     defaults: defaults ?? noSettings,
     overrides,
-    setSetting,
-    resetSetting,
+    setSettings,
     dropped: reconciled.dropped,
     error: failure,
     slots,

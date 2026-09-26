@@ -130,6 +130,13 @@ export function ParametersNumber({
   const [localValue, setLocalValue] = React.useState<Readonly<{ value: number; authorityValue: number }>>();
   const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
   const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding, authorityValue }));
+  /* A local value answers the authority it was entered against; once the authority moves, a later
+   * return to that same value (a reset after a transient edit) must not bring the old entry back. */
+  const [enteredAgainst, setEnteredAgainst] = React.useState(authorityValue);
+  if (!Object.is(enteredAgainst, authorityValue)) {
+    setEnteredAgainst(authorityValue);
+    setLocalValue(undefined);
+  }
 
   const isDirty = draftText !== '';
   const currentBase: EditBase = { value: authorityValue, binding, authorityValue };

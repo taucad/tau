@@ -15,7 +15,7 @@ import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { toast } from '#components/ui/sonner.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
-import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions/publish-machine';
+import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
 import { PublicationAccessPanel } from '#components/publish/publication-access-panel.js';
@@ -25,6 +25,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import {
+  awaitGithubGistConnection,
   connectGithubGist,
   getGithubGistConnectionStatus,
   parseGithubGistAuthorizationReturn,
@@ -43,6 +44,7 @@ export type ProjectSharePanelProps = {
   readonly collectSnapshot?: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
   readonly initialMethod?: ShareMethod;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
+  readonly githubAuthorizationFailure?: string;
 };
 
 export type ShareMethod = 'direct' | 'tau' | 'github-gist';
@@ -351,12 +353,14 @@ function PortableShareBody({
   collectSnapshot,
   signIn,
   githubAuthorizationOutcome,
+  githubAuthorizationFailure,
   onBusyChange,
 }: {
   readonly method: Exclude<ShareMethod, 'tau'>;
   readonly collectSnapshot: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
   readonly signIn: string;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
+  readonly githubAuthorizationFailure?: string;
   readonly onBusyChange: (busy: boolean) => void;
 }): React.JSX.Element {
   const [busy, setBusy] = useState(false);
@@ -368,15 +372,26 @@ function PortableShareBody({
   const [password, setPassword] = useState('');
   const [includePassword, setIncludePassword] = useState(true);
   const [publicGist, setPublicGist] = useState(false);
+  /* D16c: desktop runs the Gist grant in the system browser and waits here for it. */
+  const [browserConsent, setBrowserConsent] = useState<'waiting' | 'cancelled' | 'timed-out'>();
   const operationRef = useRef<AbortController | undefined>(undefined);
+  const consentRef = useRef<AbortController | undefined>(undefined);
+  const primaryRef = useRef<HTMLButtonElement>(null);
   const { ticked: copied, trigger: triggerCopiedTick } = useTickAnimation();
 
   useEffect(() => {
     onBusyChange(busy);
   }, [busy, onBusyChange]);
+  /* The Cancel that was clicked unmounts; focus returns to the button that started the grant. */
+  useEffect(() => {
+    if (browserConsent === 'cancelled') {
+      primaryRef.current?.focus();
+    }
+  }, [browserConsent]);
   useEffect(() => {
     return () => {
       operationRef.current?.abort();
+      consentRef.current?.abort();
     };
   }, []);
   useEffect(() => {
@@ -464,15 +479,39 @@ function PortableShareBody({
   const connect = async (): Promise<void> => {
     setBusy(true);
     setError(undefined);
+    setBrowserConsent(undefined);
     try {
-      await connectGithubGist({
+      const handoff = await connectGithubGist({
         returnUrl: globalThis.location.href,
         surface: 'editor',
       });
+      if (handoff === 'redirect') {
+        return;
+      }
+      const consent = new AbortController();
+      consentRef.current = consent;
+      setBrowserConsent('waiting');
+      const connected = await awaitGithubGistConnection(consent.signal);
+      if (consent.signal.aborted) {
+        return;
+      }
+      consentRef.current = undefined;
+      setBrowserConsent(connected ? undefined : 'timed-out');
+      if (connected) {
+        setGithubStatus('connected');
+      }
+      setBusy(false);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'GitHub authorization failed.');
       setBusy(false);
     }
+  };
+
+  const cancelBrowserConsent = (): void => {
+    consentRef.current?.abort();
+    consentRef.current = undefined;
+    setBrowserConsent('cancelled');
+    setBusy(false);
   };
 
   const isDirect = method === 'direct';
@@ -574,16 +613,32 @@ function PortableShareBody({
       {isDirect ? (
         <p className='text-sm text-purple dark:text-purple/70'>Sign in to persist a Tau-hosted share.</p>
       ) : null}
-      {!isDirect && githubAuthorizationOutcome ? (
+      {/* `returned` is the wait for the status check, so it goes once that answers:
+       * connected needs no words, and anything else has its own line below. */}
+      {!isDirect &&
+      githubAuthorizationOutcome &&
+      !(githubAuthorizationOutcome === 'returned' && githubStatus !== undefined) ? (
         <div className='rounded-md border border-purple/30 bg-purple/10 px-3 py-2 text-sm text-purple dark:text-purple/80'>
           {githubAuthorizationOutcome === 'returned'
             ? 'GitHub authorization returned. Checking Gist access…'
             : githubAuthorizationOutcome === 'cancelled'
               ? 'GitHub Gist access was not granted.'
-              : 'GitHub authorization could not be completed. Try again.'}
+              : (githubAuthorizationFailure ?? 'GitHub authorization could not be completed. Try again.')}
         </div>
       ) : null}
-      {!isDirect && githubStatus && githubStatus !== 'connected' ? (
+      {!isDirect && browserConsent ? (
+        <div
+          role='status'
+          className='rounded-md border border-purple/30 bg-purple/10 px-3 py-2 text-sm text-purple dark:text-purple/80'
+        >
+          {browserConsent === 'waiting'
+            ? 'Finish in your browser. Tau continues here once GitHub grants Gist access.'
+            : browserConsent === 'cancelled'
+              ? 'Stopped waiting for your browser. Gist access was not changed here.'
+              : 'Gist access did not arrive within 10 minutes. Try again.'}
+        </div>
+      ) : null}
+      {!isDirect && githubStatus && githubStatus !== 'connected' && browserConsent !== 'waiting' ? (
         <div className='rounded-md border border-purple/30 bg-purple/10 px-3 py-2 text-sm text-purple dark:text-purple/80'>
           {githubStatus === 'signed-out'
             ? 'Sign in to Tau before connecting GitHub.'
@@ -604,12 +659,18 @@ function PortableShareBody({
       ) : null}
       {shareUrl ? <Input aria-label='Share link' readOnly value={shareUrl} /> : null}
       <div className='flex flex-wrap justify-end gap-2'>
+        {browserConsent === 'waiting' ? (
+          <Button type='button' variant='ghost' onClick={cancelBrowserConsent}>
+            Cancel
+          </Button>
+        ) : null}
         {!isDirect && githubStatus === 'signed-out' ? (
           <Button asChild>
             <NavLink to={signIn}>Sign in</NavLink>
           </Button>
         ) : (
           <Button
+            ref={primaryRef}
             type='button'
             disabled={busy || !passwordValid || (!isDirect && githubStatus === undefined)}
             onClick={() => {
@@ -651,6 +712,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     collectSnapshot,
     initialMethod,
     githubAuthorizationOutcome,
+    githubAuthorizationFailure,
   } = properties;
   const { pathname, search } = useLocation();
   const [shareMethod, setShareMethod] = useState<ShareMethod>(initialMethod ?? (collectSnapshot ? 'direct' : 'tau'));
@@ -801,6 +863,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
           collectSnapshot={collectSnapshot}
           signIn={signIn}
           githubAuthorizationOutcome={githubAuthorizationOutcome}
+          githubAuthorizationFailure={githubAuthorizationFailure}
           onBusyChange={setPortableBusy}
         />
       </SharePanelFrame>

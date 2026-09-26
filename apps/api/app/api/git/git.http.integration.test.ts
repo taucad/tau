@@ -872,4 +872,15 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       expect(refused.status, target).toBe(400);
     }
   });
+
+  it('lets an LFS object PUT reach the relay instead of refusing its media type (D44)', async () => {
+    const put = await fetch(`${baseUrl}/v1/git/lfs/0f8fad5b-d9cb-469f-a165-70867728950e`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${callers.owner.token}`, 'content-type': 'application/octet-stream' },
+      body: Buffer.from('bytes'),
+    });
+
+    expect(put.status).toBe(400);
+    expect(((await put.json()) as { code?: string }).code).toBe('GIT_LFS_HANDLE_REFUSED');
+  });
 });

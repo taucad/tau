@@ -216,7 +216,7 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
 
   /**
    * The kernel sends exactly one pattern, `.tau/cache/**`.
-   * ponytail: prefix-only exclude matching; export `libs/filesystem`'s private
+   * ponytail: prefix-only exclude matching; export `packages/filesystem`'s private
    * `matchesGlob` (`watch-registry.ts:72`) if a caller ever sends a non-prefix glob.
    */
   const isExcluded = (rootedPath: string, excludes: readonly string[]): boolean =>

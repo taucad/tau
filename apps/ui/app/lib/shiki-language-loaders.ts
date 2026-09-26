@@ -12,6 +12,7 @@ export const runtimeShikiLanguageLoaders = [
   import('@shikijs/langs-precompiled/csharp'),
   import('@shikijs/langs-precompiled/tsx'),
   import('@shikijs/langs-precompiled/typescript'),
+  import('@shikijs/langs-precompiled/yaml'),
   import('@taucad/grammars/openscad'),
   import('@taucad/grammars/kcl'),
   import('@taucad/grammars/stepfile'),

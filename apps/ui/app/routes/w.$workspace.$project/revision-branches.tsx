@@ -11,9 +11,10 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
 import { DiffViewer } from '#components/code/diff-viewer.js';
+import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
 import { RevisionConflictEditor } from '#routes/w.$workspace.$project/revision-conflict-editor.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
-import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions';
 
 /**
  * The one *New branch* control, wherever it is offered.
@@ -117,6 +118,7 @@ function ConflictCard({
   const target = into ?? conflict.labels?.ours ?? 'the other branch';
   const count = conflict.paths.length;
   const [modes, setModes] = useState<Readonly<Record<string, 'compare' | 'edit'>>>({});
+  const undecided = conflict.paths.filter((path) => path.side === undefined).length;
 
   return (
     <div className='flex flex-col gap-2 pl-5'>
@@ -241,7 +243,7 @@ function ConflictCard({
                 <DiffViewer
                   originalContent={materialized.ours}
                   modifiedContent={materialized.theirs}
-                  language={path}
+                  language={resolveHighlightLanguageForPath(path).shikiLanguage}
                   className='rounded-md border'
                 />
               ) : null}
@@ -251,7 +253,9 @@ function ConflictCard({
       </ul>
       {conflict.ready ? null : (
         <p className='text-xs text-muted-foreground'>
-          {`${String(conflict.paths.filter((path) => path.side === undefined).length)} file${conflict.paths.filter((path) => path.side === undefined).length === 1 ? '' : 's'} still need a choice before the merge can finish.`}
+          {undecided === 1
+            ? '1 file still needs a choice before the merge can finish.'
+            : `${String(undecided)} files still need a choice before the merge can finish.`}
         </p>
       )}
       <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -422,8 +426,9 @@ export function RevisionBranches({
           const isCurrent = branch.name === currentBranch;
           const conflict = conflicts.find((entry) => entry.branch === branch.name);
           const fact = branchFacts.get(branch.name);
+          /* An unplaced chat has no checkout id; a remote-only branch has none either, and must not claim it. */
           const placedChats = Object.entries(chatCheckoutIds).filter(
-            ([, checkoutId]) => checkoutId === branch.checkoutId,
+            ([, checkoutId]) => checkoutId !== undefined && checkoutId === branch.checkoutId,
           );
           /* What *Use in this chat* would do, when it would change anything: an unplaced chat works in the live checkout. */
           const placement =

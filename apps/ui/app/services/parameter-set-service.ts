@@ -1,8 +1,9 @@
+import type { MachineActors } from '#lib/xstate.lib.js';
 import { Topic } from '@taucad/events';
 import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { FileOperation, PreparedFileOperation } from '@taucad/fs-client/file-content-service';
-import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import { createActor, createCallbackLogic, createAsyncLogic, waitFor } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { fileParameterEntrySchema, parameterEntryPath, parametersDirectory } from '@taucad/types';
 import type { JSONValue } from '@taucad/types';
 import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
@@ -273,21 +274,22 @@ export const createParameterSetService = (
     const actor = createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise(async ({ input, signal }) =>
-            input.current !== undefined && input.current.manifest.revision === manifestRef.current.revision
-              ? refreshParameterSnapshot({ current: input.current, authority, signal })
-              : loadParameterSnapshot({
-                  target,
-                  authority,
-                  manifest: async () => manifestRef.current,
-                  signal,
-                  resolution: input.resolution,
-                }),
-          ),
-          commitParameterSet: fromPromise(async ({ input: change, signal }) =>
-            commitParameterChange({ change, authority, signal }),
-          ),
-          observeParameterSet: fromCallback(({ sendBack }) => {
+          loadParameterSet: createAsyncLogic({
+            run: async ({ input, signal }) =>
+              input.current !== undefined && input.current.manifest.revision === manifestRef.current.revision
+                ? refreshParameterSnapshot({ current: input.current, authority, signal })
+                : loadParameterSnapshot({
+                    target,
+                    authority,
+                    manifest: async () => manifestRef.current,
+                    signal,
+                    resolution: input.resolution,
+                  }),
+          }),
+          commitParameterSet: createAsyncLogic({
+            run: async ({ input: change, signal }) => commitParameterChange({ change, authority, signal }),
+          }),
+          observeParameterSet: createCallbackLogic(({ sendBack }) => {
             try {
               return options.subscribe(parameterEntryPath(filePath), () => {
                 sendBack({ type: 'watch.changed' });
@@ -300,7 +302,7 @@ export const createParameterSetService = (
               return () => undefined;
             }
           }),
-        },
+        } satisfies Partial<MachineActors<typeof parameterSetMachine>>,
       }),
       { input: { target, resolution: manifest.identity.resolution } },
     );
@@ -317,7 +319,7 @@ export const createParameterSetService = (
     if (!matches() && !state.actor.getSnapshot().matches({ open: 'loading' })) {
       state.actor.send({ type: 'resolve', resolution: state.manifestRef.current.identity.resolution });
     }
-    const snapshot = await waitFor(
+    const snapshot: SnapshotFrom<typeof parameterSetMachine> = await waitFor(
       state.actor,
       (snapshot) =>
         snapshot.matches({ open: 'disconnected' }) ||

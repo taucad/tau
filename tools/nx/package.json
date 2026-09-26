@@ -11,10 +11,12 @@
   },
   "exports": {
     ".": "./src/resolver.ts",
+    "./bundled-declarations": "./src/bundled-declarations.ts",
     "./tags": "./src/tags.ts",
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@nx/devkit": "catalog:"
+    "@nx/devkit": "catalog:",
+    "typescript": "catalog:"
   }
 }

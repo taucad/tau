@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
+import { github as githubProvider } from 'better-auth/social-providers';
 import { getBetterAuthConfig } from '#config/better-auth.config.js';
 import type { Environment } from '#config/environment.config.js';
 import type { ConfigService } from '@nestjs/config';
@@ -248,6 +249,24 @@ describe('getBetterAuthConfig abuse gates', () => {
 
     expect(typeof github).not.toBe('function');
     expect(typeof github === 'function' ? undefined : github?.scope).toEqual(['read:user', 'user:email']);
+  });
+
+  /* D62: the provider's own defaults were added to the configured list. */
+  it('asks GitHub for each identity scope once', async () => {
+    const { config } = createConfig();
+    const options = config.socialProviders?.['github'];
+    if (options === undefined || typeof options === 'function') {
+      throw new TypeError('GitHub sign-in is configured statically.');
+    }
+
+    const url = await githubProvider(options).createAuthorizationURL({
+      state: 'state',
+      codeVerifier: 'v'.repeat(43),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- better-auth's parameter name.
+      redirectURI: 'http://localhost:4000/v1/auth/callback/github',
+    });
+
+    expect(url.searchParams.get('scope')).toBe('read:user user:email');
   });
 
   it('keeps bearer last in both lockstep plugin lists', async () => {

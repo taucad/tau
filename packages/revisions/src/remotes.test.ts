@@ -34,11 +34,12 @@ import {
   tauRemoteUrl,
 } from '#remotes.js';
 import type { GitRemoteCredential } from '#remotes.js';
-import type { PublishPublicationActorInput } from '#publish.machine.js';
+import type { PublishPublicationActorInput } from '#publish.types.js';
 /* The two W4 rows assert the *consequence* of the code, not only the code: a
    terminal class is what stops `sync.machine` retrying, and that classifier is
    the machine's, not this module's. */
 import { syncFailureReason } from '#sync.machine.js';
+import { RevisionPortError } from '#revision-port.js';
 
 describe('remotes', () => {
   it('reads the kind from the reserved name, never from the URL', () => {
@@ -223,6 +224,24 @@ describe('remotes', () => {
  * (review R1); and nothing is reached at all before routing is known.
  */
 describe('remoteTransportError', () => {
+  /* D66: a repository transferred out of the App's reach answers 403 in plain
+   * text; Tau replaced that with "rejected the saved credentials". */
+  it('keeps GitHub’s plain-text refusal as the sentence, and ignores an HTML error page', () => {
+    const refused = (response: string): RevisionPortError =>
+      remoteTransportError(
+        Object.assign(new Error('HTTP Error: 403 Forbidden'), { data: { statusCode: 403, response } }),
+        {
+          remote: 'github-1',
+        },
+      );
+
+    expect(refused('Write access to repository not granted.\n')).toMatchObject({
+      code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+      message: 'Write access to repository not granted.',
+    });
+    expect(refused('<!DOCTYPE html><html>…</html>').message).toBe('The remote rejected the saved credentials.');
+  });
+
   /* Contract §4: the server refuses a rewind or a deletion on *every* ref
    * family from its `pre-receive` hook, which answers over the sideband and
    * never with an HTTP status — so the status rule alone read a refusal every
@@ -266,6 +285,14 @@ describe('remoteTransportError', () => {
     expect(syncFailureReason(refusal)).toBe('quota');
     expect(refusal.message).toContain('Tau: repository size limit exceeded');
     expect(refusal.message).toContain('huge.bin (5000 bytes)');
+  });
+
+  /* D18: a Git remote that cannot hold large objects is not a plan problem,
+   * so the class that offers *Upgrade* must not claim it. */
+  it('should classify a large-object refusal on a Git remote apart from the storage plan', () => {
+    const refusal = new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(['huge.step']));
+
+    expect(syncFailureReason(refusal)).toBe('largeFiles');
   });
 
   it('leaves a sideband refusal without the ceiling marker a plain rejection', () => {
@@ -357,6 +384,31 @@ describe('remoteTransportError', () => {
     expect(refusal.code).toBe('REMOTE_REJECTED');
     expect(refusal.message).toBe(sentence);
     expect(syncFailureReason(refusal)).toBe('rejected');
+  });
+
+  /* D11: the git proxy refuses to carry a credential across a redirect and says
+   * so with a typed 409. That is a moved repository, not an outage to retry. */
+  it('reads the proxy’s refused credentialed redirect as a moved repository', () => {
+    const body = {
+      statusCode: 409,
+      code: 'GIT_PROXY_REDIRECTED_CREDENTIAL',
+      error: 'The repository moved; confirm its new location before sending the credential there',
+      location: 'https://github.com/octo/renamed.git/info/refs',
+    };
+    const thrown = Object.assign(new Error('HTTP Error: 409 Conflict'), {
+      data: { statusCode: 409, response: JSON.stringify(body) },
+    });
+
+    const refusal = remoteTransportError(thrown, { remote: 'origin' });
+
+    expect(refusal.code).toBe('REMOTE_MOVED');
+    expect(refusal.message).toBe(body.error);
+    expect(syncFailureReason(refusal)).toBe('moved');
+    /* Any other 409 is still the retryable class. */
+    const other = Object.assign(new Error('HTTP Error: 409 Conflict'), {
+      data: { statusCode: 409, response: JSON.stringify({ code: 'SOMETHING_ELSE' }) },
+    });
+    expect(remoteTransportError(other, { remote: 'origin' }).code).toBe('REMOTE_UNAVAILABLE');
   });
 
   it('still reads a failure with neither a status nor a server sentence as unreachable', () => {

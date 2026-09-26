@@ -65,19 +65,20 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
     "@taucad/agent-host": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
     "@taucad/jobs": "workspace:*",
     "@taucad/mcp": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "basic-ftp": "catalog:",
-    "ws": "catalog:",
-    "xstate": "catalog:"
+    "ws": "catalog:"
   },
   "peerDependencies": {
     "@taucad/geospec-engine": "^0.1.0-beta.0",
     "@taucad/revisions": "^0.1.0-beta.0",
     "@taucad/runtime": "^0.1.0-beta.0",
     "geospec": "^0.1.0-beta.0",
-    "zod": "^4.0.0"
+    "zod": "^4.0.0",
+    "xstate": "^6.0.0-alpha.59"
   },
   "peerDependenciesMeta": {
     "@taucad/geospec-engine": {
@@ -91,7 +92,6 @@
     "@taucad/agent-tools": "workspace:*",
     "@taucad/bambu": "workspace:*",
     "@taucad/chat": "workspace:*",
-    "@taucad/filesystem": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",
@@ -99,6 +99,7 @@
     "@taucad/utils": "workspace:*",
     "@types/ws": "^8.18.1",
     "geospec": "workspace:*",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "xstate": "catalog:"
   }
 }

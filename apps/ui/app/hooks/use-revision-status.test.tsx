@@ -11,7 +11,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
-import { assign, createActor, setup } from 'xstate';
+import { createActor, setup, types } from 'xstate';
+import { eventSchemas } from '#lib/xstate.lib.js';
 import { createIsomorphicGitRevisionPort, createRevisionHttpClient } from '@taucad/revisions';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
@@ -38,16 +39,14 @@ const projectId = 'alpha';
 
 /** The file-manager's own context, as far as this hook reads it. */
 const fileManagerMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as { worker: Worker | undefined },
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as { type: 'worker'; worker: Worker | undefined },
+  schemas: {
+    context: types<{ worker: Worker | undefined }>(),
+    events: eventSchemas<{ type: 'worker'; worker: Worker | undefined }>(),
   },
 }).createMachine({
   context: { worker: undefined },
   on: {
-    worker: { actions: assign(({ event }) => ({ worker: event.worker })) },
+    worker: { context: ({ event }) => ({ worker: event.worker }) },
   },
 });
 
@@ -474,6 +473,26 @@ describe('the page client of the worker revision root', () => {
       },
     ]);
     client.close();
+  });
+
+  it('should hold every frame until the route opens, so the credential precedes the first fetch (D36)', () => {
+    const { worker, ports, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    revisionClient.send({ command: 'setDeviceId', deviceId: 'device-1' });
+    revisionClient.remoteCredential({ apiBaseUrl: 'http://api.test', origin: 'https://github.com' });
+
+    /* Connecting starts the root and its opening fetch. */
+    expect(ports).toHaveLength(0);
+
+    revisionClient.open();
+
+    expect(ports).toHaveLength(1);
+    expect(messages).toMatchObject([
+      { command: 'remoteCredential' },
+      { command: 'setDeviceId', deviceId: 'device-1' },
+      { command: 'remoteCredential', origin: 'https://github.com' },
+    ]);
+    revisionClient.close();
   });
 
   it('should replay a completed chat projection to a later route subscriber', () => {

@@ -1,11 +1,9 @@
 import * as THREE from 'three';
-import { getOrBuildBvh } from '#components/geometry/graphics/three/utils/bvh-cache.js';
+import { getOrBuildBvh, intersectsBvhGeometryBounds } from '#components/geometry/graphics/three/utils/bvh-cache.js';
 
 const inverseMatrix = new THREE.Matrix4();
 const localRay = new THREE.Ray();
 const worldPoint = new THREE.Vector3();
-
-export const defaultMaxRaycastCandidateHitsPerMesh = 1024;
 
 export type RaycastClipState = Readonly<{
   enabled: boolean;
@@ -68,19 +66,17 @@ export function raycastFirstVisibleMeshHit({
   raycaster,
   meshes,
   clipping,
-  maxCandidateHitsPerMesh = defaultMaxRaycastCandidateHitsPerMesh,
 }: {
   readonly raycaster: THREE.Raycaster;
   readonly meshes: readonly THREE.Mesh[];
   readonly clipping?: RaycastClipState;
-  readonly maxCandidateHitsPerMesh?: number;
 }): THREE.Intersection<THREE.Mesh> | undefined {
   let nearest: THREE.Intersection<THREE.Mesh> | undefined;
   const shouldFilterClipping = hasActiveClipping(clipping);
 
   for (const mesh of meshes) {
     const positionAttribute = mesh.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
-    if (!isWorldVisible(mesh) || positionAttribute === undefined) {
+    if (!isWorldVisible(mesh) || !raycaster.layers.test(mesh.layers) || positionAttribute === undefined) {
       continue;
     }
 
@@ -88,12 +84,16 @@ export function raycastFirstVisibleMeshHit({
     inverseMatrix.copy(mesh.matrixWorld).invert();
     localRay.copy(raycaster.ray).applyMatrix4(inverseMatrix);
 
+    if (!intersectsBvhGeometryBounds(mesh.geometry, localRay)) {
+      continue;
+    }
+
     const bvh = getOrBuildBvh(mesh.geometry);
     const firstHit = shouldFilterClipping
       ? undefined
       : bvh.raycastFirst(localRay, mesh.material, 0, Number.POSITIVE_INFINITY);
     const hits = shouldFilterClipping
-      ? bvh.raycast(localRay, mesh.material, 0, Number.POSITIVE_INFINITY).slice(0, maxCandidateHitsPerMesh)
+      ? bvh.raycast(localRay, mesh.material, 0, Number.POSITIVE_INFINITY)
       : firstHit
         ? [firstHit]
         : [];

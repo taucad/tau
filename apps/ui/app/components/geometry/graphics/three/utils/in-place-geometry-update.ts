@@ -58,6 +58,7 @@ type PrimitiveTarget = {
  */
 export type InPlaceGeometryTargets = {
   readonly materialsSignature: string;
+  readonly imageBytes: ReadonlyArray<Uint8Array<ArrayBuffer>>;
   readonly primitives: readonly PrimitiveTarget[];
 };
 
@@ -68,6 +69,23 @@ export type CaptureInPlaceGeometryTargetsInput = {
   readonly associations: ReadonlyMap<Object3D, { meshes?: number; primitives?: number } | undefined>;
   readonly bytes: Uint8Array<ArrayBuffer>;
 };
+
+function materialSignature(json: GltfJson): string {
+  return JSON.stringify([json.materials ?? [], json.textures ?? [], json.samplers ?? [], json.images ?? []]);
+}
+
+function readImages({ json, bin }: ParsedGltf): Array<Uint8Array<ArrayBuffer>> | undefined {
+  const images: Array<Uint8Array<ArrayBuffer>> = [];
+  for (const image of json.images ?? []) {
+    const view = image.bufferView === undefined ? undefined : json.bufferViews?.[image.bufferView];
+    if (!view || (view.byteOffset ?? 0) + view.byteLength > bin.byteLength) {
+      // External resources have no immutable bytes to compare; use the full loader path.
+      return undefined;
+    }
+    images.push(bin.subarray(view.byteOffset ?? 0, (view.byteOffset ?? 0) + view.byteLength));
+  }
+  return images;
+}
 
 function describePrimitive(json: GltfJson, primitive: GltfPrimitive): string {
   const accessors = json.accessors ?? [];
@@ -176,7 +194,19 @@ function planSurfaceUpdate({ json, bin, primitive, target }: PrimitiveUpdate): (
   const writes: Array<[BufferAttribute, AccessorArray]> = [];
   for (const [name, accessorIndex] of Object.entries(primitive.attributes ?? {})) {
     const values = readAccessor(json, bin, accessorIndex);
-    const attribute = values && writableAttribute(target.geometry, name.toLowerCase(), values);
+    const attribute =
+      values &&
+      writableAttribute(
+        target.geometry,
+        name === 'TEXCOORD_0'
+          ? 'uv'
+          : name.startsWith('TEXCOORD_')
+            ? `uv${name.slice(9)}`
+            : name === 'COLOR_0'
+              ? 'color'
+              : name.toLowerCase(),
+        values,
+      );
     if (!values || !attribute) {
       return undefined;
     }
@@ -234,6 +264,10 @@ export function captureInPlaceGeometryTargets({
     return undefined;
   }
   const { json } = parsed;
+  const imageBytes = readImages(parsed);
+  if (!imageBytes) {
+    return undefined;
+  }
   const objectsByAddress = new Map<string, Object3D>();
   for (const [object, association] of associations) {
     if (association?.meshes === undefined || association.primitives === undefined) {
@@ -269,7 +303,7 @@ export function captureInPlaceGeometryTargets({
     }
   }
 
-  return { materialsSignature: JSON.stringify(json.materials ?? []), primitives };
+  return { materialsSignature: materialSignature(json), imageBytes, primitives };
 }
 
 /**
@@ -285,7 +319,13 @@ export function applyInPlaceGeometryUpdate(targets: InPlaceGeometryTargets, byte
     return false;
   }
   const { json, bin } = parsed;
-  if (JSON.stringify(json.materials ?? []) !== targets.materialsSignature) {
+  const imageBytes = readImages(parsed);
+  if (
+    materialSignature(json) !== targets.materialsSignature ||
+    !imageBytes ||
+    imageBytes.length !== targets.imageBytes.length ||
+    imageBytes.some((bytes, index) => !sameElements(bytes, targets.imageBytes[index]))
+  ) {
     return false;
   }
 

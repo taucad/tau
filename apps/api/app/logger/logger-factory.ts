@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
-import { loggingRedactPaths, logServiceProvider } from '#constants/app.constant.js';
+import { loggingRedactPaths, loggingRedactQueryPaths, logServiceProvider } from '#constants/app.constant.js';
 import type { LogServiceProvider } from '#constants/app.constant.js';
 import type { Environment } from '#config/environment.config.js';
 
@@ -93,7 +93,32 @@ const formatRequestId = (requestId: string) => {
   return `${colors.cyan}${requestId}${colors.reset}`;
 };
 
-const formatUrl = (url: string, isDevelopmentMode = true) => {
+/**
+ * Drops the query of an OAuth callback URL so its code and state never reach a log line.
+ *
+ * @param url - The request URL as received (path and optional query).
+ * @returns The URL unchanged, or only its path for a callback in `loggingRedactQueryPaths`.
+ */
+export const redactUrlQuery = (url: string): string => {
+  const queryStart = url.search(/[?#]/u);
+  const path = queryStart === -1 ? url : url.slice(0, queryStart);
+  return queryStart !== -1 && loggingRedactQueryPaths.some((pattern) => pattern.test(path)) ? path : url;
+};
+
+/**
+ * The URL a request arrived with. Middleware mounted under a prefix rewrites `url` to the remainder (an OAuth
+ * callback reads as `/?code=…`), which no callback pattern matches, so its code reached the message unredacted.
+ *
+ * @param request - The incoming request.
+ * @returns The original URL when middleware recorded one, else `url`.
+ */
+const loggedUrl = (request: IncomingMessage): string => {
+  const { originalUrl } = request as IncomingMessage & { originalUrl?: unknown };
+  return typeof originalUrl === 'string' ? originalUrl : (request.url ?? '');
+};
+
+const formatUrl = (rawUrl: string, isDevelopmentMode = true) => {
+  const url = redactUrlQuery(rawUrl);
   if (!url) {
     return isDevelopmentMode ? `${colors.white}/${colors.reset}` : '/';
   }
@@ -124,13 +149,13 @@ const customSuccessMessage = (request: IncomingMessage, response: ServerResponse
   const isDevelopmentMode = import.meta.env.DEV;
 
   if (!isDevelopmentMode) {
-    const url = formatUrl(request.url ?? '', false);
+    const url = formatUrl(loggedUrl(request), false);
     return `[RES]:${request.id as string} ${request.method} ${url} ${response.statusCode} ${responseTime}ms`;
   }
 
   const methodColor = getMethodColor(request.method ?? '');
   const statusColor = getStatusColor(response.statusCode);
-  const url = formatUrl(request.url ?? '', true);
+  const url = formatUrl(loggedUrl(request), true);
 
   return [
     `${colors.bright}${colors.white}[RES]:${formatRequestId(request.id as string)}`,
@@ -145,14 +170,12 @@ const customReceivedMessage = (request: IncomingMessage) => {
   const isDevelopmentMode = import.meta.env.DEV;
 
   if (!isDevelopmentMode) {
-    const url = formatUrl(request.url ?? '', false);
+    const url = formatUrl(loggedUrl(request), false);
     return `[REQ]:${request.id as string} ${request.method} ${url}`;
   }
 
   const methodColor = getMethodColor(request.method ?? '');
-  // @ts-expect-error -- TODO: add typings
-  // oxlint-disable-next-line @typescript-eslint/no-unsafe-argument -- TODO: add typings
-  const url = formatUrl(request.originalUrl ?? '', true);
+  const url = formatUrl(loggedUrl(request), true);
 
   return [
     `${colors.bright}${colors.white}[REQ]:${formatRequestId(request.id as string)}`,
@@ -172,7 +195,7 @@ const customErrorMessage = (...args: Parameters<NonNullable<Options['customError
   const isDevelopmentMode = import.meta.env.DEV;
 
   if (!isDevelopmentMode) {
-    const url = formatUrl(request.url ?? '', false);
+    const url = formatUrl(loggedUrl(request), false);
     return [
       `[ERR]:${request.id as string}`,
       `${request.method}`,
@@ -185,7 +208,7 @@ const customErrorMessage = (...args: Parameters<NonNullable<Options['customError
 
   const methodColor = getMethodColor(request.method ?? '');
   const statusColor = getStatusColor(response.statusCode);
-  const url = formatUrl(request.url ?? '', true);
+  const url = formatUrl(loggedUrl(request), true);
 
   return [
     `${colors.bright}${colors.red}[ERR]:${formatRequestId(request.id as string)}`,
@@ -315,6 +338,18 @@ export async function useLoggerFactory(configService: ConfigService<Environment,
       /** Custom error serializer for stack traces */
       err: serializeError,
       error: serializeError,
+      /**
+       * Receives pino's own fresh request projection, so rewriting it leaves the request untouched. The Nest
+       * Fastify middleware copies the parsed query onto the raw request, so a redacted URL also drops `query`.
+       */
+      req(request: { url?: unknown; query?: unknown }) {
+        const url = typeof request.url === 'string' ? redactUrlQuery(request.url) : request.url;
+        if (url !== request.url) {
+          request.url = url;
+          request.query = undefined;
+        }
+        return request;
+      },
     },
     redact: {
       paths: loggingRedactPaths,

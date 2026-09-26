@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import {
@@ -68,7 +68,7 @@ describe('graphicsMachine model interaction', () => {
   it('should forward model interaction events without storing Three objects in graphics context', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
-        probeWebGpu: fromPromise(async () => false),
+        probeWebGpu: createAsyncLogic({ run: async () => false }),
       },
     });
     const actor = createActor(providedMachine, { input: {} });
@@ -123,7 +123,7 @@ describe('graphicsMachine model interaction', () => {
   it('should forward duplicate component ids into separate model units', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
-        probeWebGpu: fromPromise(async () => false),
+        probeWebGpu: createAsyncLogic({ run: async () => false }),
       },
     });
     const actor = createActor(providedMachine, { input: {} });
@@ -158,7 +158,7 @@ describe('graphicsMachine model interaction', () => {
   it('should use an externally owned model interaction actor', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
-        probeWebGpu: fromPromise(async () => false),
+        probeWebGpu: createAsyncLogic({ run: async () => false }),
       },
     });
     const sourceUnitId = deriveModelInteractionUnitId({ sourceFile: 'src/main.ts' });
@@ -188,7 +188,7 @@ describe('graphicsMachine model interaction', () => {
   it('should accept the component manifest from the committed GLTF presentation', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
-        probeWebGpu: fromPromise(async () => false),
+        probeWebGpu: createAsyncLogic({ run: async () => false }),
       },
     });
     const actor = createActor(providedMachine, { input: {} });
@@ -228,7 +228,7 @@ describe('graphicsMachine model interaction', () => {
   it('should preserve hover on camera control start and suppress hover only after camera movement', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
-        probeWebGpu: fromPromise(async () => false),
+        probeWebGpu: createAsyncLogic({ run: async () => false }),
       },
     });
     const actor = createActor(providedMachine, { input: {} });
@@ -272,7 +272,7 @@ describe('graphicsMachine model interaction', () => {
   it('should not guard model clicks when camera controls start and end without movement', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
-        probeWebGpu: fromPromise(async () => false),
+        probeWebGpu: createAsyncLogic({ run: async () => false }),
       },
     });
     const actor = createActor(providedMachine, { input: {} });
@@ -303,7 +303,7 @@ describe('graphicsMachine model interaction', () => {
   it('should forward generic hover suppression and model pointer guard events', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
-        probeWebGpu: fromPromise(async () => false),
+        probeWebGpu: createAsyncLogic({ run: async () => false }),
       },
     });
     const actor = createActor(providedMachine, { input: {} });
@@ -334,7 +334,7 @@ describe('graphicsMachine model interaction', () => {
   it('should suppress viewer hover for the full measure mode lifetime', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
-        probeWebGpu: fromPromise(async () => false),
+        probeWebGpu: createAsyncLogic({ run: async () => false }),
       },
     });
     const actor = createActor(providedMachine, { input: {} });
@@ -354,7 +354,7 @@ describe('graphicsMachine model interaction', () => {
 
   it('should synchronize same-unit appearance across graphics actors while keeping suppression local', () => {
     const providedMachine = graphicsMachine.provide({
-      actors: { probeWebGpu: fromPromise(async () => false) },
+      actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) },
     });
     const modelRef = createActor(modelInteractionMachine, { input: {} }).start();
     const first = createActor(providedMachine, { input: { modelInteractionRef: modelRef } }).start();

@@ -52,6 +52,25 @@ describe('writeArtifactSet helpers', () => {
   });
 
   it.each([
+    { toolCallId: 'call_abc123|fc_def456', directory: 'call_abc123_fc_def456__main.scad-glb' },
+    { toolCallId: 'toolu_01ABCdef', directory: 'toolu_01ABCdef__main.scad-glb' },
+  ])('should name the export directory $directory for tool call id $toolCallId', async ({ toolCallId, directory }) => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.writeBinaryFile.mockResolvedValue(undefined);
+
+    const result = await writeArtifactSet(
+      { toolCallId, targetFile: 'main.scad', format: 'glb', files: [file('model.glb', [1])] },
+      fileSystem,
+    );
+
+    expect(result?.map((written) => written.artifactPath)).toEqual([`.tau/artifacts/${directory}/model.glb`]);
+    expect(fileSystem.writeBinaryFile).toHaveBeenCalledWith(
+      `.tau/artifacts/${directory}/model.glb`,
+      new Uint8Array([1]),
+    );
+  });
+
+  it.each([
     { label: 'empty', files: [] },
     { label: 'unsafe', files: [file('../model.bin', [1])] },
     { label: 'duplicate', files: [file('model.bin', [1]), file('model.bin', [2])] },

@@ -7,6 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Spinner } from '#components/ui/spinner.js';
 import { DiffViewer } from '#components/code/diff-viewer.js';
+import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { FileLink } from '#components/files/file-link.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -143,7 +144,14 @@ function FileComparison({
   if (!isLoaded) {
     return null;
   }
-  return <DiffViewer originalContent={original} modifiedContent={modified} language={path} className='border-t' />;
+  return (
+    <DiffViewer
+      originalContent={original}
+      modifiedContent={modified}
+      language={resolveHighlightLanguageForPath(path).shikiLanguage}
+      className='border-t'
+    />
+  );
 }
 
 /**

@@ -10,6 +10,7 @@ import type { Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
+import { spyOnSend } from '#lib/xstate-test.utils.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted harness — mocks the project-manager surface (chat row persistence),
@@ -1001,7 +1002,7 @@ describe('ActiveChatProvider', () => {
       wrapper: createSessionWrapper('chat_stop'),
     });
 
-    const sendSpy = vi.spyOn(result.current.session.persistenceActorRef, 'send');
+    const sendSpy = spyOnSend(result.current.session.persistenceActorRef);
 
     act(() => {
       result.current.composer.stop();

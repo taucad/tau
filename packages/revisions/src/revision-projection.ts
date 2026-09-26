@@ -10,7 +10,7 @@
  * both come from there.
  */
 import type { ChangeEvent, PathPolicy } from '@taucad/filesystem';
-import type { RevisionStatusProjection } from '#project-revisions.machine.js';
+import type { RevisionStatusProjection } from '#project-revisions.types.js';
 
 /**
  * The versioned paths one content-change event touches inside one project.

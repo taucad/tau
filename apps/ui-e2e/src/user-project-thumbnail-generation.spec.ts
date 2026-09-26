@@ -46,7 +46,7 @@ async function readGeneratedThumbnail(image: Locator): Promise<ThumbnailState | 
   );
 }
 
-async function expectProjectCardParity(name: string, minimumMaskIoU = 0.94): Promise<void> {
+async function expectProjectCardParity(name: string): Promise<void> {
   await expect
     .poll(
       async () => {
@@ -88,9 +88,7 @@ async function expectProjectCardParity(name: string, minimumMaskIoU = 0.94): Pro
   expect(Math.abs(previewForeground!.height - thumbnailForeground!.height)).toBeLessThanOrEqual(
     Math.max(4, thumbnailForeground!.height * 0.015),
   );
-  expect(foregroundMaskIntersectionOverUnion(thumbnailForeground!, previewForeground!)).toBeGreaterThanOrEqual(
-    minimumMaskIoU,
-  );
+  expect(foregroundMaskIntersectionOverUnion(thumbnailForeground!, previewForeground!)).toBeGreaterThanOrEqual(0.94);
 }
 
 test('user project thumbnails follow settled sources, persist, and match the live card preview', async () => {
@@ -185,9 +183,7 @@ test('curved user project thumbnail matches the live AABB-framed card preview', 
   await target.expectGraphicsBackend('webgpu');
   await target.openSecondary('/projects');
   try {
-    // The pale curved surface crosses the two renderers' foreground-color threshold differently,
-    // while center and extent retain the strict framing tolerances above.
-    await expectProjectCardParity(curvedProjectName, 0.85);
+    await expectProjectCardParity(curvedProjectName);
   } finally {
     await target.closeSecondary();
   }

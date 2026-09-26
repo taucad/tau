@@ -138,11 +138,19 @@ export type TauApiCredential = Readonly<{
   authorization: string;
 }>;
 
-/** In-memory credential for one exact non-Tau Git repository. @public */
-export type NativeGitRemoteCredential = Readonly<{
-  repositoryUrl: string;
-  authorization: string;
-}>;
+/**
+ * In-memory credential for one exact non-Tau Git repository.
+ *
+ * Either the header Tau minted for it, or the sentence saying why Tau could not
+ * mint one. Both make the repository Tau-managed (ruling G1): git runs with the
+ * user's credential helpers switched off, and an `unavailable` repository is
+ * refused before git starts rather than reached with somebody's own keychain.
+ *
+ * @public
+ */
+export type NativeGitRemoteCredential =
+  | Readonly<{ repositoryUrl: string; authorization: string }>
+  | Readonly<{ repositoryUrl: string; unavailable: string }>;
 
 /** Native-Git revision port configuration. @public */
 export type NativeGitRevisionPortOptions = Readonly<{
@@ -385,6 +393,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * reach a third-party remote, which is the same rule the browser leg's
    * transport applies to the cookie (W11b review Q2).
    *
+   * A remote Tau credits is Tau's alone (ruling G1): the empty
+   * `credential.helper` resets the helper list, URL-scoped helpers included,
+   * and the empty `GIT_ASKPASS` stops `core.askPass`/`SSH_ASKPASS`, so a
+   * rejected or expired App token fails instead of pushing as the person's own
+   * keychain identity. A remote Tau marked unavailable is refused before git
+   * starts. Every other remote keeps the user's git configuration.
+   *
    * @param remote - The remote a command is about to talk to.
    * @param known - Git's remotes list, when the caller has already read it.
    *   `listRemotes` costs `1 + 3R` processes on this leg and a push asked for it
@@ -410,19 +425,27 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         return undefined;
       }
     };
+    const remoteRecord =
+      remoteHeld !== undefined && url !== undefined && normalized(remoteHeld.repositoryUrl) === normalized(url)
+        ? remoteHeld
+        : undefined;
+    if (remoteRecord !== undefined && 'unavailable' in remoteRecord) {
+      throw new RevisionPortError('REMOTE_REAUTHORIZATION_REQUIRED', remoteRecord.unavailable);
+    }
     const authorization =
       held !== undefined && url !== undefined && isTauApiUrl(held.apiBaseUrl, url)
         ? held.authorization
-        : remoteHeld !== undefined && url !== undefined && normalized(remoteHeld.repositoryUrl) === normalized(url)
-          ? remoteHeld.authorization
-          : undefined;
+        : remoteRecord?.authorization;
     const normalizedUrl = url === undefined ? undefined : normalized(url);
     if (authorization !== undefined && normalizedUrl !== undefined) {
-      env['GIT_CONFIG_COUNT'] = '2';
+      env['GIT_CONFIG_COUNT'] = '3';
       env['GIT_CONFIG_KEY_0'] = `http.${normalizedUrl}.extraHeader`;
       env['GIT_CONFIG_VALUE_0'] = `Authorization: ${authorization}`;
       env['GIT_CONFIG_KEY_1'] = 'lfs.url';
       env['GIT_CONFIG_VALUE_1'] = `${normalizedUrl}/info/lfs`;
+      env['GIT_CONFIG_KEY_2'] = 'credential.helper';
+      env['GIT_CONFIG_VALUE_2'] = '';
+      env['GIT_ASKPASS'] = '';
     }
     return env;
   };

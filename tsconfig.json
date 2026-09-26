@@ -53,7 +53,7 @@
       "path": "./examples/react-router"
     },
     {
-      "path": "./libs/filesystem"
+      "path": "./packages/filesystem"
     },
     {
       "path": "./apps/libs/fs-client"

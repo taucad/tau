@@ -49,7 +49,7 @@
  * | 42 | a queue entry naming another remote is not offered | **C12**: disconnect pauses that destination's queue |
  */
 
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -61,10 +61,9 @@ import type {
   SyncMachineEmitted,
   SyncMergeActorOutput,
   SyncPushActorOutput,
-  SyncQueueRecord,
   SyncReadRemoteActorOutput,
-  SyncRefOutcome,
 } from '#sync.machine.js';
+import type { SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
@@ -227,6 +226,48 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /* D57: a merge the pull composed moved the branch its checkout shows. */
+  it('tells the parent which revision a merged pull landed on', async () => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', { output: { status: 'merged', revisionId: 'merged-head' } });
+
+    await vi.waitFor(() => {
+      expect(harness.parent.events).toContainEqual({
+        type: 'branchMerged',
+        branch: 'tau/main',
+        into: 'main',
+        revisionId: 'merged-head',
+      });
+    });
+    harness.stop();
+  });
+
+  /* D60: another checkout the pull moved is re-headed through the parent. */
+  it('tells the parent about every other checkout the pull advanced', async () => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: {
+        leases: { [mainRef]: 'remote-head' },
+        integration: 'upToDate',
+        advanced: [{ checkoutId: 'linked-1', revisionId: 'feature-head', treeId: 'feature-tree', branch: 'feature' }],
+      } satisfies SyncFetchActorOutput,
+    });
+
+    await vi.waitFor(() => {
+      expect(harness.parent.events).toContainEqual({
+        type: 'checkoutChanged',
+        checkoutId: 'linked-1',
+        revisionId: 'feature-head',
+        treeId: 'feature-tree',
+        branch: 'feature',
+      });
+    });
+    harness.stop();
+  });
+
   it('row 35: reopening a retained root fetches again', async () => {
     const harness = start();
     await openCleanly(harness);
@@ -344,6 +385,25 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /* D59: a new branch mints nothing; *Backed up* must not stand over it. */
+  it('pushes from backed up when the refs change without a mint', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+
+    harness.actor.send({ type: 'recordsChanged' });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('pending')).toBe(true);
+    });
+    harness.clock.advance(2000);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.stop();
+  });
+
   it('pushes a durable record written while the current push is in flight', async () => {
     const harness = start();
     await openCleanly(harness);
@@ -406,6 +466,18 @@ describe('syncMachine', () => {
       into: 'main',
       paths: ['main.scad'],
     });
+
+    /* A re-pull that lands on the same waiting conflict announces nothing new. */
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('merge')).toHaveLength(2);
+      expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
+    });
+    expect(harness.parent.events.filter((event) => event.type === 'mergeConflicted')).toHaveLength(1);
 
     harness.stop();
   });
@@ -534,6 +606,59 @@ describe('syncMachine', () => {
     /* No backoff re-opens the pull: only the person does. */
     harness.clock.advance(600_000);
     expect(harness.effects.inputsFor('fetch')).toHaveLength(1);
+
+    harness.stop();
+  });
+
+  /* D11: a renamed or transferred GitHub repository answers the proxy's typed
+   * 409 until the person confirms the new address, so the old one is never
+   * fetched again on backoff. */
+  it('row 43b (D11): a moved repository fails with its own class instead of retrying on backoff', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    harness.effects.settle('fetch', {
+      error: Object.assign(new Error('This repository moved to a new address.'), { code: 'REMOTE_MOVED' }),
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+
+    expect(selectSyncFacet(harness.actor.getSnapshot()).reason).toBe('moved');
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(1);
+
+    harness.stop();
+  });
+
+  /* D49: large files on a remote without LFS are refused before any network
+   * call, so a retry can never succeed; only a new revision (the file removed)
+   * or the person tries again. */
+  it('row 43c (D49): a large-file refusal fails with its own class instead of retrying on backoff', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      error: Object.assign(new Error('Large files cannot be backed up to a Git remote: part.step.'), {
+        code: 'LFS_REMOTE_UNSUPPORTED',
+      }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+
+    expect(selectSyncFacet(harness.actor.getSnapshot()).reason).toBe('largeFiles');
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r-without-part' });
+    expect(harness.actor.getSnapshot().matches('failed')).toBe(false);
 
     harness.stop();
   });
@@ -1005,18 +1130,24 @@ describe('syncMachine', () => {
      * reads what the first life wrote, and nothing else (D29). */
     const store = { current: emptyQueue };
     const actors = (): SyncActors => ({
-      readPending: fromPromise(async () => {
-        await Promise.resolve();
-        return store.current;
+      readPending: createAsyncLogic({
+        run: async () => {
+          await Promise.resolve();
+          return store.current;
+        },
       }),
-      writePending: fromPromise(async ({ input }) => {
-        await Promise.resolve();
-        store.current = (input as { record: SyncQueueRecord }).record;
-        recorded.push(store.current);
+      writePending: createAsyncLogic({
+        run: async ({ input }) => {
+          await Promise.resolve();
+          store.current = (input as { record: SyncQueueRecord }).record;
+          recorded.push(store.current);
+        },
       }),
-      readRemote: fromPromise<SyncReadRemoteActorOutput, Readonly<{ projectId: string }>>(async () => {
-        await Promise.resolve();
-        return { remote: 'tau' };
+      readRemote: createAsyncLogic<SyncReadRemoteActorOutput, Readonly<{ projectId: string }>>({
+        run: async () => {
+          await Promise.resolve();
+          return { remote: 'tau' };
+        },
       }),
       push: effects.actor('push'),
       fetch: effects.actor('fetch'),
@@ -1144,6 +1275,45 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  it('says a lost lease in words, never as the port code (D39)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'rejected', head: undefined, reason: 'leaseLost' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().context.error).toBe(
+        'This branch changed on the remote; this project will catch up and try again.',
+      );
+    });
+    harness.stop();
+  });
+
+  it('names another checkout’s branch whose lease was lost', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'r1' },
+        { name: 'refs/heads/feature', status: 'rejected', head: 'f1', reason: 'leaseLost' },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().context.error).toBe(
+        'feature changed on the remote; this project will catch up and try again.',
+      );
+    });
+    harness.stop();
+  });
+
   it('row 34 (review 2 R9): a throw during a narrowed retry records only what it offered', async () => {
     const harness = start();
     await openCleanly(harness);
@@ -1164,7 +1334,7 @@ describe('syncMachine', () => {
 
     harness.clock.advance(5000);
     await settleWhenRunning(harness.effects, 'fetch', {
-      output: { leases: {}, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+      output: { leases: { [mainRef]: 'r1' }, integration: 'upToDate' } satisfies SyncFetchActorOutput,
     });
     await vi.waitFor(() => {
       expect(harness.effects.running('push')).toBe(1);
@@ -1180,6 +1350,33 @@ describe('syncMachine', () => {
     });
     expect(harness.actor.getSnapshot().context.pending.map((entry) => entry.ref)).toEqual([chatRef]);
     expect(selectSyncFacet(harness.actor.getSnapshot()).pendingCount).toBe(1);
+
+    harness.stop();
+  });
+
+  it('offers the branch again when a revision is minted while a refused chat ref is retried', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'r1' },
+        { name: chatRef, status: 'rejected', head: undefined, reason: 'does not fast-forward' },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    /* The chat is still refused, but `r2` has never been offered: the push
+     * must carry both sets, not only the chat ref it is retrying. */
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r2' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('push').at(-1)).not.toHaveProperty('refs');
 
     harness.stop();
   });

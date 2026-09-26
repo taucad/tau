@@ -33,12 +33,13 @@ import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
 import { z } from 'zod';
 import { createActor, waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { Actor } from 'xstate';
 import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { isAnyToolPart } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { MachineActors } from '#lib/xstate.lib.js';
 import type { ChatRequest, ChatSessionActorRef, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
@@ -133,8 +134,8 @@ export type ChatSessionDeps = {
 export type ChatSession = {
   readonly chatId: string;
   readonly chat: Chat<MyUIMessage>;
-  readonly persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
-  readonly draftActorRef: ActorRefFrom<typeof draftMachine>;
+  readonly persistenceActorRef: Actor<typeof chatPersistenceMachine>;
+  readonly draftActorRef: Actor<typeof draftMachine>;
   /**
    * This chat's composer record on this device (D2): draft, edits, tool choice
    * and mode. A surface mounts `useComposerRecordToasts` on it.
@@ -1476,6 +1477,9 @@ export class ChatSessionStore {
     // oxlint-disable-next-line eslint/prefer-const -- initialised only after the actor/chat callbacks that close over it are constructed.
     let session: InternalSession;
     let approvalWasPending = false;
+    /* Whether the current request wrote any assistant output. Opening a chat resumes it, and a host
+     * holding no run closes that stream without a chunk; its `onFinish` is not a run finishing. */
+    let requestWroteOutput = false;
 
     // `undefined` is a chat with no project: it has nowhere to keep a composer, so its record I/O fails.
     const composer = Promise.withResolvers<ComposerBinding | undefined>();
@@ -1707,7 +1711,7 @@ export class ChatSessionStore {
           persistActiveKernelActor: fromSafeAsync(async ({ input }) => {
             await depsRef().patchChat(input.chatId, 'activeKernel', input.activeKernel);
           }),
-        },
+        } satisfies Partial<MachineActors<typeof chatPersistenceMachine>>,
       }),
       {
         input: {
@@ -1720,7 +1724,10 @@ export class ChatSessionStore {
 
     const draftActorRef = createActor(
       draftMachine.provide({
-        actors: { ...draftPersistenceFor(composerRecordRef, recordStore), resizeImageActor },
+        actors: {
+          ...draftPersistenceFor(composerRecordRef, recordStore),
+          resizeImageActor,
+        } satisfies Partial<MachineActors<typeof draftMachine>>,
       }),
       { input: {}, inspect },
     );
@@ -1792,7 +1799,7 @@ export class ChatSessionStore {
           this.#reconcileUnsettledRun(session, { runId: durableRunId, isAbort, isError });
         }
         persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
-        if (!isAbort && !isDisconnect) {
+        if (!isAbort && !isDisconnect && (requestWroteOutput || isError)) {
           markUnreadIfUnattended();
         }
         this.#scheduleRunReleaseIfTerminal(session);
@@ -2042,7 +2049,11 @@ export class ChatSessionStore {
       const next = chat.status;
       if (session.status !== next) {
         session.status = next;
+        if (next === 'submitted') {
+          requestWroteOutput = false;
+        }
         if (next === 'streaming') {
+          requestWroteOutput = true;
           persistenceActorRef.send({ type: 'streamResumed' });
         }
         if (session.durableRunId && (next === 'submitted' || next === 'streaming')) {

@@ -16,6 +16,7 @@
  * stream alone would race the first tool write.
  */
 
+import type { SnapshotFrom } from 'xstate';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, watch as watchDirectory, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -55,18 +56,22 @@ import {
   registerProjectOverHttp,
   tauRemoteUrl,
 } from '@taucad/revisions';
+import type { branchMachine } from '@taucad/revisions/branch-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import type {
-  RevisionActor,
   CreateRevisionTagInput,
+  PublishDraft,
+  PublishPublicationActorInput,
+  PublishPublicationActorOutput,
+  RevisionActor,
   RevisionDiffEntry,
   RevisionEngineDescriptor,
   RevisionLogRequest,
   RevisionPlace,
   RevisionPort,
   RevisionRow,
+  RevisionStatusProjection,
   RevisionTag,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
@@ -77,11 +82,6 @@ import type {
   TauApiCredential,
 } from '@taucad/revisions/node';
 import { publishPushMilliseconds } from '@taucad/revisions/publish-machine';
-import type {
-  PublishDraft,
-  PublishPublicationActorInput,
-  PublishPublicationActorOutput,
-} from '@taucad/revisions/publish-machine';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
@@ -1220,6 +1220,29 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     }
     return value;
   };
+  /**
+   * What one `remoteCredential` frame makes this host hold (D4, D16b).
+   *
+   * An `unavailable` frame is held as well: dropping it left native git free
+   * to reach the repository with the person's own credential helper, where
+   * holding it refuses the repository with reconnect-required (ruling G1). A
+   * frame that names no repository clears whatever was held.
+   *
+   * @param request - The parsed frame.
+   * @returns The credential native git reads next, if any.
+   */
+  const channelCredential = (request: Record<string, JsonValue>): NativeGitRemoteCredential | undefined => {
+    const repositoryUrl = optionalText(request, 'repositoryUrl');
+    const authorization = optionalText(request, 'authorization');
+    const unavailable = optionalText(request, 'unavailable');
+    if (repositoryUrl === undefined) {
+      return undefined;
+    }
+    if (unavailable !== undefined) {
+      return { repositoryUrl, unavailable };
+    }
+    return authorization === undefined ? undefined : { repositoryUrl, authorization };
+  };
   // oxlint-disable-next-line complexity -- One validated dispatch table mirrors the established worker wire without another protocol layer.
   const sendRevisionRequest = async (value: JsonValue): Promise<JsonValue> => {
     const request = hostRevisionRequestSchema.parse(value) as {
@@ -1239,10 +1262,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         actor.send({ type: 'sync', event: { type: 'open' } });
         return null;
       case 'remoteCredential': {
-        const repositoryUrl = optionalText(request, 'repositoryUrl');
-        const authorization = optionalText(request, 'authorization');
-        channelRemoteCredential =
-          repositoryUrl === undefined || authorization === undefined ? undefined : { repositoryUrl, authorization };
+        channelRemoteCredential = channelCredential(request);
         return null;
       }
       case 'log': {
@@ -1405,6 +1425,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         break;
       case 'cancelRemote':
         actor.send({ type: 'remote', event: { type: 'cancel' } });
+        break;
+      /* The page re-minted the credential a remote in `reconnectRequired` was
+         refused with, and sent the frame first (D3). */
+      case 'authorizeRemote':
+        actor.send({ type: 'remote', event: { type: 'authorized' } });
         break;
       case 'syncNow':
         actor.send({ type: 'syncNow' });
@@ -1955,7 +1980,7 @@ export const openProjectRevisions = (
         });
         /* The machine parks in `confirming` when its own check says a person is
          * needed; an unconfirmed switch cancels rather than waiting. */
-        const watching = child.subscribe((snapshot) => {
+        const watching = child.subscribe((snapshot: SnapshotFrom<typeof branchMachine>) => {
           if (!snapshot.matches('confirming')) {
             return;
           }

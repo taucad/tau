@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { deviceId, deviceIdStorageKey } from '#lib/device-id.js';
+import { githubNoreplyAuthor } from '#lib/github-project-binding.js';
 import { revisionUserActor } from '#lib/revision-actor.js';
 
 const asDevice = (id: string): void => {
@@ -45,7 +46,7 @@ describe('revisionUserActor', () => {
 
   it('hides a signed-in person behind the same pseudonym on every device', () => {
     asDevice('device-a');
-    const person = { id: 'user-1', name: 'Lane Person', email: 'lane@example.com' };
+    const person = { id: 'user-1', name: 'Lane Person' };
     const first = revisionUserActor({ workspace: 'studio', user: person, anonymous: true });
     asDevice('device-b');
     const second = revisionUserActor({ workspace: 'studio', user: person, anonymous: true });
@@ -56,14 +57,31 @@ describe('revisionUserActor', () => {
     expect(first.id).not.toBe(revisionUserActor({ workspace: 'studio', user: undefined, anonymous: false }).id);
   });
 
-  it('records the signed-in person when anonymity is off', () => {
+  it('records the signed-in person, without an account address, when anonymity is off (D33)', () => {
     const actor = revisionUserActor({
       workspace: 'studio',
-      user: { id: 'user-1', name: 'Lane Person', email: 'lane@example.com' },
+      user: { id: 'user-1', name: 'Lane Person' },
       anonymous: false,
     });
 
-    expect(actor).toStrictEqual({ kind: 'user', id: 'user-1', name: 'Lane Person', email: 'lane@example.com' });
+    /* The git author falls back to `user-1@users.noreply.tau.new`. */
+    expect(actor).toStrictEqual({ kind: 'user', id: 'user-1', name: 'Lane Person' });
+  });
+
+  it('authors a GitHub-linked project with the no-reply identity and keeps the Tau user id (D33)', () => {
+    const person = { id: 'user-1', name: 'Lane Person' };
+    const commitIdentity = githubNoreplyAuthor(42, 'lane');
+
+    expect(revisionUserActor({ workspace: 'studio', user: person, anonymous: false, commitIdentity })).toStrictEqual({
+      kind: 'user',
+      id: 'user-1',
+      name: 'lane',
+      email: '42+lane@users.noreply.github.com',
+    });
+    /* Anonymity still wins: no address of any kind is recorded. */
+    expect(
+      revisionUserActor({ workspace: 'studio', user: person, anonymous: true, commitIdentity }).email,
+    ).toBeUndefined();
   });
 
   it('keeps one device id across reads', () => {

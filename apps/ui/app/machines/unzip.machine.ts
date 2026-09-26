@@ -1,7 +1,7 @@
-import { assign, assertEvent, setup, emit } from 'xstate';
+import { setup, types } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import JSZip from 'jszip';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 
 /**
  * Unzip Machine Context
@@ -96,6 +96,14 @@ const unzipActors = {
   extractZipActor,
 } as const;
 
+const reset = {
+  zipBlob: undefined,
+  files: new Map(),
+  error: undefined,
+  totalBytes: 0,
+  processedBytes: 0,
+} satisfies Partial<UnzipContext>;
+
 /**
  * Unzip Machine
  *
@@ -108,78 +116,13 @@ const unzipActors = {
  * - error: An error occurred during extraction
  */
 export const unzipMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as UnzipContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as UnzipEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as UnzipInput,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    emitted: {} as UnzipEmitted,
+  schemas: {
+    context: types<UnzipContext>(),
+    events: eventSchemas<UnzipEvent>(),
+    input: types<UnzipInput>(),
+    emitted: eventSchemas<UnzipEmitted>(),
   },
   actors: unzipActors,
-  guards: {
-    hasZipBlob({ context }) {
-      return context.zipBlob !== undefined;
-    },
-  },
-  actions: {
-    setError: assign({
-      error({ event }) {
-        if ('error' in event && event.error instanceof Error) {
-          return event.error;
-        }
-
-        return new Error('Unknown error');
-      },
-    }),
-    clearError: assign({
-      error: undefined,
-    }),
-    setZipBlob: assign({
-      zipBlob({ event }) {
-        assertEvent(event, 'extract');
-        return event.zipBlob;
-      },
-    }),
-    setFiles: assign({
-      files({ event }) {
-        assertEvent(event, 'zipExtracted');
-        return event.files;
-      },
-    }),
-    setProgress: assign({
-      processedBytes({ event }) {
-        assertEvent(event, 'updateProgress');
-        return event.processedBytes;
-      },
-      totalBytes({ event }) {
-        assertEvent(event, 'updateProgress');
-        return event.totalBytes;
-      },
-    }),
-    reset: assign({
-      zipBlob: undefined,
-      files: new Map(),
-      error: undefined,
-      totalBytes: 0,
-      processedBytes: 0,
-    }),
-    emitProgress: emit(({ context }) => ({
-      type: 'progress',
-      processedBytes: context.processedBytes,
-      totalBytes: context.totalBytes,
-    })),
-    emitComplete: emit(({ context }) => ({
-      type: 'complete',
-      files: context.files,
-    })),
-    emitError: emit(({ context }) => ({
-      type: 'error',
-      error: context.error ?? new Error('Unknown error'),
-    })),
-  },
 }).createMachine({
   id: 'unzip',
   context: ({ input }) => ({
@@ -196,15 +139,15 @@ export const unzipMachine = setup({
       on: {
         extract: {
           target: 'extracting',
-          actions: 'setZipBlob',
+          context: ({ event }) => ({ zipBlob: event.zipBlob }),
         },
         reset: {
-          actions: 'reset',
+          context: reset,
         },
       },
     },
     extracting: {
-      entry: 'clearError',
+      entry: () => ({ context: { error: undefined } }),
       invoke: {
         src: 'extractZipActor',
         input: ({ context, self }) => ({
@@ -220,17 +163,20 @@ export const unzipMachine = setup({
         onDone: {
           target: 'ready',
         },
-        onError: {
-          target: 'error',
-          actions: ['setError', 'emitError'],
+        onError: ({ event }, enq) => {
+          const error = event.error instanceof Error ? event.error : new Error('Unknown error');
+          enq.emit({ type: 'error', error });
+          return { target: 'error', context: { error } };
         },
       },
       on: {
-        zipExtracted: {
-          actions: ['setFiles', 'emitComplete'],
+        zipExtracted: ({ event }, enq) => {
+          enq.emit({ type: 'complete', files: event.files });
+          return { context: { files: event.files } };
         },
-        updateProgress: {
-          actions: ['setProgress', 'emitProgress'],
+        updateProgress: ({ event }, enq) => {
+          enq.emit({ type: 'progress', processedBytes: event.processedBytes, totalBytes: event.totalBytes });
+          return { context: { processedBytes: event.processedBytes, totalBytes: event.totalBytes } };
         },
       },
     },
@@ -238,11 +184,11 @@ export const unzipMachine = setup({
       on: {
         extract: {
           target: 'extracting',
-          actions: 'setZipBlob',
+          context: ({ event }) => ({ zipBlob: event.zipBlob }),
         },
         reset: {
           target: 'idle',
-          actions: 'reset',
+          context: reset,
         },
       },
     },
@@ -250,11 +196,11 @@ export const unzipMachine = setup({
       on: {
         extract: {
           target: 'extracting',
-          actions: 'setZipBlob',
+          context: ({ event }) => ({ zipBlob: event.zipBlob }),
         },
         reset: {
           target: 'idle',
-          actions: 'reset',
+          context: reset,
         },
       },
     },

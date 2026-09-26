@@ -1,6 +1,6 @@
-import { assign, setup, enqueueActions } from 'xstate';
+import { setup, types } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 /**
@@ -53,34 +53,13 @@ const prepareFilesActor = fromSafeAsync<void, PrepareFilesInput>(async () => {
  * On successful preparation, sends `initializeModel` to the cadRef actor.
  */
 export const cadPreviewMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as CadPreviewContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as CadPreviewInput,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as CadPreviewEvent,
+  schemas: {
+    context: types<CadPreviewContext>(),
+    input: types<CadPreviewInput>(),
+    events: eventSchemas<CadPreviewEvent>(),
   },
   actors: {
     prepareFiles: prepareFilesActor,
-  },
-  actions: {
-    initializeCadModel: enqueueActions(({ enqueue, context }) => {
-      enqueue.sendTo(context.cadRef, {
-        type: 'initializeModel',
-        entryPath: context.mainFile,
-        ...(Object.keys(context.parameters).length === 0 ? {} : { parameters: context.parameters }),
-      });
-    }),
-    /* A preview has no parameter record, so its values go straight to the kernel. This machine is
-     * the only owner of them; the CAD machine keeps no second copy to fall out of step. */
-    forwardSetParameters: enqueueActions(({ enqueue, context, event }) => {
-      if (event.type === 'setParameters') {
-        enqueue.assign({ parameters: event.parameters });
-        const { kernelClient } = context.cadRef.getSnapshot().context;
-        void kernelClient?.updateParameters(event.parameters);
-      }
-    }),
   },
 }).createMachine({
   id: 'cadPreview',
@@ -96,7 +75,7 @@ export const cadPreviewMachine = setup({
   states: {
     idle: {
       on: {
-        start: 'preparingFiles',
+        start: { target: 'preparingFiles' },
       },
     },
     preparingFiles: {
@@ -106,28 +85,38 @@ export const cadPreviewMachine = setup({
           files: context.files,
           projectId: context.projectId,
         }),
-        onDone: {
-          target: 'active',
-          actions: 'initializeCadModel',
+        onDone: ({ context }, enq) => {
+          enq.sendTo(context.cadRef, {
+            type: 'initializeModel',
+            entryPath: context.mainFile,
+            ...(Object.keys(context.parameters).length === 0 ? {} : { parameters: context.parameters }),
+          });
+          return { target: 'active' };
         },
         onError: {
           target: 'error',
-          actions: assign({
-            initError: ({ event }) => (event.error instanceof Error ? event.error : new Error(String(event.error))),
+          context: ({ event }) => ({
+            initError: event.error instanceof Error ? event.error : new Error(String(event.error)),
           }),
         },
       },
     },
     active: {
       on: {
-        setParameters: {
-          actions: 'forwardSetParameters',
+        /* A preview has no parameter record, so its values go straight to the kernel. This machine is
+         * the only owner of them; the CAD machine keeps no second copy to fall out of step. */
+        setParameters: ({ context, event }, enq) => {
+          const { kernelClient } = context.cadRef.getSnapshot().context;
+          enq(() => {
+            void kernelClient?.updateParameters(event.parameters);
+          });
+          return { context: { parameters: event.parameters } };
         },
       },
     },
     error: {
       on: {
-        retry: 'preparingFiles',
+        retry: { target: 'preparingFiles' },
       },
     },
   },

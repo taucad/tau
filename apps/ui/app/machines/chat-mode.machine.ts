@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- XState uses UPPER_CASE event types */
-import { setup, assign } from 'xstate';
+import { setup, types } from 'xstate';
 import type { ChatMode } from '@taucad/chat/constants';
 import { chatMode } from '@taucad/chat/constants';
+import { eventSchemas } from '#lib/xstate.lib.js';
 
 type ChatModeContext = {
   mode: ChatMode;
@@ -15,11 +16,9 @@ type ChatModeEvent =
   | { type: 'BUILD_COMPLETE' };
 
 export const chatModeMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- type assertion required
-    context: {} as ChatModeContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- type assertion required
-    events: {} as ChatModeEvent,
+  schemas: {
+    context: types<ChatModeContext>(),
+    events: eventSchemas<ChatModeEvent>(),
   },
 }).createMachine({
   id: 'chatMode',
@@ -30,9 +29,7 @@ export const chatModeMachine = setup({
   },
   on: {
     SET_MODE: {
-      actions: assign({
-        mode: ({ event }) => event.mode,
-      }),
+      context: ({ event }) => ({ mode: event.mode }),
     },
   },
   states: {
@@ -40,9 +37,7 @@ export const chatModeMachine = setup({
       on: {
         PLAN_FILE_DETECTED: {
           target: 'planCreated',
-          actions: assign({
-            activePlanPath: ({ event }) => event.path,
-          }),
+          context: ({ event }) => ({ activePlanPath: event.path }),
         },
       },
     },
@@ -53,10 +48,7 @@ export const chatModeMachine = setup({
         },
         SET_MODE: {
           target: 'idle',
-          actions: assign({
-            mode: ({ event }) => event.mode,
-            activePlanPath: undefined,
-          }),
+          context: ({ event }) => ({ mode: event.mode, activePlanPath: undefined }),
         },
       },
     },
@@ -64,10 +56,7 @@ export const chatModeMachine = setup({
       on: {
         BUILD_COMPLETE: {
           target: 'idle',
-          actions: assign({
-            activePlanPath: undefined,
-            mode: chatMode.agent,
-          }),
+          context: { activePlanPath: undefined, mode: chatMode.agent },
         },
       },
     },

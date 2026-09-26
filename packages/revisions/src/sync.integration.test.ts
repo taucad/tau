@@ -36,8 +36,9 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
-import type { SyncQueueRecord } from '#sync.machine.js';
+import type { SyncQueueRecord } from '#sync.types.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
+import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import type { RevisionPort } from '#revision-port.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
@@ -370,6 +371,53 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       expect(await two.port.readRef(mainRef)).toBe(head);
 
       scheduler.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
+   * A project opened from Tau Cloud is created with a placeholder `tau.json`
+   * before the open pull. An unborn branch has recorded nothing, so the
+   * manifest is not work to lose: the pull must replace it, not refuse it.
+   */
+  it('materializes a remote project over the placeholder manifest a cloud open writes', async () => {
+    const remoteRoot = await temporaryRoot('cloud-open-manifest');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-cloud-open', remoteUrl: remote.url });
+      const files = { 'tau.json': '{"name":"Bracket","main":"bracket.scad"}\n', 'bracket.scad': 'cube(7);\n' };
+      const head = await record({ device: one, files, summary: 'Device A' });
+      const first = one.scheduler();
+      first.start();
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      first.stop();
+
+      const two = await device({
+        leg,
+        label: 'b-cloud-open',
+        remoteUrl: remote.url,
+        files: { 'tau.json': '{"name":"Bracket","main":"main.scad"}\n' },
+      });
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+
+      expect(await two.port.readRef(mainRef)).toBe(head);
+      expect(await two.filesystem.readFile('tau.json', 'utf8')).toBe(files['tau.json']);
+      expect(await two.filesystem.readFile('bracket.scad', 'utf8')).toBe(files['bracket.scad']);
+      second.stop();
     } finally {
       await remote.close();
     }
@@ -729,6 +777,161 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       reopened.stop();
     } finally {
       await second.close();
+    }
+  }, 180_000);
+
+  it('row 10: a branch the remote has never had is pushed on open, not read as backed up (D38)', async () => {
+    const remoteRoot = await temporaryRoot('remote-new-branch');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      /* An import writes its setup revision straight to the ref: nothing is minted or queued. */
+      const one = await device({ leg, label: 'a-new-branch', remoteUrl: remote.url, files: { 'main.ts': 'setup\n' } });
+      const setup = await record({ device: one, files: { 'main.ts': 'setup\n' }, summary: 'Setup' });
+
+      const opened = one.scheduler();
+      opened.start();
+      await vi.waitFor(
+        async () => {
+          expect(selectSyncFacet(opened.getSnapshot()).state).toBe('backedUp');
+          expect(await remote.git(['rev-parse', mainRef])).toBe(setup);
+        },
+        { timeout: 30_000 },
+      );
+      opened.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
+   * D60: a branch open in another checkout, moved on by someone else, used to
+   * stay behind; every push then offered it under a lease it could not
+   * integrate and the Sync row retried for ever. Observed live 2026-09-25.
+   */
+  /* The native leg here is built without a checkouts directory; the rule is the effects layer's, shared by both. */
+  it.skipIf(leg.name === 'native git')(
+    'row 12: a pull moves another checkout’s clean branch onto its remote head (D60)',
+    async () => {
+      const remoteRoot = await temporaryRoot('remote-linked');
+      const remote = await startGitHttpBackend({ root: remoteRoot });
+      const featureRef = 'refs/heads/feature';
+      try {
+        const one = await device({ leg, label: 'a-linked', remoteUrl: remote.url, files: { 'part.scad': 'a\n' } });
+        /* A checkout is clean only against a tree that carries the store's own
+         * generated files, as every real revision does. */
+        const generated = Object.fromEntries(
+          await Promise.all(
+            [generatedGitattributesPath, generatedIgnorePath].map(
+              async (path) => [path, new TextDecoder().decode(await one.filesystem.readFile(path))] as const,
+            ),
+          ),
+        );
+        const shared = await record({ device: one, files: { ...generated, 'part.scad': 'a\n' }, summary: 'Shared' });
+        await one.port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(shared) });
+        await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }, { name: featureRef }] });
+        await one.port.addCheckout!({ branch: 'feature' });
+        await run(one.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+
+        /* A second device moves `feature` on. */
+        const two = await device({ leg, label: 'b-linked', remoteUrl: remote.url });
+        await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+        const theirs = await two.port.writeRevision({
+          parents: [revisionId(shared)],
+          tree: projectTree({ ...generated, 'part.scad': 'b\n' }),
+          provenance: { source: 'user', actorId: 'actor-w13', createdAt: Date.UTC(2026, 8, 25) },
+          summary: { generated: 'Feature, elsewhere' },
+        });
+        await two.port.updateRef({
+          name: 'feature',
+          expectedHead: revisionId(shared),
+          head: revisionId(theirs.commitId),
+        });
+        await two.port.push({ remote: 'tau', atomic: true, refs: [{ name: featureRef }] });
+
+        /* A pull while the linked files are unsaved leaves the branch, and
+         * moves the tracking ref past it; saving must not strand it there. */
+        /* This fixture serves every checkout from the one root. */
+        const linkedPart = 'part.scad';
+        await one.filesystem.writeFile(linkedPart, 'unsaved\n');
+        const refused = await run<{ advanced?: unknown }>(one.actors.sync.fetch, {
+          remote: 'tau',
+          branch: 'main',
+          deadlineMilliseconds: 25_000,
+        });
+        expect(refused.advanced).toBeUndefined();
+        expect(await one.port.readRef('feature')).toBe(shared);
+        await one.filesystem.writeFile(linkedPart, 'a\n');
+
+        const fetched = await run<{
+          leases: Readonly<Record<string, string>>;
+          advanced?: ReadonlyArray<{ branch: string; revisionId: string }>;
+        }>(one.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+        expect(fetched.advanced).toContainEqual(
+          expect.objectContaining({ branch: 'feature', revisionId: theirs.commitId }),
+        );
+        expect(await one.port.readRef('feature')).toBe(theirs.commitId);
+
+        const pushed = await run<{ refs: ReadonlyArray<{ name: string; status: string }> }>(one.actors.sync.push, {
+          remote: 'tau',
+          branch: 'main',
+          leases: fetched.leases,
+        });
+        expect(pushed.refs.find((entry) => entry.name === featureRef)?.status).not.toBe('rejected');
+        expect(await remote.git(['rev-parse', featureRef])).toBe(theirs.commitId);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /*
+   * D54: a lease is the head this device integrated, not the head it last saw.
+   * A fetch records the remote's head before any merge runs, and a merge that
+   * does not happen (open files mid-save) left that lease in place — so the
+   * next push, forced under a lease that still matched, overwrote the remote's
+   * own commit. Observed live against GitHub on 2026-09-25.
+   */
+  it('row 11: a push never overwrites a remote commit this device fetched but did not merge (D54)', async () => {
+    const remoteRoot = await temporaryRoot('remote-unmerged');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-unmerged', remoteUrl: remote.url, files: { 'part.scad': 'a\n' } });
+      const shared = await record({ device: one, files: { 'part.scad': 'a\n' }, summary: 'Shared' });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
+      /* Someone else's commit on the remote, on top of the shared one. */
+      const theirs = await remote.git([
+        '-c',
+        'user.name=Remote',
+        '-c',
+        'user.email=remote@example.com',
+        'commit-tree',
+        `${shared}^{tree}`,
+        '-p',
+        shared,
+        '-m',
+        'Remote edit',
+      ]);
+      await remote.git(['update-ref', mainRef, theirs, shared]);
+      const mine = await record({ device: one, files: { 'part.scad': 'b\n' }, summary: 'Mine', parent: shared });
+
+      const fetched = await run<{ leases: Readonly<Record<string, string>>; integration: string }>(
+        one.actors.sync.fetch,
+        { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 },
+      );
+      expect(fetched).toMatchObject({ integration: 'diverged', leases: { [mainRef]: theirs } });
+
+      const pushed = await run<{ refs: ReadonlyArray<{ name: string; status: string; reason?: string }> }>(
+        one.actors.sync.push,
+        { remote: 'tau', branch: 'main', leases: fetched.leases },
+      );
+      expect(pushed.refs).toContainEqual(
+        expect.objectContaining({ name: mainRef, status: 'rejected', reason: 'leaseLost' }),
+      );
+      expect(await remote.git(['rev-parse', mainRef])).toBe(theirs);
+      expect(await one.port.readRef(mainRef)).toBe(mine);
+    } finally {
+      await remote.close();
     }
   }, 180_000);
 });

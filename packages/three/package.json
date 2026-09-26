@@ -72,7 +72,7 @@
     "@taucad/camera": "^0.0.1",
     "@taucad/spatial": "^0.0.1",
     "three": "^0.184.0",
-    "xstate": "^5.0.0"
+    "xstate": "^6.0.0-alpha.59"
   },
   "devDependencies": {
     "@gltf-transform/core": "catalog:",

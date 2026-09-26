@@ -194,6 +194,8 @@ describe('a free-tier owner', () => {
     const region = client.page.getByRole('region', { name: 'Sync' }).first();
     await expect.poll(async () => region.getByRole('radio', { name: 'Tau Cloud' }).isDisabled()).toBe(true);
     await expect.poll(async () => region.getByRole('button', { name: /Available on Pro/u }).count()).toBeGreaterThan(0);
+    /* A Git remote, GitHub included, is on every plan. */
+    await expect.poll(async () => region.getByRole('radio', { name: 'Git remote' }).isEnabled()).toBe(true);
     /* The gesture a person would try anyway: a disabled radio must not connect. */
     await region.getByRole('radio', { name: 'Tau Cloud' }).click({ force: true });
     await expect.poll(async () => region.getByRole('button', { name: 'Connect backup' }).isDisabled()).toBe(true);

@@ -1,8 +1,8 @@
 import { contentDigest } from '@taucad/cache-core';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { expect, it } from 'vitest';
-import { createActor, fromPromise, waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
+import type { Actor } from 'xstate';
 import { compileParameterManifest } from '#manifest.js';
 import type { ParameterResolutionOptions } from '#manifest.js';
 import { parameterSetMachine, submitParameterRequest } from '#parameter-set.machine.js';
@@ -90,7 +90,7 @@ const valueRequest = (current: ParameterSnapshot, requestId: string, value: numb
 });
 
 type Fixture = Readonly<{
-  actor: ActorRefFrom<typeof parameterSetMachine>;
+  actor: Actor<typeof parameterSetMachine>;
   current: ParameterSnapshot;
   emitted: ParameterSetEmission[];
   counts(): { loads: number; writes: number };
@@ -109,23 +109,31 @@ const start = async (
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => {
-          loads += 1;
-          return options.load === undefined ? structuredClone(current) : options.load(loads, current);
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => {
+            loads += 1;
+            return options.load === undefined ? structuredClone(current) : options.load(loads, current);
+          },
         }),
-        commitParameterSet: fromPromise(async ({ input }) => {
-          writes += 1;
-          return options.commit === undefined
-            ? {
-                status: 'applied',
-                content:
-                  typeof input.write.data === 'string'
-                    ? new TextEncoder().encode(input.write.data)
-                    : Uint8Array.from(input.write.data),
-              }
-            : options.commit(writes);
+        commitParameterSet: createAsyncLogic<CheckedFileWriteResult, Extract<ParameterChange, { status: 'prepared' }>>({
+          run: async ({ input }) => {
+            writes += 1;
+            return options.commit === undefined
+              ? {
+                  status: 'applied',
+                  content:
+                    typeof input.write.data === 'string'
+                      ? new TextEncoder().encode(input.write.data)
+                      : Uint8Array.from(input.write.data),
+                }
+              : options.commit(writes);
+          },
         }),
-        ...(options.plan === undefined ? {} : { planParameterSet: fromPromise(options.plan) }),
+        /* The machine's own planner unless a row scripts one: v6's `provide` rejects an optional slot. */
+        planParameterSet: createAsyncLogic<
+          ParameterChange,
+          Readonly<{ current: ParameterSnapshot; request: ParameterSetRequest }>
+        >({ run: options.plan ?? (async ({ input }) => planParameterChange(input)) }),
       },
     }),
     { input: { target } },
@@ -354,7 +362,11 @@ it('disconnects when observation fails during the first load', async () => {
   const gate = Promise.withResolvers<ParameterSnapshot>();
   const current = await sourceUnitSnapshot();
   const actor = createActor(
-    parameterSetMachine.provide({ actors: { loadParameterSet: fromPromise(async () => gate.promise) } }),
+    parameterSetMachine.provide({
+      actors: {
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({ run: async () => gate.promise }),
+      },
+    }),
     { input: { target } },
   ).start();
   actor.send({ type: 'watch.error', message: 'Watch reset' });
@@ -370,11 +382,13 @@ it('exposes a typed record failure and refuses submissions until reloaded', asyn
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise<ParameterSnapshot, ParameterSetLoadInput>(async () => {
-          throw Object.assign(new Error('The parameter record is invalid; its bytes are preserved.'), {
-            code: 'INVALID_RECORD',
-            applicationState: 'known-not-applied',
-          });
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => {
+            throw Object.assign(new Error('The parameter record is invalid; its bytes are preserved.'), {
+              code: 'INVALID_RECORD',
+              applicationState: 'known-not-applied',
+            });
+          },
         }),
       },
     }),

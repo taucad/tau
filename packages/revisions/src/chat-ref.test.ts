@@ -255,6 +255,50 @@ describe.each([
     expect(repeated.status).toBe('upToDate');
   });
 
+  it.runIf(enabled)('adopts a fetched head that already holds everything its own orphan chain has', async () => {
+    const adoptedChat = 'chat_adopted';
+    await writeChatFiles(
+      harness.checkout,
+      { 'chat.json': '{"id":"chat_adopted"}', 'events.jsonl': '{"leaderEpoch":"e1","sequence":0}\n' },
+      adoptedChat,
+    );
+    const orphan = await writeChatRef({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      chatId: adoptedChat,
+      syncChats: true,
+      actorId,
+      now,
+    });
+    const tree = await harness.port.readTree(orphan.head!);
+    /* What the remote holds: another orphan commit of the same tree, as a first
+     * push that raced this device's own first write leaves it. */
+    const fetched = await harness.port.writeRevision({
+      parents: [],
+      tree: tree!,
+      largeObjects: false,
+      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      summary: { generated: `Chat ${adoptedChat}` },
+    });
+
+    const replayed = await replayChatSegment({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      chatId: adoptedChat,
+      syncChats: true,
+      actorId,
+      now,
+      onto: revisionId(fetched.commitId),
+    });
+
+    /* Nothing to add, so the local ref becomes the remote's head, and the next
+     * push offers a fast-forward instead of the refused orphan again. */
+    expect(replayed.status).toBe('upToDate');
+    expect(await harness.port.readRef(chatRefName(adoptedChat))).toBe(revisionId(fetched.commitId));
+  });
+
   it.runIf(enabled)("projects a fetched tree into the checkout without touching this device's own log", async () => {
     /* Device B's world: its own log at `events.jsonl`, and device A's ref. */
     const head = await harness.port.readRef(chatRefName(chatId));
@@ -383,6 +427,31 @@ describe.each([
       }),
     ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
     expect(await readChatFile(target, 'chat.json', id)).toBe('{"name":"Local edit"}');
+  });
+
+  it.runIf(enabled)('keeps a local metadata edit when the fetch brings back this device’s own ref (D40)', async () => {
+    const id = `echo_${_engine}`;
+    await writeChatFiles(harness.checkout, { 'chat.json': '{"name":"Pushed"}' }, id);
+    const pushed = await writeChatRef({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      chatId: id,
+      syncChats: true,
+      actorId,
+      now,
+    });
+    /* A first chat ref has no parent, so the incoming commit names no base of its own. */
+    await harness.checkout.writeFile(`${chatRecordsPath(id)}/chat.json`, '{"name":"Renamed here"}');
+
+    await projectChats({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      refs: [{ name: `refs/remotes/tau/tau/chats/${id}`, head: pushed.head! }],
+    });
+
+    expect(await readChatFile(harness.checkout, 'chat.json', id)).toBe('{"name":"Renamed here"}');
   });
 
   it.runIf(enabled)('never projects this device back over its own segment', async () => {
@@ -545,6 +614,9 @@ describe.each([
 
       const projected = await createMemoryProvider();
       await projected.writeFile(`${chatRecordsPath(staleChat)}/chat.json`, '{"name":"pending local edit"}');
+      /* The third device shares this store, so its own chat ref is put back at
+       * what it last recorded; the ref `mine` just wrote is not its own (D40). */
+      await harness.port.updateRef({ name: chatRefName(staleChat), expectedHead: written.head!, head: oldHead });
       await expect(
         projectChats({
           port: harness.port,

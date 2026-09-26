@@ -8,6 +8,7 @@ import { createRevisionHttpClient } from '#http-client.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { bootstrapRemoteRevisionStore } from '#remote-bootstrap.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
+import { generatedGitattributesContent, generatedIgnoreContent } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 const provenance = {
@@ -67,6 +68,11 @@ describe('bootstrapRemoteRevisionStore', () => {
       expect(result.head).not.toBe(sourceHead);
       expect(result.tree.mode('model.scad')).toBe('100755');
       expect(new TextDecoder().decode(result.tree.get('tau.json'))).toContain('Imported');
+      /* The generated config is part of the reviewed setup, not a later unsaved change (D34). */
+      expect(new TextDecoder().decode(result.tree.get('.gitignore'))).toBe(generatedIgnoreContent(undefined));
+      expect(new TextDecoder().decode(result.tree.get('.gitattributes'))).toBe(
+        generatedGitattributesContent(undefined),
+      );
       const importedRevision = await destination.readRevision(result.head);
       expect(importedRevision?.parents).toEqual([sourceHead]);
       expect(await destination.readHead()).toEqual({ branch: 'main', head: result.head });

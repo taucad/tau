@@ -492,13 +492,18 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     }
     const stored: unknown = JSON.parse(await filesystem.readFile(path, 'utf8'));
     const record = stored as Readonly<{ id: string; branch: string; baseRevisionId: string }>;
+    /* D58: the head is the branch's, as a native worktree's HEAD is. The
+     * record's own value is only where the checkout started; reported as the
+     * head it froze every linked checkout here at its first revision, so a
+     * conflict that moved on kept its card bound to one no branch names. */
+    const head = await port.readRef(record.branch);
     return Object.freeze({
       id: record.id,
       projectId: checkouts.projectId,
       root: `/checkouts/${record.id}`,
       kind: 'linked',
       branch: record.branch,
-      baseRevisionId: revisionId(record.baseRevisionId),
+      baseRevisionId: head ?? revisionId(record.baseRevisionId),
     });
   };
 
@@ -553,6 +558,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       : createLfsClient({
           url: remote.url,
           http: options.http,
+          remote: remote.name,
           ...(remote.kind === 'tau' ? { fetch: globalThis.fetch.bind(globalThis) } : {}),
         });
   };
@@ -607,18 +613,25 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   };
 
   /**
-   * Large objects reachable from the refs this push offers, by oid.
+   * One large object's bytes for an upload the remote asked for.
    *
-   * @returns The objects, by oid.
+   * Only an object this device authored is sure to be here: one that arrived
+   * with a fetch stays a pointer until somebody reads it. The remote asks for
+   * one only when it is not where it came from (a changed backup, say).
+   *
+   * @param oid - The pointer's object id.
+   * @param path - Where the object is in the pushed history, for the refusal.
+   * @returns The object's bytes.
    */
-  const localLfsObjects = async (oids: Iterable<string>): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> => {
-    const objects = new Map<string, Uint8Array<ArrayBuffer>>();
-    await Promise.all(
-      [...oids].map(async (oid) => {
-        objects.set(oid, await filesystem.readFile(lfsObjectFile(oid)));
-      }),
-    );
-    return objects;
+  const localLfsObject = async (oid: string, path: string | undefined): Promise<Uint8Array<ArrayBuffer>> => {
+    const file = lfsObjectFile(oid);
+    if (!(await filesystem.exists(file))) {
+      throw new RevisionPortError(
+        'MISSING_LARGE_OBJECT',
+        `${path ?? 'A large file'} is not on this device, and the remote does not have it either.`,
+      );
+    }
+    return filesystem.readFile(file);
   };
 
   /**
@@ -686,8 +699,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     }
   };
 
-  const pointerPaths = async (offered: readonly RevisionPushRef[]): Promise<ReadonlyMap<string, string>> => {
-    const paths = new Map<string, string>();
+  const offeredPointers = async (
+    offered: readonly RevisionPushRef[],
+  ): Promise<ReadonlyMap<string, Readonly<{ path: string; size: number }>>> => {
+    const paths = new Map<string, Readonly<{ path: string; size: number }>>();
     const heads = [] as RevisionId[];
     for (const ref of offered) {
       // eslint-disable-next-line no-await-in-loop -- one ref resolution per offered name.
@@ -711,7 +726,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           const { blob } = await readBlob({ fs, gitdir, oid });
           const pointer = readLfsPointer(new Uint8Array(blob));
           if (pointer !== undefined) {
-            paths.set(pointer.oid, path);
+            paths.set(pointer.oid, { path, size: pointer.size });
           }
         }),
       );
@@ -1266,9 +1281,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       const configuredRemotes = await port.listRemotes();
       const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
       if (!remoteCarriesLargeObjects(configuredRemote ?? input.remote)) {
-        const large = await pointerPaths(input.refs);
+        const large = await offeredPointers(input.refs);
         if (large.size > 0) {
-          throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage([...large.values()]));
+          throw new RevisionPortError(
+            'LFS_REMOTE_UNSUPPORTED',
+            lfsRemoteUnsupportedMessage([...large.values()].map((entry) => entry.path)),
+          );
         }
       }
       const url = await remoteUrl(input.remote);
@@ -1279,17 +1297,23 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       );
       /* Objects before the refs that name them (A39): a pointer whose object
        * never arrived is a file nobody can open. The batch call skips what the
-       * remote already holds, so this is one upload per object (V13). */
+       * remote already holds, so this is one upload per object (V13) — and only
+       * those are read, because an object fetched from this remote is still a
+       * pointer here until somebody opens it. */
       const client = await lfsClient();
       if (client !== undefined) {
-        const pointers = await pointerPaths(ordered);
-        const objects = await localLfsObjects(pointers.keys());
+        const pointers = await offeredPointers(ordered);
         try {
-          await client.upload(objects);
+          await client.upload({
+            pointers: [...pointers].map(([oid, { size }]) => ({ oid, size })),
+            read: async (oid) => localLfsObject(oid, pointers.get(oid)?.path),
+          });
         } catch (error) {
           /* The server counts in object ids; the person reads paths (D16). */
           if (error instanceof LfsQuotaError) {
-            throw new LfsQuotaError(withQuotaPaths(error.refusal, await pointerPaths(ordered)));
+            throw new LfsQuotaError(
+              withQuotaPaths(error.refusal, new Map([...pointers].map(([oid, { path }]) => [oid, path]))),
+            );
           }
           throw error;
         }

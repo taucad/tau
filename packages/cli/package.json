@@ -94,6 +94,7 @@
     "react": "catalog:",
     "semver": "catalog:",
     "ws": "catalog:",
+    "xstate": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

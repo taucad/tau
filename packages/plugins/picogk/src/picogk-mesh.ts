@@ -135,12 +135,14 @@ const componentsToGlb = (
           // The writer copies from this view into the GLB buffer, so no copy is made here.
           indices: sourceIndices,
           material: {
-            name: component.name,
-            baseColorFactor: materialColor,
-            metallicFactor: component.metallic,
-            roughnessFactor: component.roughness,
             doubleSided: false,
-            alphaMode: materialColor[3] < 1 ? 'BLEND' : 'OPAQUE',
+            pbrMetallicRoughness: {
+              baseColorFactor: materialColor,
+              metallicFactor: component.metallic,
+              ...(component.roughness === 1 ? {} : { roughnessFactor: component.roughness }),
+            },
+            ...(materialColor[3] < 1 ? { alphaMode: 'BLEND' } : {}),
+            name: component.name,
           },
         },
       ],

@@ -738,6 +738,19 @@ const conformance = (adapter: Adapter): void => {
       await expect(port.addCheckout!({ branch })).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
     }, 180_000);
 
+    /* D58: native reads the worktree's HEAD, which follows its branch; the
+     * browser leg reported the head the checkout was created at, forever. */
+    it('reports a linked checkout at its branch’s current head after the branch moves', async () => {
+      const branch = 'checkout/moving';
+      await port.updateRef({ name: branch, expectedHead: undefined, head: base });
+      const added = await port.addCheckout!({ branch });
+      await port.updateRef({ name: branch, expectedHead: base, head: child });
+
+      const listed = await port.listCheckouts!();
+      expect(listed.find((checkout) => checkout.id === added.id)).toMatchObject({ branch, baseRevisionId: child });
+      await port.removeCheckout!(added.id);
+    }, 180_000);
+
     it('removes a linked checkout and refuses to remove the live one', async () => {
       const branch = 'checkout/removable';
       await port.updateRef({ name: branch, expectedHead: undefined, head: base });
@@ -1607,6 +1620,47 @@ describe.runIf(gitOnPath)('LFS clients over the batch API', () => {
       } finally {
         await nativeReader.dispose();
       }
+      expect(fixture.uploadCount()).toBe(1);
+    } finally {
+      await fixture.close();
+      await writer.dispose();
+      await reader.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
+
+  /* Live: a linked import of a repository whose history held an LFS file could
+   * never back up — the push read the bytes of every pointer it offered, and a
+   * fetched pointer has none here until somebody opens the file. */
+  it('pushes history whose large objects it only fetched as pointers, without reading them', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-pointer-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    const reader = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      const head = revisionId(receipt.commitId);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+
+      const second = reader.withTransport();
+      await second.init({ author });
+      await second.setRemote({ name: 'tau', url: fixture.url });
+      await second.fetch({ remote: 'tau' });
+      await second.updateRef({ name: 'imported', expectedHead: undefined, head });
+
+      const result = await second.push({ remote: 'tau', refs: [{ name: 'refs/heads/imported' }] });
+
+      expect(result.refs[0]?.status).toBe('updated');
+      expect(await fixture.git(['rev-parse', 'refs/heads/imported'])).toBe(head);
       expect(fixture.uploadCount()).toBe(1);
     } finally {
       await fixture.close();

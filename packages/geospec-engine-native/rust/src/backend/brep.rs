@@ -2,7 +2,7 @@
 
 use super::{BackendError, TriangleMesh};
 use serde::Serialize;
-use std::{collections::BTreeMap, rc::Rc};
+use std::rc::Rc;
 
 /// Complete analytic boundary certificate for the declared continuous wall domain.
 /// Kernel/model tolerance is evidence, not an exact-real certification.
@@ -428,72 +428,11 @@ pub struct ValidityFacts {
     pub reason: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Extrema {
-    pub distance: f64,
-    pub point_a: [f64; 3],
-    pub point_b: [f64; 3],
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PointState {
     In,
     On,
     Out,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CommonVolume {
-    pub volume: f64,
-    pub centroid: [f64; 3],
-}
-
-/// Source wall facet options, with units stated at the connector boundary.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WallOptions {
-    pub work_unit_budget: u64,
-    pub mesh_linear_tolerance_mm: f64,
-    pub mesh_angular_tolerance_degrees: f64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct WallSupport {
-    pub face_index: Option<u32>,
-    pub surface_type: Option<String>,
-    pub support_type: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct WallThickness {
-    /// Actual completed logical requests reported by the kernel.
-    pub consumed: u64,
-    pub value: f64,
-    pub location: Option<[f64; 3]>,
-    pub point_a: Option<[f64; 3]>,
-    pub point_b: Option<[f64; 3]>,
-    pub solid_index: Option<u32>,
-    pub tie_count: Option<u32>,
-    pub algorithm: String,
-    pub tolerance: f64,
-    pub support_a: Option<WallSupport>,
-    pub support_b: Option<WallSupport>,
-    pub rejections: BTreeMap<String, u32>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-// Preserve the inline connector return contract; boxing adds a per-query
-// allocation and changes callers outside the core quality scope.
-#[allow(clippy::large_enum_variant)]
-pub enum WallThicknessOutcome {
-    Measured(WallThickness),
-    Empty {
-        consumed: u64,
-        rejections: BTreeMap<String, u32>,
-    },
-    BudgetExceeded {
-        consumed: u64,
-        limit: u64,
-    },
 }
 
 /// Validated regular-solid difference facts. Zero residual volume alone never
@@ -1160,13 +1099,6 @@ pub trait BrepSubject {
     fn occurrence_faces(&self, occurrence: u32) -> Result<Rc<[LocatedFace]>, BackendError>;
     fn occurrence_edges(&self, occurrence: u32) -> Result<Rc<[EdgeFacts]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
-    fn extrema(&self, a: BrepEntity, b: BrepEntity) -> Result<Extrema, BackendError>;
-    fn classify_points(
-        &self,
-        occurrence: u32,
-        points: &[[f64; 3]],
-    ) -> Result<Vec<PointState>, BackendError>;
-    fn common_volume(&self, a: u32, b: u32) -> Result<CommonVolume, BackendError>;
     /// Classify against the located trimmed face. Off-surface points are Out.
     fn classify_face_points(
         &self,
@@ -1174,10 +1106,6 @@ pub trait BrepSubject {
         points: &[[f64; 3]],
         tolerance_mm: f64,
     ) -> Result<Vec<PointState>, BackendError>;
-    fn minimum_wall_thickness(
-        &self,
-        options: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError>;
     fn tessellate(
         &self,
         entity: BrepEntity,

@@ -2303,8 +2303,8 @@ mod tests {
     use super::*;
     use crate::backend::{
         brep::{
-            CommonVolume, EdgeFacts, Extrema, FaceFacts, PointState, ShapeFacts,
-            TessellationProfile, TopologyCounts, ValidityFacts, WallOptions, WallThicknessOutcome,
+            EdgeFacts, FaceFacts, PointState, ShapeFacts, TessellationProfile, TopologyCounts,
+            ValidityFacts,
         },
         TriangleMesh,
     };
@@ -2617,15 +2617,6 @@ mod tests {
         fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
             Err(unused())
         }
-        fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-            Err(unused())
-        }
-        fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-            Err(unused())
-        }
-        fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-            Err(unused())
-        }
         fn classify_face_points(
             &self,
             face: BrepEntity,
@@ -2653,12 +2644,6 @@ mod tests {
                     _ => PointState::Out,
                 })
                 .collect())
-        }
-        fn minimum_wall_thickness(
-            &self,
-            _: &WallOptions,
-        ) -> Result<WallThicknessOutcome, BackendError> {
-            Err(unused())
         }
         fn tessellate(
             &self,

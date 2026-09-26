@@ -160,6 +160,26 @@ fn interference_bound_independent_fraction_oracle_and_threshold() {
     ));
 }
 #[test]
+fn interference_bound_carried_ladder_sum_keeps_the_exact_upper() {
+    // The from-zero ladder's exact 2048-panel upper for these operands (the m3
+    // catalog allowance), recorded from the R10 product before the ladder
+    // carried its sum across levels. The carried sum must be the same rational.
+    let (h, s) = operands();
+    let json: serde_json::Value = serde_json::from_slice(
+        &crate::codec::encode(
+            &bound(&h, &s, 381., &Budget::new(8_000_000))
+                .ok()
+                .unwrap()
+                .to_json(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(json["upper"]["numerator"], "65698786951283357591360423118573201487829284248299694100465470958638003601714404202519301844425800294951261496855047683553735819714014178678559743827798175562575013243542592175");
+    assert_eq!(json["upper"]["denominator"], "172450118755710639765577280687118720113339137229096806601713962950309335469192289521259698527853648820251363692975621506279026926076085960676449312928633916989697375479005184");
+    assert_eq!(json["panels"], 2048.);
+}
+#[test]
 fn interference_bound_budget_and_domain_are_not_negative_verdicts() {
     let (h, mut s) = operands();
     assert!(matches!(

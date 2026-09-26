@@ -60,26 +60,6 @@ fn source_numerics_and_validity_do_not_depend_on_demand_order() {
 }
 
 #[test]
-fn common_volume_completes_original_source_numerics_before_boolean() {
-    for name in [
-        "two-cube-assembly.step",
-        "component-interference/original.step",
-    ] {
-        let bytes = fixture(name);
-        let eager = Document::from_step(&bytes).unwrap();
-        let expected = source_numerics(&eager);
-        let expected_common = format!("{:?}", eager.common_volume(0, 1).unwrap());
-
-        let boolean_first = Document::from_step(&bytes).unwrap();
-        let common = format!("{:?}", boolean_first.common_volume(0, 1).unwrap());
-        assert_eq!(common, expected_common, "{name}");
-        assert_eq!(source_numerics(&boolean_first), expected, "{name}");
-        // Both documents validate their current shapes after the Boolean.
-        assert_eq!(validity(&boolean_first), validity(&eager), "{name}");
-    }
-}
-
-#[test]
 fn numeric_failure_refuses_at_first_demand_not_admission() {
     // cubeB keeps its product and placement but loses its solid, so XDE
     // admits an occurrence whose optimal bounds are void.

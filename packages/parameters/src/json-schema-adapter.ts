@@ -3,7 +3,7 @@ import { admitParameterDeclaration } from '#manifest.js';
 import type { ParameterDeclaration } from '#manifest.js';
 import type { JSONSchema7 } from '@taucad/json-schema';
 
-/** Input for projecting one admitted Draft-7 schema into a native parameter declaration. @public */
+/** Input for projecting one admitted Draft-07 or 2020-12 schema into a native parameter declaration. @public */
 export type Draft7ParameterDeclarationInput = Readonly<{
   schema: JSONSchema7 | Readonly<Record<string, unknown>>;
   defaults: Readonly<Record<string, unknown>>;
@@ -16,7 +16,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const escapePointer = (value: string): string => value.replaceAll('~', '~0').replaceAll('/', '~1');
 
-const schemaMapKeywords = new Set(['definitions', 'properties']);
+// The carrier keeps one definitions keyword whichever dialect the author wrote.
+const carrierReference = (reference: string): string => reference.replace(/^#\/\$defs\//u, '#/definitions/');
+const schemaMapKeywords = new Set(['$defs', 'definitions', 'properties']);
+// In 2020-12 documents admission guarantees each numeric format sits on its own JSON type, and the carrier spells
+// the width as the type. Draft-07 keeps format an inert annotation.
+const draft202012 = 'https://json-schema.org/draft/2020-12/schema';
+const carrierWidths = new Set(['float', 'double', 'int32', 'uint32']);
 const schemaArrayKeywords = new Set(['allOf', 'anyOf', 'oneOf']);
 const schemaKeywords = new Set([
   'additionalItems',
@@ -38,15 +44,12 @@ const semanticKeywords = new Set([
   'x-tau-unit',
 ]);
 
-const draftTypeToNative = (value: unknown): unknown => {
+const draftTypeToNative = (value: unknown, width: string | undefined): unknown => {
   if (Array.isArray(value)) {
-    return value.map((item) => draftTypeToNative(item));
+    return value.map((item) => draftTypeToNative(item, width));
   }
-  if (value === 'number') {
-    return 'double';
-  }
-  if (value === 'integer') {
-    return 'integer';
+  if (value === 'number' || value === 'integer') {
+    return width ?? (value === 'number' ? 'double' : 'integer');
   }
   return value;
 };
@@ -112,6 +115,7 @@ const createProjection = (
   const semanticDefinitions = new Set<Record<string, unknown>>();
   const referencedDefinitions = new Set<Record<string, unknown>>();
   const traversedReferences = new Set<string>();
+  const formatWidths = root['$schema'] === draft202012;
 
   const resolveReference = (reference: string): unknown => {
     let value: unknown = root;
@@ -131,7 +135,7 @@ const createProjection = (
     const schemaReference = value['$ref'];
     if (typeof schemaReference === 'string') {
       if (Object.keys(value).some((key) => key !== '$ref')) {
-        throw new TypeError('NATIVE_PROJECTION_UNSUPPORTED: Draft-7 reference siblings');
+        throw new TypeError('NATIVE_PROJECTION_UNSUPPORTED: reference siblings');
       }
       if (/%[0-9A-Fa-f]{2}/u.test(schemaReference)) {
         throw new TypeError('NATIVE_PROJECTION_UNSUPPORTED: percent-encoded bundled reference');
@@ -142,7 +146,7 @@ const createProjection = (
         traversedReferences.add(referenceKey);
         visit({ value: target, mode, instancePointer, emit: false });
       }
-      return emit ? { type: { $ref: schemaReference } } : undefined;
+      return emit ? { type: { $ref: carrierReference(schemaReference) } } : undefined;
     }
     const semantic = Object.keys(value).some((key) => semanticKeywords.has(key));
     if (semantic) {
@@ -170,8 +174,10 @@ const createProjection = (
     }
 
     const projected: Record<string, unknown> = {};
+    const { format } = value;
+    const width = formatWidths && typeof format === 'string' && carrierWidths.has(format) ? format : undefined;
     for (const [key, child] of Object.entries(value)) {
-      if (key === 'pattern') {
+      if (key === 'pattern' || (key === 'format' && width !== undefined)) {
         continue;
       }
       if (key === '$schema' || key.startsWith('x-tau-') || key.startsWith('x-ogc-')) {
@@ -185,7 +191,7 @@ const createProjection = (
         continue;
       }
       if (key === 'type') {
-        projected[key] = draftTypeToNative(child);
+        projected[key] = draftTypeToNative(child, width);
         continue;
       }
       if (schemaMapKeywords.has(key) && isRecord(child)) {
@@ -200,7 +206,7 @@ const createProjection = (
           }),
         ]);
         if (entries.length > 0) {
-          projected[key] = Object.fromEntries(entries);
+          projected[key === '$defs' ? 'definitions' : key] = Object.fromEntries(entries);
         }
         continue;
       }
@@ -281,7 +287,8 @@ const createProjection = (
 };
 
 /**
- * Project admitted Draft-7/OGC schema data and native defaults into a pinned parameter declaration.
+ * Project admitted Draft-07 or 2020-12 schema data, as its `$schema` declares, and native defaults into a pinned
+ * parameter declaration.
  * @param input - Schema data, defaults, and caller-owned stable schema identity.
  * @returns An admitted immutable native parameter declaration.
  * @public

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { projectDraft7SchemaToParameterDeclaration } from '#json-schema-adapter.js';
+import { ParameterAdmissionError } from '#manifest.js';
 
 const identity = {
   schemaId: 'urn:test:producer:parameters:v1',
@@ -146,7 +147,7 @@ describe('Draft-7 parameter declaration adapter', () => {
     });
   });
 
-  it('should reject every Draft-7 reference sibling independent of key order or semantics', () => {
+  it('should reject every reference sibling independent of key order or semantics', () => {
     const reference = '#/definitions/value';
     for (const value of [
       { $ref: reference, type: 'number' },
@@ -163,7 +164,7 @@ describe('Draft-7 parameter declaration adapter', () => {
             definitions: { value: { type: 'number', 'x-tau-unit': 'mm' } },
           },
         }),
-      ).toThrow('NATIVE_PROJECTION_UNSUPPORTED: Draft-7 reference siblings');
+      ).toThrow('NATIVE_PROJECTION_UNSUPPORTED: reference siblings');
     }
   });
 
@@ -339,5 +340,196 @@ describe('Draft-7 parameter declaration adapter', () => {
     expect(defaults).toEqual(defaultsBefore);
     expect(declaration.schema).not.toBe(schema);
     expect(declaration.defaults).not.toBe(defaults);
+  });
+});
+
+// Conformance corpus for the OGC profile of JSON Schema 2020-12. The fixtures are Tau's own; each test names the
+// requirement or recommendation of OGC 23-058r2 it exercises.
+const draft07 = 'http://json-schema.org/draft-07/schema#';
+const draft202012 = 'https://json-schema.org/draft/2020-12/schema';
+const lengthKind = 'http://qudt.org/vocab/quantitykind/Length';
+
+// The refusal text: an admission message, followed by carrier diagnostics when the carrier refused.
+const refusal = (schema: Readonly<Record<string, unknown>>, defaults: Readonly<Record<string, unknown>> = {}) => {
+  try {
+    projectDraft7SchemaToParameterDeclaration({ ...identity, defaults, schema });
+  } catch (error) {
+    const details = error instanceof ParameterAdmissionError ? error.diagnostics.map((item) => item.message) : [];
+    return [error instanceof Error ? error.message : String(error), ...details].join('; ');
+  }
+  return 'admitted';
+};
+
+describe('JSON Schema dialects', () => {
+  const bracket = (dialect: string, definitions: 'definitions' | '$defs') => ({
+    $schema: dialect,
+    type: 'object',
+    properties: {
+      width: { $ref: `#/${definitions}/length` },
+      count: { type: 'integer', minimum: 1 },
+    },
+    required: ['width'],
+    [definitions]: {
+      length: {
+        type: 'number',
+        minimum: 0,
+        'x-tau-unit': 'mm',
+        'x-tau-quantity-kind': lengthKind,
+        'x-tau-space': 'linear',
+      },
+    },
+  });
+
+  it('should admit a 2020-12 document into the same declaration as its Draft-07 twin (Requirement 1)', () => {
+    const defaults = { width: 2, count: 1 };
+    const fromDraft07 = projectDraft7SchemaToParameterDeclaration({
+      ...identity,
+      defaults,
+      schema: bracket(draft07, 'definitions'),
+    });
+    // Requirement 1 B: an HTTP $id and an object root; the caller-owned schemaId still names the carrier.
+    const from202012 = projectDraft7SchemaToParameterDeclaration({
+      ...identity,
+      defaults,
+      schema: { ...bracket(draft202012, '$defs'), $id: 'https://parameters.tau.test/bracket' },
+    });
+
+    expect(from202012).toEqual(fromDraft07);
+    expect(from202012.schema).toMatchObject({
+      $id: identity.schemaId,
+      definitions: { length: { type: 'double', ucumUnit: 'mm' } },
+      properties: { width: { type: { $ref: '#/definitions/length' } } },
+    });
+    expect(from202012.bindings).toEqual({ '/width': { quantityKind: lengthKind, space: 'linear' } });
+  });
+
+  it('should keep an unlabelled document on Draft-07 and refuse every other dialect', () => {
+    expect(refusal({ type: 'object', $defs: { length: { type: 'number' } } })).toMatch(
+      /^UNSUPPORTED_KEYWORD at \/\$defs/u,
+    );
+    expect(refusal({ $schema: 'https://json-schema.org/draft/2019-09/schema', type: 'object' })).toMatch(
+      /^UNSUPPORTED_DIALECT at \/\$schema/u,
+    );
+    expect(
+      refusal({ $schema: draft202012, type: 'object', properties: { value: { $schema: draft07, type: 'number' } } }),
+    ).toMatch(/^UNSUPPORTED_DIALECT at \/properties\/value\/\$schema: every \$schema must match the root dialect/u);
+  });
+
+  // Recommendation 1 U discourages $ref; Tau admits only local references into the dialect's own definitions keyword.
+  it('should confine references to the definitions keyword of the declared dialect (Recommendation 1 U)', () => {
+    expect(refusal({ ...bracket(draft202012, 'definitions') })).toMatch(/^UNSUPPORTED_KEYWORD at \/definitions/u);
+    expect(
+      refusal({ $schema: draft202012, type: 'object', properties: { width: { $ref: '#/definitions/length' } } }),
+    ).toMatch(/^UNSUPPORTED_REFERENCE at \/properties\/width\/\$ref: only bundled #\/\$defs\/ references/u);
+    expect(refusal({ type: 'object', properties: { width: { $ref: '#/$defs/length' } } })).toMatch(
+      /^UNSUPPORTED_REFERENCE at \/properties\/width\/\$ref: only bundled #\/definitions\/ references/u,
+    );
+    expect(
+      refusal({
+        $schema: draft202012,
+        type: 'object',
+        properties: { width: { $ref: 'https://parameters.tau.test/length' } },
+      }),
+    ).toMatch(/^UNSUPPORTED_REFERENCE/u);
+  });
+
+  // Recommendation 1 T constrains the keyword set; 2020-12 renames or retires the Draft-07 array and dependency forms.
+  it('should refuse keywords outside the admitted 2020-12 subset (Recommendation 1 T)', () => {
+    for (const [property, code] of [
+      [{ type: 'object', dependencies: { a: ['b'] } }, 'UNSUPPORTED_KEYWORD'],
+      [{ type: 'array', additionalItems: false }, 'UNSUPPORTED_KEYWORD'],
+      [{ type: 'array', prefixItems: [{ type: 'number' }] }, 'UNSUPPORTED_KEYWORD'],
+      [{ type: 'object', unevaluatedProperties: false }, 'UNSUPPORTED_KEYWORD'],
+      [{ type: 'array', items: [{ type: 'number' }, { type: 'number' }] }, 'INVALID_SCHEMA'],
+    ] as const) {
+      expect(refusal({ $schema: draft202012, type: 'object', properties: { value: property } })).toMatch(
+        new RegExp(`^${code} at /properties/value/`, 'u'),
+      );
+    }
+  });
+
+  it('should carry 2020-12 dependentRequired into the carrier', () => {
+    const declaration = projectDraft7SchemaToParameterDeclaration({
+      ...identity,
+      defaults: {},
+      schema: {
+        $schema: draft202012,
+        type: 'object',
+        properties: { depth: { type: 'number' }, width: { type: 'number' } },
+        dependentRequired: { depth: ['width'] },
+      },
+    });
+
+    expect(declaration.schema).toMatchObject({ dependentRequired: { depth: ['width'] } });
+    expect(refusal({ $schema: draft202012, type: 'object', dependentRequired: { depth: 'width' } })).toMatch(
+      /^INVALID_SCHEMA at \/dependentRequired\/depth/u,
+    );
+  });
+});
+
+describe('OGC numeric format widths (Recommendation 1 G–L)', () => {
+  const widths = (dialect: string) =>
+    projectDraft7SchemaToParameterDeclaration({
+      ...identity,
+      defaults: {},
+      schema: {
+        $schema: dialect,
+        type: 'object',
+        properties: {
+          ratio: { type: 'number', format: 'float' },
+          offset: { type: 'number', format: 'double' },
+          count: { type: 'integer', format: 'int32' },
+          teeth: { type: ['integer', 'null'], format: 'uint32' },
+          stamp: { type: 'string', format: 'date-time' },
+        },
+      },
+    }).schema['properties'];
+
+  it('should carry float, double, int32 and uint32 as carrier widths in 2020-12', () => {
+    expect(widths(draft202012)).toEqual({
+      ratio: { type: 'float' },
+      offset: { type: 'double' },
+      count: { type: 'int32' },
+      teeth: { type: ['uint32', 'null'] },
+      stamp: { type: 'string', format: 'date-time' },
+    });
+  });
+
+  it('should keep Draft-07 formats inert annotations', () => {
+    expect(widths(draft07)).toEqual({
+      ratio: { type: 'double', format: 'float' },
+      offset: { type: 'double', format: 'double' },
+      count: { type: 'integer', format: 'int32' },
+      teeth: { type: ['integer', 'null'], format: 'uint32' },
+      stamp: { type: 'string', format: 'date-time' },
+    });
+    expect(refusal({ type: 'object', properties: { value: { type: 'integer', format: 'int64' } } })).toBe('admitted');
+  });
+
+  it('should enforce the declared width on defaults', () => {
+    const schema = {
+      $schema: draft202012,
+      type: 'object',
+      properties: { count: { type: 'integer', format: 'int32' } },
+    };
+
+    expect(refusal(schema, { count: 2 ** 31 })).toContain('int32 value out of range');
+    expect(refusal(schema, { count: 2 ** 31 - 1 })).toBe('admitted');
+  });
+
+  it('should refuse widths the carrier cannot represent and formats on the wrong type', () => {
+    for (const property of [
+      { type: 'integer', format: 'int64' },
+      { type: 'integer', format: 'uint64' },
+      { type: 'integer', format: 'float' },
+      { type: 'number', format: 'int32' },
+      { type: 'integer', format: 'int8' },
+      { type: ['number', 'integer'], format: 'double' },
+      { format: 'uint32' },
+    ]) {
+      expect(refusal({ $schema: draft202012, type: 'object', properties: { value: property } })).toMatch(
+        /^UNSUPPORTED_FORMAT at \/properties\/value\/format/u,
+      );
+    }
   });
 });

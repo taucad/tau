@@ -136,6 +136,7 @@ impl BrepSubject for EdgeTreatmentBrep {
             solid_count: None,
             invalid_solid_count: None,
             open_edge_count: None,
+            nonmanifold_edge_count: None,
             closed_wires: None,
             reason: None,
         }))

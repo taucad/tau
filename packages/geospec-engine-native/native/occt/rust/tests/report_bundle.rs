@@ -133,6 +133,7 @@ fn original_validation_reuse_preserves_complete_facts_across_query_orders() {
         solid_count: Some(2),
         invalid_solid_count: Some(0),
         open_edge_count: Some(0),
+        nonmanifold_edge_count: Some(0),
         closed_wires: Some(true),
         reason: None,
     };

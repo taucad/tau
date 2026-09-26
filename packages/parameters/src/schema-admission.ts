@@ -5,27 +5,42 @@ import { admitUnit } from '@taucad/units/unit';
 import { quantityKinds, quantityReferences } from '@taucad/units/quantity';
 import { assertBoundedJson } from '#bounded-json.js';
 
-/** Draft-7 schema data admitted by the runtime configuration boundary. @public */
+/** JSON Schema data (Draft-07 or 2020-12) admitted by the configuration and parameter boundaries. @public */
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
-const draft7Uri = 'http://json-schema.org/draft-07/schema#';
+/** JSON Schema dialect a document declares with `$schema`; a document without one is Draft-07. @public */
+export type JsonSchemaDialect = 'draft-07' | '2020-12';
+
+const dialectUris: Readonly<Record<JsonSchemaDialect, string>> = {
+  'draft-07': 'http://json-schema.org/draft-07/schema#',
+  '2020-12': 'https://json-schema.org/draft/2020-12/schema',
+};
+const definitionsKeywords: Readonly<Record<JsonSchemaDialect, string>> = {
+  'draft-07': 'definitions',
+  '2020-12': '$defs',
+};
+const validatorDrafts: Readonly<Record<JsonSchemaDialect, '7' | '2020-12'>> = { 'draft-07': '7', '2020-12': '2020-12' };
+// OpenAPI numeric widths the parameter carrier represents; 64-bit integers are string-encoded there.
+const numericFormats = new Map([
+  ['float', 'number'],
+  ['double', 'number'],
+  ['int32', 'integer'],
+  ['uint32', 'integer'],
+]);
 const kinds = new Set<string>(Object.values(quantityKinds));
 const references = new Set<string>(Object.values(quantityReferences));
 const primitives = new Set(['array', 'boolean', 'integer', 'null', 'number', 'object', 'string']);
-const allowedKeywords = new Set([
+const commonKeywords = [
   '$comment',
   '$id',
   '$ref',
   '$schema',
-  'additionalItems',
   'additionalProperties',
   'allOf',
   'anyOf',
   'const',
   'contains',
   'default',
-  'definitions',
-  'dependencies',
   'deprecated',
   'description',
   'else',
@@ -62,8 +77,13 @@ const allowedKeywords = new Set([
   'x-tau-unit',
   'x-ogc-unit',
   'x-ogc-unitLang',
-]);
-const schemaMapKeywords = new Set(['definitions', 'properties']);
+];
+// Each dialect admits its own spelling of the definitions and dependency keywords.
+const allowedKeywords: Readonly<Record<JsonSchemaDialect, ReadonlySet<string>>> = {
+  'draft-07': new Set([...commonKeywords, 'additionalItems', 'definitions', 'dependencies']),
+  '2020-12': new Set([...commonKeywords, '$defs', 'dependentRequired']),
+};
+const schemaMapKeywords = new Set(['$defs', 'definitions', 'properties']);
 const schemaArrayKeywords = new Set(['allOf', 'anyOf', 'oneOf']);
 const schemaKeywords = new Set([
   'additionalItems',
@@ -117,16 +137,45 @@ const assertSchemaShape = (value: unknown, pointer: string): void => {
   }
 };
 
-// oxlint-disable-next-line complexity -- Draft-7 keyword validation is a bounded flat dispatch.
+const declaredTypes = (schema: JsonSchema): readonly unknown[] => {
+  const schemaType = schema['type'];
+  return Array.isArray(schemaType) ? schemaType : [schemaType];
+};
+
+// Requirement 1 of the OGC schema profile pins 2020-12; Draft-07 remains the dialect of an unlabelled document.
+const dialectOf = (schema: JsonSchema): JsonSchemaDialect =>
+  schema['$schema'] === dialectUris['2020-12'] ? '2020-12' : 'draft-07';
+
+// OGC Recommendation 1 G–L in 2020-12 documents: float and double on number, int32 and uint32 on integer.
+const assertNumericFormat = (schema: JsonSchema, format: string, pointer: string): void => {
+  const numericTypes = declaredTypes(schema).filter((type) => type === 'number' || type === 'integer');
+  const width = numericFormats.get(format);
+  if (numericTypes.length === 0 && width === undefined && format !== 'int64' && format !== 'uint64') {
+    return;
+  }
+  if (format === 'int64' || format === 'uint64') {
+    fail('UNSUPPORTED_FORMAT', pointer, `${format} values need string encoding in the parameter carrier`);
+  }
+  if (numericTypes.length !== 1 || numericTypes[0] !== width) {
+    fail(
+      'UNSUPPORTED_FORMAT',
+      pointer,
+      'numeric format must be float or double on number, or int32 or uint32 on integer',
+    );
+  }
+};
+
+// oxlint-disable-next-line complexity -- keyword validation is a bounded flat dispatch.
 const assertKeywordValue = (
   input: Readonly<{
     schema: JsonSchema;
     key: string;
     value: unknown;
     pointer: string;
+    dialect: JsonSchemaDialect;
   }>,
 ): void => {
-  const { schema, key, value, pointer } = input;
+  const { schema, key, value, pointer, dialect } = input;
   if (finiteNumberKeywords.has(key) && (typeof value !== 'number' || !Number.isFinite(value))) {
     fail('INVALID_SCHEMA', pointer, `${key} must be finite`);
   }
@@ -149,8 +198,12 @@ const assertKeywordValue = (
       types.some((type) => typeof type !== 'string' || !primitives.has(type)) ||
       new Set(types).size !== types.length
     ) {
-      fail('INVALID_SCHEMA', pointer, 'type must name unique Draft-7 primitive types');
+      fail('INVALID_SCHEMA', pointer, 'type must name unique JSON Schema primitive types');
     }
+  }
+  // Draft-07 keeps format an inert annotation, as before the 2020-12 profile existed.
+  if (key === 'format' && typeof value === 'string' && dialect === '2020-12') {
+    assertNumericFormat(schema, value, pointer);
   }
   if (key === 'required') {
     assertUniqueStrings(value, pointer, 'required');
@@ -176,6 +229,9 @@ const assertKeywordValue = (
   }
   if (schemaKeywords.has(key)) {
     if (key === 'items' && Array.isArray(value)) {
+      if (dialect === '2020-12') {
+        fail('INVALID_SCHEMA', pointer, 'items must be one schema in 2020-12; tuple prefixItems are not admitted');
+      }
       if (value.length === 0) {
         fail('INVALID_SCHEMA', pointer, 'tuple items must not be empty');
       }
@@ -189,11 +245,26 @@ const assertKeywordValue = (
   if (key === 'dependencies' && !isRecord(value)) {
     fail('INVALID_SCHEMA', pointer, 'dependencies must be an object');
   }
-  if (key === '$schema' && value !== draft7Uri) {
-    fail('UNSUPPORTED_DIALECT', pointer, `expected ${draft7Uri}`);
+  if (key === 'dependentRequired') {
+    if (!isRecord(value)) {
+      fail('INVALID_SCHEMA', pointer, 'dependentRequired must be an object');
+    }
+    for (const [property, required] of Object.entries(value as Record<string, unknown>)) {
+      assertUniqueStrings(required, `${pointer}/${escapePointer(property)}`, 'dependentRequired');
+    }
   }
-  if (key === '$ref' && (typeof value !== 'string' || !value.startsWith('#/definitions/'))) {
-    fail('UNSUPPORTED_REFERENCE', pointer, 'only bundled definitions are supported');
+  if (key === '$schema' && value !== dialectUris[dialect]) {
+    fail(
+      'UNSUPPORTED_DIALECT',
+      pointer,
+      Object.values(dialectUris).includes(value as string)
+        ? `every $schema must match the root dialect ${dialectUris[dialect]}`
+        : `expected ${dialectUris['draft-07']} or ${dialectUris['2020-12']}`,
+    );
+  }
+  const definitions = `#/${definitionsKeywords[dialect]}/`;
+  if (key === '$ref' && (typeof value !== 'string' || !value.startsWith(definitions))) {
+    fail('UNSUPPORTED_REFERENCE', pointer, `only bundled ${definitions} references are supported`);
   }
   if (key === 'x-tau-unit') {
     const schemaType = schema['type'];
@@ -322,15 +393,16 @@ export const resolveLocalSchema = (root: JsonSchema, input: JsonSchema): JsonSch
   return schema;
 };
 
-/** Admit one bounded Draft-7 object schema or throw a pointer-addressed error.
+/** Admit one bounded Draft-07 or 2020-12 object schema, as its `$schema` declares, or throw a pointer-addressed error.
  * @param schema - Untrusted schema data.
  * @public
  */
-// oxlint-disable-next-line eslint/complexity -- One bounded walk enforces the closed Draft-7 subset.
+// oxlint-disable-next-line eslint/complexity -- One bounded walk enforces the closed subset of each dialect.
 export const admitJsonSchema = (schema: JsonSchema): void => {
   if (!isRecord(schema)) {
     fail('INVALID_SCHEMA', '', 'root schema must be an object');
   }
+  const dialect = dialectOf(schema);
   assertBoundedJson(schema, {
     code: 'SCHEMA',
     maximumDepth: 20,
@@ -407,7 +479,7 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
         if (key === 'pattern' || key === 'patternProperties') {
           fail('UNSUPPORTED_KEYWORD', pointer, 'regular expressions are excluded');
         }
-        if (!allowedKeywords.has(key)) {
+        if (!allowedKeywords[dialect].has(key)) {
           fail('UNSUPPORTED_KEYWORD', pointer, key);
         }
         assertKeywordValue({
@@ -415,6 +487,7 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
           key,
           value,
           pointer,
+          dialect,
         });
       }
       stack.push({
@@ -453,14 +526,14 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
   visitReferences(schema);
 
   try {
-    void new Validator(structuredClone(schema), '7', false);
+    void new Validator(structuredClone(schema), validatorDrafts[dialect], false);
   } catch (error) {
     fail('INVALID_SCHEMA', '', error instanceof Error ? error.message : 'validator setup failed');
   }
 };
 
 /**
- * Validate a value against an admitted schema.
+ * Validate a value against an admitted schema in the dialect its `$schema` declares.
  * @param schema - Admitted schema.
  * @param value - Candidate data.
  * @returns Whether the candidate validates.
@@ -468,14 +541,14 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
  */
 export const validateJsonSchemaValue = (schema: JsonSchema, value: unknown): boolean => {
   try {
-    return new Validator(structuredClone(schema), '7', false).validate(value).valid;
+    return new Validator(structuredClone(schema), validatorDrafts[dialectOf(schema)], false).validate(value).valid;
   } catch {
     return false;
   }
 };
 
 /**
- * Return pointer-addressed user issues from an admitted schema.
+ * Return pointer-addressed user issues from an admitted schema, validated in the dialect its `$schema` declares.
  * @param schema - Admitted schema.
  * @param value - Candidate value.
  * @returns Stable pointer-addressed issues.
@@ -485,7 +558,7 @@ export const validateJsonSchemaIssues = (
   schema: JsonSchema,
   value: unknown,
 ): ReadonlyArray<Readonly<{ pointer: string; message: string }>> => {
-  const result = new Validator(structuredClone(schema), '7', false).validate(value);
+  const result = new Validator(structuredClone(schema), validatorDrafts[dialectOf(schema)], false).validate(value);
   return result.errors.map((error) => ({
     pointer: error.instanceLocation.startsWith('#') ? error.instanceLocation.slice(1) : error.instanceLocation,
     message: error.error,

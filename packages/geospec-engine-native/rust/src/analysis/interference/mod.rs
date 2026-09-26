@@ -273,6 +273,10 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
     let components = match components(subject)? {
         Some(value) => value,
         None => {
+            // ponytail: STEP's primitiveCount is the report mesh's (one primitive
+            // when it has triangles), so only this diagnostic still builds it,
+            // uncharged (ruling 11); a structure count replaces it in Wave 2 (C3b).
+            subject.report_mesh()?;
             let primitive_count = subject
                 .mesh_record()
                 .and_then(named_identities)
@@ -658,10 +662,11 @@ fn components(subject: &Subject) -> Result<Option<Vec<Component>>, BackendError>
     if occurrences.len() < 2 {
         return Ok(None);
     }
-    // Each occurrence becomes its own retained tessellation entry, so more
-    // occurrences than entries fail whatever is already retained: refuse with
+    // Each occurrence becomes its own retained tessellation entry and the
+    // partition diagnostic's report mesh one more (R10 built it first), so N
+    // occurrences need N + 1 entries whatever is already retained: refuse with
     // the tessellation refusal before the first BRepMesh pass.
-    if occurrences.len() as u64 > u64::from(subject.retention_limits.max_mesh_entries) {
+    if occurrences.len() as u64 >= u64::from(subject.retention_limits.max_mesh_entries) {
         return Err(BackendError {
             kind: BackendErrorKind::Unsupported,
             message: "Tessellation demands exceed the declared analysis retention entry limit."
@@ -1190,17 +1195,18 @@ mod tests {
     }
 
     #[test]
-    fn more_occurrences_than_retention_entries_refuse_before_tessellating() {
+    fn occurrences_leaving_no_report_mesh_entry_refuse_before_tessellating() {
         let mut subject = Subject::new(
             "entry-limit".into(),
             crate::subject::SubjectFormat::Step,
             "mm".into(),
         );
+        // Two occurrences plus the report mesh need three entries (R10 refused
+        // at the second tessellation because the report mesh held one).
         subject.retention_limits.max_mesh_entries = 2;
         subject.brep = Some(Box::new(Occurrences(Rc::from(vec![
             occurrence("a"),
             occurrence("b"),
-            occurrence("c"),
         ]))));
         let error = components(&subject).unwrap_err();
         assert_eq!(error.kind, BackendErrorKind::Unsupported);

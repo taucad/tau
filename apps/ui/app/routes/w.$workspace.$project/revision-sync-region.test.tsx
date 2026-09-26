@@ -1008,6 +1008,44 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     expect(screen.getByRole('status', { name: 'Backup status' })).toHaveTextContent('340.0 MB of 1 GB');
   });
 
+  /* D18: retained packs are their own figure, never added to what the plan counts. */
+  it('should show retained packs beside the figure on the status line, outside it', () => {
+    renderRegion(
+      facet({
+        kind: 'tau',
+        phase: 'connected',
+        storage: { used: 340 * 1024 ** 2, quota: 1024 ** 3, retained: 12 * 1024 ** 2 },
+      }),
+    );
+
+    const row = screen.getByRole('status', { name: 'Backup status' });
+    expect(row).toHaveTextContent('340.0 MB of 1 GB');
+    expect(row).toHaveTextContent('12.0 MB kept for recovery, not counted');
+  });
+
+  it('should keep retained packs out of the meter and name them in its caption', () => {
+    renderRegion(
+      facet({
+        kind: 'tau',
+        phase: 'connected',
+        storage: { used: 900 * 1024 ** 2, quota: 1024 ** 3, retained: 12 * 1024 ** 2 },
+      }),
+    );
+    expect(screen.getByRole('meter', { name: 'Storage used against your plan' })).toHaveAttribute(
+      'aria-valuenow',
+      String(Math.round((900 / 1024) * 100)),
+    );
+    expect(screen.getByText('12.0 MB kept for recovery, not counted')).toBeInTheDocument();
+  });
+
+  it('should draw no retained figure when nothing is retained', () => {
+    renderRegion(
+      facet({ kind: 'tau', phase: 'connected', storage: { used: 340 * 1024 ** 2, quota: 1024 ** 3, retained: 0 } }),
+    );
+
+    expect(screen.queryByText(/kept for recovery/u)).not.toBeInTheDocument();
+  });
+
   /*
    * D17: the quota refusal's one action follows the viewer's relationship. The
    * owner who can grow the plan is offered Upgrade; an owner with no larger

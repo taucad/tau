@@ -762,6 +762,12 @@ export function RevisionSyncRegion({
     the action is chosen from `sync.reason`, which is a contract.
   */
   const hasFigure = remote.storage !== undefined && !showMeter;
+  /* D18: packs a compaction retired but still keeps, beside the figure and never in it. */
+  const retained = remote.storage?.retained ?? 0;
+  const retainedFigure =
+    retained > 0 ? (
+      <span className='text-muted-foreground'>{formatBytes(retained)} kept for recovery, not counted</span>
+    ) : undefined;
   const showsAccess = readOnly && role !== 'revoked' && remote.kind !== 'none';
   const statusBlock =
     syncState === undefined && !hasFigure && !showsAccess ? undefined : (
@@ -780,6 +786,7 @@ export function RevisionSyncRegion({
               {formatBytes(remote.storage.used)} of {formatStorageLimit(remote.storage.quota)}
             </span>
           )}
+          {hasFigure ? retainedFigure : undefined}
         </span>
         {role === 'revoked' ? (
           <span className='text-muted-foreground'>{accessRemovedSentence}</span>
@@ -1190,8 +1197,11 @@ export function RevisionSyncRegion({
 
       {remote.storage === undefined || !showMeter ? undefined : (
         <div className='flex flex-col gap-1.5'>
-          <p className='text-sm tabular-nums'>
-            {formatBytes(remote.storage.used)} of {formatStorageLimit(remote.storage.quota)}
+          <p className='flex flex-wrap items-baseline gap-x-3 text-sm tabular-nums'>
+            <span>
+              {formatBytes(remote.storage.used)} of {formatStorageLimit(remote.storage.quota)}
+            </span>
+            {retainedFigure === undefined ? undefined : <span className='text-xs'>{retainedFigure}</span>}
           </p>
           <div
             role='meter'

@@ -428,15 +428,23 @@ describe('tau agent (scripted command projections)', () => {
 
     const tailing = tailInBackground(origin, 'chat-1');
 
-    const steered = await tau({ args: ['agent', 'steer', 'chat-1', runId, 'focus on the plate'], origin });
-    expect(steered.code).toBe(0);
-    expect(steered.stdout).toContain('operation\tsteer');
+    /* RA-R10: a steer is answered once its message row is durable, which is the
+     * run's next step boundary. The held gateway means this run never reaches
+     * one, so the steer is still open when the cancel lands and is refused with
+     * no row: STEER_NOT_DELIVERED if it reached the run first, RUN_NOT_LIVE if
+     * the cancel did. Either way it never hangs and never reports applied. */
+    const steering = tau({ args: ['agent', 'steer', 'chat-1', runId, 'focus on the plate'], origin });
 
     const cancelled = await tau({ args: ['agent', 'cancel', 'chat-1', runId, '--json'], origin });
     const [cancelRecord] = jsonRecords(cancelled.stdout);
     /* D12: the answer is the daemon's, never this command's assumption: the terminal row is durable at `cursor`. */
     expect(cancelRecord).toMatchObject({ v: 1, kind: 'agent', operation: 'cancel', run: runId, status: 'applied' });
     expect(cancelled.code).toBe(0);
+
+    const steered = await steering;
+    expect(steered.code).toBe(3);
+    expect(steered.stderr).toMatch(/^(STEER_NOT_DELIVERED|RUN_NOT_LIVE): /mu);
+    expect(steered.stdout).toBe('');
 
     // --- a followed run that is cancelled underneath it exits 4 --------------
     const following = tau({ args: ['agent', 'run', 'chat-cancel', 'hold this one'], origin });

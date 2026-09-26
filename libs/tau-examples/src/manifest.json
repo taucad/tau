@@ -465,6 +465,14 @@
     "files": ["main.ts", "tau.json"]
   },
   {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "v8-engine",
+    "mainFile": "main.ts",
+    "files": ["DESIGN.md", "layout.ts", "main.geospec.ts", "main.ts", "tau.json"]
+  },
+  {
     "kind": "spec-fixture",
     "geometry": "3d",
     "kernel": "replicad",

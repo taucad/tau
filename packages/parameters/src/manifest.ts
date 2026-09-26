@@ -6,6 +6,7 @@ import { admitUnit, unitProfile } from '@taucad/units/unit';
 import { quantityKinds, quantityReferences } from '@taucad/units/quantity';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { admitJsonSchema } from '#schema-admission.js';
+import type { JsonSchema, JsonSchemaDialect } from '#schema-admission.js';
 import { cloneBoundedJson } from '#bounded-json.js';
 
 /** Native JSON Structure Core -04 schema data. @public */
@@ -137,7 +138,7 @@ export type ParameterManifest = Readonly<{
   bindings: Readonly<Record<string, ParameterBinding>>;
   provenance: Readonly<Record<string, ParameterProvenance>>;
   diagnostics: readonly ParameterDiagnostic[];
-  legacyProjection: ParameterLegacyProjection;
+  legacyProjection: ParameterSchemaProjection<'draft-07'>;
   scope: ParameterScope;
   source: ParameterSource;
   identity: Readonly<{
@@ -149,19 +150,29 @@ export type ParameterManifest = Readonly<{
   revision: ContentDigest;
 }>;
 
-/** Explicit status of the temporary Draft-7/OGC parameter view. @public */
-export type ParameterLegacyProjection =
+/**
+ * A JSON Schema view of a native parameter schema: usable with the loss warnings it carries, or unsupported with the
+ * diagnostics that explain why. A Draft-07 view is typed as `JSONSchema7`.
+ * @public
+ */
+export type ParameterSchemaProjection<Dialect extends JsonSchemaDialect = JsonSchemaDialect> =
   | Readonly<{
       status: 'usable';
-      dialect: 'draft-07';
-      schema: JSONSchema7;
+      dialect: Dialect;
+      schema: Dialect extends 'draft-07' ? JSONSchema7 : JsonSchema;
       diagnostics: readonly ParameterDiagnostic[];
     }>
   | Readonly<{
       status: 'unsupported';
-      dialect: 'draft-07';
+      dialect: Dialect;
       diagnostics: readonly ParameterDiagnostic[];
     }>;
+
+/** Options for `projectParameterSchema`. @public */
+export type ParameterSchemaProjectionOptions<Dialect extends JsonSchemaDialect = JsonSchemaDialect> = Readonly<{
+  /** Dialect of the view; `'2020-12'` when omitted. */
+  dialect?: Dialect;
+}>;
 
 /** Trusted execution identity used when admitting middleware or cache output. @public */
 export type ParameterAdmissionExpectation = Readonly<{
@@ -1263,8 +1274,16 @@ const fixedIntegerBounds = new Map<string, readonly [number, number]>([
 ]);
 const wideIntegerTypes = new Set(['int64', 'uint64', 'int128', 'uint128']);
 
-/** Derive the temporary Draft-7/OGC view used by still-migrating runtime consumers. @public */
-export const projectParameterSchemaToDraft7 = (schema: JsonStructureSchema): ParameterLegacyProjection => {
+const schemaUcum = (value: Record<string, unknown>): string | undefined =>
+  typeof value['ucumUnit'] === 'string'
+    ? value['ucumUnit']
+    : typeof value['unit'] === 'string'
+      ? symbolToUcum.get(value['unit'])
+      : undefined;
+
+// The Draft-07 view a manifest embeds as `legacyProjection`. It carries units only and stays byte-identical to the
+// view every issued manifest revision hashed, so persisted manifests keep re-admitting.
+const projectDraft07 = (schema: JsonStructureSchema): ParameterSchemaProjection<'draft-07'> => {
   const diagnostics: ParameterDiagnostic[] = [];
   let usable = true;
   const visit = (value: unknown, pointer: string): unknown => {
@@ -1328,12 +1347,7 @@ export const projectParameterSchemaToDraft7 = (schema: JsonStructureSchema): Par
         severity: 'warning',
       });
     }
-    const declaredUnit =
-      typeof value['ucumUnit'] === 'string'
-        ? value['ucumUnit']
-        : typeof value['unit'] === 'string'
-          ? symbolToUcum.get(value['unit'])
-          : undefined;
+    const declaredUnit = schemaUcum(value);
     if (declaredUnit !== undefined) {
       projected['x-ogc-unit'] = declaredUnit;
       projected['x-ogc-unitLang'] = 'UCUM';
@@ -1412,6 +1426,236 @@ export const projectParameterSchemaToDraft7 = (schema: JsonStructureSchema): Par
       : { status: 'unsupported', dialect: 'draft-07', diagnostics },
   );
 };
+
+const jsonSchema202012 = 'https://json-schema.org/draft/2020-12/schema';
+// Carrier keywords that mean the same in JSON Schema 2020-12. Data keywords are copied; the others are schemas or
+// scalars and are visited.
+const dataKeywords202012 = new Set(['const', 'default', 'dependentRequired', 'enum', 'examples', 'required']);
+const keywords202012 = new Set([
+  '$comment',
+  'additionalProperties',
+  'allOf',
+  'anyOf',
+  'contains',
+  'deprecated',
+  'description',
+  'else',
+  'exclusiveMaximum',
+  'exclusiveMinimum',
+  'format',
+  'if',
+  'items',
+  'maxItems',
+  'maxLength',
+  'maxProperties',
+  'maximum',
+  'minItems',
+  'minLength',
+  'minProperties',
+  'minimum',
+  'multipleOf',
+  'not',
+  'oneOf',
+  'propertyNames',
+  'readOnly',
+  'then',
+  'title',
+  'uniqueItems',
+]);
+// Carrier keywords the view re-spells or drops: identity, units and symbols become OGC and Tau keywords.
+const replacedKeywords202012 = new Set(['$id', '$schema', '$uses', 'name', 'symbol', 'symbols', 'ucumUnit', 'unit']);
+// Carrier widths that OGC Recommendation 1 G–L names as OpenAPI formats; other fixed widths keep their bounds.
+const openApiWidths = new Set(['double', 'float', 'int32', 'uint32']);
+
+type BindingClaims = Readonly<Pick<ParameterBinding, 'unit' | 'quantityKind' | 'space' | 'reference'>>;
+
+const projectionLoss = (message: string, pointer: string): ParameterDiagnostic => ({
+  ...diagnostic('LEGACY_PROJECTION_LOSS', message, rootResource, pointer),
+  severity: 'warning',
+});
+
+const definitionsReference = (reference: unknown): unknown =>
+  typeof reference === 'string' ? reference.replace(/^#\/definitions\//u, '#/$defs/') : reference;
+
+const primitive202012 = (type: unknown): Record<string, unknown> => ({
+  type: projectPrimitiveType(type),
+  ...(typeof type === 'string' && openApiWidths.has(type) ? { format: type } : {}),
+});
+
+const projectType202012 = (type: unknown): Record<string, unknown> => {
+  if (isRecord(type)) {
+    return { $ref: definitionsReference(type['$ref']) };
+  }
+  if (!Array.isArray(type)) {
+    return primitive202012(type);
+  }
+  if (type.some((item) => isRecord(item))) {
+    return { anyOf: type.map((item) => (isRecord(item) ? projectType202012(item) : primitive202012(item))) };
+  }
+  const widths = type.filter((item) => typeof item === 'string' && openApiWidths.has(item));
+  return {
+    type: type.map((item) => projectPrimitiveType(item)),
+    ...(widths.length === 1 ? { format: widths[0] } : {}),
+  };
+};
+
+// Semantics live in instance bindings; the view places them on the root schema node each binding names. Bindings
+// that share a node but disagree leave it without binding claims rather than pick one.
+const claimsBySchemaPointer = (
+  bindings: ParameterManifest['bindings'],
+  diagnostics: ParameterDiagnostic[],
+): ReadonlyMap<string, BindingClaims> => {
+  const claims = new Map<string, BindingClaims>();
+  const conflicts = new Set<string>();
+  for (const { schema, unit, quantityKind, space, reference } of Object.values(bindings)) {
+    if (schema.resource !== rootResource || conflicts.has(schema.pointer)) {
+      continue;
+    }
+    const next: BindingClaims = { unit, quantityKind, space, reference };
+    const existing = claims.get(schema.pointer);
+    if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(next)) {
+      claims.delete(schema.pointer);
+      conflicts.add(schema.pointer);
+      diagnostics.push(
+        projectionLoss('bindings sharing this schema node disagree, so it carries none', schema.pointer),
+      );
+      continue;
+    }
+    claims.set(schema.pointer, next);
+  }
+  return claims;
+};
+
+// The OGC-profile view (ruling P1): `$defs`, OpenAPI widths, OGC unit and definition keywords, Tau keywords only for
+// space, reference and symbols, and no `$id` (Q5).
+const project202012 = (
+  source: Pick<ParameterManifest, 'schema' | 'bindings'>,
+): ParameterSchemaProjection<'2020-12'> => {
+  const diagnostics: ParameterDiagnostic[] = [];
+  let usable = true;
+  const claims = claimsBySchemaPointer(source.bindings, diagnostics);
+  const visit = (value: unknown, pointer: string): unknown => {
+    if (Array.isArray(value)) {
+      return value.map((item, index) => visit(item, `${pointer}/${String(index)}`));
+    }
+    if (!isRecord(value)) {
+      return value;
+    }
+    const types = nodeTypes(value);
+    const numeric = types.some((type) => numericTypes.has(type));
+    const projected: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      const childPointer = `${pointer}/${escapePointer(key)}`;
+      if (replacedKeywords202012.has(key)) {
+        continue;
+      }
+      if (key === 'type') {
+        Object.assign(projected, projectType202012(child));
+      } else if (key === '$ref') {
+        projected['$ref'] = definitionsReference(child);
+      } else if ((key === 'properties' || key === 'definitions') && isRecord(child)) {
+        projected[key === 'definitions' ? '$defs' : key] = Object.fromEntries(
+          Object.entries(child).map(([name, schema]) => [
+            name,
+            visit(schema, `${childPointer}/${escapePointer(name)}`),
+          ]),
+        );
+      } else if (dataKeywords202012.has(key)) {
+        projected[key] = structuredClone(child);
+      } else if (keywords202012.has(key) && !(key === 'format' && numeric)) {
+        projected[key] = visit(child, childPointer);
+      } else {
+        diagnostics.push(projectionLoss(`JSON Structure keyword ${key} has no 2020-12 projection`, childPointer));
+      }
+    }
+    const claim = claims.get(pointer);
+    const unit = schemaUcum(value) ?? claim?.unit;
+    const semantics = Object.entries({
+      'x-ogc-definition': claim?.quantityKind,
+      'x-tau-space': claim?.space,
+      'x-tau-reference': claim?.reference,
+      'x-tau-symbol': value['symbol'],
+      'x-tau-symbols': isRecord(value['symbols']) ? structuredClone(value['symbols']) : undefined,
+    }).filter(([, semantic]) => semantic !== undefined);
+    if (unit !== undefined) {
+      Object.assign(projected, { 'x-ogc-unit': unit, 'x-ogc-unitLang': 'UCUM' }, Object.fromEntries(semantics));
+    } else if (semantics.length > 0) {
+      diagnostics.push(projectionLoss('quantity semantics without a unit have no 2020-12 projection', pointer));
+    }
+    for (const type of types) {
+      const bounds = openApiWidths.has(type) ? undefined : fixedIntegerBounds.get(type);
+      if (bounds !== undefined) {
+        projected['minimum'] = Math.max(
+          bounds[0],
+          typeof projected['minimum'] === 'number' ? projected['minimum'] : bounds[0],
+        );
+        projected['maximum'] = Math.min(
+          bounds[1],
+          typeof projected['maximum'] === 'number' ? projected['maximum'] : bounds[1],
+        );
+      }
+      if (wideIntegerTypes.has(type) || type === 'decimal') {
+        usable = false;
+        diagnostics.push({
+          ...diagnostic(
+            type === 'decimal' ? 'REPRESENTATION_UNSUPPORTED' : 'LEGACY_PROJECTION_LOSS',
+            `${type} values are strings in the carrier, which a JSON Schema number cannot carry`,
+            rootResource,
+            `${pointer}/type`,
+          ),
+          severity: 'warning',
+        });
+      }
+    }
+    return projected;
+  };
+  const schema = { $schema: jsonSchema202012, ...(visit(source.schema, '') as Record<string, unknown>) };
+  try {
+    admitJsonSchema(schema);
+  } catch (error) {
+    usable = false;
+    diagnostics.push(
+      projectionLoss(`2020-12 projection is invalid: ${error instanceof Error ? error.message : String(error)}`, ''),
+    );
+  }
+  return deepFreeze(
+    usable
+      ? { status: 'usable', dialect: '2020-12', schema, diagnostics }
+      : { status: 'unsupported', dialect: '2020-12', diagnostics },
+  );
+};
+
+/**
+ * Project a native parameter schema into JSON Schema for readers outside the carrier.
+ *
+ * The default `'2020-12'` view is the OGC profile of JSON Schema 2020-12: `$defs`, the OpenAPI numeric formats,
+ * `x-ogc-unit` with `x-ogc-unitLang`, `x-ogc-definition` for the quantity kind, and Tau keywords only for space,
+ * reference and symbols. It has no `$id`, because a Tau parameter document is not a dereferenceable resource. The
+ * `'draft-07'` view carries units only; every manifest embeds it as `legacyProjection` for readers that cannot take
+ * 2020-12 yet. Keywords a dialect cannot express become warnings, and a view whose values JSON numbers cannot carry
+ * is `unsupported`.
+ * @param source - The native schema and the effective bindings whose semantics the view carries, usually a manifest.
+ * @param options - The dialect of the view.
+ * @returns The view and its loss warnings, or the diagnostics that make it unsupported.
+ * @public
+ * @example <caption>Publish a manifest's parameters as an OGC-profile document</caption>
+ * ```typescript
+ * import { projectParameterSchema } from '@taucad/parameters';
+ * import type { ParameterManifest } from '@taucad/parameters';
+ *
+ * export const ogcParameterSchema = (manifest: ParameterManifest) => {
+ *   const view = projectParameterSchema(manifest);
+ *   return view.status === 'usable' ? view.schema : undefined;
+ * };
+ * ```
+ */
+export const projectParameterSchema = <Dialect extends JsonSchemaDialect = '2020-12'>(
+  source: Pick<ParameterManifest, 'schema' | 'bindings'>,
+  options: ParameterSchemaProjectionOptions<Dialect> = {},
+): ParameterSchemaProjection<Dialect> =>
+  (options.dialect === 'draft-07'
+    ? projectDraft07(source.schema)
+    : project202012(source)) as ParameterSchemaProjection<Dialect>;
 
 // Keywords whose values are data or names, never schemas, and keywords whose values map names to schemas.
 const carrierDataKeywords = new Set([
@@ -1867,7 +2111,10 @@ export const compileParameterManifest = async (input: CompileParameterManifestIn
   const source = admitSource(cloneBoundedJson(input.source, limits));
   const sourceFiles = admitSourceFiles(cloneBoundedJson(input.sourceFiles ?? {}, limits));
   const tables = deriveManifestTables(declaration, source);
-  const legacyProjection = projectParameterSchemaToDraft7(declaration.schema);
+  const legacyProjection = projectParameterSchema(
+    { schema: declaration.schema, bindings: tables.bindings },
+    { dialect: 'draft-07' },
+  );
   const withoutRevision = {
     version: 1,
     profile,
@@ -1939,7 +2186,11 @@ const inspectParameterManifest = (value: unknown): ParameterManifest => {
   admitSourceFiles(identity['sourceFiles']);
   const source = admitSource(candidate['source']);
   admitScope(candidate['scope']);
-  const expectedProjection = projectParameterSchemaToDraft7(declaration.schema);
+  const expectedTables = deriveManifestTables(declaration, source);
+  const expectedProjection = projectParameterSchema(
+    { schema: declaration.schema, bindings: expectedTables.bindings },
+    { dialect: 'draft-07' },
+  );
   if (
     canonicalizeCacheValue({
       value: asCacheValue(candidate['legacyProjection']),
@@ -1954,7 +2205,6 @@ const inspectParameterManifest = (value: unknown): ParameterManifest => {
       ),
     );
   }
-  const expectedTables = deriveManifestTables(declaration, source);
   const bindings = candidate['bindings'] as Record<string, unknown>;
   for (const pointer of Object.keys(expectedTables.bindings)) {
     if (!Object.hasOwn(bindings, pointer)) {

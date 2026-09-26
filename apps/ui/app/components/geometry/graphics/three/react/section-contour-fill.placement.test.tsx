@@ -36,7 +36,7 @@ import type { CapMultiPolygon } from '#components/geometry/graphics/three/utils/
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const stageSource = readFileSync(join(currentDirectory, '..', 'stage.tsx'), 'utf8');
-const sectionViewControlsSource = readFileSync(join(currentDirectory, 'section-view-controls.tsx'), 'utf8');
+const sectionHandlesSource = readFileSync(join(currentDirectory, 'section-handles.tsx'), 'utf8');
 const sectionContourFillSource = readFileSync(join(currentDirectory, 'section-contour-fill.tsx'), 'utf8');
 const gltfMeshSource = readFileSync(join(currentDirectory, 'gltf-mesh.tsx'), 'utf8');
 
@@ -112,10 +112,10 @@ describe('SectionContourFills placement (Architecture C)', () => {
     expect(stageSource.includes(legacyCapPlane)).toBe(false);
   });
 
-  it('keeps clipped-cap contour extraction out of section-view controls', () => {
-    expect(sectionViewControlsSource.includes('SectionContourFills')).toBe(false);
-    expect(sectionViewControlsSource.includes('extractSectionContours')).toBe(false);
-    expect(sectionViewControlsSource.includes('buildSectionCapBoundaryPositions')).toBe(false);
+  it('keeps clipped-cap contour extraction out of the section handles', () => {
+    expect(sectionHandlesSource.includes('SectionContourFills')).toBe(false);
+    expect(sectionHandlesSource.includes('extractSectionContours')).toBe(false);
+    expect(sectionHandlesSource.includes('buildSectionCapBoundaryPositions')).toBe(false);
   });
 
   it('uses explicit render tiers and contour-specific materials for cap fills and outlines', () => {

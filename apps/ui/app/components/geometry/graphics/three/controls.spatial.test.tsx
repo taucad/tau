@@ -1,49 +1,27 @@
-import { act, render } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RenderFrame } from '@taucad/spatial';
 import { Controls } from '#components/geometry/graphics/three/controls.js';
 import type * as TauCameraControlsModule from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
 
-type MockGraphicsContext = {
-  isSectionViewActive: boolean;
-  selectedSectionViewId: 'xy';
-  sectionViewRotation: [number, number, number];
-  sectionViewPivot: [number, number, number];
-  availableSectionViews: Array<{ id: 'xy'; normal: [number, number, number]; constant: number }>;
-  planeName: 'face';
-  hoveredSectionViewId: undefined;
-  upDirection: 'z';
-};
-
 const mocks = vi.hoisted(() => {
-  const context: MockGraphicsContext = {
-    isSectionViewActive: true,
-    selectedSectionViewId: 'xy',
-    sectionViewRotation: [0, 0, 0],
-    sectionViewPivot: [10.016, 20, 30],
-    availableSectionViews: [{ id: 'xy', normal: [0, 0, 1], constant: 0 }],
-    planeName: 'face',
-    hoveredSectionViewId: undefined,
-    upDirection: 'z',
-  };
   const renderFrame: RenderFrame = {
     anchorFrameId: 'tau:root',
     originMeters: [10, 20, 30],
     metersPerRenderUnit: 0.001,
   };
   return {
-    context,
+    context: { isSectionViewActive: true },
     renderFrame,
-    send: vi.fn(),
-    sectionProperties: undefined as Record<string, unknown> | undefined,
     cameraControlProperties: undefined as Record<string, unknown> | undefined,
+    handlesPicker: undefined as unknown,
+    cubePicker: undefined as unknown,
   };
 });
 
 vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => ({ actorRef: { getSnapshot: () => ({ context: { view: { target: [0, 0, 0] } } }) } }),
-  useCameraSelector: () => ({ kind: 'perspective' }),
-  useGraphics: () => ({ send: mocks.send }),
+  useCameraSelector: () => 'perspective',
   useGraphicsSelector: (selector: (state: { context: typeof mocks.context }) => unknown) =>
     selector({ context: mocks.context }),
   useRenderFrame: () => mocks.renderFrame,
@@ -57,88 +35,67 @@ vi.mock('#components/geometry/graphics/three/controls/tau-camera-controls.js', a
   },
 }));
 
-vi.mock('#components/geometry/graphics/three/controls/viewport-gizmo-cube.js', () => ({
-  ViewportGizmoCube: () => null,
-}));
+vi.mock('#components/geometry/graphics/three/controls/viewport-gizmo-cube.js', async () => {
+  const { useContext } = await import('react');
+  const { SectionPlanePickerContext } =
+    await import('#components/geometry/graphics/three/controls/viewport-gizmo-render-loop.js');
+  return {
+    ViewportGizmoCube: () => {
+      mocks.cubePicker = useContext(SectionPlanePickerContext);
+      return null;
+    },
+  };
+});
 
 vi.mock('#components/geometry/graphics/three/react/measure-tool.js', () => ({
   MeasureTool: () => null,
 }));
 
-vi.mock('#components/geometry/graphics/three/react/section-view-controls.js', () => ({
-  SectionViewControls: (properties: Record<string, unknown>) => {
-    mocks.sectionProperties = properties;
+vi.mock('#components/geometry/graphics/three/react/section-handles.js', () => ({
+  SectionHandles: ({ planePicker }: { readonly planePicker?: unknown }) => {
+    mocks.handlesPicker = planePicker;
     return null;
   },
 }));
 
-const renderControls = (): ReturnType<typeof render> =>
-  render(<Controls enableGizmo={false} enableDamping={false} enableZoom enablePan zoomSpeed={1} />);
+const renderControls = (enableGizmo = false): ReturnType<typeof render> =>
+  render(<Controls enableGizmo={enableGizmo} enableDamping={false} enableZoom enablePan zoomSpeed={1} />);
 
-const getSectionProperty = <T,>(key: string): T => {
-  const value = mocks.sectionProperties?.[key];
-  if (value === undefined) {
-    throw new Error(`SectionViewControls property '${key}' was not captured.`);
-  }
-  return value as T;
-};
-
-describe('Controls spatial section boundary', () => {
+describe('Controls', () => {
   beforeEach(() => {
-    mocks.send.mockReset();
-    mocks.sectionProperties = undefined;
+    mocks.context.isSectionViewActive = true;
     mocks.cameraControlProperties = undefined;
-    mocks.context.sectionViewPivot = [10.016, 20, 30];
-    mocks.renderFrame = {
-      anchorFrameId: 'tau:root',
-      originMeters: [10, 20, 30],
-      metersPerRenderUnit: 0.001,
-    };
+    mocks.handlesPicker = undefined;
+    mocks.cubePicker = undefined;
   });
 
   /* `initialTarget` is a render-unit API that camera-controls writes into the live camera in its own
    * state initializer, two frames before `ActorBridge` exists. Handing it metres pointed the camera
    * at a target 1000x away for those frames, which is what a restored view was caught showing. */
-  it('hands the camera controls their initial target in render units', () => {
+  it('should hand the camera controls their initial target in render units', () => {
     renderControls();
 
     expect(mocks.cameraControlProperties?.['initialTarget']).toEqual([-10_000, -20_000, -30_000]);
   });
 
-  it('maps the physical section pivot into render-local coordinates and inverts drag output', () => {
-    renderControls();
+  it('should hand the section handles the view cube plane picker', () => {
+    renderControls(true);
 
-    const renderPivot = getSectionProperty<[number, number, number]>('renderPivot');
-    expect(renderPivot[0]).toBeCloseTo(16, 12);
-    expect(renderPivot.slice(1)).toEqual([0, 0]);
-
-    act(() => {
-      getSectionProperty<(value: [number, number, number]) => void>('onSetRenderPivot')([17, 0, 0]);
-    });
-
-    const pivotEvent = mocks.send.mock.calls.at(-1)?.[0] as unknown as {
-      readonly type: string;
-      readonly payload: [number, number, number];
-    };
-    expect(pivotEvent.type).toBe('setSectionViewPivot');
-    expect(pivotEvent.payload[0]).toBeCloseTo(10.017, 12);
-    expect(pivotEvent.payload.slice(1)).toEqual([20, 30]);
+    expect(mocks.handlesPicker).toBeDefined();
+    expect(mocks.cubePicker).toBe(mocks.handlesPicker);
   });
 
-  it('retargets native placement when the RenderFrame changes without changing physical state', () => {
-    const view = renderControls();
-    expect(getSectionProperty<[number, number, number]>('renderPivot')[0]).toBeCloseTo(16, 12);
+  it('should draw the plane picker beside the view cube only while Section is on', () => {
+    mocks.context.isSectionViewActive = false;
+    renderControls(true);
 
-    mocks.renderFrame = {
-      anchorFrameId: 'tau:root',
-      originMeters: [10.01, 20, 30],
-      metersPerRenderUnit: 0.000001,
-    };
-    view.rerender(<Controls enableGizmo={false} enableDamping={false} enableZoom enablePan zoomSpeed={2} />);
+    expect(mocks.handlesPicker).toBeDefined();
+    expect(mocks.cubePicker).toBeUndefined();
+  });
 
-    expect(mocks.context.sectionViewPivot).toEqual([10.016, 20, 30]);
-    const retargetedPivot = getSectionProperty<[number, number, number]>('renderPivot');
-    expect(retargetedPivot[0]).toBeCloseTo(6000, 8);
-    expect(retargetedPivot.slice(1)).toEqual([0, 0]);
+  it('should give the section handles no plane picker without a view cube', () => {
+    renderControls(false);
+
+    expect(mocks.handlesPicker).toBeUndefined();
   });
 });

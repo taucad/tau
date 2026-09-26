@@ -329,6 +329,14 @@ export const resolveSectionFootprint = ({
 // Defaults, edits and labels
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether a cut newly on `plane` is flipped, so that it removes the side facing the camera: an unflipped plane
+ * removes its +axis side. `viewDirection` points from the view's target toward the camera; a camera level with the
+ * plane, or no view, leaves it unflipped. Every new plane takes it: an added cut and a cut moved to another plane.
+ */
+export const resolveSectionPlaneFlip = (plane: SectionPlane, viewDirection: SectionVector | undefined): boolean =>
+  (viewDirection?.[sectionAxisIndices[sectionPlaneAxes[plane]]] ?? 0) < 0;
+
 type CreateDefaultPlaneCutOptions = Readonly<{
   id: string;
   /** The plane to add; defaults to the first of XZ, YZ and XY the list does not have. */
@@ -340,7 +348,7 @@ type CreateDefaultPlaneCutOptions = Readonly<{
   viewDirection?: SectionVector;
 }>;
 
-/** A new plane cut through the bounds centre, flipped when needed so it removes the side facing the camera. */
+/** A new plane cut through the bounds centre, flipped by {@link resolveSectionPlaneFlip}. */
 export const createDefaultPlaneCut = ({
   id,
   plane,
@@ -350,13 +358,12 @@ export const createDefaultPlaneCut = ({
 }: CreateDefaultPlaneCutOptions): Extract<SectionCut, { kind: 'plane' }> => {
   const used = new Set(existing.flatMap((cut) => (cut.kind === 'plane' ? [cut.plane] : [])));
   const chosen = plane ?? defaultPlaneOrder.find((candidate) => !used.has(candidate)) ?? 'xz';
-  const axisIndex = sectionAxisIndices[sectionPlaneAxes[chosen]];
   return {
     id,
     kind: 'plane',
     plane: chosen,
-    offset: center[axisIndex],
-    isFlipped: (viewDirection?.[axisIndex] ?? 0) < 0,
+    offset: center[sectionAxisIndices[sectionPlaneAxes[chosen]]],
+    isFlipped: resolveSectionPlaneFlip(chosen, viewDirection),
   };
 };
 

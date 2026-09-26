@@ -434,7 +434,7 @@ impl BrepSubject for Control {
         self.answer.clone()
     }
 
-    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
+    fn reported_faces(&self, _: bool) -> Result<ReportedFaces, BackendError> {
         let mut occurrence_faces: Vec<Rc<[LocatedFace]>> =
             vec![Rc::from([]); self.reported.occurrence as usize + 1];
         for band in std::iter::once(&self.reported).chain(&self.additional) {
@@ -470,54 +470,60 @@ impl BrepSubject for Control {
             }
             occurrence_faces[band.occurrence as usize] = Rc::from(faces);
         }
-        Ok(ReportedBrepBundle {
-            facts: Rc::new(DocumentFacts {
-                source_length_unit: "millimetre".into(),
-                source_unit_to_millimeters: 1.0,
-                occurrences: (0..=self.reported.occurrence)
-                    .map(|index| OccurrenceFacts {
-                        name: if index == 1 { "shaft" } else { "housing" }.into(),
-                        placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                        bounds: Bounds {
-                            min: [-40.0; 3],
-                            max: [40.0; 3],
-                        },
-                        path: if index == 1 { "shaft" } else { "housing" }.into(),
-                        parent: None,
-                        product: 0,
-                        product_name: "core-product".into(),
-                        instance_name: None,
-                        ordinal_path: vec![index + 1],
-                    })
-                    .collect(),
-                subshapes: vec![],
-                datum_placements: vec![],
-                semantic_datums: vec![],
-                shape: ShapeFacts {
-                    bounds: Bounds {
-                        min: [-40.0; 3],
-                        max: [40.0; 3],
-                    },
-                    volume: 1.0,
-                    surface_area: 1.0,
-                    center_of_mass: [0.0; 3],
-                    topology: TopologyCounts {
-                        compounds: 0,
-                        solids: 1,
-                        shells: 1,
-                        faces: 3,
-                        wires: 3,
-                        edges: 3,
-                        vertices: 2,
-                    },
-                },
-            }),
+        Ok(ReportedFaces {
             whole_faces: Rc::from([]),
             occurrence_faces,
-            mesh: Rc::new(TriangleMesh {
-                positions: vec![],
-                triangles: vec![],
-            }),
+        })
+    }
+
+    fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        Ok((0..=self.reported.occurrence)
+            .map(|index| OccurrenceFacts {
+                name: if index == 1 { "shaft" } else { "housing" }.into(),
+                placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                bounds: Bounds {
+                    min: [-40.0; 3],
+                    max: [40.0; 3],
+                },
+                path: if index == 1 { "shaft" } else { "housing" }.into(),
+                parent: None,
+                product: 0,
+                product_name: "core-product".into(),
+                instance_name: None,
+                ordinal_path: vec![index + 1],
+            })
+            .collect())
+    }
+
+    fn document_rows(&self) -> Result<DocumentRows, BackendError> {
+        Ok(DocumentRows::default())
+    }
+
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        Ok(ShapeFacts {
+            bounds: Bounds {
+                min: [-40.0; 3],
+                max: [40.0; 3],
+            },
+            volume: 1.0,
+            surface_area: 1.0,
+            center_of_mass: [0.0; 3],
+            topology: TopologyCounts {
+                compounds: 0,
+                solids: 1,
+                shells: 1,
+                faces: 3,
+                wires: 3,
+                edges: 3,
+                vertices: 2,
+            },
+        })
+    }
+
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
+        Ok(TriangleMesh {
+            positions: vec![],
+            triangles: vec![],
         })
     }
 

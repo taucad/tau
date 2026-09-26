@@ -757,12 +757,14 @@ pub(crate) struct SelectorIndex {
 
 #[cfg(test)]
 pub(crate) fn build_index(
-    facts: &crate::backend::brep::DocumentFacts,
+    source_occurrences: &[OccurrenceFacts],
+    whole_bounds: Bounds,
+    rows: &DocumentRows,
     brep: &dyn BrepSubject,
 ) -> Result<SelectorIndex, BackendError> {
     let whole = brep.faces()?;
     // Each occurrence re-addresses the probe's whole faces.
-    let occurrences = (0..facts.occurrences.len() as u32)
+    let occurrences = (0..source_occurrences.len() as u32)
         .map(|occurrence| {
             whole
                 .iter()
@@ -778,15 +780,10 @@ pub(crate) fn build_index(
                 .into()
         })
         .collect::<Vec<_>>();
-    let rows = DocumentRows {
-        subshapes: facts.subshapes.clone(),
-        datum_placements: facts.datum_placements.clone(),
-        semantic_datums: facts.semantic_datums.clone(),
-    };
     build_report_index(
-        &facts.occurrences,
-        Some(facts.shape.bounds),
-        &rows,
+        source_occurrences,
+        Some(whole_bounds),
+        rows,
         &whole,
         &occurrences,
     )
@@ -2345,10 +2342,7 @@ mod tests {
 
     use super::*;
     use crate::backend::{
-        brep::{
-            DocumentFacts, FaceFacts, PointState, ShapeFacts, TessellationProfile, TopologyCounts,
-            ValidityFacts,
-        },
+        brep::{FaceFacts, PointState, TessellationProfile, ValidityFacts},
         TriangleMesh,
     };
 
@@ -2706,32 +2700,21 @@ mod tests {
         }
     }
 
-    fn flat_facts() -> DocumentFacts {
-        DocumentFacts {
-            source_length_unit: "millimetre".into(),
-            source_unit_to_millimeters: 1.0,
+    /// A flat (occurrence-free) STEP document's selector-index inputs.
+    struct FlatFacts {
+        occurrences: Vec<OccurrenceFacts>,
+        bounds: Bounds,
+        rows: DocumentRows,
+    }
+
+    fn flat_facts() -> FlatFacts {
+        FlatFacts {
             occurrences: Vec::new(),
-            shape: ShapeFacts {
-                bounds: Bounds {
-                    min: [-1.0, -1.0, 0.0],
-                    max: [1.0, 1.0, 0.0],
-                },
-                volume: 0.0,
-                surface_area: 4.0,
-                center_of_mass: [0.0, 0.0, 0.0],
-                topology: TopologyCounts {
-                    compounds: 0,
-                    solids: 0,
-                    shells: 0,
-                    faces: 1,
-                    wires: 1,
-                    edges: 4,
-                    vertices: 4,
-                },
+            bounds: Bounds {
+                min: [-1.0, -1.0, 0.0],
+                max: [1.0, 1.0, 0.0],
             },
-            subshapes: Vec::new(),
-            datum_placements: Vec::new(),
-            semantic_datums: Vec::new(),
+            rows: DocumentRows::default(),
         }
     }
     #[test]
@@ -3012,28 +2995,29 @@ mod tests {
     fn authored_interface_keeps_its_name_and_original_face_query_address() {
         let mut facts = flat_facts();
         // This ordinary occurrence uses ProbeBrep's located face fixture.
-        facts
-            .occurrences
-            .push(crate::backend::brep::OccurrenceFacts {
-                name: "part".into(),
-                placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                bounds: facts.shape.bounds,
-                path: "part".into(),
-                parent: None,
-                product: 0,
-                product_name: "part".into(),
-                instance_name: None,
-                ordinal_path: vec![0],
-            });
-        facts.subshapes.push(crate::backend::brep::SubshapeFacts {
-            occurrence: Some(0),
-            occurrence_path: "part".into(),
-            name: "seat".into(),
-            shape_type: SubshapeType::Face,
-            face_index: Some(1),
-            shape_label: None,
+        facts.occurrences.push(OccurrenceFacts {
+            name: "part".into(),
+            placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            bounds: facts.bounds,
+            path: "part".into(),
+            parent: None,
+            product: 0,
+            product_name: "part".into(),
+            instance_name: None,
+            ordinal_path: vec![0],
         });
-        let index = build_index(&facts, &ProbeBrep).unwrap();
+        facts
+            .rows
+            .subshapes
+            .push(crate::backend::brep::SubshapeFacts {
+                occurrence: Some(0),
+                occurrence_path: "part".into(),
+                name: "seat".into(),
+                shape_type: SubshapeType::Face,
+                face_index: Some(1),
+                shape_label: None,
+            });
+        let index = build_index(&facts.occurrences, facts.bounds, &facts.rows, &ProbeBrep).unwrap();
         let row = &index.interfaces[0];
         assert!(!row.dangling);
         assert_eq!(row.entity.id, "interface:part.seat");
@@ -3045,7 +3029,8 @@ mod tests {
 
     #[test]
     fn flat_step_index_uses_whole_shape_faces_without_occurrence_zero() {
-        let index = build_index(&flat_facts(), &ProbeBrep).unwrap();
+        let facts = flat_facts();
+        let index = build_index(&facts.occurrences, facts.bounds, &facts.rows, &ProbeBrep).unwrap();
         assert_eq!(index.faces.len(), 1);
         assert_eq!(index.faces[0].id, "face:whole#1");
         assert_eq!(index.faces[0].occurrence, None);

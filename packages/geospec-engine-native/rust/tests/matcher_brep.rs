@@ -53,10 +53,16 @@ fn occurrence(index: u32, path: &str) -> OccurrenceFacts {
     }
 }
 
-fn retained_facts() -> DocumentFacts {
-    DocumentFacts {
-        source_length_unit: "millimetre".into(),
-        source_unit_to_millimeters: 1.0,
+/// The retained fixture's occurrences and whole-shape facts, which its report
+/// facets serve (a millimetre source without rows).
+#[derive(Clone)]
+struct RetainedFacts {
+    occurrences: Vec<OccurrenceFacts>,
+    shape: ShapeFacts,
+}
+
+fn retained_facts() -> RetainedFacts {
+    RetainedFacts {
         occurrences: vec![occurrence(0, "left"), occurrence(1, "right")],
         shape: ShapeFacts {
             bounds: bounds([-10.0, -10.0, 0.0], [10.0, 10.0, 10.0]),
@@ -73,9 +79,6 @@ fn retained_facts() -> DocumentFacts {
                 vertices: 16,
             },
         },
-        subshapes: Vec::new(),
-        datum_placements: Vec::new(),
-        semantic_datums: Vec::new(),
     }
 }
 
@@ -145,7 +148,7 @@ fn retained_faces() -> Vec<LocatedFace> {
 }
 
 struct RetainedBrep {
-    facts: Rc<DocumentFacts>,
+    facts: Rc<RetainedFacts>,
     faces: Rc<[LocatedFace]>,
     validity: Rc<ValidityFacts>,
     bore_queries: Rc<Cell<usize>>,
@@ -154,6 +157,18 @@ struct RetainedBrep {
 }
 
 impl RetainedBrep {
+    /// One report facet demand: counted, and refused under `fail_report`.
+    fn report(&self) -> Result<(), BackendError> {
+        self.report_calls.set(self.report_calls.get() + 1);
+        if self.fail_report {
+            return Err(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "deliberate report failure".into(),
+            });
+        }
+        Ok(())
+    }
+
     fn complete() -> Self {
         Self {
             facts: Rc::new(retained_facts()),
@@ -280,31 +295,34 @@ impl BrepSubject for RetainedBrep {
         Ok(CircularBoreInventory { candidates })
     }
 
-    fn reported_facts_and_mesh(
-        &self,
-    ) -> Result<crate::backend::brep::ReportedBrepBundle, BackendError> {
-        self.report_calls.set(self.report_calls.get() + 1);
-        if self.fail_report {
-            return Err(BackendError {
-                kind: BackendErrorKind::Unsupported,
-                message: "deliberate report failure".into(),
-            });
-        }
-        // This test double supplies the explicit coherent report seam. Its empty
-        // mesh is unused by these fact-only predicate/early-selection controls.
-        let facts = Rc::clone(&self.facts);
-        let occurrence_faces = (0..facts.occurrences.len())
-            .map(|_| Rc::from(Vec::<LocatedFace>::new()))
-            .collect();
-        Ok(crate::backend::brep::ReportedBrepBundle {
-            facts,
+    fn reported_faces(&self, _: bool) -> Result<crate::backend::brep::ReportedFaces, BackendError> {
+        self.report()?;
+        Ok(crate::backend::brep::ReportedFaces {
             whole_faces: Rc::clone(&self.faces),
-            occurrence_faces,
-            mesh: Rc::new(TriangleMesh {
-                positions: Vec::new(),
-                triangles: Vec::new(),
-            }),
+            occurrence_faces: (0..self.facts.occurrences.len())
+                .map(|_| Rc::from(Vec::<LocatedFace>::new()))
+                .collect(),
         })
+    }
+
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        self.report()?;
+        Ok(self.facts.shape.clone())
+    }
+
+    // Its empty mesh is unused by these fact-only predicate/early-selection
+    // controls.
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
+        self.report()?;
+        Ok(TriangleMesh {
+            positions: Vec::new(),
+            triangles: Vec::new(),
+        })
+    }
+
+    fn document_rows(&self) -> Result<crate::backend::brep::DocumentRows, BackendError> {
+        self.report()?;
+        Ok(crate::backend::brep::DocumentRows::default())
     }
 
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
@@ -695,7 +713,7 @@ fn retained_neutral_facts_drive_all_eleven_positive_predicates() {
     let brep = RetainedBrep::complete();
     let facts = Rc::clone(&brep.facts);
 
-    assert!(evaluate_units("mm", &facts).unwrap().positive);
+    assert!(unit_outcome("mm", "millimetre", 1.0).positive);
     assert!(
         evaluate_products(
             &ProductStructure {
@@ -1073,7 +1091,7 @@ fn evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit() {
 #[test]
 fn mismatch_diagnostics_retain_source_details_and_inventory() {
     let facts = retained_facts();
-    let units = evaluate_units("in", &facts).unwrap();
+    let units = unit_outcome("in", "millimetre", 1.0);
     assert_eq!(
         units.diagnostics[0].details,
         Some(Json::object([
@@ -1266,7 +1284,7 @@ fn analyze_brep_reports_the_source_unavailable_diagnostic() {
 fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
     let brep = RetainedBrep::complete();
     let facts = Rc::clone(&brep.facts);
-    assert!(!evaluate_units("in", &facts).unwrap().positive);
+    assert!(!unit_outcome("in", "millimetre", 1.0).positive);
     assert!(
         !evaluate_products(
             &ProductStructure {
@@ -1888,7 +1906,7 @@ fn analyze_brep_meets_the_edge_treatment_face_limit_before_report_facts_and_bore
         })
         .collect::<Vec<_>>()
         .into();
-    connector.facts = Rc::new(DocumentFacts {
+    connector.facts = Rc::new(RetainedFacts {
         occurrences: Vec::new(),
         ..retained_facts()
     });

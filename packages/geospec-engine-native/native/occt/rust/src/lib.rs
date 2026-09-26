@@ -13,14 +13,14 @@ pub use geospec_engine_native_core::backend::brep::{
     ContinuousWallShape, CurveFacts, CylinderAttachmentProfile, CylinderAxialExtent,
     CylinderBoundaryOrientation, CylinderBoundarySide, CylinderBoundaryUse,
     CylinderPeriodicAttachment, CylinderVertex, CylindricalBandBoundaryResidual,
-    CylindricalBandProfile, CylindricalBandRim, DatumPlacementFacts, DocumentFacts, DocumentRows,
-    EdgeFacts, EdgeTreatmentBoundaryRole, EdgeTreatmentBoundaryUse, EdgeTreatmentCertificate,
+    CylindricalBandProfile, CylindricalBandRim, DatumPlacementFacts, DocumentRows, EdgeFacts,
+    EdgeTreatmentBoundaryRole, EdgeTreatmentBoundaryUse, EdgeTreatmentCertificate,
     EdgeTreatmentCounts, EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind,
     EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
     EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, FaceFacts,
     FiniteContactCircle, FiniteContactFace, LocatedFace, NominalCylindricalBand, OccurrenceFacts,
-    OperandMemo, PointState, RegularSolidContainment, ReportedBrepBundle, ReportedFaces,
-    ResolvedSourceFace, SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts,
+    OperandMemo, PointState, RegularSolidContainment, ReportedFaces, ResolvedSourceFace,
+    SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts, ShapeParts,
     SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
     TessellationProfile, TopologyCounts, ValidityFacts, MAX_CIRCULAR_BORE_CANDIDATES,
     MAX_CIRCULAR_BORE_OWNED_BYTES, MAX_EDGE_TREATMENT_BOUNDARY_USES,
@@ -470,41 +470,18 @@ impl BrepSubject for Document {
         unsafe { step_subject_metadata(self.raw.as_ptr()).map(Some) }
     }
 
-    /// The facets together, in the order a combined report used to build
-    /// them: mesh, whole-shape facts, occurrences and rows, measured faces.
-    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
-        let mesh = Rc::new(self.reported_mesh()?);
-        let shape = self.reported_shape()?;
-        let raw = self.raw.as_ptr();
-        let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
-        let occurrences = unsafe { transfer_occurrences(raw, product_count, true)? };
-        let rows = self.document_rows()?;
-        let faces = self.reported_faces(true)?;
-        let admission = self.admission_facts()?;
-        Ok(ReportedBrepBundle {
-            facts: Rc::new(DocumentFacts {
-                source_length_unit: admission.source_length_unit,
-                source_unit_to_millimeters: admission.source_unit_to_millimeters,
-                occurrences,
-                shape,
-                subshapes: rows.subshapes,
-                datum_placements: rows.datum_placements,
-                semantic_datums: rows.semantic_datums,
-            }),
-            whole_faces: faces.whole_faces,
-            occurrence_faces: faces.occurrence_faces,
-            mesh,
-        })
-    }
-
     // SAFETY (granted documents): see the connector's lifetime permit contract.
     fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
         unsafe { reported_mesh(self.raw.as_ptr(), self.parallel_grant_width) }
     }
 
-    // SAFETY (granted documents): see the connector's lifetime permit contract.
     fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
-        unsafe { reported_shape(self.raw.as_ptr(), self.parallel_grant_width) }
+        self.reported_shape_parts(ShapeParts::ALL)
+    }
+
+    // SAFETY (granted documents): see the connector's lifetime permit contract.
+    fn reported_shape_parts(&self, parts: ShapeParts) -> Result<ShapeFacts, BackendError> {
+        unsafe { reported_shape(self.raw.as_ptr(), parts, self.parallel_grant_width) }
     }
 
     fn reported_faces(&self, measured: bool) -> Result<ReportedFaces, BackendError> {
@@ -1458,7 +1435,7 @@ fn checked_transfer_bytes(count: usize, width: usize) -> Result<usize, BackendEr
 }
 
 fn validate_report_sizes(sizes: &ffi::ReportSizes, facets: u32) -> Result<(), BackendError> {
-    let has_facts = facets & ffi::REPORT_FACTS != 0;
+    let has_facts = facets & ffi::REPORT_SHAPE != 0;
     let has_mesh = facets & ffi::REPORT_MESH != 0;
     let has_faces = facets & ffi::REPORT_FACES != 0;
     let expected = [
@@ -1546,13 +1523,25 @@ unsafe fn reported_mesh(
     report_mesh(raw, &sizes)
 }
 
-/// Whole-shape facts from the same generation as the mesh facet (F2: no
-/// validity).
+/// Whole-shape facts of the admitted source measuring `parts` (F1; the others
+/// come back unmeasured). Only BOUNDS takes the grant, for V2's per-face box
+/// pass; the integrals and counts are serial plain calls.
 unsafe fn reported_shape(
     raw: *const ffi::Document,
+    parts: ShapeParts,
     grant: Option<u32>,
 ) -> Result<ShapeFacts, BackendError> {
-    let (_sizes, _transfer) = prepare_report(raw, ffi::REPORT_FACTS, grant)?;
+    let facets = [
+        (ShapeParts::VOLUME, ffi::REPORT_VOLUME),
+        (ShapeParts::AREA, ffi::REPORT_AREA),
+        (ShapeParts::BOUNDS, ffi::REPORT_BOUNDS),
+        (ShapeParts::COUNTS, ffi::REPORT_COUNTS),
+    ]
+    .into_iter()
+    .filter(|(part, _)| parts.contains(*part))
+    .fold(0, |facets, (_, bit)| facets | bit);
+    let grant = grant.filter(|_| parts.contains(ShapeParts::BOUNDS));
+    let (_sizes, _transfer) = prepare_report(raw, facets, grant)?;
     let mut shape = ffi::ShapeFacts::default();
     let mut error = ErrorBuffer::new();
     check(
@@ -3412,9 +3401,13 @@ mod ffi {
     pub const BUFFER_TOO_SMALL: i32 = 6;
     pub const UNSUPPORTED: i32 = 7;
     pub const REPORT_MESH: u32 = 1;
-    pub const REPORT_FACTS: u32 = 2;
+    pub const REPORT_VOLUME: u32 = 2;
     pub const REPORT_FACES: u32 = 4;
     pub const REPORT_FACE_MEASURES: u32 = 8;
+    pub const REPORT_AREA: u32 = 16;
+    pub const REPORT_BOUNDS: u32 = 32;
+    pub const REPORT_COUNTS: u32 = 64;
+    pub const REPORT_SHAPE: u32 = REPORT_VOLUME | REPORT_AREA | REPORT_BOUNDS | REPORT_COUNTS;
 
     #[repr(C)]
     pub struct Document {
@@ -3443,7 +3436,6 @@ mod ffi {
     #[derive(Clone, Copy, Default)]
     #[repr(C)]
     pub struct ShapeFacts {
-        pub valid: i32,
         pub bounds: Bounds,
         pub volume: f64,
         pub surface_area: f64,
@@ -3530,7 +3522,6 @@ mod ffi {
         pub face: FaceFacts,
         pub bounds: Bounds,
         pub reversed: i32,
-        pub edge_count: usize,
     }
 
     #[derive(Clone, Copy, Default)]

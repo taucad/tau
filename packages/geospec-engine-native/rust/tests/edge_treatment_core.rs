@@ -6,7 +6,7 @@ use crate::{
         brep::{
             BrepEntity, CircularBoreInventory, EdgeTreatmentBoundaryUse, EdgeTreatmentCounts,
             EdgeTreatmentResidual, EdgeTreatmentRow, EdgeTreatmentSupport, FaceFacts, LocatedFace,
-            PointState, ReportedBrepBundle, ShapeFacts, TessellationProfile, ValidityFacts,
+            PointState, ReportedFaces, ShapeFacts, TessellationProfile, ValidityFacts,
         },
         TriangleMesh,
     },
@@ -18,7 +18,7 @@ use crate::{
 #[derive(Clone)]
 struct EdgeTreatmentBrep {
     inventory: EdgeTreatmentInventory,
-    facts: Rc<DocumentFacts>,
+    shape: ShapeFacts,
     faces: Rc<[LocatedFace]>,
     reports: Rc<Cell<usize>>,
     counts: Rc<Cell<usize>>,
@@ -50,32 +50,24 @@ impl EdgeTreatmentBrep {
         );
         Self {
             inventory,
-            facts: Rc::new(DocumentFacts {
-                source_length_unit: "millimetre".into(),
-                source_unit_to_millimeters: 1.0,
-                occurrences: Vec::new(),
-                shape: ShapeFacts {
-                    bounds: Bounds {
-                        min: [0.0; 3],
-                        max: [3.0, 1.0, 1.0],
-                    },
-                    volume: 1.0,
-                    surface_area: 1.0,
-                    center_of_mass: [0.0; 3],
-                    topology: TopologyCounts {
-                        compounds: 1,
-                        solids: 1,
-                        shells: 1,
-                        faces: 3,
-                        wires: 3,
-                        edges: 5,
-                        vertices: 6,
-                    },
+            shape: ShapeFacts {
+                bounds: Bounds {
+                    min: [0.0; 3],
+                    max: [3.0, 1.0, 1.0],
                 },
-                subshapes: Vec::new(),
-                datum_placements: Vec::new(),
-                semantic_datums: Vec::new(),
-            }),
+                volume: 1.0,
+                surface_area: 1.0,
+                center_of_mass: [0.0; 3],
+                topology: TopologyCounts {
+                    compounds: 1,
+                    solids: 1,
+                    shells: 1,
+                    faces: 3,
+                    wires: 3,
+                    edges: 5,
+                    vertices: 6,
+                },
+            },
             faces,
             reports: Rc::new(Cell::new(0)),
             counts: Rc::new(Cell::new(0)),
@@ -102,22 +94,36 @@ impl BrepSubject for EdgeTreatmentBrep {
         Ok(self.inventory.clone())
     }
 
-    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
+    // `reports` counts the report facets demanded.
+    fn reported_faces(&self, _: bool) -> Result<ReportedFaces, BackendError> {
         self.reports.set(self.reports.get() + 1);
-        Ok(ReportedBrepBundle {
-            facts: Rc::clone(&self.facts),
+        Ok(ReportedFaces {
             whole_faces: Rc::clone(&self.faces),
             occurrence_faces: Vec::new(),
-            mesh: Rc::new(TriangleMesh {
-                positions: Vec::new(),
-                triangles: Vec::new(),
-            }),
         })
+    }
+
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        self.reports.set(self.reports.get() + 1);
+        Ok(self.shape.clone())
+    }
+
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
+        self.reports.set(self.reports.get() + 1);
+        Ok(TriangleMesh {
+            positions: Vec::new(),
+            triangles: Vec::new(),
+        })
+    }
+
+    fn document_rows(&self) -> Result<crate::backend::brep::DocumentRows, BackendError> {
+        self.reports.set(self.reports.get() + 1);
+        Ok(crate::backend::brep::DocumentRows::default())
     }
 
     // The source route; the report is demanded only for the face tables.
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
-        Ok(self.facts.occurrences.clone().into())
+        Ok(Rc::from(Vec::new()))
     }
 
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {

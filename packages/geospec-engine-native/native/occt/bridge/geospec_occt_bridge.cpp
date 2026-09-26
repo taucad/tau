@@ -90,6 +90,7 @@
 #include <NCollection_IncAllocator.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_List.hxx>
+#include <NCollection_Map.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Face.hxx>
@@ -258,7 +259,6 @@ struct ReportData {
   MeshData mesh;
 };
 
-struct ReportGeneration;
 struct EdgeTreatmentTransferData;
 
 int write_string(const std::string& value, geospec_occt_string* output) noexcept {
@@ -513,16 +513,6 @@ geospec_occt_bounds bounds(const TopoDS_Shape& shape) {
   return result;
 }
 
-geospec_occt_bounds reporting_bounds(const TopoDS_Shape& shape) {
-  Bnd_Box box;
-  BRepBndLib::Add(shape, box);
-  if (box.IsVoid()) throw Standard_Failure("Shape has no finite reporting bounds.");
-  geospec_occt_bounds result{};
-  box.Get(result.min[0], result.min[1], result.min[2], result.max[0],
-          result.max[1], result.max[2]);
-  return result;
-}
-
 size_t shape_count(const TopoDS_Shape& shape, TopAbs_ShapeEnum kind) {
   size_t count = 0;
   for (TopExp_Explorer explorer(shape, kind); explorer.More(); explorer.Next()) {
@@ -598,31 +588,53 @@ bool shape_is_valid(const TopoDS_Shape& shape) {
   return BRepCheck_Analyzer(shape).IsValid();
 }
 
-// Geometry only: `valid` stays 0. Validity is the separate source proof, so
-// the report facts facet never analyzes its copy (F2).
-geospec_occt_shape_facts shape_facts(const TopoDS_Shape& shape,
-                                     bool include_optimal_bounds = true) {
-  geospec_occt_shape_facts result{};
-  if (include_optimal_bounds) result.bounds = bounds(shape);
-
-  GProp_GProps volume;
-  BRepGProp::VolumeProperties(shape, volume);
-  result.volume = volume.Mass();
-  if (std::abs(result.volume) > std::numeric_limits<double>::epsilon()) {
-    point(result.center_of_mass, volume.CentreOfMass());
+// S6 (ruling 26): BRepGProp::volumeProperties' rigid-instance cache, for the
+// surface area alone (the centre of mass stays on the volume integral). A
+// shape without a repeated solid TShape keeps the plain SurfaceProperties
+// bits. With one, each rigid instance reuses its definition's area, which
+// regroups the additions (relative ULP moves, as ruling 7 accepts for the
+// centre of mass). ponytail: free faces keep the plain whole-shape integral
+// rather than a separate free-face term.
+double surface_area(const TopoDS_Shape& shape) {
+  bool repeated = false;
+  {
+    NCollection_Map<occ::handle<TopoDS_TShape>> seen;
+    for (TopExp_Explorer solid(shape, TopAbs_SOLID); solid.More() && !repeated;
+         solid.Next()) {
+      repeated = !seen.Add(solid.Current().TShape());
+    }
   }
-
-  GProp_GProps surface;
-  BRepGProp::SurfaceProperties(shape, surface);
-  result.surface_area = surface.Mass();
-  result.compounds = shape_count(shape, TopAbs_COMPOUND);
-  result.solids = shape_count(shape, TopAbs_SOLID);
-  result.shells = shape_count(shape, TopAbs_SHELL);
-  result.faces = shape_count(shape, TopAbs_FACE);
-  result.wires = shape_count(shape, TopAbs_WIRE);
-  result.edges = shape_count(shape, TopAbs_EDGE);
-  result.vertices = shape_count(shape, TopAbs_VERTEX);
-  return result;
+  if (!repeated || TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SOLID).More()) {
+    GProp_GProps whole;
+    BRepGProp::SurfaceProperties(shape, whole);
+    return whole.Mass();
+  }
+  struct Definition {
+    double area;
+    TopLoc_Location location;
+  };
+  NCollection_DataMap<occ::handle<TopoDS_TShape>, Definition> definitions;
+  double area = 0.0;
+  for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More();
+       explorer.Next()) {
+    const TopoDS_Shape& solid = explorer.Current();
+    if (const Definition* known = definitions.Seek(solid.TShape())) {
+      const gp_Trsf relative =
+          solid.Location().Multiplied(known->location.Inverted()).Transformation();
+      if (std::abs(std::abs(relative.ScaleFactor()) - 1.0) <=
+              TopLoc_Location::ScalePrec() &&
+          !relative.IsNegative()) {
+        area += known->area;
+        continue;
+      }
+    }
+    // A first instance, or one whose placement is not rigid relative to it.
+    GProp_GProps properties;
+    BRepGProp::SurfaceProperties(solid, properties);
+    definitions.TryBind(solid.TShape(), {properties.Mass(), solid.Location()});
+    area += properties.Mass();
+  }
+  return area;
 }
 
 void placement(double output[12], const TopLoc_Location& location) {
@@ -1588,9 +1600,7 @@ struct geospec_occt_document {
   std::vector<SemanticDatumFacts> semantic_datums;
   std::vector<DatumPlacementFacts> datum_placements;
   mutable std::optional<ReportData> report;
-  // N2-FACET report generation: the isolated copy+mesh shared by the mesh and
-  // facts facets until both have run; the transfer slot stays above.
-  mutable std::unique_ptr<ReportGeneration> report_generation;
+  // Copy+mesh generations built by MESH prepares; each lives for its call.
   mutable size_t report_generation_builds = 0;
   mutable std::optional<std::pair<MeshKey, MeshData>> transfer_mesh;
   mutable std::optional<std::vector<geospec_occt_circular_bore_candidate>>
@@ -1606,9 +1616,14 @@ struct geospec_occt_document {
   // The source validity proof.
   mutable std::optional<bool> shape_valid;
   // O3-02: one AddOptimal box per located face (IsSame: TShape + Location),
-  // shared by occurrence bounds (F4) and whole-face boxes (F6). Serial.
+  // shared by whole-shape bounds (V2), occurrence bounds (F4) and whole-face
+  // boxes (F6). Only a granted BOUNDS prepare fills it in parallel.
   mutable NCollection_DataMap<TopoDS_Shape, Bnd_Box, TopTools_ShapeMapHasher>
       face_boxes;
+  // F1: whole-shape report facts of this shape; `source_shape_parts` holds
+  // the REPORT_VOLUME/AREA/BOUNDS/COUNTS bits already measured.
+  mutable geospec_occt_shape_facts source_shape{};
+  mutable uint32_t source_shape_parts = 0;
   mutable std::vector<std::optional<geospec_occt_bounds>> occurrence_bounds;
   mutable std::vector<std::optional<OccurrenceEdgeAddresses>>
       occurrence_edge_addresses;
@@ -1681,6 +1696,131 @@ geospec_occt_bounds memo_bounds(const geospec_occt_document& document,
   geospec_occt_bounds result{};
   box.Get(result.min[0], result.min[1], result.min[2], result.max[0],
           result.max[1], result.max[2]);
+  return result;
+}
+
+// BRepBndLib's CanUseEdges (pinned BRepBndLib.cxx): the surfaces whose face
+// box AddOptimal folds from the edge curves alone, which is cheap.
+bool edge_path_surface(const Adaptor3d_Surface& surface) {
+  switch (surface.GetType()) {
+    case GeomAbs_Plane:
+    case GeomAbs_Cylinder:
+    case GeomAbs_Cone:
+    case GeomAbs_SurfaceOfExtrusion:
+      return true;
+    case GeomAbs_SurfaceOfRevolution:
+      return surface.BasisCurve()->GetType() == GeomAbs_Line;
+    case GeomAbs_OffsetSurface:
+      return edge_path_surface(*surface.BasisSurface());
+    case GeomAbs_BSplineSurface:
+      return (surface.UDegree() == 1 && surface.NbUKnots() == 2) ||
+             (surface.VDegree() == 1 && surface.NbVKnots() == 2);
+    case GeomAbs_BezierSurface:
+      return surface.UDegree() == 1 || surface.VDegree() == 1;
+    default:
+      return false;
+  }
+}
+
+// V2 under the grant (ruling 24): the AddOptimal box of every located face of
+// `shape` not yet in the memo, computed in OSD_Parallel::For when at least 16
+// of them are off the edge path (O3-02: planar documents are slower in
+// parallel). Each box is that face's own AddOptimal and memo_bounds keeps the
+// serial fold, so the bits equal the serial path. ponytail: a pure prefill; a
+// face whose box throws, or any failure here, is left to the serial fold,
+// which then fails exactly as it would have without a grant.
+void prefill_face_boxes(const geospec_occt_document& document,
+                        const TopoDS_Shape& shape) {
+  try {
+    std::vector<TopoDS_Shape> pending;
+    NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> listed;
+    size_t off_edge_path = 0;
+    for (TopExp_Explorer face(shape, TopAbs_FACE); face.More(); face.Next()) {
+      if (document.face_boxes.IsBound(face.Current()) || !listed.Add(face.Current()))
+        continue;
+      pending.push_back(face.Current());
+      TopLoc_Location location;
+      const TopoDS_Face& value = TopoDS::Face(face.Current());
+      if (!BRep_Tool::Surface(value, location).IsNull() &&
+          !edge_path_surface(BRepAdaptor_Surface(value, false))) {
+        ++off_edge_path;
+      }
+    }
+    // ponytail: O3-02's fixed gate; tune it if a corpus measures slower above it.
+    if (off_edge_path < 16) return;
+    std::vector<Bnd_Box> boxes(pending.size());
+    std::vector<char> measured(pending.size(), 0);
+    OSD_Parallel::For(0, static_cast<int>(pending.size()), [&](int index) {
+      const size_t face = static_cast<size_t>(index);
+      try {
+        BRepBndLib::AddOptimal(pending[face], boxes[face], false, false);
+        measured[face] = 1;
+      } catch (...) {
+      }
+    });
+    for (size_t face = 0; face < pending.size(); ++face) {
+      if (measured[face] != 0) document.face_boxes.Bind(pending[face], boxes[face]);
+    }
+  } catch (...) {
+  }
+}
+
+// F1: whole-shape report facts on the admitted source shape (no copy, no
+// mesh). Each part is measured once per document and kept only after it
+// returns; the result carries exactly the requested `parts` (the others NaN,
+// counts zero), so its bytes never depend on what earlier calls measured.
+// Bounds are V2's exact AddOptimal (ruling 4 (A)), folded from the memo.
+geospec_occt_shape_facts source_shape_facts(const geospec_occt_document& document,
+                                            uint32_t parts) {
+  const TopoDS_Shape& shape = document.shape;
+  geospec_occt_shape_facts& slot = document.source_shape;
+  const auto missing = [&](uint32_t part) {
+    return (parts & part) != 0 && (document.source_shape_parts & part) == 0;
+  };
+  if (missing(GEOSPEC_OCCT_REPORT_VOLUME)) {
+    GProp_GProps volume;
+    BRepGProp::VolumeProperties(shape, volume);
+    slot.volume = volume.Mass();
+    if (std::abs(slot.volume) > std::numeric_limits<double>::epsilon()) {
+      point(slot.center_of_mass, volume.CentreOfMass());
+    }
+    document.source_shape_parts |= GEOSPEC_OCCT_REPORT_VOLUME;
+  }
+  if (missing(GEOSPEC_OCCT_REPORT_AREA)) {
+    slot.surface_area = surface_area(shape);
+    document.source_shape_parts |= GEOSPEC_OCCT_REPORT_AREA;
+  }
+  if (missing(GEOSPEC_OCCT_REPORT_BOUNDS)) {
+    slot.bounds = memo_bounds(document, shape);
+    document.source_shape_parts |= GEOSPEC_OCCT_REPORT_BOUNDS;
+  }
+  if (missing(GEOSPEC_OCCT_REPORT_COUNTS)) {
+    slot.compounds = shape_count(shape, TopAbs_COMPOUND);
+    slot.solids = shape_count(shape, TopAbs_SOLID);
+    slot.shells = shape_count(shape, TopAbs_SHELL);
+    slot.faces = shape_count(shape, TopAbs_FACE);
+    slot.wires = shape_count(shape, TopAbs_WIRE);
+    slot.edges = shape_count(shape, TopAbs_EDGE);
+    slot.vertices = shape_count(shape, TopAbs_VERTEX);
+    document.source_shape_parts |= GEOSPEC_OCCT_REPORT_COUNTS;
+  }
+
+  geospec_occt_shape_facts result = slot;
+  constexpr double unmeasured = std::numeric_limits<double>::quiet_NaN();
+  if ((parts & GEOSPEC_OCCT_REPORT_VOLUME) == 0) {
+    result.volume = unmeasured;
+    std::fill(std::begin(result.center_of_mass), std::end(result.center_of_mass),
+              unmeasured);
+  }
+  if ((parts & GEOSPEC_OCCT_REPORT_AREA) == 0) result.surface_area = unmeasured;
+  if ((parts & GEOSPEC_OCCT_REPORT_BOUNDS) == 0) {
+    std::fill(std::begin(result.bounds.min), std::end(result.bounds.min), unmeasured);
+    std::fill(std::begin(result.bounds.max), std::end(result.bounds.max), unmeasured);
+  }
+  if ((parts & GEOSPEC_OCCT_REPORT_COUNTS) == 0) {
+    result.compounds = result.solids = result.shells = result.faces =
+        result.wires = result.edges = result.vertices = 0;
+  }
   return result;
 }
 
@@ -5275,19 +5415,37 @@ MeshData report_triangle_soup(const TopoDS_Shape& shape) {
   return result;
 }
 
-// A72's qualified domain: a nonempty compound of complete, disjoint solids.
-// Different solid definitions may not share even an unlocated descendant.
+// S5 (ruling 25): the located leaves of nonempty compounds, where a leaf is
+// any non-compound shape (a compsolid is one leaf).
+bool collect_prototype_leaves(const TopoDS_Shape& shape,
+                              std::vector<TopoDS_Shape>& leaves) {
+  if (shape.IsNull()) return false;
+  if (shape.ShapeType() != TopAbs_COMPOUND) {
+    leaves.push_back(shape);
+    return true;
+  }
+  TopoDS_Iterator child(shape, true, true);
+  if (!child.More()) return false;
+  for (; child.More(); child.Next()) {
+    if (!collect_prototype_leaves(child.Value(), leaves)) return false;
+  }
+  return true;
+}
+
+// A72's qualified domain, widened by S5 from solids to any leaf: a compound
+// of at least two located-disjoint leaves, whose different definitions do
+// not share even an unlocated descendant.
 bool prototype_copy_eligible(const TopoDS_Shape& source) {
-  std::vector<TopoDS_Shape> solids;
+  std::vector<TopoDS_Shape> leaves;
   if (source.ShapeType() != TopAbs_COMPOUND ||
-      !collect_validation_solids(source, solids) || solids.size() < 2 ||
-      !disjoint_validation_solids(solids)) return false;
+      !collect_prototype_leaves(source, leaves) || leaves.size() < 2 ||
+      !disjoint_validation_solids(leaves)) return false;
 
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> definitions;
   NCollection_IndexedDataMap<TopoDS_Shape, size_t, TopTools_ShapeMapHasher> owners;
-  for (const TopoDS_Shape& solid : solids) {
+  for (const TopoDS_Shape& leaf : leaves) {
     const TopoDS_Shape definition =
-        solid.Located(TopLoc_Location()).Oriented(TopAbs_FORWARD);
+        leaf.Located(TopLoc_Location()).Oriented(TopAbs_FORWARD);
     if (definitions.FindIndex(definition) != 0) continue;
     const int owner = definitions.Add(definition);
     std::vector<TopoDS_Shape> pending{definition};
@@ -5331,7 +5489,7 @@ struct PrototypeReportCopy {
   }
 
   TopoDS_Shape rebuild(const TopoDS_Shape& source) {
-    if (source.ShapeType() == TopAbs_SOLID) {
+    if (source.ShapeType() != TopAbs_COMPOUND) {
       const TopoDS_Shape definition =
           source.Located(TopLoc_Location()).Oriented(TopAbs_FORWARD);
       int index = definitions.FindIndex(definition);
@@ -5356,11 +5514,14 @@ struct PrototypeReportCopy {
     return compound.Located(source.Location()).Oriented(source.Orientation());
   }
 
-  bool join(const TopoDS_Shape& source, const TopoDS_Shape& copied) {
+  // Every node rebuild produced (the compounds and their leaves) keeps its
+  // source placement bits; a leaf's descendants come from its definition copy.
+  bool join(const TopoDS_Shape& source, const TopoDS_Shape& copied,
+            bool produced = true) {
     if (source.ShapeType() != copied.ShapeType() ||
         source.Orientation() != copied.Orientation() || source.IsPartner(copied))
       return false;
-    if (source.ShapeType() == TopAbs_COMPOUND || source.ShapeType() == TopAbs_SOLID) {
+    if (produced) {
       double original_location[12], copied_location[12];
       placement(original_location, source.Location());
       placement(copied_location, copied.Location());
@@ -5374,11 +5535,13 @@ struct PrototypeReportCopy {
     } else {
       history.Add(source, copied);
     }
+    const bool children_produced = source.ShapeType() == TopAbs_COMPOUND;
     TopoDS_Iterator original_child(source, true, true);
     TopoDS_Iterator copied_child(copied, true, true);
     for (; original_child.More() && copied_child.More();
          original_child.Next(), copied_child.Next()) {
-      if (!join(original_child.Value(), copied_child.Value())) return false;
+      if (!join(original_child.Value(), copied_child.Value(), children_produced))
+        return false;
     }
     return original_child.More() == copied_child.More();
   }
@@ -5387,14 +5550,6 @@ struct PrototypeReportCopy {
     if (!prototype_copy_eligible(source)) return false;
     shape = rebuild(source);
     return !shape.IsNull() && join(source, shape);
-  }
-
-  TopoDS_Shape mapped(const TopoDS_Shape& source) const {
-    const int index = history.FindIndex(source);
-    if (index == 0) return {};
-    TopoDS_Shape result = history.FindFromIndex(index);
-    result.Orientation(source.Orientation());
-    return result;
   }
 };
 
@@ -5409,7 +5564,7 @@ struct OrientedShapeHasher {
 };
 
 // The address part always (F5); integrals and the selector box only when
-// measured. Index, query index and edge count are per record.
+// measured. Index and query index are per record.
 geospec_occt_located_face_facts reported_face(const TopoDS_Face& face,
                                               bool measured) {
   const FaceFacts value = face_facts(face, 0, 0, false, measured);
@@ -5471,32 +5626,18 @@ bool build_report_faces(const geospec_occt_document& document, bool measured,
   return true;
 }
 
-// The isolated meshed report shape. Its soup (mesh facet) and whole-shape
-// facts (facts facet) are its only consumers; F1 moves the facts to the source.
-struct ReportGeneration {
-  TopoDS_Shape shape;
-  bool soup_taken = false;
-  bool facts_taken = false;
-};
-
-// Mesh facet prerequisite: copy or prototype-map, then mesh, exactly as before.
-// A dedicated caller may select the mesher's parallel mode under its grant.
+// The mesh facet's isolated meshed shape, its soup's only source (F1 moved
+// the facts to the source shape): the prototype share copy when eligible (S5),
+// else a whole copy, so meshing never writes onto the admitted faces. A
+// dedicated caller may select the mesher's parallel mode under its grant.
 bool build_report_generation(const geospec_occt_document& document,
-                             ReportGeneration& generation,
-                             std::string& message, bool run_parallel) {
+                             TopoDS_Shape& generation, std::string& message,
+                             bool run_parallel) {
   std::optional<PrototypeReportCopy> prototype;
   prototype.emplace();
-  bool use_prototype = prototype->build(document.shape);
-  if (use_prototype) {
-    // XDE report addresses must all resolve before the isolated shape is meshed.
-    for (const OccurrenceFacts& occurrence : document.occurrences) {
-      if (prototype->mapped(occurrence.shape).IsNull()) use_prototype = false;
-      for (const FaceView& face : occurrence.public_faces)
-        if (prototype->mapped(face.shape).IsNull()) use_prototype = false;
-    }
-    for (const FaceView& face : document.public_faces)
-      if (prototype->mapped(face.shape).IsNull()) use_prototype = false;
-  }
+  // No report address reads the generation any more (F5, F1), so the XDE
+  // address mapping it once had to resolve is not checked.
+  const bool use_prototype = prototype->build(document.shape);
   // The copy histories stay alive through meshing, as before; only the
   // meshed shape outlives this call.
   std::unique_ptr<BRepBuilderAPI_Copy> copy;
@@ -5508,9 +5649,9 @@ bool build_report_generation(const geospec_occt_document& document,
       return false;
     }
   }
-  generation.shape = use_prototype ? prototype->shape : copy->Shape();
+  generation = use_prototype ? prototype->shape : copy->Shape();
   constexpr double pi = 3.141592653589793238462643383279502884;
-  mesh_shape(generation.shape, 0.01, 15.0 * pi / 180.0, run_parallel);
+  mesh_shape(generation, 0.01, 15.0 * pi / 180.0, run_parallel);
   return true;
 }
 
@@ -6066,9 +6207,13 @@ int geospec_occt_report_prepare_dedicated(
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Report grant arguments are invalid.", error);
   }
-  constexpr uint32_t generation_facets =
-      GEOSPEC_OCCT_REPORT_MESH | GEOSPEC_OCCT_REPORT_FACTS;
-  constexpr uint32_t all_facets = generation_facets | GEOSPEC_OCCT_REPORT_FACES |
+  constexpr uint32_t shape_facets =
+      GEOSPEC_OCCT_REPORT_VOLUME | GEOSPEC_OCCT_REPORT_AREA |
+      GEOSPEC_OCCT_REPORT_BOUNDS | GEOSPEC_OCCT_REPORT_COUNTS;
+  constexpr uint32_t granted_facets =
+      GEOSPEC_OCCT_REPORT_MESH | GEOSPEC_OCCT_REPORT_BOUNDS;
+  constexpr uint32_t all_facets = GEOSPEC_OCCT_REPORT_MESH | shape_facets |
+                                  GEOSPEC_OCCT_REPORT_FACES |
                                   GEOSPEC_OCCT_REPORT_FACE_MEASURES;
   if (facets == 0 || (facets & ~all_facets) != 0 ||
       ((facets & GEOSPEC_OCCT_REPORT_FACE_MEASURES) != 0 &&
@@ -6082,32 +6227,35 @@ int geospec_occt_report_prepare_dedicated(
     std::string message;
     ReportData report;
     report.facets = facets;
-    if ((facets & generation_facets) != 0) {
-      // F11: the grant's worker reservation covers only the copy+mesh build.
+    // F9 after F1: a MESH call's copy+mesh generation; its soup is its one
+    // consumer, so it is released right after the soup is read.
+    TopoDS_Shape generation;
+    if ((facets & granted_facets) != 0) {
+      // F11 and ruling 24: the grant's worker reservation covers only the
+      // copy+mesh build and the per-face box pass.
       // ponytail: the serial copy (<= 0.16 s on the corpus) stays inside it.
       std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
       const int scope_status = dedicated_pool_scope(
           grant_width, used_parallel, reservation, error);
       if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
-      if (!document->report_generation) {
-        // Publish only a complete copy+mesh; a throw or refusal retains nothing.
-        auto generation = std::make_unique<ReportGeneration>();
-        if (!build_report_generation(*document, *generation, message,
+      if ((facets & GEOSPEC_OCCT_REPORT_MESH) != 0) {
+        if (!build_report_generation(*document, generation, message,
                                      *used_parallel != 0)) {
           return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
         }
-        document->report_generation = std::move(generation);
         ++document->report_generation_builds;
       }
-      reservation.reset();
-      const TopoDS_Shape& isolated = document->report_generation->shape;
-      if ((facets & GEOSPEC_OCCT_REPORT_MESH) != 0) {
-        report.mesh = report_triangle_soup(isolated);
+      if ((facets & GEOSPEC_OCCT_REPORT_BOUNDS) != 0 && *used_parallel != 0 &&
+          (document->source_shape_parts & GEOSPEC_OCCT_REPORT_BOUNDS) == 0) {
+        prefill_face_boxes(*document, document->shape);
       }
-      if ((facets & GEOSPEC_OCCT_REPORT_FACTS) != 0) {
-        report.shape = shape_facts(isolated, false);
-        report.shape.bounds = reporting_bounds(isolated);
-      }
+    }
+    if ((facets & GEOSPEC_OCCT_REPORT_MESH) != 0) {
+      report.mesh = report_triangle_soup(generation);
+      generation.Nullify();
+    }
+    if ((facets & shape_facets) != 0) {
+      report.shape = source_shape_facts(*document, facets & shape_facets);
     }
     if ((facets & GEOSPEC_OCCT_REPORT_FACES) != 0 &&
         !build_report_faces(*document,
@@ -6140,7 +6288,7 @@ int geospec_occt_report_prepare_dedicated(
     sizes->position_count = report.mesh.positions.size();
     sizes->triangle_count = report.mesh.triangles.size();
     sizes->shape_bytes =
-        (facets & GEOSPEC_OCCT_REPORT_FACTS) != 0 ? sizeof(report.shape) : 0;
+        (facets & shape_facets) != 0 ? sizeof(report.shape) : 0;
     if (!bytes(report.whole_faces.size(), sizeof(geospec_occt_located_face_facts),
                sizes->whole_face_bytes) ||
         !bytes(occurrence_face_count,
@@ -6153,16 +6301,6 @@ int geospec_occt_report_prepare_dedicated(
       return fail(GEOSPEC_OCCT_NATIVE_ERROR,
                   "Reported transfer byte count exceeds addressable memory.",
                   error);
-    }
-    if ((facets & generation_facets) != 0) {
-      ReportGeneration& generation = *document->report_generation;
-      generation.soup_taken |= (facets & GEOSPEC_OCCT_REPORT_MESH) != 0;
-      generation.facts_taken |= (facets & GEOSPEC_OCCT_REPORT_FACTS) != 0;
-      // F9, Wave 1: release the copy and mesh once both consumers have run.
-      // F1 moves the facts to the source; the soup alone then releases it.
-      if (generation.soup_taken && generation.facts_taken) {
-        document->report_generation.reset();
-      }
     }
     document->report.emplace(std::move(report));
     return GEOSPEC_OCCT_OK;
@@ -6183,7 +6321,9 @@ int geospec_occt_report_shape_facts(const geospec_occt_document* document,
                                     geospec_occt_shape_facts* shape,
                                     geospec_occt_string* error) noexcept {
   if (document == nullptr || !document->report.has_value() ||
-      (document->report->facets & GEOSPEC_OCCT_REPORT_FACTS) == 0 ||
+      (document->report->facets &
+       (GEOSPEC_OCCT_REPORT_VOLUME | GEOSPEC_OCCT_REPORT_AREA |
+        GEOSPEC_OCCT_REPORT_BOUNDS | GEOSPEC_OCCT_REPORT_COUNTS)) == 0 ||
       shape == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Prepared report shape facts output is unavailable.", error);

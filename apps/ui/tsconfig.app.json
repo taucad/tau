@@ -8,6 +8,8 @@
     "desktop/**/*.ts",
     "desktop/**/*.tsx",
     "server.ts",
+    "geospec-mt-assets.vite-plugin.ts",
+    "geospec-mt-assets-cache-key.ts",
     "react-router.config.ts",
     "vite-environment.d.ts",
     "types/**/*.d.ts",

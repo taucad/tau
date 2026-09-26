@@ -2,14 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Geometry } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { ModelViewer } from '#components/model-viewer.js';
+import { pairedCaseVerdict } from '#routes/debug.geospec/paired-result.js';
 import { ENV } from '#environment.config.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import {
   GeoSpecPerformanceService,
+  availableMtPermits,
   catalogCasesForFixture,
   casesForFixture,
   loadFixtureBytes,
   loadPreview,
+  mtExecution,
   runInput,
 } from '#services/geospec-performance.js';
 import type { PerformanceLabSelectionCase } from '#services/geospec-performance.js';
@@ -25,16 +28,20 @@ import type { LabFixture } from '../../../../../packages/geospec-engine-native/b
 import type {
   PerformanceLabRunInput,
   PerformanceLabRunResult,
+  PerformanceLabWasmExecution,
 } from '../../../../../packages/geospec-engine-native/bench/performance-lab-runner.js';
 /* oxlint-enable no-restricted-imports */
 
-const engines = ['legacy-wasm', 'combined-wasm', 'native-desktop'] as const;
+const engines = ['legacy-wasm', 'combined-st', 'combined-mt', 'native-desktop'] as const;
 const label = {
   'legacy-wasm': 'Legacy WASM',
-  'combined-wasm': 'Combined WASM',
+  'combined-st': 'Combined WASM ST',
+  'combined-mt': 'Combined WASM MT',
   'native-desktop': 'Desktop native',
 };
 type Engine = (typeof engines)[number];
+type WasmMode = 'st' | 'mt' | 'compare';
+const stExecution: PerformanceLabWasmExecution = { variant: 'st' };
 type Cell = {
   result: PerformanceLabRunResult;
   uiWall: number;
@@ -42,7 +49,10 @@ type Cell = {
   run: number;
   engineOrder: readonly Engine[];
 };
-const key = (fixtureId: string, engine: Engine): string => `${fixtureId}/${engine}`;
+const key = (fixtureId: string, engine: Engine, mt?: Extract<PerformanceLabWasmExecution, { variant: 'mt' }>): string =>
+  engine === 'combined-mt'
+    ? `${fixtureId}/${engine}/${mt?.permits ?? ''}/${mt?.receipt ?? ''}`
+    : `${fixtureId}/${engine}`;
 const duration = (value: number | undefined): string => (value === undefined ? '—' : `${value.toFixed(1)} ms`);
 const spread = (values: readonly number[]): string => {
   if (values.length === 0) {
@@ -54,12 +64,22 @@ const spread = (values: readonly number[]): string => {
   return `${duration(median)} median (${duration(sorted[0])}–${duration(sorted.at(-1))})`;
 };
 const nativeAvailable = (): boolean => Boolean(desktopBridge()?.geoSpecPerformance);
+const record = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 const runnableFixtures = performanceLabFixtures.filter(({ id }) => casesForFixture(id).length > 0);
 
 function GeoSpecLab(): React.JSX.Element {
   const [fixtureId, setFixtureId] = useState(runnableFixtures[0]?.id ?? '');
   const [repeats, setRepeats] = useState(1);
   const [cache, setCache] = useState<PerformanceLabRunInput['cache']>('cold');
+  const [wasmMode, setWasmMode] = useState<WasmMode>('st');
+  const mtPermits = availableMtPermits();
+  const [permits, setPermits] = useState(mtPermits[0] ?? 1);
+  const [mounted, setMounted] = useState(false);
+  const mt = mounted ? mtExecution(permits) : undefined;
+  const [verifiedMtReceipt, setVerifiedMtReceipt] = useState<string>();
+  const mtReady = mt !== undefined && verifiedMtReceipt === mt.receipt;
+  const [mtStatus, setMtStatus] = useState('No qualified MT assets in this build.');
   const [includeScale, setIncludeScale] = useState(false);
   const [preview, setPreview] = useState<Geometry>();
   const [previewStatus, setPreviewStatus] = useState('No preview available for this fixture.');
@@ -73,6 +93,49 @@ function GeoSpecLab(): React.JSX.Element {
   const fixture = runnableFixtures.find(({ id }) => id === fixtureId) ?? runnableFixtures[0];
   const cases = useMemo(() => casesForFixture(fixtureId), [fixtureId]);
   const desktop = nativeAvailable();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mt) {
+      setVerifiedMtReceipt(undefined);
+      setMtStatus('No qualified MT assets in this build.');
+      return;
+    }
+    let active = true;
+    setVerifiedMtReceipt(undefined);
+    setMtStatus('Checking MT receipt…');
+    const check = async (): Promise<void> => {
+      try {
+        const response = await fetch(mt.receipt);
+        if (!response.ok) {
+          throw new Error(`MT receipt unavailable: HTTP ${response.status}.`);
+        }
+        const receipt: unknown = await response.json();
+        if (
+          !record(receipt) ||
+          receipt['schema'] !== 'geospec-mixed-mt-assets-v1' ||
+          receipt['permits'] !== mt.permits
+        ) {
+          throw new Error('Served MT receipt does not match the selected permit budget.');
+        }
+        if (active) {
+          setVerifiedMtReceipt(mt.receipt);
+          setMtStatus(`Qualified MT receipt available · ${mt.permits} permits.`);
+        }
+      } catch (error) {
+        if (active) {
+          setMtStatus(error instanceof Error ? error.message : String(error));
+        }
+      }
+    };
+    void check();
+    return () => {
+      active = false;
+    };
+  }, [mt?.receipt, permits]);
 
   useEffect(() => {
     service.current = new GeoSpecPerformanceService();
@@ -119,19 +182,30 @@ function GeoSpecLab(): React.JSX.Element {
     if (busy || !service.current) {
       return;
     }
+    if (wasmMode !== 'st' && !mtReady) {
+      setError(mtStatus);
+      return;
+    }
     setBusy(true);
     setError(undefined);
     const runNumber = runSequence.current++;
-    const available = engines.filter((engine) => engine !== 'native-desktop' || desktop);
+    const selectedCombined: Engine[] =
+      wasmMode === 'compare' ? ['combined-st', 'combined-mt'] : [wasmMode === 'mt' ? 'combined-mt' : 'combined-st'];
+    const available: Engine[] = [
+      'legacy-wasm',
+      ...selectedCombined,
+      ...(desktop ? (['native-desktop'] as Engine[]) : []),
+    ];
     const offset = runNumber % available.length;
-    const engineOrder = [...available.slice(offset), ...available.slice(0, offset)];
+    const engineOrder =
+      wasmMode === 'compare' ? available : [...available.slice(offset), ...available.slice(0, offset)];
     try {
       for (const item of selection) {
         // oxlint-disable-next-line no-await-in-loop -- Fixture cells are intentionally serialized to avoid benchmark contention.
         const bytes = await loadFixtureBytes(item.fixture);
         for (const engine of engineOrder) {
           setProgress(`${item.fixture.label} · ${label[engine]}`);
-          const cellKey = key(item.fixture.id, engine);
+          const cellKey = key(item.fixture.id, engine, mt);
           setCellErrors((previous) => {
             const next = { ...previous };
             for (const current of item.cases) {
@@ -142,8 +216,21 @@ function GeoSpecLab(): React.JSX.Element {
           const wallAt = performance.now();
           try {
             // oxlint-disable-next-line no-await-in-loop -- Measure only one engine cell at a time.
+            if (engine === 'combined-mt' && !mt) {
+              throw new Error('No qualified MT package assets are available for this permit budget.');
+            }
+            // oxlint-disable-next-line no-await-in-loop -- Comparison cells must run sequentially on identical bytes.
             const result = await service.current.run(
-              runInput({ engine, fixture: item.fixture, bytes, cases: item.cases, repeats, cache }),
+              runInput({
+                engine: engine === 'combined-st' || engine === 'combined-mt' ? 'combined-wasm' : engine,
+                fixture: item.fixture,
+                bytes,
+                cases: item.cases,
+                repeats,
+                cache,
+                ...(engine === 'combined-st' ? { execution: stExecution } : {}),
+                ...(engine === 'combined-mt' ? { execution: mt } : {}),
+              }),
             );
             const uiWall = performance.now() - wallAt;
             setCells((previous) => ({
@@ -261,6 +348,49 @@ function GeoSpecLab(): React.JSX.Element {
               <option value='warm'>Reuse module</option>
             </select>
           </label>
+          <label className='grid gap-1 text-sm'>
+            Combined WASM
+            <select
+              className='h-9 rounded-md border bg-background px-2'
+              value={wasmMode}
+              disabled={busy}
+              onChange={(event) => {
+                setWasmMode(event.target.value as WasmMode);
+              }}
+            >
+              <option value='st'>ST</option>
+              <option value='mt' disabled={mtPermits.length === 0}>
+                MT
+              </option>
+              <option value='compare' disabled={mtPermits.length === 0}>
+                ST then MT
+              </option>
+            </select>
+          </label>
+          <label className='grid gap-1 text-sm'>
+            MT permits (caller included)
+            <select
+              className='h-9 rounded-md border bg-background px-2'
+              value={permits}
+              disabled={busy || mtPermits.length === 0}
+              onChange={(event) => {
+                setPermits(Number(event.target.value));
+              }}
+            >
+              {mtPermits.length === 0 ? (
+                <option value={1}>Unavailable</option>
+              ) : (
+                mtPermits.map((count) => (
+                  <option key={count} value={count}>
+                    {count}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <p className='text-xs text-muted-foreground' role='status'>
+            {mtStatus}
+          </p>
           <label className='flex h-9 items-center gap-2 text-sm'>
             <input
               type='checkbox'
@@ -273,7 +403,7 @@ function GeoSpecLab(): React.JSX.Element {
             Include scale fixtures in catalog
           </label>
           <Button
-            disabled={busy || cases.length === 0}
+            disabled={busy || cases.length === 0 || (wasmMode !== 'st' && !mtReady)}
             onClick={async () => {
               await run([{ fixture, cases }]);
             }}
@@ -282,7 +412,7 @@ function GeoSpecLab(): React.JSX.Element {
           </Button>
           <Button
             variant='outline'
-            disabled={busy}
+            disabled={busy || (wasmMode !== 'st' && !mtReady)}
             onClick={async () => {
               await run(
                 runnableFixtures
@@ -364,24 +494,41 @@ function GeoSpecLab(): React.JSX.Element {
                         </Button>
                       </th>
                       {engines.map((engine) => {
-                        const cell = cells[key(fixture.id, engine)]?.findLast((candidate) =>
+                        const cellKey = key(fixture.id, engine, mt);
+                        const cell = cells[cellKey]?.findLast((candidate) =>
                           candidate.result.perCase.some((row) => row.caseId === entry.id),
                         );
-                        const cellError = cellErrors[`${key(fixture.id, engine)}/${entry.id}`];
+                        const cellError = cellErrors[`${cellKey}/${entry.id}`];
                         const rows = cell?.result.perCase.filter((row) => row.caseId === entry.id) ?? [];
                         const latest = rows.at(-1);
-                        const difference = latest ? classifyPerformanceLabDifference({ engine, ...latest }) : undefined;
+                        const parity =
+                          engine === 'combined-mt' && cell
+                            ? pairedCaseVerdict(cell, cells[key(fixture.id, 'combined-st')], entry.id)
+                            : undefined;
+                        const catalogEngine =
+                          engine === 'combined-st' || engine === 'combined-mt' ? 'combined-wasm' : engine;
+                        const difference = latest
+                          ? classifyPerformanceLabDifference({
+                              engine: catalogEngine,
+                              ...latest,
+                            })
+                          : undefined;
                         const hasUnexpectedMismatch = rows.some(
                           (row) =>
                             row.status !== 'unsupported' &&
                             row.expectedStatus !== 'unverified' &&
                             row.status !== row.expectedStatus &&
-                            !classifyPerformanceLabDifference({ engine, ...row }),
+                            !classifyPerformanceLabDifference({
+                              engine: catalogEngine,
+                              ...row,
+                            }),
                         );
                         return (
                           <td key={engine} className='p-2'>
                             {engine === 'native-desktop' && !desktop ? (
                               <span className='text-muted-foreground'>Unavailable in browser</span>
+                            ) : engine === 'combined-mt' && !mt ? (
+                              <span className='text-muted-foreground'>No qualified MT assets</span>
                             ) : cellError ? (
                               <span role='alert' className='text-destructive'>
                                 Error: {cellError}
@@ -392,7 +539,8 @@ function GeoSpecLab(): React.JSX.Element {
                                   {[...new Set(rows.map(({ status }) => status))].join(' / ')}
                                 </strong>
                                 <div className='font-mono text-xs text-muted-foreground'>
-                                  {rows.length} sample{rows.length === 1 ? '' : 's'} · evaluate{' '}
+                                  {rows.length} sample
+                                  {rows.length === 1 ? '' : 's'} · evaluate{' '}
                                   {spread(rows.map(({ evaluation }) => evaluation))}
                                 </div>
                                 <div className='font-mono text-xs text-muted-foreground'>
@@ -407,14 +555,40 @@ function GeoSpecLab(): React.JSX.Element {
                                   <p className='text-xs text-muted-foreground'>{difference.reason}</p>
                                 ) : null}
                                 <div className='font-mono text-xs text-muted-foreground'>
-                                  startup {duration(cell?.result.timing.startup)} · admit{' '}
+                                  {cell?.result.execution
+                                    ? `${cell.result.execution.variant.toUpperCase()}${cell.result.execution.variant === 'mt' ? ` · ${cell.result.execution.permits} permits` : ''} · `
+                                    : ''}
+                                  first {duration(cell?.result.timing.firstResult ?? undefined)} · startup{' '}
+                                  {duration(cell?.result.timing.startup)} · admit{' '}
                                   {duration(cell?.result.timing.admission)} · engine{' '}
                                   {duration(cell?.result.timing.total)} · UI {duration(cell?.uiWall)}
                                 </div>
+                                {parity ? (
+                                  <div className='font-mono text-xs text-muted-foreground'>
+                                    ST/MT:{' '}
+                                    {parity === 'same'
+                                      ? 'same status and canonical result across repeats'
+                                      : parity === 'different'
+                                        ? 'different status or canonical result'
+                                        : parity === 'unpaired'
+                                          ? 'no paired ST result'
+                                          : 'unsupported case; no parity verdict'}
+                                  </div>
+                                ) : null}
                                 <div className='font-mono text-xs text-muted-foreground'>
                                   {cell?.result.backend} · {latest.numericProfile ?? 'profile unavailable'} · actual{' '}
                                   {cell?.result.cache} · requested {cell?.requestedCache}
                                 </div>
+                                {cell?.result.execution?.variant === 'mt' ? (
+                                  <div className='font-mono text-xs break-all text-muted-foreground'>
+                                    Receipt {cell.result.execution.receipt}
+                                  </div>
+                                ) : null}
+                                {cell?.result.execution ? (
+                                  <div className='font-mono text-xs text-muted-foreground'>
+                                    Memory unavailable (no scoped cell measurement)
+                                  </div>
+                                ) : null}
                                 {latest.diagnostics.length > 0 ? (
                                   <details className='mt-1'>
                                     <summary>Diagnostics</summary>

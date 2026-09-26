@@ -17,6 +17,8 @@ import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration lives outside the app alias root.
 import { resolveTauCloudBuildEnabled } from './build-environment.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -137,7 +139,11 @@ const normalizeProvenancePath = (moduleId: string): string => {
 export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = {}): Plugin => {
   let viteRoot = __dirname;
   let graphFileName: string | undefined;
-  let graphAssets: Array<{ fileName: string; sourcePath: string; sha256: string }> = [];
+  let graphAssets: Array<{
+    fileName: string;
+    sourcePath: string;
+    sha256: string;
+  }> = [];
   return {
     name: 'tau-ui-source-alias',
     enforce: 'pre',
@@ -329,7 +335,10 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
         const assets = graphAssets.filter((asset) => existsSync(path.resolve(outputRoot, asset.fileName)));
         await writeFile(
           path.resolve(outputRoot, graphFileName),
-          JSON.stringify({ chunks: chunks.filter((chunk) => chunk !== undefined), assets }),
+          JSON.stringify({
+            chunks: chunks.filter((chunk) => chunk !== undefined),
+            assets,
+          }),
         );
       },
     },
@@ -367,6 +376,7 @@ export const createUiReactCompilerPlugin = (): Plugin => {
 };
 
 export default defineConfig(({ mode }) => {
+  const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   const isTest = mode === 'test';
   const isNetlify = process.env['NETLIFY'] === 'true';
   const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
@@ -382,6 +392,7 @@ export default defineConfig(({ mode }) => {
       // granularity at which a tab's app-logic vintage can diverge.
       tauBuildId: JSON.stringify(Date.now()),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
+      tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
        * `"desktop"`. Left undefined under `mode === 'test'` so unit tests can
@@ -401,6 +412,7 @@ export default defineConfig(({ mode }) => {
       ...(isTest ? {} : { 'import.meta.env.TAU_OFFLINE_SHELL': '"enabled"' }),
     },
     plugins: [
+      mtAssets.plugin,
       createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
 
       /*
@@ -445,7 +457,14 @@ export default defineConfig(({ mode }) => {
       plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }), nxViteTsPaths()],
     },
     resolve: {
-      alias: isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : [],
+      alias: isTest
+        ? [
+            {
+              find: testScriptsAlias,
+              replacement: path.resolve(__dirname, 'scripts'),
+            },
+          ]
+        : [],
     },
 
     ssr: uiSsrOptions,

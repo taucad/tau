@@ -38,12 +38,6 @@ enum geospec_occt_surface_type {
   GEOSPEC_OCCT_SURFACE_OTHER = 10
 };
 
-enum geospec_occt_pmi_kind {
-  GEOSPEC_OCCT_PMI_DIMENSION = 0,
-  GEOSPEC_OCCT_PMI_GEOMETRIC_TOLERANCE = 1,
-  GEOSPEC_OCCT_PMI_DATUM = 2
-};
-
 enum geospec_occt_entity_kind {
   GEOSPEC_OCCT_ENTITY_WHOLE = 0,
   GEOSPEC_OCCT_ENTITY_OCCURRENCE = 1,
@@ -219,12 +213,6 @@ typedef struct geospec_occt_face_facts {
   int u_rational;
   int v_rational;
 } geospec_occt_face_facts;
-
-typedef struct geospec_occt_pmi_facts {
-  int kind;
-  size_t association_count;
-  size_t first_association_count;
-} geospec_occt_pmi_facts;
 
 typedef struct geospec_occt_subshape_facts {
   int64_t occurrence;
@@ -716,16 +704,6 @@ int geospec_occt_face_location(const geospec_occt_document* document,
 int geospec_occt_face_label(const geospec_occt_document* document,
                             size_t index, geospec_occt_string* shape_label,
                             geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-
-size_t geospec_occt_pmi_count(const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_pmi(const geospec_occt_document* document, size_t index,
-                     geospec_occt_pmi_facts* out_pmi,
-                     geospec_occt_string* label, geospec_occt_string* name,
-                     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_pmi_association(const geospec_occt_document* document,
-                                 size_t pmi_index, size_t association_index,
-                                 geospec_occt_string* shape_label,
-                                 geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 size_t geospec_occt_subshape_count(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;

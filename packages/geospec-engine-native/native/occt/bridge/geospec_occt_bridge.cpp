@@ -96,7 +96,6 @@
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Iterator.hxx>
-#include <XCAFDoc_DimTolTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XSControl_TransferReader.hxx>
@@ -193,14 +192,6 @@ struct FaceFacts {
   geospec_occt_bounds bounds{};
   int reversed = 0;
   std::string shape_label;
-};
-
-struct PmiFacts {
-  int kind = GEOSPEC_OCCT_PMI_DIMENSION;
-  std::string label;
-  std::string name;
-  std::vector<std::string> shape_labels;
-  size_t first_association_count = 0;
 };
 
 struct SubshapeFacts {
@@ -1107,25 +1098,6 @@ void prepare_source_associations(
   }
 }
 
-void append_pmi(const NCollection_Sequence<TDF_Label>& labels,
-                int kind,
-                std::vector<PmiFacts>& output) {
-  for (const TDF_Label& label : labels) {
-    PmiFacts record;
-    record.kind = kind;
-    record.label = label_entry(label);
-    record.name = label_name(label);
-    NCollection_Sequence<TDF_Label> first;
-    NCollection_Sequence<TDF_Label> second;
-    if (XCAFDoc_DimTolTool::GetRefShapeLabel(label, first, second)) {
-      for (const TDF_Label& shape : first) record.shape_labels.push_back(label_entry(shape));
-      record.first_association_count = record.shape_labels.size();
-      for (const TDF_Label& shape : second) record.shape_labels.push_back(label_entry(shape));
-    }
-    output.push_back(std::move(record));
-  }
-}
-
 int subshape_type(TopAbs_ShapeEnum type) {
   switch (type) {
     case TopAbs_FACE: return GEOSPEC_OCCT_SUBSHAPE_FACE;
@@ -1568,7 +1540,6 @@ struct geospec_occt_document {
   // Private whole-shape faces: shape and label only; numerics are a slot.
   std::vector<FaceFacts> faces;
   std::vector<FaceView> public_faces;
-  std::vector<PmiFacts> pmi;
   std::vector<SubshapeFacts> subshapes;
   std::vector<SemanticDatumFacts> semantic_datums;
   std::vector<DatumPlacementFacts> datum_placements;
@@ -6073,18 +6044,6 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     append_subshapes(shape_tool, products, result->occurrences,
                      result->faces, result->public_faces,
                      result->subshapes);
-
-    const auto pmi_tool = XCAFDoc_DocumentTool::DimTolTool(result->document->Main());
-    NCollection_Sequence<TDF_Label> dimensions;
-    NCollection_Sequence<TDF_Label> tolerances;
-    NCollection_Sequence<TDF_Label> datums;
-    pmi_tool->GetDimensionLabels(dimensions);
-    pmi_tool->GetGeomToleranceLabels(tolerances);
-    pmi_tool->GetDatumLabels(datums);
-    result->pmi.reserve(static_cast<size_t>(dimensions.Length() + tolerances.Length() + datums.Length()));
-    append_pmi(dimensions, GEOSPEC_OCCT_PMI_DIMENSION, result->pmi);
-    append_pmi(tolerances, GEOSPEC_OCCT_PMI_GEOMETRIC_TOLERANCE, result->pmi);
-    append_pmi(datums, GEOSPEC_OCCT_PMI_DATUM, result->pmi);
     append_semantic_datums(reader, shape_tool, products, result->occurrences,
                            result->public_faces, result->semantic_datums);
     append_datum_placements(reader, result->occurrences,
@@ -6578,35 +6537,6 @@ int geospec_occt_face_label(const geospec_occt_document* document,
   return write_string(
       document->faces[static_cast<size_t>(query_index - 1)].shape_label,
       shape_label);
-}
-
-size_t geospec_occt_pmi_count(const geospec_occt_document* document) noexcept {
-  return document == nullptr ? 0 : document->pmi.size();
-}
-
-int geospec_occt_pmi(const geospec_occt_document* document, size_t index,
-                     geospec_occt_pmi_facts* pmi,
-                     geospec_occt_string* label, geospec_occt_string* name,
-                     geospec_occt_string* error) noexcept {
-  if (document == nullptr || pmi == nullptr || index >= document->pmi.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "PMI index/output is invalid.", error);
-  }
-  const PmiFacts& value = document->pmi[index];
-  pmi->kind = value.kind;
-  pmi->association_count = value.shape_labels.size();
-  pmi->first_association_count = value.first_association_count;
-  return copy_result(write_string(value.label, label), write_string(value.name, name));
-}
-
-int geospec_occt_pmi_association(const geospec_occt_document* document,
-                                 size_t pmi_index, size_t association_index,
-                                 geospec_occt_string* shape_label,
-                                 geospec_occt_string* error) noexcept {
-  if (document == nullptr || pmi_index >= document->pmi.size() ||
-      association_index >= document->pmi[pmi_index].shape_labels.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "PMI association index is out of range.", error);
-  }
-  return write_string(document->pmi[pmi_index].shape_labels[association_index], shape_label);
 }
 
 int geospec_occt_pmi_source_faces(

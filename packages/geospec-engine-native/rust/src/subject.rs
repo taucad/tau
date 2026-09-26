@@ -1249,18 +1249,7 @@ fn report_facts_bytes(bundle: &ReportedBrepBundle) -> u64 {
             .saturating_add(optional_text(&value.instance_name))
             .saturating_add(vector(&value.ordinal_path));
     }
-    bytes = bytes
-        .saturating_add(vector(&facts.faces))
-        .saturating_add(vector(&facts.pmi));
-    for value in &facts.pmi {
-        bytes = bytes
-            .saturating_add(text(&value.label))
-            .saturating_add(text(&value.name))
-            .saturating_add(vector(&value.shape_labels));
-        for label in &value.shape_labels {
-            bytes = bytes.saturating_add(text(label));
-        }
-    }
+    bytes = bytes.saturating_add(vector(&facts.faces));
     bytes = bytes.saturating_add(vector(&facts.subshapes));
     for value in &facts.subshapes {
         bytes = bytes

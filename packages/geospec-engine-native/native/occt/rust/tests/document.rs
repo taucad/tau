@@ -1,5 +1,5 @@
 use geospec_engine_native_core::backend::BackendErrorKind;
-use geospec_engine_native_occt::{Document, PmiKind, SurfaceFacts, TopologyCounts};
+use geospec_engine_native_occt::{Document, SurfaceFacts, TopologyCounts};
 use std::path::PathBuf;
 
 // The bridge reports TopExp_Explorer traversal multiplicities. Each closed box
@@ -117,7 +117,6 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
         2_200.0,
         1e-8,
     );
-    assert!(facts.pmi.is_empty());
     assert!(facts.occurrences.is_empty());
 
     let mesh = document.tessellate(0.1, 0.5).unwrap();
@@ -251,7 +250,7 @@ fn assembly_retains_occurrence_references_composed_placements_and_bounds() {
 }
 
 #[test]
-fn nist_document_retains_bspline_and_exact_pmi_association_inventory() {
+fn nist_document_retains_bspline_faces() {
     let document = Document::from_step(&fixture("nist-pmi-bspline.step")).unwrap();
     let facts = document.facts().unwrap();
 
@@ -289,86 +288,6 @@ fn nist_document_retains_bspline_and_exact_pmi_association_inventory() {
         }
     }
     assert_eq!(
-        facts
-            .pmi
-            .iter()
-            .filter(|value| value.kind == PmiKind::Dimension)
-            .count(),
-        28
-    );
-    assert_eq!(
-        facts
-            .pmi
-            .iter()
-            .filter(|value| value.kind == PmiKind::GeometricTolerance)
-            .count(),
-        10
-    );
-    assert_eq!(
-        facts
-            .pmi
-            .iter()
-            .filter(|value| value.kind == PmiKind::Datum)
-            .count(),
-        11
-    );
-    assert_eq!(
-        facts
-            .pmi
-            .iter()
-            .map(|value| value.shape_labels.len())
-            .sum::<usize>(),
-        50
-    );
-
-    let dimension_labels = (1..=28)
-        .map(|value| format!("0:1:4:{value}"))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        facts.pmi[..28]
-            .iter()
-            .map(|value| value.label.clone())
-            .collect::<Vec<_>>(),
-        dimension_labels
-    );
-    assert_eq!(
-        facts.pmi[28..38]
-            .iter()
-            .map(|value| value.label.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "0:1:4:29", "0:1:4:32", "0:1:4:35", "0:1:4:38", "0:1:4:40", "0:1:4:42", "0:1:4:43",
-            "0:1:4:45", "0:1:4:46", "0:1:4:48"
-        ]
-    );
-    assert_eq!(
-        facts.pmi[38..]
-            .iter()
-            .map(|value| value.label.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "0:1:4:30", "0:1:4:31", "0:1:4:33", "0:1:4:34", "0:1:4:36", "0:1:4:37", "0:1:4:39",
-            "0:1:4:41", "0:1:4:44", "0:1:4:47", "0:1:4:49"
-        ]
-    );
-
-    let associated = facts
-        .pmi
-        .iter()
-        .filter(|value| !value.shape_labels.is_empty())
-        .map(|value| {
-            (
-                value.label.as_str(),
-                value
-                    .shape_labels
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(associated, expected_pmi_associations());
-    assert_eq!(
         document.tessellate(0.1, 0.5).unwrap().triangles.len(),
         14_212
     );
@@ -395,55 +314,4 @@ fn external_step_resource_is_refused_before_transfer() {
         error.message,
         "STEP external file references are unsupported by byte-only admission."
     );
-}
-
-fn expected_pmi_associations() -> Vec<(&'static str, Vec<&'static str>)> {
-    // Frozen independently by the accepted S3 OCCT dev1 probe before this adapter existed.
-    vec![
-        ("0:1:4:1", vec!["0:1:1:1:7"]),
-        ("0:1:4:2", vec!["0:1:1:1:9"]),
-        ("0:1:4:3", vec!["0:1:1:1:12"]),
-        ("0:1:4:4", vec!["0:1:1:1:13"]),
-        ("0:1:4:5", vec!["0:1:1:1:14"]),
-        ("0:1:4:6", vec!["0:1:1:1:15"]),
-        ("0:1:4:7", vec!["0:1:1:1:12"]),
-        ("0:1:4:8", vec!["0:1:1:1:16"]),
-        ("0:1:4:9", vec!["0:1:1:1:3"]),
-        ("0:1:4:10", vec!["0:1:1:1:17"]),
-        ("0:1:4:11", vec!["0:1:1:1:18"]),
-        ("0:1:4:12", vec!["0:1:1:1:19"]),
-        ("0:1:4:13", vec!["0:1:1:1:20"]),
-        ("0:1:4:14", vec!["0:1:1:1:21"]),
-        ("0:1:4:15", vec!["0:1:1:1:22"]),
-        ("0:1:4:16", vec!["0:1:1:1:5"]),
-        ("0:1:4:17", vec!["0:1:1:1:11"]),
-        ("0:1:4:18", vec!["0:1:1:1:13"]),
-        ("0:1:4:19", vec!["0:1:1:1:5"]),
-        ("0:1:4:20", vec!["0:1:1:1:10"]),
-        ("0:1:4:23", vec!["0:1:1:1:14"]),
-        ("0:1:4:24", vec!["0:1:1:1:23", "0:1:1:1:22"]),
-        ("0:1:4:25", vec!["0:1:1:1:4", "0:1:1:1:5"]),
-        ("0:1:4:26", vec!["0:1:1:1:10", "0:1:1:1:11"]),
-        ("0:1:4:27", vec!["0:1:1:1:7", "0:1:1:1:5"]),
-        ("0:1:4:28", vec!["0:1:1:1:10", "0:1:1:1:10"]),
-        ("0:1:4:29", vec!["0:1:1:1:19"]),
-        ("0:1:4:32", vec!["0:1:1:1:20"]),
-        ("0:1:4:35", vec!["0:1:1:1:21"]),
-        ("0:1:4:38", vec!["0:1:1:1:17"]),
-        ("0:1:4:40", vec!["0:1:1:1:18"]),
-        ("0:1:4:42", vec!["0:1:1:1:3"]),
-        ("0:1:4:43", vec!["0:1:1:1:16"]),
-        ("0:1:4:45", vec!["0:1:1:1:12"]),
-        ("0:1:4:46", vec!["0:1:1:1:14"]),
-        ("0:1:4:48", vec!["0:1:1:1:15"]),
-        ("0:1:4:30", vec!["0:1:1:1:12"]),
-        ("0:1:4:31", vec!["0:1:1:1:14"]),
-        ("0:1:4:33", vec!["0:1:1:1:12"]),
-        ("0:1:4:34", vec!["0:1:1:1:14"]),
-        ("0:1:4:36", vec!["0:1:1:1:12"]),
-        ("0:1:4:37", vec!["0:1:1:1:14"]),
-        ("0:1:4:44", vec!["0:1:1:1:12"]),
-        ("0:1:4:47", vec!["0:1:1:1:12"]),
-        ("0:1:4:49", vec!["0:1:1:1:14"]),
-    ]
 }

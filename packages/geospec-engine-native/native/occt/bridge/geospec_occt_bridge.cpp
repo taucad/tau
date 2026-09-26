@@ -22,6 +22,7 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <DESTEP_Parameters.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom2dAdaptor_Curve.hxx>
@@ -41,6 +42,7 @@
 #include <STEPConstruct_Tool.hxx>
 #include <STEPConstruct_ExternRefs.hxx>
 #include <STEPConstruct_UnitContext.hxx>
+#include <Standard_ArrayStreamBuffer.hxx>
 #include <Standard_Failure.hxx>
 #include <StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext.hxx>
 #include <StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx.hxx>
@@ -48,6 +50,7 @@
 #include <StepGeom_CartesianPoint.hxx>
 #include <StepGeom_Direction.hxx>
 #include <StepGeom_Plane.hxx>
+#include <StepBasic_ApplicationContext.hxx>
 #include <StepBasic_Product.hxx>
 #include <StepBasic_ProductDefinition.hxx>
 #include <StepBasic_ProductDefinitionFormation.hxx>
@@ -81,6 +84,7 @@
 #include <TransferBRep.hxx>
 #include <Transfer_TransientProcess.hxx>
 #include <NCollection_DataMap.hxx>
+#include <NCollection_IncAllocator.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_List.hxx>
 #include <TopoDS.hxx>
@@ -93,7 +97,6 @@
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Iterator.hxx>
-#include <XCAFDoc_DimTolTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XSControl_TransferReader.hxx>
@@ -142,8 +145,14 @@ struct ProductFacts {
 // Private occurrence face address; its numerics are a document slot.
 struct LocatedFaceFacts {
   TopoDS_Face shape;
-  std::vector<uint32_t> edge_indices;
   std::string shape_label;
+};
+
+// One occurrence's ordered private edge addresses and, per private face, the
+// 1-based addresses of its edges: a document slot filled on first edge demand.
+struct OccurrenceEdgeAddresses {
+  std::vector<TopoDS_Edge> edges;
+  std::vector<std::vector<uint32_t>> face_edges;
 };
 
 struct EdgeFacts {
@@ -175,7 +184,6 @@ struct OccurrenceFacts {
   geospec_occt_occurrence_facts facts{};
   std::vector<LocatedFaceFacts> faces;
   std::vector<FaceView> public_faces;
-  std::vector<TopoDS_Edge> edges;
 };
 
 struct SourceFaceFacts {
@@ -190,14 +198,6 @@ struct FaceFacts {
   geospec_occt_bounds bounds{};
   int reversed = 0;
   std::string shape_label;
-};
-
-struct PmiFacts {
-  int kind = GEOSPEC_OCCT_PMI_DIMENSION;
-  std::string label;
-  std::string name;
-  std::vector<std::string> shape_labels;
-  size_t first_association_count = 0;
 };
 
 struct SubshapeFacts {
@@ -548,7 +548,10 @@ bool collect_validation_solids(const TopoDS_Shape& shape,
 bool disjoint_validation_solids(const std::vector<TopoDS_Shape>& solids) {
   // IsSame includes the accumulated location but ignores orientation. Sharing
   // within one complete solid is normal; sharing across solids needs fallback.
-  NCollection_IndexedDataMap<TopoDS_Shape, size_t, TopTools_ShapeMapHasher> owners;
+  const occ::handle<NCollection_BaseAllocator> allocator =
+      new NCollection_IncAllocator;
+  NCollection_IndexedDataMap<TopoDS_Shape, size_t, TopTools_ShapeMapHasher> owners(
+      size_t(1), allocator);
   for (size_t owner = 0; owner < solids.size(); ++owner) {
     std::vector<TopoDS_Shape> pending{solids[owner]};
     while (!pending.empty()) {
@@ -726,18 +729,6 @@ FaceFacts face_facts(const TopoDS_Face& face, uint32_t index,
 }
 
 template <typename Face>
-int exact_face_index(const std::vector<Face>& faces,
-                     const TopoDS_Shape& shape) {
-  int match = 0;
-  for (size_t index = 0; index < faces.size(); ++index) {
-    if (!faces[index].shape.IsEqual(shape)) continue;
-    if (match != 0) return 0;
-    match = static_cast<int>(index + 1);
-  }
-  return match;
-}
-
-template <typename Face>
 int exact_mapped_face_index(
     const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& map,
     const std::vector<Face>& faces, const TopoDS_Shape& shape) {
@@ -748,24 +739,79 @@ int exact_mapped_face_index(
              : 0;
 }
 
-int located_public_face_index(const TopoDS_Shape& product,
-                              const TopoDS_Shape& attached,
-                              const OccurrenceFacts& occurrence) {
-  TopoDS_Shape product_face;
-  for (TopExp_Explorer explorer(product, TopAbs_FACE); explorer.More();
-       explorer.Next()) {
-    if (!explorer.Current().IsSame(attached)) continue;
-    if (!product_face.IsNull()) return -1;
-    product_face = explorer.Current();
-  }
-  if (product_face.IsNull()) return -1;
+// A face list indexed by IsSame, with each key's ordinals in the list.
+struct IndexedFaces {
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> map;
+  std::vector<std::vector<size_t>> ordinals;
 
+  void add(const TopoDS_Shape& face, size_t ordinal) {
+    const size_t key = static_cast<size_t>(map.Add(face));
+    if (key > ordinals.size()) ordinals.resize(key);
+    ordinals[key - 1].push_back(ordinal);
+  }
+
+  // The 1-based ordinal of the unique IsEqual match in `faces`, else 0. IsEqual
+  // implies IsSame, so no match lies outside the shape's own key.
+  template <typename Face>
+  int exact(const std::vector<Face>& faces, const TopoDS_Shape& shape) const {
+    const int key = map.FindIndex(shape);
+    if (key <= 0) return 0;
+    int match = 0;
+    for (const size_t ordinal : ordinals[static_cast<size_t>(key - 1)]) {
+      if (!faces[ordinal].shape.IsEqual(shape)) continue;
+      if (match != 0) return 0;
+      match = static_cast<int>(ordinal + 1);
+    }
+    return match;
+  }
+};
+
+// Face indexes for the named-subshape and datum lookups: the whole shape's
+// public faces over its private face map, and each product's and occurrence's
+// faces indexed on their first lookup rather than scanned per lookup.
+struct FaceLookups {
+  IndexedFaces whole;
+  std::vector<std::optional<IndexedFaces>> products;
+  std::vector<std::optional<IndexedFaces>> occurrences;
+};
+
+int located_public_face_index(FaceLookups& lookups, size_t product,
+                              const TopoDS_Shape& product_shape,
+                              const TopoDS_Shape& attached,
+                              const std::vector<OccurrenceFacts>& occurrences,
+                              size_t occurrence) {
+  std::optional<IndexedFaces>& product_faces = lookups.products[product];
+  if (!product_faces) {
+    product_faces.emplace();
+    size_t ordinal = 0;
+    for (TopExp_Explorer explorer(product_shape, TopAbs_FACE); explorer.More();
+         explorer.Next()) {
+      product_faces->add(explorer.Current(), ordinal++);
+    }
+  }
+  // The one product face the explorer visits IsSame `attached`, else none.
+  const int key = product_faces->map.FindIndex(attached);
+  if (key <= 0 ||
+      product_faces->ordinals[static_cast<size_t>(key - 1)].size() != 1) {
+    return -1;
+  }
+  const TopoDS_Shape& product_face = product_faces->map(key);
+
+  const OccurrenceFacts& value = occurrences[occurrence];
   TopoDS_Shape located = product_face;
-  located.Location(occurrence.shape.Location() * product.Location().Inverted() *
+  located.Location(value.shape.Location() *
+                   product_shape.Location().Inverted() *
                    product_face.Location());
-  const int face = exact_face_index(occurrence.public_faces, located);
+  std::optional<IndexedFaces>& faces = lookups.occurrences[occurrence];
+  if (!faces) {
+    faces.emplace();
+    for (size_t ordinal = 0; ordinal < value.public_faces.size(); ++ordinal) {
+      faces->add(value.public_faces[ordinal].shape, ordinal);
+    }
+  }
+  const int face = faces->exact(value.public_faces, located);
   if (face == 0) return -1;
-  return occurrence.public_faces[static_cast<size_t>(face - 1)].query_index == 0
+  return value.public_faces[static_cast<size_t>(face - 1)].query_index == 0
              ? -1
              : face - 1;
 }
@@ -820,33 +866,19 @@ EdgeFacts edge_facts(const TopoDS_Edge& edge, uint32_t index) {
   return result;
 }
 
-// Ordered private edge/face addresses, edge incidence and public faces. Their
-// numerics are filled on demand from these same ordered shapes.
+// Ordered private face addresses and public faces. Edge addresses, face→edge
+// incidence and all numerics are filled on demand from these same shapes.
 void populate_occurrence_geometry(OccurrenceFacts& occurrence) {
-  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
-  TopExp::MapShapes(occurrence.shape, TopAbs_EDGE, edges);
-  occurrence.edges.reserve(static_cast<size_t>(edges.Extent()));
-  for (int index = 1; index <= edges.Extent(); ++index) {
-    occurrence.edges.push_back(TopoDS::Edge(edges(index)));
-  }
-
-  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+  // Transient map nodes come from one bump allocator released at return.
+  const occ::handle<NCollection_BaseAllocator> allocator =
+      new NCollection_IncAllocator;
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces(
+      size_t(1), allocator);
   TopExp::MapShapes(occurrence.shape, TopAbs_FACE, faces);
   occurrence.faces.reserve(static_cast<size_t>(faces.Extent()));
   for (int index = 1; index <= faces.Extent(); ++index) {
-    const TopoDS_Face face = TopoDS::Face(faces(index));
     LocatedFaceFacts located;
-    located.shape = face;
-
-    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> face_edges;
-    TopExp::MapShapes(face, TopAbs_EDGE, face_edges);
-    located.edge_indices.reserve(static_cast<size_t>(face_edges.Extent()));
-    for (int edge = 1; edge <= face_edges.Extent(); ++edge) {
-      const int occurrence_index = edges.FindIndex(face_edges(edge));
-      if (occurrence_index > 0) {
-        located.edge_indices.push_back(static_cast<uint32_t>(occurrence_index));
-      }
-    }
+    located.shape = TopoDS::Face(faces(index));
     occurrence.faces.push_back(std::move(located));
   }
 
@@ -1104,25 +1136,6 @@ void prepare_source_associations(
   }
 }
 
-void append_pmi(const NCollection_Sequence<TDF_Label>& labels,
-                int kind,
-                std::vector<PmiFacts>& output) {
-  for (const TDF_Label& label : labels) {
-    PmiFacts record;
-    record.kind = kind;
-    record.label = label_entry(label);
-    record.name = label_name(label);
-    NCollection_Sequence<TDF_Label> first;
-    NCollection_Sequence<TDF_Label> second;
-    if (XCAFDoc_DimTolTool::GetRefShapeLabel(label, first, second)) {
-      for (const TDF_Label& shape : first) record.shape_labels.push_back(label_entry(shape));
-      record.first_association_count = record.shape_labels.size();
-      for (const TDF_Label& shape : second) record.shape_labels.push_back(label_entry(shape));
-    }
-    output.push_back(std::move(record));
-  }
-}
-
 int subshape_type(TopAbs_ShapeEnum type) {
   switch (type) {
     case TopAbs_FACE: return GEOSPEC_OCCT_SUBSHAPE_FACE;
@@ -1138,6 +1151,7 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
                       std::vector<OccurrenceFacts>& occurrences,
                       std::vector<FaceFacts>& whole_query_faces,
                       const std::vector<FaceView>& whole_faces,
+                      FaceLookups& lookups,
                       std::vector<SubshapeFacts>& output) {
   std::vector<std::vector<int>> owners = index_product_owners(
       static_cast<size_t>(product_labels.Length()), occurrences);
@@ -1162,10 +1176,10 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
         if (shape.ShapeType() == TopAbs_FACE) {
           if (owner >= 0) {
             face = located_public_face_index(
-                product_shape, shape,
-                occurrences[static_cast<size_t>(owner)]);
+                lookups, static_cast<size_t>(product_index - 1), product_shape,
+                shape, occurrences, static_cast<size_t>(owner));
           } else {
-            const int matched = exact_face_index(whole_faces, shape);
+            const int matched = lookups.whole.exact(whole_faces, shape);
             if (matched > 0 &&
                 whole_faces[static_cast<size_t>(matched - 1)].query_index > 0) {
               face = matched - 1;
@@ -1203,7 +1217,8 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
               .faces[static_cast<size_t>(located.query_index - 1)]
               .shape_label = record.shape_label;
         }
-        const int whole = exact_face_index(whole_query_faces, located.shape);
+        const int whole = exact_mapped_face_index(
+            lookups.whole.map, whole_query_faces, located.shape);
         if (whole > 0) {
           whole_query_faces[static_cast<size_t>(whole - 1)].shape_label =
               record.shape_label;
@@ -1231,7 +1246,7 @@ void append_semantic_datums(
     const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
     const NCollection_Sequence<TDF_Label>& product_labels,
     const std::vector<OccurrenceFacts>& occurrences,
-    const std::vector<FaceView>& whole_faces,
+    const std::vector<FaceView>& whole_faces, FaceLookups& lookups,
     std::vector<SemanticDatumFacts>& output) {
   const auto session = reader.ChangeReader().WS();
   if (session.IsNull() || session->Model().IsNull()) return;
@@ -1344,7 +1359,7 @@ void append_semantic_datums(
   for (const auto& [letter, attached_faces] : faces_by_letter) {
     auto& whole_indices = whole_face_indices_by_letter[letter];
     for (const TopoDS_Shape& attached : attached_faces) {
-      const int face = exact_face_index(whole_faces, attached);
+      const int face = lookups.whole.exact(whole_faces, attached);
       if (face > 0 &&
           whole_faces[static_cast<size_t>(face - 1)].query_index > 0) {
         whole_indices.push_back(static_cast<uint32_t>(face - 1));
@@ -1365,8 +1380,9 @@ void append_semantic_datums(
           product_labels.Value(static_cast<int>(occurrence.product + 1)));
       std::vector<uint32_t> indices;
       for (const TopoDS_Shape& attached : attached_faces) {
-        const int face =
-            located_public_face_index(product_shape, attached, occurrence);
+        const int face = located_public_face_index(
+            lookups, occurrence.product, product_shape, attached, occurrences,
+            occurrence_index);
         if (face >= 0) {
           indices.push_back(static_cast<uint32_t>(face));
         }
@@ -1565,7 +1581,6 @@ struct geospec_occt_document {
   // Private whole-shape faces: shape and label only; numerics are a slot.
   std::vector<FaceFacts> faces;
   std::vector<FaceView> public_faces;
-  std::vector<PmiFacts> pmi;
   std::vector<SubshapeFacts> subshapes;
   std::vector<SemanticDatumFacts> semantic_datums;
   std::vector<DatumPlacementFacts> datum_placements;
@@ -1579,16 +1594,19 @@ struct geospec_occt_document {
       circular_bores;
   mutable std::unique_ptr<EdgeTreatmentTransferData> edge_treatments;
   // N2-LAZY source numeric slots. Admission keeps XDE identity, order,
-  // placements and private/public addresses only. Each slot is computed once
+  // placements and private/public face addresses only; occurrence edge
+  // addresses and face→edge incidence are a slot too. Each slot is computed once
   // from this admitted source shape on first demand and stored only after it
   // succeeds; common_volume completes all of them before it may modify inputs.
   // Const getters write these unsynchronized slots: the document is confined
-  // to one thread at a time (see geospec_occt_open_step).
+  // to one thread at a time (its Rust owner is neither Send nor Sync).
   mutable std::optional<geospec_occt_shape_facts> shape_facts;
   // The shape_facts validity check alone, for a validity demand that comes
   // before any source shape facts.
   mutable std::optional<bool> shape_valid;
   mutable std::vector<std::optional<geospec_occt_bounds>> occurrence_bounds;
+  mutable std::vector<std::optional<OccurrenceEdgeAddresses>>
+      occurrence_edge_addresses;
   mutable std::vector<std::optional<std::vector<geospec_occt_edge_facts>>>
       occurrence_edges;
   mutable std::vector<
@@ -1626,11 +1644,47 @@ const geospec_occt_bounds& source_occurrence_bounds(
   return *slot;
 }
 
+// The edge addresses and incidence admission used to map for every occurrence,
+// in the same MapShapes order; only edge consumers pay for them.
+const OccurrenceEdgeAddresses& source_occurrence_edge_addresses(
+    const geospec_occt_document& document, size_t occurrence) {
+  std::optional<OccurrenceEdgeAddresses>& slot =
+      document.occurrence_edge_addresses[occurrence];
+  if (!slot) {
+    const OccurrenceFacts& value = document.occurrences[occurrence];
+    const occ::handle<NCollection_BaseAllocator> allocator =
+        new NCollection_IncAllocator;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges(
+        size_t(1), allocator);
+    TopExp::MapShapes(value.shape, TopAbs_EDGE, edges);
+    OccurrenceEdgeAddresses addresses;
+    addresses.edges.reserve(static_cast<size_t>(edges.Extent()));
+    for (int index = 1; index <= edges.Extent(); ++index) {
+      addresses.edges.push_back(TopoDS::Edge(edges(index)));
+    }
+    addresses.face_edges.reserve(value.faces.size());
+    for (const LocatedFaceFacts& face : value.faces) {
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> face_edges(
+          size_t(1), allocator);
+      TopExp::MapShapes(face.shape, TopAbs_EDGE, face_edges);
+      std::vector<uint32_t>& incidence = addresses.face_edges.emplace_back();
+      incidence.reserve(static_cast<size_t>(face_edges.Extent()));
+      for (int edge = 1; edge <= face_edges.Extent(); ++edge) {
+        const int index = edges.FindIndex(face_edges(edge));
+        if (index > 0) incidence.push_back(static_cast<uint32_t>(index));
+      }
+    }
+    slot = std::move(addresses);
+  }
+  return *slot;
+}
+
 const std::vector<geospec_occt_edge_facts>& source_occurrence_edges(
     const geospec_occt_document& document, size_t occurrence) {
   auto& slot = document.occurrence_edges[occurrence];
   if (!slot) {
-    const std::vector<TopoDS_Edge>& edges = document.occurrences[occurrence].edges;
+    const std::vector<TopoDS_Edge>& edges =
+        source_occurrence_edge_addresses(document, occurrence).edges;
     std::vector<geospec_occt_edge_facts> values;
     values.reserve(edges.size());
     for (size_t index = 0; index < edges.size(); ++index) {
@@ -1648,6 +1702,8 @@ const std::vector<geospec_occt_located_face_facts>& source_occurrence_faces(
   if (!slot) {
     const std::vector<LocatedFaceFacts>& faces =
         document.occurrences[occurrence].faces;
+    const std::vector<std::vector<uint32_t>>& face_edges =
+        source_occurrence_edge_addresses(document, occurrence).face_edges;
     std::vector<geospec_occt_located_face_facts> values;
     values.reserve(faces.size());
     for (size_t index = 0; index < faces.size(); ++index) {
@@ -1657,7 +1713,7 @@ const std::vector<geospec_occt_located_face_facts>& source_occurrence_faces(
       located.face = local.facts;
       located.bounds = local.bounds;
       located.reversed = local.reversed;
-      located.edge_count = faces[index].edge_indices.size();
+      located.edge_count = face_edges[index].size();
       values.push_back(located);
     }
     slot = std::move(values);
@@ -5305,8 +5361,7 @@ bool build_report_facts(const geospec_occt_document& document,
         message = "Occurrence public face has no unique private query address.";
         return false;
       }
-      const LocatedFaceFacts& query_face =
-          source_occurrence.faces[static_cast<size_t>(source_face.query_index - 1)];
+      const size_t query_face = static_cast<size_t>(source_face.query_index - 1);
       TopoDS_Shape mapped;
       if (!map_report_shape(
               source_face.shape, TopAbs_FACE,
@@ -5317,7 +5372,10 @@ bool build_report_facts(const geospec_occt_document& document,
       }
       mapped_faces.push_back(reported_face(
           TopoDS::Face(mapped), static_cast<uint32_t>(public_index),
-          source_face.query_index, query_face.edge_indices.size()));
+          source_face.query_index,
+          source_occurrence_edge_addresses(document, occurrence_index)
+              .face_edges[query_face]
+              .size()));
     }
     report.occurrence_faces.push_back(std::move(mapped_faces));
   }
@@ -5384,9 +5442,12 @@ geospec_occt_validity_facts compute_validity(const geospec_occt_document& docume
                  BRep_Tool::Tolerance(TopoDS::Face(explorer.Current())));
   }
 
+  // Map nodes come from one bump allocator; the face lists keep the default.
+  const occ::handle<NCollection_BaseAllocator> allocator =
+      new NCollection_IncAllocator;
   NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
                              TopTools_ShapeMapHasher>
-      edge_faces;
+      edge_faces(size_t(1), allocator);
   TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
   for (int index = 1; index <= edge_faces.Extent(); ++index) {
     if (edge_faces.FindFromIndex(index).Extent() < 2) {
@@ -5864,6 +5925,64 @@ static int dedicated_pool_scope(
   return GEOSPEC_OCCT_OK;
 }
 
+// The STEP read profile, pinned field by field to the Interface_Static values
+// admission read before, so a header-default change cannot move bytes. Never
+// default-construct it: ReadSubshapeNames is false there and drops subshape
+// names. OnNoBRep keeps a file's tessellation off exact faces (policy §16).
+// The XCAF mode fields are inert on this reader; the reader setters govern.
+static DESTEP_Parameters step_read_parameters() {
+  DESTEP_Parameters p;
+  p.ReadBSplineContinuity = DESTEP_Parameters::ReadMode_BSplineContinuity_C0;
+  p.ReadPrecisionMode = DESTEP_Parameters::ReadMode_Precision_File;
+  p.ReadPrecisionVal = 1.e-3;  // used when a file has no length uncertainty
+  p.ReadMaxPrecisionMode = DESTEP_Parameters::ReadMode_MaxPrecision_Preferred;
+  p.ReadMaxPrecisionVal = 1.0;
+  p.ReadSameParamMode = false;
+  p.ReadSurfaceCurveMode = DESTEP_Parameters::ReadMode_SurfaceCurve_Default;
+  p.EncodeRegAngle = 0.57295779513082323;  // 0.01 rad in degrees; unread on STEP
+  p.AngleUnit = DESTEP_Parameters::AngleUnitMode_File;
+  p.ReadProductMode = true;
+  p.ReadProductContext = DESTEP_Parameters::ReadMode_ProductContext_All;
+  p.ReadShapeRepr = DESTEP_Parameters::ReadMode_ShapeRepr_All;
+  p.ReadTessellated = DESTEP_Parameters::RWMode_Tessellated_OnNoBRep;
+  p.ReadAssemblyLevel = DESTEP_Parameters::ReadMode_AssemblyLevel_All;
+  p.ReadRelationship = true;
+  p.ReadShapeAspect = true;
+  p.ReadConstrRelation = false;
+  p.ReadSubshapeNames = true;
+  p.ReadCodePage = Resource_FormatType_UTF8;
+  p.ReadNonmanifold = false;
+  p.ReadIdeas = false;
+  p.ReadAllShapes = false;
+  p.ReadRootTransformation = true;
+  return p;
+}
+
+// OCCT initializes its data-exchange globals (controllers, LibCtl libraries,
+// Interface_Static standards, XSAlgo and ShapeProcess operators) unsynchronized
+// on first use. One reader construction does it before admissions may overlap;
+// nothing writes Interface_Static afterwards, so the three statics without a
+// DESTEP_Parameters field stay process constants.
+static void step_reader_warmup() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    const STEPCAFControl_Reader warmup;
+    // No edge-continuity consumer reads the regularity flags: skip encoding.
+    Interface_Static::SetRVal("read.encoderegularity.angle", 0.0);
+  });
+}
+
+// ReadStream's SetModel -> ComputeGraph runs the semantic ComputeCheck, which
+// nothing reads, unless the session has finished one. A finished ComputeGraph
+// on a one-entity seed leaves it finished; the real SetModel re-arms it.
+static void skip_semantic_check(STEPCAFControl_Reader& reader) {
+  const occ::handle<XSControl_WorkSession> session = reader.ChangeReader().WS();
+  const occ::handle<StepData_StepModel> seed = new StepData_StepModel;
+  seed->AddEntity(new StepBasic_ApplicationContext);
+  session->SetModel(seed);
+  session->ComputeGraph(true);
+}
+
 int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                            geospec_occt_document** output,
                            geospec_occt_string* error) noexcept {
@@ -5879,21 +5998,24 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
         geospec_occt_thread_pool_width(1, &pool_width, nullptr);
     if (pool_status != GEOSPEC_OCCT_OK && pool_status != GEOSPEC_OCCT_UNSUPPORTED)
       return pool_status;
-    // The reader writes process-global Interface_Static options, and its
-    // read/transfer state is not proven safe beside another reader. Serialize
-    // the reader's whole lifetime; the lock is declared first so it is
-    // released after the reader is destroyed.
-    // ponytail: one process-wide lock serializes concurrent admissions; a
-    // parameter-local ReadStream needs its own whole-configuration parity.
-    static std::mutex step_reader_lock;
-    const std::lock_guard<std::mutex> step_reader_guard(step_reader_lock);
+    // Each admission owns its reader, session, model and document, and reads
+    // its parameters from the model, so admissions need no process lock.
+    step_reader_warmup();
     STEPCAFControl_Reader reader;
-    // Reader construction registers and resets this option on first use.
-    Interface_Static::SetIVal("read.stepcaf.subshapes.name", 1);
     reader.SetNameMode(true);
+    // GDT and layer reading create consumed subshape labels, so they stay on.
     reader.SetGDTMode(true);
-    std::istringstream stream(std::string(reinterpret_cast<const char*>(bytes), length));
-    if (reader.ReadStream("memory.step", stream) != IFSelect_RetDone) {
+    // No reader of these XCAF attributes: re-enable a mode when one exists.
+    reader.SetPropsMode(false);
+    reader.SetMatMode(false);
+    reader.SetViewMode(false);
+    reader.SetMetaMode(false);
+    reader.SetColorMode(false);
+    skip_semantic_check(reader);
+    // Zero-copy: the caller's bytes stay borrowed until ReadStream has parsed them.
+    Standard_ArrayStreamBuffer buffer(reinterpret_cast<const char*>(bytes), length);
+    std::istream stream(&buffer);
+    if (reader.ReadStream("memory.step", step_read_parameters(), stream) != IFSelect_RetDone) {
       return fail(GEOSPEC_OCCT_READ_FAILED, "STEP read failed.", error);
     }
 
@@ -5989,7 +6111,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     }
     prepare_source_associations(reader, shape_tool, result->occurrences,
                                 result->source_faces);
-    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    // The private face map also keys the named-subshape and datum lookups.
+    FaceLookups lookups;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& faces =
+        lookups.whole.map;
     TopExp::MapShapes(result->shape, TopAbs_FACE, faces);
     result->faces.reserve(static_cast<size_t>(faces.Extent()));
     for (int index = 1; index <= faces.Extent(); ++index) {
@@ -6003,29 +6128,22 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
       const TopoDS_Face face = TopoDS::Face(explorer.Current());
       const int query_index =
           exact_mapped_face_index(faces, result->faces, face);
+      lookups.whole.add(face, result->public_faces.size());
       result->public_faces.push_back(
           {query_index > 0 ? static_cast<uint32_t>(query_index) : 0, face});
     }
+    lookups.products.resize(static_cast<size_t>(products.Length()));
+    lookups.occurrences.resize(result->occurrences.size());
     append_subshapes(shape_tool, products, result->occurrences,
-                     result->faces, result->public_faces,
+                     result->faces, result->public_faces, lookups,
                      result->subshapes);
-
-    const auto pmi_tool = XCAFDoc_DocumentTool::DimTolTool(result->document->Main());
-    NCollection_Sequence<TDF_Label> dimensions;
-    NCollection_Sequence<TDF_Label> tolerances;
-    NCollection_Sequence<TDF_Label> datums;
-    pmi_tool->GetDimensionLabels(dimensions);
-    pmi_tool->GetGeomToleranceLabels(tolerances);
-    pmi_tool->GetDatumLabels(datums);
-    result->pmi.reserve(static_cast<size_t>(dimensions.Length() + tolerances.Length() + datums.Length()));
-    append_pmi(dimensions, GEOSPEC_OCCT_PMI_DIMENSION, result->pmi);
-    append_pmi(tolerances, GEOSPEC_OCCT_PMI_GEOMETRIC_TOLERANCE, result->pmi);
-    append_pmi(datums, GEOSPEC_OCCT_PMI_DATUM, result->pmi);
     append_semantic_datums(reader, shape_tool, products, result->occurrences,
-                           result->public_faces, result->semantic_datums);
+                           result->public_faces, lookups,
+                           result->semantic_datums);
     append_datum_placements(reader, result->occurrences,
                             result->datum_placements);
     result->occurrence_bounds.resize(result->occurrences.size());
+    result->occurrence_edge_addresses.resize(result->occurrences.size());
     result->occurrence_edges.resize(result->occurrences.size());
     result->occurrence_faces.resize(result->occurrences.size());
     result->query_faces.resize(result->faces.size());
@@ -6036,6 +6154,17 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
 }
 
 void geospec_occt_release(geospec_occt_document* document) noexcept { delete document; }
+
+size_t geospec_occt_triangulated_face_count(
+    const geospec_occt_document* document) noexcept {
+  if (document == nullptr) return 0;
+  size_t count = 0;
+  for (const FaceFacts& face : document->faces) {
+    TopLoc_Location location;
+    if (!BRep_Tool::Triangulation(face.shape, location).IsNull()) ++count;
+  }
+  return count;
+}
 
 int geospec_occt_document_facts(const geospec_occt_document* document,
                                 geospec_occt_shape_facts* shape,
@@ -6505,35 +6634,6 @@ int geospec_occt_face_label(const geospec_occt_document* document,
       shape_label);
 }
 
-size_t geospec_occt_pmi_count(const geospec_occt_document* document) noexcept {
-  return document == nullptr ? 0 : document->pmi.size();
-}
-
-int geospec_occt_pmi(const geospec_occt_document* document, size_t index,
-                     geospec_occt_pmi_facts* pmi,
-                     geospec_occt_string* label, geospec_occt_string* name,
-                     geospec_occt_string* error) noexcept {
-  if (document == nullptr || pmi == nullptr || index >= document->pmi.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "PMI index/output is invalid.", error);
-  }
-  const PmiFacts& value = document->pmi[index];
-  pmi->kind = value.kind;
-  pmi->association_count = value.shape_labels.size();
-  pmi->first_association_count = value.first_association_count;
-  return copy_result(write_string(value.label, label), write_string(value.name, name));
-}
-
-int geospec_occt_pmi_association(const geospec_occt_document* document,
-                                 size_t pmi_index, size_t association_index,
-                                 geospec_occt_string* shape_label,
-                                 geospec_occt_string* error) noexcept {
-  if (document == nullptr || pmi_index >= document->pmi.size() ||
-      association_index >= document->pmi[pmi_index].shape_labels.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "PMI association index is out of range.", error);
-  }
-  return write_string(document->pmi[pmi_index].shape_labels[association_index], shape_label);
-}
-
 int geospec_occt_pmi_source_faces(
     const geospec_occt_document* document, uint32_t source_face_id,
     geospec_occt_pmi_source_face* output, size_t capacity,
@@ -6853,33 +6953,47 @@ int geospec_occt_occurrence_face_edge(
                 "Occurrence public face has no unique private query address.",
                 error);
   }
-  const std::vector<uint32_t>& edge_indices =
-      value.faces[static_cast<size_t>(query_index - 1)].edge_indices;
-  if (edge_index >= edge_indices.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                "Occurrence face-edge index/output is invalid.", error);
-  }
-  *edge = edge_indices[edge_index];
-  return GEOSPEC_OCCT_OK;
+  return guarded(error, [&]() -> int {
+    const std::vector<uint32_t>& edge_indices =
+        source_occurrence_edge_addresses(*document, occurrence)
+            .face_edges[static_cast<size_t>(query_index - 1)];
+    if (edge_index >= edge_indices.size()) {
+      return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                  "Occurrence face-edge index/output is invalid.", error);
+    }
+    *edge = edge_indices[edge_index];
+    return GEOSPEC_OCCT_OK;
+  });
 }
 
-size_t geospec_occt_occurrence_edge_count(
-    const geospec_occt_document* document, uint32_t occurrence) noexcept {
-  return document == nullptr || occurrence >= document->occurrences.size()
-             ? 0
-             : document->occurrences[occurrence].edges.size();
+int geospec_occt_occurrence_edge_count(const geospec_occt_document* document,
+                                       uint32_t occurrence, size_t* count,
+                                       geospec_occt_string* error) noexcept {
+  if (document == nullptr || count == nullptr ||
+      occurrence >= document->occurrences.size()) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Occurrence edge-count index/output is invalid.", error);
+  }
+  return guarded(error, [&]() -> int {
+    *count = source_occurrence_edge_addresses(*document, occurrence).edges.size();
+    return GEOSPEC_OCCT_OK;
+  });
 }
 
 int geospec_occt_occurrence_edge(
     const geospec_occt_document* document, uint32_t occurrence, size_t index,
     geospec_occt_edge_facts* edge, geospec_occt_string* error) noexcept {
   if (document == nullptr || edge == nullptr ||
-      occurrence >= document->occurrences.size() ||
-      index >= document->occurrences[occurrence].edges.size()) {
+      occurrence >= document->occurrences.size()) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Occurrence edge index/output is invalid.", error);
   }
   return guarded(error, [&]() -> int {
+    if (index >= source_occurrence_edge_addresses(*document, occurrence)
+                     .edges.size()) {
+      return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                  "Occurrence edge index/output is invalid.", error);
+    }
     *edge = source_occurrence_edges(*document, occurrence)[index];
     return GEOSPEC_OCCT_OK;
   });

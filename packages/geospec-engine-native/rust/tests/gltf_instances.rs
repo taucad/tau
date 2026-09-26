@@ -75,7 +75,7 @@ fn ingest(engine: &mut Engine, primary: Vec<u8>, buffer: Vec<u8>) -> String {
         &engine
             .ingest_subject(
                 &serde_json::to_vec(&request).unwrap(),
-                primary,
+                &primary,
                 vec![buffer],
             )
             .unwrap(),

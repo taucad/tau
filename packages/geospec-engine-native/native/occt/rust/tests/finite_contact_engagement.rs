@@ -97,7 +97,7 @@ fn finite_contact_local_engagement_negative_and_budget_controls() {
         engine
             .ingest_subject(
                 &bind_ingest(f[3].as_bytes()),
-                std::fs::read(input.join(f[2])).unwrap(),
+                &std::fs::read(input.join(f[2])).unwrap(),
                 vec![],
             )
             .unwrap(),
@@ -290,7 +290,7 @@ fn finite_contact_engagement_original44_capture_before_assertions() {
                 );
                 let admission = String::from_utf8(
                     engine
-                        .ingest_subject(&bind_ingest(f[3].as_bytes()), bytes, vec![])
+                        .ingest_subject(&bind_ingest(f[3].as_bytes()), &bytes, vec![])
                         .map_err(|e| e.to_string())?,
                 )
                 .map_err(|e| e.to_string())?;

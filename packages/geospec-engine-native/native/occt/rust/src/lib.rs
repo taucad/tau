@@ -19,13 +19,12 @@ pub use geospec_engine_native_core::backend::brep::{
     EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
     EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, Extrema, FaceFacts,
     FiniteContactCircle, FiniteContactFace, LocatedFace, NominalCylindricalBand, OccurrenceFacts,
-    PmiFacts, PmiKind, PointState, ProductFacts, RegularSolidContainment, ReportedBrepBundle,
-    ResolvedSourceFace, SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts,
-    SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
-    TessellationProfile, TopologyCounts, ValidityFacts, WallOptions, WallSupport, WallThickness,
-    WallThicknessOutcome, MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
-    MAX_EDGE_TREATMENT_BOUNDARY_USES, MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS,
-    MAX_EDGE_TREATMENT_ROWS,
+    PointState, ProductFacts, RegularSolidContainment, ReportedBrepBundle, ResolvedSourceFace,
+    SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts, SourceFaceKey,
+    StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts, TessellationProfile,
+    TopologyCounts, ValidityFacts, WallOptions, WallSupport, WallThickness, WallThicknessOutcome,
+    MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES, MAX_EDGE_TREATMENT_BOUNDARY_USES,
+    MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS, MAX_EDGE_TREATMENT_ROWS,
 };
 use geospec_engine_native_core::backend::pmi::{PmiFaceAssociation, PmiField, PmiFieldStatus};
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
@@ -139,6 +138,11 @@ impl Document {
     /// Diagnostic count of report copy+mesh generations built for this document.
     pub fn report_generation_builds(&self) -> usize {
         unsafe { ffi::geospec_occt_report_generation_builds(self.raw.as_ptr()) }
+    }
+
+    /// Diagnostic count of admitted faces that carry a triangulation; 0 for a BRep.
+    pub fn triangulated_faces(&self) -> usize {
+        unsafe { ffi::geospec_occt_triangulated_face_count(self.raw.as_ptr()) }
     }
 
     pub fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
@@ -421,8 +425,7 @@ impl BrepSubject for Document {
         };
         let occurrence_face_count =
             unsafe { ffi::geospec_occt_occurrence_query_face_count(self.raw.as_ptr(), occurrence) };
-        let occurrence_edge_count =
-            unsafe { ffi::geospec_occt_occurrence_edge_count(self.raw.as_ptr(), occurrence) };
+        let occurrence_edge_count = unsafe { edge_address_count(self.raw.as_ptr(), occurrence)? };
         if (face_count, edge_count) != expected_counts
             || !valid_association_map(&value.face_map[..face_count], occurrence_face_count)
             || !valid_association_map(&value.edge_map[..edge_count], occurrence_edge_count)
@@ -1831,36 +1834,6 @@ unsafe fn facts(raw: *const ffi::Document, reported: bool) -> Result<DocumentFac
         faces.push(output.try_into()?);
     }
 
-    let pmi_count = ffi::geospec_occt_pmi_count(raw);
-    let mut pmi = Vec::with_capacity(pmi_count);
-    for index in 0..pmi_count {
-        let mut output = ffi::PmiFacts::default();
-        let label = copied_string(|label, error| {
-            ffi::geospec_occt_pmi(raw, index, &mut output, label, std::ptr::null_mut(), error)
-        })?;
-        let name = copied_string(|name, error| {
-            ffi::geospec_occt_pmi(raw, index, &mut output, std::ptr::null_mut(), name, error)
-        })?;
-        let mut shape_labels = Vec::with_capacity(output.association_count);
-        if output.first_association_count > output.association_count {
-            return Err(backend_error(
-                "PMI ordered role boundary exceeds association count.",
-            ));
-        }
-        for association in 0..output.association_count {
-            shape_labels.push(copied_string(|label, error| {
-                ffi::geospec_occt_pmi_association(raw, index, association, label, error)
-            })?);
-        }
-        pmi.push(PmiFacts {
-            label,
-            name,
-            kind: pmi_kind(output.kind)?,
-            shape_labels,
-            first_association_count: output.first_association_count,
-        });
-    }
-
     let subshape_count = ffi::geospec_occt_subshape_count(raw);
     let mut subshapes = Vec::with_capacity(subshape_count);
     for index in 0..subshape_count {
@@ -2017,7 +1990,6 @@ unsafe fn facts(raw: *const ffi::Document, reported: bool) -> Result<DocumentFac
         occurrences,
         shape: shape.into(),
         faces,
-        pmi,
         subshapes,
         datum_placements,
         semantic_datums,
@@ -2145,11 +2117,25 @@ fn qualified_query_index(index: u32) -> Result<u32, BackendError> {
     Ok(index)
 }
 
+// The first edge demand maps the occurrence's edge addresses, which can fail.
+unsafe fn edge_address_count(
+    raw: *const ffi::Document,
+    occurrence: u32,
+) -> Result<usize, BackendError> {
+    let mut count = 0;
+    let mut error = ErrorBuffer::new();
+    check(
+        ffi::geospec_occt_occurrence_edge_count(raw, occurrence, &mut count, error.raw()),
+        &error,
+    )?;
+    Ok(count)
+}
+
 unsafe fn occurrence_edges(
     raw: *const ffi::Document,
     occurrence: u32,
 ) -> Result<Vec<EdgeFacts>, BackendError> {
-    let count = ffi::geospec_occt_occurrence_edge_count(raw, occurrence);
+    let count = edge_address_count(raw, occurrence)?;
     let mut result = Vec::with_capacity(count);
     for index in 0..count {
         let mut value = ffi::EdgeFacts::default();
@@ -3708,15 +3694,6 @@ impl TryFrom<ffi::FaceFacts> for FaceFacts {
     }
 }
 
-fn pmi_kind(value: i32) -> Result<PmiKind, BackendError> {
-    match value {
-        0 => Ok(PmiKind::Dimension),
-        1 => Ok(PmiKind::GeometricTolerance),
-        2 => Ok(PmiKind::Datum),
-        _ => Err(backend_error("OCCT returned an unknown PMI kind.")),
-    }
-}
-
 mod ffi {
     use super::c_char;
 
@@ -3798,14 +3775,6 @@ mod ffi {
         pub v_knots: u32,
         pub u_rational: i32,
         pub v_rational: i32,
-    }
-
-    #[derive(Clone, Copy, Default)]
-    #[repr(C)]
-    pub struct PmiFacts {
-        pub kind: i32,
-        pub association_count: usize,
-        pub first_association_count: usize,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -4279,6 +4248,7 @@ mod ffi {
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_release(document: *mut Document);
+        pub fn geospec_occt_triangulated_face_count(document: *const Document) -> usize;
         pub fn geospec_occt_document_facts(
             document: *const Document,
             shape: *mut ShapeFacts,
@@ -4416,22 +4386,6 @@ mod ffi {
             shape_label: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_pmi_count(document: *const Document) -> usize;
-        pub fn geospec_occt_pmi(
-            document: *const Document,
-            index: usize,
-            facts: *mut PmiFacts,
-            label: *mut StringBuffer,
-            name: *mut StringBuffer,
-            error: *mut StringBuffer,
-        ) -> i32;
-        pub fn geospec_occt_pmi_association(
-            document: *const Document,
-            index: usize,
-            association: usize,
-            label: *mut StringBuffer,
-            error: *mut StringBuffer,
-        ) -> i32;
         pub fn geospec_occt_subshape_count(document: *const Document) -> usize;
         pub fn geospec_occt_subshape(
             document: *const Document,
@@ -4501,7 +4455,9 @@ mod ffi {
         pub fn geospec_occt_occurrence_edge_count(
             document: *const Document,
             occurrence: u32,
-        ) -> usize;
+            count: *mut usize,
+            error: *mut StringBuffer,
+        ) -> i32;
         pub fn geospec_occt_occurrence_edge(
             document: *const Document,
             occurrence: u32,

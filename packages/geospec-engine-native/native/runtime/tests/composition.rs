@@ -11,7 +11,7 @@ fn ingest(
     let request = json!({"method":"ingestSubject","requestId":"admit","protocolVersion":3,"registryVersion":5,"canonicalProfile":"geospec-jcs-v1","format":format,"frame":{"coordinateSystem":"z-up","sourceUnit":source,"outputUnit":"mm"},"ingestOptions":{},"primaryByteLength":bytes.len(),"resources":buffers.iter().map(|b|json!({"name":"mesh.bin","byteLength":b.len()})).collect::<Vec<_>>()});
     serde_json::from_slice(
         &engine
-            .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, buffers)
+            .ingest_subject(&serde_json::to_vec(&request).unwrap(), &bytes, buffers)
             .unwrap(),
     )
     .unwrap()

@@ -46,7 +46,6 @@ impl BrepSubject for Control {
             products: vec![],
             occurrences: vec![],
             faces: vec![],
-            pmi: vec![],
             subshapes: vec![],
             datum_placements: vec![],
             semantic_datums: vec![],

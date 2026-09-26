@@ -12,9 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createMachineSecretStore,
   createNodeMachineRuntime,
-  hostMachineWorkspaceId,
   machineRouteGrants,
-  machineWorkspaceId,
   openMachineHostIdentity,
 } from '#machine-host.js';
 import { createKeychainSecretVaultWith, createMemorySecretVault } from '#secret-vault.js';
@@ -29,26 +27,6 @@ const sandbox = async (): Promise<string> => {
 
 afterEach(async () => {
   await Promise.all(sandboxes.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })));
-});
-
-describe('machineWorkspaceId', () => {
-  it('should derive one stable 64-character identity per canonical root', () => {
-    expect(machineWorkspaceId('/Users/tester/Projects/widget')).toBe(
-      createHash('sha256').update('/Users/tester/Projects/widget').digest('hex'),
-    );
-    expect(machineWorkspaceId('/Users/tester/Projects/widget')).toHaveLength(64);
-    expect(machineWorkspaceId('/Users/tester/Projects/widget')).not.toBe(
-      machineWorkspaceId('/Users/tester/Projects/widget-evil'),
-    );
-  });
-});
-
-describe('hostMachineWorkspaceId', () => {
-  it('should be one fixed 64-character scope that no project root derives', () => {
-    expect(hostMachineWorkspaceId).toBe(machineWorkspaceId('tau:machines:host'));
-    expect(hostMachineWorkspaceId).toMatch(/^[\da-f]{64}$/u);
-    expect(hostMachineWorkspaceId).not.toBe(machineWorkspaceId('/'));
-  });
 });
 
 describe('machineRouteGrants', () => {
@@ -67,6 +45,12 @@ describe('openMachineHostIdentity', () => {
     const { mode } = await stat(join(directory, 'identity.json'));
     // oxlint-disable-next-line no-bitwise -- POSIX group/world bits must be absent on protected state.
     expect(mode & 0o077).toBe(0);
+    /* An older build opening the same store still reads a `generation`. */
+    expect(JSON.parse(await readFile(join(directory, 'identity.json'), 'utf8'))).toEqual({
+      v: 1,
+      ...first,
+      generation: expect.any(String) as string,
+    });
   });
 });
 
@@ -154,12 +138,7 @@ describe('createMachineSecretStore', () => {
 describe('createNodeMachineRuntime', () => {
   const bytes = new TextEncoder().encode('G28\n');
   const artifact: MachineArtifactReference = {
-    revision: {
-      authorityId: 'a',
-      workspaceId: 'w',
-      revisionId: 'r1' as MachineArtifactReference['revision']['revisionId'],
-      treeDigest: `sha256:${'1'.repeat(64)}` as MachineArtifactReference['digest'],
-    },
+    projectId: 'proj_000000000000000000001',
     path: 'part.gcode.3mf',
     digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}` as MachineArtifactReference['digest'],
     length: bytes.byteLength,
@@ -177,16 +156,21 @@ describe('createNodeMachineRuntime', () => {
 
   it('should hand a provider only artifact bytes whose length and digest match the reference', async () => {
     const readArtifact = vi.fn(async () => bytes);
+    const log = vi.fn();
     const runtime = createNodeMachineRuntime({
       secrets: createMachineSecretStore({ vault: createMemorySecretVault() }),
       readArtifact,
+      log,
     });
-    const connection = runtime.connection('workspace-1');
+    const connection = runtime.connection();
     const { signal } = new AbortController();
     await expect(collect(connection.readArtifact({ artifact, maximumBytes: 1024, signal }))).resolves.toEqual(
       Buffer.from(bytes),
     );
-    expect(readArtifact).toHaveBeenCalledExactlyOnceWith('workspace-1', artifact, signal);
+    /* The reference itself names its project; the connection carries no scope. */
+    expect(readArtifact).toHaveBeenCalledExactlyOnceWith(artifact, signal);
+    await connection.log({ level: 'warning', message: 'MQTT reconnecting' });
+    expect(log).toHaveBeenCalledExactlyOnceWith({ level: 'warning', message: 'MQTT reconnecting' });
     readArtifact.mockResolvedValueOnce(new TextEncoder().encode('G29\n'));
     await expect(collect(connection.readArtifact({ artifact, maximumBytes: 1024, signal }))).rejects.toThrow(
       'MACHINE_ARTIFACT_MISMATCH',
@@ -200,7 +184,7 @@ describe('createNodeMachineRuntime', () => {
     const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
     const reference = 'vault:machine/fixture/printer-1';
     await secrets.save(reference, 'code');
-    const connection = createNodeMachineRuntime({ secrets, readArtifact: async () => bytes }).connection('w');
+    const connection = createNodeMachineRuntime({ secrets, readArtifact: async () => bytes }).connection();
     await expect(connection.resolveSecret({ reference, signal: new AbortController().signal })).resolves.toBe('code');
     await expect(connection.resolveSecret({ reference, signal: AbortSignal.abort() })).rejects.toThrow();
   });
@@ -265,7 +249,7 @@ describe('createNodeMachineRuntime', () => {
       secrets: createMachineSecretStore({ vault: createMemorySecretVault() }),
       readArtifact: async () => bytes,
     });
-    const stream = await runtime.connection('w').connectStream({
+    const stream = await runtime.connection().connectStream({
       endpoint: { address: '127.0.0.1', port: address.port },
       transport: 'tcp',
       trust: { type: 'system' },

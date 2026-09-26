@@ -62,12 +62,11 @@ export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
 export {
   createMachineSecretStore,
   createNodeMachineRuntime,
-  hostMachineWorkspaceId,
   localMachineFacet,
   machineRouteGrants,
-  machineWorkspaceId,
   openMachineHostIdentity,
   probeCertificateTrust,
+  readProjectId,
 } from '#machine-host.js';
 export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
 export { completeMachineBinding } from '#machine-binding-ceremony.js';

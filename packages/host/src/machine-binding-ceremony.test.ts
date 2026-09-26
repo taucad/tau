@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { completeMachineBinding } from '#machine-binding-ceremony.js';
 import type { CompleteMachineBindingInput, MachineBindingCeremonyEvent } from '#machine-binding-ceremony.js';
-import { createMachineSecretStore, hostMachineWorkspaceId } from '#machine-host.js';
+import { createMachineSecretStore } from '#machine-host.js';
 import type { probeCertificateTrust } from '#machine-host.js';
 import { createMemorySecretVault } from '#secret-vault.js';
 import type { SecretVault } from '#secret-vault.js';
@@ -71,7 +71,6 @@ const ceremony = (
     completeMachineBinding({
       host,
       secrets,
-      workspaceId: hostMachineWorkspaceId,
       ceremonyId: input.ceremonyId ?? 'ceremony-1',
       ...(input.accessCode === undefined ? {} : { accessCode: input.accessCode }),
       probeCertificateTrust: probe,
@@ -178,10 +177,7 @@ describe('completeMachineBinding', () => {
       expect(failure.message).toBe('MACHINE_CREDENTIAL_SAVE_FAILED');
       expect(failure.cause).toEqual({ code: 'SECRET_VAULT_UNAVAILABLE' });
       expect(JSON.stringify({ message: failure.message, cause: failure.cause })).not.toContain(printerCode);
-      expect(bind.removeBinding).toHaveBeenCalledWith({
-        workspaceId: hostMachineWorkspaceId,
-        machineId: 'workshop-x1c',
-      });
+      expect(bind.removeBinding).toHaveBeenCalledWith({ machineId: 'workshop-x1c' });
       await expect(bind.secrets.resolve(reference)).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
       expect(bind.events).toEqual([]);
     });

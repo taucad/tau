@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, realpath } from 'node:fs/promises';
+import { mkdir, readdir, realpath } from 'node:fs/promises';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MessageChannel } from 'node:worker_threads';
 
@@ -18,7 +18,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
-import type { CreateNodeMachineHostInput } from '@taucad/runtime/host/node';
+import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
 import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
@@ -51,11 +51,12 @@ import type { HostCredential } from '#credential-store.js';
 import {
   createMachineSecretStore,
   createNodeMachineRuntime,
-  hostMachineWorkspaceId,
   localMachineFacet,
   machineRouteGrants,
   openMachineHostIdentity,
+  readProjectId,
 } from '#machine-host.js';
+import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
 import { openSecretVault } from '#secret-vault.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
@@ -133,6 +134,9 @@ export type HostDaemonEvent =
          * route keeps serving and the person sees it in the directory. */
         | 'MACHINE_HOST'
         | 'MACHINE_PROVIDER'
+        /* Another Tau app holds the per-user machine store's writer lock, so
+         * this host serves without machines rather than exiting. */
+        | 'MACHINE_STORE_OWNED_ELSEWHERE'
         /* Retriable, never fatal: the compute child backs the relay sessions and
          * the geometry tools, and nothing else. The agent channel and its file
          * tools keep serving while the loop retries the child. */
@@ -207,9 +211,10 @@ export type HostDaemonAgentOptions = {
   /**
    * Machine providers served on the `/machines` route (`tau serve --machines`).
    * Absent, the route answers 404 and a client's machines facet negotiates
-   * `unsupported`. Identity and the directory journal live under
-   * `<config>/machines`, printers are scoped to the host rather than the
-   * workspace, and access codes resolve from the host's secret vault (the
+   * `unsupported`. Printers live in the per-user machine store,
+   * `<config>/machines`, which the desktop app opens too; while another Tau
+   * app holds it, the daemon warns `MACHINE_STORE_OWNED_ELSEWHERE` and serves
+   * without machines. Access codes resolve from the host's secret vault (the
    * macOS keychain, else that directory). The binding ceremony's native half
    * (the secret) has no daemon surface yet, so only providers that bind
    * without one — the simulator — complete here.
@@ -799,80 +804,71 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   };
 
   /**
+   * Open the per-user machine store, `<config>/machines`: the one store the
+   * desktop app and every other Tau host on this computer share.
+   *
+   * One identity beside it, the host's secret vault (`TAU_SECRET_VAULT`
+   * overrides its kind), and one trusted session for the route and the tools.
+   * While another Tau app holds the store's writer lock, this host warns and
+   * serves without machines instead of exiting.
+   *
+   * @param providers - The providers `--machines` admitted.
+   * @param readArtifact - Finds a print request's file in the served project.
+   * @returns What the agent server needs to answer the machines route, or `undefined` while the store is owned elsewhere.
+   */
+  const openMachineHost = async (
+    providers: CreateNodeMachineHostInput['providers'],
+    readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'],
+  ): Promise<NonNullable<AgentServerOptions['machines']> | undefined> => {
+    const storeRoot = join(defaultConfigDirectory(), 'machines');
+    const identity = await openMachineHostIdentity(storeRoot);
+    let host: NodeMachineHost;
+    try {
+      host = await createNodeMachineHost({
+        storeRoot,
+        ...identity,
+        admission: createHostAdmissionAuthority({ hostId: identity.hostId }),
+        providers,
+        runtime: createNodeMachineRuntime({
+          secrets: createMachineSecretStore({
+            vault: openSecretVault({ directory: storeRoot, env: process.env }),
+            legacyDirectory: storeRoot,
+          }),
+          readArtifact,
+          log: (entry) => {
+            if (entry.level === 'error' || entry.level === 'warning') {
+              emit({ type: 'warning', code: 'MACHINE_PROVIDER', message: entry.message });
+            }
+          },
+        }),
+        onError: (error) => {
+          emit({
+            type: 'warning',
+            code: 'MACHINE_HOST',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        },
+      });
+    } catch (error) {
+      if ((error as { readonly code?: unknown }).code !== 'AUTHORITY_ALREADY_OWNED') {
+        throw error;
+      }
+      emit({
+        type: 'warning',
+        code: 'MACHINE_STORE_OWNED_ELSEWHERE',
+        message:
+          'machines.unavailable (owned-elsewhere): printers are in use by another Tau app on this computer, so this host serves without them. Quit it and restart `tau serve --machines` to use them here.',
+      });
+      return undefined;
+    }
+    return { host, session: host.issueSession({ actor: { kind: 'user', id: 'daemon' }, grants: machineRouteGrants }) };
+  };
+
+  /**
    * Bring up Launcher 1: the always-on agent host and its `/agent` channel.
    *
    * @param agent - Workspace, gateway, model, admission secret, and binding.
    */
-  /**
-   * Compose the node machine host for the served workspace.
-   *
-   * One identity per config directory, one journal authority beside it, the
-   * host's secret vault (`TAU_SECRET_VAULT` overrides its kind), and one
-   * trusted session in the host-wide machine scope the desktop services
-   * utility serves too: printers belong to the host, not a project.
-   *
-   * @param providers - The providers `--machines` admitted.
-   * @param artifactProvider - The admitted filesystem an artifact is read through.
-   * @returns What the agent server needs to answer the machines route.
-   */
-  const openMachineHost = async (
-    providers: CreateNodeMachineHostInput['providers'],
-    artifactProvider: () => NodeFsProviderClient,
-  ): Promise<NonNullable<AgentServerOptions['machines']>> => {
-    const directory = join(defaultConfigDirectory(), 'machines');
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    const identity = await openMachineHostIdentity(directory);
-    const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
-    const authorityRoot = join(directory, 'authority');
-    await mkdir(authorityRoot, { recursive: true, mode: 0o700 });
-    const workspaceId = hostMachineWorkspaceId;
-    const host = await createNodeMachineHost({
-      authorityRoot,
-      ...identity,
-      admission,
-      providers,
-      runtime: createNodeMachineRuntime({
-        secrets: createMachineSecretStore({
-          vault: openSecretVault({ directory, env: process.env }),
-          legacyDirectory: directory,
-        }),
-        /* A request names no root, so the one this daemon serves holds the
-         * file only when the bytes carry the reference's digest. */
-        readArtifact: async (_workspaceId, artifact) => {
-          let bytes: Uint8Array<ArrayBuffer>;
-          try {
-            bytes = await artifactProvider().readFile(artifact.path);
-          } catch {
-            throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
-          }
-          if (`sha256:${createHash('sha256').update(bytes).digest('hex')}` !== artifact.digest) {
-            throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
-          }
-          return bytes;
-        },
-        log: (logWorkspaceId, entry) => {
-          if (entry.level === 'error' || entry.level === 'warning') {
-            emit({ type: 'warning', code: 'MACHINE_PROVIDER', message: `${logWorkspaceId}: ${entry.message}` });
-          }
-        },
-      }),
-      onError: (error) => {
-        emit({
-          type: 'warning',
-          code: 'MACHINE_HOST',
-          message: error instanceof Error ? error.message : String(error),
-        });
-      },
-    });
-    const session = admission.issueTrustedSession({
-      actor: { kind: 'user', id: 'daemon' },
-      authorityId: identity.authorityId,
-      workspaceId,
-      grants: machineRouteGrants,
-    });
-    return { host, session, workspaceId };
-  };
-
   const startAgent = async (agent: HostDaemonAgentOptions): Promise<void> => {
     const canonicalWorkspaceRoot = await realpath(agent.workspaceRoot);
     const authorityRoot = join(
@@ -977,11 +973,16 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         }
       }
     };
+    /* Named here rather than left to the revision port's default, because a
+     * print request's slice can sit in one of these checkouts: the machine
+     * host's artifact reader looks in the same directory the port writes. */
+    const checkoutsDirectory = join(defaultConfigDirectory(), 'checkouts', basename(agent.workspaceRoot));
     /* Before the tool registry, because the registry hands the agent this
      * project's read-only history (S28) — and before the launcher, because the
      * tree wraps it. */
     const revisions = createProjectRevisions({
       workspaceRoot: agent.workspaceRoot,
+      checkoutsDirectory,
       checkouts,
       filesystem: (checkout) => providerForAgentRoot(checkout.kind === 'live' ? agent.workspaceRoot : checkout.root),
       useFileSystem: useRevisionFileSystem,
@@ -1042,21 +1043,54 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         });
       },
     });
+    /* The served root is the project, and its `tau.json` id is what a print
+     * request names. A root without one prints nothing: no `request_print` is
+     * offered, and every artifact is refused. */
+    const projectId = await readProjectId(providerForAgentRoot(agent.workspaceRoot));
+    /**
+     * Find a print request's file: only this project's, in the served root and
+     * then its checkouts, where a candidate turn's slice lands. The digest
+     * decides; a checkout is admitted only for the read.
+     *
+     * @param artifact - The request's reference.
+     * @returns The first candidate's bytes whose digest matches.
+     */
+    const readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'] = async (artifact) => {
+      if (projectId === undefined || artifact.projectId !== projectId) {
+        throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
+      }
+      const checkoutRoots = await readdir(checkoutsDirectory, { withFileTypes: true }).then(
+        (entries) =>
+          entries.filter((entry) => entry.isDirectory()).map((entry) => join(checkoutsDirectory, entry.name)),
+        () => [],
+      );
+      const candidates: ReadonlyArray<Parameters<typeof useRevisionFileSystem>[0]> = [
+        { root: agent.workspaceRoot, kind: 'live' },
+        ...checkoutRoots.map((root) => ({ root, kind: 'linked' }) as const),
+      ];
+      for (const candidate of candidates) {
+        try {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- the served root first; the first digest match wins.
+          const bytes = await useRevisionFileSystem(candidate, async (provider) => provider.readFile(artifact.path));
+          if (`sha256:${createHash('sha256').update(bytes).digest('hex')}` === artifact.digest) {
+            return bytes;
+          }
+        } catch {
+          /* Not in this tree. */
+        }
+      }
+      throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
+    };
     /* Before the registry: the machine tools are offered only over a facet the
      * host already serves, the same rule the revisions history follows. */
-    const machines = agent.machines
-      ? await openMachineHost(agent.machines.providers, () => providerForAgentRoot(agent.workspaceRoot))
-      : undefined;
+    const machines = agent.machines ? await openMachineHost(agent.machines.providers, readArtifact) : undefined;
     const toolRegistry = createHostToolRegistry({
       workspaceRoot: agent.workspaceRoot,
       checkouts,
       revisions: revisions.history,
+      ...(projectId === undefined ? {} : { projectId }),
       ...(machines
-        ? {
-            machines: localMachineFacet((port) =>
-              machines.host.serve({ port, session: machines.session, workspaceId: machines.workspaceId }),
-            ),
-          }
+        ? { machines: localMachineFacet((port) => machines.host.serve({ port, session: machines.session })) }
         : {}),
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* Per root, not per host: a candidate turn's kernel must read the tree

@@ -388,7 +388,7 @@ describe('createHostToolRegistry', () => {
     expect(names).toContain('export_geometry');
   });
 
-  it('offers request_print only with a runtime, a history and a machine, and slices at the requested quality through its own export route', async () => {
+  it('offers request_print only with a runtime, a project id and a machine, and slices at the requested quality through its own export route', async () => {
     const workspaceRoot = await makeWorkspace();
     const timestamp = '2026-09-24T00:00:00.000Z';
     /* Not a real container: the planner's summary is advisory and covered in its own tests. */
@@ -399,17 +399,7 @@ describe('createHostToolRegistry', () => {
       issues: [],
     }));
     const runtimeClient = async () => fakeRuntime({ export: slice });
-    const revisions: NonNullable<HostToolRegistryOptions['revisions']> = {
-      log: async () => [],
-      diff: async () => [],
-      describe: async () => ({
-        branch: 'main',
-        revisionNumber: 3,
-        revisionId: 'revision-3',
-        branches: [{ name: 'main', revisionNumber: 3, revisionId: 'revision-3' }],
-        line: 'main · Rev 3',
-      }),
-    };
+    const projectId = 'proj_000000000000000000001';
     const entry = {
       machineId: 'machine-1',
       providerId: 'bambu',
@@ -463,14 +453,7 @@ describe('createHostToolRegistry', () => {
     const machines = {
       available: true,
       list: async () => ({
-        cursor: {
-          hostId: 'host-1',
-          authorityId: 'authority-1',
-          workspaceId: 'workspace-1',
-          generation: 'generation-1',
-          position: 1,
-          revision: 1,
-        },
+        cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
         entries: [entry],
       }),
       listProviders: async () => [provider],
@@ -481,10 +464,11 @@ describe('createHostToolRegistry', () => {
       createHostToolRegistry({ workspaceRoot, ...options })
         .list()
         .map((tool) => tool.name);
-    expect(names({ runtimeClient, revisions })).not.toContain('request_print');
+    expect(names({ runtimeClient, projectId })).not.toContain('request_print');
     expect(names({ runtimeClient, machines })).not.toContain('request_print');
-    expect(names({ revisions, machines })).not.toContain('request_print');
-    const registry = createHostToolRegistry({ workspaceRoot, runtimeClient, revisions, machines });
+    expect(names({ projectId, machines })).not.toContain('request_print');
+    /* No revision history: a print names its project, not a revision. */
+    const registry = createHostToolRegistry({ workspaceRoot, runtimeClient, projectId, machines });
     expect(registry.list().map((tool) => tool.name)).toContain('request_print');
 
     const result = await invoke(registry, 'request_print', {
@@ -511,8 +495,9 @@ describe('createHostToolRegistry', () => {
       },
     });
     const request = requestPrint.mock.calls[0]![0];
+    expect(request.artifact).not.toHaveProperty('revision');
     expect(request.artifact).toMatchObject({
-      revision: { authorityId: 'authority-1', workspaceId: 'workspace-1', revisionId: 'revision-3' },
+      projectId,
       path: '.tau/artifacts/call-1__main.ts-gcode.3mf/main.gcode.3mf',
       digest: `sha256:${await sha256Bytes(sliced)}`,
       length: sliced.byteLength,

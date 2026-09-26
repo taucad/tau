@@ -177,7 +177,9 @@ describe('startAgentServer', () => {
       }
       closed.resolve();
     });
+    const session = Object.freeze({}) as HostSessionHandle;
     const host: NodeMachineHost = {
+      issueSession: () => session,
       admitRoute: () => ({
         hostId: 'host',
         actor: { kind: 'user', id: 'user' },
@@ -206,12 +208,11 @@ describe('startAgentServer', () => {
       },
       close: vi.fn(async () => undefined),
     };
-    const session = Object.freeze({}) as HostSessionHandle;
     server = startAgentServer({
       launcher: stubLauncher(),
       token,
       workspaceRoot,
-      machines: { host, session, workspaceId: 'workspace' },
+      machines: { host, session },
     });
     await server.ready;
     const origin = server.url();

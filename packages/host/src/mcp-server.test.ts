@@ -429,14 +429,7 @@ describe('the mounted /mcp route', () => {
     /* Only what request_print reads; any other client call fails the test. */
     const client = {
       list: async () => ({
-        cursor: {
-          hostId: 'host-1',
-          authorityId: 'authority-1',
-          workspaceId: 'workspace-1',
-          generation: 'generation-1',
-          position: 1,
-          revision: 1,
-        },
+        cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
         entries: [machine],
       }),
       requestPrint,

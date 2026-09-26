@@ -417,33 +417,33 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
     let Evaluation::Geometric {
         positive_satisfied,
         diagnostics,
-        evidence,
+        mut evidence,
         negated_diagnostic,
     } = evaluation
     else {
         return evaluation;
     };
-    let get = |key: &str| evidence_field(&evidence, key);
-    let raw_measured = get("measured");
+    // Each field is taken once, so the projection moves rather than clones.
+    let mut raw_measured = take_field(&mut evidence, "measured");
     let (measured, witnesses) = match prepared {
         Prepared::BoundingBox { .. } => (
             raw_measured,
             selected_fields(
-                &evidence,
+                &mut evidence,
                 &["source", "primitives", "axisFailures", "tolerance"],
             ),
         ),
         Prepared::ConnectedComponents { .. } => (
-            selected_fields(&raw_measured, &["count"]),
+            selected_fields(&mut raw_measured, &["count"]),
             Json::object([
-                ("toleranceMm", get("toleranceMm")),
-                ("clusters", evidence_field(&raw_measured, "clusters")),
-                ("gaps", evidence_field(&raw_measured, "gaps")),
+                ("toleranceMm", take_field(&mut evidence, "toleranceMm")),
+                ("clusters", take_field(&mut raw_measured, "clusters")),
+                ("gaps", take_field(&mut raw_measured, "gaps")),
             ]),
         ),
         Prepared::Watertight => (
             selected_fields(
-                &raw_measured,
+                &mut raw_measured,
                 &[
                     "watertight",
                     "irregularEdges",
@@ -454,7 +454,7 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                 ],
             ),
             selected_fields(
-                &raw_measured,
+                &mut raw_measured,
                 &[
                     "irregularEdgeKindCounts",
                     "irregularEdgeClusters",
@@ -463,9 +463,9 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             ),
         ),
         Prepared::MeshIntegrity(_) => {
-            let nonfinite = evidence_field(&raw_measured, "nonFiniteVertices");
-            let degenerate = evidence_field(&raw_measured, "degenerateTriangles");
-            let duplicate = evidence_field(&raw_measured, "duplicateFaces");
+            let nonfinite = take_field(&mut raw_measured, "nonFiniteVertices");
+            let degenerate = take_field(&mut raw_measured, "degenerateTriangles");
+            let duplicate = take_field(&mut raw_measured, "duplicateFaces");
             let count = |value: &Json| match value {
                 Json::Array(values) => Json::Number(values.len() as f64),
                 _ => unreachable!("owned list"),
@@ -473,21 +473,19 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             let mut measured = vec![
                 (
                     "triangleCount".into(),
-                    evidence_field(&raw_measured, "triangleCount"),
+                    take_field(&mut raw_measured, "triangleCount"),
                 ),
                 ("nonFiniteVertexCount".into(), count(&nonfinite)),
                 ("degenerateTriangleCount".into(), count(&degenerate)),
                 ("duplicateFaceCount".into(), count(&duplicate)),
             ];
-            if let Json::Object(fields) = &evidence {
-                if let Some(value) = optional_field(fields, "watertight") {
-                    measured.push(("watertight".into(), evidence_field(value, "watertight")));
-                }
+            if let Some(mut value) = take_optional(&mut evidence, "watertight") {
+                measured.push(("watertight".into(), take_field(&mut value, "watertight")));
             }
             (
                 Json::Object(measured),
                 Json::object([
-                    ("failures", get("failures")),
+                    ("failures", take_field(&mut evidence, "failures")),
                     ("nonFiniteVertices", nonfinite),
                     ("degenerateTriangles", degenerate),
                     ("duplicateFaces", duplicate),
@@ -495,15 +493,13 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             )
         }
         Prepared::SurfaceArea(_) | Prepared::Volume(_) | Prepared::Mass(_) => {
-            let mut witnesses = match selected_fields(&evidence, &["source", "tolerance"]) {
+            let mut witnesses = match selected_fields(&mut evidence, &["source", "tolerance"]) {
                 Json::Object(values) => values,
                 _ => unreachable!(),
             };
-            if let Json::Object(fields) = &evidence {
-                for name in ["density", "volume", "signedVolume"] {
-                    if let Some(value) = optional_field(fields, name) {
-                        witnesses.push((name.into(), value.clone()));
-                    }
+            for name in ["density", "volume", "signedVolume"] {
+                if let Some(value) = take_optional(&mut evidence, name) {
+                    witnesses.push((name.into(), value));
                 }
             }
             (raw_measured, Json::Object(witnesses))
@@ -511,9 +507,9 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
         Prepared::CenterOfMass { .. } => (
             raw_measured,
             Json::object([
-                ("source", get("source")),
-                ("tolerance", get("tolerance")),
-                ("failures", get("axisFailures")),
+                ("source", take_field(&mut evidence, "source")),
+                ("tolerance", take_field(&mut evidence, "tolerance")),
+                ("failures", take_field(&mut evidence, "axisFailures")),
             ]),
         ),
     };
@@ -530,19 +526,23 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
     }
 }
 
-fn evidence_field(value: &Json, key: &str) -> Json {
+/// Moves one field out of an owned evidence object.
+fn take_optional(value: &mut Json, key: &str) -> Option<Json> {
     let Json::Object(fields) = value else {
         unreachable!("owned family evidence object")
     };
-    optional_field(fields, key)
-        .expect("owned measured evidence field")
-        .clone()
+    let index = fields.iter().position(|(candidate, _)| candidate == key)?;
+    Some(fields.swap_remove(index).1)
 }
 
-fn selected_fields(value: &Json, keys: &[&str]) -> Json {
+fn take_field(value: &mut Json, key: &str) -> Json {
+    take_optional(value, key).expect("owned measured evidence field")
+}
+
+fn selected_fields(value: &mut Json, keys: &[&str]) -> Json {
     Json::Object(
         keys.iter()
-            .map(|key| ((*key).to_owned(), evidence_field(value, key)))
+            .map(|key| ((*key).to_owned(), take_field(value, key)))
             .collect(),
     )
 }
@@ -875,7 +875,7 @@ fn evaluate_integrity(
     expected: &IntegrityExpectation,
     context: &mut EvaluationContext<'_>,
 ) -> Evaluation {
-    let (hash, mut diagnostics) = subject_meta(context);
+    let mut diagnostics = context.subject().diagnostics.clone();
     let analysis = match context.mesh_analysis() {
         Ok(value) => value,
         Err(result) => return result,
@@ -940,19 +940,31 @@ fn evaluate_integrity(
             None,
         );
     }
+    // Only the fields `evaluate` projects: no per-triangle rows, and the
+    // watertight verdict without its edge detail.
     let mut evidence = vec![
-        ("profile", Json::string("mesh-integrity-v1")),
-        ("source", Json::string("mesh")),
-        ("subjectContentHash", Json::string(&hash)),
-        ("expected", integrity_json(expected)),
-        ("measured", quality_json(&quality, true)),
+        (
+            "measured",
+            Json::object([
+                (
+                    "triangleCount",
+                    Json::Number(f64::from(quality.triangle_count)),
+                ),
+                ("nonFiniteVertices", nonfinite_list(&quality)),
+                ("degenerateTriangles", degenerate_list(&quality)),
+                ("duplicateFaces", duplicate_list(&quality)),
+            ]),
+        ),
         (
             "failures",
             Json::Array(failures.iter().map(|value| Json::string(value)).collect()),
         ),
     ];
     if let Some(watertight) = watertight.as_ref() {
-        evidence.push(("watertight", watertight_json(watertight)));
+        evidence.push((
+            "watertight",
+            Json::object([("watertight", Json::Bool(watertight.watertight))]),
+        ));
     }
     geometric(
         failures.is_empty(),
@@ -1781,38 +1793,20 @@ fn breakdown_json(value: &WatertightPrimitiveBreakdown) -> Json {
     ])
 }
 
-fn quality_json(value: &MeshQuality, include_duplicate_faces: bool) -> Json {
+/// The complete `analyzeMesh` quality, including its per-triangle rows.
+fn quality_json(value: &MeshQuality) -> Json {
     let mut fields = vec![
         (
             "triangleCount".into(),
             Json::Number(f64::from(value.triangle_count)),
         ),
-        (
-            "nonFiniteVertices".into(),
-            Json::Array(
-                value
-                    .non_finite_vertices
-                    .iter()
-                    .map(nonfinite_json)
-                    .collect(),
-            ),
-        ),
-        (
-            "degenerateTriangles".into(),
-            Json::Array(
-                value
-                    .degenerate_triangles
-                    .iter()
-                    .map(degenerate_json)
-                    .collect(),
-            ),
-        ),
+        ("nonFiniteVertices".into(), nonfinite_list(value)),
+        ("degenerateTriangles".into(), degenerate_list(value)),
         (
             "triangles".into(),
             Json::Array(
                 value
-                    .triangles
-                    .iter()
+                    .triangles()
                     .map(|triangle| {
                         Json::object([
                             ("primitive", Json::string(&triangle.primitive)),
@@ -1832,17 +1826,36 @@ fn quality_json(value: &MeshQuality, include_duplicate_faces: bool) -> Json {
         ),
         ("surfaceArea".into(), finite_or_string(value.surface_area)),
         ("signedVolume".into(), finite_or_string(value.signed_volume)),
+        ("duplicateFaces".into(), duplicate_list(value)),
     ];
-    if include_duplicate_faces {
-        fields.push((
-            "duplicateFaces".into(),
-            Json::Array(value.duplicate_faces().iter().map(duplicate_json).collect()),
-        ));
-    }
     if let Some(center) = value.center_of_mass {
         fields.push(("centerOfMass".into(), point_json(center)));
     }
     Json::Object(fields)
+}
+
+fn nonfinite_list(value: &MeshQuality) -> Json {
+    Json::Array(
+        value
+            .non_finite_vertices
+            .iter()
+            .map(nonfinite_json)
+            .collect(),
+    )
+}
+
+fn degenerate_list(value: &MeshQuality) -> Json {
+    Json::Array(
+        value
+            .degenerate_triangles
+            .iter()
+            .map(degenerate_json)
+            .collect(),
+    )
+}
+
+fn duplicate_list(value: &MeshQuality) -> Json {
+    Json::Array(value.duplicate_faces().iter().map(duplicate_json).collect())
 }
 
 fn nonfinite_json(value: &NonFiniteVertex) -> Json {
@@ -1944,9 +1957,8 @@ fn integrity_details(quality: &MeshQuality, failures: &[String]) -> Json {
                             Json::Object(fields) => fields,
                             _ => unreachable!(),
                         };
-                        if let Some(triangle) = quality.triangles.get(face.triangle_index as usize)
-                        {
-                            value.push(("center".into(), point_json(triangle.center)));
+                        if let Some(center) = quality.triangle_center(face.triangle_index) {
+                            value.push(("center".into(), point_json(center)));
                         }
                         Json::Object(value)
                     })
@@ -1967,7 +1979,7 @@ fn analysis_json(value: &MeshAnalysis) -> Json {
             "triangleCount",
             Json::Number(f64::from(value.triangle_count)),
         ),
-        ("meshQuality", quality_json(&quality, true)),
+        ("meshQuality", quality_json(&quality)),
         ("watertight", Json::Bool(watertight.watertight)),
         (
             "boundingBox",

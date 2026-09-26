@@ -1094,6 +1094,37 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return head === undefined ? undefined : port.readTree(head);
   };
 
+  /**
+   * Whether an unborn checkout holds only an opener's scaffold before any
+   * fetch — a fresh device's first open, offline (W13d, W13c's residual).
+   *
+   * Nothing has named what the pull will bring, so the opener's own `tau.json`
+   * (this project's manifest) counts as setup: minted, it is the root the first
+   * pull merges in as unrelated history. An edit to it is not lost, only
+   * recorded by the first pull's dirty-first mint (rule 6).
+   *
+   * @param files - The checkout's captured tree.
+   * @returns `true` when there is nothing here to record yet.
+   */
+  const holdsOnlyUnfetchedScaffold = async (files: ImmutableRevisionTree): Promise<boolean> => {
+    const manifest = files.get('tau.json');
+    const [remote] = await port.listRemotes();
+    if (manifest === undefined || remote === undefined) {
+      return false;
+    }
+    try {
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a parsed manifest is `unknown` until read.
+      const { id } = JSON.parse(new TextDecoder().decode(manifest)) as Readonly<{ id?: unknown }>;
+      if (id !== options.projectId) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+    const fetched = await port.listRefs(`refs/remotes/${remote.name}`);
+    return fetched.length === 0 && holdsNoWork(files, new ImmutableRevisionTree([['tau.json', manifest]]));
+  };
+
   /* Tau-owned siblings carry their role in the reserved name, so recovery can
    * distinguish unpublished staging bytes from the only copy of a backup. */
   const temporarySibling = (path: string, role: 'staged' | 'backup'): string => {
@@ -2462,12 +2493,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         });
         const treeId = await checkoutTreeId(place.id, tree);
         /* A cut taken before the open pull lands — a close, a hidden tab —
-         * follows the same rule as the pull (W13c). Only when a fetch has
-         * named what arrives: with no remote head there is no pull to merge a
-         * root into, and an unborn line's first cut is an ordinary one. */
+         * follows the same rule as the pull (W13c). Before any fetch, the
+         * opener's own manifest is setup too (W13d); a project with no remote
+         * has no pull to merge a root into, so its first cut is an ordinary one. */
         if ((await headOf(place)) === undefined) {
           const arriving = await arrivingTree(place);
-          if (arriving !== undefined && holdsNoWork(tree, arriving)) {
+          if (arriving === undefined ? await holdsOnlyUnfetchedScaffold(tree) : holdsNoWork(tree, arriving)) {
             return { treeId, cutId: '', nothingToSave: true };
           }
         }
@@ -3663,8 +3694,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             quotaStorage = offered_.quotaStorage ?? quotaStorage;
           }
           if (chatId === undefined) {
-            // oxlint-disable-next-line no-await-in-loop -- a refused log is re-offered before its result is recorded.
             results.push(
+              // oxlint-disable-next-line no-await-in-loop -- serial by design: each re-offer is a push to one rate-budgeted remote, and its result is recorded before the next ref's.
               (await reofferRefusedLog({ name, outcome, remote: input.remote, leases: input.leases })) ?? outcome,
             );
             continue;
@@ -3772,15 +3803,26 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               (!name.startsWith(`${chatRefPrefix}/`) || syncChats) &&
               (!name.startsWith('refs/tau/evidence/') || syncLargeExports),
           );
+        /* Nothing new — this device's own push, echoed back by the stream,
+         * included (W13d): every wanted tip is the one already tracked, so the
+         * fetch is skipped and the tracked refs stand for what it would bring. */
+        const trackedByName = new Map(trackingBefore.map((entry) => [entry.name, entry]));
+        const advertisedHeads = new Map(advertised.map((entry) => [entry.name, String(entry.head)]));
+        const current = wanted.flatMap((name) => {
+          const tracked = trackedByName.get(remoteTrackingRef(input.remote, name));
+          return tracked !== undefined && String(tracked.head) === advertisedHeads.get(name) ? [tracked] : [];
+        });
         let fetched =
           advertised.length === 0 || wanted.length === 0
             ? { refs: [] }
-            : await Promise.race([
-                /* The signal goes *into* the port, so the deadline ends the socket and
-                 * not only this host's wait (review 2 P36). */
-                port.fetch({ remote: input.remote, signal: abort, refs: wanted }),
-                deadline,
-              ]);
+            : current.length === wanted.length
+              ? { refs: current }
+              : await Promise.race([
+                  /* The signal goes *into* the port, so the deadline ends the socket and
+                   * not only this host's wait (review 2 P36). */
+                  port.fetch({ remote: input.remote, signal: abort, refs: wanted }),
+                  deadline,
+                ]);
         signal.throwIfAborted();
         if (!syncLargeExports && (await fetchedProjectSyncsLargeExports(input.remote, input.branch))) {
           syncLargeExports = true;

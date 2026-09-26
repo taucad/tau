@@ -83,6 +83,11 @@ type SyncMachineContextFields = Readonly<{
   pushId: string | undefined;
   /** How many pushes in a row have not been acknowledged. Never leaves context. */
   attempt: number;
+  /**
+   * A rate-limited remote's own wait (W13d): the next retry waits exactly this
+   * long instead of the doubling, which a 429 does not advance.
+   */
+  retryAfterMilliseconds: number | undefined;
   /** Whether the last settle was retryable, fatal, or fine. */
   failure: 'none' | 'retry' | 'fatal';
   /** Set while the open pull is still inside its first window (F16's 3 s). */
@@ -437,6 +442,16 @@ const codeOf = (error: unknown): string | undefined => {
 
 const isFatal = (error: unknown): boolean => terminalFailureCodes.has(codeOf(error) ?? '');
 
+/* A 429's wait, read off the port's error the way `codeOf` reads its code. */
+const retryAfterOf = (error: unknown): number | undefined => {
+  if (typeof error !== 'object' || error === null) {
+    return undefined;
+  }
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a rejection is `unknown` until read.
+  const { retryAfterMilliseconds } = error as Readonly<{ retryAfterMilliseconds?: unknown }>;
+  return typeof retryAfterMilliseconds === 'number' ? retryAfterMilliseconds : undefined;
+};
+
 /**
  * Which action the surface beside this failure should offer (N3).
  *
@@ -727,6 +742,7 @@ const rememberFetch = (
   return {
     leases: output.leases,
     pending,
+    retryAfterMilliseconds: undefined,
     recordQueueDirty: records !== undefined,
     ahead: output.integration === 'ahead',
     failure: projectionFailure === undefined ? (pending.length === 0 ? 'none' : context.failure) : 'retry',
@@ -740,7 +756,11 @@ const rememberFetch = (
  * (C3b/N2): the backoff would only re-fetch it.
  */
 const pullFailed = (context: SyncMachineContext, enq: SyncEnqueue, error: unknown) => {
-  const failure = { error: reason(error), reason: syncFailureReason(error) };
+  const failure = {
+    error: reason(error),
+    reason: syncFailureReason(error),
+    retryAfterMilliseconds: retryAfterOf(error),
+  };
   if (isFatal(error)) {
     return {
       target: '#sync.failed',
@@ -839,7 +859,10 @@ const syncMachineDefinition = setup({
     syncMaxWait: ({ context }) => context.debounceMaxWaitMilliseconds,
     /* Doubling, capped. It is a delay, not a rendered state (A38). */
     syncBackoff: ({ context }) =>
-      Math.min(context.retryMilliseconds * 2 ** Math.max(0, context.attempt - 1), context.maxRetryMilliseconds),
+      Math.min(
+        context.retryAfterMilliseconds ?? context.retryMilliseconds * 2 ** Math.max(0, context.attempt - 1),
+        context.maxRetryMilliseconds,
+      ),
     pullRenderWindow: ({ context }) => context.pullRenderMilliseconds,
     pullDeadline: ({ context }) => context.pullDeadlineMilliseconds,
   },
@@ -861,6 +884,7 @@ const syncMachineDefinition = setup({
     leases: {},
     pushId: undefined,
     attempt: 0,
+    retryAfterMilliseconds: undefined,
     failure: 'none',
     withinPullWindow: false,
     localHead: undefined,
@@ -944,6 +968,7 @@ const syncMachineDefinition = setup({
         remote: undefined,
         leases: {},
         attempt: 0,
+        retryAfterMilliseconds: undefined,
         failure: 'none',
         error: undefined,
         reason: undefined,
@@ -976,6 +1001,7 @@ const syncMachineDefinition = setup({
         }),
         failure: 'none',
         attempt: 0,
+        retryAfterMilliseconds: undefined,
       }),
     },
     pushFailed: {
@@ -1231,6 +1257,7 @@ const syncMachineDefinition = setup({
       entry: () => ({
         context: {
           attempt: 0,
+          retryAfterMilliseconds: undefined,
           failure: 'none',
           error: undefined,
           reason: undefined,
@@ -1350,6 +1377,7 @@ const syncMachineDefinition = setup({
               pending,
               failure: pending.length > 0 ? 'retry' : 'none',
               attempt: pending.length > 0 ? context.attempt + 1 : 0,
+              retryAfterMilliseconds: undefined,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
               error: refusalSaid(refusedHistory?.reason ?? (pending.length > 0 ? pending[0]?.reason : undefined)),
               /* D20's ceiling refusal arrives here as a per-ref result rather
@@ -1378,7 +1406,10 @@ const syncMachineDefinition = setup({
           target: 'recording',
           context: ({ context, event }) => ({
             failure: isFatal(event.error) ? 'fatal' : 'retry',
-            attempt: context.attempt + 1,
+            /* A rate limit is the remote pacing this host, not this host
+             * failing: it waits the remote's wait and keeps its doubling (W13d). */
+            attempt: retryAfterOf(event.error) === undefined ? context.attempt + 1 : context.attempt,
+            retryAfterMilliseconds: retryAfterOf(event.error),
             error: reason(event.error),
             reason: syncFailureReason(event.error),
             pending: nextPending({
@@ -1459,15 +1490,19 @@ const syncMachineDefinition = setup({
       always: ({ context }) =>
         context.pendingFlush
           ? { target: 'pushing' }
-          : /* The remote moved: that is news the backoff was waiting for. */
-            context.pendingFetch && context.online
+          : /* The remote moved: that is news the backoff was waiting for — unless
+             * the remote itself asked for the wait (W13d). */
+            context.pendingFetch && context.online && context.retryAfterMilliseconds === undefined
             ? { target: 'opening' }
             : undefined,
       after: {
         syncBackoff: ({ context, guards }) => (guards.isOnline(context) ? { target: 'opening' } : undefined),
       },
       on: {
-        remoteMoved: ({ context }) => (context.online ? { target: 'opening' } : { context: { pendingFetch: true } }),
+        remoteMoved: ({ context }) =>
+          context.online && context.retryAfterMilliseconds === undefined
+            ? { target: 'opening' }
+            : { context: { pendingFetch: true } },
         /* The patch is here as well as at the root because a state's own
          * handler is the one that runs: without it `opening` would read the
          * stale `online` and bounce straight back. */

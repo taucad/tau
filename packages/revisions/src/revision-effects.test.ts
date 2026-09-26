@@ -1214,13 +1214,15 @@ for (const actorSet of actorSets) {
       expect(await edited.filesystem.readFile('tau.json', 'utf8')).toBe('{"id":"project-1","name":"mine"}\n');
     }, 30_000);
 
-    /* W13c: the same rule for a cut taken before that pull lands (a close, a hidden tab). */
+    /* W13c + W13d: the same rule for a cut taken before that pull lands (a close, a hidden tab), or before any fetch. */
     it('cuts nothing to save on an unborn checkout that holds only what its open brings', async () => {
-      const unbornCut = async (files: Readonly<Record<string, string>>, fetched = true) => {
+      const unbornCut = async (files: Readonly<Record<string, string>>, fetched = true, connected = true) => {
         const context = await fixture(files, (filesystem) => filesystem, { actorSet: actorSet.name });
         await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
         await context.port.setHead('main');
-        await context.port.setRemote({ name: 'tau', url: 'https://tau.test/v1/git/project-1.git' });
+        if (connected) {
+          await context.port.setRemote({ name: 'tau', url: 'https://tau.test/v1/git/project-1.git' });
+        }
         const remoteReceipt = await context.port.writeRevision({
           parents: [],
           tree: new ImmutableRevisionTree([
@@ -1251,8 +1253,19 @@ for (const actorSet of actorSets) {
       await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n', 'notes.md': 'mine\n' })).resolves.not.toHaveProperty(
         'nothingToSave',
       );
-      /* No fetched head, no pull to merge a root into: an unborn line's first cut is an ordinary one. */
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n' }, false)).resolves.not.toHaveProperty(
+      /* W13d: never fetched — a fresh device opened offline — the opener's own manifest is setup too… */
+      await expect(unbornCut({ 'tau.json': '{"id":"project-1","name":"mine"}\n' }, false)).resolves.toMatchObject({
+        nothingToSave: true,
+      });
+      /* …but not another project's manifest, nor any other file. */
+      await expect(unbornCut({ 'tau.json': '{"id":"project-2"}\n' }, false)).resolves.not.toHaveProperty(
+        'nothingToSave',
+      );
+      await expect(
+        unbornCut({ 'tau.json': '{"id":"project-1"}\n', 'notes.md': 'mine\n' }, false),
+      ).resolves.not.toHaveProperty('nothingToSave');
+      /* No remote, no pull to merge a root into: an unborn line's first cut is an ordinary one. */
+      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n' }, false, false)).resolves.not.toHaveProperty(
         'nothingToSave',
       );
     }, 30_000);
@@ -1882,6 +1895,31 @@ describe('independent sync record failures', () => {
     expect(result.refs).toContainEqual(expect.objectContaining({ name: 'refs/tau/chats/chat-two', status: 'updated' }));
   }, 30_000);
 
+  /* W13d: a 429 is the whole push's; offering each record alone would spend N more requests on the same limit. */
+  it('stops at a rate-limited record push instead of offering each record alone', async () => {
+    const limited = new RevisionPortError('REMOTE_UNAVAILABLE', 'Too many requests; retry shortly.', {
+      retryAfterMilliseconds: 20_000,
+    });
+    const { pushes, actors, port } = await twoChatProject(async (input) => {
+      if (input.refs.length > 1) {
+        throw limited;
+      }
+      return {
+        refs: await Promise.all(
+          input.refs.map(
+            async (ref) => ({ name: ref.name, status: 'updated', head: await port.readRef(ref.name) }) as const,
+          ),
+        ),
+      };
+    });
+
+    await expect(run(actors.sync.push, { remote: 'tau', branch: 'main', leases: {} })).rejects.toBe(limited);
+    expect(pushes.map((push) => push.refs)).toEqual([
+      ['refs/heads/main'],
+      ['refs/tau/chats/chat-one', 'refs/tau/chats/chat-two'],
+    ]);
+  }, 30_000);
+
   /*
    * W13c chat-ref C (b): a replay that finds nothing new offered the unchanged
    * local chain again, and the remote refused it on every sync. The remote
@@ -2201,6 +2239,43 @@ describe('independent sync record failures', () => {
 
     await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
 
+    expect(requested).toEqual([['refs/heads/main']]);
+  }, 30_000);
+
+  /* W13d: this device's own push, echoed back by the stream, brings nothing new. */
+  it('fetches nothing when every advertised tip is the one already tracked, as after its own push', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+    let advertisedHead = head;
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/heads/main', head: advertisedHead }],
+        fetch: async (input) => {
+          requested.push(input.refs);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(requested).toEqual([]);
+
+    /* Another device's move is still fetched. */
+    advertisedHead = revisionId('0'.repeat(39) + '1');
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
     expect(requested).toEqual([['refs/heads/main']]);
   }, 30_000);
 

@@ -1403,6 +1403,45 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         }
       }, 180_000);
 
+      /* The browser leg's request count (W13d): every wanted ref — branch,
+       * chat and tag — in one advertisement and one `upload-pack`, and nothing
+       * new costs no pack request. The native leg is `git fetch`'s own. */
+      it.runIf(adapter.name === 'isomorphic-git')(
+        'fetches every wanted ref in one upload-pack, and sends none when nothing is new',
+        async () => {
+          const second = await adapter.create();
+          const requests = (from: number, to?: number): string[] =>
+            fixture
+              .trail()
+              .slice(from, to)
+              .map((entry) => entry.replace(/ \/.*?\.git\//u, ' '));
+          try {
+            const reader = second.withTransport();
+            await reader.init({ author });
+            await reader.setRemote({ name: 'tau', url: fixture.url });
+            const wanted = ['refs/heads/main', 'refs/tau/chats/kept', 'refs/tags/v1'];
+            const first = fixture.trail().length;
+
+            const fetched = await reader.fetch({ remote: 'tau', refs: wanted });
+            const again = fixture.trail().length;
+            await reader.fetch({ remote: 'tau', refs: wanted });
+            const record = await reader.readRevision(head);
+
+            expect(fetched.refs.map((entry) => entry.name)).toStrictEqual([
+              'refs/remotes/tau/main',
+              'refs/remotes/tau/tau/chats/kept',
+              'refs/remotes/tau/tags/v1',
+            ]);
+            expect(record?.summary.generated).toBe('Base revision');
+            expect(requests(first, again)).toStrictEqual(['GET info/refs', 'POST git-upload-pack']);
+            expect(requests(again)).toStrictEqual(['GET info/refs']);
+          } finally {
+            await second.dispose();
+          }
+        },
+        180_000,
+      );
+
       /* The lease, on both legs (A32, S24, D14 `push(expected)`). It runs last
        * because the held half deliberately moves the remote's `main`. */
       it('refuses a stale lease without touching the remote ref, and takes a held one', async () => {

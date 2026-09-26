@@ -21,9 +21,9 @@ import {
   addRemote,
   deleteRef,
   deleteRemote,
-  fetch as fetchFromRemote,
   getConfigAll,
   getRemoteInfo2,
+  indexPack,
   init,
   isDescendent,
   listRefs,
@@ -214,7 +214,7 @@ const pktPayloads = (bytes: Uint8Array<ArrayBuffer>): Array<Uint8Array<ArrayBuff
   while (offset + 4 <= bytes.byteLength) {
     const length = Number.parseInt(pktDecoder.decode(bytes.subarray(offset, offset + 4)), 16);
     if (Number.isNaN(length)) {
-      throw new TypeError('The remote answered a push with something that is not git’s pkt-line protocol.');
+      throw new TypeError('The remote answered with something that is not git’s pkt-line protocol.');
     }
     if (length < 4) {
       offset += 4;
@@ -235,6 +235,41 @@ type ReceivePackReport = Readonly<{
 }>;
 
 /**
+ * Split a `side-band-64k` stream into its data and what the server said.
+ *
+ * @param body - The sideband pkt-lines.
+ * @returns Channel 1's bytes and channel 2's lines; channel 3 is thrown.
+ */
+const demuxSideband = (
+  body: Uint8Array<ArrayBuffer>,
+): Readonly<{ data: Uint8Array<ArrayBuffer>; said: readonly string[] }> => {
+  const data: Array<Uint8Array<ArrayBuffer>> = [];
+  const said: string[] = [];
+  for (const payload of pktPayloads(body)) {
+    switch (payload[0]) {
+      case 1: {
+        data.push(payload.subarray(1));
+        break;
+      }
+      case 2: {
+        said.push(...pktDecoder.decode(payload.subarray(1)).split(/\r?\n|\r/u));
+        break;
+      }
+      case 3: {
+        throw new Error(pktDecoder.decode(payload.subarray(1)));
+      }
+      default: {
+        break;
+      }
+    }
+  }
+  return Object.freeze({
+    data: concatBytes(...data),
+    said: said.map((line) => line.trim()).filter((line) => line !== ''),
+  });
+};
+
+/**
  * Read a `receive-pack` result: sideband-demuxed when asked for, then the
  * `report-status` lines.
  *
@@ -243,30 +278,7 @@ type ReceivePackReport = Readonly<{
  * @returns The per-ref report and what the server said.
  */
 const readReceivePackReport = (body: Uint8Array<ArrayBuffer>, sideband: boolean): ReceivePackReport => {
-  const said: string[] = [];
-  let status = body;
-  if (sideband) {
-    const data: Array<Uint8Array<ArrayBuffer>> = [];
-    for (const payload of pktPayloads(body)) {
-      switch (payload[0]) {
-        case 1: {
-          data.push(payload.subarray(1));
-          break;
-        }
-        case 2: {
-          said.push(...pktDecoder.decode(payload.subarray(1)).split(/\r?\n|\r/u));
-          break;
-        }
-        case 3: {
-          throw new Error(pktDecoder.decode(payload.subarray(1)));
-        }
-        default: {
-          break;
-        }
-      }
-    }
-    status = concatBytes(...data);
-  }
+  const { data: status, said } = sideband ? demuxSideband(body) : { data: body, said: [] };
   const references = new Map<string, { ok: boolean; reason: string }>();
   for (const payload of pktPayloads(status)) {
     const line = pktDecoder.decode(payload).replace(/\n$/u, '');
@@ -275,7 +287,37 @@ const readReceivePackReport = (body: Uint8Array<ArrayBuffer>, sideband: boolean)
       references.set(name, { ok: kind === 'ok', reason: reason.join(' ') });
     }
   }
-  return Object.freeze({ refs: references, said: said.map((line) => line.trim()).filter((line) => line !== '') });
+  return Object.freeze({ refs: references, said });
+};
+
+/**
+ * The pack an `upload-pack` answered: past its `ACK`/`NAK` lines, and
+ * sideband-demuxed when asked for.
+ *
+ * @param body - The whole response body.
+ * @param sideband - Whether the request asked for `side-band-64k`.
+ * @returns The packfile's bytes.
+ */
+const readUploadPackPack = (body: Uint8Array<ArrayBuffer>, sideband: boolean): Uint8Array<ArrayBuffer> => {
+  let offset = 0;
+  while (offset + 4 <= body.byteLength) {
+    const length = Number.parseInt(pktDecoder.decode(body.subarray(offset, offset + 4)), 16);
+    if (length === 0) {
+      offset += 4;
+      continue;
+    }
+    /* A raw pack starts `PACK`, a sideband line with its channel byte: either
+     * ends the negotiation's text lines. */
+    if (
+      Number.isNaN(length) ||
+      !/^(?:ACK|NAK|shallow|unshallow)\b/u.test(pktDecoder.decode(body.subarray(offset + 4, offset + length)))
+    ) {
+      break;
+    }
+    offset += length;
+  }
+  const rest = body.subarray(offset);
+  return sideband ? demuxSideband(rest).data : rest;
 };
 
 /** One ref this push sends: its local name, the remote's name, old and new. */
@@ -285,26 +327,29 @@ const refused = (name: string, reason: string): RevisionPushRefResult =>
   Object.freeze({ name, status: 'rejected', head: undefined, reason });
 
 /**
- * One `receive-pack` request, answered as its per-ref report.
+ * One smart-HTTP `POST` to a git service, answered as its body.
  *
  * A status other than 200 is thrown as the library's own `HttpError` *with*
  * the body, so the classifier reads the remote's code and sentence (N1).
  *
- * @param http - The client this push goes through.
- * @param request - The remote's URL; the commands, a flush and the pack; and
- *   whether the commands asked for `side-band-64k`.
- * @returns The per-ref report.
+ * @param http - The client this request goes through.
+ * @param request - The remote's URL, the service and the request body.
+ * @returns The whole response body.
  */
-const receivePack = async (
+const postService = async (
   http: RevisionHttpClient,
-  { url, body, sideband }: Readonly<{ url: string; body: Uint8Array<ArrayBuffer>; sideband: boolean }>,
-): Promise<ReceivePackReport> => {
+  {
+    url,
+    service,
+    body,
+  }: Readonly<{ url: string; service: 'git-receive-pack' | 'git-upload-pack'; body: Uint8Array<ArrayBuffer> }>,
+): Promise<Uint8Array<ArrayBuffer>> => {
   const response = await http.request({
     method: 'POST',
-    url: `${url}/git-receive-pack`,
+    url: `${url}/${service}`,
     headers: {
-      'content-type': 'application/x-git-receive-pack-request',
-      accept: 'application/x-git-receive-pack-result',
+      'content-type': `application/x-${service}-request`,
+      accept: `application/x-${service}-result`,
     },
     body: (async function* once(): AsyncGenerator<Uint8Array<ArrayBuffer>> {
       yield body;
@@ -318,7 +363,22 @@ const receivePack = async (
   if (response.statusCode !== 200) {
     throw new Errors.HttpError(response.statusCode, response.statusMessage, pktDecoder.decode(answered));
   }
-  const report = readReceivePackReport(answered, sideband);
+  return answered;
+};
+
+/**
+ * One `receive-pack` request, answered as its per-ref report.
+ *
+ * @param http - The client this push goes through.
+ * @param request - The remote's URL; the commands, a flush and the pack; and
+ *   whether the commands asked for `side-band-64k`.
+ * @returns The per-ref report.
+ */
+const receivePack = async (
+  http: RevisionHttpClient,
+  { url, body, sideband }: Readonly<{ url: string; body: Uint8Array<ArrayBuffer>; sideband: boolean }>,
+): Promise<ReceivePackReport> => {
+  const report = readReceivePackReport(await postService(http, { url, service: 'git-receive-pack', body }), sideband);
   /* No per-ref report means the remote never got as far as the refs, so it is
    * not "the remote refused this ref" for any of them (seam 3 of 3, N1). */
   if (report.refs.size === 0) {
@@ -990,33 +1050,52 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   /**
    * What the remote advertises, read through the client the caller gives.
    *
-   * The client is a parameter because a fetch's advertisement has to carry the
-   * fetch's own deadline: the negotiation is the request most likely to be the
-   * one that hangs (P36).
+   * A fetch reads its own advertisement, which carries the capabilities and
+   * the fetch's own deadline (P36); this one is `listRemoteRefs`'.
    *
    * @param remote - The remote's name in git's config.
-   * @param http - The client this read goes through.
-   * @returns Every advertised ref, peeled tags dropped.
+   * @returns Every advertised ref, `HEAD` and peeled tags dropped.
    */
-  const advertisedReferences = async (remote: string, http: RevisionHttpClient): Promise<readonly RemoteRef[]> => {
+  const advertisedReferences = async (remote: string): Promise<readonly RemoteRef[]> => {
     const url = await remoteUrl(remote);
+    const http = boundBy(requireHttp());
     /* Seam 1 of 3 (N1). The advertisement is the *first* thing every remote
      * verb does, so it is where a 401, a `403 GIT_SYNC_NOT_ENTITLED` and a 404
      * arrive — and until this catch existed the library's own
      * `HTTP Error: 403 Forbidden` escaped verbatim into a `role='alert'`. */
     const advertised = await listServerRefs({ http, url }).catch((error: unknown) => {
-      throw remoteTransportError(error, { remote });
+      throw http.refused(error, remote);
     });
     return Object.freeze(
       advertised
-        .filter((reference) => !reference.ref.endsWith('^{}'))
+        /* `git ls-remote --refs`, as the native leg reads it: no `HEAD`, no peeled tags. */
+        .filter((reference) => reference.ref.startsWith('refs/') && !reference.ref.endsWith('^{}'))
         .map((reference) => Object.freeze({ name: reference.ref, head: revisionId(reference.oid) })),
     );
   };
 
-  /** One client, bounded by one operation's signal. */
-  const boundBy = (client: RevisionHttpClient, signal: AbortSignal | undefined): RevisionHttpClient =>
-    signal === undefined ? client : { request: async (request) => client.request({ ...request, signal }) };
+  /**
+   * One operation's client: bounded by its signal, and keeping a 429's
+   * `Retry-After`, which the library's own `HttpError` drops, for the
+   * classifier (W13d).
+   */
+  const boundBy = (
+    client: RevisionHttpClient,
+    signal?: AbortSignal,
+  ): RevisionHttpClient & Readonly<{ refused: (error: unknown, remote: string) => RevisionPortError }> => {
+    let retryAfter: string | undefined;
+    return {
+      request: async (request) => {
+        const response = await client.request(signal === undefined ? request : { ...request, signal });
+        if (response.statusCode === 429) {
+          retryAfter = response.headers['retry-after'];
+        }
+        return response;
+      },
+      refused: (error, remote) =>
+        remoteTransportError(error, { remote, ...(retryAfter === undefined ? {} : { retryAfter }) }),
+    };
+  };
 
   const requireHttp = (): RevisionHttpClient => {
     if (options.http === undefined) {
@@ -1463,8 +1542,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       );
     },
 
-    listRemoteRefs: async (remote: string): Promise<readonly RemoteRef[]> =>
-      advertisedReferences(remote, requireHttp()),
+    listRemoteRefs: async (remote: string): Promise<readonly RemoteRef[]> => advertisedReferences(remote),
 
     /**
      * Bring the remote's refs into `refs/remotes/<remote>/…`.
@@ -1482,8 +1560,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        * abort ends the socket and not only the caller's wait (P36). */
       const http = boundBy(requireHttp(), input.signal);
       const url = await remoteUrl(input.remote);
-      const advertised = await advertisedReferences(input.remote, http);
-      const wanted = (input.refs ?? advertised.map((reference) => reference.name)).filter((ref) => {
+      /* Seam 2 of 3 (N1): every negotiation this fetch makes answers in the
+       * refusal vocabulary, so a pull that the remote refused never reads as a
+       * pull the remote did not answer. */
+      const refused = (error: unknown): never => {
+        throw http.refused(error, input.remote);
+      };
+      /* The one advertisement: `upload-pack`'s own, which carries the
+       * capabilities the request below may use as well as the refs. */
+      const advertisement = await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
+      const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));
+      const wanted = (input.refs ?? [...advertised.keys()].filter((ref) => ref.startsWith('refs/'))).filter((ref) => {
         if (input.refs !== undefined) {
           guardRef(ref, 'ref');
         }
@@ -1492,16 +1579,6 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       if (wanted.length === 0) {
         return Object.freeze({ refs: Object.freeze([]) });
       }
-      /*
-       * The library's own fetch drops every advertised ref outside
-       * `refs/heads/*` before it translates the refspecs, so one call brings
-       * the history set and the record set arrives one ref at a time.
-       *
-       * ponytail: one round trip per record ref. A project with many chats pays
-       * for it; the upgrade is `listServerRefs` + a single `fetch` over the
-       * library's private `_fetch`, or an upstream fix, and neither is worth
-       * doing before the count hurts.
-       */
       const tagReferences = wanted.filter((ref) => ref.startsWith(`${tagRefPrefix}/`));
       const previousTags = await Promise.all(
         tagReferences.map(async (ref) => {
@@ -1510,31 +1587,55 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           return { local, tracked, localHead: await tryResolve(local), remoteHead: await tryResolve(tracked) };
         }),
       );
-      /* Seam 2 of 3 (N1): every negotiation this fetch makes answers in the
-       * refusal vocabulary, so a pull that the remote refused never reads as a
-       * pull the remote did not answer. */
-      const refused = (error: unknown): never => {
-        throw remoteTransportError(error, { remote: input.remote });
-      };
-      const heads = wanted.filter((ref) => ref.startsWith('refs/heads/'));
-      if (heads.length > 0) {
-        await fetchFromRemote({ fs, http, gitdir, url, remote: input.remote, singleBranch: false, tags: false }).catch(
-          refused,
+      /*
+       * Every wanted ref in one `upload-pack` (W13d): the library's own fetch
+       * keeps only `refs/heads/*`, so it cost a negotiation per record ref.
+       * What this store's refs already name is a `have`, and a tip it already
+       * holds is not wanted, so a fetch with nothing new sends no pack request.
+       */
+      const localTips = await listRefs({ fs, gitdir, filepath: 'refs' });
+      const localHeads = await Promise.all(localTips.map(async (name) => tryResolve(`refs/${name}`)));
+      const haves = new Set(localHeads.filter((oid) => oid !== undefined));
+      const fetchedHeads = wanted.flatMap((ref) => {
+        const oid = advertised.get(ref);
+        return oid === undefined ? [] : [[ref, oid] as const];
+      });
+      const missing = await Promise.all(
+        fetchedHeads.map(async ([, oid]) => (haves.has(oid) || (await holds(oid)) ? undefined : oid)),
+      );
+      const wants = [...new Set(missing.filter((oid) => oid !== undefined))];
+      if (wants.length > 0) {
+        const capabilities = ['side-band-64k', 'ofs-delta'].filter(
+          (capability) => capability in advertisement.capabilities,
         );
+        const body = concatBytes(
+          ...wants.map((oid, index) => pktLine(`want ${oid}${index === 0 ? ` ${capabilities.join(' ')}` : ''}\n`)),
+          pktEncoder.encode('0000'),
+          ...[...haves].map((oid) => pktLine(`have ${oid}\n`)),
+          pktLine('done\n'),
+        );
+        const answered = await postService(http, { url, service: 'git-upload-pack', body }).catch(refused);
+        const pack = (() => {
+          try {
+            return readUploadPackPack(answered, capabilities.includes('side-band-64k'));
+          } catch (error) {
+            return refused(error);
+          }
+        })();
+        /* A pack with no objects has nothing to index. */
+        if (pack.byteLength > 32 && new DataView(pack.buffer, pack.byteOffset + 8, 4).getUint32(0) > 0) {
+          const name = `objects/pack/pack-${[...pack.subarray(-20)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}.pack`;
+          await filesystem.mkdir(`${gitdir}/objects/pack`, { recursive: true });
+          await filesystem.writeFile(`${gitdir}/${name}`, pack);
+          await indexPack({ fs, dir: gitdir, gitdir, filepath: name });
+        }
       }
-      for (const ref of wanted.filter((candidate) => !heads.includes(candidate))) {
-        // eslint-disable-next-line no-await-in-loop -- one negotiation per non-branch ref, see above.
-        await fetchFromRemote({
-          fs,
-          http,
-          gitdir,
-          url,
-          remote: input.remote,
-          singleBranch: true,
-          remoteRef: ref,
-          tags: false,
-        }).catch(refused);
-      }
+      /* Refs after objects: a tracking ref never names what this store lacks. */
+      await Promise.all(
+        fetchedHeads.map(async ([ref, oid]) =>
+          writeRef({ fs, gitdir, ref: remoteTrackingRef(input.remote, ref), value: oid, force: true }),
+        ),
+      );
       await Promise.all(
         previousTags.map(async ({ local, tracked, localHead, remoteHead }) => {
           const fetchedHead = await tryResolve(tracked);
@@ -1580,7 +1681,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * @returns One result per offered ref, in the order offered.
      */
     push: async (input: RevisionPushInput): Promise<RevisionPushResult> => {
-      const http = requireHttp();
+      const http = boundBy(requireHttp());
       if (input.refs.length === 0) {
         throw new RevisionPortError('INVALID_TRANSPORT', 'push requires at least one ref.');
       }
@@ -1612,7 +1713,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        * (N1), exactly as in `advertisedReferences`. */
       const advertisement = await getRemoteInfo2({ http, url, forPush: true, protocolVersion: 1 }).catch(
         (error: unknown) => {
-          throw remoteTransportError(error, { remote: input.remote });
+          throw http.refused(error, input.remote);
         },
       );
       const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));
@@ -1660,7 +1761,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
          * only a failure with no status at all is the offline window. */
         const report = await receivePack(http, { url, body, sideband: capabilities.includes('side-band-64k') }).catch(
           (error: unknown) => {
-            throw remoteTransportError(error, { remote: input.remote });
+            throw http.refused(error, input.remote);
           },
         );
         for (const command of commands) {

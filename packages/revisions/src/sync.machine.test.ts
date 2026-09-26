@@ -66,6 +66,7 @@
  * | 62 | `awaitingLease --remoteMoved / pushAcknowledged--> recording → opening` | **RV-W5b F7**: a parked apply is remembered, so leaving the park any way re-pulls |
  * | 60 | `pending --revisionMinted every 500 ms--> pushing` within `syncDebounceMaxWaitMilliseconds` | **W13 follow-up**: a steady mint cadence faster than the window still pushes, at least once per bound |
  * | 59 | `merging(merged) → pushing` | **D12**: a diverged clean checkout merges, re-heads its actor, and pushes the merge revision under the fetched lease |
+ * | 63 | `pushing / opening --429--> queued --Retry-After--> opening` | **W13d**: a rate limit waits the remote's own wait, a remote move does not cut it short, and it does not advance the doubling |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -83,6 +84,7 @@ import type {
   SyncReadRemoteActorOutput,
 } from '#sync.machine.js';
 import type { SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
+import { RevisionPortError } from '#revision-port.js';
 import {
   createFakeCallbackActors,
   createFakeParent,
@@ -1954,6 +1956,56 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
 
     await vi.waitFor(() => {
       expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
+    });
+
+    harness.stop();
+  });
+
+  it('row 63 (W13d): a 429 waits its Retry-After, is not cut short by a move, and does not advance the doubling', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    const limited = (): RevisionPortError =>
+      new RevisionPortError('REMOTE_UNAVAILABLE', 'Too many requests; retry shortly.', {
+        retryAfterMilliseconds: 20_000,
+      });
+
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'push', { error: limited() });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    /* The other device's move is remembered, not fetched into the same limit. */
+    harness.holds.sendBack('remoteMoves', moved);
+    harness.clock.advance(19_999);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(1);
+
+    harness.clock.advance(1);
+    /* The pull's own 429 waits the same way. */
+    await settleWhenRunning(harness.effects, 'fetch', { error: limited() });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+    harness.clock.advance(19_999);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(2);
+    harness.clock.advance(1);
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: {}, integration: 'upToDate' } satisfies SyncFetchActorOutput,
+    });
+
+    /* Any other failure keeps the doubling — from its first step, because
+     * neither 429 advanced it. */
+    await settleWhenRunning(harness.effects, 'push', { error: new Error('Failed to fetch') });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+    harness.clock.advance(4999);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
+    harness.clock.advance(1);
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('fetch')).toHaveLength(4);
     });
 
     harness.stop();

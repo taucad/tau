@@ -16,6 +16,7 @@ import {
   artifact,
   bambuStudioSliceSummary,
   bambuStudioVersion,
+  baseSliceSummary,
   createBambuStudio,
   createBridge,
   createFixture,
@@ -36,7 +37,11 @@ import {
   timestamp,
 } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { submissionDefaults } from '#routes/w.$workspace.$project/chat-print-prepare.js';
-import { bambuStudioRequired, startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
+import {
+  bambuStudioRequired,
+  developerModeRequired,
+  startBlocker,
+} from '#routes/w.$workspace.$project/chat-print-send.js';
 import { PrintPanel, nextAction, presentMachine } from '#routes/w.$workspace.$project/chat-print.js';
 
 vi.mock('#hooks/use-project.js', async () => {
@@ -239,12 +244,12 @@ describe('Print pane prepare and send', () => {
     expect(within(result).getByText('125')).toBeInTheDocument();
     expect(within(result).getByText('about 42 min')).toBeInTheDocument();
     expect(within(result).getByText('3.2 m')).toBeInTheDocument();
-    // The part alone, then every move with the purge line: the plate fit is checked on the latter.
+    // The part alone decides the plate fit; every move, start routine included, is shown beside it.
     expect(within(result).getByText('Part').nextElementSibling).toHaveTextContent('50 × 50 × 25 mm');
     expect(within(result).getByText('Toolpath').nextElementSibling).toHaveTextContent(
-      '236 × 153 × 35 mm · every nozzle move',
+      "236 × 153 × 35 mm · every nozzle move, including the printer's start routine",
     );
-    expect(within(result).getByText('The toolpath fits the plate')).toBeInTheDocument();
+    expect(within(result).getByText('The part fits the plate')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Open printer preview' }));
     expect(mockEditorSend).toHaveBeenCalledExactlyOnceWith({
@@ -338,9 +343,30 @@ describe('Print pane prepare and send', () => {
       'Standard0.2 mm',
       'Fine0.12 mm',
       'A1pla-black',
+      'Plate',
       'Slice and preview',
     ];
     expect(names.filter((name) => order.includes(name))).toEqual(order);
+  });
+
+  it('should name the plate select by its label and slice for the plate chosen there', async () => {
+    const user = userEvent.setup();
+    renderPane(createFixture().client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+
+    const plate = within(prepareRegion()).getByRole('combobox', { name: 'Plate' });
+    // Playwright reads a wrapping label's whole text, options included, so only an explicit name keeps
+    // `getByLabel('Plate', { exact: true })` finding it; jsdom and Chromium already name it "Plate" either way.
+    expect(plate).toHaveAttribute('aria-label', 'Plate');
+    expect(plate).toHaveValue('textured-pei');
+    await user.selectOptions(plate, 'Cool plate');
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+
+    await waitFor(() => {
+      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+        exportOptions: { ...machineSliceOptions, plate: 'cool' },
+      });
+    });
   });
 
   it('keeps advanced drafts across telemetry and marks the slice stale until sliced again', async () => {
@@ -511,7 +537,7 @@ describe('Print pane prepare and send', () => {
 });
 
 describe('Print pane slice summary', () => {
-  it('should measure the part apart from the purge line and end lift and check the plate fit on every move', async () => {
+  it('should measure the part apart from the purge line and end lift and check the plate fit on the part', async () => {
     const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
     const bytes = writeBambuContainer({
       gcode: fixtureGcode({ layers: 10, size: 40 }),
@@ -525,7 +551,28 @@ describe('Print pane slice summary', () => {
     expect(result.partBounds).toEqual({ min: [108, 108, 0], max: [148, 148, 2] });
     expect(summary.formatSize(result.bounds)).toBe('148 × 148 × 50 mm');
     expect(result.partBounds && summary.formatSize(result.partBounds)).toBe('40 × 40 × 2 mm');
-    expect(summary.fitsBuildVolume(result.bounds, manifest.geometry.buildVolume)).toEqual({ fits: true });
+    expect(summary.fitsPlate(result, manifest.geometry.buildVolume)).toEqual({
+      fits: true,
+      message: 'The part fits the plate',
+    });
+  });
+
+  it('should check every nozzle move and say so when the G-code labels no part', async () => {
+    const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
+    const { buildVolume } = manifest.geometry;
+
+    expect(
+      summary.fitsPlate({ bounds: { min: [0, -3, 0], max: [236, 153, 35] }, partBounds: undefined }, buildVolume),
+    ).toEqual({
+      fits: false,
+      axis: 'Y',
+      reason: '3 mm past the plate edge on Y',
+      message: 'The toolpath does not fit the plate: 3 mm past the plate edge on Y.',
+    });
+    expect(summary.fitsPlate({ bounds: baseSliceSummary.bounds, partBounds: undefined }, buildVolume)).toEqual({
+      fits: true,
+      message: 'The toolpath fits the plate',
+    });
   });
 });
 
@@ -1029,6 +1076,50 @@ describe('Print pane Bambu Studio mode', () => {
     expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
   });
 
+  /**
+   * The 20 mm cube Bambu Studio sliced for the X1C on 2026-09-26: the printer's start routine travels to Y −3 and
+   * purges at Y 265, so every nozzle move spans 240 × 268 × 121.5 mm around a centred 19.6 × 19.6 × 20 mm part.
+   */
+  const cubeOnX1c: PrintSummary.SliceSummary = {
+    ...bambuStudioSliceSummary,
+    bounds: { min: [8, -3, 0], max: [248, 265, 121.5] },
+    partBounds: { min: [118.2, 118.2, 0], max: [137.8, 137.8, 20] },
+  };
+
+  it('should send an archive whose start routine leaves the plate while the part stands on it', async () => {
+    const user = userEvent.setup();
+    await renderStudio();
+    summarizeGcodeContainerMock.mockReturnValueOnce(cubeOnX1c);
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+
+    const result = await screen.findByLabelText('Slice result');
+    expect(within(result).getByText('Part').nextElementSibling).toHaveTextContent('19.6 × 19.6 × 20 mm');
+    expect(within(result).getByText('Toolpath').nextElementSibling).toHaveTextContent(
+      "240 × 268 × 121.5 mm · every nozzle move, including the printer's start routine",
+    );
+    expect(within(result).getByText('The part fits the plate')).toBeInTheDocument();
+    expect(within(result).queryByRole('alert')).not.toBeInTheDocument();
+    const send = within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' });
+    expect(send).toBeEnabled();
+    expect(send).not.toHaveAccessibleDescription();
+  });
+
+  it('should hold Send with a part-worded reason when the part itself leaves the plate', async () => {
+    const user = userEvent.setup();
+    await renderStudio();
+    summarizeGcodeContainerMock.mockReturnValueOnce({
+      ...cubeOnX1c,
+      partBounds: { min: [240.4, 118.2, 0], max: [260, 137.8, 20] },
+    });
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+
+    const reason = 'The part does not fit the plate: 260 mm is larger than the 256 mm plate on X.';
+    const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAccessibleDescription(reason);
+    expect(within(screen.getByLabelText('Slice result')).getByRole('alert')).toHaveTextContent(reason);
+  });
+
   it('reloads the settings for another process or filament and drops overrides the new presets lack', async () => {
     const user = userEvent.setup();
     const { studio } = await renderStudio();
@@ -1143,6 +1234,35 @@ describe('Print pane Bambu Studio mode', () => {
     renderPane(refused.client);
     expect(await screen.findByText(bambuStudioRequired)).toBeInTheDocument();
     expect(screen.queryByText('This file was not sliced by Bambu Studio.')).not.toBeInTheDocument();
+  });
+
+  it("should keep the printer's reason and say how to allow the start when it refuses an unsigned command", async () => {
+    const reason = 'mqtt message verify failed';
+    const refused = createFixture({
+      entries: [realPrinter()],
+      requests: [
+        agentRequest({
+          state: 'rejected',
+          startOperationId: 'operation-start-1',
+          receipt: {
+            operationId: 'operation-start-1',
+            machineId: 'machine-1',
+            kind: 'start',
+            status: 'rejected',
+            code: 'PROVIDER_REJECTED',
+            message: reason,
+            observedAt: timestamp,
+          },
+          failure: { code: 'PROVIDER_REJECTED', message: reason },
+        }),
+      ],
+    });
+    renderPane(refused.client);
+
+    const send = await screen.findByRole('region', { name: 'Send' });
+    const failure = within(send).getByRole('alert');
+    expect(failure).toHaveTextContent('The printer rejected the start (PROVIDER_REJECTED)');
+    expect(failure).toHaveTextContent(`${reason}. ${developerModeRequired}`);
   });
 });
 

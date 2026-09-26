@@ -594,6 +594,9 @@ export const createFixture = ({
       yield* [];
     },
     beginBinding: async () => ({ status: 'operator-action-required', ceremonyId: 'ceremony-1' }),
+    removeBinding: async () => {
+      throw new Error('not used');
+    },
     preparePrint: async () => {
       throw new Error('not used');
     },
@@ -690,7 +693,7 @@ export const sliceFixture: SlicedArtifact = {
   optionsKey: '{}',
   geometry: {},
   summary: baseSliceSummary,
-  fit: { fits: true },
+  fit: { fits: true, message: 'The part fits the plate' },
 };
 
 /* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio setting keys and filament ids are fixed names. */

@@ -18,6 +18,7 @@
  * | 11 | **W5b (D12, D13)** | two open devices editing different files converge on a remote move: B merges and pushes, A fast-forwards, nobody presses anything |
  * | 12 | **W5b a1b (D13)** | a push that lands between opening and the stream's first read is not missed: the open pull reads the remote only once the stream knows its tail |
  * | 13 | **W6 (D14)** | two devices change one file: the device that meets the divergence records it on its conflict line and pushes that line; both list it; deciding on the other device lands a merge on `main` that fast-forwards the recorder and hides the line on both |
+ * | 13c | **D14-P** | the remote answers the conflict line's push `503 GIT_PUSH_RACE_LOST` (another device's push committed first): the line is offered again after the backoff and reaches the remote (isomorphic-git leg) |
  * | 13b | **RV-W6 F2** | a line removed on the remote stays on the device that recorded it, still listed, and its next push offers it again |
  * | 15 | **FX1 N** | a hook's plan-quota refusal of `main` reaches the per-ref result as the hook's sentence, and the push settles as a terminal quota answer |
  *
@@ -100,7 +101,7 @@ type Device = Readonly<{
   actors: ReturnType<typeof createRevisionActors>;
   /** Start a scheduler over this device's effects, with a real clock. */
   scheduler: (
-    options?: Readonly<{ online?: boolean }>,
+    options?: Readonly<{ online?: boolean; retryMilliseconds?: number }>,
   ) => ReturnType<typeof createActor<ReturnType<typeof syncMachine.provide>>>;
 }>;
 
@@ -174,7 +175,7 @@ const device = async (
           debounceMilliseconds: 5,
           /* Long enough that a settled state stays settled while a row asserts it:
            * the backoff is a delay, not something this suite is measuring. */
-          retryMilliseconds: 30_000,
+          retryMilliseconds: options.retryMilliseconds ?? 30_000,
           pullRenderMilliseconds: 20,
           pullDeadlineMilliseconds: 25_000,
           ...(options.online === undefined ? {} : { online: options.online }),
@@ -900,7 +901,11 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
    * D14's setup: A and B change one line of one file, A's reaches the remote
    * first, and B records the divergence on its own conflict line and pushes it.
    */
-  const conflictOnB = async (remote: Awaited<ReturnType<typeof startGitHttpBackend>>, suffix: string) => {
+  const conflictOnB = async (
+    remote: Awaited<ReturnType<typeof startGitHttpBackend>>,
+    suffix: string,
+    options: Readonly<{ legOfB?: Leg; retryMilliseconds?: number; beforeConflict?: () => void }> = {},
+  ) => {
     const one = await device({ leg, label: `a-${suffix}`, remoteUrl: remote.url, files: { 'a.scad': 'cube(1);\n' } });
     const save = async (device_: Device, summary: string, parent?: string): Promise<string> => {
       const tree = await captureRevisionTree(device_.filesystem, { exclude: (path) => !classify(path).versioned });
@@ -926,8 +931,11 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     };
     const base = await save(one, 'Base');
     await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
-    const two = await device({ leg, label: `b-${suffix}`, remoteUrl: remote.url });
-    const schedulers = [one.scheduler(), two.scheduler()] as const;
+    const two = await device({ leg: options.legOfB ?? leg, label: `b-${suffix}`, remoteUrl: remote.url });
+    const schedulers = [
+      one.scheduler(),
+      two.scheduler(options.retryMilliseconds === undefined ? {} : { retryMilliseconds: options.retryMilliseconds }),
+    ] as const;
     for (const scheduler of schedulers) {
       scheduler.start();
     }
@@ -956,6 +964,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     /* B meets the divergence, records it on its own line, and that line travels. */
     /* Named by B's record device (R1), which B mints when it records. */
     const lineOf = async (): Promise<string> => `conflicts/main/${await recordDeviceOf(two)}`;
+    options.beforeConflict?.();
     schedulers[1].send({ type: 'remoteMoved', generation: 2, refs: [mainRef] });
     await vi.waitFor(
       async () => {
@@ -1039,6 +1048,69 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       await remote.close();
     }
   }, 180_000);
+
+  /*
+   * D14-P: the Hosted Remote answers a push that overlaps another device's with
+   * `503 GIT_PUSH_RACE_LOST` — retryable and self-clearing (rule 19). A device
+   * meets the conflict because another device pushed, and that device's record
+   * push usually follows at once, so the line's first offer is the one that
+   * loses the race. It must be offered again, not dropped until the next pull.
+   */
+  it.runIf(leg.name === 'isomorphic-git')(
+    'row 13c (D14-P): a conflict line the remote answered race-lost is offered again and travels',
+    async () => {
+      const remoteRoot = await temporaryRoot('remote-conflict-raced');
+      const remote = await startGitHttpBackend({ root: remoteRoot });
+      const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      let racing = false;
+      const raced: string[] = [];
+      const legOfB: Leg = {
+        name: leg.name,
+        port: (_root, filesystem) =>
+          createIsomorphicGitRevisionPort({
+            filesystem,
+            http: createRevisionHttpClient({
+              authorization: () => 'Bearer session-token',
+              fetch: async (input, init) => {
+                const url = input instanceof Request ? input.url : String(input);
+                if (racing && init?.method === 'POST' && url.endsWith('/git-receive-pack')) {
+                  racing = false;
+                  raced.push(url);
+                  return Response.json(
+                    { code: 'GIT_PUSH_RACE_LOST', message: 'Another push for this project committed first; retry.' },
+                    { status: 503, headers: { 'retry-after': '5' } },
+                  );
+                }
+                return fetch(input, init);
+              },
+            }),
+            checkouts: { projectId: 'project-1', root: () => filesystem },
+          }),
+      };
+      try {
+        const { schedulers, line, recorded } = await conflictOnB(remote, 'raced', {
+          legOfB,
+          retryMilliseconds: 50,
+          beforeConflict: () => {
+            racing = true;
+          },
+        });
+        expect(raced).toHaveLength(1);
+        expect(await remote.git(['rev-parse', `refs/heads/${line}`])).toBe(recorded);
+        expect(reported).toHaveBeenCalledWith(
+          '[revisions] conflict line push',
+          expect.objectContaining({ code: 'REMOTE_UNAVAILABLE' }),
+        );
+        for (const scheduler of schedulers) {
+          scheduler.stop();
+        }
+      } finally {
+        reported.mockRestore();
+        await remote.close();
+      }
+    },
+    180_000,
+  );
 
   /*
    * D14 / RV-W6 F2: a line removed on the remote — another device's *Remove* —

@@ -1672,8 +1672,10 @@ const syncMachineDefinition = setup({
      *
      * The decision itself travels (D14): the conflict line is offered alone on
      * entry, because the line it decides has diverged and would sink it in the
-     * atomic set. A line the remote refused is offered again by the next pull,
-     * which reaches the same conflict.
+     * atomic set. An offer that failed is reported and owed: after the backoff
+     * the machine pulls again, which reaches the same conflict under fresh
+     * leases and offers the line again. A terminal refusal waits for *Sync now*
+     * or a remote change, as every terminal class does (rule 19).
      */
     conflicted: {
       entry: ({ context }, enq) => {
@@ -1683,28 +1685,58 @@ const syncMachineDefinition = setup({
           reason: context.error ?? 'The remote has work this device has not seen.',
         });
       },
-      invoke: {
-        src: 'push',
-        input: ({ context }) => ({
-          remote: context.remote ?? '',
-          branch: context.branch,
-          leases: context.leases,
-          refs: [context.conflictRef ?? historyRefOf(context.branch)],
-        }),
-        onDone: ({ context, event }) => ({
-          context: {
-            leases: {
-              ...context.leases,
-              ...Object.fromEntries(
-                event.output.refs.flatMap((entry) =>
-                  entry.status === 'rejected' || entry.head === undefined ? [] : [[entry.name, entry.head]],
+      initial: 'offering',
+      states: {
+        offering: {
+          invoke: {
+            src: 'push',
+            input: ({ context }) => ({
+              remote: context.remote ?? '',
+              branch: context.branch,
+              leases: context.leases,
+              refs: [context.conflictRef ?? historyRefOf(context.branch)],
+            }),
+            onDone: ({ context, event }, enq) => {
+              const leases = {
+                ...context.leases,
+                ...Object.fromEntries(
+                  event.output.refs.flatMap((entry) =>
+                    entry.status === 'rejected' || entry.head === undefined ? [] : [[entry.name, entry.head]],
+                  ),
                 ),
-              ),
+              };
+              const refused = event.output.refs.find((entry) => entry.status === 'rejected');
+              if (refused === undefined) {
+                return { target: 'offered', context: { leases, attempt: 0, retryAfterMilliseconds: undefined } };
+              }
+              enq(() => {
+                console.error('[revisions] conflict line refused', refused.name, refused.reason);
+              });
+              const quota = (event.output.overQuota ?? []).length > 0 || isStorageRefusal(refused.reason ?? '');
+              return {
+                target: quota ? 'offered' : 'owed',
+                context: { leases, attempt: context.attempt + 1, retryAfterMilliseconds: undefined },
+              };
+            },
+            onError: ({ context, event }, enq) => {
+              const { error } = event;
+              enq(() => {
+                console.error('[revisions] conflict line push', error);
+              });
+              return {
+                target: isFatal(error) ? 'offered' : 'owed',
+                context: { attempt: context.attempt + 1, retryAfterMilliseconds: retryAfterOf(error) },
+              };
             },
           },
-        }),
-        /* Offline, or refused: the card is still here, and the next pull offers it again. */
-        onError: {},
+        },
+        /* Recorded here and not on the remote yet: `Needs your decision` stays, and the backoff pulls again. */
+        owed: {
+          after: {
+            syncBackoff: ({ context, guards }) => (guards.isOnline(context) ? { target: '#sync.opening' } : undefined),
+          },
+        },
+        offered: {},
       },
       on: {
         remoteMoved: { target: 'opening' },

@@ -156,7 +156,14 @@ try {
   const application = await electron.launch({
     executablePath: join(app, 'Contents/MacOS/Tau'),
     args: [`--user-data-dir=${join(runRoot, 'user-data')}`],
-    env: { LANG: 'C.UTF-8', PATH: '/usr/bin:/bin:/usr/sbin:/sbin', TAU_E2E_KEEP_PATH: '1', TMPDIR: runRoot },
+    env: {
+      LANG: 'C.UTF-8',
+      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+      TAU_E2E_KEEP_PATH: '1',
+      TMPDIR: runRoot,
+      /* Automated runs keep secrets in the throwaway profile, never the login keychain. */
+      TAU_SECRET_VAULT: 'file',
+    },
   });
   try {
     const positive = await runUtilityProbe(application, { cwd: runRoot, entry: utilityEntry, esbuildExecutable });

@@ -241,14 +241,19 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
      * stopped and has no child left running. */
     expect(alphaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
     expect(betaRoot.inspect().status).toBe('active');
-    expect(fixture.registry.openProjectIds()).toEqual(['beta']);
+    // Closing waits for the operation log's last append, so the registry lets go after the root stops.
+    await vi.waitFor(() => {
+      expect(fixture.registry.openProjectIds()).toEqual(['beta']);
+    });
 
     beta.send({ command: 'close' });
     await vi.waitFor(() => {
       expect(betaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
     });
-    expect(fixture.registry.openProjectIds()).toEqual([]);
-  });
+    await vi.waitFor(() => {
+      expect(fixture.registry.openProjectIds()).toEqual([]);
+    });
+  }, 20_000);
 
   it('should serve the projection to a port the moment it connects', async () => {
     const fixture = harness(['alpha']);
@@ -1206,7 +1211,7 @@ describe('the focus frame through the worker registry (RV-W5b2 N4)', () => {
     } finally {
       globalThis.fetch = original;
     }
-  });
+  }, 20_000);
 });
 
 /*

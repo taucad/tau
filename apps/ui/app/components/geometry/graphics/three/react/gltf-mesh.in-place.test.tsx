@@ -6,7 +6,9 @@ import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial } from '@taucad/geometry-core';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import type { BufferAttribute, Mesh, Object3D } from 'three';
+import { Raycaster, Vector3 } from 'three';
+import type { BufferAttribute, Intersection, Mesh, Object3D } from 'three';
+import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 
 const mocks = vi.hoisted(() => {
@@ -24,7 +26,11 @@ const mocks = vi.hoisted(() => {
     graphicsActor: {
       send: vi.fn(),
       getSnapshot: () => ({
-        context: { modelPointerClickSuppressionReasons: [], suppressNextModelPointerClick: false },
+        context: {
+          modelPointerClickSuppressionReasons: [],
+          suppressNextModelPointerClick: false,
+          viewerHoverSuppressionReasons: [] as string[],
+        },
       }),
     },
     gl: Object.create(null) as { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?: number },
@@ -225,5 +231,39 @@ describe('GltfMesh in-place updates', () => {
     await waitFor(() => {
       expect(parseAsync).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+describe('GltfMesh model raycast', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    mocks.graphicsActor.send.mockClear();
+  });
+
+  it('should skip the model query while a section-view gizmo drag suppresses hover', async () => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const gltf = (await parseAsync.mock.results[0]?.value) as GLTF;
+    const query = vi.spyOn(bvhRaycast, 'raycastFirstVisibleMeshHit');
+    const raycaster = new Raycaster(new Vector3(0.25, 0.25, 10), new Vector3(0, 0, -1));
+    const intersections: Intersection[] = [];
+
+    gltf.scene.raycast(raycaster, intersections);
+    expect(query).toHaveBeenCalledOnce();
+
+    query.mockClear();
+    intersections.length = 0;
+    const { context } = mocks.graphicsActor.getSnapshot();
+    vi.spyOn(mocks.graphicsActor, 'getSnapshot').mockReturnValue({
+      context: { ...context, viewerHoverSuppressionReasons: ['sectionViewTransform'] },
+    });
+    gltf.scene.raycast(raycaster, intersections);
+
+    expect(query).not.toHaveBeenCalled();
+    expect(intersections).toEqual([]);
   });
 });

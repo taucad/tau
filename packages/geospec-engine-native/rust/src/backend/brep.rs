@@ -345,6 +345,11 @@ pub struct SemanticDatumFacts {
     pub face_indices: Vec<u32>,
 }
 
+/// A claim-local memo a connector fills once per occurrence (C7), such as its
+/// qualified regular-solid operand. The evaluation context owns it and drops
+/// it with the claim, so nothing is retained with the subject.
+pub type OperandMemo = Box<dyn std::any::Any>;
+
 /// Entity ordinals are local to one retained subject, never foreign pointers.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum BrepEntity {
@@ -1044,6 +1049,40 @@ pub trait BrepSubject {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no qualified edge-treatment topology query.".into(),
         })
+    }
+
+    /// A fresh claim-local operand memo. The default memo is empty and the
+    /// `*_memoized` defaults below ignore it.
+    fn operand_memo(&self) -> OperandMemo {
+        Box::new(())
+    }
+
+    /// `selected_interference_material`, qualifying each occurrence once per memo.
+    fn selected_interference_material_memoized(
+        &self,
+        face: BrepEntity,
+        _memo: &mut OperandMemo,
+    ) -> Result<SelectedInterferenceMaterial, BackendError> {
+        self.selected_interference_material(face)
+    }
+
+    /// `selected_bore_void`, qualifying each occurrence once per memo.
+    fn selected_bore_void_memoized(
+        &self,
+        face: BrepEntity,
+        _memo: &mut OperandMemo,
+    ) -> Result<SelectedBoreVoid, BackendError> {
+        self.selected_bore_void(face)
+    }
+
+    /// `regular_solid_containment` whose occurrence operands come from the memo.
+    fn regular_solid_containment_memoized(
+        &self,
+        subject: BrepEntity,
+        target: BrepEntity,
+        _memo: &mut OperandMemo,
+    ) -> Result<RegularSolidContainment, BackendError> {
+        self.regular_solid_containment(subject, target)
     }
 
     /// One requested subject-target difference. Implementations must validate

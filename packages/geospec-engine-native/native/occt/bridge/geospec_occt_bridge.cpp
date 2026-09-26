@@ -1611,6 +1611,27 @@ struct geospec_occt_document {
   mutable std::vector<std::optional<FaceFacts>> query_faces;
 };
 
+// C7: one claim's qualified occurrence operands and scoped bore inventories,
+// each computed once and only after it returns. The caller's evaluation
+// context owns the memo and releases it with the claim, so nothing here is
+// retained with the document.
+struct geospec_occt_operand_memo {
+  struct Operand {
+    bool qualified = false;
+    TopoDS_Solid solid;
+    std::string message;
+  };
+  struct Bores {
+    bool built = false;
+    bool native_error = false;
+    std::string message;
+    std::vector<geospec_occt_circular_bore_candidate> candidates;
+  };
+  const geospec_occt_document* document = nullptr;
+  std::map<uint32_t, Operand> operands;
+  std::map<uint32_t, Bores> bores;
+};
+
 namespace {
 
 // N2-LAZY slot fills. Each computes exactly what admission used to compute,
@@ -1833,6 +1854,26 @@ bool regular_solid_operand(const TopoDS_Shape& shape, TopoDS_Solid& solid,
     return false;
   }
   solid = solids.front();
+  return true;
+}
+
+// regular_solid_operand(occurrence.shape), once per occurrence per memo.
+bool occurrence_operand(const geospec_occt_document& document,
+                        uint32_t occurrence, geospec_occt_operand_memo* memo,
+                        TopoDS_Solid& solid, std::string& message) {
+  const TopoDS_Shape& shape = document.occurrences[occurrence].shape;
+  if (memo == nullptr) return regular_solid_operand(shape, solid, message);
+  auto found = memo->operands.find(occurrence);
+  if (found == memo->operands.end()) {
+    geospec_occt_operand_memo::Operand value;
+    value.qualified = regular_solid_operand(shape, value.solid, value.message);
+    found = memo->operands.emplace(occurrence, std::move(value)).first;
+  }
+  if (!found->second.qualified) {
+    message = found->second.message;
+    return false;
+  }
+  solid = found->second.solid;
   return true;
 }
 
@@ -6600,18 +6641,40 @@ int geospec_occt_regular_solid_containment(
     geospec_occt_string* error) noexcept {
   int used_parallel = 0;
   return geospec_occt_regular_solid_containment_dedicated(
-      document, subject_entity, target_entity, 0, &used_parallel, result, error);
+      document, subject_entity, target_entity, nullptr, 0, &used_parallel, result,
+      error);
+}
+
+geospec_occt_operand_memo* geospec_occt_operand_memo_new(
+    const geospec_occt_document* document) noexcept {
+  if (document == nullptr) return nullptr;
+  try {
+    auto* memo = new geospec_occt_operand_memo();
+    memo->document = document;
+    return memo;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void geospec_occt_operand_memo_release(geospec_occt_operand_memo* memo) noexcept {
+  delete memo;
 }
 
 int geospec_occt_regular_solid_containment_dedicated(
     const geospec_occt_document* document, geospec_occt_entity subject_entity,
-    geospec_occt_entity target_entity, int grant_width, int* used_parallel,
+    geospec_occt_entity target_entity, geospec_occt_operand_memo* memo,
+    int grant_width, int* used_parallel,
     geospec_occt_regular_solid_containment_result* result,
     geospec_occt_string* error) noexcept {
   if (document == nullptr || result == nullptr || used_parallel == nullptr ||
       grant_width < 0) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Document/containment output is null.", error);
+  }
+  if (memo != nullptr && memo->document != document) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Operand memo belongs to another document.", error);
   }
   return guarded(error, [&]() -> int {
     *result = {};
@@ -6623,10 +6686,17 @@ int geospec_occt_regular_solid_containment_dedicated(
         !resolve_entity(*document, target_entity, target_shape, message)) {
       return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, message, error);
     }
+    // Occurrence operands come from the claim's memo (C7), in the same order.
+    auto operand = [&](geospec_occt_entity entity, const TopoDS_Shape& shape,
+                       TopoDS_Solid& solid) {
+      return entity.kind == GEOSPEC_OCCT_ENTITY_OCCURRENCE
+                 ? occurrence_operand(*document, entity.occurrence, memo, solid, message)
+                 : regular_solid_operand(shape, solid, message);
+    };
     TopoDS_Solid subject;
     TopoDS_Solid target;
-    if (!regular_solid_operand(subject_shape, subject, message) ||
-        !regular_solid_operand(target_shape, target, message)) {
+    if (!operand(subject_entity, subject_shape, subject) ||
+        !operand(target_entity, target_shape, target)) {
       return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
     }
     if (boolean_debug_requested(message)) {
@@ -6857,30 +6927,40 @@ int geospec_occt_nominal_cylindrical_band_query(
 }
 
 // The selected-bore certificate after the band and the material solid are
-// established; `solid` is `regular_solid_operand(occurrence.shape)`.
+// established; `solid` is `regular_solid_operand(occurrence.shape)`. A memo
+// keeps one scoped inventory per occurrence for the claim (C7).
 static int selected_bore_void(
     const geospec_occt_document* document, geospec_occt_entity face,
     const geospec_occt_nominal_cylindrical_band& associated, const TopoDS_Solid& solid,
-    geospec_occt_nominal_cylindrical_band* band,
+    geospec_occt_operand_memo* memo, geospec_occt_nominal_cylindrical_band* band,
     geospec_occt_circular_bore_candidate* clear_interior, geospec_occt_string* error) {
   const auto& occurrence = document->occurrences[face.occurrence];
-  std::string message;
   if (occurrence.public_faces.size() > 4096) {
     return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore material has too many faces.", error);
   }
-  // A scoped view reuses A7 without changing its document-local semantics.
-  // Its sole solid is the ENTIRE selected material, never just a face owner.
-  geospec_occt_document scoped;
-  scoped.shape = occurrence.shape;
-  scoped.public_faces = occurrence.public_faces;
-  std::vector<geospec_occt_circular_bore_candidate> candidates;
-  bool native_error = false;
-  if (!build_circular_bores(scoped, 4096, 0, 0, candidates, message, native_error,
-                            false, &solid)) {
-    return fail(native_error ? GEOSPEC_OCCT_NATIVE_ERROR : GEOSPEC_OCCT_UNSUPPORTED,
-                message, error);
+  geospec_occt_operand_memo::Bores fresh;
+  const geospec_occt_operand_memo::Bores* inventory = &fresh;
+  if (memo != nullptr) {
+    const auto found = memo->bores.find(face.occurrence);
+    if (found != memo->bores.end()) inventory = &found->second;
   }
-  for (const auto& candidate : candidates) {
+  if (inventory == &fresh) {
+    // A scoped view reuses A7 without changing its document-local semantics.
+    // Its sole solid is the ENTIRE selected material, never just a face owner.
+    geospec_occt_document scoped;
+    scoped.shape = occurrence.shape;
+    scoped.public_faces = occurrence.public_faces;
+    fresh.built = build_circular_bores(scoped, 4096, 0, 0, fresh.candidates, fresh.message,
+                                       fresh.native_error, false, &solid);
+    if (memo != nullptr) {
+      inventory = &memo->bores.emplace(face.occurrence, std::move(fresh)).first->second;
+    }
+  }
+  if (!inventory->built) {
+    return fail(inventory->native_error ? GEOSPEC_OCCT_NATIVE_ERROR : GEOSPEC_OCCT_UNSUPPORTED,
+                inventory->message, error);
+  }
+  for (const auto& candidate : inventory->candidates) {
     if (candidate.public_face_ordinal != associated.public_face_ordinal ||
         candidate.private_query_face != face.face) continue;
     if (candidate.disposition != GEOSPEC_OCCT_CIRCULAR_BORE_QUALIFIED ||
@@ -6906,11 +6986,14 @@ static int selected_bore_void(
 
 int geospec_occt_selected_bore_void_query(
     const geospec_occt_document* document, geospec_occt_entity face,
-    geospec_occt_nominal_cylindrical_band* band,
+    geospec_occt_operand_memo* memo, geospec_occt_nominal_cylindrical_band* band,
     geospec_occt_circular_bore_candidate* clear_interior,
     geospec_occt_string* error) noexcept {
   if (document == nullptr || band == nullptr || clear_interior == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Selected bore output/document is null.", error);
+  }
+  if (memo != nullptr && memo->document != document) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Operand memo belongs to another document.", error);
   }
   *band = {};
   *clear_interior = {};
@@ -6921,20 +7004,24 @@ int geospec_occt_selected_bore_void_query(
     if (status != GEOSPEC_OCCT_OK) return status;
     TopoDS_Solid solid;
     std::string message;
-    if (!regular_solid_operand(document->occurrences[face.occurrence].shape, solid, message)) {
+    if (!occurrence_operand(*document, face.occurrence, memo, solid, message)) {
       return fail(GEOSPEC_OCCT_UNSUPPORTED,
                   "Selected bore requires one complete regular material solid: " + message, error);
     }
-    return selected_bore_void(document, face, associated, solid, band, clear_interior, error);
+    return selected_bore_void(document, face, associated, solid, memo, band, clear_interior,
+                              error);
   });
 }
 
 int geospec_occt_selected_interference_material_query(
     const geospec_occt_document* document, geospec_occt_entity face,
-    geospec_occt_nominal_cylindrical_band* output, uint32_t* kind,
-    geospec_occt_string* error) noexcept {
+    geospec_occt_operand_memo* memo, geospec_occt_nominal_cylindrical_band* output,
+    uint32_t* kind, geospec_occt_string* error) noexcept {
   if (!document || !output || !kind) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Material output/document is null.", error);
+  }
+  if (memo != nullptr && memo->document != document) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Operand memo belongs to another document.", error);
   }
   *output = {};
   *kind = UINT32_MAX;
@@ -6948,7 +7035,7 @@ int geospec_occt_selected_interference_material_query(
     };
     TopoDS_Solid solid;
     std::string message;
-    if (!regular_solid_operand(occurrence.shape, solid, message))
+    if (!occurrence_operand(*document, face.occurrence, memo, solid, message))
       return refuse("Interference material requires exactly one complete regular solid.");
     ShapeIndex faces, edges, vertices, shells;
     TopExp::MapShapes(solid, TopAbs_FACE, faces);
@@ -6990,7 +7077,7 @@ int geospec_occt_selected_interference_material_query(
       // would re-establish (same inputs, pure functions), so it reuses them.
       geospec_occt_nominal_cylindrical_band certified{};
       geospec_occt_circular_bore_candidate clear{};
-      status = selected_bore_void(document, face, band, solid, &certified, &clear, error);
+      status = selected_bore_void(document, face, band, solid, memo, &certified, &clear, error);
       if (status != GEOSPEC_OCCT_OK) return status;
       // In this nominal domain the slab axis is exactly Cartesian. Every
       // other face is a bounded plane, so linear height extrema occur on

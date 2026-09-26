@@ -86,6 +86,20 @@ fn thread_times() -> BTreeMap<u64, u64> {
     times
 }
 
+/// Samples threads until at most `expected` remain or one second passes: a joined
+/// sampler's Mach thread can outlive `join` briefly, while a leaked worker outlives
+/// the deadline and still fails the count.
+fn settled_thread_times(expected: usize) -> BTreeMap<u64, u64> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        let times = thread_times();
+        if times.len() <= expected || std::time::Instant::now() >= deadline {
+            return times;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
 fn occurrence(document: &dyn BrepSubject, name: &str) -> BrepEntity {
     let facts = document.facts().unwrap();
     let index = facts
@@ -231,7 +245,7 @@ fn measured<T>(
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation));
     running.store(false, Ordering::Relaxed);
     let (peak_threads, peak_active, sampled_ids) = monitor.join().unwrap();
-    let after = thread_times();
+    let after = settled_thread_times(before.len());
     let active_ids = std::iter::once(caller_id)
         .chain(workers.iter().copied())
         .filter(|id| after.get(id).copied().unwrap_or(0) > before.get(id).copied().unwrap_or(0))

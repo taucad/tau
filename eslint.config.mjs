@@ -259,6 +259,12 @@ const memberOrdering = [
 const moduleBoundaryOptions = {
   allowCircularSelfDependency: true,
   /*
+   * The Quick Look extensions are a nested app project (`desktop-quick-look`,
+   * `apps/desktop/macos`) that owns its format manifest. The desktop shell reads
+   * that one JSON contract; nothing else crosses the app-to-app boundary.
+   */
+  allow: ['#macos/quick-look-formats.json'],
+  /*
    * Libraries that are deliberately lazy-loaded in one consumer and
    * statically imported in another: the UI keeps the runtime and the
    * filesystem bridge out of its initial bundle, and the CLI client

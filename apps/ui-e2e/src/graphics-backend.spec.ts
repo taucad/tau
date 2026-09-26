@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { beforeEach, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
@@ -369,18 +369,18 @@ async function sampleGridFadeRows(pngBase64: string): Promise<GridFadeRowProfile
       const index = (y * canvas.width + x) * 4;
       return data[index]! * 0.2126 + data[index + 1]! * 0.7152 + data[index + 2]! * 0.0722;
     };
-    let backgroundTotal = 0;
-    let backgroundSamples = 0;
+    // The median ignores a debug overlay in these rows, such as the WebGPU inspector's FPS panel.
+    const backgroundSamples: number[] = [];
     const backgroundRows = Math.max(1, Math.floor(canvas.height * 0.08));
     for (let y = 0; y < backgroundRows; y += 1) {
       for (const [start, end] of bands) {
         for (let x = Math.floor(canvas.width * start); x < Math.floor(canvas.width * end); x += 1) {
-          backgroundTotal += luminanceAt(x, y);
-          backgroundSamples += 1;
+          backgroundSamples.push(luminanceAt(x, y));
         }
       }
     }
-    const background = backgroundTotal / backgroundSamples;
+    backgroundSamples.sort((a, b) => a - b);
+    const background = backgroundSamples[Math.floor(backgroundSamples.length / 2)]!;
     const rawRows = Array.from({ length: canvas.height }, (_, y) => {
       let total = 0;
       let samples = 0;
@@ -775,6 +775,18 @@ function expectRearEdgesStayOccluded(stats: EdgeOcclusionSampleStats, context: s
 }
 
 test.describe('Graphics backend regression guard', () => {
+  // The consent banner overlaps the sampled canvas bands; a stored decision keeps it closed.
+  beforeEach(async () => {
+    await target.addCookies([
+      {
+        domain: 'localhost',
+        name: 'tau-cookie-consent',
+        path: '/',
+        value: encodeURIComponent(JSON.stringify({ status: 'declined', version: 1 })),
+      },
+    ]);
+  });
+
   for (const backend of ['webgl', 'webgpu'] as const satisfies readonly GraphicsBackend[]) {
     test(`FOV changes preserve projected size through CameraControls on ${backend}`, async () => {
       await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);

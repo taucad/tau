@@ -43,6 +43,8 @@ const candidate = z.strictObject({
   }),
   observedAt: timestamp,
   expiresAt: timestamp,
+  /* The host marks a discovered printer whose access code it already keeps; echoing it back is harmless. */
+  credential: z.enum(['saved']).optional(),
 });
 const artifact = z.strictObject({
   revision: z.strictObject({

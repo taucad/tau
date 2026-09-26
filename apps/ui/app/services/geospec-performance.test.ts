@@ -299,9 +299,9 @@ describe('GeoSpec performance route adapter', () => {
       pmiCases.map(({ claim }) => claim.subjectSlots[0]),
     );
     expect(pmiInput.cases.some(({ subjectSlot }) => subjectSlot === 'part')).toBe(true);
-    expect(casesForFixture('many-occurrences-4096-step')).toHaveLength(1);
+    expect(casesForFixture('many-occurrences-4096-step')).toHaveLength(7);
     expect(catalogCasesForFixture('many-occurrences-4096-step', false)).toHaveLength(0);
-    expect(catalogCasesForFixture('many-occurrences-4096-step', true)).toHaveLength(1);
+    expect(catalogCasesForFixture('many-occurrences-4096-step', true)).toHaveLength(7);
     expect(mapped.fixture).toEqual({
       id: fixture.id,
       format: 'step',

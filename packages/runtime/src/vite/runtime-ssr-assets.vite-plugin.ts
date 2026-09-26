@@ -132,7 +132,8 @@ export const runtimeAssetsPlugin = (): Plugin => {
   let isServerEnvironment = false;
   let isTest = false;
   const emittedAssets = new WeakMap<Environment, Map<string, string>>();
-  const emittedReferences = new WeakMap<Environment, Set<string>>();
+  // Reference id → whether a rendered chunk resolved its placeholder.
+  const emittedReferences = new WeakMap<Environment, Map<string, boolean>>();
 
   return {
     name: 'taucad-runtime:assets',
@@ -150,7 +151,7 @@ export const runtimeAssetsPlugin = (): Plugin => {
     },
     buildStart() {
       emittedAssets.set(this.environment, new Map());
-      emittedReferences.set(this.environment, new Set());
+      emittedReferences.set(this.environment, new Map());
     },
     transform: {
       filter: { code: 'import.meta' },
@@ -199,7 +200,7 @@ export const runtimeAssetsPlugin = (): Plugin => {
               source,
             });
             environmentAssets.set(assetKey, referenceId);
-            environmentReferences.add(referenceId);
+            environmentReferences.set(referenceId, false);
           }
           const assetReference = `__TAUCAD_RUNTIME_ASSET__${referenceId}__`;
           replacements.push({
@@ -223,7 +224,7 @@ export const runtimeAssetsPlugin = (): Plugin => {
         throw new Error('Runtime asset state was not initialized for this build environment');
       }
       let result = code;
-      for (const referenceId of environmentReferences) {
+      for (const referenceId of environmentReferences.keys()) {
         const assetReference = `__TAUCAD_RUNTIME_ASSET__${referenceId}__`;
         if (!result.includes(assetReference)) {
           continue;
@@ -238,8 +239,35 @@ export const runtimeAssetsPlugin = (): Plugin => {
         if (result.includes(assetReference)) {
           throw new Error(`Runtime asset reference ${referenceId} was not resolved in ${chunk.fileName}`);
         }
+        environmentReferences.set(referenceId, true);
       }
       return result === code ? undefined : { code: result, map: null };
+    },
+    // Transform emits before tree-shaking, so a dropped importer leaves its asset behind. This runs
+    // before Vite's manifest, which lists every named asset, so the manifest omits pruned files.
+    generateBundle(_, bundle) {
+      const environmentReferences = emittedReferences.get(this.environment);
+      if (!environmentReferences) {
+        throw new Error('Runtime asset state was not initialized for this build environment');
+      }
+      const resolvedFiles = new Set<string>();
+      const unresolvedFiles = new Set<string>();
+      for (const [referenceId, isResolved] of environmentReferences) {
+        (isResolved ? resolvedFiles : unresolvedFiles).add(this.getFileName(referenceId));
+      }
+      // ponytail: bundlers merge identical sources, so another emitter may use the same file. A
+      // base-name match in the chunks and text assets present now finds that use; one written only
+      // URL-encoded, or by a later generateBundle hook, is missed (Vite's worker plugin re-emits).
+      const outputTexts = Object.values(bundle)
+        .map((output) => (output.type === 'chunk' ? output.code : output.source))
+        .filter((text): text is string => typeof text === 'string');
+      for (const fileName of unresolvedFiles) {
+        const baseName = path.posix.basename(fileName);
+        if (!resolvedFiles.has(fileName) && !outputTexts.some((text) => text.includes(baseName))) {
+          // oxlint-disable-next-line @typescript-eslint/no-dynamic-delete -- the bundle is keyed by output file name
+          delete bundle[fileName];
+        }
+      }
     },
   };
 };

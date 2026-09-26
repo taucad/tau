@@ -3320,6 +3320,9 @@ importers:
       '@gltf-transform/functions':
         specifier: 'catalog:'
         version: 4.4.0
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../../kinematics
       '@taucad/spatial':
         specifier: workspace:*
         version: link:../../spatial

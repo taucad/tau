@@ -3119,6 +3119,9 @@ importers:
       '@taucad/json-schema':
         specifier: workspace:*
         version: link:../json-schema
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../../packages/kinematics
       '@taucad/units':
         specifier: workspace:*
         version: link:../../packages/units

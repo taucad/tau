@@ -181,18 +181,24 @@ describe('ViewerSettings', () => {
 
       const tooltip = await screen.findByRole('tooltip', { name: /Drag for field of view/ });
       expect(tooltip).toHaveTextContent('Drag for field of view · 0° is orthographic');
-      expect(tooltip).toHaveTextContent('Click to type · ↑↓ step 1° · Shift 5° · P toggles orthographic');
+      expect(tooltip).toHaveTextContent('Click or Enter to type · ←→ step 1° · Shift 5° · P toggles orthographic');
     });
 
-    it('should explain the row in a tooltip when the field takes keyboard focus', async () => {
+    it('should reach the row from the keyboard, explain it, and step it with ArrowRight', async () => {
       const user = userEvent.setup();
       await openViewerSettings(user);
-
       act(() => {
-        screen.getByRole('textbox', { name: fieldOfViewName }).focus();
+        screen.getByRole('menuitem', { name: 'Axes' }).focus();
       });
 
+      await user.keyboard('{ArrowDown}');
+      expect(screen.getByRole('menuitem', { name: fieldOfViewName })).toHaveFocus();
       expect(await screen.findByRole('tooltip', { name: /Drag for field of view/ })).toBeInTheDocument();
+
+      await user.keyboard('{ArrowRight}');
+      expect(mocks.cameraSend).toHaveBeenLastCalledWith(setFieldOfView(43));
+      await user.keyboard('{Shift>}{ArrowRight}{/Shift}');
+      expect(mocks.cameraSend).toHaveBeenLastCalledWith(setFieldOfView(47));
     });
   });
 });

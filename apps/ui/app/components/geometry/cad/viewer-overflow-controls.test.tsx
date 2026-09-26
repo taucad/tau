@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@taucad/ui/components/dropdown-menu';
 
 type CameraState = {
   readonly context: {
@@ -28,7 +29,15 @@ describe('FovOverflowControl', () => {
 
   it('renders the degree adornment and dispatches typed and stepped values', async () => {
     const user = userEvent.setup();
-    render(<FovOverflowControl />);
+    // The control is a menu item, so it renders inside the viewer settings menu.
+    render(
+      <DropdownMenu defaultOpen>
+        <DropdownMenuTrigger>Viewer settings</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <FovOverflowControl />
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
     const input = screen.getByRole('spinbutton', { name: 'Field of View' });
 
     expect(input).toHaveValue('42');

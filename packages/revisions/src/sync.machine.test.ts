@@ -1354,7 +1354,7 @@ describe('syncMachine', () => {
   });
 
   /*
-   * **B7** (policy rule 20): *mint → push request issued, connected and online,
+   * **B2** (policy rule 20): *mint → push request issued, connected and online,
    * within 2.1 s — the debounce plus 100 ms.*
    *
    * It lives here rather than in `apps/ui-e2e` for two reasons. The budget is a
@@ -1369,7 +1369,7 @@ describe('syncMachine', () => {
    * with load. What is asserted here is what the machine *schedules*, which is
    * a property of the code.
    */
-  it('B7 (rule 20): a mint on a connected, online project issues its push inside the debounce plus 100 ms', async () => {
+  it('B2 (rule 20): a mint on a connected, online project issues its push inside the debounce plus 100 ms', async () => {
     const harness = start();
     await openCleanly(harness);
     expect(selectSyncFacet(harness.actor.getSnapshot()).online).toBe(true);
@@ -1395,7 +1395,7 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
-  it('B7: an offline or unconnected project issues nothing, which is what makes the row about the debounce', async () => {
+  it('B2: an offline or unconnected project issues nothing, which is what makes the row about the debounce', async () => {
     const offline = start({ online: false });
     offline.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
     offline.clock.advance(2100);

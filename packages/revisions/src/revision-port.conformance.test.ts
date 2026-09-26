@@ -1077,7 +1077,7 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
         const recorded = await readFile(log, 'utf8');
         const commands = recorded.split('\n').filter((line) => line !== '');
         /* Object reads only — no `log`, no `show`, nothing that would read a
-         * tree — and a handful of processes rather than one per revision (B5). */
+         * tree — and a handful of processes rather than one per revision (rule 20's log cost). */
         expect(commands.map((command) => command.split('\t')[0])).toStrictEqual(
           commands.map((command) => (command.startsWith('rev-list') ? 'rev-list' : 'cat-file')),
         );

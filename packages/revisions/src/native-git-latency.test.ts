@@ -1,5 +1,5 @@
 /**
- * The latency budgets that are really process counts (W6, B3/B5/B6).
+ * The latency budgets that are really process counts (W6; rule 20's cost budgets).
  *
  * On the native leg a revision read costs what it spawns: one `git` is ~7 ms of
  * fork, `.gitconfig` and object-store setup before it does any work, so an
@@ -81,7 +81,7 @@ const treeOf = (entries: readonly RevisionTreeInput[]): ImmutableRevisionTree =>
 const encoder = new TextEncoder();
 
 describe.runIf(gitToolchainOnPath)('native-leg latency budgets', () => {
-  it('B5: a 50-row history page over 200 revisions costs a handful of processes', async () => {
+  it('a 50-row history page over 200 revisions costs a handful of processes', async () => {
     const { port, spawns } = await countedProject('b5');
     await port.init({ author });
     let head: RevisionId | undefined;
@@ -109,7 +109,7 @@ describe.runIf(gitToolchainOnPath)('native-leg latency budgets', () => {
     expect(counted.total).toBeLessThanOrEqual(5);
   }, 300_000);
 
-  it('B6: reading a 4,000-file tree costs three processes and never fans out', async () => {
+  it('reading a 4,000-file tree costs three processes and never fans out', async () => {
     const { port, spawns } = await countedProject('b6');
     await port.init({ author });
     const receipt = await port.writeRevision({
@@ -138,7 +138,7 @@ describe.runIf(gitToolchainOnPath)('native-leg latency budgets', () => {
   }, 300_000);
 });
 
-describe('cut hashing (B3)', () => {
+describe('cut hashing', () => {
   /* The measured cost of a save was never one hash of the tree: the I5 gate
    * folds the cut, the claim `revisionTreeId` makes folds it again and the port
    * cleans it a third time on the way to the object store, each SHA-256ing

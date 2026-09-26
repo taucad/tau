@@ -759,7 +759,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /**
-   * Every named blob, in one `cat-file --batch` (B6).
+   * Every named blob, in one `cat-file --batch` (rule 20's `readTree` cost).
    *
    * `--batch` reads object names on stdin and answers
    * `<oid> SP <type> SP <size> LF <content> LF` for each, in the order it was
@@ -808,7 +808,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /**
-   * The commits a walk from these heads is about to read, in two processes (B5).
+   * The commits a walk from these heads is about to read, in two processes (rule 20's log cost).
    *
    * `rev-list` answers the reachable *set* and `--batch` reads it; the promised
    * order is still {@link walkRevisionLog}'s, computed from the same parents and
@@ -1113,7 +1113,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     /* Three processes whatever the tree holds: the commit, its paths, and one
-     * `cat-file --batch` for every blob in it (B6). */
+     * `cat-file --batch` for every blob in it (rule 20's `readTree` cost). */
     readTree: async (id: RevisionId): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await readCommitObject(id);
       if (commit === undefined) {
@@ -1318,7 +1318,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const references = input?.heads === undefined ? await port.listRefs() : undefined;
       const heads = [...(input?.heads ?? (references ?? []).map((reference) => reference.head))];
       /* The set in one `cat-file --batch`, the *order* still the walk's own
-       * (B5). `rev-list` answers which objects to read and nothing else: it
+       * (rule 20's log cost). `rev-list` answers which objects to read and nothing else: it
        * never decides what is emitted or in what order, so a long history costs
        * two processes rather than one per revision while the promised order
        * stays a property of the graph (review 4 R12). */

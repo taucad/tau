@@ -296,7 +296,7 @@ describe('revision verbs', () => {
     expect(rows.map((row) => row.revisionNumber)).toEqual(Array.from({ length: 50 }, (_, index) => 81 - index));
   });
 
-  /* B2: a surface holding one page reads an older revision on its own, numbered as the whole history numbers it. */
+  /* B4: a surface holding one page reads an older revision on its own, numbered as the whole history numbers it. */
   it('reads one revision older than the page by id, with its Rev N, in a bounded read', async () => {
     const port = await openMemoryPort();
     await history(port, 80, 'e6-from');

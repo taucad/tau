@@ -161,7 +161,10 @@ export type FocusSummary = {
     statuses: string[];
     expectedStatus: string | WireNull;
     /** Millisecond statistics. */
-    wall: Record<'process' | 'startup' | 'admission' | 'firstClaim' | 'repeatClaim' | 'runner', Stats | WireNull>;
+    wall: Record<
+      'process' | 'harness' | 'startup' | 'admission' | 'firstClaim' | 'repeatClaim' | 'runner',
+      Stats | WireNull
+    >;
     cpu: Record<
       'startup' | 'admission' | 'evaluation' | 'firstClaim' | 'repeatClaim' | 'runner' | 'process',
       CpuMedians
@@ -745,6 +748,7 @@ export const summarizeFocusRows = (rows: readonly FocusRow[]): FocusSummary => {
       expectedStatus: cases[0]?.expectedStatus ?? null,
       wall: {
         process: stats(members.map(({ processWall }) => processWall)),
+        harness: stats(ok.map(({ processWall, report }) => processWall - report.timing!.total)),
         startup: stats(ok.map(({ report }) => report.timing!.startup)),
         admission: stats(ok.map(({ report }) => report.timing!.admission)),
         firstClaim: stats(cases.filter(({ repeat }) => repeat === 0).map(({ evaluation }) => evaluation)),
@@ -839,7 +843,7 @@ export const renderFocusSummary = (summary: FocusSummary): string => {
   const cpuSeconds = (value: CpuMedians) => (value === null ? '—' : (value.totalMicros / 1_000_000).toFixed(3));
   const timing = summary.groups.map(
     (group) =>
-      `| ${group.caseId} | ${group.product} | ${group.cells}${group.failures > 0 ? ` (${group.failures} failed)` : ''} | ${group.statuses.join('/') || '—'} | ${spread(group.wall.process)} | ${spread(group.wall.startup)} | ${spread(group.wall.admission)} | ${spread(group.wall.firstClaim)} | ${spread(group.wall.repeatClaim)} | ${cpuSeconds(group.cpu.admission)} | ${cpuSeconds(group.cpu.firstClaim)} | ${cpuSeconds(group.cpu.process)} | ${group.maxRssMiB === null ? '—' : group.maxRssMiB.median.toFixed(0)} | ${group.threadsMax ?? '—'} | ${group.loadPerCpuBefore?.median.toFixed(2) ?? '—'} |`,
+      `| ${group.caseId} | ${group.product} | ${group.cells}${group.failures > 0 ? ` (${group.failures} failed)` : ''} | ${group.statuses.join('/') || '—'} | ${spread(group.wall.process)} | ${spread(group.wall.harness)} | ${spread(group.wall.startup)} | ${spread(group.wall.admission)} | ${spread(group.wall.firstClaim)} | ${spread(group.wall.repeatClaim)} | ${cpuSeconds(group.cpu.admission)} | ${cpuSeconds(group.cpu.firstClaim)} | ${cpuSeconds(group.cpu.process)} | ${group.maxRssMiB === null ? '—' : group.maxRssMiB.median.toFixed(0)} | ${group.threadsMax ?? '—'} | ${group.loadPerCpuBefore?.median.toFixed(2) ?? '—'} |`,
   );
   const parity = summary.parity.flatMap(({ caseId, families, crossFamilyStatusAgreement }) =>
     families.map(
@@ -852,8 +856,8 @@ export const renderFocusSummary = (summary: FocusSummary): string => {
     '',
     'Walls are medians (min–max) in seconds; CPU columns are median user+system seconds; RSS is the child peak.',
     '',
-    '| Case | Product | n | Status | Spawn→exit | Startup | Admission | First claim | Repeat claim | Admission CPU | First-claim CPU | Process CPU | Peak RSS MiB | Threads | Load/CPU |',
-    '| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    '| Case | Product | n | Status | Spawn→exit | Harness | Startup | Admission | First claim | Repeat claim | Admission CPU | First-claim CPU | Process CPU | Peak RSS MiB | Threads | Load/CPU |',
+    '| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     ...timing,
     '',
     '| Case | Family | Products | Obs | Status | Result SHA-256 | Admission SHA-256 | Same-family exact | Cross-family status |',
@@ -936,7 +940,7 @@ const runFocusParent = async (options: Options): Promise<void> => {
     protocol:
       'Fresh child per round/case/product; case offset = round, product offset = round + case index. The child verifies product and fixture SHA-256, admits once (cold module, engine and subject), then evaluates the authored claim `repeats` times on the retained subject.',
     phases:
-      'Walls are the shared runner timings; CPU windows are process.cpuUsage() deltas at traced engine-call boundaries (startup to Engine construction or legacy initialize, admission ingest through subject handle, evaluation plan/evaluate or submitClaims, cleanup release/close). processWall spans parent spawn through close, including child hash verification; processCpu is cumulative child CPU. CPU includes background runtime threads and can exceed wall.',
+      'Walls are the shared runner timings; CPU windows are process.cpuUsage() deltas at traced engine-call boundaries (startup to Engine construction or legacy initialize, admission ingest through subject handle, evaluation plan/evaluate or submitClaims, cleanup release/close). processWall spans parent spawn through close, including child hash verification; harness is processWall minus the runner total (Node start, TypeScript imports, SHA-256 checks, result write), reported apart from product time; processCpu is cumulative child CPU. CPU includes background runtime threads and can exceed wall.',
     resources:
       'maxRssBytes is process.resourceUsage().maxRSS * 1024 for the child process, taken after cleanup. threads is the parent-polled ps -M high-water, a lower bound at the sampling interval.',
     parity:

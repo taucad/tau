@@ -186,6 +186,7 @@ void describe('performance-lab focus benchmark', () => {
     );
     const group = exact.groups.find(({ product }) => product === 'native-a');
     assert.deepStrictEqual([group?.wall.firstClaim?.median, group?.wall.repeatClaim?.median], [40, 10]);
+    assert.equal(group?.wall.harness?.median, 530);
     const drift = summarizeFocusRows([
       row('native-a', 'native', { sha256: 'a'.repeat(64) }),
       row('native-b', 'native', { sha256: 'd'.repeat(64), status: 'failed' }),

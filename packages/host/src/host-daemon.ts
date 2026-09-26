@@ -51,11 +51,12 @@ import type { HostCredential } from '#credential-store.js';
 import {
   createMachineSecretStore,
   createNodeMachineRuntime,
+  hostMachineWorkspaceId,
   localMachineFacet,
   machineRouteGrants,
-  machineWorkspaceId,
   openMachineHostIdentity,
 } from '#machine-host.js';
+import { openSecretVault } from '#secret-vault.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
@@ -206,10 +207,12 @@ export type HostDaemonAgentOptions = {
   /**
    * Machine providers served on the `/machines` route (`tau serve --machines`).
    * Absent, the route answers 404 and a client's machines facet negotiates
-   * `unsupported`. Identity, secrets and the directory journal live under
-   * `<config>/machines`; the binding ceremony's native half (the secret) has no
-   * daemon surface yet, so only providers that bind without one — the
-   * simulator — complete here.
+   * `unsupported`. Identity and the directory journal live under
+   * `<config>/machines`, printers are scoped to the host rather than the
+   * workspace, and access codes resolve from the host's secret vault (the
+   * macOS keychain, else that directory). The binding ceremony's native half
+   * (the secret) has no daemon surface yet, so only providers that bind
+   * without one — the simulator — complete here.
    */
   readonly machines?: { readonly providers: CreateNodeMachineHostInput['providers'] } | undefined;
 };
@@ -801,20 +804,19 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * @param agent - Workspace, gateway, model, admission secret, and binding.
    */
   /**
-   * Compose the node machine host for one served workspace.
+   * Compose the node machine host for the served workspace.
    *
-   * One identity and one secret store per config directory, one journal
-   * authority beside them, and one trusted session scoped to this workspace's
-   * id — the same shape the desktop services utility serves per project.
+   * One identity per config directory, one journal authority beside it, the
+   * host's secret vault (`TAU_SECRET_VAULT` overrides its kind), and one
+   * trusted session in the host-wide machine scope the desktop services
+   * utility serves too: printers belong to the host, not a project.
    *
    * @param providers - The providers `--machines` admitted.
-   * @param canonicalWorkspaceRoot - Real path the workspace id is derived from.
    * @param artifactProvider - The admitted filesystem an artifact is read through.
    * @returns What the agent server needs to answer the machines route.
    */
   const openMachineHost = async (
     providers: CreateNodeMachineHostInput['providers'],
-    canonicalWorkspaceRoot: string,
     artifactProvider: () => NodeFsProviderClient,
   ): Promise<NonNullable<AgentServerOptions['machines']>> => {
     const directory = join(defaultConfigDirectory(), 'machines');
@@ -823,21 +825,28 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
     const authorityRoot = join(directory, 'authority');
     await mkdir(authorityRoot, { recursive: true, mode: 0o700 });
-    const workspaceId = machineWorkspaceId(canonicalWorkspaceRoot);
+    const workspaceId = hostMachineWorkspaceId;
     const host = await createNodeMachineHost({
       authorityRoot,
       ...identity,
       admission,
       providers,
       runtime: createNodeMachineRuntime({
-        secrets: createMachineSecretStore(directory),
-        readArtifact: async (requestedWorkspaceId, artifact) => {
-          if (requestedWorkspaceId !== workspaceId) {
-            throw new Error('MACHINE_WORKSPACE_UNKNOWN');
+        secrets: createMachineSecretStore({
+          vault: openSecretVault({ directory, env: process.env }),
+          legacyDirectory: directory,
+        }),
+        /* A request names no root, so the one this daemon serves holds the
+         * file only when the bytes carry the reference's digest. */
+        readArtifact: async (_workspaceId, artifact) => {
+          let bytes: Uint8Array<ArrayBuffer>;
+          try {
+            bytes = await artifactProvider().readFile(artifact.path);
+          } catch {
+            throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
           }
-          const bytes = await artifactProvider().readFile(artifact.path);
-          if (typeof bytes === 'string') {
-            throw new TypeError('MACHINE_ARTIFACT_MISMATCH');
+          if (`sha256:${createHash('sha256').update(bytes).digest('hex')}` !== artifact.digest) {
+            throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
           }
           return bytes;
         },
@@ -1036,9 +1045,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     /* Before the registry: the machine tools are offered only over a facet the
      * host already serves, the same rule the revisions history follows. */
     const machines = agent.machines
-      ? await openMachineHost(agent.machines.providers, canonicalWorkspaceRoot, () =>
-          providerForAgentRoot(agent.workspaceRoot),
-        )
+      ? await openMachineHost(agent.machines.providers, () => providerForAgentRoot(agent.workspaceRoot))
       : undefined;
     const toolRegistry = createHostToolRegistry({
       workspaceRoot: agent.workspaceRoot,

@@ -16,6 +16,7 @@ import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
 import { bambuMachine } from '@taucad/bambu';
 import { tauRemoteUrl } from '@taucad/revisions';
 import { connectMachineChannel } from '@taucad/runtime/machine';
+import type { MachineArtifactReference } from '@taucad/runtime/machine';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
@@ -26,6 +27,7 @@ import type { HostDaemonEvent } from '#host-daemon.js';
 import { writeHostCredential } from '#credential-store.js';
 import * as revisions from '#revisions.js';
 import * as agentTools from '#agent-tools.js';
+import * as machineHost from '#machine-host.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
@@ -44,6 +46,8 @@ vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
 
 /* Observe the tool-surface decision the daemon forwards, without changing it. */
 const registrySpy = vi.spyOn(agentTools, 'createHostToolRegistry');
+/* Observe the artifact reader the daemon hands its machine runtime, without changing it. */
+const machineRuntimeSpy = vi.spyOn(machineHost, 'createNodeMachineRuntime');
 /* Captured before the spy replaces it: a case that counts subscriptions still
  * has to build the real revision tree around the real launcher. */
 const realCreateProjectRevisions = revisions.createProjectRevisions;
@@ -55,6 +59,7 @@ const resources: Array<{ close(): void }> = [];
 
 afterEach(async () => {
   delete process.env['TAU_CONFIG_DIR'];
+  delete process.env['TAU_SECRET_VAULT'];
   process.chdir(originalWorkingDirectory);
   for (const resource of resources.splice(0)) {
     resource.close();
@@ -616,9 +621,11 @@ describe('startHostDaemon', () => {
     expect(await daemon.closed).toEqual({ cause: 'requested' });
   }, 20_000);
 
-  it('should admit the machines route and list the configured providers when machines are on', async () => {
+  it('should admit the machines route in the host scope, list the configured providers and read artifacts by digest when machines are on', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    /* The daemon picks the keychain on macOS; no test may touch a person's keychain. */
+    process.env['TAU_SECRET_VAULT'] = 'memory';
     process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
     await writeHostCredential({
       v: 1,
@@ -627,10 +634,12 @@ describe('startHostDaemon', () => {
     });
 
     const events: HostDaemonEvent[] = [];
+    const agentOptions = await agentOptionsIn(temporaryDirectory);
+    machineRuntimeSpy.mockClear();
     const daemon = startHostDaemon({
       relayUrl: new URL('http://127.0.0.1:1'),
       runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
-      agent: { ...(await agentOptionsIn(temporaryDirectory)), machines: { providers: [bambuMachine()] } },
+      agent: { ...agentOptions, machines: { providers: [bambuMachine()] } },
       onEvent: (event) => events.push(event),
     });
     await daemon.ready;
@@ -654,10 +663,39 @@ describe('startHostDaemon', () => {
     try {
       const providers = await client.listProviders({});
       expect(providers.map((provider) => provider.id)).toEqual(['bambu']);
+      /* Printers belong to the host, the same scope the desktop app serves. */
+      await expect(client.list({})).resolves.toMatchObject({
+        cursor: { workspaceId: machineHost.hostMachineWorkspaceId },
+      });
     } finally {
       client.close();
     }
     expect(registrySpy.mock.calls.at(-1)?.[0].machines).toMatchObject({ available: true });
+
+    /* A request names no root: the served one holds its file only when the bytes carry its digest. */
+    const readArtifact = machineRuntimeSpy.mock.calls.at(-1)?.[0].readArtifact;
+    if (readArtifact === undefined) {
+      throw new Error('The daemon composed no machine runtime.');
+    }
+    const plate = new TextEncoder().encode('sliced plate');
+    await writeFile(join(agentOptions.workspaceRoot, 'plate.gcode.3mf'), plate);
+    const artifact = (path: string, digest: string): MachineArtifactReference =>
+      // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- plain fixture data; the reader reads only the path and digest.
+      ({ path, digest, length: plate.byteLength }) as MachineArtifactReference;
+    const plateDigest = `sha256:${createHash('sha256').update(plate).digest('hex')}`;
+    const { signal } = new AbortController();
+    const read = await readArtifact(
+      machineHost.hostMachineWorkspaceId,
+      artifact('plate.gcode.3mf', plateDigest),
+      signal,
+    );
+    expect(Buffer.from(read).toString('utf8')).toBe('sliced plate');
+    await expect(
+      readArtifact(machineHost.hostMachineWorkspaceId, artifact('plate.gcode.3mf', `sha256:${'0'.repeat(64)}`), signal),
+    ).rejects.toThrow('MACHINE_ARTIFACT_NOT_FOUND');
+    await expect(
+      readArtifact(machineHost.hostMachineWorkspaceId, artifact('missing.gcode.3mf', plateDigest), signal),
+    ).rejects.toThrow('MACHINE_ARTIFACT_NOT_FOUND');
 
     await daemon.close();
     expect(await daemon.closed).toEqual({ cause: 'requested' });

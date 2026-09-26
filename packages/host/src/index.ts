@@ -62,6 +62,7 @@ export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
 export {
   createMachineSecretStore,
   createNodeMachineRuntime,
+  hostMachineWorkspaceId,
   localMachineFacet,
   machineRouteGrants,
   machineWorkspaceId,
@@ -69,6 +70,15 @@ export {
   probeCertificateTrust,
 } from '#machine-host.js';
 export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
+export { completeMachineBinding } from '#machine-binding-ceremony.js';
+export type { CompleteMachineBindingInput, MachineBindingCeremonyEvent } from '#machine-binding-ceremony.js';
+export {
+  createFileSecretVault,
+  createKeychainSecretVault,
+  createMemorySecretVault,
+  openSecretVault,
+} from '#secret-vault.js';
+export type { SecretVault, SecretVaultFacts, SecretVaultKind, SecretVaultWriteOptions } from '#secret-vault.js';
 export { createHostToolRegistry } from '#agent-tools.js';
 export type { HostToolRegistryOptions } from '#agent-tools.js';
 export {

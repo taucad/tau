@@ -200,6 +200,10 @@ describe('startAgentServer', () => {
       async completeBinding() {
         return { status: 'bound', machineId: 'fixture' };
       },
+      describeBinding: () => undefined,
+      async removeBinding({ machineId }) {
+        return { status: 'removed', machineId };
+      },
       close: vi.fn(async () => undefined),
     };
     const session = Object.freeze({}) as HostSessionHandle;

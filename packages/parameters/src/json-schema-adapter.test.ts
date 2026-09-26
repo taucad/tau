@@ -311,7 +311,7 @@ describe('Draft-7 parameter declaration adapter', () => {
           'x-ogc-unitLang': 'UCUM',
         },
       }),
-    ).toThrow('conflicting Tau and OGC unit annotations');
+    ).toThrow(/^METADATA_CONFLICT at \/x-ogc-unit: conflicting Tau and OGC unit annotations/u);
     expect(() =>
       projectDraft7SchemaToParameterDeclaration({
         ...identity,
@@ -531,5 +531,94 @@ describe('OGC numeric format widths (Recommendation 1 G–L)', () => {
         /^UNSUPPORTED_FORMAT at \/properties\/value\/format/u,
       );
     }
+  });
+});
+
+describe('OGC quantity keywords (Requirements 3, 7 and 8)', () => {
+  const angleKind = 'http://qudt.org/vocab/quantitykind/PlaneAngle';
+  const lengthProperty = (claims: Readonly<Record<string, unknown>>) => ({
+    $schema: draft202012,
+    type: 'object',
+    properties: { depth: { type: 'number', ...claims } },
+  });
+  const project = (schema: Readonly<Record<string, unknown>>) =>
+    projectDraft7SchemaToParameterDeclaration({ ...identity, defaults: {}, schema });
+
+  // Requirement 7: UCUM is the unit language when x-ogc-unitLang is absent.
+  it('should read x-ogc-unit alone as UCUM (Requirement 7)', () => {
+    const alone = project(lengthProperty({ 'x-ogc-unit': 'mm' }));
+    const labelled = project(lengthProperty({ 'x-ogc-unit': 'mm', 'x-ogc-unitLang': 'UCUM' }));
+
+    expect(alone.schema['properties']).toEqual({ depth: { type: 'double', ucumUnit: 'mm' } });
+    expect(labelled).toEqual(alone);
+  });
+
+  it('should refuse unit languages and units the Tau profile cannot map (Requirement 7)', () => {
+    expect(
+      refusal(lengthProperty({ 'x-ogc-unit': 'http://qudt.org/vocab/unit/MilliM', 'x-ogc-unitLang': 'QUDT' })),
+    ).toMatch(/^UNSUPPORTED_UNIT_LANGUAGE at \/properties\/depth\/x-ogc-unitLang/u);
+    expect(refusal(lengthProperty({ 'x-ogc-unit': 'mm', 'x-ogc-unitLang': 'SI' }))).toMatch(
+      /^INVALID_QUANTITY at \/properties\/depth\/x-ogc-unitLang: OGC unit language must be UCUM or QUDT/u,
+    );
+    expect(refusal(lengthProperty({ 'x-ogc-unitLang': 'UCUM' }))).toMatch(
+      /^INVALID_QUANTITY at \/properties\/depth\/x-ogc-unitLang: OGC unit language requires an OGC unit/u,
+    );
+    expect(refusal(lengthProperty({ 'x-ogc-unit': 'millimetre' }))).toMatch(
+      /^INVALID_QUANTITY at \/properties\/depth\/x-ogc-unit/u,
+    );
+  });
+
+  // Requirement 8 names the semantic definition of a property; ruling P5 reads it as the QUDT quantity kind.
+  it('should lift x-ogc-definition beside x-ogc-unit into the binding quantity kind (Requirement 8)', () => {
+    const declaration = project(
+      lengthProperty({ 'x-ogc-unit': 'mm', 'x-ogc-definition': lengthKind, 'x-tau-space': 'linear' }),
+    );
+
+    expect(declaration.schema['properties']).toEqual({ depth: { type: 'double', ucumUnit: 'mm' } });
+    expect(declaration.bindings).toEqual({ '/depth': { quantityKind: lengthKind, space: 'linear' } });
+  });
+
+  it('should accept x-tau-quantity-kind as an inbound alias and refuse a disagreeing alias', () => {
+    const canonical = project(lengthProperty({ 'x-ogc-unit': 'mm', 'x-ogc-definition': lengthKind }));
+
+    expect(project(lengthProperty({ 'x-tau-unit': 'mm', 'x-tau-quantity-kind': lengthKind }))).toEqual(canonical);
+    expect(
+      project(
+        lengthProperty({ 'x-ogc-unit': 'mm', 'x-ogc-definition': lengthKind, 'x-tau-quantity-kind': lengthKind }),
+      ),
+    ).toEqual(canonical);
+    expect(
+      refusal(lengthProperty({ 'x-ogc-unit': 'mm', 'x-ogc-definition': lengthKind, 'x-tau-quantity-kind': angleKind })),
+    ).toMatch(/^METADATA_CONFLICT at \/properties\/depth\/x-ogc-definition/u);
+  });
+
+  it('should refuse definitions that are not reviewed quantity kinds and claims without a unit (Requirement 8)', () => {
+    expect(
+      refusal(lengthProperty({ 'x-ogc-unit': 'mm', 'x-ogc-definition': 'https://parameters.tau.test/def/depth' })),
+    ).toMatch(/^UNSUPPORTED_DEFINITION at \/properties\/depth\/x-ogc-definition/u);
+    expect(refusal(lengthProperty({ 'x-ogc-definition': lengthKind }))).toMatch(
+      /^INVALID_QUANTITY at \/properties\/depth\/x-ogc-definition: semantic quantity fields require an admitted unit/u,
+    );
+  });
+
+  // Requirement 3 reserves the x-ogc- prefix; Tau carries the unit and definition keywords and refuses the rest.
+  it('should refuse x-ogc- and vendor keywords it cannot carry rather than drop them (Requirement 3)', () => {
+    expect(refusal(lengthProperty({ 'x-ogc-unit': 'mm', 'x-ogc-sequence': 2 }))).toMatch(
+      /^UNSUPPORTED_KEYWORD at \/properties\/depth\/x-ogc-sequence/u,
+    );
+    expect(refusal(lengthProperty({ 'x-ogc-unit': 'mm', 'x-acme-unit': 'mm' }))).toMatch(
+      /^UNSUPPORTED_KEYWORD at \/properties\/depth\/x-acme-unit/u,
+    );
+  });
+
+  it('should carry locale symbols into the carrier', () => {
+    const symbols = { default: 'mm', 'lang:de': 'Millimeter' };
+
+    expect(project(lengthProperty({ 'x-ogc-unit': 'mm', 'x-tau-symbols': symbols })).schema['properties']).toEqual({
+      depth: { type: 'double', ucumUnit: 'mm', symbols },
+    });
+    expect(refusal(lengthProperty({ 'x-ogc-unit': 'mm', 'x-tau-symbols': { de: 'Millimeter' } }))).toMatch(
+      /^INVALID_QUANTITY at \/properties\/depth\/x-tau-symbols/u,
+    );
   });
 });

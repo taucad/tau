@@ -74,10 +74,20 @@ const commonKeywords = [
   'x-tau-reference',
   'x-tau-space',
   'x-tau-symbol',
+  'x-tau-symbols',
   'x-tau-unit',
+  'x-ogc-definition',
   'x-ogc-unit',
   'x-ogc-unitLang',
 ];
+const semanticClaims = [
+  'x-ogc-definition',
+  'x-tau-quantity-kind',
+  'x-tau-reference',
+  'x-tau-space',
+  'x-tau-symbol',
+  'x-tau-symbols',
+] as const;
 // Each dialect admits its own spelling of the definitions and dependency keywords.
 const allowedKeywords: Readonly<Record<JsonSchemaDialect, ReadonlySet<string>>> = {
   'draft-07': new Set([...commonKeywords, 'additionalItems', 'definitions', 'dependencies']),
@@ -285,11 +295,9 @@ const assertKeywordValue = (
       fail('INVALID_QUANTITY', pointer, 'OGC unit must be admitted UCUM on numeric or decimal-lexical data');
     }
   }
-  if (key === 'x-ogc-unitLang' && value !== 'UCUM') {
-    fail('INVALID_QUANTITY', pointer, 'OGC unit language must be exactly UCUM');
-  }
-  if ((schema['x-ogc-unit'] === undefined) !== (schema['x-ogc-unitLang'] === undefined)) {
-    fail('INVALID_QUANTITY', pointer, 'OGC unit and unit language must be declared together');
+  // OGC Requirement 8 allows any definition URI; Tau reads it as the QUDT quantity kind (ruling P5).
+  if (key === 'x-ogc-definition' && (typeof value !== 'string' || !kinds.has(value))) {
+    fail('UNSUPPORTED_DEFINITION', pointer, 'x-ogc-definition must name a reviewed QUDT quantity kind');
   }
   if (key === 'x-tau-quantity-kind' && (typeof value !== 'string' || !kinds.has(value))) {
     fail('INVALID_QUANTITY', pointer, 'quantity kind must use the reviewed exact QUDT URI');
@@ -304,16 +312,54 @@ const assertKeywordValue = (
     fail('INVALID_QUANTITY', pointer, 'symbol must be a non-empty string');
   }
   if (
-    (schema['x-tau-quantity-kind'] !== undefined ||
-      schema['x-tau-space'] !== undefined ||
-      schema['x-tau-reference'] !== undefined ||
-      schema['x-tau-symbol'] !== undefined) &&
-    schema['x-tau-unit'] === undefined
+    key === 'x-tau-symbols' &&
+    (!isRecord(value) ||
+      Object.entries(value).some(
+        ([tag, symbol]) =>
+          (tag !== 'default' && !tag.startsWith('lang:')) || typeof symbol !== 'string' || symbol.length === 0,
+      ))
   ) {
-    fail('INVALID_QUANTITY', pointer, 'semantic quantity fields require an admitted unit');
+    fail('INVALID_QUANTITY', pointer, 'symbols must map default or lang: tags to non-empty strings');
+  }
+};
+
+// Rules that relate several quantity keywords of one schema; they run before any single keyword is checked, so a
+// QUDT unit is refused for its language rather than for failing UCUM admission.
+const assertQuantityClaims = (schema: JsonSchema, pointer: string): void => {
+  const at = (keyword: string): string => `${pointer}/${keyword}`;
+  const unitLanguage = schema['x-ogc-unitLang'];
+  if (unitLanguage !== undefined) {
+    // OGC Requirement 7: QUDT unit URIs have no mapping in the Tau unit profile.
+    if (unitLanguage === 'QUDT') {
+      fail('UNSUPPORTED_UNIT_LANGUAGE', at('x-ogc-unitLang'), 'QUDT unit URIs have no UCUM mapping; declare UCUM');
+    }
+    if (unitLanguage !== 'UCUM') {
+      fail('INVALID_QUANTITY', at('x-ogc-unitLang'), 'OGC unit language must be UCUM or QUDT');
+    }
+    if (schema['x-ogc-unit'] === undefined) {
+      fail('INVALID_QUANTITY', at('x-ogc-unitLang'), 'OGC unit language requires an OGC unit');
+    }
+  }
+  const tauUnit = schema['x-tau-unit'];
+  const ogcUnit = schema['x-ogc-unit'];
+  if (tauUnit !== undefined && ogcUnit !== undefined && tauUnit !== ogcUnit) {
+    fail('METADATA_CONFLICT', at('x-ogc-unit'), 'conflicting Tau and OGC unit annotations');
+  }
+  const definition = schema['x-ogc-definition'];
+  const kind = schema['x-tau-quantity-kind'];
+  if (definition !== undefined && kind !== undefined && definition !== kind) {
+    fail('METADATA_CONFLICT', at('x-ogc-definition'), 'x-ogc-definition and its x-tau-quantity-kind alias disagree');
+  }
+  const claim = semanticClaims.find((keyword) => schema[keyword] !== undefined);
+  if (claim !== undefined && tauUnit === undefined && ogcUnit === undefined) {
+    fail('INVALID_QUANTITY', at(claim), 'semantic quantity fields require an admitted unit');
   }
   if ((schema['x-tau-space'] === 'point') !== (schema['x-tau-reference'] !== undefined)) {
-    fail('INVALID_QUANTITY', pointer, 'point space requires a supported reference and other spaces forbid one');
+    fail(
+      'INVALID_QUANTITY',
+      at(schema['x-tau-space'] === 'point' ? 'x-tau-space' : 'x-tau-reference'),
+      'point space requires a supported reference and other spaces forbid one',
+    );
   }
 };
 
@@ -457,6 +503,7 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
         fail('INVALID_SCHEMA', item.pointer, 'schema must be an object or boolean');
       }
       schemaNodes.add(item.value as Record<string, unknown>);
+      assertQuantityClaims(item.value as JsonSchema, item.pointer);
     }
     if (item.role === 'schema-array' && !Array.isArray(item.value)) {
       fail('INVALID_SCHEMA', item.pointer, 'schema array expected');

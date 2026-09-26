@@ -19,6 +19,7 @@ import {
   GraphicsProvider,
   useGraphics,
   useGraphicsSelector,
+  useKinematicsSelector,
   useModelInteractionSelector,
 } from '#hooks/use-graphics.js';
 import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
@@ -31,6 +32,7 @@ import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ArButton } from '#components/cad/ar-button.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import { describeKinematicsHover, getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import {
   selectCadGeometry,
   selectCadKernelClient,
@@ -369,6 +371,14 @@ const ViewerContent = memo(function ({
     }
     return unit.manifest?.nodesById[hoveredComponentId]?.name;
   });
+  const hoveredComponentId = useModelInteractionSelector(
+    (state) => getModelInteractionUnitState(state.context, modelInteractionUnitId).hoveredComponentId,
+  );
+  const kinematicsDetail = useKinematicsSelector((state) =>
+    hoveredComponentId
+      ? describeKinematicsHover(getKinematicsUnitState(state.context, modelInteractionUnitId), hoveredComponentId)
+      : undefined,
+  );
   const viewerActionMenuData = useModelInteractionSelector((state): ModelComponentActionMenuData | undefined => {
     if (!viewerActionMenu) {
       return undefined;
@@ -581,7 +591,7 @@ const ViewerContent = memo(function ({
       />
 
       {!isGeometryUnitClosed && isPointerOverViewer && componentNameForPointer ? (
-        <ModelComponentNameBadge componentName={componentNameForPointer} />
+        <ModelComponentNameBadge componentName={componentNameForPointer} detail={kinematicsDetail} />
       ) : undefined}
 
       {/* Reopen-renderer overlay — shown when the geometry unit was closed */}
@@ -620,14 +630,21 @@ const ViewerContent = memo(function ({
   );
 });
 
-function ModelComponentNameBadge({ componentName }: { readonly componentName: string }): React.JSX.Element {
+function ModelComponentNameBadge({
+  componentName,
+  detail,
+}: {
+  readonly componentName: string;
+  /** A second, quieter line: what the part does in the mechanism while the Kinematics pane is open. */
+  readonly detail?: string;
+}): React.JSX.Element {
   return (
     <div
       aria-hidden='true'
       data-testid='model-component-name-badge'
       className={cn(
         popoverSurfaceVariants(),
-        'pointer-events-none absolute z-20 max-w-[min(18rem,calc(100%-1rem))] truncate px-2 py-1 text-xs font-medium',
+        'pointer-events-none absolute z-20 flex max-w-[min(18rem,calc(100%-1rem))] flex-col px-2 py-1 text-xs',
       )}
       style={{
         left: 'var(--viewer-hover-label-x, 0px)',
@@ -635,7 +652,8 @@ function ModelComponentNameBadge({ componentName }: { readonly componentName: st
         translate: 'var(--viewer-hover-label-translate-x, 8px) var(--viewer-hover-label-translate-y, 10px)',
       }}
     >
-      {componentName}
+      <span className='truncate font-medium'>{componentName}</span>
+      {detail ? <span className='truncate text-muted-foreground'>{detail}</span> : null}
     </div>
   );
 }

@@ -96,6 +96,7 @@ import type {
   SectionTopologyGltfParser,
 } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 import { createSectionTopologyScheduler } from '#components/geometry/graphics/three/utils/section-topology-scheduler.js';
+import { useKinematicsViewer } from '#components/geometry/graphics/three/react/kinematics-viewer.js';
 import type { GltfPresentationBarrier, GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 
 // Module-scoped GLTFLoader instance. GLTFLoader is stateless and fully reusable,
@@ -1143,8 +1144,8 @@ export function GltfMesh({
     scene.raycast = (raycaster, intersections): false => {
       const { context } = graphicsActor.getSnapshot();
       // A section gizmo drag owns the pointer and suppresses model hover, so its moves skip the model query.
-      // The model handles only secondary presses, which never start that drag, and the release's click
-      // raycasts after pointer-up has lifted the suppression.
+      // The model's presses (secondary, and a primary one that starts a kinematics drag) never start that
+      // drag, and the release's click raycasts after pointer-up has lifted the suppression.
       if (context.viewerHoverSuppressionReasons.includes('sectionViewTransform')) {
         return false;
       }
@@ -1164,6 +1165,13 @@ export function GltfMesh({
       scene.raycast = previousRaycast;
     };
   }, [getModelPickableMeshes, graphicsActor, renderFrame, scene]);
+
+  const handleKinematicsPointerDown = useKinematicsViewer({
+    unitId,
+    scene,
+    manifest: componentManifest,
+    getPickableMeshes: getModelPickableMeshes,
+  });
 
   // Update resolution when size changes. Deferred via requestAnimationFrame
   // so that rapid resize events (e.g. dragging a Dockview divider) batch into
@@ -1935,6 +1943,13 @@ export function GltfMesh({
 
   const handlePointerDown = useCallback(
     (event: ThreeEvent<PointerEvent>) => {
+      if (event.nativeEvent.button === 0) {
+        if (!hasModelHitBlockingSceneUiHit(event.intersections)) {
+          handleKinematicsPointerDown(event);
+        }
+        return;
+      }
+
       if (!onModelComponentSecondaryPointerCandidate || event.nativeEvent.button !== 2) {
         return;
       }
@@ -1948,7 +1963,12 @@ export function GltfMesh({
       event.stopPropagation();
       publishSecondaryPointerAction(contextMenuAction);
     },
-    [onModelComponentSecondaryPointerCandidate, publishSecondaryPointerAction, resolveContextMenuActionFromEvent],
+    [
+      handleKinematicsPointerDown,
+      onModelComponentSecondaryPointerCandidate,
+      publishSecondaryPointerAction,
+      resolveContextMenuActionFromEvent,
+    ],
   );
 
   const handlePointerMissed = useCallback(() => {

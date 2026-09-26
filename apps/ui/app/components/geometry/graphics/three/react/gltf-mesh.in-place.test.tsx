@@ -102,6 +102,10 @@ vi.mock('#components/geometry/graphics/three/use-section-view.js', () => ({
   useSectionViewFlags: () => mocks.sectionView,
 }));
 
+vi.mock('#components/geometry/graphics/three/react/kinematics-viewer.js', () => ({
+  useKinematicsViewer: () => () => undefined,
+}));
+
 const { GltfMesh } = await import('#components/geometry/graphics/three/react/gltf-mesh.js');
 
 const surfaceMaterial: GlbMaterial = {

@@ -1730,6 +1730,23 @@ const candidateTopologyTriangles = (source: SectionSurfaceSource, worldPlane: TH
 };
 
 /**
+ * Where the source frame sits in the world now. Topology positions were fixed through each participant's
+ * registration-time `localToSource`, and posing moves participant meshes without moving the source root, so
+ * the frame follows a participant: `matrixWorld × localToSource⁻¹` (the root's `matrixWorld` while unposed).
+ * Like the slice, it reads the participant's matrix as the caller last updated it.
+ * @internal
+ */
+export const getSectionSourceWorldMatrix = (
+  source: SectionSurfaceSource,
+  target = new THREE.Matrix4(),
+): THREE.Matrix4 => {
+  // ponytail: one rigid placement per source, from its first participant; a body posed apart across kinematic
+  // links would need per-participant slicing.
+  const participant = source.participants[0]!;
+  return target.copy(participant.localToSource).invert().premultiply(participant.mesh.matrixWorld);
+};
+
+/**
  * Slices one admitted logical source through paired halfedge adjacency.
  *
  * Callers update each source root and its descendants' world matrices before slicing, once per frame.
@@ -1758,9 +1775,7 @@ export const sliceSectionSurfaceSource = (options: {
     return source.topology;
   }
   const { topology } = source.topology;
-  const sourcePlane = options.worldPlane
-    .clone()
-    .applyMatrix4(new THREE.Matrix4().copy(source.root.matrixWorld).invert());
+  const sourcePlane = options.worldPlane.clone().applyMatrix4(getSectionSourceWorldMatrix(source).invert());
   const broadphaseStartedAt = performance.now();
   const candidates = candidateTopologyTriangles(source, options.worldPlane);
   const candidateBroadphaseMilliseconds = performance.now() - broadphaseStartedAt;

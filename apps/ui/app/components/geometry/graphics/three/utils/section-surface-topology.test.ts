@@ -10,12 +10,16 @@ import { setModelComponentOwner } from '#components/geometry/graphics/three/util
 import {
   buildSectionSurfaceTopologyForGeometry,
   collectSectionSurfaceSources,
+  getSectionSourceWorldMatrix,
   registerGltfSectionSurfaceSources,
   setGltfSectionSurfaceRegistrationState,
   sliceSectionSurfaceSource,
   sliceSectionSurfaceTopologyForGeometry,
 } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
-import type { SectionTopologyGltfParser } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
+import type {
+  SectionSurfaceSlice,
+  SectionTopologyGltfParser,
+} from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 
 const positionAttribute = 'POSITION';
 const manifoldExtension = 'EXT_mesh_manifold';
@@ -409,6 +413,35 @@ describe('section surface topology', () => {
     setGltfSectionSurfaceRegistrationState(scene, 'unsupported');
 
     expect(collectSectionSurfaceSources(scene)).toHaveLength(1);
+  });
+
+  it('cuts a registered part where a kinematic pose placed it after registration', async () => {
+    const node = new THREE.Group();
+    node.add(new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial()));
+    const scene = new THREE.Group();
+    scene.add(node);
+    await registerGltfSectionSurfaceSources({
+      scene,
+      manifest,
+      unitId: 'unit',
+      parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
+    });
+
+    // The pose composer moves the part's node; the scene root the source registered under stays put.
+    node.matrixAutoUpdate = false;
+    node.matrix.makeTranslation(3, 0, 0);
+    scene.updateMatrixWorld(true);
+    const worldPlane = new THREE.Plane(new THREE.Vector3(1, 0, 0), -3);
+    const [visible] = collectSectionSurfaceSources(scene);
+    const slice = sliceSectionSurfaceSource({ visibleSource: visible!, worldPlane });
+
+    expect(slice).toMatchObject({ status: 'complete', trueCutComponentCount: 1 });
+    const sourceWorld = getSectionSourceWorldMatrix(visible!.source);
+    const distances = (slice as SectionSurfaceSlice).closedContours
+      .flat()
+      .map((point) => Math.abs(worldPlane.distanceToPoint(point.clone().applyMatrix4(sourceWorld))));
+    expect(distances.length).toBeGreaterThan(0);
+    expect(Math.max(...distances)).toBeLessThan(1e-9);
   });
 
   it('certifies face-split bodies as one logical source and rejects partial visibility', async () => {

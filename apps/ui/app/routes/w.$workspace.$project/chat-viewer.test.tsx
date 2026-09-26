@@ -368,6 +368,9 @@ vi.mock('#hooks/use-graphics.js', () => ({
     }),
   useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
     selector({ context: createModelInteractionContext() }),
+  useKinematicsSelector: (
+    selector: (state: { context: { unitsById: Record<string, never>; revision: number } }) => unknown,
+  ) => selector({ context: { unitsById: {}, revision: 0 } }),
 }));
 
 const { ChatViewer } = await import('./chat-viewer.js');

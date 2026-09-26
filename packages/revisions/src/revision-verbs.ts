@@ -171,7 +171,7 @@ const readGraph = async (
       : revisionId(from);
   const entries = new Map<string, RevisionLogEntry>();
   if (head !== undefined) {
-    /* B5: bounded once the table can number the page, else the whole line once. */
+    /* Rule 20's log cost: bounded once the table can number the page, else the whole line once. */
     const bounded = seededPorts.has(port) || ordinals.has(head) ? limit : undefined;
     seededPorts.add(port);
     for (const entry of await port.log(bounded === undefined ? { heads: [head] } : { heads: [head], limit: bounded })) {
@@ -197,7 +197,7 @@ const ordinals = new Map<string, number>();
 const maximumOrdinals = 4096;
 
 /*
- * Ports whose first read has walked a whole line (B5).
+ * Ports whose first read has walked a whole line (rule 20's log cost).
  *
  * Until a port has read, the table cannot number anything on its lines, so a
  * bounded first page would be followed by the whole walk anyway: two walks
@@ -370,7 +370,7 @@ export const readRevisionDiff = async (
 export const readRevisionPlace = async (port: RevisionPort): Promise<RevisionPlace> => {
   const [live, references] = await Promise.all([port.readHead(), port.listRefs()]);
   const { branch, head } = { branch: live?.branch, head: live?.head };
-  /* One walk for every head at once, not one per branch (B5). `log` takes the
+  /* One walk for every head at once, not one per branch (rule 20's log cost). `log` takes the
    * whole set and answers their union, and `Rev N` is read out of that union by
    * following first parents — the same ids, in the same order, that a walk per
    * branch produced at N times the cost. A project with eight branches was

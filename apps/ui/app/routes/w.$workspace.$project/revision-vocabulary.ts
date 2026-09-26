@@ -13,7 +13,7 @@
  */
 import { ArrowDownToLine, CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { isGithubRemoteUrl } from '@taucad/revisions';
+import { isCeilingRefusal, isGithubRemoteUrl } from '@taucad/revisions';
 import type { RemoteFacet, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
 import type { SidebarMark } from '#hooks/use-sidebar-status.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
@@ -457,7 +457,8 @@ export const selectStripVerbs = ({
     return { primary: 'Sign in', secondary };
   }
   if (sync.state === 'failed' && (sync.reason === 'quota' || sync.reason === 'notEntitled')) {
-    return { primary: canUpgrade ? 'Upgrade' : undefined, secondary };
+    /* F2: no plan clears D20's per-repository ceiling. */
+    return { primary: canUpgrade && !isCeilingRefusal(sync.error) ? 'Upgrade' : undefined, secondary };
   }
   return { primary: undefined, secondary };
 };

@@ -18,6 +18,15 @@ describe('selectStripVerbs', () => {
     expect(selectStripVerbs({ status: refused, where, undoable: false, canWrite: true }).primary).toBe('Upgrade');
   });
 
+  /* RV-W8 F2: D20's ceiling is the same on every plan, so the strip offers no Upgrade for it. */
+  it('should offer no plan verb for the repository ceiling, even to an owner who can upgrade', () => {
+    const ceiling = {
+      ...refused,
+      sync: { ...refused.sync, error: 'Tau: repository size limit exceeded — this push needs 12 bytes more.' },
+    } as const;
+    expect(selectStripVerbs({ status: ceiling, where, undoable: false, canWrite: true }).primary).toBeUndefined();
+  });
+
   it('should offer no plan verb to a collaborator or a top-tier owner', () => {
     expect(
       selectStripVerbs({ status: refused, where, undoable: false, canWrite: true, canUpgrade: false }).primary,

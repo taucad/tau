@@ -119,7 +119,10 @@ export class BillingService {
       now < relevant.graceEndsAt.getTime();
     const tier = relevant && (paid || grace) ? planToTier(relevant.plan) : 'free';
     const status = this.resolveStatus(relevant);
-    const base = entitlementsFromTier(tier);
+    /* D23: the free tier's sync is a deployment gate, closed unless configured. */
+    const base = entitlementsFromTier(tier, {
+      freeTierSync: this.configService.get('TAU_FREE_TIER_SYNC_ENABLED', { infer: true }),
+    });
     const overrides = tier === 'enterprise' && relevant ? await this.loadOverrides(relevant.id) : {};
     const stripeAccountId = this.configService.get('STRIPE_ACCOUNT_ID', { infer: true });
     const livemode = this.configService.get('STRIPE_LIVEMODE', { infer: true });

@@ -10,9 +10,11 @@ import {
   pktLine,
   preReceiveHookScript,
   projectIdFromRepository,
+  quotaRefusalMarker,
+  quotaRefusalSentence,
   serviceAdvertisementPrefix,
-  storageLimitBytesByTier,
 } from '#api/git/git.constants.js';
+import { storageLimitBytesByTier } from '@taucad/billing';
 import * as constants from '#api/git/git.constants.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- process environment variable names, not identifiers */
@@ -273,90 +275,124 @@ describe('Tau Hosted Remote constants', () => {
    * The ceiling is the lease's remaining headroom, which the service computes
    * from the manifest's live pack bytes and passes in; the hook only compares
    * it against the quarantine `receive-pack` has already written.
+   *
+   * D17 / L6-F2: the plan's quota refusal carries the same list and the
+   * caller's sentence. A free allowance equals the D20 ceiling and the quota is
+   * tested first, so without it a free owner would never see a file named.
    */
-  it('refuses a push past the D20 ceiling and names the largest files it adds', async () => {
-    const fixture = await mkdtemp(path.join(tmpdir(), 'tau-git-ceiling-'));
-    const quarantine = await mkdtemp(path.join(tmpdir(), 'tau-git-quarantine-'));
-    try {
-      /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
-      const fixtureEnvironment = {
-        PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-        HOME: fixture,
-        GIT_CONFIG_GLOBAL: '/dev/null',
-        GIT_CONFIG_SYSTEM: '/dev/null',
-      } as unknown as NodeJS.ProcessEnv;
-      /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
-      const git = async (...args: readonly string[]): Promise<void> =>
-        new Promise((resolve, reject) => {
-          const child = spawn('git', [...args], {
-            cwd: fixture,
-            stdio: ['ignore', 'pipe', 'pipe'],
-            env: fixtureEnvironment,
+  it.each<{
+    bound: string;
+    environment: Readonly<Record<string, string>>;
+    opener: string;
+    sentence: string | undefined;
+  }>([
+    {
+      bound: 'the D20 ceiling',
+      /* eslint-disable-next-line @typescript-eslint/naming-convention -- process environment name */
+      environment: { TAU_GIT_CEILING_REMAINING_BYTES: '16' },
+      opener: ceilingRefusalMarker,
+      sentence: undefined,
+    },
+    {
+      bound: 'the plan quota, addressed to the caller',
+      environment: {
+        /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+        TAU_GIT_QUOTA_REMAINING_BYTES: '16',
+        TAU_GIT_QUOTA_SENTENCE: quotaRefusalSentence('owner', storageLimitBytesByTier.free),
+        /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+      },
+      opener: quotaRefusalMarker,
+      sentence: 'your 1 GB storage plan',
+    },
+  ])(
+    'should refuse a push past $bound and name the largest files it adds',
+    async ({ environment, opener, sentence }) => {
+      const fixture = await mkdtemp(path.join(tmpdir(), 'tau-git-ceiling-'));
+      const quarantine = await mkdtemp(path.join(tmpdir(), 'tau-git-quarantine-'));
+      try {
+        /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+        const fixtureEnvironment = {
+          PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+          HOME: fixture,
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_SYSTEM: '/dev/null',
+        } as unknown as NodeJS.ProcessEnv;
+        /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+        const git = async (...args: readonly string[]): Promise<void> =>
+          new Promise((resolve, reject) => {
+            const child = spawn('git', [...args], {
+              cwd: fixture,
+              stdio: ['ignore', 'pipe', 'pipe'],
+              env: fixtureEnvironment,
+            });
+            child.on('close', (code) => {
+              if (code === 0) {
+                resolve();
+                return;
+              }
+              reject(new Error(`git ${args.join(' ')}`));
+            });
           });
-          child.on('close', (code) => {
-            if (code === 0) {
-              resolve();
-              return;
-            }
-            reject(new Error(`git ${args.join(' ')}`));
+        const read = async (...args: readonly string[]): Promise<string> =>
+          new Promise((resolve) => {
+            const child = spawn('git', [...args], {
+              cwd: fixture,
+              stdio: ['ignore', 'pipe', 'ignore'],
+              env: fixtureEnvironment,
+            });
+            const out: Array<Uint8Array<ArrayBuffer>> = [];
+            child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => out.push(chunk));
+            child.on('close', () => {
+              resolve(Buffer.concat(out).toString('utf8').trim());
+            });
           });
-        });
-      const read = async (...args: readonly string[]): Promise<string> =>
-        new Promise((resolve) => {
-          const child = spawn('git', [...args], {
-            cwd: fixture,
-            stdio: ['ignore', 'pipe', 'ignore'],
-            env: fixtureEnvironment,
-          });
-          const out: Array<Uint8Array<ArrayBuffer>> = [];
-          child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => out.push(chunk));
-          child.on('close', () => {
-            resolve(Buffer.concat(out).toString('utf8').trim());
-          });
-        });
 
-      await git('init', '--quiet', '--initial-branch=main', '.');
-      await git('config', 'user.email', 'w4@tau.test');
-      await git('config', 'user.name', 'W4');
-      await writeFile(path.join(fixture, 'huge.bin'), Buffer.alloc(64 * 1024, 7));
-      await writeFile(path.join(fixture, 'part.ts'), 'export const width = 10;\n', 'utf8');
-      await git('add', '.');
-      await git('commit', '--quiet', '-m', 'over the ceiling');
-      const head = await read('rev-parse', 'HEAD');
-      /* The refs a push carries are not reachable from the repository's own
+        await git('init', '--quiet', '--initial-branch=main', '.');
+        await git('config', 'user.email', 'w4@tau.test');
+        await git('config', 'user.name', 'W4');
+        await writeFile(path.join(fixture, 'huge.bin'), Buffer.alloc(64 * 1024, 7));
+        await writeFile(path.join(fixture, 'part.ts'), 'export const width = 10;\n', 'utf8');
+        await git('add', '.');
+        await git('commit', '--quiet', '-m', 'over the ceiling');
+        const head = await read('rev-parse', 'HEAD');
+        /* The refs a push carries are not reachable from the repository's own
          refs yet, which is what `--not --all` means; dropping the branch is how
          a fixture stands in for the quarantine's unreferenced objects. */
-      await git('update-ref', '-d', 'refs/heads/main');
-      await writeFile(path.join(quarantine, 'pack'), Buffer.alloc(4096, 1));
+        await git('update-ref', '-d', 'refs/heads/main');
+        await writeFile(path.join(quarantine, 'pack'), Buffer.alloc(4096, 1));
 
-      const refused = await runHook(
-        `${'0'.repeat(40)} ${head} refs/heads/main`,
-        {
-          /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
-          PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-          TAU_GIT_PUSH_ADMITTED: '1',
-          TAU_GIT_CEILING_REMAINING_BYTES: '16',
-          GIT_QUARANTINE_PATH: quarantine,
-          /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
-        },
-        fixture,
-      );
+        const refused = await runHook(
+          `${'0'.repeat(40)} ${head} refs/heads/main`,
+          {
+            /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+            PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+            TAU_GIT_PUSH_ADMITTED: '1',
+            ...environment,
+            GIT_QUARANTINE_PATH: quarantine,
+            /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+          },
+          fixture,
+        );
 
-      expect(refused.code, refused.stderr).toBe(1);
-      /* The refusal *opens* with the marker, which is what lets the client
+        expect(refused.code, refused.stderr).toBe(1);
+        /* The refusal *opens* with the marker, which is what lets the client
          classify a status-less `pre-receive` refusal as the D20 ceiling
          (`packages/revisions/src/remotes.ts`) while showing these same words. */
-      expect(refused.stderr.startsWith(ceilingRefusalMarker), refused.stderr).toBe(true);
-      expect(refused.stderr).toContain('huge.bin');
-      expect(refused.stderr).toContain('part.ts');
-      expect(refused.stderr).toContain('nothing was written');
-      /* Largest first, so the first name in the list is the one worth removing. */
-      expect(refused.stderr.indexOf('huge.bin')).toBeLessThan(refused.stderr.indexOf('part.ts'));
-    } finally {
-      await rm(fixture, { recursive: true, force: true });
-      await rm(quarantine, { recursive: true, force: true });
-    }
-  });
+        expect(refused.stderr.startsWith(opener), refused.stderr).toBe(true);
+        if (sentence !== undefined) {
+          expect(refused.stderr).toContain(sentence);
+        }
+        expect(refused.stderr).toContain('huge.bin');
+        expect(refused.stderr).toContain('part.ts');
+        expect(refused.stderr).toContain('nothing was written');
+        /* Largest first, so the first name in the list is the one worth removing. */
+        expect(refused.stderr.indexOf('huge.bin')).toBeLessThan(refused.stderr.indexOf('part.ts'));
+      } finally {
+        await rm(fixture, { recursive: true, force: true });
+        await rm(quarantine, { recursive: true, force: true });
+      }
+    },
+  );
 
   /**
    * I9 (D22, L6-F13): a chat ref fast-forwards only when every device's
@@ -607,9 +643,23 @@ describe('Tau Hosted Remote constants', () => {
     expect(serviceAdvertisementPrefix('git-receive-pack')).toBe('001f# service=git-receive-pack\n0000');
   });
 
-  it('gives the free tier no allowance, so the entitlement refusal is the only one it can see', () => {
-    expect(storageLimitBytesByTier.free).toBe(0);
-    expect(storageLimitBytesByTier.pro).toBe(10 * 1024 ** 3);
-    expect(storageLimitBytesByTier.enterprise).toBeGreaterThan(storageLimitBytesByTier.pro);
+  /*
+   * D17: one sentence per relationship. The owner who can grow the plan hears
+   * its size; the owner at the top tier is told what to do instead; a
+   * collaborator is sent to the owner and never told the owner's plan.
+   */
+  it('should address a quota refusal to the caller and name the allowance only to its owner', () => {
+    const { free } = storageLimitBytesByTier;
+    expect(quotaRefusalSentence('owner', free)).toContain('your 1 GB storage plan');
+    expect(quotaRefusalSentence('ownerAtTopTier', storageLimitBytesByTier.enterprise)).toMatch(
+      /your 100 GB storage plan.*Remove or stop tracking the largest files/u,
+    );
+    const collaborator = quotaRefusalSentence('collaborator', free);
+    expect(collaborator).toContain('Ask the owner to make room.');
+    expect(collaborator).not.toMatch(/\bGB\b|\byour\b.*plan/u);
+  });
+
+  it('should spell the quota marker the way packages/revisions matches it', () => {
+    expect(quotaRefusalMarker).toBe('Tau: storage quota exceeded');
   });
 });

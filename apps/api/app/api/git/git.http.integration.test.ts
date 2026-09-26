@@ -800,8 +800,11 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
     expect(response.status).toBe(413);
     const body = (await response.json()) as { files?: Array<{ oid: string }>; message?: string };
-    expect(body.files?.map((file) => file.oid)).toEqual(objects.map((object) => object.oid));
-    expect(body.message).toContain('quota');
+    /* D17: largest first, in the sentence addressed to the owner of a Pro plan. */
+    expect(body.files?.map((file) => file.oid)).toEqual(objects.toReversed().map((object) => object.oid));
+    expect(body.message).toBe(
+      'This push needs more room than your 10 GB storage plan has left, so it was not backed up.',
+    );
   });
 
   /**

@@ -196,6 +196,21 @@ describe('runGeoSpecModule', () => {
     expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['v2']);
   });
 
+  it('should rebundle when a new file now wins an import resolution', async () => {
+    const filesystem = filesystemWith([
+      ['spec.geospec.ts', `import { it } from 'geospec'; import { variant } from './helper.js'; it(variant, () => {});`],
+      ['helper.ts', `export const variant = 'helper.ts';`],
+    ]);
+    const bundleCache = new Map();
+
+    const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+    filesystem.setText('helper.js', `export const variant = 'helper.js';`);
+    const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+
+    expect(first.success && first.tests.map(({ name }) => name)).toStrictEqual(['helper.ts']);
+    expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['helper.js']);
+  });
+
   it('should expose the injected model and step loaders to authored modules', async () => {
     const result = await runModule(
       [

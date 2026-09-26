@@ -510,6 +510,15 @@ describe('model component action menu', () => {
     });
   });
 
+  it('should focus the coordinate-anchored viewer menu itself on open, not its first row', () => {
+    // Materials make the part-name row a focusable first row.
+    renderViewerModelComponentActionMenu({
+      appearance: { materials: [{ materialIndex: 0, color: carrierBaseColor }] },
+    });
+
+    expect(document.activeElement).toBe(screen.getByRole('menu'));
+  });
+
   it('should move coordinate-anchored viewer menu focus to enabled items on pointer hover', async () => {
     const user = userEvent.setup();
     renderViewerModelComponentActionMenu();

@@ -8,12 +8,13 @@ use crate::{
     analysis::selection::{EcmaRegexEngine, EcmaRegexError, TextPattern},
     backend::{
         brep::{
-            Bounds, BrepSubject, CircularBoreDisposition, CircularBoreInventory,
-            CircularBoreNonMember, CircularBoreTermination, CircularBoreUnqualified, CurveFacts,
-            EdgeTreatmentBoundaryRole, EdgeTreatmentCertificate, EdgeTreatmentDisposition,
-            EdgeTreatmentInventory, EdgeTreatmentKind, EdgeTreatmentLabel,
-            EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidualKind,
-            OccurrenceFacts, ShapeFacts, SurfaceFacts, TopologyCounts, ValidityFacts,
+            Bounds, BrepSubject, CircularBoreCandidate, CircularBoreDisposition,
+            CircularBoreInventory, CircularBoreNonMember, CircularBoreTermination,
+            CircularBoreUnqualified, CurveFacts, EdgeTreatmentBoundaryRole,
+            EdgeTreatmentCertificate, EdgeTreatmentDisposition, EdgeTreatmentInventory,
+            EdgeTreatmentKind, EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason,
+            EdgeTreatmentResidualKind, LocatedFace, OccurrenceFacts, ShapeFacts, SurfaceFacts,
+            TopologyCounts, ValidityFacts,
         },
         BackendError, BackendErrorKind,
     },
@@ -1636,6 +1637,7 @@ fn derive_features(brep: &dyn BrepSubject) -> Result<Features, BackendError> {
 }
 
 fn evaluate_bores(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
+    let bounded = context.bounded_evidence();
     let bores = match context.circular_bores() {
         Ok(value) => value,
         Err(evaluation) => return evaluation,
@@ -1644,6 +1646,15 @@ fn evaluate_bores(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> E
     let Some(brep) = subject.brep.as_deref() else {
         return brep_evidence_unavailable();
     };
+    // C10 (PERF-OUTPUT-01): one qualified hole is an existential witness, so
+    // the bounded profile stops at the first match; no match stays complete.
+    if let (true, Prepared::CircularHole(expected)) = (bounded, prepared) {
+        match first_matching_hole(expected, brep, &bores) {
+            Ok(Some(outcome)) => return geometric(prepared, &subject.content_hash, outcome),
+            Ok(None) => {}
+            Err(error) => return backend_refused(prepared.capability(), error),
+        }
+    }
     let features = derive_features(brep).and_then(|mut features| {
         populate_bores(&mut features, brep, &bores)?;
         Ok(features)
@@ -1679,42 +1690,92 @@ fn populate_bores(
 ) -> Result<(), BackendError> {
     let faces = brep.faces()?;
     for candidate in &bores.candidates {
-        let CircularBoreDisposition::Qualified(topology) = &candidate.disposition else {
-            continue;
-        };
-        let face = faces
-            .get(candidate.public_face_ordinal as usize)
-            .filter(|face| face.facts.index == candidate.public_face_ordinal)
-            .ok_or_else(|| BackendError {
-                kind: BackendErrorKind::ComputationFailed,
-                message: "Qualified circular bore has no corresponding reported face.".into(),
-            })?;
-        let SurfaceFacts::Cylinder { radius, axis, .. } = face.facts.surface else {
-            return Err(BackendError {
-                kind: BackendErrorKind::ComputationFailed,
-                message: "Qualified circular bore does not correspond to an analytic cylinder."
-                    .into(),
-            });
-        };
-        let principal = Axis::dominant(axis);
-        let bounds = brep.face_optimal_bounds(candidate.public_face_ordinal)?;
-        features.holes.push(Hole {
-            diameter: radius * 2.0,
-            through: topology
-                .ends
-                .iter()
-                .all(|end| end.termination == CircularBoreTermination::Mouth),
-            axis: principal,
-            center: face.facts.center_of_mass,
-            // Retained nominal display values; never used to qualify topology.
-            axis_min: bounds.min[principal.index()],
-            axis_max: bounds.max[principal.index()],
-        });
+        if let Some(hole) = qualified_hole(brep, &faces, candidate)? {
+            features.holes.push(hole);
+        }
     }
     if !bore_inventory_is_partial(bores) {
         features.patterns = derive_patterns(&features.holes);
     }
     Ok(())
+}
+
+/// The hole a qualified candidate describes; `None` for any other disposition.
+fn qualified_hole(
+    brep: &dyn BrepSubject,
+    faces: &[LocatedFace],
+    candidate: &CircularBoreCandidate,
+) -> Result<Option<Hole>, BackendError> {
+    let CircularBoreDisposition::Qualified(topology) = &candidate.disposition else {
+        return Ok(None);
+    };
+    let face = faces
+        .get(candidate.public_face_ordinal as usize)
+        .filter(|face| face.facts.index == candidate.public_face_ordinal)
+        .ok_or_else(|| BackendError {
+            kind: BackendErrorKind::ComputationFailed,
+            message: "Qualified circular bore has no corresponding reported face.".into(),
+        })?;
+    let SurfaceFacts::Cylinder { radius, axis, .. } = face.facts.surface else {
+        return Err(BackendError {
+            kind: BackendErrorKind::ComputationFailed,
+            message: "Qualified circular bore does not correspond to an analytic cylinder.".into(),
+        });
+    };
+    let principal = Axis::dominant(axis);
+    let bounds = brep.face_optimal_bounds(candidate.public_face_ordinal)?;
+    Ok(Some(Hole {
+        diameter: radius * 2.0,
+        through: topology
+            .ends
+            .iter()
+            .all(|end| end.termination == CircularBoreTermination::Mouth),
+        axis: principal,
+        center: face.facts.center_of_mass,
+        // Retained nominal display values; never used to qualify topology.
+        axis_min: bounds.min[principal.index()],
+        axis_max: bounds.max[principal.index()],
+    }))
+}
+
+/// C10: the first qualified candidate matching `expected`, as the bounded
+/// profile's single witness: the hole and that candidate's topology.
+fn first_matching_hole(
+    expected: &HoleExpectation,
+    brep: &dyn BrepSubject,
+    bores: &CircularBoreInventory,
+) -> Result<Option<MatchOutcome>, BackendError> {
+    let faces = brep.faces()?;
+    for candidate in &bores.candidates {
+        let Some(hole) = qualified_hole(brep, &faces, candidate)? else {
+            continue;
+        };
+        if !hole_matches(expected, &hole) {
+            continue;
+        }
+        return Ok(Some(MatchOutcome {
+            positive: true,
+            measured: Json::object([("matchCount", Json::Number(1.0))]),
+            witnesses: Json::object([
+                ("matches", Json::Array(vec![hole_json(&hole)])),
+                ("measurementContract", feature_measurement_contract(true)),
+                (
+                    "circularBoreTopology",
+                    Json::Object(
+                        bore_topology_header()
+                            .into_iter()
+                            .chain([(
+                                "candidates".into(),
+                                Json::Array(vec![bore_candidate_json(candidate)]),
+                            )])
+                            .collect(),
+                    ),
+                ),
+            ]),
+            diagnostics: Vec::new(),
+        }));
+    }
+    Ok(None)
 }
 
 fn bore_inventory_is_partial(bores: &CircularBoreInventory) -> bool {
@@ -1743,69 +1804,129 @@ fn bore_uncertainty(capability: Capability, bores: &CircularBoreInventory) -> Di
 }
 
 fn bore_inventory_json(bores: &CircularBoreInventory) -> Json {
-    Json::object([
-        ("profile", Json::string("geospec-circular-bore-topology-v1")),
-        ("grade", Json::string("kernel-model-topology")),
-        ("scope", Json::string("local-owning-solid-straight-bore")),
-        ("complete", Json::Bool(!bore_inventory_is_partial(bores))),
+    let mut fields = bore_topology_header();
+    fields.push((
+        "complete".into(),
+        Json::Bool(!bore_inventory_is_partial(bores)),
+    ));
+    fields.push((
+        "candidates".into(),
+        Json::Array(bores.candidates.iter().map(bore_candidate_json).collect()),
+    ));
+    Json::Object(fields)
+}
+
+fn bore_topology_header() -> Vec<(String, Json)> {
+    vec![
         (
-            "candidates",
-            Json::Array(
-                bores.candidates.iter().map(|candidate| {
-                    let mut fields = vec![
-                        ("publicFaceOrdinal".into(), Json::Number(candidate.public_face_ordinal as f64)),
-                        ("privateQueryFace".into(), Json::Number(candidate.private_query_face as f64)),
-                    ];
-                    match &candidate.disposition {
-                        CircularBoreDisposition::NonMember(reason) => {
-                            fields.push(("status".into(), Json::string("nonmember")));
-                            fields.push(("reason".into(), Json::string(match reason {
-                                CircularBoreNonMember::ExteriorCylinder => "exterior-cylinder",
-                                CircularBoreNonMember::SealedCavity => "sealed-cavity",
-                                CircularBoreNonMember::ObstructedInterior => "obstructed-interior",
-                            })));
-                        }
-                        CircularBoreDisposition::Unqualified(reason) => {
-                            fields.push(("status".into(), Json::string("unqualified")));
-                            fields.push(("reason".into(), Json::string(match reason {
-                                CircularBoreUnqualified::UnsupportedSurface => "unsupported-surface",
-                                CircularBoreUnqualified::UnsupportedOrientation => "unsupported-orientation",
-                                CircularBoreUnqualified::AmbiguousOwnership => "ambiguous-ownership",
-                                CircularBoreUnqualified::InvalidSolid => "invalid-solid",
-                                CircularBoreUnqualified::IncompleteBand => "incomplete-band",
-                                CircularBoreUnqualified::UnsupportedTermination => "unsupported-termination",
-                                CircularBoreUnqualified::AmbiguousAssociation => "ambiguous-association",
-                            })));
-                        }
-                        CircularBoreDisposition::Qualified(topology) => {
-                            fields.extend([
-                                ("status".into(), Json::string("qualified")),
-                                ("owningSolidOrdinal".into(), Json::Number(topology.owning_solid_ordinal as f64)),
-                                ("band".into(), Json::object([
-                                    ("origin", point_json(topology.band.origin)),
-                                    ("axis", point_json(topology.band.axis)),
-                                    ("radius", Json::Number(topology.band.radius)),
-                                    ("from", Json::Number(topology.band.from)),
-                                    ("to", Json::Number(topology.band.to)),
-                                ])),
-                                ("ends".into(), Json::Array(topology.ends.iter().map(|end| Json::object([
-                                    ("owningSolidEdgeOrdinal", Json::Number(end.owning_solid_edge_ordinal as f64)),
-                                    ("adjacentPublicFaceOrdinal", Json::Number(end.adjacent_public_face_ordinal as f64)),
-                                    ("termination", Json::string(match end.termination {
-                                        CircularBoreTermination::Mouth => "mouth",
-                                        CircularBoreTermination::PlanarDiskBottom => "planar-disk-bottom",
-                                    })),
-                                ])).collect())),
-                                ("maximumTopologyToleranceMm".into(), Json::Number(topology.maximum_topology_tolerance_mm)),
-                                ("interiorResidualSolidCount".into(), Json::Number(topology.interior_residual_solid_count as f64)),
-                            ]);
-                        }
-                    }
-                    Json::Object(fields)
-                }).collect(),
-            ),
+            "profile".into(),
+            Json::string("geospec-circular-bore-topology-v1"),
         ),
-    ])
+        ("grade".into(), Json::string("kernel-model-topology")),
+        (
+            "scope".into(),
+            Json::string("local-owning-solid-straight-bore"),
+        ),
+    ]
+}
+
+fn bore_candidate_json(candidate: &CircularBoreCandidate) -> Json {
+    let mut fields = vec![
+        (
+            "publicFaceOrdinal".into(),
+            Json::Number(candidate.public_face_ordinal as f64),
+        ),
+        (
+            "privateQueryFace".into(),
+            Json::Number(candidate.private_query_face as f64),
+        ),
+    ];
+    match &candidate.disposition {
+        CircularBoreDisposition::NonMember(reason) => {
+            fields.push(("status".into(), Json::string("nonmember")));
+            fields.push((
+                "reason".into(),
+                Json::string(match reason {
+                    CircularBoreNonMember::ExteriorCylinder => "exterior-cylinder",
+                    CircularBoreNonMember::SealedCavity => "sealed-cavity",
+                    CircularBoreNonMember::ObstructedInterior => "obstructed-interior",
+                }),
+            ));
+        }
+        CircularBoreDisposition::Unqualified(reason) => {
+            fields.push(("status".into(), Json::string("unqualified")));
+            fields.push((
+                "reason".into(),
+                Json::string(match reason {
+                    CircularBoreUnqualified::UnsupportedSurface => "unsupported-surface",
+                    CircularBoreUnqualified::UnsupportedOrientation => "unsupported-orientation",
+                    CircularBoreUnqualified::AmbiguousOwnership => "ambiguous-ownership",
+                    CircularBoreUnqualified::InvalidSolid => "invalid-solid",
+                    CircularBoreUnqualified::IncompleteBand => "incomplete-band",
+                    CircularBoreUnqualified::UnsupportedTermination => "unsupported-termination",
+                    CircularBoreUnqualified::AmbiguousAssociation => "ambiguous-association",
+                }),
+            ));
+        }
+        CircularBoreDisposition::Qualified(topology) => {
+            fields.extend([
+                ("status".into(), Json::string("qualified")),
+                (
+                    "owningSolidOrdinal".into(),
+                    Json::Number(topology.owning_solid_ordinal as f64),
+                ),
+                (
+                    "band".into(),
+                    Json::object([
+                        ("origin", point_json(topology.band.origin)),
+                        ("axis", point_json(topology.band.axis)),
+                        ("radius", Json::Number(topology.band.radius)),
+                        ("from", Json::Number(topology.band.from)),
+                        ("to", Json::Number(topology.band.to)),
+                    ]),
+                ),
+                (
+                    "ends".into(),
+                    Json::Array(
+                        topology
+                            .ends
+                            .iter()
+                            .map(|end| {
+                                Json::object([
+                                    (
+                                        "owningSolidEdgeOrdinal",
+                                        Json::Number(end.owning_solid_edge_ordinal as f64),
+                                    ),
+                                    (
+                                        "adjacentPublicFaceOrdinal",
+                                        Json::Number(end.adjacent_public_face_ordinal as f64),
+                                    ),
+                                    (
+                                        "termination",
+                                        Json::string(match end.termination {
+                                            CircularBoreTermination::Mouth => "mouth",
+                                            CircularBoreTermination::PlanarDiskBottom => {
+                                                "planar-disk-bottom"
+                                            }
+                                        }),
+                                    ),
+                                ])
+                            })
+                            .collect(),
+                    ),
+                ),
+                (
+                    "maximumTopologyToleranceMm".into(),
+                    Json::Number(topology.maximum_topology_tolerance_mm),
+                ),
+                (
+                    "interiorResidualSolidCount".into(),
+                    Json::Number(topology.interior_residual_solid_count as f64),
+                ),
+            ]);
+        }
+    }
+    Json::Object(fields)
 }
 
 fn expected_planar(expected: &PlanarExpectation) -> FeatureDecision {
@@ -1884,20 +2005,22 @@ fn expected_cylinder(expected: &CylindricalExpectation) -> FeatureDecision {
     })
 }
 
+fn hole_matches(expected: &HoleExpectation, hole: &Hole) -> bool {
+    (hole.diameter - expected.diameter).abs() <= expected.tolerance
+        && expected.through.is_none_or(|value| value == hole.through)
+        && expected.axis.is_none_or(|value| value == hole.axis)
+        && expected
+            .center
+            .is_none_or(|center| point_holds(hole.center, center, expected.tolerance))
+}
+
 fn expected_hole(expected: &HoleExpectation) -> FeatureDecision {
     let expected = expected.clone();
     Box::new(move |features| {
         let matches = features
             .holes
             .iter()
-            .filter(|hole| {
-                (hole.diameter - expected.diameter).abs() <= expected.tolerance
-                    && expected.through.is_none_or(|value| value == hole.through)
-                    && expected.axis.is_none_or(|value| value == hole.axis)
-                    && expected
-                        .center
-                        .is_none_or(|center| point_holds(hole.center, center, expected.tolerance))
-            })
+            .filter(|hole| hole_matches(&expected, hole))
             .map(hole_json)
             .collect::<Vec<_>>();
         feature_outcome(

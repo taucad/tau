@@ -4,7 +4,7 @@ import type { UserConfig } from 'tsdown';
 const externalDependencies = [/^(?:@taucad\/(?:cache-core|filesystem|runtime|units)|basic-ftp|mqtt|zod)(?:\/|$)/u];
 
 const baseConfig: UserConfig = {
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/bambu.plate.ts'],
   sourcemap: false,
   clean: true,
   dts: true,
@@ -13,6 +13,7 @@ const baseConfig: UserConfig = {
     dts: { neverBundle: externalDependencies },
   },
   minify: true,
+  copy: ({ outDir }) => [{ from: 'src/assets', to: outDir }],
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };

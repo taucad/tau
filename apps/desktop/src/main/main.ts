@@ -7,7 +7,7 @@
  * work — kernels, disk, the agent host — lives in the utilities.
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
@@ -73,6 +73,7 @@ import {
 import { createServicesBroker, rendererServicesConcerns } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import {
+  bundledGitEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -308,26 +309,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const picogkResourceRoot = app.isPackaged
     ? join(process.resourcesPath, 'picogk')
     : join(import.meta.dirname, '../../resources/picogk');
-  /*
-   * The `git` this app records revisions with (OQ3, C68).
-   *
-   * One binary, not two: the bundled git's own exec path carries `git-lfs`, so
-   * `git lfs` resolves through it and nothing has to name a second executable.
-   * Absent — a development tree, or a platform whose payload is not built — the
-   * toolchain comes from `PATH`, which on a Finder launch is
-   * `/usr/bin:/bin:/usr/sbin:/sbin`; a machine that has neither is told once,
-   * by name, through `revision.unavailable`.
-   */
-  const bundledGitExecutable = join(
-    app.isPackaged ? join(process.resourcesPath, 'git') : join(import.meta.dirname, '../../resources/git'),
-    `${process.platform}-${process.arch}`,
-    'bin',
-    process.platform === 'win32' ? 'git.exe' : 'git',
+  /* The `git` this app records revisions with, when this build ships one (OQ3, C68). */
+  const gitEnvironment = bundledGitEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
-  const gitEnvironment: Readonly<Record<string, string>> = existsSync(bundledGitExecutable)
-    ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
-      { TAU_GIT_EXECUTABLE: bundledGitExecutable }
-    : {};
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
   log.log('info', 'main.ready', { electron: process.versions.electron, packaged: app.isPackaged, isDevelopment });

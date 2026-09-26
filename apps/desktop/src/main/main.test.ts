@@ -240,6 +240,7 @@ vi.mock('#main/services-broker.js', () => ({
 vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => undefined),
   packagedEsbuildEnvironment: vi.fn(() => ({})),
+  bundledGitEnvironment: vi.fn(() => ({})),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),

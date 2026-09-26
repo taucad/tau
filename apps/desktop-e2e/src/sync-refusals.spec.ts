@@ -1,9 +1,13 @@
 /* oxlint-disable no-await-in-loop -- Each refusal class drives one client after another on purpose. */
 import { execFile } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
+import { desktopE2EApiUrl } from '#support/config.js';
 import { openBackupChooser } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { launchBrowserClient } from '#support/two-client/browser-client.js';
@@ -11,8 +15,10 @@ import type { BrowserClient } from '#support/two-client/browser-client.js';
 import { routeGitRefusal } from '#support/two-client/git-faults.js';
 import type { GitRefusal } from '#support/two-client/git-faults.js';
 import {
+  basicAuthorization,
   forgetSeededProjects,
   mintOneTimeToken,
+  runGit,
   seedProPlan,
   tauCloudOwnerIds,
 } from '#support/two-client/tau-cloud.js';
@@ -58,7 +64,7 @@ const countRows = async (statement: string): Promise<number> => {
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
-type Seeded = { email: string; owner: TauCloudOwnerIds; client: BrowserClient };
+type Seeded = { email: string; bearer: string; owner: TauCloudOwnerIds; client: BrowserClient };
 
 let uiServer: UiServer | undefined;
 let free: Seeded | undefined;
@@ -72,7 +78,7 @@ const seed = async (label: string, plan: 'free' | 'pro'): Promise<Seeded> => {
     await seedProPlan(owner);
   }
   const client = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
-  return { email: account.email, owner, client };
+  return { email: account.email, bearer, owner, client };
 };
 
 const required = <T>(value: T | undefined): T => {
@@ -119,12 +125,13 @@ const backupText = async (client: BrowserClient): Promise<string> =>
   (await backupStatus(client).count()) === 0 ? '' : backupStatus(client).innerText();
 
 /** Connect Tau Cloud with no fault and wait for the first backup to land. */
-const connectAndBackUp = async (client: BrowserClient, name: string): Promise<void> => {
-  await createProject(client, name);
+const connectAndBackUp = async (client: BrowserClient, name: string): Promise<string> => {
+  const projectId = await createProject(client, name);
   await openSync(client);
   await client.page.getByRole('radio', { name: 'Tau Cloud' }).first().click();
   await client.page.getByRole('button', { name: 'Connect backup', exact: true }).first().click();
   await expect.poll(async () => backupText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
+  return projectId;
 };
 
 /** Make the tree differ from head and mint, so the scheduler owes a push. */
@@ -300,12 +307,11 @@ describe('a Pro owner whose pushes are refused', () => {
     900_000,
   );
 
-  /* Red pin (upstream): isomorphic-git 1.38.5 does not await `stringifyBody` on
-   * its POST path (`index.js:9169`), so a refusal served on the
-   * `git-receive-pack` POST reaches the classifier with no body and the row
-   * shows the generic class sentence. Remove `.fails` when the dependency
-   * awaits it. */
-  it.fails('should name a refusal served on the git-receive-pack POST in its own words', async () => {
+  /* Was a red pin on isomorphic-git 1.38.5's POST path, which dropped the body
+   * (`index.js:9169`). The browser port now sends its own receive-pack POST and
+   * hands a non-200 to the classifier with its body (5436b5df8), so the row
+   * asserts the server's own words. */
+  it('should name a refusal served on the git-receive-pack POST in its own words', async () => {
     const { client } = required(pro);
     await connectAndBackUp(client, 'W8 Refusal POST');
     const sentence = 'Storage quota reached on the pack upload (W8 POST 413).';
@@ -384,5 +390,75 @@ describe('a Pro owner whose pushes are refused', () => {
     } finally {
       await fault.remove();
     }
+  }, 900_000);
+});
+
+/* D14 (charter W6): a decision travels only on `refs/heads/conflicts/`. The
+ * hook refuses a conflicted revision anywhere else with a sentence a person can
+ * act on, and the name `conflicts` is kept for those lines. */
+describe('a Pro owner and a decision that travels (D14)', () => {
+  it('should refuse a conflicted revision pushed to main, in words, and admit it on a conflict line', async () => {
+    const { client, bearer } = required(pro);
+    const projectId = await connectAndBackUp(client, 'W6 Conflicted Push');
+    const peer = await mkdtemp(join(tmpdir(), 'tau-w6-conflicted-push-'));
+    try {
+      const authorization = `http.extraHeader=Authorization: ${basicAuthorization(bearer)}`;
+      const git = async (...args: readonly string[]) => runGit(['-c', authorization, ...args], peer);
+      const output = async (...args: readonly string[]): Promise<string> => {
+        const { stdout } = await git(...args);
+        return stdout.trim();
+      };
+      const cloned = await git('clone', '--quiet', `${desktopE2EApiUrl}/v1/git/${projectId}.git`, '.');
+      expect(cloned.code, cloned.stderr).toBe(0);
+      const head = await output('rev-parse', 'HEAD');
+      const tree = await output('rev-parse', 'HEAD^{tree}');
+      /* A commit object as Tau writes a conflicted revision: its terms in `jj:trees`. */
+      const body = [
+        `tree ${tree}`,
+        `parent ${head}`,
+        'author W6 <w6@tau.invalid> 1790000000 +0000',
+        'committer W6 <w6@tau.invalid> 1790000000 +0000',
+        `jj:trees ${tree} ${tree} ${tree}`,
+        '',
+        'Needs your decision',
+        '',
+      ].join('\n');
+      const file = join(peer, '.git', 'conflicted-commit');
+      await writeFile(file, body, 'utf8');
+      const conflicted = await output('hash-object', '-t', 'commit', '-w', '--literally', file);
+
+      const onMain = await git('push', 'origin', `${conflicted}:refs/heads/main`);
+      expect(onMain.code, 'D14: a conflicted revision on main must be refused').not.toBe(0);
+      expect(onMain.stderr).toContain('it carries a revision that still needs your decision');
+
+      const onLine = await git('push', 'origin', `${conflicted}:refs/heads/conflicts/main/w6-peer`);
+      expect(onLine.code, onLine.stderr).toBe(0);
+    } finally {
+      await rm(peer, { recursive: true, force: true });
+    }
+  }, 900_000);
+
+  it('should refuse a branch named conflicts at creation, and say why', async () => {
+    const { client } = required(pro);
+    await createProject(client, 'W6 Reserved Name');
+    const { page } = client;
+    /* *New branch* is offered from a revision: record one first. A fresh
+     * project opens with Files already showing, where the Files chord closes it;
+     * Revisions first leaves the chord to open Files, as it does after a connect. */
+    await page
+      .getByRole('button', { name: /^Open Revisions\./u })
+      .first()
+      .click({ timeout: 120_000 });
+    await mintRevision(client, 'reserved.scad');
+    await page.getByRole('button', { name: 'New branch', exact: true }).first().click({ timeout: 120_000 });
+    await page.getByLabel('Name for the new branch').fill('conflicts');
+    await page.getByRole('button', { name: 'Create branch', exact: true }).click();
+
+    await expect
+      .poll(async () => page.getByText(/is kept for decisions that travel between devices/u).count(), {
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(0);
+    expect(await page.getByRole('list', { name: 'Branches' }).getByText('conflicts', { exact: true }).count()).toBe(0);
   }, 900_000);
 });

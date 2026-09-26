@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { desktopE2EApiUrl } from '#support/config.js';
@@ -407,6 +408,10 @@ const gitOutput = async (repository: string, args: readonly string[]): Promise<s
 const gitHead = async (repository: string): Promise<string | undefined> =>
   gitOutput(repository, ['rev-parse', 'refs/heads/main']);
 
+/** When each project's mirror last fetched, and the least time between two fetches. */
+const mirrorFetchedAt = new Map<string, number>();
+const mirrorFetchGapMilliseconds = 2000;
+
 /**
  * A local mirror of the Tau Hosted Remote's repository for `projectId`.
  *
@@ -418,6 +423,15 @@ const gitHead = async (repository: string): Promise<string | undefined> =>
  * stale refs.
  */
 const tauRepository = async (projectId: string): Promise<string> => {
+  /* Every read is a fetch through the API's own git budget, which the devices
+   * under test spend too (120 smart-HTTP requests per account, project and
+   * minute). Polled at `expect.poll`'s 50 ms it spent that budget in seconds,
+   * and every device then read *Too many requests* until the row timed out. */
+  const gap = (mirrorFetchedAt.get(projectId) ?? 0) + mirrorFetchGapMilliseconds - Date.now();
+  if (gap > 0) {
+    await delay(gap);
+  }
+  mirrorFetchedAt.set(projectId, Date.now());
   const mirror = join(tauGitRoot, `${projectId}.git`);
   if (!existsSync(mirror)) {
     await mkdir(mirror, { recursive: true });
@@ -820,7 +834,12 @@ describe('a project on the browser client', () => {
     await openSyncRegion(client);
     await chooseTauCloud(client);
     await expect.poll(async () => syncRegionText(client), { timeout: 120_000 }).toMatch(/Backed up/u);
-    await leaveProjectStorageHeadroom(projectId, proLimitBytes, 1024);
+    /* Room for the revision's own pack and the project's trailing chat-ref pushes
+     * (a few KiB, and they can land after *Backed up*), never for the 1 MiB file:
+     * with 1 KiB left, one late chat ref put the project over its plan and the
+     * receive-pack advertisement refused the whole push (413 quota) before the
+     * LFS batch could name the file. */
+    await leaveProjectStorageHeadroom(projectId, proLimitBytes, 512 * 1024);
     try {
       await uploadFileInBrowser(client, 'over-plan.step', Buffer.alloc(1024 * 1024 + 1, 1));
       await openRevisionsPane(client);
@@ -1033,51 +1052,89 @@ describe('a project on the browser client', () => {
    * Diverge `main` from a stock-git peer, then resolve the conflict in the
    * browser by keeping one side, and prove the resolution reached Tau Cloud.
    *
-   * AC17's divergent case, owner W10 (the surface) with W13
-   * (`sync/<remote>/<branch>`). `revision-branches.tsx` renders a
-   * `Files to resolve in <branch>` list with a *Keep <side> in <path>* button
-   * per side and file, and finishing the resolution is a separate verb.
-   * Reaching it needs two devices to record divergent revisions on one branch
-   * and both to push. W19-b fixed the browser write and smart-HTTP
-   * prerequisites. *Keep theirs* is the same row with the other side (audit
-   * §7.2 item 5).
+   * AC17's divergent case, owner W10 (the surface) with W13 and D14: the
+   * conflict is recorded on `conflicts/main/<device>`, which the browser
+   * pushes, and `revision-branches.tsx` renders a `Files to resolve in <label>`
+   * list with *Keep mine* / *Keep theirs* per file — mine is always this
+   * device's side (rule 8). Finishing lands a merge on main with the
+   * conflicted revision among its parents. *Keep theirs* runs second on the
+   * same project, so its conflict is a second one on the same line: the push
+   * must be admitted, not refused (audit §7.2 item 5, D14).
    */
   const divergeAndResolve = async (client: BrowserClient, keep: 'mine' | 'theirs', tag: string): Promise<void> => {
     const previousRemoteHead = await gitHead(await tauRepository(projectId));
-    const peer = await scratch('conflict-peer');
-    const authorization = `http.extraHeader=Authorization: ${basicAuthorization(bearer)}`;
-    const remoteUrl = `${desktopE2EApiUrl}/v1/git/${projectId}.git`;
-    const cloned = await runGit(['-c', authorization, 'clone', '--quiet', remoteUrl, '.'], peer);
-    expect(cloned.code, cloned.stderr).toBe(0);
-    const configuredName = await runGit(['config', 'user.name', `${tag} peer`], peer);
-    expect(configuredName.code, configuredName.stderr).toBe(0);
-    const configuredEmail = await runGit(['config', 'user.email', 'w18-peer@tau.invalid'], peer);
-    expect(configuredEmail.code, configuredEmail.stderr).toBe(0);
-    const peerVersion = `cube([31, 31, 31]); // ${tag} peer\n`;
-    await writeFile(join(peer, 'main.scad'), peerVersion, 'utf8');
-    const staged = await runGit(['add', 'main.scad'], peer);
-    expect(staged.code, staged.stderr).toBe(0);
-    const committed = await runGit(['commit', '--quiet', '-m', `${tag} peer divergence`], peer);
-    expect(committed.code, committed.stderr).toBe(0);
-    const pushed = await runGit(['-c', authorization, 'push', '--quiet', 'origin', 'HEAD:refs/heads/main'], peer);
-    expect(pushed.code, pushed.stderr).toBe(0);
-    await expect
-      .poll(async () => gitHead(await tauRepository(projectId)), { timeout: 120_000 })
-      .not.toBe(previousRemoteHead);
-
-    await client.page.keyboard.press('Control+KeyF');
-    await client.page
-      .getByRole('treeitem', { name: /main\.scad/u })
-      .first()
-      .click({ timeout: 120_000 });
-    await focusBrowserEditor(client);
+    /* D14: every conflict line on Tau Cloud, with its tip. */
+    const conflictLines = async (): Promise<ReadonlyMap<string, string>> => {
+      const listed = await gitOutput(await tauRepository(projectId), [
+        'for-each-ref',
+        '--format=%(refname) %(objectname)',
+        'refs/heads/conflicts/main/',
+      ]);
+      return new Map(
+        (listed ?? '')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => line.split(' ') as [string, string]),
+      );
+    };
+    /* The one line's tip. */
+    const lineTip = async (): Promise<string | undefined> => {
+      const lines = await conflictLines();
+      return [...lines.values()][0];
+    };
+    const linesBefore = await conflictLines();
+    const previousBrowserHead = await browserHead(client, slug);
+    /* D12 keeps an open project live: a peer's push reaches this browser within
+     * seconds, fast-forwards it, and an edit racing that apply is the editor's
+     * own *Needs your decision* (I1), not a divergent branch. So the browser
+     * mints its side while its git wire is down, and only then does the peer
+     * push the other side: the branch diverges once the wire returns. */
+    const gitWire = `${desktopE2EApiUrl}/v1/git/**`;
+    await client.context.route(gitWire, async (route) => route.abort('connectionfailed'));
     const browserVersion = `cube([32, 32, 32]); // ${tag} browser\n`;
-    await client.page.keyboard.press(`${modifier}+KeyA`);
-    await client.page.keyboard.insertText(browserVersion);
-    await expect
-      .poll(async () => readBrowserFile(client, slug, ['main.scad']), { timeout: 10_000 })
-      .toBe(browserVersion);
-    await saveRevisionInBrowser(client);
+    const peerVersion = `cube([31, 31, 31]); // ${tag} peer\n`;
+    try {
+      await client.page.keyboard.press('Control+KeyF');
+      await client.page
+        .getByRole('treeitem', { name: /main\.scad/u })
+        .first()
+        .click({ timeout: 120_000 });
+      await focusBrowserEditor(client);
+      await client.page.keyboard.press(`${modifier}+KeyA`);
+      await client.page.keyboard.insertText(browserVersion);
+      await expect
+        .poll(async () => readBrowserFile(client, slug, ['main.scad']), { timeout: 10_000 })
+        .toBe(browserVersion);
+      await saveRevisionInBrowser(client);
+      await expect
+        .poll(async () => browserHead(client, slug), {
+          message: 'W10/W13: the browser must mint its side while its git wire is down',
+          timeout: 120_000,
+        })
+        .not.toBe(previousBrowserHead);
+
+      const peer = await scratch('conflict-peer');
+      const authorization = `http.extraHeader=Authorization: ${basicAuthorization(bearer)}`;
+      const remoteUrl = `${desktopE2EApiUrl}/v1/git/${projectId}.git`;
+      const cloned = await runGit(['-c', authorization, 'clone', '--quiet', remoteUrl, '.'], peer);
+      expect(cloned.code, cloned.stderr).toBe(0);
+      const configuredName = await runGit(['config', 'user.name', `${tag} peer`], peer);
+      expect(configuredName.code, configuredName.stderr).toBe(0);
+      const configuredEmail = await runGit(['config', 'user.email', 'w18-peer@tau.invalid'], peer);
+      expect(configuredEmail.code, configuredEmail.stderr).toBe(0);
+      await writeFile(join(peer, 'main.scad'), peerVersion, 'utf8');
+      const staged = await runGit(['add', 'main.scad'], peer);
+      expect(staged.code, staged.stderr).toBe(0);
+      const committed = await runGit(['commit', '--quiet', '-m', `${tag} peer divergence`], peer);
+      expect(committed.code, committed.stderr).toBe(0);
+      const pushed = await runGit(['-c', authorization, 'push', '--quiet', 'origin', 'HEAD:refs/heads/main'], peer);
+      expect(pushed.code, pushed.stderr).toBe(0);
+      await expect
+        .poll(async () => gitHead(await tauRepository(projectId)), { timeout: 120_000 })
+        .not.toBe(previousRemoteHead);
+    } finally {
+      await client.context.unroute(gitWire);
+    }
     await openRevisionsPane(client);
     await expect
       .poll(async () => syncRegionText(client), {
@@ -1085,15 +1142,23 @@ describe('a project on the browser client', () => {
         timeout: 120_000,
       })
       .toMatch(/Needs your decision/u);
-    expect(
-      await readBrowserFile(client, slug, ['.git', 'refs', 'heads', 'sync', 'tau', 'main']),
-      'W13: the conflict must remain reachable from sync/tau/main',
-    ).toBeDefined();
+    /* D14: the browser pushed its conflict line, and a second conflict advanced the same line, admitted. */
+    await expect
+      .poll(
+        async () => {
+          const lines = await conflictLines();
+          return lines.size === 1 && [...lines].every(([name, tip]) => linesBefore.get(name) !== tip);
+        },
+        { message: 'D14: the conflict must travel on one conflicts/main/<device> line', timeout: 120_000 },
+      )
+      .toBe(true);
+    const conflicted = required(await lineTip(), 'D14: no conflict line on Tau Cloud.');
     const checkoutRecords = await browserStorePaths(client, `/${slug}/.git/checkouts/`);
-    expect(
-      checkoutRecords.filter((path) => path.endsWith('.json')),
-      'W10: the conflicted ref must have a checkout record that can project a resolution card',
-    ).not.toHaveLength(0);
+    for (const path of checkoutRecords.filter((candidate) => candidate.endsWith('.json'))) {
+      /* A conflict line is a decision in flight, not a place to work: no checkout is made for it. */
+      const record = await readBrowserFile(client, slug, path.split(`/${slug}/`)[1]?.split('/') ?? []);
+      expect(record ?? '').not.toMatch(/conflicts\//u);
+    }
     await expect
       .poll(async () => client.page.getByRole('list', { name: /^Files to resolve in/u }).count(), {
         message: 'W10/W13 (DEF-7/DEF-8): divergent revisions must reach the conflict card',
@@ -1101,9 +1166,8 @@ describe('a project on the browser client', () => {
       })
       .toBeGreaterThan(0);
     await client.page
-      /* `revision-branches.tsx` labels each side by its name: *Keep main in <path>*
-       * is this device's side; the other button in the pair is the remote's. */
-      .getByRole('button', { name: keep === 'mine' ? /^Keep main in / : /^Keep (?!main in ).+ in main\.scad$/u })
+      /* Device-relative (rule 8): *Keep mine* is this browser's side, *Keep theirs* the peer's. */
+      .getByRole('button', { name: keep === 'mine' ? 'Keep mine in main.scad' : 'Keep theirs in main.scad' })
       .first()
       .click();
     const finishResolution = client.page.getByRole('button', { name: /^Merge into / }).first();
@@ -1125,6 +1189,13 @@ describe('a project on the browser client', () => {
     const remoteFile = await runGit(['show', `${resolvedHead}:main.scad`], await tauRepository(projectId));
     expect(remoteFile.code, remoteFile.stderr).toBe(0);
     expect(remoteFile.stdout).toBe(kept);
+    /* D14: the decision is a merge on main with the conflicted revision among its parents; ancestry hides the line. */
+    expect(
+      await gitOutput(await tauRepository(projectId), ['rev-list', '--parents', '-n', '1', resolvedHead]),
+    ).toContain(conflicted);
+    await expect
+      .poll(async () => client.page.getByRole('list', { name: /^Files to resolve in/u }).count(), { timeout: 60_000 })
+      .toBe(0);
   };
 
   it('should resolve a divergent branch with Keep mine', async () => {
@@ -1162,16 +1233,16 @@ describe('a project on the browser client', () => {
     const client = required(desktop, 'The desktop client did not launch.');
     /* A desktop shell signed in as the same account is asked to show the project
      * the browser client backed up, which it has never held itself. */
-    await client.page.goto('app://tau/projects', { waitUntil: 'domcontentloaded' });
-    const fromTauCloud = client.page.getByRole('region', { name: 'From Tau Cloud' }).first();
-    await expect
-      .poll(async () => fromTauCloud.getByText(/W18 Two Client/u).count(), { timeout: 45_000 })
-      .toBeGreaterThan(0);
-
-    await fromTauCloud.getByRole('button', { name: 'Open' }).first().click();
-    /* The canonical project URL (`/w/{workspace}/{project}`): the local project
-     * was created under the remote's own id and the open pull is running. */
-    await expect.poll(async () => client.page.url(), { timeout: 120_000 }).toMatch(/\/w\//u);
+    /* Its own row's *Open*: the rows above back up other projects too, so the
+     * region's first *Open* is whichever it lists first, and T10 below reads
+     * the page this leaves open. The canonical project URL
+     * (`/w/{workspace}/{project}`) means the local project was created under the
+     * remote's own id and the open pull is running. */
+    await openTauCloudProject(client.page, {
+      projectsUrl: 'app://tau/projects',
+      name: 'W18 Two Client',
+      direction: 'DEF-2 browser→desktop',
+    });
   }, 900_000);
 
   /* Audit §7.1 T10 (W3; revisions charter D1): a restore is a revision like any
@@ -1550,18 +1621,6 @@ describe('live and automatic', () => {
     sourceSlug = await createProjectInBrowser(source, liveName);
     liveProjectId = required(await browserProjectId(source, sourceSlug), 'W5b: the project id is absent.');
     await registerProjectOnRemote(accountOwner, liveProjectId, liveName);
-    await openSyncRegion(source);
-    await chooseTauCloud(source);
-    await expect.poll(async () => syncRegionText(a()), { timeout: 180_000 }).toMatch(/Backed up/u);
-    const destinationSlug = await openTauCloudProject(destination.page, {
-      projectsUrl: 'app://tau/projects',
-      name: liveName,
-      direction: 'W5b browser→desktop',
-    });
-    destinationRoot = join(destination.homeRoot, destinationSlug);
-    await openSyncRegion(destination);
-    await expect.poll(async () => syncRegionText(b()), { timeout: 180_000 }).toMatch(/Backed up/u);
-    await expectConverged('setup');
   }, 900_000);
 
   afterAll(async () => {
@@ -1575,6 +1634,24 @@ describe('live and automatic', () => {
       await captureFailure(`live-${task.name}`, [source, destination]);
     }
   }, 120_000);
+
+  /* The connect half of the setup is a row, not `beforeAll`: vitest 4 refuses
+   * `expect.poll` outside a test, and every wait below is one. The rows after it
+   * need its two connected devices, so it runs first. */
+  it('should back up one project from the browser and open it live on the desktop', async () => {
+    await openSyncRegion(a());
+    await chooseTauCloud(a());
+    await expect.poll(async () => syncRegionText(a()), { timeout: 180_000 }).toMatch(/Backed up/u);
+    const destinationSlug = await openTauCloudProject(b().page, {
+      projectsUrl: 'app://tau/projects',
+      name: liveName,
+      direction: 'W5b browser→desktop',
+    });
+    destinationRoot = join(b().homeRoot, destinationSlug);
+    await openSyncRegion(b());
+    await expect.poll(async () => syncRegionText(b()), { timeout: 180_000 }).toMatch(/Backed up/u);
+    await expectConverged('setup');
+  }, 900_000);
 
   it('should settle the desktop on the browser’s pushed head within 5 s, without a reload', async () => {
     await createFileInBrowser(a(), 'live.scad');
@@ -1679,6 +1756,101 @@ describe('live and automatic', () => {
     await openSyncRegion(b());
     await expect.poll(async () => syncRegionText(b()), { timeout: 60_000 }).toMatch(/Backed up/u);
   }, 600_000);
+
+  /* D14 (charter W6): a conflict travels. Both devices change one line of one
+   * file; whichever pulls second records the conflict on its own
+   * `conflicts/main/<device>` line and pushes it, the other fetches it, and both
+   * say *Needs your decision on main*. A second overlap before anyone decides
+   * advances the same line — admitted — and both decisions are listed. Deciding
+   * on the desktop lands one merge on main, with the conflicted revision among
+   * its parents, that fast-forwards the browser and hides the line everywhere. */
+  it('should show a travelling decision on both devices and settle both when either decides (D14)', async () => {
+    const conflictLines = async (): Promise<ReadonlyMap<string, string>> => {
+      const listed = await gitOutput(await tauRepository(liveProjectId), [
+        'for-each-ref',
+        '--format=%(refname) %(objectname)',
+        'refs/heads/conflicts/main/',
+      ]);
+      return new Map(
+        (listed ?? '')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => line.split(' ') as [string, string]),
+      );
+    };
+    /* The one line's tip, and how many lines there are. */
+    const lineTip = async (): Promise<string | undefined> => {
+      const lines = await conflictLines();
+      return [...lines.values()][0];
+    };
+    const lineCount = async (): Promise<number> => {
+      const lines = await conflictLines();
+      return lines.size;
+    };
+    const statusText = async (page: Page): Promise<string> =>
+      (await page.getByRole('status', { name: 'Revision status' }).first().textContent()) ?? '';
+    const cards = (page: Page): Locator => page.getByRole('list', { name: /^Files to resolve in/u });
+    const desktopText = (round: number): string => `cube(${String(round)}); // desktop ${String(round)}\n`;
+    const overlap = async (round: number): Promise<void> => {
+      await writeFile(join(destinationRoot, 'overlap.scad'), desktopText(round));
+      await saveOnDesktop();
+      await writeBrowserFile(['overlap.scad'], `cube(${String(round * 10)}); // browser ${String(round)}\n`);
+      await saveRevisionInBrowser(a());
+    };
+
+    await writeFile(join(destinationRoot, 'overlap.scad'), 'cube(0); // base\n');
+    await saveOnDesktop();
+    await expect
+      .poll(async () => readBrowserFile(a(), sourceSlug, ['overlap.scad']), { timeout: 180_000 })
+      .toBe('cube(0); // base\n');
+    await expectConverged('D14 base');
+    await openRevisionsPane(a());
+    await openRevisionsPane(b());
+
+    await overlap(1);
+    for (const page of [a().page, b().page]) {
+      await expect
+        .poll(async () => statusText(page), {
+          message: 'D14: every device must show the decision, named by the line it lands on',
+          timeout: 180_000,
+        })
+        .toMatch(/Needs your decision on main/u);
+    }
+    await expect.poll(lineCount, { timeout: 120_000 }).toBe(1);
+    const firstTip = required(await lineTip(), 'D14: no conflict line on Tau Cloud.');
+
+    await overlap(2);
+    await expect
+      .poll(lineTip, {
+        message: 'D14: a second conflict on the same line must push without refusal',
+        timeout: 180_000,
+      })
+      .not.toBe(firstTip);
+    expect(await lineCount()).toBe(1);
+    for (const page of [a().page, b().page]) {
+      await expect
+        .poll(async () => cards(page).count(), { message: 'D14: both decisions are listed', timeout: 180_000 })
+        .toBe(2);
+    }
+    const latest = required(await lineTip(), 'D14: the line has no tip.');
+
+    /* The newest decision is listed first; deciding it covers the older one it parents on. */
+    await b().page.getByRole('button', { name: 'Keep mine in overlap.scad' }).first().click();
+    const finish = b().page.getByRole('button', { name: 'Merge into main' }).first();
+    await expect.poll(async () => finish.isEnabled(), { timeout: 120_000 }).toBe(true);
+    await finish.click();
+
+    const decided = await expectConverged('D14 decision');
+    expect(await remoteFile(decided, 'overlap.scad')).toBe(desktopText(2).trimEnd());
+    expect(
+      await gitOutput(await tauRepository(liveProjectId), ['rev-list', '--parents', '-n', '1', decided]),
+      'D14: the decision is a merge on main with the conflicted revision among its parents',
+    ).toContain(latest);
+    for (const page of [a().page, b().page]) {
+      await expect.poll(async () => cards(page).count(), { timeout: 120_000 }).toBe(0);
+      await expect.poll(async () => statusText(page), { timeout: 120_000 }).not.toMatch(/Needs your decision/u);
+    }
+  }, 900_000);
 });
 
 /** Charter W13/V18 and blueprint S48(15): real close-and-continue in both directions. */
@@ -2284,11 +2456,6 @@ describe('chat attachments across two clients', () => {
           timeout: 180_000,
         })
         .toBeDefined();
-      const firstHead = required(
-        await gitOutput(await tauRepository(projectId), ['rev-parse', chatRef]),
-        'The chat ref is absent.',
-      );
-
       /* One object per attachment, at its content-addressed name and its exact
        * size: an LFS pointer would be 127 bytes and the wrong name (D26). */
       await expect
@@ -2311,6 +2478,21 @@ describe('chat attachments across two clients', () => {
             `attachments/${specName} ${String(specBytes.byteLength)}`,
           ].sort(),
         );
+      /* Read once the attachments are on it: the browser's first write of the
+       * chat can precede them, and a base without them counts them as new. */
+      const firstHead = required(
+        await gitOutput(await tauRepository(projectId), ['rev-parse', chatRef]),
+        'The chat ref is absent.',
+      );
+      const segments = async (): Promise<number> => {
+        const listing = await gitOutput(await tauRepository(projectId), [
+          'ls-tree',
+          '--name-only',
+          `${chatRef}:events`,
+        ]);
+        return (listing ?? '').split('\n').filter(Boolean).length;
+      };
+      const browserSegments = await segments();
 
       const destinationSlug = await openTauCloudProject(destination.page, {
         projectsUrl: 'app://tau/projects',
@@ -2342,12 +2524,10 @@ describe('chat attachments across two clients', () => {
       // A later turn in the same chat re-references the same blobs: no new bytes.
       await selectChatModel(destination.page, gatewayFixtureModelName);
       await sendPrompt(destination.page, secondPrompt);
+      /* The desktop's own segment, not a late write of the browser's, is what moved the head. */
       await expect
-        .poll(async () => gitOutput(await tauRepository(projectId), ['rev-parse', chatRef]), {
-          message: 'the second turn must publish a new chat head',
-          timeout: 180_000,
-        })
-        .not.toBe(firstHead);
+        .poll(segments, { message: 'the second turn must publish the desktop’s chat segment', timeout: 180_000 })
+        .toBeGreaterThan(browserSegments);
       const added = await gitOutput(await tauRepository(projectId), [
         'rev-list',
         '--objects',

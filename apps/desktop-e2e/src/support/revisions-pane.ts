@@ -6,6 +6,7 @@
  * and its verbs. History's rows are buttons named `Rev N · <title>` that open
  * in place; a restore is the opened row's *Restore Rev N*.
  */
+import process from 'node:process';
 import { expect } from 'vitest';
 import type { Locator, Page } from 'playwright';
 
@@ -84,7 +85,9 @@ export const restoreFromHistory = async (
  * Open the Sync region's chooser through the pane's own offer (A29, canvas
  * round 16): the strip's *Back up*, or More's *Back up…* while the strip's
  * button is *Save revision*. Nothing offers a backup before the first
- * revision (S1), so a project with none saves one first, from the strip.
+ * revision (S1), so a project with none saves one first: from the strip when
+ * it has edits, with the save chord when it has none — a fresh, unedited
+ * project reads *Nothing saved yet* and its strip offers no verb at all.
  * A project that already has a remote shows the region directly.
  *
  * @param page - The page, with the Revisions pane open.
@@ -94,7 +97,8 @@ export const openBackupChooser = async (page: Page): Promise<void> => {
   const strip = revisionStrip(page);
   const backUp = strip.getByRole('button', { name: 'Back up', exact: true });
   const save = strip.getByRole('button', { name: 'Save revision', exact: true });
-  let offer: 'sync' | 'backUp' | 'save' | undefined;
+  const nothingSaved = strip.getByRole('status', { name: 'Revision status' }).filter({ hasText: 'Nothing saved yet' });
+  let offer: 'sync' | 'backUp' | 'save' | 'nothingSaved' | undefined;
   await expect
     .poll(
       async () => {
@@ -104,12 +108,19 @@ export const openBackupChooser = async (page: Page): Promise<void> => {
             ? 'backUp'
             : (await save.isVisible())
               ? 'save'
-              : undefined;
+              : (await nothingSaved.isVisible())
+                ? 'nothingSaved'
+                : undefined;
         return offer;
       },
       { timeout: 120_000 },
     )
     .toBeDefined();
+  if (offer === 'nothingSaved') {
+    await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+KeyS`);
+    await backUp.waitFor({ state: 'visible', timeout: 120_000 });
+    offer = 'backUp';
+  }
   if (offer === 'save') {
     // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's own locator method.
     const status = await strip.getByRole('status', { name: 'Revision status' }).innerText();

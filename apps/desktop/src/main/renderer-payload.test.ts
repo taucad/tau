@@ -54,6 +54,42 @@ describe('Desktop renderer ownership', () => {
     ]);
   });
 
+  it('should budget renderer WASM at one copy of each approved producer', async () => {
+    const paths = await fixture();
+    const kclSource = require.resolve('@taucad/kcl-wasm-lib/kcl.wasm').replaceAll('\\', '/');
+    const [kcl, clipper] = await Promise.all([
+      readFile(kclSource).then((bytes) => Uint8Array.from(bytes)),
+      readFile(clipperSource).then((bytes) => Uint8Array.from(bytes)),
+    ]);
+    const writeGraph = async (kclFileNames: string[]) =>
+      writeFile(
+        join(paths.renderer, 'tau-module-graph-123.json'),
+        JSON.stringify({
+          chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] }],
+          assets: [
+            asset('clipper2z.wasm', clipper),
+            ...kclFileNames.map((fileName) => ({ ...asset(fileName, kcl), sourcePath: kclSource })),
+          ],
+        }),
+      );
+    await Promise.all([
+      writeFile(join(paths.renderer, 'clipper2z.wasm'), clipper),
+      writeFile(join(paths.renderer, 'kcl_wasm_lib_bg.wasm'), kcl),
+      writeGraph(['kcl_wasm_lib_bg.wasm']),
+    ]);
+    const approved = await inspectDesktopPayload(paths);
+    expect(approved.violations).toEqual([]);
+
+    await Promise.all([
+      writeFile(join(paths.renderer, 'kcl_wasm_lib_bg-copy.wasm'), kcl),
+      writeGraph(['kcl_wasm_lib_bg.wasm', 'kcl_wasm_lib_bg-copy.wasm']),
+    ]);
+    const duplicated = await inspectDesktopPayload(paths);
+    expect(duplicated.violations).toEqual([
+      `Renderer WASM budget exceeded: ${2 * kcl.byteLength + clipper.byteLength} bytes`,
+    ]);
+  });
+
   it('should accept identical shared-worker provenance but reject conflicting producers', async () => {
     const paths = await fixture();
     const wasm = Uint8Array.from(await readFile(clipperSource));

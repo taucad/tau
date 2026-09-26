@@ -1140,6 +1140,10 @@ export function SectionContourFills({
             }
 
             if (response.requestKey !== latestWorkerRequestKeyRef.current) {
+              // The discarded result is no longer in flight, so returning to its plane requests it again.
+              if (response.requestKey === submittedWorkerRequestKeyRef.current) {
+                submittedWorkerRequestKeyRef.current = undefined;
+              }
               staleWorkerResponseCountRef.current++;
               topologyStaleWorkerResponseCountRef.current++;
               invalidate();

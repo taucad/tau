@@ -1,4 +1,8 @@
-import { resolveConfig } from 'vite';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { build, resolveConfig } from 'vite';
 import type { Plugin, ResolvedConfig } from 'vite';
 import { describe, it, expect, vi } from 'vitest';
 import { tauRuntime } from '#vite/index.js';
@@ -82,15 +86,52 @@ describe('tauRuntime (Vite plugin)', () => {
 
   it('should leave Node builtins available to Vitest while stubbing browser builds', () => {
     const invariants = findInvariants(tauRuntime());
-    const resolveId = invariants.resolveId as unknown as (
-      this: { environment: { config: { consumer: string; mode: string } } },
-      source: string,
-    ) => unknown;
+    const { handler: resolveId } = invariants.resolveId as unknown as {
+      handler: (this: { environment: { config: { consumer: string; mode: string } } }, source: string) => unknown;
+    };
+    const browserBuild = { environment: { config: { consumer: 'client', mode: 'production' } } };
 
     expect(resolveId.call({ environment: { config: { consumer: 'client', mode: 'test' } } }, 'node:fs')).toBeNull();
-    expect(resolveId.call({ environment: { config: { consumer: 'client', mode: 'production' } } }, 'node:fs')).toBe(
-      '\0taucad-runtime:browser-node-builtins',
-    );
+    expect(resolveId.call(browserBuild, 'node:fs')).toBe('\0taucad-runtime:browser-node-builtins');
+    // Hosts that ignore hook filters call the handler for every import.
+    expect(resolveId.call(browserBuild, 'node:path')).toBeNull();
+  });
+
+  it('should stub every browser Node builtin in a Vite client build', async () => {
+    const fixtureDirectory = mkdtempSync(path.join(tmpdir(), 'tau-runtime-builtins-'));
+    try {
+      const entry = path.join(fixtureDirectory, 'entry.mjs');
+      writeFileSync(
+        entry,
+        [
+          `import { readFileSync } from 'fs';`,
+          `import { randomUUID } from 'node:crypto';`,
+          `import { statSync } from 'node:fs';`,
+          `import { readFile } from 'node:fs/promises';`,
+          `import { fileURLToPath } from 'node:url';`,
+          `export const builtins = [readFileSync, randomUUID, statSync, readFile, fileURLToPath];`,
+        ].join('\n'),
+      );
+      const outputDirectory = path.join(fixtureDirectory, 'dist');
+
+      await build({
+        configFile: false,
+        logLevel: 'silent',
+        plugins: [tauRuntime()],
+        build: { lib: { entry, formats: ['es'] }, outDir: outputDirectory },
+      });
+
+      const output = readdirSync(outputDirectory).find((file) => /\.[cm]?js$/.test(file)) ?? 'missing';
+      const built = (await import(pathToFileURL(path.join(outputDirectory, output)).href)) as {
+        readonly builtins: ReadonlyArray<() => unknown>;
+      };
+      expect(built.builtins).toHaveLength(5);
+      for (const builtin of built.builtins) {
+        expect(builtin).toThrow('is unavailable in a browser runtime');
+      }
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
   });
 
   it('should compose the WASM invariant with a resolved numeric asset limit', async () => {

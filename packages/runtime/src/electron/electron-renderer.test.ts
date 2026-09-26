@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createChannelServer, wrapMessagePort } from '@taucad/rpc';
+import type { ChannelServerHandle } from '@taucad/rpc';
 
 import {
   awaitElectronRelayedPort,
@@ -9,6 +11,8 @@ import {
   getElectronRuntimeBridge,
   requestElectronRuntimePort,
 } from '#electron/renderer.js';
+import { protocolVersion } from '#types/protocol-header.types.js';
+import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 
 const runtimeRelayTag = 'tau-runtime-port';
 const hostExitRelayTag = 'tau-runtime-host-exit';
@@ -233,6 +237,63 @@ describe('Electron renderer runtime helpers', () => {
       ['host-1', 'render-timeout'],
       ['host-2', 'render-timeout'],
     ]);
+  });
+
+  it('should deliver a hello the utility sent before the runtime client subscribed', async () => {
+    const { port1, port2 } = new MessageChannel();
+    let listener: ((event: MessageEvent) => void) | undefined;
+    const target = {
+      addEventListener: vi.fn((_name: string, handler: (event: MessageEvent) => void) => {
+        listener = handler;
+      }),
+      removeEventListener: vi.fn(),
+    } as unknown as Window;
+    let server: ChannelServerHandle<RuntimeProtocol> | undefined;
+    const bridge = {
+      requestRuntimePort: vi.fn((requestId: string) => {
+        listener?.(relayEvent({ taucadRelay: runtimeRelayTag, hostId: 'host-warm', requestId }, [port1]));
+        /* A warm utility serves the moment main hands it the other leg, so its
+         * hello is on the wire before the renderer has built the client. */
+        server = createChannelServer<RuntimeProtocol>({
+          port: wrapMessagePort<unknown>(port2, { label: 'warm-utility' }),
+          sessionKey: 'tau.runtime/v1',
+          hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },
+          impl: {
+            async call() {
+              throw new Error('The hello is all this utility serves.');
+            },
+            notify: () => undefined,
+            listen: () => {
+              throw new Error('The hello is all this utility serves.');
+            },
+          },
+        });
+      }),
+      releaseRuntimeHost: vi.fn(),
+      relayTag: { hostExit: hostExitRelayTag, runtime: runtimeRelayTag },
+    };
+    const options = await createElectronClientOptions({ bridge, target })();
+    /* The CAD machine builds its client only once the project's file manager
+     * is ready, which a project card waits hundreds of milliseconds for. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    const client = options.transport.materialize();
+
+    try {
+      const opened = await Promise.race([
+        client.open().then(() => 'ready'),
+        new Promise((resolve) => {
+          setTimeout(resolve, 1000, 'no hello');
+        }),
+      ]);
+
+      expect(opened).toBe('ready');
+    } finally {
+      await client.close();
+      server?.dispose();
+      port2.close();
+    }
   });
 
   it('materialises inline export bytes on the copy-only Electron transport', async () => {

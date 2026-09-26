@@ -234,7 +234,8 @@ export const awaitElectronRuntimePort = async (
  * Request one Electron utility-process runtime from preload.
  *
  * @param options - Optional bridge, global name, and message target overrides.
- * @returns A promise resolving with the leased runtime port.
+ * @returns A promise resolving with the leased runtime port, unstarted: frames
+ * queue until its reader subscribes and calls `start()`.
  * @public
  */
 export const requestElectronRuntimePort = async (
@@ -302,7 +303,10 @@ export const requestElectronRuntimePort = async (
     });
   }
   registerElectronRuntimeHostRelease(port, release);
-  port.start();
+  /* Not started here. A started port dispatches each frame to whatever listens
+   * at that moment, and a warm utility sends its hello the moment main hands it
+   * the other leg — before a caller still waiting on its file manager has built
+   * the client. The channel starts the port once it listens. */
   return port;
 };
 

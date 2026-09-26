@@ -8,14 +8,13 @@ const webGlDepthStep = constantDepthSteps / (2 ** 24 - 1);
 const webGlDepthClamp = 0.01;
 const shaderCacheKey = 'tau-gltf-surface-depth-bias-v2';
 
-type SurfaceDepthBiasState = Readonly<{
-  backend: ResolvedGraphicsBackend;
-  onBeforeCompile: Material['onBeforeCompile'];
-  customProgramCacheKey: Material['customProgramCacheKey'];
+type SurfaceDepthBiasState = {
+  /** The backend the bias is active for; undefined while the surface is not an opaque depth writer. */
+  backend: ResolvedGraphicsBackend | undefined;
   polygonOffset: boolean;
   polygonOffsetFactor: number;
   polygonOffsetUnits: number;
-}>;
+};
 
 /**
  * The rasterizer offset half of the separation, per backend.
@@ -43,13 +42,44 @@ const replaceExactlyOnce = (source: string, replacement: string): string => {
 const isOpaqueDepthWriter = (material: Material): boolean =>
   material.depthWrite && !material.transparent && material.opacity >= 1;
 
-const restoreSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasState): void => {
-  material.onBeforeCompile = state.onBeforeCompile;
-  material.customProgramCacheKey = state.customProgramCacheKey;
+/**
+ * Chains the bias into the material's shader hook once, for good. The hook and the program key read the state, so
+ * turning the bias off never unwinds the chain and cannot drop a hook composed after it, such as the section clip.
+ */
+const composeSurfaceDepthBias = (material: Material): SurfaceDepthBiasState => {
+  const state: SurfaceDepthBiasState = {
+    backend: undefined,
+    polygonOffset: material.polygonOffset,
+    polygonOffsetFactor: material.polygonOffsetFactor,
+    polygonOffsetUnits: material.polygonOffsetUnits,
+  };
+  states.set(material, state);
+  const previousHook = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms, renderer): void => {
+    previousHook.call(material, shader, renderer);
+    if (state.backend === 'webgl') {
+      shader.fragmentShader = replaceExactlyOnce(
+        shader.fragmentShader,
+        `#include <logdepthbuf_fragment>
+        #ifdef USE_LOGARITHMIC_DEPTH_BUFFER
+          float tauSurfaceDepthSlope = max(abs(dFdx(gl_FragDepth)), abs(dFdy(gl_FragDepth)));
+          float tauSurfaceDepthOffset = min(${webGlDepthClamp.toPrecision(8)}, tauSurfaceDepthSlope * ${slopeScale.toPrecision(8)} + ${webGlDepthStep.toPrecision(8)});
+          gl_FragDepth = min(1.0, gl_FragDepth + tauSurfaceDepthOffset);
+        #endif`,
+      );
+    }
+  };
+  material.customProgramCacheKey = (): string =>
+    state.backend === 'webgl' ? `${previousKey.call(material)}|${shaderCacheKey}` : previousKey.call(material);
+  return state;
+};
+
+const deactivateSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasState): void => {
+  state.backend = undefined;
   material.polygonOffset = state.polygonOffset;
   material.polygonOffsetFactor = state.polygonOffsetFactor;
   material.polygonOffsetUnits = state.polygonOffsetUnits;
-  states.delete(material);
   material.needsUpdate = true;
 };
 
@@ -70,8 +100,8 @@ const restoreSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasStat
 export const applyGltfSurfaceDepthBias = (material: Material, backend: ResolvedGraphicsBackend): void => {
   const existingState = states.get(material);
   if (!isOpaqueDepthWriter(material)) {
-    if (existingState) {
-      restoreSurfaceDepthBias(material, existingState);
+    if (existingState?.backend) {
+      deactivateSurfaceDepthBias(material, existingState);
     }
     return;
   }
@@ -79,39 +109,18 @@ export const applyGltfSurfaceDepthBias = (material: Material, backend: ResolvedG
   if (existingState?.backend === backend) {
     return;
   }
-  if (existingState) {
-    restoreSurfaceDepthBias(material, existingState);
+  if (existingState?.backend) {
+    deactivateSurfaceDepthBias(material, existingState);
   }
 
-  const state: SurfaceDepthBiasState = {
-    backend,
-    onBeforeCompile: material.onBeforeCompile,
-    customProgramCacheKey: material.customProgramCacheKey,
-    polygonOffset: material.polygonOffset,
-    polygonOffsetFactor: material.polygonOffsetFactor,
-    polygonOffsetUnits: material.polygonOffsetUnits,
-  };
-  states.set(material, state);
+  const state = existingState ?? composeSurfaceDepthBias(material);
+  state.backend = backend;
+  state.polygonOffset = material.polygonOffset;
+  state.polygonOffsetFactor = material.polygonOffsetFactor;
+  state.polygonOffsetUnits = material.polygonOffsetUnits;
   material.polygonOffset = true;
   material.polygonOffsetFactor = gltfSurfacePolygonOffset[backend].polygonOffsetFactor;
   material.polygonOffsetUnits = gltfSurfacePolygonOffset[backend].polygonOffsetUnits;
-
-  if (backend === 'webgl') {
-    material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms, renderer): void => {
-      state.onBeforeCompile.call(material, shader, renderer);
-      shader.fragmentShader = replaceExactlyOnce(
-        shader.fragmentShader,
-        `#include <logdepthbuf_fragment>
-        #ifdef USE_LOGARITHMIC_DEPTH_BUFFER
-          float tauSurfaceDepthSlope = max(abs(dFdx(gl_FragDepth)), abs(dFdy(gl_FragDepth)));
-          float tauSurfaceDepthOffset = min(${webGlDepthClamp.toPrecision(8)}, tauSurfaceDepthSlope * ${slopeScale.toPrecision(8)} + ${webGlDepthStep.toPrecision(8)});
-          gl_FragDepth = min(1.0, gl_FragDepth + tauSurfaceDepthOffset);
-        #endif`,
-      );
-    };
-    material.customProgramCacheKey = (): string => `${state.customProgramCacheKey.call(material)}|${shaderCacheKey}`;
-  }
-
   material.needsUpdate = true;
 };
 

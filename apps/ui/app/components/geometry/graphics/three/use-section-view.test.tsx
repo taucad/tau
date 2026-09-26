@@ -6,11 +6,14 @@ import * as THREE from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import type { RenderFrame } from '@taucad/spatial';
-import { GraphicsProvider } from '#hooks/use-graphics.js';
+import { GraphicsProvider, useGraphicsSelector, useSetRenderFrame } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
+import { resolveSectionPieces, toRenderSectionPieces } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionPiece } from '#components/geometry/graphics/section-cuts.js';
 import {
   resolveSectionViewRaycastClip,
   resolveSectionViewRenderPlane,
+  useSectionPieces,
   useSectionViewFlags,
 } from '#components/geometry/graphics/three/use-section-view.js';
 
@@ -99,5 +102,73 @@ describe('useSectionViewFlags', () => {
     });
     expect(commits).toBe(settled + 1);
     expect(seen.at(-1)).toEqual({ isActive: false, enableMesh: true });
+  });
+});
+
+describe('useSectionPieces', () => {
+  let actor: Actor<typeof graphicsMachine> | undefined;
+
+  afterEach(() => {
+    actor?.stop();
+    actor = undefined;
+  });
+
+  it('should give the cut list in the render frame while Section is on, and keep one list until a cut changes', async () => {
+    actor = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      { input: {} },
+    ).start();
+    actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [0, 0, 0] });
+
+    const seen: Array<readonly SectionPiece[]> = [];
+    let setRenderFrame: ((next: RenderFrame) => void) | undefined;
+    const Probe = (): ReactNode => {
+      // Re-renders on hover too, which the pieces do not depend on.
+      useGraphicsSelector((state) => state.context.hoveredSectionCutId);
+      seen.push(useSectionPieces());
+      setRenderFrame = useSetRenderFrame();
+      return undefined;
+    };
+    render(
+      <GraphicsProvider graphicsRef={actor}>
+        <Probe />
+      </GraphicsProvider>,
+    );
+    await act(async () => undefined);
+    const off = seen.at(-1);
+    expect(off).toEqual([]);
+
+    const scaledFrame: RenderFrame = {
+      anchorFrameId: 'tau:root',
+      originMeters: [0.05, -0.02, 0.1],
+      metersPerRenderUnit: 0.25,
+    };
+    act(() => {
+      setRenderFrame!(scaledFrame);
+      actor!.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
+      actor!.send({ type: 'addSectionCut', payload: { kind: 'revolution' } });
+    });
+    const { sectionCuts } = actor.getSnapshot().context;
+    const on = seen.at(-1);
+    expect(sectionCuts).toHaveLength(2);
+    expect(on).toEqual(toRenderSectionPieces(resolveSectionPieces(sectionCuts), scaledFrame));
+    expect(on).not.toEqual(resolveSectionPieces(sectionCuts));
+
+    const renders = seen.length;
+    act(() => {
+      actor!.send({ type: 'hoverSectionCut', payload: sectionCuts[0]!.id });
+    });
+    expect(seen.length).toBeGreaterThan(renders);
+    expect(seen.at(-1)).toBe(on);
+
+    act(() => {
+      actor!.send({ type: 'removeSectionCut', payload: sectionCuts[1]!.id });
+    });
+    expect(seen.at(-1)).toEqual(toRenderSectionPieces(resolveSectionPieces([sectionCuts[0]!]), scaledFrame));
+
+    act(() => {
+      actor!.send({ type: 'setSectionViewActive', payload: false });
+    });
+    expect(seen.at(-1)).toBe(off);
   });
 });

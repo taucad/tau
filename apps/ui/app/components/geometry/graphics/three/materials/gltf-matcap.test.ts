@@ -6,10 +6,13 @@ import {
   MeshBasicMaterial,
   MeshMatcapMaterial,
   Scene,
+  ShaderLib,
   Texture,
   TextureLoader,
 } from 'three';
+import type { WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
 import { applyMatcap } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
+import { createSectionClip, installSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -65,5 +68,38 @@ describe('applyMatcap', () => {
     expect(material.opacity).toBe(0.35);
     expect(material.transparent).toBe(true);
     expect(material.depthWrite).toBe(false);
+  });
+
+  it('should carry the section clip over to the WebGL matcap replacement', async () => {
+    vi.spyOn(TextureLoader.prototype, 'load').mockReturnValue(new Texture());
+    const sourceMaterial = new MeshBasicMaterial();
+    installSectionClip(sourceMaterial, createSectionClip('webgl'));
+    const mesh = new Mesh(createTriangleGeometry(), sourceMaterial);
+    const scene = new Scene();
+    scene.add(mesh);
+
+    await applyMatcap({ scene });
+
+    const shader = {
+      vertexShader: ShaderLib.matcap.vertexShader,
+      fragmentShader: ShaderLib.matcap.fragmentShader,
+      uniforms: {},
+    } as unknown as WebGLProgramParametersWithUniforms;
+    getMatcapMaterial(mesh).onBeforeCompile(shader, {} as unknown as WebGLRenderer);
+    expect(shader.fragmentShader).toContain('tauSectionRemoved( vTauSectionWorld )');
+  });
+
+  it('should carry the section clip over to the WebGPU matcap replacement', async () => {
+    vi.spyOn(TextureLoader.prototype, 'load').mockReturnValue(new Texture());
+    const clip = createSectionClip('webgpu');
+    const sourceMaterial = new MeshBasicMaterial();
+    installSectionClip(sourceMaterial, clip);
+    const mesh = new Mesh(createTriangleGeometry(), sourceMaterial);
+    const scene = new Scene();
+    scene.add(mesh);
+
+    await applyMatcap({ scene }, 1, 'webgpu');
+
+    expect((mesh.material as { maskNode?: unknown }).maskNode).toBe(clip.mask);
   });
 });

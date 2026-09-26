@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
     gl: Object.create(null) as { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?: number },
     invalidate: vi.fn(),
     kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,
+    rootScene: { name: 'viewport-lighting-scene' },
     modelUnit: {
       focusedComponentId: undefined as string | undefined,
       hiddenComponentIds: [],
@@ -56,12 +57,13 @@ vi.mock('@react-three/fiber', () => {
     controls: undefined,
     gl: mocks.gl,
     invalidate: mocks.invalidate,
+    scene: mocks.rootScene,
     size: { height: 768, width: 1024 },
     get: () => undefined,
   });
   return {
     useFrame: () => undefined,
-    // GltfMesh reads the whole state; the kinematics hooks select from it.
+    // GltfMesh reads the whole state; the kinematics hooks and the section clip select from it.
     useThree: (selector?: (current: ReturnType<typeof state>) => unknown) => (selector ? selector(state()) : state()),
   };
 });

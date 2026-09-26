@@ -151,6 +151,59 @@ describe('a cut on a complete change feed (E1)', () => {
     expect(second.treeId).toBe(await walkTreeId(counted.actors));
   });
 
+  it('should take a running comparison of the same write generation instead of reading its files again (FX1 M)', async () => {
+    const counted = await fixture(files(200), true);
+    await mint(counted);
+    await counted.filesystem.writeFile('dir7/f7.txt', 'edited\n');
+
+    counted.reads.length = 0;
+    /* A write turns the clean checkout to a comparison, and a save arrives while it runs. */
+    const held = counted.hold('dir7/f7.txt');
+    const comparing = run<{ treeId: string }>(counted.actors.checkout.captureTree, {
+      checkoutId: 'live',
+      changedPaths: ['dir7/f7.txt'],
+      generation: 1,
+    });
+    await held.reached;
+    const taken = run<Cut>(counted.actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+      changedPaths: ['dir7/f7.txt'],
+      generation: 1,
+    });
+    held.release();
+    const [compared, second] = await Promise.all([comparing, taken]);
+
+    expect(counted.reads).toEqual(['dir7/f7.txt']);
+    expect(second.treeId).toBe(compared.treeId);
+    expect(second.treeId).toBe(await walkTreeId(counted.actors));
+  });
+
+  it('should read for itself when a write landed after the running comparison began', async () => {
+    const counted = await fixture(files(20), true);
+    await mint(counted);
+    await counted.filesystem.writeFile('dir7/f7.txt', 'edited\n');
+
+    const held = counted.hold('dir7/f7.txt');
+    const comparing = run(counted.actors.checkout.captureTree, {
+      checkoutId: 'live',
+      changedPaths: ['dir7/f7.txt'],
+      generation: 1,
+    });
+    await held.reached;
+    await counted.filesystem.writeFile('dir7/f7.txt', 'edited again\n');
+    const taken = run<Cut>(counted.actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+      changedPaths: ['dir7/f7.txt'],
+      generation: 2,
+    });
+    held.release();
+    const [, second] = await Promise.all([comparing, taken]);
+
+    expect(second.treeId).toBe(await walkTreeId(counted.actors));
+  });
+
   it('should read every file when the host does not promise a complete feed', async () => {
     const counted = await fixture(files(20), false);
     await mint(counted);

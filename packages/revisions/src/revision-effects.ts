@@ -888,6 +888,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     last: ImmutableRevisionTree | undefined;
     lastCapture: number;
     basis: Readonly<{ revisionId: string; tree: ImmutableRevisionTree }> | undefined;
+    /** The comparison still running, and the write generation it covers. */
+    comparing: Readonly<{ generation: number; tree: Promise<ImmutableRevisionTree> }> | undefined;
   };
   const checkoutMemos = new Map<string, CheckoutMemos>();
   const memosOf = (checkoutId: string): CheckoutMemos => {
@@ -897,6 +899,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       last: undefined,
       lastCapture: 0,
       basis: undefined,
+      comparing: undefined,
     };
     checkoutMemos.set(checkoutId, memos);
     return memos;
@@ -1207,10 +1210,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * Capture one already-open checkout filesystem.
    *
    * With `changed`, and a feed the host promised complete, the capture starts
-   * from this checkout's `last` and re-reads only the named paths (E1). A walk,
-   * or a cut's capture of the paths it took, becomes the new `last`; a
-   * comparison's capture of paths it did not take does not, because a cut may
-   * take them before it finishes.
+   * from this checkout's `last` and re-reads only the named paths (E1). Every
+   * capture on a complete feed becomes the new `last` unless a newer one
+   * already has: the checkout forgets the paths a capture read only when it
+   * accepts that capture's answer, so any other capture is still followed by
+   * every path written since it started.
    *
    * @param rooted - The checkout tree.
    * @param basisOf - Recorded modes to inherit where the provider has none, read only for a walk.
@@ -1223,7 +1227,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     captureOptions: Readonly<{
       memos: CheckoutMemos;
       bypassMemo: boolean;
-      changed?: Readonly<{ paths: readonly string[] | undefined; taken: boolean }>;
+      changed?: Readonly<{ paths: readonly string[] | undefined }>;
     }>,
   ): Promise<ImmutableRevisionTree> => {
     const { memos, bypassMemo, changed } = captureOptions;
@@ -1266,11 +1270,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         `These paths cannot be checked out together on every computer (they differ only by letter case or accents, or one names a file another needs as a folder): ${collisions.join(', ')}`,
       );
     }
-    if (
-      options.completeChanges === true &&
-      (since === undefined || changed?.taken === true) &&
-      started > memos.lastCapture
-    ) {
+    if (options.completeChanges === true && started > memos.lastCapture) {
       memos.lastCapture = started;
       memos.last = heldTree(tree);
     }
@@ -1297,7 +1297,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     captureOptions: Readonly<{
       modeBasis?: ImmutableRevisionTree | undefined;
       bypassMemo: boolean;
-      changed?: Readonly<{ paths: readonly string[] | undefined; taken: boolean }>;
+      changed?: Readonly<{ paths: readonly string[] | undefined }>;
     }>,
   ): Promise<ImmutableRevisionTree> =>
     useFileSystem(place, async (rooted) => {
@@ -2487,11 +2487,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     recordEditorConflict,
     checkout: {
       cut: fromAuthorityPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async ({ input }) => {
+        /* A comparison running when this cut was asked, over the same write
+         * generation, already captures every write this cut takes, which the
+         * complete feed names: reading them again beside it is the double read
+         * E1 forbids (FX1 M). Read before the first await, as it was published. */
+        const running = memosOf(input.checkoutId).comparing;
         const place = await placeOf(input.checkoutId);
-        const tree = await captureCheckout(place, {
-          bypassMemo: false,
-          changed: { paths: input.changedPaths, taken: true },
-        });
+        const own = async (): Promise<ImmutableRevisionTree> =>
+          captureCheckout(place, { bypassMemo: false, changed: { paths: input.changedPaths } });
+        const tree =
+          options.completeChanges === true && running !== undefined && running.generation === input.generation
+            ? await running.tree.catch(own)
+            : await own();
         const treeId = await checkoutTreeId(place.id, tree);
         /* A cut taken before the open pull lands — a close, a hidden tab —
          * follows the same rule as the pull (W13c). Before any fetch, the
@@ -2506,16 +2513,30 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         return { treeId, cutId: cuts.put(input.checkoutId, { tree, treeId }) };
       }),
 
-      /* D4's spawn-time comparison: the same memoised capture the first cut
-       * reads, so that cut re-reads only what changed after it. */
+      /* D4's and I6's comparison: the same memoised capture a cut reads, and
+       * the next cut's starting tree, so that cut re-reads only what changed after it. */
       captureTree: fromAuthorityPromise<CheckoutCaptureTreeActorOutput, CheckoutCaptureTreeActorInput>(
         async ({ input }) => {
-          const place = await placeOf(input.checkoutId);
-          const tree = await captureCheckout(place, {
-            bypassMemo: false,
-            changed: { paths: input.changedPaths, taken: false },
-          });
-          return { treeId: await checkoutTreeId(place.id, tree) };
+          const memos = memosOf(input.checkoutId);
+          let published: CheckoutMemos['comparing'];
+          const captured = (async () => {
+            try {
+              return await captureCheckout(await placeOf(input.checkoutId), {
+                bypassMemo: false,
+                changed: { paths: input.changedPaths },
+              });
+            } finally {
+              if (published !== undefined && memos.comparing === published) {
+                memos.comparing = undefined;
+              }
+            }
+          })();
+          /* Published before the first await, so a cut asked on the next event finds it. */
+          if (input.generation !== undefined) {
+            published = { generation: input.generation, tree: captured };
+            memos.comparing = published;
+          }
+          return { treeId: await checkoutTreeId(input.checkoutId, await captured) };
         },
       ),
 

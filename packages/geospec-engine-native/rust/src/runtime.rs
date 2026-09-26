@@ -425,17 +425,24 @@ impl Engine {
                     let Some(subject) = self.subjects.get(key) else {
                         continue;
                     };
-                    if subject.pmi_source_bytes() != Some(primary.as_slice()) {
+                    // Ruling 15: digest, length and descriptor; bytes compare only when retained.
+                    if subject
+                        .pmi_source_bytes()
+                        .is_some_and(|bytes| bytes != &primary[..])
+                    {
                         continue;
                     }
                     let identity = subject.semantic_identity.get().expect("admitted identity");
                     let descriptor = object(identity.descriptor(), "retained descriptor")?;
-                    if field(descriptor, "ingestOptions")?
-                        == &Json::Object(
-                            step_name
-                                .map(|name| vec![("name".into(), Json::string(name))])
-                                .unwrap_or_default(),
-                        )
+                    let retained_primary =
+                        object(field(descriptor, "primary")?, "retained primary")?;
+                    if number_field(retained_primary, "byteLength")? == primary.len() as f64
+                        && field(descriptor, "ingestOptions")?
+                            == &Json::Object(
+                                step_name
+                                    .map(|name| vec![("name".into(), Json::string(name))])
+                                    .unwrap_or_default(),
+                            )
                         && string_field(descriptor, "ingestProfile")? == profile.ingest_profile
                         && string_field(descriptor, "backendProfile")? == profile.backend_profile
                     {
@@ -615,7 +622,7 @@ impl Engine {
                 })?;
         }
         if let Some(subject) = self.subjects.get(&key) {
-            if subject.format == SubjectFormat::Step && subject.pmi_source_bytes().is_some() {
+            if subject.format == SubjectFormat::Step {
                 let primary_hash = subject.content_hash.clone();
                 if let Some(keys) = self.step_sources.get_mut(&primary_hash) {
                     keys.retain(|candidate| candidate != &key);
@@ -677,7 +684,7 @@ impl Engine {
         }
         self.next_generation = generation;
         self.subject_generations.insert(key.clone(), generation);
-        if retained.format == SubjectFormat::Step && retained.pmi_source_bytes().is_some() {
+        if retained.format == SubjectFormat::Step {
             self.step_sources
                 .entry(retained.content_hash.clone())
                 .or_default()

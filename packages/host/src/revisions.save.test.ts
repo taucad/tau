@@ -8,16 +8,22 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { RevisionPort } from '@taucad/revisions';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 
 import { hostRevisionActor } from '#revision-actor.js';
-import { createProjectRevisionPort, openProjectRevisions, requireRevisionToolchain } from '#revisions.js';
+import {
+  createProjectRevisionPort,
+  createProjectRevisions,
+  openProjectRevisions,
+  requireRevisionToolchain,
+} from '#revisions.js';
 import type { RevisionSaveOutcome } from '#index.js';
 
 const roots: string[] = [];
@@ -145,6 +151,160 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
       await revisions.close();
     }
     expect(asked).toEqual([projectId]);
+  }, 120_000);
+
+  it('resolves one id for `tau serve` and `tau revisions save`, and the directory name for a malformed tau.json id (RV-W15)', async () => {
+    process.env['TAU_CONFIG_DIR'] = await directory('config');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    /**
+     * The id each entry resolves in a directory named otherwise, with no id passed, as the CLI and the daemon do.
+     *
+     * @param manifestId - What `tau.json` says.
+     * @returns The directory's name, the id `save`'s verbs ask a remote for, and the id `serve`'s connect wrote.
+     */
+    const resolved = async (manifestId: string) => {
+      const workspaceRoot = await directory('named-otherwise');
+      await writeFile(join(workspaceRoot, 'tau.json'), `${JSON.stringify({ id: manifestId })}\n`);
+      const asked: string[] = [];
+      const verbs = openProjectRevisions({
+        workspaceRoot,
+        remoteUrl: (id) => {
+          asked.push(id);
+          return undefined;
+        },
+      });
+      try {
+        await verbs.openFromRemote();
+      } finally {
+        await verbs.close();
+      }
+      const served = createProjectRevisions({ workspaceRoot, apiBaseUrl: 'http://127.0.0.1:9' });
+      /* Read as soon as it is written: the connect that follows fails against
+       * no API, and git's remotes list is the record only until then. */
+      const connectedId = async (): Promise<string | undefined> =>
+        /\/v1\/git\/(?<id>[^\s/]+)\.git/u.exec(
+          await readFile(join(workspaceRoot, '.git', 'config'), 'utf8').catch(() => ''),
+        )?.groups?.['id'];
+      let serve: string | undefined;
+      try {
+        await served.channel.request({ command: 'connectRemote', kind: 'tau' });
+        await vi.waitFor(
+          async () => {
+            serve = await connectedId();
+            expect(serve).toBeDefined();
+          },
+          { timeout: 10_000, interval: 5 },
+        );
+      } finally {
+        await served.release();
+      }
+      return { directory: basename(workspaceRoot), save: asked, serve };
+    };
+
+    const named = await resolved('proj-manifest');
+    expect(named.save).toEqual(['proj-manifest']);
+    expect(named.serve).toBe('proj-manifest');
+
+    const malformed = await resolved('../x');
+    expect(malformed.save).toEqual([malformed.directory]);
+    expect(malformed.serve).toBe(malformed.directory);
+    /* Said once for the directory, though both entries resolved it. */
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  }, 120_000);
+
+  /**
+   * Run one `save` whose port never answers `stalled`, with the verb's own bound brought forward.
+   *
+   * Only the timer of exactly `bound` ms is shortened, and it fires once the
+   * stall is reached, so everything else (git's own deadlines, the machines'
+   * windows) keeps real time.
+   *
+   * @param project - The project directory and its id.
+   * @param stall - The port method that never settles, and the verb's wait for
+   *   its answer: 30 s for the cut, publish's 60 s + 30 s for the push.
+   * @returns What `save` reported.
+   */
+  const saveStalled = async (
+    project: Readonly<{ workspaceRoot: string; projectId: string }>,
+    stall: Readonly<{ method: 'writeRevision' | 'push'; boundMilliseconds: number }>,
+  ): Promise<RevisionSaveOutcome> => {
+    const { workspaceRoot, projectId } = project;
+    const real = createProjectRevisionPort({ workspaceRoot, projectId });
+    let reached = false;
+    /* Held until the verb has answered, then released so `close` can settle. */
+    const held = Promise.withResolvers<never>();
+    const never = async (): Promise<never> => {
+      reached = true;
+      return held.promise;
+    };
+    const port: RevisionPort = stall.method === 'push' ? { ...real, push: never } : { ...real, writeRevision: never };
+    const realSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      handler: () => void,
+      delayMilliseconds?: number,
+      ...rest: unknown[]
+    ) => {
+      if (delayMilliseconds !== stall.boundMilliseconds) {
+        return realSetTimeout(handler, delayMilliseconds, ...rest);
+      }
+      const once = (): void => {
+        if (reached) {
+          handler();
+        } else {
+          realSetTimeout(once, 5);
+        }
+      };
+      return realSetTimeout(once, 0);
+    }) as typeof setTimeout);
+    const revisions = openProjectRevisions({ workspaceRoot, projectId, port });
+    try {
+      return await revisions.save();
+    } finally {
+      vi.mocked(globalThis.setTimeout).mockRestore();
+      held.reject(new Error('The stalled port call is released.'));
+      await revisions.close();
+    }
+  };
+
+  it('says a cut that did not answer in time is unknown, not refused (RV-W15)', async () => {
+    const workspaceRoot = await directory('cut-timeout');
+    process.env['TAU_CONFIG_DIR'] = await directory('config');
+    execFileSync('git', ['init', '--quiet', '--initial-branch=main', workspaceRoot]);
+    await writeFile(join(workspaceRoot, 'part.ts'), 'export const part = 1;\n');
+
+    const outcome = await saveStalled(
+      { workspaceRoot, projectId: 'project-cut-timeout' },
+      { method: 'writeRevision', boundMilliseconds: 30_000 },
+    );
+
+    expect(outcome).toEqual({
+      status: 'timedOut',
+      reason: 'This project did not answer in time; the save may still be recorded.',
+    });
+  }, 120_000);
+
+  it('says a push that did not answer in time is unknown, not failed (RV-W15)', async () => {
+    const { bare, projectId } = await remoteWithOneRevision();
+    const second = await directory('push-timeout');
+    const opener = openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
+    try {
+      expect(await opener.openFromRemote()).toMatchObject({ status: 'opened' });
+    } finally {
+      await opener.close();
+    }
+    await writeFile(join(second, 'bracket.ts'), 'export const bracket = 2;\n');
+
+    const outcome = await saveStalled(
+      { workspaceRoot: second, projectId },
+      { method: 'push', boundMilliseconds: 90_000 },
+    );
+
+    expect(outcome).toMatchObject({
+      status: 'saved',
+      backup: 'timedOut',
+      reason: 'The backup did not answer in time; whether it reached the remote is unknown.',
+    });
   }, 120_000);
 
   it('says a project with no remote is saved on this device, not that its backup failed', async () => {

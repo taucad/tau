@@ -1626,9 +1626,9 @@ impl<'a> EvaluationContext<'a> {
         // Named primary meshes are a different component partition. Never
         // reinterpret their integer IDs as occurrence selectors.
         if subject.mesh_record().is_some_and(|record| {
-            crate::analysis::interference::build_component_labels(subject)
-                .is_ok_and(|v| v.len() >= 2)
-                && record.primitives.len() >= 2
+            record.primitives.len() >= 2
+                && crate::analysis::interference::build_component_labels(subject)
+                    .is_ok_and(|v| v.len() >= 2)
         }) {
             return Err(refusal());
         }

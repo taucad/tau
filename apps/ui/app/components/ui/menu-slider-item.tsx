@@ -5,6 +5,7 @@ import { Button } from '@taucad/ui/components/button';
 import { menuItemIconClass, menuItemLayoutClass, menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { SliderInput } from '#components/ui/slider-input.js';
+import type { SliderInputProperties } from '#components/ui/slider-input.js';
 import { cn } from '@taucad/ui/utils/cn';
 
 export type MenuSliderItemProperties = {
@@ -12,6 +13,8 @@ export type MenuSliderItemProperties = {
   readonly children: React.ReactNode;
   readonly value: number;
   readonly onValueChange?: (value: number) => void;
+  /** Replaces the arrow keys' default one-`step` change, for example to step further while Shift is held. */
+  readonly onStep?: SliderInputProperties['onStep'];
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
@@ -37,6 +40,7 @@ export const MenuSliderItem = ({
   children,
   value,
   onValueChange,
+  onStep,
   min = 0,
   max = 100,
   step = 1,
@@ -63,6 +67,7 @@ export const MenuSliderItem = ({
     aria-valuetext={trailingAdornment ? `${value}${trailingAdornment}` : undefined}
     onScrubChange={onValueChange}
     onInputCommit={onValueChange}
+    onStep={onStep}
     onPointerDown={stopPointerPropagation}
     onPointerMove={stopPointerPropagation}
     onPointerUp={stopPointerPropagation}

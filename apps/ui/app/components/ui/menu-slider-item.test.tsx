@@ -128,6 +128,32 @@ describe('MenuSliderItem', () => {
     expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 
+  it('should hand arrow keys and the Shift state to onStep instead of stepping by itself', async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    const onStep = vi.fn();
+    render(
+      <DropdownMenu>
+        <DropdownMenuTrigger>Open</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuSliderItem value={50} aria-label='Opacity' onValueChange={onValueChange} onStep={onStep}>
+            Opacity
+          </DropdownMenuSliderItem>
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    await user.click(screen.getByRole('spinbutton', { name: 'Opacity' }));
+
+    await user.keyboard('{ArrowUp}');
+    expect(onStep).toHaveBeenLastCalledWith(1, { shift: false });
+
+    await user.keyboard('{Shift>}{ArrowDown}{/Shift}');
+    expect(onStep).toHaveBeenLastCalledWith(-1, { shift: true });
+    expect(onStep).toHaveBeenCalledTimes(2);
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
   it('scrubs and reverts editing inside a context menu without dismissing it early', async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();

@@ -42,4 +42,14 @@ describe('tauPlanCatalog', () => {
     const everything = JSON.stringify(tauPlanCatalog);
     expect(everything).not.toMatch(/geospec/i);
   });
+
+  it('should advertise the storage each plan includes, from the table the quota enforces (D16)', () => {
+    const [free, pro, enterprise] = tauPlanCatalog;
+    expect(free?.features).toContain('Tau Cloud backup and sync — 1 GB (Coming Soon)');
+    expect(pro?.features).toContain('Tau Cloud backup and sync — 10 GB (Coming Soon)');
+    expect(enterprise?.features).toContain('Tau Cloud backup and sync — 100 GB (Coming Soon)');
+    /* EQ2: a free account may connect GitHub, so Pro inherits it through "Everything in Free". */
+    expect(free?.features).toContain('GitHub connection (Coming Soon)');
+    expect(pro?.features).not.toContain('GitHub connection (Coming Soon)');
+  });
 });

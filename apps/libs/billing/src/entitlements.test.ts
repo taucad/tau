@@ -1,7 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { entitlementsFromTier } from '#entitlements.js';
+import { entitlementsFromTier, formatStorageLimit, storageLimitBytesByTier } from '#entitlements.js';
 
 describe('entitlementsFromTier', () => {
+  /* D23: free sync is a launch gate, closed unless a deployment opens it. */
+  it('should keep free-tier sync and GitHub closed unless the deployment opens free sync', () => {
+    expect(entitlementsFromTier('free')).toMatchObject({ canSyncFiles: false, canConnectGitHub: false });
+    expect(entitlementsFromTier('free', { freeTierSync: false })).toMatchObject({
+      canSyncFiles: false,
+      canConnectGitHub: false,
+    });
+  });
+
+  /* D16 and EQ2: open, a free account backs up, publishes and connects GitHub. */
+  it('should let a free account sync and connect GitHub once free sync is open', () => {
+    expect(entitlementsFromTier('free', { freeTierSync: true })).toMatchObject({
+      tier: 'free',
+      canSyncFiles: true,
+      canConnectGitHub: true,
+      canUseProKernels: false,
+      canCreatePrivateShares: false,
+    });
+  });
+
+  it('should leave the paid tiers alone whatever the free-sync gate says', () => {
+    expect(entitlementsFromTier('pro', { freeTierSync: false }).canSyncFiles).toBe(true);
+    expect(entitlementsFromTier('enterprise', { freeTierSync: false }).canSyncFiles).toBe(true);
+  });
+
   it('returns free-tier entitlements with pro features disabled', () => {
     const entitlements = entitlementsFromTier('free');
 
@@ -76,5 +101,23 @@ describe('entitlementsFromTier', () => {
     expect(entitlements.apiCadGatewayMonthlyLimit).toBe(Number.POSITIVE_INFINITY);
     expect(entitlements.conversionApiMonthlyLimit).toBe(Number.POSITIVE_INFINITY);
     expect(entitlements.geospecValidationMonthlyLimit).toBe(Number.POSITIVE_INFINITY);
+  });
+});
+
+describe('storageLimitBytesByTier', () => {
+  it('should give each plan its advertised account allowance (D16)', () => {
+    expect(storageLimitBytesByTier).toStrictEqual({
+      free: 1024 ** 3,
+      pro: 10 * 1024 ** 3,
+      enterprise: 100 * 1024 ** 3,
+    });
+  });
+
+  it('should quote an allowance without a trailing zero', () => {
+    expect(formatStorageLimit(storageLimitBytesByTier.free)).toBe('1 GB');
+    expect(formatStorageLimit(storageLimitBytesByTier.enterprise)).toBe('100 GB');
+    expect(formatStorageLimit(2.5 * 1024 ** 3)).toBe('2.5 GB');
+    expect(formatStorageLimit(512 * 1024 ** 2)).toBe('512 MB');
+    expect(formatStorageLimit(0)).toBe('0 B');
   });
 });

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import type { BufferGeometry } from 'three';
 import { Mesh, MeshMatcapMaterial, Object3D, PerspectiveCamera, Scene } from 'three';
 import {
@@ -52,6 +53,8 @@ type AttachedControlsFixture = {
   readonly controls: TransformControls<PerspectiveCamera>;
   readonly camera: PerspectiveCamera;
   readonly domElement: HTMLElement;
+  /** Counts layout reads of the 100x100 viewport element. */
+  readonly getBoundingClientRect: Mock;
 };
 
 function createAttachedControlsFixture(cameraDistance = 5): AttachedControlsFixture {
@@ -60,18 +63,19 @@ function createAttachedControlsFixture(cameraDistance = 5): AttachedControlsFixt
   const scene = new Scene();
   const target = new Object3D();
   const domElement = document.createElement('div');
+  const getBoundingClientRect = vi.fn(() => ({
+    bottom: 100,
+    height: 100,
+    left: 0,
+    right: 100,
+    top: 0,
+    width: 100,
+    x: 0,
+    y: 0,
+  }));
   Object.defineProperty(domElement, 'getBoundingClientRect', {
     configurable: true,
-    value: () => ({
-      bottom: 100,
-      height: 100,
-      left: 0,
-      right: 100,
-      top: 0,
-      width: 100,
-      x: 0,
-      y: 0,
-    }),
+    value: getBoundingClientRect,
   });
   const controls = new TransformControls(camera, domElement);
 
@@ -81,7 +85,7 @@ function createAttachedControlsFixture(cameraDistance = 5): AttachedControlsFixt
   controls.setMode('translate');
   controls.setSpace('world');
 
-  return { controls, camera, domElement };
+  return { controls, camera, domElement, getBoundingClientRect };
 }
 
 function createAttachedControls(): TransformControls<PerspectiveCamera> {
@@ -90,14 +94,33 @@ function createAttachedControls(): TransformControls<PerspectiveCamera> {
   return controls;
 }
 
-function dispatchMousePointerMove(target: EventTarget, clientX: number, clientY: number): void {
-  const event = new MouseEvent('pointermove', { clientX, clientY });
+function dispatchMousePointer(target: EventTarget, type: string, init: MouseEventInit): void {
+  const event = new MouseEvent(type, init);
   Object.defineProperty(event, 'pointerType', {
     configurable: true,
     value: 'mouse',
   });
 
   target.dispatchEvent(event);
+}
+
+function dispatchMousePointerMove(target: EventTarget, clientX: number, clientY: number): void {
+  dispatchMousePointer(target, 'pointermove', { clientX, clientY });
+}
+
+type ClientPoint = { readonly clientX: number; readonly clientY: number };
+
+/** Scans the viewport centre, where the gizmo sits, for the first point that satisfies `isFound`. */
+function findClientPoint(isFound: (point: ClientPoint) => boolean): ClientPoint {
+  for (let clientY = 30; clientY <= 70; clientY += 2) {
+    for (let clientX = 30; clientX <= 70; clientX += 2) {
+      if (isFound({ clientX, clientY })) {
+        return { clientX, clientY };
+      }
+    }
+  }
+
+  throw new Error('No scanned viewport point satisfied the gizmo probe.');
 }
 
 describe('TransformControlsGizmo section controls rendering contract', () => {
@@ -248,5 +271,93 @@ describe('TransformControlsGizmo section controls rendering contract', () => {
     domElement.dispatchEvent(new Event('pointerleave'));
 
     expect(controls.axis).toBe('Z');
+  });
+
+  it('should light every one-letter axis that a multi-axis highlight names', () => {
+    const controls = createAttachedControls();
+    const { gizmo } = controls as unknown as { readonly gizmo: TransformControlsGizmo };
+    const translateMeshes = collectTransformControlBodyMeshesForMode(gizmo, 'translate');
+
+    controls.highlightAxis = 'XY';
+    controls.updateMatrixWorld();
+
+    const opacitiesByName = (name: string): number[] =>
+      translateMeshes.filter((mesh) => mesh.name === name).map((mesh) => mesh.material.opacity);
+    expect(opacitiesByName('X').every((opacity) => opacity === 1)).toBe(true);
+    expect(opacitiesByName('Y').every((opacity) => opacity === 1)).toBe(true);
+    expect(opacitiesByName('Z').every((opacity) => opacity < 1)).toBe(true);
+  });
+});
+
+describe('TransformControls pointer moves', () => {
+  it('should skip hover picking and its layout read while the primary button is held', () => {
+    const { controls, domElement, getBoundingClientRect } = createAttachedControlsFixture();
+    const { ownerDocument } = domElement;
+
+    try {
+      controls.updateMatrixWorld();
+      const handlePoint = findClientPoint((point) => {
+        dispatchMousePointer(ownerDocument, 'pointermove', point);
+        return controls.axis !== undefined;
+      });
+      dispatchMousePointer(ownerDocument, 'pointermove', { clientX: 0, clientY: 0 });
+      expect(controls.axis).toBeUndefined();
+      const onAxisChanged = vi.fn();
+      controls.addEventListener('axis-changed', onAxisChanged);
+      getBoundingClientRect.mockClear();
+
+      // A drag of the sibling gizmo, or a camera orbit, crosses this gizmo's handle.
+      dispatchMousePointer(ownerDocument, 'pointermove', { ...handlePoint, buttons: 1 });
+
+      expect(controls.axis).toBeUndefined();
+      expect(onAxisChanged).not.toHaveBeenCalled();
+      expect(getBoundingClientRect).not.toHaveBeenCalled();
+
+      dispatchMousePointer(ownerDocument, 'pointermove', handlePoint);
+
+      expect(controls.axis).toBeDefined();
+      expect(onAxisChanged).toHaveBeenCalledOnce();
+      expect(getBoundingClientRect).toHaveBeenCalledOnce();
+    } finally {
+      controls.dispose();
+    }
+  });
+
+  it('should read the viewport rect once per drag move across both gizmo instances', () => {
+    const { controls, camera, domElement, getBoundingClientRect } = createAttachedControlsFixture();
+    // As in section view, a sibling gizmo shares the viewport and hears every press and move.
+    const sibling = new TransformControls(camera, domElement);
+    sibling.setMode('rotate');
+    const { ownerDocument } = domElement;
+
+    try {
+      controls.updateMatrixWorld();
+      const pressPoint = findClientPoint((point) => {
+        dispatchMousePointer(domElement, 'pointerdown', { ...point, button: 0, buttons: 1 });
+        if (controls.dragging) {
+          return true;
+        }
+
+        dispatchMousePointer(ownerDocument, 'pointerup', { ...point, button: 0 });
+        return false;
+      });
+      const onChange = vi.fn();
+      controls.addEventListener('change', onChange);
+      getBoundingClientRect.mockClear();
+
+      dispatchMousePointer(ownerDocument, 'pointermove', {
+        clientX: pressPoint.clientX + 4,
+        clientY: pressPoint.clientY + 4,
+        button: -1,
+        buttons: 1,
+      });
+
+      expect(onChange).toHaveBeenCalled();
+      expect(getBoundingClientRect).toHaveBeenCalledOnce();
+      expect(sibling.dragging).toBe(false);
+    } finally {
+      controls.dispose();
+      sibling.dispose();
+    }
   });
 });

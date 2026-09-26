@@ -5075,7 +5075,9 @@ bool classify_continuous_wall(
 
   ShapeIndex shells, vertices;
   TopExp::MapShapes(solid, TopAbs_SHELL, shells);
-  if (shells.Extent() != 1 || !TopoDS::Shell(shells(1)).Closed()) {
+  // The operand gate closed every shell by computed edge-use parity (S4),
+  // never by the stored flag a healer may write: one closure definition.
+  if (shells.Extent() != 1) {
     message = "Continuous wall requires one closed outer shell without cavities.";
     return false;
   }

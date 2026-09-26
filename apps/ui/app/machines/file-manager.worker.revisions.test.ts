@@ -685,6 +685,45 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
 
   /* W7: S38's second half — the comparison whose right-hand side is the working
    * copy rather than another revision. */
+  it('should answer an editor conflict with the line it was recorded on (D14)', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    alpha.send({ command: 'setDeviceId', deviceId: 'tab:one' });
+    alpha.send({ command: 'saveRevision', id: 1, trigger: 'save' });
+    await vi.waitFor(() => {
+      expect(alpha.frames.some((frame) => 'id' in frame && frame.id === 1)).toBe(true);
+    });
+    await project.writeFile('main.scad', 'cube(30);');
+    fixture.announce('alpha', ['main.scad']);
+    alpha.send({ command: 'saveRevision', id: 2, trigger: 'save' });
+    await vi.waitFor(() => {
+      expect(alpha.frames.some((frame) => 'id' in frame && frame.id === 2)).toBe(true);
+    });
+
+    alpha.send({ command: 'recordEditorConflict', id: 3, path: 'main.scad', base: 'cube(10);', mine: 'cube(20);' });
+
+    await vi.waitFor(
+      () => {
+        expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 3)).toMatchObject({
+          type: 'result',
+          result: {
+            kind: 'editorConflict',
+            outcome: { status: 'recorded', line: 'conflicts/main/tab_3aone', into: 'main' },
+          },
+        });
+      },
+      { timeout: 10_000 },
+    );
+    /* Nothing reaches the files; the card is the one surface. */
+    expect(await project.readFile('main.scad', 'utf8')).toBe('cube(30);');
+    const root = await fixture.root('alpha');
+    await vi.waitFor(() => {
+      expect(root.status().conflicts.map((conflict) => conflict.branch)).toEqual(['conflicts/main/tab_3aone']);
+    });
+  });
+
   it('should compare a recorded revision against the files as they are now (S38)', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');

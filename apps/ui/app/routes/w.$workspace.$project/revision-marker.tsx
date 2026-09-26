@@ -69,7 +69,6 @@ import {
   timelineRowContent,
   timelineRowHover,
 } from '#components/revisions/revision-timeline.js';
-import { requireClientEnvironmentUrl } from '#environment.config.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
 import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
@@ -79,6 +78,8 @@ import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { consumeRevisionReveal, useRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
+import type { AffectedPublication } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import { revisionName, revisionTriggerLabel } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
 /** Whether a revision is one of the autosaves History folds. */
@@ -389,69 +390,6 @@ export function RevisionDetails({
   );
 }
 
-/** A publication the Hosted Remote says a name backs (D24). */
-type AffectedPublication = Readonly<{ id: string; title: string }>;
-
-type RemovalAnswer =
-  | Readonly<{ kind: 'removed' }>
-  | Readonly<{ kind: 'published'; publication: AffectedPublication }>
-  | Readonly<{ kind: 'refused'; code: string | undefined }>;
-
-/**
- * Ask the Hosted Remote to remove a version name through its audited verb (D24).
- *
- * A name a live publication points at answers `409 GIT_REF_PUBLISHED` with that
- * publication; the caller shows it and asks again with its id. A name the remote
- * never held is not a refusal: there is nothing there to remove.
- *
- * @param projectId - The project, which names its Tau Cloud repository.
- * @param name - The version name.
- * @param publicationId - The publication the person was shown, when the name backs one.
- * @returns What the remote answered.
- */
-const requestNameRemoval = async (
-  projectId: string,
-  name: string,
-  publicationId: string | undefined,
-): Promise<RemovalAnswer> => {
-  const base = requireClientEnvironmentUrl('TAU_API_URL');
-  const query = new URLSearchParams({ name: `refs/tags/${name}` });
-  if (publicationId !== undefined) {
-    query.set('publication', publicationId);
-  }
-  try {
-    const response = await fetch(`${base}/v1/git/${encodeURIComponent(projectId)}/refs?${query.toString()}`, {
-      method: 'DELETE',
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    });
-    if (response.ok) {
-      return { kind: 'removed' };
-    }
-    const body = (await response.json().catch(() => ({}))) as {
-      code?: unknown;
-      publication?: { id?: unknown; title?: unknown };
-    };
-    const code = typeof body.code === 'string' ? body.code : undefined;
-    if (response.status === 404 && code === 'GIT_REF_NOT_FOUND') {
-      return { kind: 'removed' };
-    }
-    const { publication } = body;
-    if (code === 'GIT_REF_PUBLISHED' && typeof publication?.id === 'string') {
-      return {
-        kind: 'published',
-        publication: {
-          id: publication.id,
-          title: typeof publication.title === 'string' ? publication.title : 'A publication',
-        },
-      };
-    }
-    return { kind: 'refused', code };
-  } catch {
-    return { kind: 'refused', code: undefined };
-  }
-};
-
 type NameRemoval = Readonly<{
   name: string;
   publication: AffectedPublication | undefined;
@@ -480,7 +418,7 @@ function useNameRemoval(): Readonly<{
   const remove = async (name: string, publication?: AffectedPublication): Promise<void> => {
     setRemoval({ name, publication, error: undefined, isBusy: true });
     const answer = isTauCloud
-      ? await requestNameRemoval(projectId, name, publication?.id)
+      ? await requestRefRemoval(projectId, `refs/tags/${name}`, publication?.id)
       : ({ kind: 'removed' } as const);
     if (answer.kind === 'published') {
       /* The person sees what the removal affects before anything changes. */

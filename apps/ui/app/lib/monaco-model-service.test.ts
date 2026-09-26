@@ -7,12 +7,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { toast } from 'sonner';
 import { serializeParameterRecord } from '@taucad/parameters';
 import { mock } from 'vitest-mock-extended';
 import type * as Monaco from 'monaco-editor';
-import { createWorkspaceContentBinding, MonacoModelService } from '#lib/monaco-model-service.js';
-import { hasPendingEditorDecision } from '#lib/editor-decisions.js';
+import {
+  createWorkspaceContentBinding,
+  isRecordingEditorConflict,
+  MonacoModelService,
+} from '#lib/monaco-model-service.js';
+import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type { ModelServiceConfig } from '#lib/monaco-model-service.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '@taucad/fs-client/file-content-service';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -51,8 +54,6 @@ vi.mock('#lib/monaco.constants.js', () => ({
     return undefined;
   },
 }));
-
-vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { dismiss: vi.fn() }) }));
 
 vi.mock('#utils/filesystem.utils.js', () => ({
   decodeTextFile: (data: Uint8Array<ArrayBuffer>) => new TextDecoder().decode(data),
@@ -923,6 +924,18 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
       disk.set(target, content);
       return { status: 'applied', content };
     });
+    /* The revision client's record: every edit it was handed, held while `recordGate` is. */
+    const records: EditorConflictInput[] = [];
+    let recordGate: PromiseWithResolvers<void> | undefined;
+    let recordFailure: Error | undefined;
+    const recordEditorConflict = async (input: EditorConflictInput): Promise<EditorConflictOutcome> => {
+      records.push(input);
+      await recordGate?.promise;
+      if (recordFailure !== undefined) {
+        throw recordFailure;
+      }
+      return { status: 'recorded', revisionId: 'c1', line: `conflicts/main/${projectId}`, into: 'main' };
+    };
     let emitWorkerChange: ((event: unknown) => void) | undefined;
     const channel = new WorkerChangeChannel({
       transport: {
@@ -948,6 +961,7 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
       contentService,
       markerService: createMockMarkerService() as unknown as ModelServiceConfig['markerService'],
       projectId,
+      recordEditorConflict,
     });
     const binding = createWorkspaceContentBinding(modelService);
     const subscription = subscribeWorkspaceContentDispatch(
@@ -1011,27 +1025,16 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
       },
       /** A worker rename event, for a swap whose events arrive after the save's answer. */
       rename,
-      /** The choose-one the person was shown, if any. */
-      decision: () => vi.mocked(toast).mock.calls.at(-1),
-      /** Press *Keep mine* or *Keep theirs* on this project's newest decision toast. */
-      keep: (choice: 'Keep mine' | 'Keep theirs'): void => {
-        const options = vi
-          .mocked(toast)
-          .mock.calls.findLast(([, candidate]) =>
-            (candidate as { id?: string } | undefined)?.id?.includes(`:${projectId}:`),
-          )?.[1] as
-          | {
-              action: { label: string; onClick: (event: { preventDefault: () => void }) => void };
-              cancel: { props: { children: string; onClick: () => void } };
-            }
-          | undefined;
-        if (choice === 'Keep mine') {
-          expect(options?.action.label).toBe(choice);
-          options?.action.onClick({ preventDefault: vi.fn() });
-          return;
-        }
-        expect(options?.cancel.props.children).toBe(choice);
-        options?.cancel.props.onClick();
+      /** What the revision client was asked to record. */
+      records,
+      /** Hold the next record in flight. */
+      holdRecord: (): PromiseWithResolvers<void> => {
+        recordGate = Promise.withResolvers<void>();
+        return recordGate;
+      },
+      /** Refuse the next record. */
+      failRecord: (error: Error): void => {
+        recordFailure = error;
       },
       dispose: (): void => {
         subscription.dispose();
@@ -1052,10 +1055,6 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
       });
     }
   };
-
-  beforeEach(() => {
-    vi.mocked(toast).mockClear();
-  });
 
   it('scenario A: a keystroke save in flight does not revert the hunk the apply just wrote', async () => {
     const race = createRace();
@@ -1157,102 +1156,99 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
     }
   });
 
-  it.each([
-    ['Keep mine', 'A\nb\nmine\n'],
-    ['Keep theirs', arrived],
-  ])(
-    'never writes conflict markers when both sides changed a line: it asks, and %s settles it (N1, I7)',
-    async (choice, settled) => {
-      const race = createRace();
-      const mine = 'A\nb\nmine\n';
-      try {
-        await race.modelService.acquireModel('part.scad');
-        const held = race.holdWrites();
-        const save = race.type(mine);
-        race.applied(arrived);
-        race.releaseWrites(held);
-        await drain();
+  it('never writes conflict markers when both sides changed a line: it records the edit as a conflict (N1, I7, D14)', async () => {
+    const race = createRace();
+    const mine = 'A\nb\nmine\n';
+    try {
+      await race.modelService.acquireModel('part.scad');
+      const held = race.holdWrites();
+      const save = race.type(mine);
+      race.applied(arrived);
+      race.releaseWrites(held);
+      await save;
 
-        /* Nothing is written: the arrived bytes stay, the typed text stays in the model. */
-        expect(decode(race.disk.get(race.file))).toBe(arrived);
-        expect(race.model()?.getValue()).toBe(mine);
-        const [title, options] = race.decision() ?? [];
-        expect(title).toBe('Needs your decision');
-        /* Not dismissible: no close control, no swipe, no timeout (RV-W5b2 R2-1). */
-        expect(options).toMatchObject({ dismissible: false, duration: Number.POSITIVE_INFINITY });
-        race.keep(choice as 'Keep mine' | 'Keep theirs');
-        await save;
-
-        await vi.waitFor(() => {
-          expect(decode(race.disk.get(race.file))).toBe(settled);
-        });
-        expect(race.model()?.getValue()).toBe(settled);
-        for (const bytes of race.disk.values()) {
-          expect(decode(bytes)).not.toContain('<<<<<<<');
-        }
-      } finally {
-        race.dispose();
+      /* The graph holds the edit; the files keep the arrived bytes, and so does the model. */
+      expect(race.records).toEqual([{ path: 'part.scad', base, mine }]);
+      expect(decode(race.disk.get(race.file))).toBe(arrived);
+      expect(race.model()?.getValue()).toBe(arrived);
+      for (const bytes of race.disk.values()) {
+        expect(decode(bytes)).not.toContain('<<<<<<<');
       }
-    },
-  );
+    } finally {
+      race.dispose();
+    }
+  });
 
-  it('gives each live project its own decision toast, even for the same file (RV-W5b2 R2-1)', async () => {
+  it('holds only its own project open while a record is in flight, even when its service goes away (RV-W5b2 R2-1)', async () => {
     const alpha = createRace('part.scad', base, 'alpha');
     const beta = createRace('part.scad', base, 'beta');
     try {
-      const overlap = async (race: typeof alpha): Promise<void> => {
-        await race.modelService.acquireModel('part.scad');
-        const held = race.holdWrites();
-        void race.type('A\nb\nmine\n');
-        race.applied(arrived);
-        race.releaseWrites(held);
-        await drain();
-      };
-      await overlap(alpha);
-      await overlap(beta);
+      await alpha.modelService.acquireModel('part.scad');
+      const recording = alpha.holdRecord();
+      const held = alpha.holdWrites();
+      const save = alpha.type('A\nb\nmine\n');
+      alpha.applied(arrived);
+      alpha.releaseWrites(held);
+      await vi.waitFor(() => {
+        expect(alpha.records).toHaveLength(1);
+      });
+      expect(isRecordingEditorConflict('alpha')).toBe(true);
+      expect(isRecordingEditorConflict('beta')).toBe(false);
 
-      const ids = [
-        ...new Set(vi.mocked(toast).mock.calls.map(([, options]) => (options as { id?: string } | undefined)?.id)),
-      ];
-      expect(ids).toHaveLength(2);
-      expect(ids[0]).toContain(':alpha:');
-      expect(ids[1]).toContain(':beta:');
-      expect(hasPendingEditorDecision('alpha')).toBe(true);
-      expect(hasPendingEditorDecision('beta')).toBe(true);
-
-      beta.keep('Keep theirs');
-      expect(hasPendingEditorDecision('beta')).toBe(false);
-      expect(hasPendingEditorDecision('alpha')).toBe(true);
-      alpha.keep('Keep theirs');
-      expect(hasPendingEditorDecision('alpha')).toBe(false);
+      /* Switching project disposes the focused project's model service; the record still lands. */
+      alpha.modelService.dispose();
+      expect(isRecordingEditorConflict('alpha')).toBe(true);
+      recording.resolve();
+      await save;
+      expect(isRecordingEditorConflict('alpha')).toBe(false);
     } finally {
       alpha.dispose();
       beta.dispose();
     }
   });
 
-  it('keeps an open decision when its editor service goes away, and Keep mine still writes the text (RV-W5b2 R2-1)', async () => {
-    const race = createRace('part.scad', base, 'gamma');
+  it('records what was typed during the record too, so no keystroke is dropped (RV-W6 F3)', async () => {
+    const race = createRace();
+    const mine = 'A\nb\nmine\n';
+    const more = 'A\nb\nmine and more\n';
+    try {
+      await race.modelService.acquireModel('part.scad');
+      const recording = race.holdRecord();
+      const held = race.holdWrites();
+      const save = race.type(mine);
+      race.applied(arrived);
+      race.releaseWrites(held);
+      await vi.waitFor(() => {
+        expect(race.records).toHaveLength(1);
+      });
+      /* A keystroke inside the round trip: refused like the first, and joined to it. */
+      const later = race.type(more);
+      recording.resolve();
+      await Promise.all([save, later]);
+
+      expect(race.records.map((input) => input.mine)).toStrictEqual([mine, more]);
+      expect(race.model()?.getValue()).toBe(arrived);
+      expect(decode(race.disk.get(race.file))).toBe(arrived);
+    } finally {
+      race.dispose();
+    }
+  });
+
+  it('keeps the text and reports a record that fails, so the next keystroke tries again (RV-W5b2 N3)', async () => {
+    const race = createRace();
     const mine = 'A\nb\nmine\n';
     try {
       await race.modelService.acquireModel('part.scad');
+      race.failRecord(new Error('record refused'));
       const held = race.holdWrites();
-      void race.type(mine);
+      const save = race.type(mine);
       race.applied(arrived);
       race.releaseWrites(held);
-      await drain();
-      expect(hasPendingEditorDecision('gamma')).toBe(true);
 
-      /* Switching project disposes the focused project's model service. */
-      race.modelService.dispose();
-      expect(hasPendingEditorDecision('gamma')).toBe(true);
+      await expect(save).rejects.toThrow('record refused');
+      expect(race.model()?.getValue()).toBe(mine);
       expect(decode(race.disk.get(race.file))).toBe(arrived);
-
-      race.keep('Keep mine');
-      await vi.waitFor(() => {
-        expect(decode(race.disk.get(race.file))).toBe(mine);
-      });
-      expect(hasPendingEditorDecision('gamma')).toBe(false);
+      expect(isRecordingEditorConflict('project')).toBe(false);
     } finally {
       race.dispose();
     }
@@ -1280,13 +1276,13 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
           groups: { default: { values: { height: 20, width: 30 } } },
         });
       });
-      expect(race.decision()).toBeUndefined();
+      expect(race.records).toEqual([]);
     } finally {
       race.dispose();
     }
   });
 
-  it('asks rather than marking a parameter both sides changed (N1)', async () => {
+  it('records rather than marking a parameter both sides changed (N1, D14)', async () => {
     const record = (values: Record<string, number>): string =>
       new TextDecoder().decode(
         serializeParameterRecord({ activeGroup: 'default', groups: { default: { values } } } as Parameters<
@@ -1304,8 +1300,7 @@ describe('an editor save racing an applied revision (RV-W5b F4, RV-W5b2 N1–N3)
       await drain();
 
       expect(decode(race.disk.get(race.file))).toBe(record({ height: 30 }));
-      expect(race.model()?.getValue()).toBe(record({ height: 20 }));
-      expect(race.decision()?.[0]).toBe('Needs your decision');
+      expect(race.records).toEqual([{ path, base: record({ height: 10 }), mine: record({ height: 20 }) }]);
     } finally {
       race.dispose();
     }

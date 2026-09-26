@@ -103,8 +103,8 @@ export type ProjectSessionMachineEvent =
       readonly type: 'revisionState';
       readonly dirty: boolean;
       readonly pushed: boolean;
-      /** An editor holds a *Needs your decision* only its memory has (RV-W5b2 R2-1): no policy closes it. */
-      readonly deciding?: boolean;
+      /** An editor's conflict is being recorded, so only its memory has the text (RV-W5b2 R2-1): no policy closes it. */
+      readonly recording?: boolean;
       readonly sync?: ChatSyncState;
       /** The branch the live checkout is on; `revision.line`'s producer (R11). */
       readonly branch?: string;
@@ -401,7 +401,7 @@ export const projectSessionMachine = setup({
   on: {
     revisionState: ({ context, event }, enq) => {
       const patch = {
-        dirty: event.dirty || event.deciding === true,
+        dirty: event.dirty || event.recording === true,
         pushed: event.pushed,
         pending: event.pendingCount ?? context.pending,
       };

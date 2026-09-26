@@ -52,7 +52,11 @@ import { selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
-import { hasPendingEditorDecision, refuseCloseWhileDeciding, subscribeEditorDecisions } from '#lib/editor-decisions.js';
+import {
+  isRecordingEditorConflict,
+  refuseCloseWhileRecording,
+  subscribeEditorConflictRecords,
+} from '#lib/monaco-model-service.js';
 
 export type ProjectSessionFlushRegistration = {
   projectId: string;
@@ -76,7 +80,7 @@ export async function flushProjectSessionPersistence({
   editorRef,
   closeFlushMilliseconds,
 }: Readonly<{
-  /** The project closing: refused, before anything is torn down, while an editor decision is open. */
+  /** The project closing: refused, before anything is torn down, while an editor's conflict is being recorded. */
   projectId?: string;
   parameterService: ParameterSetService;
   projectRef: ActorRefFrom<typeof projectMachine>;
@@ -84,7 +88,7 @@ export async function flushProjectSessionPersistence({
   closeFlushMilliseconds: number;
 }>): Promise<void> {
   if (projectId !== undefined) {
-    refuseCloseWhileDeciding(projectId);
+    refuseCloseWhileRecording(projectId);
   }
   await parameterService.close();
   projectRef.send({ type: 'flushNow' });
@@ -138,10 +142,10 @@ function ProjectSessionBinding({
   /* R4: why this project has no kernel, from the machine that owns its units. */
   const kernelRefusal = useSelector(projectRef, selectProjectKernelRefusal);
   const status = useRevisionClientStatus(client);
-  /* RV-W5b2 R2-1: text only an editor holds keeps the project open, like a dirty tree. */
-  const deciding = useSyncExternalStore(
-    subscribeEditorDecisions,
-    useCallback(() => hasPendingEditorDecision(projectId), [projectId]),
+  /* RV-W5b2 R2-1: an editor's conflict still being recorded keeps the project open, like a dirty tree. */
+  const recording = useSyncExternalStore(
+    subscribeEditorConflictRecords,
+    useCallback(() => isRecordingEditorConflict(projectId), [projectId]),
   );
   /* W7 tier 3: the `cloudOpen` marker is read and cleared by the host, through
    * the router, so React sees the change. This half only acts on it. */
@@ -190,7 +194,7 @@ function ProjectSessionBinding({
     session.send({
       type: 'revisionState',
       dirty: status.projectDirty,
-      deciding,
+      recording,
       pushed: sync.state === 'noRemote' || sync.state === 'backedUp',
       sync: syncState,
       /* R11: the branch the checkout is on gives `revision.line` its producer,
@@ -198,7 +202,7 @@ function ProjectSessionBinding({
       pendingCount: sync.pendingCount,
       ...(status.line.kind === 'unknown' ? {} : { branch: status.line.name }),
     });
-  }, [deciding, session, status]);
+  }, [recording, session, status]);
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {

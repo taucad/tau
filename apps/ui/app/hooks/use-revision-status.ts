@@ -24,6 +24,7 @@ import type {
   RevisionTag,
 } from '@taucad/revisions';
 import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
+import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type {
   RevisionToast,
   RevisionFileComparison,
@@ -126,6 +127,15 @@ export type RevisionClient = Readonly<{
    * new branch has to refuse the turn rather than silently run it elsewhere.
    */
   createBranch: (name: string, from?: string) => Promise<BranchCreated>;
+  /**
+   * Record an editor's overlapping edit as a conflicted revision (charter D14).
+   *
+   * Resolves once it is in the graph, so the editor can let go of its text: the
+   * *Needs your decision* card is then the one surface, and it survives a
+   * reload. `unchanged` means the file is back on the bytes the edit was made
+   * from, and the editor saves as usual.
+   */
+  recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /**
    * Connect, or do nothing when the connection is already open.
    *
@@ -459,6 +469,8 @@ export const createHostRevisionClient = (input: {
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
+    recordEditorConflict: async (conflict) =>
+      (await ask({ command: 'recordEditorConflict', ...conflict })) as unknown as EditorConflictOutcome,
     /* The host answers this verb with its projection, not with the checkout, so
      * the settlement is taken off the same toast stream the pane reads (P4). */
     createBranch: async (name, from) =>
@@ -950,6 +962,13 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       }
       const { kind: _kind, ...created } = result;
       return created;
+    },
+    recordEditorConflict: async (conflict) => {
+      const result = await ask({ command: 'recordEditorConflict', ...conflict });
+      if (result.kind !== 'editorConflict') {
+        throw new Error('The revision root answered an editor conflict with something else.');
+      }
+      return result.outcome;
     },
     open: () => {
       admitted = true;

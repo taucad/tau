@@ -14,6 +14,14 @@ import {
   RotateCw,
   Trash2,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -28,8 +36,12 @@ import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisio
 import { DiffViewer } from '#components/code/diff-viewer.js';
 import { ActionButton } from '#components/revisions/revision-actions.js';
 import { NamePopover } from '#components/revisions/name-popover.js';
+import { useProject } from '#hooks/use-project.js';
+import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { RevisionConflictEditor } from '#routes/w.$workspace.$project/revision-conflict-editor.js';
+import { requestRefRemoval } from '#routes/w.$workspace.$project/revision-ref-removal.js';
 import { needsDecision } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
 /**
@@ -55,7 +67,12 @@ const files = (count: number): string => `${String(count)} file${count === 1 ? '
 
 export type ConflictDecisionProps = {
   readonly conflict: RevisionConflictFacet;
-  /** The line the checkout is on, which a sync divergence records its conflict on. */
+  /**
+   * The line the checkout is on.
+   *
+   * ponytail: unread since D14 — the facet names the line the decision lands on
+   * (`into`) on every device. Drop it with the pane's next edit.
+   */
   readonly currentBranch: string | undefined;
   readonly onKeepSide: (revisionId: string, path: string, side: 'mine' | 'theirs') => void;
   readonly onOpenConflict: (revisionId: string, path: string) => void;
@@ -81,7 +98,6 @@ export type ConflictDecisionProps = {
  */
 export function ConflictDecision({
   conflict,
-  currentBranch,
   onKeepSide,
   onOpenConflict,
   onAskChat,
@@ -89,26 +105,27 @@ export function ConflictDecision({
   onResolveInEditor,
   conflictTexts,
 }: ConflictDecisionProps): React.JSX.Element {
-  /* The line merged into, named the way the markers name it, so the sentence,
-     the button and the marker a person opens all say one word (I12). */
-  const target = conflict.labels?.ours ?? currentBranch ?? 'this branch';
-  const ours = conflict.labels?.ours ?? 'mine';
-  const theirs = conflict.labels?.theirs ?? 'theirs';
-  /* A sync divergence records its conflict on the line itself (C35). */
-  const isOwnLine = conflict.branch === undefined || conflict.branch === currentBranch;
+  /* The line the decision lands on, the same on every device (HQ2, D14), so the
+     sentence, the button and the strip all say one word (I12). */
+  const target = conflict.into;
+  const theirs = conflict.labels?.theirs ?? target;
   const count = conflict.paths.length;
+  /* Who changed what, device-relative: *mine* is always this device's side (rule 8). */
+  const cause = conflict.foreign
+    ? `Another device and this one changed the same lines in ${files(count)} on ${target}.`
+    : theirs === target
+      ? `Your edit and the latest ${target} changed the same lines in ${files(count)}.`
+      : theirs.endsWith(`/${target}`)
+        ? `${theirs} and this device changed the same lines in ${files(count)} on ${target}.`
+        : `Merging ${theirs} into ${target} changed the same lines in ${files(count)}.`;
   const open = conflict.paths.filter((path) => path.side === undefined).length;
   const [modes, setModes] = useState<Readonly<Record<string, 'compare' | 'edit' | undefined>>>({});
 
   return (
     <div className='flex flex-col gap-2'>
-      <p className='text-xs text-muted-foreground'>
-        {isOwnLine
-          ? `${theirs} and this device changed the same lines in ${files(count)} on ${target}. Both versions are kept until you choose.`
-          : `Merging ${conflict.branch} into ${target} changed the same lines in ${files(count)}. ${target} is untouched until you choose.`}
-      </p>
-      <ul aria-label={`Files to resolve in ${conflict.branch ?? target}`} className='flex list-none flex-col gap-2'>
-        {conflict.paths.map(({ path, openable, side }) => {
+      <p className='text-xs text-muted-foreground'>{`${cause} ${target} is untouched until you choose.`}</p>
+      <ul aria-label={`Files to resolve in ${theirs}`} className='flex list-none flex-col gap-2'>
+        {conflict.paths.map(({ path, openable, side, keys }) => {
           const materialized = conflictTexts[`${conflict.revisionId}\u0000${path}`];
           const toggle = (mode: 'compare' | 'edit'): void => {
             const isOpen = modes[path] === mode;
@@ -123,23 +140,22 @@ export function ConflictDecision({
                 <FileText aria-hidden className='mt-px size-3.5 shrink-0 text-muted-foreground' />
                 <span className='min-w-0 text-xs break-all'>{path}</span>
               </span>
+              {/* A parameter record is choose-one: the keys both sides set say what the choice decides. */}
+              {keys === undefined || keys.length === 0 ? null : (
+                <span className='text-xs text-muted-foreground sm:pl-5'>{`Both changed ${keys.join(', ')}`}</span>
+              )}
               {/* The Keeps and the tools are pairs that wrap as pairs, so a narrow
                   card never shows Edit manually alone. */}
               <span className='flex flex-wrap items-center gap-2 sm:pl-5'>
                 <span className='flex flex-wrap items-center gap-2'>
-                  {(
-                    [
-                      ['mine', ours],
-                      ['theirs', theirs],
-                    ] as const
-                  ).map(([choice, label]) => (
+                  {(['mine', 'theirs'] as const).map((choice) => (
                     <ActionButton
                       key={choice}
-                      verb={`Keep ${label}`}
+                      verb={`Keep ${choice}`}
                       icon={side === choice ? CircleCheck : Circle}
                       variant={side === choice ? 'secondary' : 'outline'}
                       aria-pressed={side === choice}
-                      aria-label={`Keep ${label} in ${path}`}
+                      aria-label={`Keep ${choice} in ${path}`}
                       disabled={conflict.busy}
                       onClick={() => {
                         onKeepSide(conflict.revisionId, path, choice);
@@ -355,6 +371,135 @@ function BranchMenu({
   );
 }
 
+/**
+ * The words a conflict line is shown by (W14): whose decision, about which
+ * line — never the raw line name, which lives in *Details*.
+ *
+ * @param conflict - The conflict on the line.
+ * @returns The row's name.
+ */
+const decisionName = (conflict: RevisionConflictFacet): string =>
+  conflict.foreign ? `Another device’s decision on ${conflict.into}` : `Your decision on ${conflict.into}`;
+
+/**
+ * Another device's conflict line, removed from Tau Cloud through D24's audited
+ * verb (D14): offered to the project's owner only, as the server allows it; the
+ * confirmation names the decision and its files, and the raw line is in
+ * *Details*. The device that recorded it keeps it and offers it again when it
+ * next syncs; the decision itself is still made in *Choose a version*.
+ *
+ * @param props - The conflict on the line, and whether a branch verb is in flight.
+ * @returns The line's More, and its confirmation.
+ */
+function ConflictLineRemoval({
+  conflict,
+  isBusy,
+}: {
+  readonly conflict: RevisionConflictFacet;
+  readonly isBusy: boolean;
+}): React.JSX.Element | undefined {
+  const { projectId } = useProject();
+  const status = useRevisionStatus();
+  const role = useProjectRole();
+  const { syncNow } = useRevisionCommands();
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const [removal, setRemoval] = useState<Readonly<{ isBusy: boolean; error: string | undefined }>>();
+  const line = conflict.branch ?? '';
+  const name = decisionName(conflict);
+  /* Only the owner may remove what the Hosted Remote holds; the verb the server would refuse is absent (RV-W6 F5). */
+  if (status?.remote.kind !== 'tau' || status.remote.phase !== 'connected' || role !== 'owner') {
+    return undefined;
+  }
+  const names = conflict.paths.map(({ path }) => path);
+  const remove = async (): Promise<void> => {
+    setRemoval({ isBusy: true, error: undefined });
+    const answer = await requestRefRemoval(projectId, `refs/heads/${line}`);
+    if (answer.kind === 'removed') {
+      setRemoval(undefined);
+      syncNow();
+      return;
+    }
+    setRemoval({
+      isBusy: false,
+      error: describeRevisionFailure('removeConflictLine', answer.kind === 'refused' ? answer.code : undefined)
+        .description,
+    });
+  };
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button ref={moreRef} size='icon-xs' variant='ghost' disabled={isBusy} aria-label={`Actions for ${name}`}>
+            <EllipsisVertical aria-hidden />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='end'>
+          <DropdownMenuItem
+            variant='destructive'
+            onSelect={() => {
+              setRemoval({ isBusy: false, error: undefined });
+            }}
+          >
+            <Trash2 aria-hidden />
+            Remove this decision…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AlertDialog
+        open={removal !== undefined}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRemoval(undefined);
+          }
+        }}
+      >
+        <AlertDialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            moreRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>{`Remove another device’s decision on ${conflict.into}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`It is about ${names.length === 0 ? conflict.into : names.join(', ')}. ${conflict.into} is unchanged, and the device that made it keeps it and offers it again when it next syncs.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <details className='text-xs text-muted-foreground'>
+            <summary className='select-none'>Details</summary>
+            <p className='mt-1 font-mono break-all'>{`refs/heads/${line}`}</p>
+          </details>
+          {removal?.error === undefined ? null : (
+            <p role='alert' className='text-sm'>
+              {removal.error}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <Button
+              autoFocus
+              variant='outline'
+              onClick={() => {
+                setRemoval(undefined);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='destructive'
+              disabled={removal?.isBusy ?? false}
+              onClick={() => {
+                void remove();
+              }}
+            >
+              Remove
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
 export type RevisionBranchesProps = {
   /** Every branch the project has, from the `RevisionStatus` projection. */
   readonly branches: readonly RevisionBranchFacet[];
@@ -423,7 +568,10 @@ export function RevisionBranches({
     <ul aria-label='Branches' className='flex list-none flex-col'>
       {branches.map((branch) => {
         const isCurrent = branch.name === currentBranch;
-        const isConflicted = conflicts.some((entry) => entry.branch === branch.name);
+        const conflictOnLine = conflicts.find((entry) => entry.branch === branch.name);
+        const isConflicted = conflictOnLine !== undefined;
+        /* A conflict line is a decision in flight, not a place to work: no Switch, Rename or Merge (D14). */
+        const isConflictLine = conflictOnLine !== undefined && conflictOnLine.branch !== conflictOnLine.into;
         const fact = branchFacts.get(branch.name);
         /* An unplaced chat has no checkout id; a remote-only branch has none either, and must not claim it. */
         const placedChats = Object.entries(chatCheckoutIds).filter(
@@ -456,7 +604,9 @@ export function RevisionBranches({
               ) : (
                 <GitBranch aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
               )}
-              <span className='min-w-0 flex-1 truncate text-sm font-medium'>{branch.name}</span>
+              <span className='min-w-0 flex-1 truncate text-sm font-medium'>
+                {isConflictLine ? decisionName(conflictOnLine) : branch.name}
+              </span>
               <span className='flex shrink-0 items-center gap-1'>
                 {isCurrent ? <Check aria-label='Current branch' className='size-3.5 shrink-0 text-primary' /> : null}
                 {!isCurrent && !isConflicted ? (
@@ -474,7 +624,11 @@ export function RevisionBranches({
                     Switch
                   </Button>
                 ) : null}
-                {isWritable ? (
+                {isConflictLine ? (
+                  isWritable && conflictOnLine.foreign ? (
+                    <ConflictLineRemoval conflict={conflictOnLine} isBusy={isBusy} />
+                  ) : null
+                ) : isWritable ? (
                   <BranchMenu
                     branch={branch.name}
                     currentBranch={currentBranch}

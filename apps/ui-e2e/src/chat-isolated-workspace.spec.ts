@@ -319,7 +319,7 @@ it('accepts the project Runtime mesh', async () => {
     try {
       const subject = await load({ source: Uint8Array.from(fixtureBytes), format: 'glb', sourceUnit: 'mm' });
       apiSubjectHash = subject.subjectHash;
-      const client = assertionApi.createGeoSpecAssertionClient({ engine, canonicalize: native.canonicalize });
+      const client = assertionApi.createGeoSpecAssertionClient({ engine });
       apiReports.push(
         canonicalChatReport(await client.expectGeo(subject).toHaveVolume({ value: 6000, tolerance: 0.000001 })),
       );

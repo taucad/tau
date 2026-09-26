@@ -30,6 +30,7 @@ import {
   requireRenderedOrder,
 } from '#support/two-client/browser-client.js';
 import type { BrowserClient } from '#support/two-client/browser-client.js';
+import { cliRecord, runCli } from '#support/two-client/cli-client.js';
 import { startGitHttpBackend } from '#support/two-client/git-http-backend.js';
 import type { GitHttpBackendFixture } from '#support/two-client/git-http-backend.js';
 import {
@@ -2612,5 +2613,113 @@ describe('chat attachments across two clients', () => {
       await destination.close();
       await source.close();
     }
+  }, 900_000);
+});
+
+/**
+ * A terminal as the third client (charter W15).
+ *
+ * `tau open` brings the browser's project down, and `tau revisions save` records
+ * and pushes a revision exactly as the other two clients do, through the same
+ * host verbs and the same session. The browser is held in a turn, so the
+ * terminal's revision is observable as what D12 says it is: *arrived*, applied
+ * once the turn settles.
+ */
+describe('a terminal as the third client', () => {
+  const projectName = 'W15 Terminal Client';
+  const prompt = 'Add the agent part (W15 third client).';
+  let source: BrowserClient | undefined;
+  let fixture: Awaited<ReturnType<typeof startGatewayFixture>> | undefined;
+  let sourceSlug = '';
+  let projectId = '';
+  let terminalRoot = '';
+
+  const a = (): BrowserClient => required(source, 'W15: the browser client did not launch.');
+  const remoteHead = async (): Promise<string | undefined> => gitHead(await tauRepository(projectId));
+
+  beforeAll(async () => {
+    const accountOwner = required(owner, 'The account was not seeded.');
+    source = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
+    fixture = await startGatewayFixture({
+      toolCalls: [{ name: 'create_file', input: { targetFile: 'agent.scad', content: 'cube(3); // the agent\n' } }],
+    });
+    await fixture.routeThrough(source.page);
+    sourceSlug = await createProjectInBrowser(source, projectName);
+    projectId = required(await browserProjectId(source, sourceSlug), 'W15: the project id is absent.');
+    await registerProjectOnRemote(accountOwner, projectId, projectName);
+  }, 900_000);
+
+  afterAll(async () => {
+    await fixture?.close();
+    await source?.close();
+  }, 120_000);
+
+  afterEach(async ({ task }) => {
+    if (task.result?.state === 'fail') {
+      await captureFailure(`terminal-${task.name}`, [source]);
+    }
+  }, 120_000);
+
+  it('should open the browser’s backed-up project in a terminal with tau open', async () => {
+    await openSyncRegion(a());
+    await chooseTauCloud(a());
+    await expect.poll(async () => syncRegionText(a()), { timeout: 180_000 }).toMatch(/Backed up/u);
+    const pushed = required(await remoteHead(), 'W15: the browser backed up nothing.');
+
+    /* Named by the project's id: the disk host keys a project by its directory. */
+    terminalRoot = join(await scratch('terminal'), projectId);
+    const opened = await runCli(['open', projectId, '--into', terminalRoot, '--json'], bearer);
+    expect(opened.code, opened.stderr).toBe(0);
+    expect(cliRecord(opened)).toMatchObject({ kind: 'project', ok: true, status: 'opened', id: projectId });
+    expect(await gitHead(terminalRoot)).toBe(pushed);
+  }, 900_000);
+
+  it('should show a revision the terminal saved as arrived while a turn holds the browser’s files', async () => {
+    const gate = required(fixture, 'W15: the gateway fixture did not start.');
+    const before = required(await browserHead(a(), sourceSlug), 'W15: the browser has no head.');
+    const release = gate.holdClosing();
+    try {
+      await selectChatModel(a().page, gatewayFixtureModelName);
+      const requested = gate.gatewayRequests.length;
+      await sendPrompt(a().page, prompt);
+      /* The tool ran and the closing round is parked: the turn holds the browser's files. */
+      await expect.poll(() => gate.gatewayRequests.length, { timeout: 180_000 }).toBeGreaterThanOrEqual(requested + 2);
+
+      await writeFile(join(terminalRoot, 'terminal.scad'), 'sphere(5); // the terminal\n');
+      const saved = await runCli(['revisions', 'save', '--project', terminalRoot, '--json'], bearer);
+      expect(saved.code, saved.stderr).toBe(0);
+      const record = cliRecord(saved);
+      expect(record).toMatchObject({ kind: 'revision-save', ok: true, status: 'saved', backup: 'backedUp' });
+      const theirs = String(record['revisionId']);
+      expect(await remoteHead(), 'W15: the terminal’s save must reach Tau Cloud').toBe(theirs);
+
+      await expect
+        .poll(
+          async () =>
+            a()
+              .page.getByRole('button', { name: /arrived/u })
+              .count(),
+          { message: 'W15: the browser must say the terminal’s revision arrived', timeout: 60_000 },
+        )
+        .toBeGreaterThan(0);
+      expect(await browserHead(a(), sourceSlug), 'Rule 9: a leased checkout is never re-based').toBe(before);
+    } finally {
+      release();
+    }
+
+    await expectVisible(turnReply(a().page, prompt), 180_000);
+    await expect
+      .poll(
+        async () => {
+          const [remote, onBrowser] = await Promise.all([remoteHead(), browserHead(a(), sourceSlug)]);
+          return remote !== undefined && remote === onBrowser ? remote : undefined;
+        },
+        { message: 'W15: the browser must merge the terminal’s revision once its turn settles', timeout: 180_000 },
+      )
+      .toBeDefined();
+    const merged = required(await remoteHead(), 'W15: Tau Cloud has no head.');
+    const remote = await tauRepository(projectId);
+    expect(await gitOutput(remote, ['show', `${merged}:terminal.scad`])).toBe('sphere(5); // the terminal');
+    expect(await gitOutput(remote, ['show', `${merged}:agent.scad`])).toBe('cube(3); // the agent');
   }, 900_000);
 });

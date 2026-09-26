@@ -145,10 +145,10 @@ vi.mock('#hooks/use-project.js', () => ({
   },
   useProject: () => ({ projectRef, editorRef, parameterService, viewGraphics }),
 }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({
-  useFlushOnClose: () => undefined,
-}));
-vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
+vi.mock('#hooks/use-flush-on-close.js', () => {
+  const flushProducers = async (): Promise<void> => undefined;
+  return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };
+});
 /* The registry's agent-host region is a real browser probe. Unmocked it rejects
  * in jsdom, so `closing.releasingAgentHost` threw, every session settled in
  * `failed` instead of `closed`, and the registry never dropped its ref — one

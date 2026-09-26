@@ -1132,18 +1132,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     ],
   );
 
-  /* A supplied id is checked and then written, so two creations of it — an
-     *Open* racing materialize on sign-in, or two tabs — hold one lock per id
-     across the check and the write; the second sees the first's project and is
-     refused. A minted id cannot collide, so it takes no lock. */
-  const createProject = useCallback(
-    async (options: CreateProjectOptions): Promise<CreatedProject> =>
-      options.id === undefined
-        ? createProjectOnce(options)
-        : withNamedLock(`tau:create-project:${options.id}`, async () => createProjectOnce(options)),
-    [createProjectOnce],
-  );
-
   const runDiscoveryPass = useCallback(
     async (options?: { quarantinedLocators?: ReadonlyMap<string, string> }) => {
       const epoch = ++discoveryEpochRef.current;
@@ -1440,6 +1428,41 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       throw error;
     }
   }, [discoverProjects, getReadiedWorker, settleRecovery]);
+
+  /* A supplied id is checked and then written, so two creations of it — an
+     *Open* racing materialize on sign-in, or two tabs — hold one lock per id
+     across the check and the write; the second sees the first's project and is
+     refused. A minted id cannot collide, so it takes no lock.
+     An earlier creation of the id that never finished — a reload, a re-init or
+     a tab closed between its directory commit and its route config (R2) — is
+     finished here rather than repeated: this page's own recovery first, then
+     any journal row another tab left since. Its directory is quarantined from
+     the library meanwhile, so a caller asking again cannot tell it is there. */
+  const createProject = useCallback(
+    async (options: CreateProjectOptions): Promise<CreatedProject> => {
+      const { id } = options;
+      if (id === undefined) {
+        return createProjectOnce(options);
+      }
+      return withNamedLock(`tau:create-project:${id}`, async () => {
+        await ensureDiscoveryReady();
+        await recoveryLoopRef.current;
+        const worker = await getReadiedWorker();
+        const operations = await worker.getPendingProjectOperations();
+        const unfinished = operations.find(
+          (operation) => operation.kind !== 'permanent-delete' && operation.manifest.id === id,
+        );
+        if (unfinished !== undefined) {
+          await settleRecovery(unfinished, worker);
+          if (recoveriesRef.current.has(unfinished.operationId)) {
+            throw new Error(`An earlier creation of this project has not finished on this device: ${id}`);
+          }
+        }
+        return createProjectOnce(options);
+      });
+    },
+    [createProjectOnce, ensureDiscoveryReady, getReadiedWorker, settleRecovery],
+  );
 
   const getProject = useCallback(
     async (projectId: string): Promise<ProjectManifest | undefined> => {

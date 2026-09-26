@@ -2148,6 +2148,71 @@ describe('useProjectManager.createProject', () => {
     expect(mockPrepareProjectCreation.mock.calls.filter(([input]) => input.manifest.id === id)).toHaveLength(1);
   });
 
+  /* Defect R2: a reload mid-creation leaves the id's directory committed and its
+     journal row pending. The new page's recovery resumes it while its
+     materialize pass asks for the same id again; that must finish the one
+     creation, never allocate `<slug>-1` beside it. */
+  describe('an interrupted creation of a supplied id', () => {
+    const interrupted = { ...pendingCreate, files: {} };
+    const configured = async (projectId: string) =>
+      mockSetProjectFileSystemConfig.mock.calls.some(([config]) => config.projectId === projectId)
+        ? { projectId, backend: 'opfs', providerBasePath: interrupted.providerBasePath }
+        : undefined;
+    const createAgain = async (result: { readonly current: ReturnType<typeof useProjectManager> }) =>
+      result.current.createProject({
+        id: fakeProject.id,
+        chat: false,
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      });
+
+    beforeEach(() => {
+      mockGetProjectFileSystemConfig.mockImplementation(configured);
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    });
+
+    it('should finish the reloaded page’s recovery instead of creating a second directory', async () => {
+      let resolveCommit!: () => void;
+      mockGetPendingProjectOperations.mockResolvedValueOnce([interrupted]);
+      mockCommitPendingProjectDirectory.mockImplementationOnce(
+        async () =>
+          new Promise<{ status: 'already-committed' }>((resolve) => {
+            resolveCommit = () => {
+              resolve({ status: 'already-committed' });
+            };
+          }),
+      );
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await result.current.getProjectListing();
+
+      const again = createAgain(result);
+      resolveCommit();
+
+      await expect(again).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+      expect(mockCommitPendingProjectDirectory.mock.calls.map(([input]) => input.providerBasePath)).toEqual([
+        'test-project',
+      ]);
+    });
+
+    it('should finish a creation another tab left unfinished instead of creating a second directory', async () => {
+      mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await result.current.getProjectListing();
+      /* Written after this page read the journal, by a tab closed mid-creation. */
+      mockGetPendingProjectOperations.mockResolvedValueOnce([interrupted]);
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+
+      await expect(createAgain(result)).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+      expect(mockCommitPendingProjectDirectory.mock.calls.map(([input]) => input.providerBasePath)).toEqual([
+        'test-project',
+      ]);
+      expect(mockCompletePending).toHaveBeenCalledWith(interrupted.operationId);
+    });
+  });
+
   /* Review R5: opening someone's project from Tau Cloud must not invent a chat
      for them. `.tau/chats` is unversioned, so the open pull cannot take one
      away, and chats ship on their own record refs — an empty *Initial chat*

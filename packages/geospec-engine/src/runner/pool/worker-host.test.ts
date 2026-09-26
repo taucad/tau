@@ -119,6 +119,21 @@ describe('startGeoSpecPoolWorkerHost', () => {
     });
   });
 
+  it('should release native admissions after every shard and collection pass', async () => {
+    const releaseAll = vi.fn(async () => undefined);
+    const nativeModelLoader = Object.assign(async () => ({ subjectHash: 'unused' }), { releaseAll });
+    const host = startHost({ 'a.geospec.ts': passingSpec('a') }, { nativeModelLoader });
+
+    await host.send({ type: 'run-shard', shard: { id: 0, file: 'a.geospec.ts' } });
+    await vi.waitFor(() => {
+      expect(releaseAll).toHaveBeenCalledTimes(1);
+    });
+    await host.send({ type: 'list-tests', shardId: 1, file: 'a.geospec.ts' });
+    await vi.waitFor(() => {
+      expect(releaseAll).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('should announce readiness before any shard arrives', () => {
     const host = startHost({});
 

@@ -84,10 +84,22 @@ export const revisionFailureCopy: Readonly<
       ],
       /* W0 M1: Undo pressed after the selection left the line the restore was made on. */
       ['UNDO_UNAVAILABLE', 'That restore was made on another branch. Open it there to undo it.'],
+      /* D15: nothing of this device's is left on the branch; nothing was written. */
+      ['NOTHING_TO_UNDO', 'Nothing you did on this branch is left to undo.'],
+      /* D15: the inverse overlaps a later revision's changes, which Undo never reverts. */
+      [
+        'UNDO_CONFLICT',
+        'A later revision changed the same lines, so that change can’t be undone. Restore an earlier revision instead.',
+      ],
+      /* D15, RV-W7 #7: Undo never reaches past a merge made here; nothing was written. */
+      ['UNDO_PAST_MERGE', 'Your last change on this branch was a merge. Restore an earlier revision instead.'],
     ]),
     titles: new Map([
       ['RESTORE_UNRECORDED', 'Files restored'],
       ['UNDO_UNAVAILABLE', 'Nothing to undo here'],
+      ['NOTHING_TO_UNDO', 'Nothing to undo here'],
+      ['UNDO_CONFLICT', 'That change can’t be undone'],
+      ['UNDO_PAST_MERGE', 'A merge can’t be undone'],
     ]),
   },
   branch: {
@@ -176,21 +188,24 @@ export const revisionFailureCopy: Readonly<
  *
  * @param subject Which verb refused.
  * @param code The refusal's `RevisionPortErrorCode`, when it carried one.
- * @param branch The branch the verb named, for the sentences that can say it.
+ * @param about The branch the verb named, and the revision an undo could not undo, for the sentences that can say them.
  * @returns The toast's title and description.
  */
 export const describeRevisionFailure = (
   subject: RevisionFailureSubject,
   code: string | undefined,
-  branch?: string,
+  about: Readonly<{ branch?: string; revisionNumber?: number }> = {},
 ): Readonly<{ title: string; description: string }> => {
+  const { branch, revisionNumber } = about;
   const copy = revisionFailureCopy[subject];
   const description = (code === undefined ? undefined : copy.codes.get(code)) ?? copy.fallback;
+  const named =
+    code === 'UNDO_CONFLICT' && revisionNumber !== undefined
+      ? `A later revision changed the same lines, so Rev ${String(revisionNumber)} can’t be undone. Restore an earlier revision instead.`
+      : description;
   return {
     title: (code === undefined ? undefined : copy.titles?.get(code)) ?? copy.title,
     description:
-      branch === undefined || code !== 'CHECKOUT_CONFLICT'
-        ? description
-        : `${branch} already exists. Pick another name.`,
+      branch === undefined || code !== 'CHECKOUT_CONFLICT' ? named : `${branch} already exists. Pick another name.`,
   };
 };

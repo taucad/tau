@@ -397,7 +397,7 @@ export const revisionAccessibleName = (where: RevisionWhere, sentence: string): 
 };
 
 /** The strip's verbs, in the words the palette and the rows use. @public */
-export type StripVerb = 'Save revision' | 'Undo restore' | 'Back up' | 'Sync now' | 'Sign in' | 'Upgrade';
+export type StripVerb = 'Save revision' | 'Undo restore' | 'Undo' | 'Back up' | 'Sync now' | 'Sign in' | 'Upgrade';
 
 /**
  * The strip's verbs for this state: at most one primary, and the decisions and
@@ -412,6 +412,7 @@ export const selectStripVerbs = ({
   status,
   where,
   undoable,
+  canUndo = false,
   canWrite,
 }: Readonly<{
   status: RevisionStatusProjection | undefined;
@@ -421,12 +422,17 @@ export const selectStripVerbs = ({
    * session made, so a reload or another device's restore never offers it (D2).
    */
   undoable: boolean;
+  /**
+   * *Undo* has an operation of this device's to reverse on the line (D15).
+   * *Undo restore* wins when both apply: on an unmoved line they make the same files.
+   */
+  canUndo?: boolean;
   canWrite: boolean;
 }>): Readonly<{ primary: StripVerb | undefined; secondary: readonly StripVerb[] }> => {
   if (status === undefined || !canWrite || status.conflicts.length > 0 || status.sync.state === 'conflicted') {
     return { primary: undefined, secondary: [] };
   }
-  const secondary: StripVerb[] = undoable && !where.isDirty ? ['Undo restore'] : [];
+  const secondary: StripVerb[] = where.isDirty ? [] : undoable ? ['Undo restore'] : canUndo ? ['Undo'] : [];
   if (where.isDirty) {
     return { primary: 'Save revision', secondary };
   }

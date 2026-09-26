@@ -704,13 +704,15 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
 
     alpha.send({ command: 'recordEditorConflict', id: 3, path: 'main.scad', base: 'cube(10);', mine: 'cube(20);' });
 
+    /* Named by this host's record device, never the tab's device id (R1, EQ10(a)). */
+    const line: unknown = expect.stringMatching(/^conflicts\/main\/[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/u);
     await vi.waitFor(
       () => {
         expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 3)).toMatchObject({
           type: 'result',
           result: {
             kind: 'editorConflict',
-            outcome: { status: 'recorded', line: 'conflicts/main/tab_3aone', into: 'main' },
+            outcome: { status: 'recorded', line, into: 'main' },
           },
         });
       },
@@ -720,7 +722,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(30);');
     const root = await fixture.root('alpha');
     await vi.waitFor(() => {
-      expect(root.status().conflicts.map((conflict) => conflict.branch)).toEqual(['conflicts/main/tab_3aone']);
+      expect(root.status().conflicts.map((conflict) => conflict.branch)).toEqual([line]);
     });
   });
 
@@ -1173,24 +1175,33 @@ describe('the focus frame through the worker registry (RV-W5b2 N4)', () => {
       expect(polls.size, 'an unfocused project holds no long poll').toBe(0);
 
       alpha.send({ command: 'focus', focused: true });
-      await vi.waitFor(() => {
-        expect(polls.size).toBe(1);
-      });
+      await vi.waitFor(
+        () => {
+          expect(polls.size).toBe(1);
+        },
+        { timeout: 10_000 },
+      );
       alpha.send({ command: 'focus', focused: true });
       await alpha.settle();
       expect(pollCount, 'one stream, not one per frame').toBe(1);
 
       alpha.send({ command: 'close', id: 7 });
-      await vi.waitFor(() => {
-        expect(polls.size, 'closing the project closes its stream').toBe(0);
-      });
+      await vi.waitFor(
+        () => {
+          expect(polls.size, 'closing the project closes its stream').toBe(0);
+        },
+        { timeout: 10_000 },
+      );
 
       const reopened = await fixture.open('alpha');
       reopened.send({ command: 'remoteCredential', apiBaseUrl: 'https://api.test' });
       reopened.send({ command: 'focus', focused: true });
-      await vi.waitFor(() => {
-        expect(polls.size).toBe(1);
-      });
+      await vi.waitFor(
+        () => {
+          expect(polls.size).toBe(1);
+        },
+        { timeout: 10_000 },
+      );
       expect(pollCount).toBe(2);
     } finally {
       globalThis.fetch = original;

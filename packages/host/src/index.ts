@@ -93,6 +93,7 @@ export type {
   AcpExternalAgentPortOptions,
   AcpPromptTurn,
   AcpAgentFacts,
+  AcpLimitReset,
   AcpSession,
   AcpTurnOutcome,
   AcpWireFrame,
@@ -103,6 +104,7 @@ export {
   createHostMcpEndpoint,
   hostMcpAllowedTools,
   hostMcpCapabilityLifetime,
+  hostMcpLeaseCeiling,
   HostMcpCapabilityError,
   hostMcpCapabilityPrefix,
 } from '#mcp-server.js';

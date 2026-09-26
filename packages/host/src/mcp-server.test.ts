@@ -21,7 +21,12 @@ import type { HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
 
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
-import { createHostMcpEndpoint, hostMcpCapabilityLifetime, HostMcpCapabilityError } from '#mcp-server.js';
+import {
+  createHostMcpEndpoint,
+  hostMcpCapabilityLifetime,
+  HostMcpCapabilityError,
+  hostMcpLeaseCeiling,
+} from '#mcp-server.js';
 import { connectMcpOverFetch } from '#acp/fixtures/mcp-fetch-client.js';
 
 const token = 'agent-server-token-with-at-least-32-characters';
@@ -351,6 +356,81 @@ describe('the mounted /mcp route', () => {
 
     expect(invocations.map((invocation) => invocation.runId)).toEqual(['run-1', 'run-2']);
   }, 30_000);
+
+  /*
+   * W10 EA-S3, EA-A4: the binding lease. The capability rides the vendor
+   * session for its whole life (V7), so a prompt that outlives it must keep
+   * its tools while the turn holds the binding — and no longer than the
+   * ceiling (I30, E20).
+   */
+  describe('the binding lease', () => {
+    const mount = async (
+      clock: () => number,
+    ): Promise<{ readonly url: string; readonly mcp: ReturnType<typeof createHostMcpEndpoint> }> => {
+      const mcp = createHostMcpEndpoint({ secret, registry, now: clock });
+      endpoint = mcp;
+      server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot: '/tmp/tau-mcp-test', mcp });
+      await server.ready;
+      return { url: new URL('mcp', server.url()).href, mcp };
+    };
+
+    it('should admit a bound session after expiry until release', async () => {
+      let clock = Date.now();
+      const { url, mcp } = await mount(() => clock);
+      const capability = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
+      const client = await connectMcpOverFetch({ url, headers: { authorization: `Bearer ${capability.token}` } });
+      const release = mcp.activate({
+        token: capability.token,
+        runId: 'run-1',
+        chatId: 'chat-1',
+        signal: new AbortController().signal,
+      });
+
+      clock += hostMcpCapabilityLifetime + 60_000;
+      await expect(client.callTool('test_model', {})).resolves.toMatchObject({ structuredContent: { passed: 1 } });
+
+      await release();
+      await expect(client.callTool('test_model', {})).rejects.toThrow();
+      expect(invocations).toHaveLength(1);
+    }, 30_000);
+
+    it('should refuse an expired unbound token', async () => {
+      let clock = Date.now();
+      const { url, mcp } = await mount(() => clock);
+      const capability = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
+      clock += hostMcpCapabilityLifetime + 1;
+
+      await expect(
+        connectMcpOverFetch({ url, headers: { authorization: `Bearer ${capability.token}` } }),
+      ).rejects.toThrow();
+      expect(() =>
+        mcp.activate({
+          token: capability.token,
+          runId: 'run-1',
+          chatId: 'chat-1',
+          signal: new AbortController().signal,
+        }),
+      ).toThrow(HostMcpCapabilityError);
+    }, 30_000);
+
+    it('should refuse past the lease ceiling', async () => {
+      let clock = Date.now();
+      const { url, mcp } = await mount(() => clock);
+      const capability = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
+      const client = await connectMcpOverFetch({ url, headers: { authorization: `Bearer ${capability.token}` } });
+      const release = mcp.activate({
+        token: capability.token,
+        runId: 'run-1',
+        chatId: 'chat-1',
+        signal: new AbortController().signal,
+      });
+
+      clock += hostMcpCapabilityLifetime + hostMcpLeaseCeiling;
+      await expect(client.callTool('test_model', {})).rejects.toThrow();
+      expect(invocations).toHaveLength(0);
+      await release();
+    }, 30_000);
+  });
 
   it('refuses a capability minted for another chat on this session', async () => {
     endpoint = createHostMcpEndpoint({ secret, registry });

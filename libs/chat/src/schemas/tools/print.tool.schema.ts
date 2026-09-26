@@ -162,6 +162,21 @@ const printRequestRecordSchema = z.looseObject({
   failure: z.looseObject({ code: z.string(), message: z.string() }).optional(),
 });
 
+/**
+ * What the project's print intent (`.tau/machines/printer.json`) contributed
+ * to a print tool call; absent when the project has none.
+ */
+const printIntentReportSchema = z
+  .looseObject({
+    path: z.string(),
+    applied: z
+      .record(z.string(), z.json())
+      .optional()
+      .describe("The file's values in effect; the call's own arguments win over them."),
+    ignored: z.string().optional().describe('Why none of its values apply.'),
+  })
+  .optional();
+
 /** @public */
 export const getMachineOutputSchema = z.looseObject({ machineId: z.string() });
 
@@ -174,6 +189,7 @@ export const requestPrintOutputSchema = z.looseObject({
     .optional()
     .describe('How the person answered, when the call waited for them.'),
   nextStep: z.string().optional(),
+  printIntent: printIntentReportSchema,
 });
 
 /** @public */
@@ -185,6 +201,7 @@ export const getPrintProfilesOutputSchema = z.looseObject({
     .looseObject({ printer: z.string(), process: z.string(), filaments: z.array(z.string()) })
     .optional()
     .describe('Presets request_print uses when profiles are omitted.'),
+  printIntent: printIntentReportSchema,
 });
 
 /** @public */

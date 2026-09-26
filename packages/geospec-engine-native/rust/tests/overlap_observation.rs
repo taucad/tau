@@ -2,6 +2,7 @@ use super::*;
 #[test]
 fn overlap_observation_metadata_never_promises_interior_or_error_bound() {
     let evidence = Evidence {
+        exact: false,
         component_count: 2,
         components: vec![],
         selected_pairs: None,

@@ -1323,7 +1323,7 @@ impl<'a> EvaluationContext<'a> {
         }
     }
 
-    fn operand_memo(&mut self, brep: &dyn BrepSubject) -> &mut OperandMemo {
+    pub(crate) fn operand_memo(&mut self, brep: &dyn BrepSubject) -> &mut OperandMemo {
         self.operand_memo.get_or_insert_with(|| brep.operand_memo())
     }
 

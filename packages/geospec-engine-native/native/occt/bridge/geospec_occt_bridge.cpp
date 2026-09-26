@@ -1014,7 +1014,6 @@ void append_occurrences(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
     occurrence.facts.parent = occurrence.parent;
     occurrence.facts.product = static_cast<uint32_t>(occurrence.product);
     occurrence.facts.ordinal_count = occurrence.ordinal_path.size();
-    populate_occurrence_geometry(occurrence);
     const int occurrence_index = static_cast<int>(output.size());
     output.push_back(std::move(occurrence));
 
@@ -1022,6 +1021,12 @@ void append_occurrences(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
                        output[static_cast<size_t>(occurrence_index)].path,
                        output[static_cast<size_t>(occurrence_index)].ordinal_path,
                        occurrence_index, identity, products, output);
+    // C2 (ruling 6): a leaf is an occurrence no other occurrence names as
+    // parent. A parent keeps its label, path, product, placement and shape but
+    // no face addresses: it is structure, and its children own the faces.
+    if (output.size() == static_cast<size_t>(occurrence_index) + 1) {
+      populate_occurrence_geometry(output[static_cast<size_t>(occurrence_index)]);
+    }
     ++component_index;
   }
 }
@@ -6828,6 +6833,132 @@ int geospec_occt_regular_solid_containment_dedicated(
     }
     result->has_residual_bounds = 1;
     result->has_residual_center_of_mass = 1;
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+// S10 (ruling 23, INTERFERENCE-EXACT-01): one candidate pair of leaf
+// occurrences. The work is counted before anything runs: the pair plus every
+// face pair whose exact memo boxes (F4/F6), each enlarged by the tolerance,
+// intersect, the face-face intersections a Boolean may need. Beyond
+// `max_work` neither operand is qualified and no Boolean runs. Operands are
+// the claim memo's regular solids (C7), each qualified once per claim.
+int geospec_occt_occurrence_overlap_dedicated(
+    const geospec_occt_document* document, uint32_t left, uint32_t right,
+    double tolerance, uint64_t max_work, geospec_occt_operand_memo* memo,
+    int grant_width, int* used_parallel,
+    geospec_occt_occurrence_overlap_result* result, geospec_occt_string* reason,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || result == nullptr || used_parallel == nullptr ||
+      grant_width < 0 || left == right ||
+      left >= document->occurrences.size() ||
+      right >= document->occurrences.size() || !std::isfinite(tolerance) ||
+      tolerance < 0.0) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Occurrence overlap arguments are invalid.", error);
+  }
+  if (memo != nullptr && memo->document_serial != document->serial) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Operand memo belongs to another document.", error);
+  }
+  return guarded(error, [&]() -> int {
+    *result = {};
+    *used_parallel = 0;
+    const auto enlarged = [&](const FaceView& face) {
+      Bnd_Box box = memo_face_box(*document, face.shape);
+      if (!box.IsVoid()) box.Enlarge(tolerance);
+      return box;
+    };
+    std::vector<Bnd_Box> right_boxes;
+    right_boxes.reserve(document->occurrences[right].public_faces.size());
+    for (const FaceView& face : document->occurrences[right].public_faces) {
+      right_boxes.push_back(enlarged(face));
+    }
+    uint64_t work = 1;
+    for (const FaceView& face : document->occurrences[left].public_faces) {
+      const Bnd_Box box = enlarged(face);
+      if (box.IsVoid()) continue;
+      for (const Bnd_Box& other : right_boxes) {
+        if (!other.IsVoid() && !box.IsOut(other)) ++work;
+      }
+    }
+    result->work = work;
+    if (work > max_work) {
+      result->work_exceeded = 1;
+      return GEOSPEC_OCCT_OK;
+    }
+    std::string message;
+    TopoDS_Solid left_solid;
+    TopoDS_Solid right_solid;
+    if (!occurrence_operand(*document, left, memo, left_solid, message)) {
+      result->unqualified = 1;
+      return write_string(message, reason);
+    }
+    if (!occurrence_operand(*document, right, memo, right_solid, message)) {
+      result->unqualified = 2;
+      return write_string(message, reason);
+    }
+    if (boolean_debug_requested(message)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
+    }
+    std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
+    const int scope_status = dedicated_pool_scope(
+        grant_width, used_parallel, reservation, error);
+    if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
+
+    NCollection_List<TopoDS_Shape> arguments;
+    arguments.Append(left_solid);
+    NCollection_List<TopoDS_Shape> tools;
+    tools.Append(right_solid);
+    BRepAlgoAPI_Common common;
+    common.SetArguments(arguments);
+    common.SetTools(tools);
+    common.SetNonDestructive(true);
+    // Both operands are regular_solid_operand-qualified, never inverted.
+    common.SetCheckInverted(false);
+    common.SetRunParallel(*used_parallel != 0);
+    common.Build();
+    if (!common.IsDone() || common.HasErrors()) {
+      std::ostringstream details;
+      common.DumpErrors(details);
+      const std::string reported = details.str();
+      return fail(GEOSPEC_OCCT_NATIVE_ERROR,
+                  reported.empty()
+                      ? "OCCT exact overlap Common failed."
+                      : "OCCT exact overlap Common failed: " + reported,
+                  error);
+    }
+    const TopoDS_Shape residual = common.Shape();
+    std::vector<TopoDS_Solid> residual_solids;
+    if (!regular_solid_set(residual, true, residual_solids, message)) {
+      return fail(GEOSPEC_OCCT_NATIVE_ERROR,
+                  "OCCT exact overlap Common returned invalid topology: " + message,
+                  error);
+    }
+    if (residual_solids.size() > std::numeric_limits<uint32_t>::max()) {
+      return fail(GEOSPEC_OCCT_NATIVE_ERROR,
+                  "OCCT exact overlap Common returned too many solids.", error);
+    }
+    result->residual_solid_count = static_cast<uint32_t>(residual_solids.size());
+    if (residual_solids.empty()) return GEOSPEC_OCCT_OK;
+    GProp_GProps properties;
+    BRepGProp::VolumeProperties(residual, properties);
+    result->residual_volume = properties.Mass();
+    result->residual_bounds = bounds(residual);
+    for (size_t axis = 0; axis < 3; ++axis) {
+      if (!std::isfinite(result->residual_bounds.min[axis]) ||
+          !std::isfinite(result->residual_bounds.max[axis]) ||
+          result->residual_bounds.min[axis] > result->residual_bounds.max[axis]) {
+        return fail(GEOSPEC_OCCT_NATIVE_ERROR,
+                    "OCCT exact overlap residual has invalid bounds.", error);
+      }
+    }
+    if (!std::isfinite(result->residual_volume) || result->residual_volume <= 0.0) {
+      return fail(GEOSPEC_OCCT_NATIVE_ERROR,
+                  "OCCT exact overlap residual has non-positive or non-finite volume.",
+                  error);
+    }
+    result->has_residual_bounds = 1;
     return GEOSPEC_OCCT_OK;
   });
 }

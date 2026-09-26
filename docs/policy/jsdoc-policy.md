@@ -3,7 +3,7 @@ title: 'JSDoc Policy'
 description: 'Standards for JSDoc documentation: @public/@internal visibility, compilable examples, real-world usage, language tags, and @example <caption> requirements.'
 status: active
 created: '2026-03-11'
-updated: '2026-09-13'
+updated: '2026-09-27'
 related:
   - docs/policy/documentation-policy.md
   - docs/policy/library-api-policy.md
@@ -33,15 +33,26 @@ Every exported symbol with JSDoc should declare its visibility:
 
 ### Where to place the tag
 
-Add `@public` or `@internal` as the last line of the description section, before `@param`, `@returns`, `@example`, etc.:
+Place the tag where `jsdoc-js/sort-tags` orders it. The rule uses eslint-plugin-jsdoc's default tag sequence, which puts the two visibility tags in different groups:
+
+| Tag         | Position                                                               |
+| ----------- | ---------------------------------------------------------------------- |
+| `@internal` | After the description and any `@template`, before `@param`             |
+| `@public`   | After `@param`, `@returns` and `@throws`, before `@see` and `@example` |
+
+**Enforced by**: `jsdoc-js/sort-tags` (warn) on `packages/**/*.{ts,tsx}`, except `packages/ui` components and tests. The rule does not run in `libs/`; follow the same order there.
+
+**Why**: The lint rule already fixes the order, and prose that disagrees with it only produces warnings.
+
+CORRECT:
 
 ````typescript
 /**
  * Create a runtime client with plugin-based configuration.
  *
- * @public
  * @param options - Client configuration
  * @returns A configured RuntimeClient instance
+ * @public
  *
  * @example <caption>Basic usage</caption>
  * ```typescript
@@ -49,6 +60,30 @@ Add `@public` or `@internal` as the last line of the description section, before
  * ```
  */
 ````
+
+CORRECT:
+
+```typescript
+/**
+ * Build the shared appender over one environment-specific file.
+ *
+ * @internal
+ * @param storage - Exclusive storage primitives for one event-log file.
+ * @returns An initialized appender positioned after all valid records.
+ */
+```
+
+INCORRECT:
+
+```typescript
+/**
+ * Create a runtime client with plugin-based configuration.
+ *
+ * @public
+ * @param options - Client configuration
+ * @returns A configured RuntimeClient instance
+ */
+```
 
 ### Enforcement
 
@@ -291,6 +326,7 @@ Never use `text` tags for TypeScript examples just to avoid compilation. Use `@i
 ## Summary Checklist
 
 - [ ] Symbol has `@public` (if publicly exported) or `@internal` (if framework-internal)
+- [ ] `@internal` precedes `@param`; `@public` follows `@param`, `@returns` and `@throws` and precedes `@see` and `@example`
 - [ ] Example shows real-world usage (how a developer would actually call this)
 - [ ] No `declare const/function` synthetic stubs
 - [ ] Fenced codeblock has a language tag (`typescript`, `text`, `json`)
@@ -306,3 +342,4 @@ Never use `text` tags for TypeScript examples just to avoid compilation. Use `@i
 - Related: `docs/policy/library-api-policy.md`
 - Lint rule (tag validation + type-check): `libs/oxlint/src/rules/validate-jsdoc-codeblocks.js`
 - Lint rule (require @public): `libs/oxlint/src/rules/require-public-export-jsdoc.js`
+- Lint rule (tag order): `jsdoc-js/sort-tags` in `.oxlintrc.json`, with eslint-plugin-jsdoc's default `tagSequence`

@@ -13,7 +13,13 @@ import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import { encodeGeoSpecCanonicalJson, toGeoSpecProtocolJson } from 'geospec/engine';
 // eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Type-only protocol contract for the bench adapter.
 import type { GeoSpecEngineImplementation } from 'geospec/engine';
-import type { HostCacheLifecycle, HostEngine, HostSubjectLifecycle } from '#host-types.js';
+import type {
+  HostBytes,
+  HostCacheLifecycle,
+  HostClaimEvaluation,
+  HostEngine,
+  HostSubjectLifecycle,
+} from '#host-types.js';
 
 /** Explicit browser WASM selection; omitted requests retain the existing ST path. @internal */
 export type PerformanceLabWasmExecution =
@@ -60,7 +66,37 @@ export type PerformanceLabEngineModule = {
   Engine: new (
     execution?: PerformanceLabWasmExecution,
   ) => HostEngine & HostSubjectLifecycle & Partial<Pick<HostCacheLifecycle, 'cacheProducerIdentity'>>;
+  /** The facade's JCS codec; only {@link withTwoCallClaims} uses it. */
+  canonicalize: (bytes: HostBytes) => HostBytes;
   initialize?: (input?: undefined, execution?: PerformanceLabWasmExecution) => Promise<void>;
+};
+
+/**
+ * Give a product whose add-on predates `evaluateClaim` (R10) the one-call claim surface the client
+ * needs, replaying the calls the client made before it: `canonicalPlan`, `canonicalize` of the plan's
+ * one claim, then `evaluatePlan` of that plan. Before/after cells then run the same authored claims.
+ *
+ * @internal
+ * @param module - Facade module over the older add-on.
+ * @returns The module with an Engine whose `evaluateClaim` makes the older calls.
+ */
+export const withTwoCallClaims = (module: PerformanceLabEngineModule): PerformanceLabEngineModule => {
+  const { Engine: Base, canonicalize } = module;
+  class Engine extends Base {
+    /**
+     * Evaluate one claim through the older add-on's calls.
+     * @param request - Exact submitClaims request bytes with one claim.
+     * @returns The canonical plan, claim and result bytes those calls return.
+     */
+    public override evaluateClaim(request: HostBytes): HostClaimEvaluation {
+      const canonicalPlan = this.canonicalPlan(request);
+      const { plan } = JSON.parse(new TextDecoder().decode(canonicalPlan)) as { plan: { claims: unknown[] } };
+      const canonicalClaim = canonicalize(new TextEncoder().encode(JSON.stringify(plan.claims[0])));
+      return { canonicalPlan, canonicalClaim, canonicalResult: this.evaluatePlan(canonicalPlan) };
+    }
+  }
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
+  return { ...module, Engine };
 };
 
 /** Lazy imports included in startup timing. @internal */

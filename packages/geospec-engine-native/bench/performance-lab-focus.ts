@@ -28,6 +28,7 @@ import {
 } from '#bench/performance-lab-cli';
 import type { HostReading } from '#bench/performance-lab-cli';
 import type { Artifact } from '#bench/lib';
+import { withTwoCallClaims } from '#bench/performance-lab-runner';
 import type {
   PerformanceLabCaseResult,
   PerformanceLabModules,
@@ -529,7 +530,10 @@ const measureFocusCase = async (spec: { product: FocusProduct; caseId: string; r
       return { geoSpecEngineImplementation: { ...implementation, protocol: trace(implementation.protocol) } };
     },
     native: async () => {
-      const module = await load(hostEntry('node'));
+      const loaded = await load(hostEntry('node'));
+      // An add-on from before evaluateClaim (R10) still runs the cell through the calls its client made.
+      const binding = await import('#native-binding');
+      const module = 'evaluateClaim' in binding.Engine.prototype ? loaded : withTwoCallClaims(loaded);
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
       return {
         ...module,

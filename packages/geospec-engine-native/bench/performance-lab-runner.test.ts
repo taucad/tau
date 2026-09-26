@@ -6,6 +6,7 @@ import {
   numericProfileOfCanonicalResult,
   parsePerformanceLabRunInput,
   runPerformanceLabCell,
+  withTwoCallClaims,
 } from '#bench/performance-lab-runner';
 import type { PerformanceLabEngineModule, PerformanceLabWasmExecution } from '#bench/performance-lab-runner';
 
@@ -109,6 +110,7 @@ describe('ordinary performance lab runner', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
       Engine: engineConstructor,
       initialize,
+      canonicalize: (value) => value,
     };
     await expect(
       runPerformanceLabCell(
@@ -120,6 +122,43 @@ describe('ordinary performance lab runner', () => {
     ).rejects.toThrow('MT construction refused');
     expect(initialize).toHaveBeenCalledExactlyOnceWith(undefined, execution);
   });
+  it('should replay canonicalPlan, canonicalize and evaluatePlan for an add-on without evaluateClaim', () => {
+    const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
+    const decode = (bytes: Uint8Array<ArrayBuffer>): string => new TextDecoder().decode(bytes);
+    const plan = '{"plan":{"claims":[{"claimId":"c","payload":null}],"subjects":[]}}';
+    const calls: string[] = [];
+    class OlderEngine {
+      public canonicalPlan(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+        calls.push(`canonicalPlan ${decode(request)}`);
+        return encode(plan);
+      }
+
+      public evaluatePlan(input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+        calls.push(`evaluatePlan ${decode(input)}`);
+        return encode('{"results":[]}');
+      }
+    }
+    const older: PerformanceLabEngineModule = {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
+      Engine: OlderEngine as unknown as PerformanceLabEngineModule['Engine'],
+      canonicalize: (bytes) => {
+        calls.push(`canonicalize ${decode(bytes)}`);
+        return encode('claim');
+      },
+    };
+
+    const evaluation = new (withTwoCallClaims(older).Engine)().evaluateClaim(encode('request'));
+
+    expect(calls).toEqual([
+      'canonicalPlan request',
+      'canonicalize {"claimId":"c","payload":null}',
+      `evaluatePlan ${plan}`,
+    ]);
+    expect(
+      [evaluation.canonicalPlan, evaluation.canonicalClaim, evaluation.canonicalResult].map((bytes) => decode(bytes)),
+    ).toEqual([plan, 'claim', '{"results":[]}']);
+  });
+
   it('should read numeric profile from the actual canonical result envelope', () => {
     const envelope = {
       numericProfile: 'geospec-st-prototypes-v4',

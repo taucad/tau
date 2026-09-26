@@ -154,8 +154,8 @@ impl Document {
         Ok(facts)
     }
 
-    /// Recompute validity using the dedicated module's full pool when admitted.
-    /// The normal `BrepSubject::validity` path remains serial and cached.
+    /// Validity under a dedicated grant. The bridge reuses the admission proof
+    /// or re-runs serially, so the returned flag is always false.
     ///
     /// # Safety
     /// The caller must prove this OCCT closure is private to GeoSpec, initialize

@@ -11,7 +11,7 @@ Knobs(fence, defer) ==
     /\ MaxTime = 3 /\ Due = 1 /\ Grace = 1 /\ MaxRecovery = 2 /\ LostReplyRetries = 1
     /\ VoidOnLookup = TRUE /\ LookupFailed = TRUE /\ Reconcile = TRUE /\ AutoProceed = TRUE
     /\ KeepCompleted = TRUE /\ RefundHolds = TRUE
-    /\ FenceGen = fence /\ DeferGrace = defer
+    /\ FenceGen = fence /\ DeferGrace = defer /\ CountRetries = TRUE
 
 ConstInit == Knobs(TRUE, TRUE)
 \* Mutants: finish without the generation predicate; the sweep without deferRecovery.

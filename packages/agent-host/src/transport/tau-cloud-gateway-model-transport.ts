@@ -213,5 +213,7 @@ export const createTauCloudGatewayModelTransport = (
     type: 'funded',
     usesBillingAttempt: isGatewayProviderKind,
     resolveInvocation: async (request) => resolveInvocation(options, request),
+    // ponytail: the transport holds a bearer or a cookie, never the account id; W6's credential port supplies it.
+    principal: async () => undefined,
   },
 });

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { openProjectRevisions, requireRevisionToolchain } from '@taucad/host';
+import type * as HostModule from '@taucad/host';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -164,6 +165,66 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
       rawArgs: ['diff', rows[1]!.revisionId, rows[0]!.revisionId, '--project', project],
     });
     expect(stdout.join('')).toContain('part.ts');
+  }, 60_000);
+
+  it('saves the project’s files as the revision the log then lists first', async () => {
+    await seed();
+    await writeFile(join(project, 'bracket.ts'), 'export const bracket = 3;\n');
+    await runCommand(await importCommand(), { rawArgs: ['save', '--project', project] });
+
+    const revisions = openProjectRevisions({ workspaceRoot: project, projectId: 'cli-project' });
+    try {
+      const [latest] = await revisions.log();
+      expect(latest?.revisionNumber).toBe(3);
+      expect(stdout.join('')).toBe('Saved main · Rev 3. Saved on this device.\n');
+      expect(await revisions.diff(undefined, latest?.revisionId ?? '')).toContainEqual(
+        expect.objectContaining({ path: 'bracket.ts' }),
+      );
+    } finally {
+      await revisions.close();
+    }
+  }, 60_000);
+
+  it('says there is nothing new to save, and mints nothing, when the files are the last revision', async () => {
+    await seed();
+    const command = await importCommand();
+    await writeFile(join(project, 'bracket.ts'), 'export const bracket = 3;\n');
+    await runCommand(command, { rawArgs: ['save', '--project', project] });
+    stdout.length = 0;
+
+    await runCommand(command, { rawArgs: ['save', '--project', project, '--json'] });
+    expect(JSON.parse(stdout.join(''))).toMatchObject({
+      kind: 'revision-save',
+      ok: true,
+      status: 'unchanged',
+      line: 'main · Rev 3',
+    });
+  }, 60_000);
+
+  it('refuses a save the host refused, in the host’s words and with the code a script reads', async () => {
+    await seed();
+    const reason = 'Something else changed this project first. Try again.';
+    vi.resetModules();
+    vi.doMock('@taucad/host', async (importOriginal) => {
+      const host = await importOriginal<typeof HostModule>();
+      return {
+        ...host,
+        openProjectRevisions: (options: Parameters<typeof host.openProjectRevisions>[0]) => ({
+          ...host.openProjectRevisions(options),
+          save: async () => ({ status: 'refused', reason }) as const,
+        }),
+      };
+    });
+    try {
+      const outcome = await runCommand(await importCommand(), { rawArgs: ['save', '--project', project] }).then(
+        () => undefined,
+        (error: unknown) => error as { readonly code?: string; readonly exit?: number; readonly message?: string },
+      );
+      expect(outcome).toMatchObject({ code: 'SAVE_REFUSED', exit: exitCodes.refused, message: reason });
+    } finally {
+      vi.doUnmock('@taucad/host');
+      vi.resetModules();
+    }
   }, 60_000);
 
   it('names the current revision and can remove that name', async () => {

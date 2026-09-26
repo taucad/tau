@@ -78,17 +78,37 @@ const probe = (git: string): Readonly<{ git: string; gitLfs: string }> => {
 const manifestIsCurrent = async (targetName: string): Promise<boolean> => {
   const layout = payload.gitPayloadLayout(resourceRoot, targetName);
   try {
-    const manifest = JSON.parse(await readFile(layout.manifest, 'utf8')) as Record<string, unknown>;
     return (
-      manifest['payload.gitSourceSha256'] === payload.gitSourceSha256 &&
-      manifest['gitLfsArchiveSha256'] === payload.gitTargets[targetName]?.gitLfs.sha256 &&
-      JSON.stringify(manifest['makeVariables']) === JSON.stringify(payload.gitMakeVariables) &&
-      manifest['gitSha256'] === (await payload.sha256Of(layout.git)) &&
-      manifest['gitLfsSha256'] === (await payload.sha256Of(layout.gitLfs)) &&
-      (await payload.sha256Of(layout.source)) === payload.gitSourceSha256
+      payload.gitPayloadManifestIsCurrent(JSON.parse(await readFile(layout.manifest, 'utf8')), {
+        target: targetName,
+        gitSha256: await payload.sha256Of(layout.git),
+        gitLfsSha256: await payload.sha256Of(layout.gitLfs),
+      }) && (await payload.sha256Of(layout.source)) === payload.gitSourceSha256
     );
   } catch {
     return false;
+  }
+};
+
+/** Mach-O magic numbers, either byte order, thin or universal. */
+const machoMagic = new Set([0xfe_ed_fa_ce, 0xfe_ed_fa_cf, 0xce_fa_ed_fe, 0xcf_fa_ed_fe, 0xca_fe_ba_be, 0xbe_ba_fe_ca]);
+
+/** Refuse a macOS payload that links anything a clean Mac does not have. */
+const assertSystemLinkedOnly = async (root: string): Promise<void> => {
+  const entries = await readdir(root, { withFileTypes: true, recursive: true });
+  const found = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile())
+      .map(async (entry) => {
+        const path = join(entry.parentPath, entry.name);
+        const bytes = await readFile(path);
+        return bytes.length >= 4 && machoMagic.has(bytes.readUInt32BE(0)) ? [path] : [];
+      }),
+  );
+  const machoFiles = found.flat();
+  const foreign = payload.foreignLibraries(execFileSync('otool', ['-L', ...machoFiles], { encoding: 'utf8' }));
+  if (foreign.length > 0) {
+    throw new Error(`The git payload links libraries a clean Mac does not have: ${foreign.join(', ')}`);
   }
 };
 
@@ -120,6 +140,11 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   execFileSync('tar', ['-xJf', sourceArchive, '-C', work], { stdio: 'inherit' });
   const source = join(work, `git-${payload.gitVersion}`);
   const destination = join(work, 'destination');
+  /* The oldest macOS the payload must run on; an environment name, so assigned. */
+  const makeEnvironment: NodeJS.ProcessEnv = { ...process.env };
+  if (process.platform === 'darwin') {
+    makeEnvironment['MACOSX_DEPLOYMENT_TARGET'] = payload.gitMacosDeploymentTarget;
+  }
   execFileSync(
     'make',
     [
@@ -132,7 +157,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
       'strip',
       'install',
     ],
-    { stdio: 'inherit' },
+    { stdio: 'inherit', env: makeEnvironment },
   );
   execFileSync(
     'tar',
@@ -159,6 +184,9 @@ const prepareTarget = async (targetName: string): Promise<void> => {
     rm(join(temporary, 'share', 'man'), { recursive: true, force: true }),
   ]);
 
+  if (process.platform === 'darwin') {
+    await assertSystemLinkedOnly(temporary);
+  }
   const layout = payload.gitPayloadLayout(resourceRoot, targetName);
   await rm(layout.root, { recursive: true, force: true });
   await rename(temporary, layout.root);
@@ -167,18 +195,12 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   await writeFile(
     layout.manifest,
     `${JSON.stringify(
-      {
-        schemaVersion: 1,
+      payload.gitPayloadManifest({
         target: targetName,
-        gitVersion: payload.gitVersion,
-        gitSourceSha256: payload.gitSourceSha256,
-        gitLfsVersion: payload.gitLfsVersion,
-        gitLfsArchiveSha256: target.gitLfs.sha256,
-        makeVariables: payload.gitMakeVariables,
         gitSha256: await payload.sha256Of(layout.git),
         gitLfsSha256: await payload.sha256Of(layout.gitLfs),
         probed: versions,
-      },
+      }),
       undefined,
       2,
     )}\n`,

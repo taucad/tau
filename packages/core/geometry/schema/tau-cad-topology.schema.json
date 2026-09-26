@@ -11,10 +11,165 @@
       "type": "array",
       "items": { "$ref": "#/$defs/component" },
       "maxItems": 1000000
-    }
+    },
+    "mechanism": { "$ref": "#/$defs/mechanism" }
   },
   "$defs": {
     "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "mechanism": {
+      "description": "A @taucad/kinematics Mechanism in this glTF's vertex space: lengths in the vertices' unit, origins and axes in their frame, link components as components[].id values. This schema checks shape only; validateTauCadTopology also runs admitMechanism (joint tree, known link and degree-of-freedom ids, lower <= upper, perpendicular planar axes, sorted keyframes, acyclic couplings) and checks link components against components[].id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "units", "root", "links", "joints"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "units": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["length", "angle"],
+          "properties": {
+            "length": { "enum": ["m", "mm"] },
+            "angle": { "enum": ["rad", "deg"] }
+          }
+        },
+        "root": { "type": "string" },
+        "links": { "type": "object", "additionalProperties": { "$ref": "#/$defs/mechanismLink" } },
+        "joints": { "type": "object", "additionalProperties": { "$ref": "#/$defs/joint" } },
+        "couplings": { "type": "array", "items": { "$ref": "#/$defs/coupling" } },
+        "animations": { "type": "array", "items": { "$ref": "#/$defs/animation" } }
+      }
+    },
+    "mechanismLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["components"],
+      "properties": {
+        "components": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "vector3": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "jointLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lower", "upper"],
+      "properties": {
+        "lower": { "type": "number" },
+        "upper": { "type": "number" }
+      }
+    },
+    "joint": {
+      "type": "object",
+      "required": ["type", "parent", "child", "origin"],
+      "properties": {
+        "type": { "enum": ["fixed", "revolute", "prismatic", "cylindrical", "screw", "spherical", "planar"] },
+        "parent": { "type": "string" },
+        "child": { "type": "string" },
+        "origin": { "$ref": "#/$defs/vector3" }
+      },
+      "oneOf": [
+        { "properties": { "type": { "const": "fixed" } } },
+        {
+          "required": ["axis"],
+          "properties": {
+            "type": { "const": "revolute" },
+            "axis": { "$ref": "#/$defs/vector3" },
+            "limits": { "$ref": "#/$defs/jointLimits" }
+          }
+        },
+        {
+          "required": ["axis"],
+          "properties": {
+            "type": { "const": "prismatic" },
+            "axis": { "$ref": "#/$defs/vector3" },
+            "limits": { "$ref": "#/$defs/jointLimits" }
+          }
+        },
+        {
+          "required": ["axis"],
+          "properties": {
+            "type": { "const": "cylindrical" },
+            "axis": { "$ref": "#/$defs/vector3" },
+            "limits": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "angle": { "$ref": "#/$defs/jointLimits" },
+                "distance": { "$ref": "#/$defs/jointLimits" }
+              }
+            }
+          }
+        },
+        {
+          "required": ["axis", "lead", "handedness"],
+          "properties": {
+            "type": { "const": "screw" },
+            "axis": { "$ref": "#/$defs/vector3" },
+            "lead": { "type": "number", "exclusiveMinimum": 0 },
+            "handedness": { "enum": ["right", "left"] },
+            "limits": { "$ref": "#/$defs/jointLimits" }
+          }
+        },
+        {
+          "properties": {
+            "type": { "const": "spherical" },
+            "limits": { "$ref": "#/$defs/jointLimits" }
+          }
+        },
+        {
+          "required": ["normal", "xAxis"],
+          "properties": {
+            "type": { "const": "planar" },
+            "normal": { "$ref": "#/$defs/vector3" },
+            "xAxis": { "$ref": "#/$defs/vector3" },
+            "limits": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "x": { "$ref": "#/$defs/jointLimits" },
+                "y": { "$ref": "#/$defs/jointLimits" },
+                "angle": { "$ref": "#/$defs/jointLimits" }
+              }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "coupling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["driver", "follower", "ratio"],
+      "properties": {
+        "driver": { "type": "string" },
+        "follower": { "type": "string" },
+        "ratio": { "type": "number", "not": { "const": 0 } },
+        "offset": { "type": "number" }
+      }
+    },
+    "animation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "duration", "keyframes"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "duration": { "type": "number", "exclusiveMinimum": 0 },
+        "loop": { "enum": ["none", "repeat", "pingPong"] },
+        "keyframes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["time", "coordinates"],
+            "properties": {
+              "time": { "type": "number", "minimum": 0 },
+              "coordinates": { "type": "object", "additionalProperties": { "type": "number" } }
+            }
+          }
+        }
+      }
+    },
     "primitiveRef": {
       "type": "object",
       "additionalProperties": true,

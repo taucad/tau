@@ -5,6 +5,7 @@ import {
   formatNamedComponentId,
   formatNodeSelector,
   formatPrimitiveSelector,
+  uniqueComponentId,
 } from '#utils/component-names.js';
 
 describe('component names', () => {
@@ -25,5 +26,14 @@ describe('component names', () => {
     expect(formatNamedComponentId('Shape 1', 0)).toBeUndefined();
     expect(formatNamedComponentId('Shape_1', 0)).toBeUndefined();
     expect(formatNamedComponentId('***', 0)).toBeUndefined();
+  });
+
+  it('keeps the first ID and suffixes later collisions, skipping IDs already emitted', () => {
+    const usedIds = new Map<string, number>();
+    const ids = ['Bolt +X', 'Bolt -X', 'Bolt X 3', 'Bolt x'].map((name, index) =>
+      uniqueComponentId(formatNamedComponentId(name, index)!, usedIds),
+    );
+
+    expect(ids).toEqual(['component:bolt-x', 'component:bolt-x-2', 'component:bolt-x-3', 'component:bolt-x-4']);
   });
 });

@@ -18,15 +18,24 @@ describe('TAU_cad_topology schema', () => {
     const invalid: unknown = JSON.parse(
       readFileSync(new URL('../../schema/tau-cad-topology.v1.invalid.fixture.json', import.meta.url), 'utf8'),
     );
-    const validate = new Ajv2020({ strict: true }).compile(schema);
+    const validate = new Ajv2020({ strict: true, allErrors: true }).compile(schema);
 
     expect(schema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
     expect(schema.properties.schemaVersion.const).toBe(1);
     expect(schema.required).toEqual(['schemaVersion', 'components']);
     expect(validate(fixture)).toBe(true);
     expect(validate(invalid)).toBe(false);
-    expect(validate.errors).toEqual(
-      expect.arrayContaining([expect.objectContaining({ instancePath: '/components/0/faceGroups/0/count' })]),
+    expect(validate.errors?.map((error) => error.instancePath)).toEqual(
+      expect.arrayContaining([
+        '/components/0/faceGroups/0/count',
+        '/mechanism/units/length',
+        '/mechanism/units',
+        '/mechanism/links/loose',
+        '/mechanism/joints/weld/type',
+        '/mechanism/joints/hinge',
+        '/mechanism/couplings/0',
+        '/mechanism/animations/0/keyframes',
+      ]),
     );
   });
 });

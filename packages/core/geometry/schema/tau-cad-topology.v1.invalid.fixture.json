@@ -9,5 +9,21 @@
       "primitiveRefs": [{ "nodeIndex": 0, "meshIndex": 0, "primitiveIndex": 2 }],
       "faceGroups": [{ "start": 0, "count": 4, "faceId": 0 }]
     }
-  ]
+  ],
+  "mechanism": {
+    "schemaVersion": 1,
+    "units": { "length": "cm", "angle": "deg", "time": "s" },
+    "root": "invalid",
+    "links": {
+      "invalid": { "components": ["component:invalid"] },
+      "arm": { "components": ["component:missing"] },
+      "loose": 5
+    },
+    "joints": {
+      "weld": { "type": "weld", "parent": "invalid", "child": "arm", "origin": [0, 0, 0] },
+      "hinge": { "type": "revolute", "parent": "invalid", "child": "loose", "origin": [0, 0, 0] }
+    },
+    "couplings": [1],
+    "animations": [{ "id": "open", "duration": 1, "keyframes": [] }]
+  }
 }

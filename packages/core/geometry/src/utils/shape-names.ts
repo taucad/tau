@@ -74,6 +74,34 @@ export function resolveShapeName({ index, name, source = 'authored' }: ResolveSh
 }
 
 /**
+ * De-duplicate a label while preserving the first occurrence unchanged: a repeat gets the next
+ * ordinal that no label emitted in this scope already uses.
+ *
+ * @internal
+ * @param label - Candidate label.
+ * @param usedLabels - Mutable count map for labels already emitted in this scope.
+ * @param separator - Text between the label and its ordinal.
+ * @returns The original label or a suffixed duplicate.
+ */
+export function uniqueLabel(label: string, usedLabels: Map<string, number>, separator: string): string {
+  let count = (usedLabels.get(label) ?? 0) + 1;
+  usedLabels.set(label, count);
+  if (count === 1) {
+    return label;
+  }
+
+  // Skip suffixes that collide with an authored label already emitted this scope.
+  let candidate = `${label}${separator}${count}`;
+  while (usedLabels.has(candidate)) {
+    count += 1;
+    candidate = `${label}${separator}${count}`;
+  }
+  usedLabels.set(label, count);
+  usedLabels.set(candidate, 1);
+  return candidate;
+}
+
+/**
  * De-duplicate a shape name while preserving the first occurrence unchanged.
  *
  * @param name - Candidate display name.
@@ -82,19 +110,5 @@ export function resolveShapeName({ index, name, source = 'authored' }: ResolveSh
  * @public
  */
 export function uniqueShapeName(name: string, usedNames: Map<string, number>): string {
-  let count = (usedNames.get(name) ?? 0) + 1;
-  usedNames.set(name, count);
-  if (count === 1) {
-    return name;
-  }
-
-  // Skip suffixes that collide with an authored name already emitted this scope.
-  let candidate = `${name} ${count}`;
-  while (usedNames.has(candidate)) {
-    count += 1;
-    candidate = `${name} ${count}`;
-  }
-  usedNames.set(name, count);
-  usedNames.set(candidate, 1);
-  return candidate;
+  return uniqueLabel(name, usedNames, ' ');
 }

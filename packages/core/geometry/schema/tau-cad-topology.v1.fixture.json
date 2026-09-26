@@ -18,6 +18,25 @@
         "hasPreciseTopology": true,
         "exports": [{ "fidelity": "brep", "formats": ["step", "stp"], "available": true }]
       }
+    },
+    {
+      "id": "component:lid",
+      "name": "Lid",
+      "kind": "part",
+      "selector": "node/1",
+      "nodeIndex": 1
     }
-  ]
+  ],
+  "mechanism": {
+    "schemaVersion": 1,
+    "units": { "length": "m", "angle": "deg" },
+    "root": "cover",
+    "links": {
+      "cover": { "components": ["component:cover"] },
+      "lid": { "components": ["component:lid"] }
+    },
+    "joints": {
+      "hinge": { "type": "revolute", "parent": "cover", "child": "lid", "origin": [0, 0.02, 0], "axis": [1, 0, 0] }
+    }
+  }
 }

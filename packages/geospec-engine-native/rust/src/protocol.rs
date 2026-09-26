@@ -461,6 +461,9 @@ impl Engine {
             return invalid_request("evaluateClaim requires exactly one claim.");
         };
         let claim = encode(claim)?;
+        // Evaluate the canonical plan, as evaluatePlan does, not the request's own prepared plan:
+        // evidence echoes the prepared payload, so a raw request can echo another spelling
+        // (conformance a2/raw/asymmetric-all-fields), which submitClaims would return.
         let prepared = PreparedPlan::prepare(&normalized)?;
         let plan = encode(&canonical_plan_envelope(normalized))?;
         let result = encode(&self.evaluate_prepared(prepared)?)?;

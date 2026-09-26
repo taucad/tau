@@ -1575,7 +1575,6 @@ struct geospec_occt_document {
   size_t free_shape_count = 0;
   std::string source_length_unit;
   double source_unit_to_millimeters = 1.0;
-  mutable bool admission_validity_reusable = true;
   std::vector<ProductFacts> products;
   std::vector<OccurrenceFacts> occurrences;
   std::vector<SourceFaceFacts> source_faces;
@@ -1598,7 +1597,7 @@ struct geospec_occt_document {
   // placements and private/public face addresses only; occurrence edge
   // addresses and face→edge incidence are a slot too. Each slot is computed once
   // from this admitted source shape on first demand and stored only after it
-  // succeeds; common_volume completes all of them before it may modify inputs.
+  // succeeds. Every Boolean is non-destructive, so no query modifies inputs.
   // Const getters write these unsynchronized slots: the document is confined
   // to one thread at a time (its Rust owner is neither Send nor Sync).
   mutable std::optional<geospec_occt_shape_facts> shape_facts;
@@ -5544,19 +5543,18 @@ bool build_report_generation(const geospec_occt_document& document,
 }
 
 geospec_occt_validity_facts compute_validity(const geospec_occt_document& document,
-                                             std::string& reason,
-                                             bool run_parallel = false) {
+                                             std::string& reason) {
   const TopoDS_Shape& shape = document.shape;
   geospec_occt_validity_facts result{};
   std::optional<BRepCheck_Analyzer> analyzer;
   // The source shape facts check proves this exact shape with the same analyzer
   // settings. IsValid recursively visits every child, including every solid.
-  // Reuse only that successful proof while no potentially destructive query
-  // has run; the proof is never computed after such a query.
-  if (document.admission_validity_reusable && source_shape_valid(document)) {
+  // Every Boolean is non-destructive, so a successful proof holds for the
+  // document's life; only a failed one re-runs, serially, for its solids.
+  if (source_shape_valid(document)) {
     result.valid = 1;
   } else {
-    analyzer.emplace(shape, true, run_parallel, false);
+    analyzer.emplace(shape, true, false, false);
     result.valid = analyzer->IsValid() ? 1 : 0;
   }
   result.same_parameter = 1;
@@ -6798,13 +6796,12 @@ int geospec_occt_validity_dedicated(
     const int scope_status = dedicated_pool_scope(
         grant_width, used_parallel, reservation, error);
     if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
-    if (document->admission_validity_reusable) {
-      // F11: the serial path uses no workers, so it holds no reservation.
-      reservation.reset();
-      *used_parallel = 0;
-    }
+    // F11: validity reuses the source proof or re-runs serially, so it uses
+    // no workers and holds no reservation.
+    reservation.reset();
+    *used_parallel = 0;
     std::string message;
-    *validity = compute_validity(*document, message, *used_parallel != 0);
+    *validity = compute_validity(*document, message);
     return write_string(message, reason);
   });
 }

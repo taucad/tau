@@ -58,9 +58,14 @@ fn retained_box_exercises_whole_faces_trim_validity_and_mesh_transfer() {
             (5, 0x4068_ffff_ffff_ffff),
         ]
     );
+    // Whole faces measure their AddOptimal boxes only when read.
     assert!(faces.iter().all(|face| {
-        face.bounds.min.iter().all(|value| value.is_finite())
-            && face.bounds.max.iter().all(|value| value.is_finite())
+        let bounds = document.face_optimal_bounds(face.facts.index).unwrap();
+        bounds
+            .min
+            .iter()
+            .chain(&bounds.max)
+            .all(|value| value.is_finite())
     }));
 
     let first = &faces[0];

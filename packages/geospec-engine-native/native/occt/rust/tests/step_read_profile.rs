@@ -1,5 +1,6 @@
-//! The pinned STEP read profile (`DESTEP_Parameters`) on substrate lane O1's
-//! reader controls: fields whose reader defaults would move exact evidence.
+//! The STEP admission profile on substrate lane O1's reader controls: the
+//! pinned read parameters (`DESTEP_Parameters`), whose reader defaults would
+//! move exact evidence, and the authored healing profile.
 
 use geospec_engine_native_occt::{BrepSubject, Document};
 use std::path::PathBuf;
@@ -66,4 +67,15 @@ fn should_read_inputs_without_length_uncertainty_at_the_pinned_precision() {
             "{stripped}"
         );
     }
+}
+
+#[test]
+fn should_admit_a_solid_with_an_open_shell_as_the_invalid_solid_it_is() {
+    // OCCT's default healing demotes this solid to a valid open shell. The
+    // authored profile keeps the solid, so validity reports the open shell.
+    let document =
+        Document::from_step(&fixture("component-interference/broken-shell.step")).unwrap();
+    let validity = BrepSubject::validity(&document).unwrap();
+    assert_eq!(validity.solid_count, Some(1));
+    assert!(!validity.valid);
 }

@@ -22,6 +22,7 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <DE_ShapeFixParameters.hxx>
 #include <DESTEP_Parameters.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
@@ -99,6 +100,7 @@
 #include <TopoDS_Iterator.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
+#include <XSAlgo_ShapeProcessor.hxx>
 #include <XSControl_TransferReader.hxx>
 #include <XSControl_WorkSession.hxx>
 #include <gp_Ax1.hxx>
@@ -5958,6 +5960,34 @@ static DESTEP_Parameters step_read_parameters() {
   return p;
 }
 
+// The authored healing profile (ruling 1): shape processing completes the
+// translation (pcurves, same-parameter, seams, wire order) but never repairs
+// authored geometry, so an invalid model is evaluated as the model it is. The
+// 13 repair modes and face/shell reorientation are off, and a solid with an
+// open shell stays the open solid it was authored as instead of becoming a
+// shell. Every other field keeps the STEP default an empty map would get.
+static DE_ShapeFixParameters authored_fix_parameters() {
+  using Mode = DE_ShapeFixParameters::FixMode;
+  DE_ShapeFixParameters p = DESTEP_Parameters::GetDefaultShapeFixParameters();
+  p.FixSelfIntersectionMode = Mode::NotFix;
+  p.FixSelfIntersectingEdgeMode = Mode::NotFix;
+  p.FixIntersectingEdgesMode = Mode::NotFix;
+  p.FixNonAdjacentIntersectingEdgesMode = Mode::NotFix;
+  p.FixIntersectingWiresMode = Mode::NotFix;
+  p.FixSmallMode = Mode::NotFix;
+  p.FixSmallAreaWireMode = Mode::NotFix;
+  p.RemoveSmallAreaFaceMode = Mode::NotFix;
+  p.FixNotchedEdgesMode = Mode::NotFix;
+  p.FixLackingMode = Mode::NotFix;
+  p.FixConnectedMode = Mode::NotFix;
+  p.FixLoopWiresMode = Mode::NotFix;
+  p.FixSplitFaceMode = Mode::NotFix;
+  p.FixFaceOrientationMode = Mode::NotFix;
+  p.FixShellOrientationMode = Mode::NotFix;
+  p.CreateOpenSolidMode = Mode::Fix;
+  return p;
+}
+
 // OCCT initializes its data-exchange globals (controllers, LibCtl libraries,
 // Interface_Static standards, XSAlgo and ShapeProcess operators) unsynchronized
 // on first use. One reader construction does it before admissions may overlap;
@@ -6018,6 +6048,9 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     if (reader.ReadStream("memory.step", step_read_parameters(), stream) != IFSelect_RetDone) {
       return fail(GEOSPEC_OCCT_READ_FAILED, "STEP read failed.", error);
     }
+    // ReadStream replaces the transfer actor, so parameters set before it land
+    // on nothing; set now they reach the actor that Transfer uses.
+    reader.SetShapeFixParameters(authored_fix_parameters(), XSAlgo_ShapeProcessor::ParameterMap());
 
     auto result = std::make_unique<geospec_occt_document>();
     result->schema = step_schema(reader);

@@ -275,8 +275,10 @@ impl Document {
 impl BrepConnector for OcctConnector {
     fn identity_profile(&self) -> geospec_engine_native_core::backend::brep::BrepIdentityProfile {
         geospec_engine_native_core::backend::brep::BrepIdentityProfile {
-            ingest_profile: "geospec-step-xde-report-v2",
-            backend_profile: "occt-8.1.0-dev1-3d097a-report-v2",
+            // Wave 2 of the close-out (authored healing, ruling 1, and every
+            // other ruled STEP contract change) is the v5 ingest profile.
+            ingest_profile: "geospec-step-xde-report-authored-v5",
+            backend_profile: "occt-8.1.0-dev1-3d097a-report-authored-v5",
         }
     }
 

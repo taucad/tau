@@ -941,12 +941,18 @@ describe('sessions composition', () => {
     await view.navigate('/projects');
 
     expect(serviceCalls).toEqual(['editor:flushNow']);
-    expect(screen.queryByText('Project library')).not.toBeInTheDocument();
+    /* The shell stays in the document while the flush holds the destination (8451a6dca), so the
+     * library is there — inert, behind the overlay — until the editor has stored. */
+    expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
+    expect(screen.getByText('Project library').closest('[inert]')).not.toBeNull();
     await act(async () => {
       editor.setIdle(true);
       await Promise.resolve();
     });
-    await screen.findByText('Project library');
+    await vi.waitFor(() => {
+      expect(screen.getByText('Project library').closest('[inert]')).toBeNull();
+    });
+    expect(screen.queryByRole('status', { name: 'Opening project' })).not.toBeInTheDocument();
     view.unmount();
   });
 

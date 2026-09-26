@@ -693,16 +693,22 @@ function GeometryUnitParameters({
 
   if (parameterManifest !== undefined && parameterActor !== undefined && authorityFailure !== undefined) {
     return (
-      <ParameterAuthorityFailure
-        entryPath={entryPath}
-        manifest={parameterManifest}
-        actor={parameterActor}
-        failure={authorityFailure}
-      />
+      <div className={paneviewAttachedBodyClassName}>
+        <ParameterAuthorityFailure
+          entryPath={entryPath}
+          manifest={parameterManifest}
+          actor={parameterActor}
+          failure={authorityFailure}
+        />
+      </div>
     );
   }
   if (parameterManifest === undefined || parameterEdit === undefined) {
-    return <div className='p-3 text-sm text-muted-foreground'>Loading parameter metadata…</div>;
+    return (
+      <div className={cn(paneviewAttachedBodyClassName, 'p-3 text-sm text-muted-foreground')}>
+        Loading parameter metadata…
+      </div>
+    );
   }
 
   return (

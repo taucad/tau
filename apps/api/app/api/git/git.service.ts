@@ -1479,8 +1479,9 @@ export class GitRepositoryService implements OnModuleDestroy {
        database transaction a timeout could not cancel, so bounding the wait
        would only stop this request knowing whether it landed while it still
        held the lease; tracked, it holds neither the lease nor the response and
-       `settled()` still waits for it. A repair re-announces its generation,
-       which costs a reader one fetch that finds nothing new. */
+       `settled()` still waits for it. A repair re-announces its generation
+       with its heads, which costs nothing on a device that already holds
+       them. */
     this.track(this.announce(access, manifest.generation, args.moved));
     const storageBytes = manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
     try {

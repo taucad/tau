@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
@@ -6,11 +6,13 @@ import { MessageChannel } from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import type { ContentDigest } from '@taucad/cache-core';
+import type { CacheValue, ContentDigest } from '@taucad/cache-core';
+import { cloneBoundedJson } from '@taucad/parameters/json';
 
 import { defineConfiguration } from '#configuration/index.js';
 import { createHostAdmissionAuthority } from '#host/host-admission.js';
 import type { HostRouteGrant } from '#host/host-admission.js';
+import { createNodeMachineEventLog } from '#host/node-machine-event-log.js';
 import { createNodeMachineHost } from '#host/node.js';
 import type { NodeMachineHost, NodeMachineRuntime } from '#host/node.js';
 import { connectMachineChannel } from '#machines/machine-channel.js';
@@ -23,6 +25,7 @@ import type {
   MachineCandidate,
   MachineConnectionRuntime,
   MachineCommandReceipt,
+  MachinePreparationReceipt,
   MachineSession,
   MachineSnapshot,
   MachineStill,
@@ -30,6 +33,26 @@ import type {
   MachineTransferReceipt,
 } from '#machines/machine.js';
 import type { PrintRequest } from '#machines/print-request.js';
+
+/** Machine directories whose operations log refuses every append, as a full log or a failing disk would. */
+const { refusedAppends } = vi.hoisted(() => ({ refusedAppends: new Set<string>() }));
+vi.mock('#host/node-machine-event-log.js', async (importOriginal) => {
+  const actual = await importOriginal<Readonly<{ createNodeMachineEventLog: typeof createNodeMachineEventLog }>>();
+  return {
+    ...actual,
+    async createNodeMachineEventLog(input: Parameters<typeof createNodeMachineEventLog>[0]) {
+      const log = await actual.createNodeMachineEventLog(input);
+      return refusedAppends.has(input.directory)
+        ? {
+            ...log,
+            append: async () => {
+              throw new Error('FIXTURE_APPEND_REFUSED');
+            },
+          }
+        : log;
+    },
+  };
+});
 
 const temporaryDirectories: string[] = [];
 const hosts: NodeMachineHost[] = [];
@@ -39,10 +62,56 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(async (path) => rm(path, { recursive: true, force: true })));
 });
 
-const authorityRoot = async (): Promise<string> => {
+const storeRoot = async (): Promise<string> => {
   const path = await mkdtemp(join(tmpdir(), 'tau-node-machine-host-'));
   temporaryDirectories.push(path);
   return path;
+};
+
+/** Every file in a store, for checks that hold across all of them. */
+const storeFiles = async (root: string): Promise<string[]> => {
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name));
+};
+
+const sortedEntries = async (path: string): Promise<string[]> => {
+  const names = await readdir(path);
+  return names.toSorted();
+};
+
+// Fixture journals hold plain JSON; the bounded clone is the parser an older host's replay applied.
+const plainJson = (value: unknown): CacheValue =>
+  cloneBoundedJson(value, {
+    code: 'FIXTURE_JSON',
+    maximumDepth: 64,
+    maximumNodes: 100_000,
+    maximumCharacters: 1_000_000,
+  });
+
+const storeBytes = async (root: string): Promise<number> => {
+  let total = 0;
+  for (const file of await storeFiles(root)) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- sizes are summed one file at a time.
+    const { size } = await stat(file);
+    total += size;
+  }
+  return total;
+};
+
+/** A legacy journal writer, as an older host left one; the fixture owns no lock. */
+const legacyJournal = async (root: string) => {
+  const directory = join(root, 'authority');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  return createNodeMachineEventLog({
+    directory,
+    fileName: 'machine-events.jsonl',
+    owner: {
+      assertCurrent() {
+        /* No host owns the store while the fixture writes. */
+      },
+    },
+    parse: plainJson,
+  });
 };
 
 const configuration = defineConfiguration({
@@ -123,8 +192,20 @@ const bindingCandidates: readonly MachineCandidate[] = [
   },
 ];
 type SessionBehavior = Partial<
-  Pick<MachineSession, 'getSnapshot' | 'observe' | 'uploadPrint' | 'submit' | 'control' | 'reconcile' | 'stillCapture'>
+  Pick<
+    MachineSession,
+    'getSnapshot' | 'observe' | 'preparePrint' | 'uploadPrint' | 'submit' | 'control' | 'reconcile' | 'stillCapture'
+  >
 >;
+const readyPreparation = (input: Parameters<MachineSession['preparePrint']>[0]): MachinePreparationReceipt => ({
+  status: 'ready',
+  remoteName: `tau-${input.operationId}.gcode.3mf`,
+  digest: input.artifact.digest,
+  length: input.artifact.length,
+  parser: { id: 'fixture-parser', version: '1' },
+  providerData: { memberMd5: 'fixture' },
+  observedAt,
+});
 
 const session = (closed: () => Promise<void>, behavior: SessionBehavior = {}): MachineSession => ({
   stillCapture: behavior.stillCapture ?? { type: 'unsupported' },
@@ -194,15 +275,10 @@ const session = (closed: () => Promise<void>, behavior: SessionBehavior = {}): M
     yield* [];
   },
   async preparePrint(input) {
-    return {
-      status: 'ready',
-      remoteName: `tau-${input.operationId}.gcode.3mf`,
-      digest: input.artifact.digest,
-      length: input.artifact.length,
-      parser: { id: 'fixture-parser', version: '1' },
-      providerData: { memberMd5: 'fixture' },
-      observedAt,
-    };
+    if (behavior.preparePrint) {
+      return behavior.preparePrint(input);
+    }
+    return readyPreparation(input);
   },
   async uploadPrint(input) {
     if (behavior.uploadPrint) {
@@ -271,13 +347,12 @@ const bindingProvider = (connections: (runtime: MachineConnectionRuntime) => voi
     },
   })();
 
-const openHost = async (root: string, generation = 'generation-1') => {
+const openHost = async (root: string) => {
   const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
   const host = await createNodeMachineHost({
-    authorityRoot: root,
+    storeRoot: root,
     hostId: 'host-1',
     authorityId: 'authority-1',
-    generation,
     admission,
     providers: [provider],
     operations,
@@ -287,38 +362,63 @@ const openHost = async (root: string, generation = 'generation-1') => {
   return { admission, host };
 };
 
+const printArtifact: MachineArtifactReference = {
+  projectId: 'proj_0123456789abcdefghijK',
+  path: '.tau/artifacts/3333/pyramid.gcode.3mf',
+  digest: `sha256:${'3'.repeat(64)}` as ContentDigest,
+  length: 128,
+  mediaType: 'application/vnd.bambulab.gcode-3mf',
+  contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+  selectedMember: 'Metadata/plate_1.gcode',
+};
+
 describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('createNodeMachineHost', () => {
-  it('serves an admitted channel, closes it on revocation, and retains authority identity across restart', async () => {
-    const root = await authorityRoot();
+  it('serves an admitted channel, closes it on revocation, and lets one host own the store at a time', async () => {
+    const root = await storeRoot();
     const first = await openHost(root);
-    const session = first.admission.issueTrustedSession({
+    const session = first.host.issueSession({
       actor: { kind: 'user', id: 'user-1' },
-      authorityId: 'authority-1',
-      workspaceId: 'workspace-1',
       grants: [{ route: 'machines', operation: 'machines.listProviders' }],
     });
     const ports = new MessageChannel();
-    const server = first.host.serve({
-      port: ports.port1,
-      session,
-      workspaceId: 'workspace-1',
-    });
+    const server = first.host.serve({ port: ports.port1, session });
     const client = connectMachineChannel(ports.port2);
     await expect(client.listProviders({})).resolves.toMatchObject([{ id: 'fixture-provider' }]);
     first.admission.revoke(session);
     await server.closed;
     client.close();
+    // A session issued for a workspace is not a machines session.
+    const foreign = first.admission.issueTrustedSession({
+      actor: { kind: 'user', id: 'user-1' },
+      authorityId: 'authority-1',
+      workspaceId: 'workspace-1',
+      grants: [{ route: 'machines', operation: 'machines.listProviders' }],
+    });
+    expect(() => first.host.admitRoute({ session: foreign })).toThrow('WORKSPACE_MISMATCH');
+    // Holding the host mints machines sessions only.
+    expect(() =>
+      first.host.issueSession({
+        actor: { kind: 'user', id: 'user-1' },
+        grants: [
+          { route: 'machines', operation: 'machines.list' },
+          { route: 'jobs', operation: 'jobs.list' },
+        ],
+      }),
+    ).toThrow('INVALID_HOST_GRANT');
+    await expect(openHost(root)).rejects.toMatchObject({ code: 'AUTHORITY_ALREADY_OWNED' });
     await first.host.close();
     hosts.splice(hosts.indexOf(first.host), 1);
 
     const second = await openHost(root);
     await second.host.close();
     hosts.splice(hosts.indexOf(second.host), 1);
-    await expect(openHost(root, 'other-generation')).rejects.toThrow('NODE_MACHINE_HOST_IDENTITY_MISMATCH');
+    expect(() => second.host.issueSession({ actor: { kind: 'user', id: 'user-1' }, grants: [] })).toThrow(
+      'NODE_MACHINE_HOST_CLOSED',
+    );
   });
 
   it('persists an opaque binding, reconnects it once, and refuses a second controller for one printer', async () => {
-    const root = await authorityRoot();
+    const root = await storeRoot();
     let currentTime = Date.parse(observedAt);
     const currentTimestamp = (): string => new Date(currentTime).toISOString();
     const connections = vi.fn((_runtime: MachineConnectionRuntime): void => undefined);
@@ -426,10 +526,9 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
     const openBoundHost = async () => {
       const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
       const host = await createNodeMachineHost({
-        authorityRoot: root,
+        storeRoot: root,
         hostId: 'host-1',
         authorityId: 'authority-1',
-        generation: 'generation-1',
         admission,
         providers: [provider_],
         runtime,
@@ -439,10 +538,8 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       return { admission, host };
     };
     const first = await openBoundHost();
-    const admitted = first.admission.issueTrustedSession({
+    const admitted = first.host.issueSession({
       actor: { kind: 'user', id: 'operator' },
-      authorityId: 'authority-1',
-      workspaceId: 'workspace-1',
       grants: [
         { route: 'machines', operation: 'machines.discover' },
         { route: 'machines', operation: 'machines.beginBinding' },
@@ -456,11 +553,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       ],
     });
     const ports = new MessageChannel();
-    const server = first.host.serve({
-      port: ports.port1,
-      session: admitted,
-      workspaceId: 'workspace-1',
-    });
+    const server = first.host.serve({ port: ports.port1, session: admitted });
     const client = connectMachineChannel(ports.port2);
     await client.ready;
     const discovered: MachineCandidate[] = [];
@@ -474,7 +567,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
     }
     const firstCeremony = await client.beginBinding({
       candidate: discovered[0]!,
-      name: 'workshop-x1c',
+      name: 'Workshop X1C',
     });
     expect(firstCeremony.status).toBe('operator-action-required');
     if (firstCeremony.status !== 'operator-action-required') {
@@ -495,6 +588,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       entries: [
         {
           machineId: 'workshop-x1c',
+          name: 'Workshop X1C',
           descriptor: { id: 'physical-1', firmware: '01.08.02.00' },
         },
       ],
@@ -518,20 +612,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
     });
     await expect(client.captureStill({ machineId: 'workshop-x1c' })).rejects.toThrow('MACHINE_STILL_INVALID');
     expect(await client.list({})).toEqual(beforeStill);
-    const artifact: MachineArtifactReference = {
-      revision: {
-        authorityId: 'authority-1',
-        workspaceId: 'workspace-1',
-        revisionId: 'revision-1' as MachineArtifactReference['revision']['revisionId'],
-        treeDigest: `sha256:${'2'.repeat(64)}` as ContentDigest,
-      },
-      path: 'part.gcode.3mf',
-      digest: `sha256:${'3'.repeat(64)}` as ContentDigest,
-      length: 128,
-      mediaType: 'application/vnd.bambulab.gcode-3mf',
-      contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-      selectedMember: 'Metadata/plate_1.gcode',
-    };
+    const artifact: MachineArtifactReference = { ...printArtifact, path: 'parts/part.gcode.3mf' };
     const prepared = await client.preparePrint({
       machineId: 'workshop-x1c',
       artifact,
@@ -686,23 +767,39 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
     await first.host.close();
     hosts.splice(hosts.indexOf(first.host), 1);
 
-    const journalPath = join(root, 'machine-events.jsonl');
-    const journal = await readFile(journalPath, 'utf8');
-    const journalStats = await stat(journalPath);
+    // The refused binding left nothing behind; the bound printer is one directory of plain files.
+    expect(await sortedEntries(root)).toEqual(['authority', 'store.json', 'workshop-x1c']);
+    const machine = join(root, 'workshop-x1c');
+    const operationsPath = join(machine, 'operations.jsonl');
+    const operationsLog = await readFile(operationsPath, 'utf8');
+    const { mode } = await stat(operationsPath);
     // oxlint-disable-next-line eslint/no-bitwise -- POSIX permission bits are a bit mask.
-    expect(journalStats.mode & 0o777).toBe(0o600);
-    expect(journal).toContain('vault:bambu-x1c');
-    expect(journal).toContain('machine-print-prepared');
-    expect(journal.indexOf('machine-effect-intent')).toBeLessThan(journal.indexOf('machine-effect-sending'));
-    expect(journal.indexOf('machine-effect-sending')).toBeLessThan(journal.indexOf('machine-effect-result'));
-    expect(journal).not.toContain('credential-must-not-be-serialized');
+    expect(mode & 0o777).toBe(0o600);
+    expect(JSON.parse(await readFile(join(machine, 'machine.json'), 'utf8'))).toMatchObject({
+      version: 1,
+      id: 'workshop-x1c',
+      name: 'Workshop X1C',
+      providerId: 'binding-provider',
+      physicalId: 'physical-1',
+      connection: { secretRef: 'vault:bambu-x1c', serviceTrust: { mqtt: { type: 'pinned', digest: pinned } } },
+      last: { descriptor: { id: 'physical-1' } },
+    });
+    expect(await readdir(join(machine, 'preparations'))).toHaveLength(2);
+    expect(operationsLog.indexOf('machine-effect-intent')).toBeLessThan(
+      operationsLog.indexOf('machine-effect-sending'),
+    );
+    expect(operationsLog.indexOf('machine-effect-sending')).toBeLessThan(
+      operationsLog.indexOf('machine-effect-result'),
+    );
+    for (const file of await storeFiles(root)) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each store file is checked on its own.
+      expect(await readFile(file, 'utf8'), file).not.toContain('credential-must-not-be-serialized');
+    }
 
     const second = await openBoundHost();
     expect(connections).toHaveBeenCalledTimes(3);
-    const restartSession = second.admission.issueTrustedSession({
+    const restartSession = second.host.issueSession({
       actor: { kind: 'user', id: 'operator' },
-      authorityId: 'authority-1',
-      workspaceId: 'workspace-1',
       grants: [
         { route: 'machines', operation: 'machines.list' },
         { route: 'machines', operation: 'machines.startPrint' },
@@ -710,14 +807,10 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       ],
     });
     const restartPorts = new MessageChannel();
-    const restartServer = second.host.serve({
-      port: restartPorts.port1,
-      session: restartSession,
-      workspaceId: 'workspace-1',
-    });
+    const restartServer = second.host.serve({ port: restartPorts.port1, session: restartSession });
     const restartClient = connectMachineChannel(restartPorts.port2);
     await expect(restartClient.list({})).resolves.toMatchObject({
-      entries: [{ machineId: 'workshop-x1c', freshness: 'current' }],
+      entries: [{ machineId: 'workshop-x1c', name: 'Workshop X1C', freshness: 'current' }],
     });
     await expect(restartClient.startPrint(restartInput)).resolves.toMatchObject({ status: 'unknown' });
     expect(submit).toHaveBeenCalledTimes(3);
@@ -750,66 +843,48 @@ const printRequestGrants: readonly HostRouteGrant[] = (
 ).map((operation) => ({ route: 'machines', operation: `machines.${operation}` }));
 const agent = { kind: 'agent', id: 'agent-1', label: 'Tau agent' } as const;
 const operator = { kind: 'user', id: 'operator', label: 'Operator' } as const;
-const printArtifact: MachineArtifactReference = {
-  revision: {
-    authorityId: 'authority-1',
-    workspaceId: 'workspace-1',
-    revisionId: 'revision-1' as MachineArtifactReference['revision']['revisionId'],
-    treeDigest: `sha256:${'2'.repeat(64)}` as ContentDigest,
-  },
-  path: 'parts/pyramid.gcode.3mf',
-  digest: `sha256:${'3'.repeat(64)}` as ContentDigest,
-  length: 128,
-  mediaType: 'application/vnd.bambulab.gcode-3mf',
-  contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-  selectedMember: 'Metadata/plate_1.gcode',
-};
-type JournalLine = Readonly<{ text: string; event: Readonly<Record<string, unknown>> }>;
-const readJournal = async (root: string): Promise<JournalLine[]> => {
-  const journal = await readFile(join(root, 'machine-events.jsonl'), 'utf8');
-  return journal
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((text) => ({ text, event: (JSON.parse(text) as { event: Readonly<Record<string, unknown>> }).event }));
-};
-const journalIndex = (lines: readonly JournalLine[], predicate: (event: JournalLine['event']) => boolean): number => {
-  const index = lines.findIndex((line) => predicate(line.event));
-  if (index === -1) {
-    throw new Error('journal record not found');
-  }
-  return index;
-};
-const requestRecord = (event: JournalLine['event']): PrintRequest | undefined =>
-  event['type'] === 'machine-print-request' ? (event['request'] as PrintRequest) : undefined;
-const effectRecord = (event: JournalLine['event'], type: string, operationId: string): boolean =>
-  event['type'] === type && event['operationId'] === operationId;
-const truncateJournal = async (root: string, lines: readonly JournalLine[], count: number): Promise<void> =>
-  writeFile(
-    join(root, 'machine-events.jsonl'),
-    lines
-      .slice(0, count)
-      .map((line) => `${line.text}\n`)
+/** Remove a log's last frame, as a crash between that append and the one before it leaves the file. */
+const dropLastFrame = async (path: string): Promise<void> => {
+  const text = await readFile(path, 'utf8');
+  const frames = text.split('\n').filter((line) => line.length > 0);
+  await writeFile(
+    path,
+    frames
+      .slice(0, -1)
+      .map((line) => `${line}\n`)
       .join(''),
   );
+};
 
 describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('print request ledger', () => {
   let currentTime = Date.parse(observedAt);
   const currentTimestamp = (): string => new Date(currentTime).toISOString();
+  /** Runs as each device call begins, before the device answers. */
+  let beforeDevice = async (_call: 'prepare' | 'start' | 'upload'): Promise<void> => undefined;
+  const preparePrint = vi.fn(
+    async (input: Parameters<MachineSession['preparePrint']>[0]): Promise<MachinePreparationReceipt> => {
+      await beforeDevice('prepare');
+      return readyPreparation(input);
+    },
+  );
   const uploadPrint = vi.fn(
-    async (input: Parameters<MachineSession['uploadPrint']>[0]): Promise<MachineTransferReceipt> => ({
-      status: 'transferred',
-      transferId: `transfer-${input.operationId}`,
-      digest: input.artifact.digest,
-      length: input.artifact.length,
-      observedAt: currentTimestamp(),
-    }),
+    async (input: Parameters<MachineSession['uploadPrint']>[0]): Promise<MachineTransferReceipt> => {
+      await beforeDevice('upload');
+      return {
+        status: 'transferred',
+        transferId: `transfer-${input.operationId}`,
+        digest: input.artifact.digest,
+        length: input.artifact.length,
+        observedAt: currentTimestamp(),
+      };
+    },
   );
-  const submit = vi.fn(
-    async (input: Parameters<MachineSession['submit']>[0]): Promise<MachineSubmissionReceipt> =>
-      input.operationId.startsWith('start-unknown')
-        ? { status: 'unknown', reason: 'reply-lost-after-possible-acceptance', observedAt: currentTimestamp() }
-        : { status: 'accepted', providerRunId: `run-${input.operationId}`, observedAt: currentTimestamp() },
-  );
+  const submit = vi.fn(async (input: Parameters<MachineSession['submit']>[0]): Promise<MachineSubmissionReceipt> => {
+    await beforeDevice('start');
+    return input.operationId.startsWith('start-unknown')
+      ? { status: 'unknown', reason: 'reply-lost-after-possible-acceptance', observedAt: currentTimestamp() }
+      : { status: 'accepted', providerRunId: `run-${input.operationId}`, observedAt: currentTimestamp() };
+  });
   const reconcile = vi.fn(
     async (input: Parameters<MachineSession['reconcile']>[0]): Promise<MachineCommandReceipt> =>
       input.command === 'project_file'
@@ -819,6 +894,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
   /** Reports every bound session streams once resolved; each session idles until its signal aborts. */
   let telemetry = Promise.withResolvers<Iterable<MachineSnapshot>>();
   const provider_ = bindingProvider(() => undefined, {
+    preparePrint,
     uploadPrint,
     submit,
     reconcile,
@@ -861,25 +937,20 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
   };
   const openLedgerHost = async (root: string) => {
     const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
+    const onError = vi.fn();
     const host = await createNodeMachineHost({
-      authorityRoot: root,
+      storeRoot: root,
       hostId: 'host-1',
       authorityId: 'authority-1',
-      generation: 'generation-1',
       admission,
       providers: [provider_],
       runtime,
-      onError: vi.fn(),
+      onError,
     });
     hosts.push(host);
-    const session = admission.issueTrustedSession({
-      actor: { kind: 'user', id: 'operator' },
-      authorityId: 'authority-1',
-      workspaceId: 'workspace-1',
-      grants: printRequestGrants,
-    });
+    const session = host.issueSession({ actor: { kind: 'user', id: 'operator' }, grants: printRequestGrants });
     const ports = new MessageChannel();
-    const server = host.serve({ port: ports.port1, session, workspaceId: 'workspace-1' });
+    const server = host.serve({ port: ports.port1, session });
     const client = connectMachineChannel(ports.port2);
     await client.ready;
     const close = async (): Promise<void> => {
@@ -888,7 +959,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
       await host.close();
       hosts.splice(hosts.indexOf(host), 1);
     };
-    return { client, host, close };
+    return { client, host, onError, close };
   };
   const bind = async (host: NodeMachineHost, client: MachineChannelClient): Promise<void> => {
     let candidate: MachineCandidate | undefined;
@@ -906,12 +977,19 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
       await expect(client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({ freshness: 'current' });
     });
   };
-  const request = async (client: MachineChannelClient, requestId: string, configuration = {}) => {
+  const request = async (
+    client: MachineChannelClient,
+    requestId: string,
+    {
+      configuration = {},
+      artifact = printArtifact,
+    }: Readonly<{ configuration?: CacheValue; artifact?: MachineArtifactReference }> = {},
+  ) => {
     currentTime += 1000;
     return client.requestPrint({
       requestId,
       machineId: 'workshop-x1c',
-      artifact: printArtifact,
+      artifact,
       configuration,
       requestedBy: agent,
     });
@@ -920,7 +998,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
   it('gates upload and start behind approval, dedupes ids and reconciles an unknown start without resending', async () => {
     uploadPrint.mockClear();
     submit.mockClear();
-    const root = await authorityRoot();
+    const root = await storeRoot();
     const { client, host, close } = await openLedgerHost(root);
     await bind(host, client);
 
@@ -936,7 +1014,19 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
     expect(uploadPrint).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
     await expect(request(client, 'request-1')).resolves.toEqual(first);
-    await expect(request(client, 'request-1', { changed: true })).rejects.toThrow('MACHINE_PRINT_REQUEST_ID_CONFLICT');
+    await expect(request(client, 'request-1', { configuration: { changed: true } })).rejects.toThrow(
+      'MACHINE_PRINT_REQUEST_ID_CONFLICT',
+    );
+    // A request lives in its machine's directory, so one for an unbound machine is refused and never written.
+    await expect(
+      client.requestPrint({
+        requestId: 'request-elsewhere',
+        machineId: 'unbound-x1c',
+        artifact: printArtifact,
+        configuration: {},
+        requestedBy: agent,
+      }),
+    ).rejects.toThrow('MACHINE_PREPARATION_UNAVAILABLE');
     const watched = client.watchPrintRequests({ machineId: 'workshop-x1c' })[Symbol.asyncIterator]();
     await expect(watched.next()).resolves.toEqual({ done: false, value: first });
 
@@ -986,7 +1076,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
     );
     const seen: string[] = [];
     for (;;) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- the watch yields one journaled transition at a time.
+      // oxlint-disable-next-line eslint/no-await-in-loop -- the watch yields one recorded transition at a time.
       const frame = await watched.next();
       if (frame.done) {
         throw new Error('watch ended early');
@@ -1050,40 +1140,102 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
     ]);
     expect(listed[0]).toMatchObject({ receipt: { providerRunId: 'run-late' } });
     expect(denied.requestId).toBe('request-2');
+    // Each request is one whole record in its machine's directory.
+    expect(await sortedEntries(join(root, 'workshop-x1c', 'requests'))).toEqual([
+      'request-1.json',
+      'request-2.json',
+      'request-3.json',
+      'request-4.json',
+      'request-5.json',
+    ]);
+    expect(JSON.parse(await readFile(join(root, 'workshop-x1c', 'requests', 'request-5.json'), 'utf8'))).toEqual({
+      version: 1,
+      request: listed[0],
+    });
     await watched.return?.();
     await close();
   });
 
-  it('recovers the exact request state from every crash fence and never re-uploads', async () => {
+  it('should list and watch print requests by project', async () => {
+    const root = await storeRoot();
+    const { client, host, close } = await openLedgerHost(root);
+    await bind(host, client);
+    const otherProject = 'proj_ZYXWVUTSRQPONMLKJIHGF';
+    const watched = client.watchPrintRequests({ projectId: otherProject })[Symbol.asyncIterator]();
+    await request(client, 'request-1');
+    await request(client, 'request-2', { artifact: { ...printArtifact, projectId: otherProject } });
+    const ids = async (projectId?: string): Promise<string[]> => {
+      const listed = await client.listPrintRequests(projectId === undefined ? {} : { projectId });
+      return listed.map(({ requestId }) => requestId);
+    };
+    await expect(ids()).resolves.toEqual(['request-2', 'request-1']);
+    await expect(ids(printArtifact.projectId)).resolves.toEqual(['request-1']);
+    await expect(ids(otherProject)).resolves.toEqual(['request-2']);
+    await expect(ids('proj_000000000000000000000')).resolves.toEqual([]);
+    const seen: string[] = [];
+    for (;;) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- the watch yields one recorded transition at a time.
+      const frame = await watched.next();
+      if (frame.done) {
+        throw new Error('watch ended early');
+      }
+      seen.push(frame.value.requestId);
+      if (frame.value.state === 'awaiting-approval') {
+        break;
+      }
+    }
+    expect(new Set(seen)).toEqual(new Set(['request-2']));
+    await watched.return?.();
+    await close();
+  });
+
+  it('recovers the exact request state from every crash point and never re-sends', async () => {
     uploadPrint.mockClear();
     submit.mockClear();
-    const root = await authorityRoot();
+    const root = await storeRoot();
     const first = await openLedgerHost(root);
     await bind(first.host, first.client);
-    await request(first.client, 'request-1');
-    await expect(
-      first.client.resolvePrintRequest({
-        requestId: 'request-1',
-        decision: 'approve',
-        resolvedBy: operator,
-        uploadOperationId: 'upload-1',
-        startOperationId: 'start-1',
-      }),
-    ).resolves.toMatchObject({ state: 'started' });
-    await first.close();
-    const lines = await readJournal(root);
-    const fences = {
-      beforePreparation: journalIndex(lines, (event) => requestRecord(event)?.state === 'awaiting-approval'),
-      beforeApproval: journalIndex(lines, (event) => requestRecord(event)?.state === 'approved'),
-      afterUploadIntent: journalIndex(lines, (event) => effectRecord(event, 'machine-effect-sending', 'upload-1')),
-      afterUploadSend: journalIndex(lines, (event) => effectRecord(event, 'machine-effect-result', 'upload-1')),
-      afterStartSend: journalIndex(lines, (event) => effectRecord(event, 'machine-effect-result', 'start-1')),
-      complete: lines.length,
+    // Copy the store while each device call is out: each copy is what a crash at that point leaves on disk.
+    const crashes = new Map<string, string>();
+    const crashCopy = async (name: string): Promise<void> => {
+      const copy = join(await storeRoot(), 'store');
+      await cp(root, copy, { recursive: true });
+      crashes.set(name, copy);
     };
-    expect(fences.beforePreparation).toBeLessThan(fences.beforeApproval);
-    expect(fences.beforeApproval).toBeLessThan(fences.afterUploadIntent);
-    expect(fences.afterUploadIntent).toBeLessThan(fences.afterUploadSend);
-    expect(fences.afterUploadSend).toBeLessThan(fences.afterStartSend);
+    beforeDevice = async (call) => crashCopy(`${call}-sending`);
+    try {
+      await request(first.client, 'request-1');
+      await crashCopy('awaiting-approval');
+      await expect(
+        first.client.resolvePrintRequest({
+          requestId: 'request-1',
+          decision: 'approve',
+          resolvedBy: operator,
+          uploadOperationId: 'upload-1',
+          startOperationId: 'start-1',
+        }),
+      ).resolves.toMatchObject({ state: 'started' });
+    } finally {
+      beforeDevice = async () => undefined;
+    }
+    await first.close();
+    await crashCopy('complete');
+    // The crash after the upload's intent but before its send was recorded.
+    await crashCopy('upload-planned');
+    const uploadSending = crashes.get('upload-sending');
+    const uploadPlanned = crashes.get('upload-planned');
+    if (!uploadSending || !uploadPlanned) {
+      throw new Error('crash copies missing');
+    }
+    await cp(uploadSending, uploadPlanned, { recursive: true, force: true });
+    await dropLastFrame(join(uploadPlanned, 'workshop-x1c', 'operations.jsonl'));
+    const at = (name: string): string => {
+      const copy = crashes.get(name);
+      if (!copy) {
+        throw new Error(`no crash copy ${name}`);
+      }
+      return copy;
+    };
     const approve = async (client: MachineChannelClient) =>
       client.resolvePrintRequest({ requestId: 'request-1', decision: 'approve', resolvedBy: operator });
     const state = async (client: MachineChannelClient): Promise<PrintRequest> => {
@@ -1093,20 +1245,27 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
       }
       return record;
     };
+    const restart = async (name: string) => {
+      uploadPrint.mockClear();
+      submit.mockClear();
+      const fixture = await openLedgerHost(at(name));
+      await vi.waitFor(async () => {
+        await expect(fixture.client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({
+          freshness: 'current',
+        });
+      });
+      return fixture;
+    };
 
-    await truncateJournal(root, lines, fences.beforePreparation);
-    uploadPrint.mockClear();
-    submit.mockClear();
-    const preparing = await openLedgerHost(root);
+    const preparing = await restart('prepare-sending');
     expect(await state(preparing.client)).toMatchObject({
       state: 'failed',
-      failure: { code: 'HOST_RESTARTED' },
+      failure: { code: 'HOST_RESTARTED', message: 'The host restarted before preparation completed.' },
     });
     await expect(approve(preparing.client)).rejects.toThrow('MACHINE_PRINT_REQUEST_NOT_AWAITING');
     await preparing.close();
 
-    await truncateJournal(root, lines, fences.beforeApproval);
-    const awaiting = await openLedgerHost(root);
+    const awaiting = await restart('awaiting-approval');
     const recoveredAwaiting = await state(awaiting.client);
     expect(recoveredAwaiting.state).toBe('awaiting-approval');
     expect(recoveredAwaiting).not.toHaveProperty('uploadOperationId');
@@ -1116,10 +1275,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
     expect(submit).toHaveBeenCalledOnce();
     await awaiting.close();
 
-    await truncateJournal(root, lines, fences.afterUploadIntent);
-    uploadPrint.mockClear();
-    submit.mockClear();
-    const planned = await openLedgerHost(root);
+    const planned = await restart('upload-planned');
     expect(await state(planned.client)).toMatchObject({ state: 'uploading', uploadOperationId: 'upload-1' });
     await expect(
       planned.client.reconcileOperation({ machineId: 'workshop-x1c', operationId: 'upload-1' }),
@@ -1134,10 +1290,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
     expect(submit).toHaveBeenCalledOnce();
     await planned.close();
 
-    await truncateJournal(root, lines, fences.afterUploadSend);
-    uploadPrint.mockClear();
-    submit.mockClear();
-    const sent = await openLedgerHost(root);
+    const sent = await restart('upload-sending');
     const recoveredSent = await state(sent.client);
     expect(recoveredSent).toMatchObject({
       state: 'unknown',
@@ -1156,9 +1309,15 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
     expect(uploadPrint).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
     await sent.close();
+    // The restart recorded that `unknown` durably, once: a second restart replays it and appends nothing.
+    const sentLog = join(at('upload-sending'), 'workshop-x1c', 'operations.jsonl');
+    const recorded = await readFile(sentLog, 'utf8');
+    expect(recorded.match(/"source":"recovery"/gu)).toHaveLength(1);
+    const again = await restart('upload-sending');
+    await again.close();
+    expect(await readFile(sentLog, 'utf8')).toBe(recorded);
 
-    await truncateJournal(root, lines, fences.afterStartSend);
-    const starting = await openLedgerHost(root);
+    const starting = await restart('start-sending');
     expect(await state(starting.client)).toMatchObject({
       state: 'unknown',
       transferId: 'transfer-upload-1',
@@ -1176,8 +1335,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
     expect(submit).not.toHaveBeenCalled();
     await starting.close();
 
-    await truncateJournal(root, lines, fences.complete);
-    const complete = await openLedgerHost(root);
+    const complete = await restart('complete');
     expect(await state(complete.client)).toMatchObject({
       state: 'started',
       receipt: { operationId: 'start-1', status: 'accepted', providerRunId: 'run-start-1' },
@@ -1189,14 +1347,13 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
   });
 
   it(
-    'should journal no telemetry from four hours of 1 Hz reports and recover bindings, operations and requests',
+    'should store no telemetry from four hours of 1 Hz reports and recover bindings, operations and requests',
     { timeout: 120_000 },
     async () => {
       uploadPrint.mockClear();
       submit.mockClear();
       telemetry = Promise.withResolvers();
-      const root = await authorityRoot();
-      const journalPath = join(root, 'machine-events.jsonl');
+      const root = await storeRoot();
       const first = await openLedgerHost(root);
       await bind(first.host, first.client);
       await request(first.client, 'request-1');
@@ -1210,7 +1367,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
         }),
       ).resolves.toMatchObject({ state: 'started' });
       await request(first.client, 'request-2');
-      const { size: ledgerBytes } = await stat(journalPath);
+      const ledgerBytes = await storeBytes(root);
       const seconds = 4 * 60 * 60;
       const startedAt = currentTime;
       const reportedAt = (second: number): string => new Date(startedAt + second * 1000).toISOString();
@@ -1242,9 +1399,8 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
         freshness: 'current',
         snapshot: { observedAt: reportedAt(seconds), run: { state: 'printing', progress: 100, remainingSeconds: 0 } },
       });
-      // Every report differs, yet the journal holds only the binding, operations and print requests.
-      const { size: afterReports } = await stat(journalPath);
-      expect(afterReports).toBe(ledgerBytes);
+      // Every report differs, yet the store holds only the binding, operations and print requests.
+      expect(await storeBytes(root)).toBe(ledgerBytes);
       expect(ledgerBytes).toBeLessThan(1024 * 1024);
       await first.close();
 
@@ -1262,8 +1418,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
       ).resolves.toMatchObject({ status: 'accepted', receipt: { providerRunId: 'run-start-1' } });
       expect(uploadPrint).toHaveBeenCalledOnce();
       expect(submit).toHaveBeenCalledOnce();
-      const { size: afterRestart } = await stat(journalPath);
-      expect(afterRestart).toBe(ledgerBytes);
+      expect(await storeBytes(root)).toBe(ledgerBytes);
       await restarted.close();
     },
   );
@@ -1348,30 +1503,35 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     credentials: { has, forget },
   };
   const removalGrants: readonly HostRouteGrant[] = (
-    ['discover', 'beginBinding', 'removeBinding', 'list', 'get', 'requestPrint', 'withdrawPrintRequest'] as const
+    [
+      'discover',
+      'beginBinding',
+      'removeBinding',
+      'list',
+      'get',
+      'preparePrint',
+      'controlRun',
+      'reconcileOperation',
+      'requestPrint',
+      'withdrawPrintRequest',
+    ] as const
   ).map((operation) => ({ route: 'machines', operation: `machines.${operation}` }));
   const openCredentialHost = async (root: string) => {
     const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
     const onError = vi.fn();
     const host = await createNodeMachineHost({
-      authorityRoot: root,
+      storeRoot: root,
       hostId: 'host-1',
       authorityId: 'authority-1',
-      generation: 'generation-1',
       admission,
       providers: [provider_],
       runtime,
       onError,
     });
     hosts.push(host);
-    const operatorSession = admission.issueTrustedSession({
-      actor: { kind: 'user', id: 'operator' },
-      authorityId: 'authority-1',
-      workspaceId: 'workspace-1',
-      grants: removalGrants,
-    });
+    const operatorSession = host.issueSession({ actor: { kind: 'user', id: 'operator' }, grants: removalGrants });
     const ports = new MessageChannel();
-    const server = host.serve({ port: ports.port1, session: operatorSession, workspaceId: 'workspace-1' });
+    const server = host.serve({ port: ports.port1, session: operatorSession });
     const client = connectMachineChannel(ports.port2);
     await client.ready;
     const close = async (): Promise<void> => {
@@ -1402,12 +1562,19 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
   const bindAs = async (
     fixture: Readonly<{ client: MachineChannelClient; host: NodeMachineHost }>,
     binding: Readonly<{ candidateId: string; name: string; secretRef: string }>,
-  ): Promise<void> => {
+  ): Promise<string> => {
     const ceremonyId = await beginCeremony(fixture.client, binding.candidateId, binding.name);
-    await fixture.host.completeBinding({ ceremonyId, secretRef: binding.secretRef, serviceTrust: {} });
+    const outcome = await fixture.host.completeBinding({ ceremonyId, secretRef: binding.secretRef, serviceTrust: {} });
+    if (outcome.status !== 'bound') {
+      throw new Error('expected a bound machine');
+    }
     await vi.waitFor(async () => {
-      await expect(fixture.client.get({ machineId: binding.name })).resolves.toMatchObject({ freshness: 'current' });
+      await expect(fixture.client.get({ machineId: outcome.machineId })).resolves.toMatchObject({
+        name: binding.name,
+        freshness: 'current',
+      });
     });
+    return outcome.machineId;
   };
 
   it('should flag a candidate whose claimed identity has a saved credential without persisting the flag', async () => {
@@ -1415,7 +1582,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     has.mockClear();
     const reference = machineCredentialReference('binding-provider', 'physical-a');
     saved.add(reference);
-    const root = await authorityRoot();
+    const root = await storeRoot();
     const fixture = await openCredentialHost(root);
     const found = await discoverAll(fixture.client);
     expect(found.get('candidate-a')).toEqual({ ...printerA, credential: 'saved' });
@@ -1429,7 +1596,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     expect(unmarked.get('candidate-a')).toEqual(printerA);
     expect(fixture.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'SECRET_VAULT_UNAVAILABLE' }));
 
-    // The flag is a projection: the ceremony, its description and the journal keep the provider's own candidate.
+    // The flag is a projection: the ceremony, its description and the store keep the provider's own candidate.
     const ceremony = await fixture.client.beginBinding({ candidate: found.get('candidate-a')!, name: 'workshop-x1c' });
     if (ceremony.status !== 'operator-action-required') {
       throw new Error('expected binding ceremony');
@@ -1440,12 +1607,14 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     });
     await fixture.host.completeBinding({ ceremonyId: ceremony.ceremonyId, secretRef: reference, serviceTrust: {} });
     await fixture.close();
-    const journal = await readJournal(root);
-    expect(journal.some(({ text }) => text.includes('"credential"'))).toBe(false);
+    for (const file of await storeFiles(root)) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each store file is checked on its own.
+      expect(await readFile(file, 'utf8'), file).not.toContain('"credential"');
+    }
   });
 
   it('should describe only a pending ceremony', async () => {
-    const fixture = await openCredentialHost(await authorityRoot());
+    const fixture = await openCredentialHost(await storeRoot());
     const ceremonyId = await beginCeremony(fixture.client, 'candidate-b', 'studio-x1c');
     expect(fixture.host.describeBinding(ceremonyId)).toEqual({ providerId: 'binding-provider', candidate: printerB });
     expect(fixture.host.describeBinding('unknown-ceremony')).toBeUndefined();
@@ -1454,11 +1623,41 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     await fixture.close();
   });
 
-  it('should remove a binding, forget its credential and keep it removed after a restart', async () => {
+  it('should give a binding the free slug of its name and keep the name to show', async () => {
+    const fixture = await openCredentialHost(await storeRoot());
+    await expect(
+      bindAs(fixture, { candidateId: 'candidate-a', name: 'Workshop X1C', secretRef: 'vault:a' }),
+    ).resolves.toBe('workshop-x1c');
+    await expect(
+      bindAs(fixture, { candidateId: 'candidate-b', name: 'workshop x1c', secretRef: 'vault:b' }),
+    ).resolves.toBe('workshop-x1c-2');
+    await expect(fixture.client.list({})).resolves.toMatchObject({
+      entries: [
+        { machineId: 'workshop-x1c', name: 'Workshop X1C', descriptor: { id: 'physical-a' } },
+        { machineId: 'workshop-x1c-2', name: 'workshop x1c', descriptor: { id: 'physical-b' } },
+      ],
+    });
+    // A name is the person's text: blank or longer than 128 characters is refused before any ceremony.
+    await expect(beginCeremony(fixture.client, 'candidate-c', '   ')).rejects.toThrow('MACHINE_BINDING_NAME_INVALID');
+    await expect(beginCeremony(fixture.client, 'candidate-c', 'x'.repeat(129))).rejects.toThrow(
+      'MACHINE_BINDING_NAME_INVALID',
+    );
+    // A candidate that is already bound answers with its machine, whatever name is asked for.
+    const found = await discoverAll(fixture.client);
+    await expect(fixture.client.beginBinding({ candidate: found.get('candidate-a')!, name: 'Other' })).resolves.toEqual(
+      {
+        status: 'bound',
+        machineId: 'workshop-x1c',
+      },
+    );
+    await fixture.close();
+  });
+
+  it('should remove a binding, forget its credential and keep its history after a restart', async () => {
     saved.clear();
     forget.mockClear();
     closes.mockClear();
-    const root = await authorityRoot();
+    const root = await storeRoot();
     const reference = machineCredentialReference('binding-provider', 'physical-a');
     saved.add(reference);
     const first = await openCredentialHost(root);
@@ -1476,17 +1675,18 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
       'MACHINE_DIRECTORY_UNKNOWN_MACHINE',
     );
     await first.close();
-    const journal = await readJournal(root);
-    const removals = journal.map(({ event }) => event).filter((event) => event['type'] === 'machine-binding-removed');
-    expect(removals).toEqual([
-      { type: 'machine-binding-removed', workspaceId: 'workspace-1', machineId: 'workshop-x1c' },
-    ]);
+    const history = `workshop-x1c.removed-${Date.parse(observedAt)}`;
+    expect(await sortedEntries(root)).toEqual(['authority', 'store.json', history]);
+    expect(JSON.parse(await readFile(join(root, history, 'machine.json'), 'utf8'))).toMatchObject({
+      id: 'workshop-x1c',
+      connection: { secretRef: reference },
+    });
 
     connects.mockClear();
     const second = await openCredentialHost(root);
     expect(connects).not.toHaveBeenCalled();
     await expect(second.client.list({})).resolves.toMatchObject({ entries: [] });
-    // The printer is free again: a new logical binding for it is not a physical-identity conflict.
+    // The printer is free again: a new binding for it is not a physical-identity conflict.
     await bindAs(second, { candidateId: 'candidate-a', name: 'studio-x1c', secretRef: reference });
     await expect(second.client.list({})).resolves.toMatchObject({
       entries: [{ machineId: 'studio-x1c', descriptor: { id: 'physical-a' } }],
@@ -1496,7 +1696,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
 
   it('should refuse removal while a print request still needs the binding', async () => {
     forget.mockClear();
-    const fixture = await openCredentialHost(await authorityRoot());
+    const fixture = await openCredentialHost(await storeRoot());
     await bindAs(fixture, { candidateId: 'candidate-a', name: 'workshop-x1c', secretRef: 'vault:busy' });
     await expect(
       fixture.client.requestPrint({
@@ -1521,13 +1721,13 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
 
   it('should forget a credential only once no binding uses it, never "none", and report a failed forget', async () => {
     forget.mockClear();
-    const fixture = await openCredentialHost(await authorityRoot());
+    const fixture = await openCredentialHost(await storeRoot());
     await bindAs(fixture, { candidateId: 'candidate-a', name: 'printer-a', secretRef: 'vault:shared' });
     await bindAs(fixture, { candidateId: 'candidate-b', name: 'printer-b', secretRef: 'vault:shared' });
     await fixture.client.removeBinding({ machineId: 'printer-a' });
     expect(forget).not.toHaveBeenCalled();
     // The trusted host object removes too, e.g. to roll back a binding whose credential could not be saved.
-    await expect(fixture.host.removeBinding({ workspaceId: 'workspace-1', machineId: 'printer-b' })).resolves.toEqual({
+    await expect(fixture.host.removeBinding({ machineId: 'printer-b' })).resolves.toEqual({
       status: 'removed',
       machineId: 'printer-b',
     });
@@ -1546,6 +1746,185 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     expect(fixture.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'SECRET_VAULT_UNAVAILABLE' }));
     await expect(fixture.client.list({})).resolves.toMatchObject({ entries: [] });
     await fixture.close();
+  });
+
+  it("should keep every other printer working when one printer's operations log is unreadable", async () => {
+    const root = await storeRoot();
+    const first = await openCredentialHost(root);
+    await bindAs(first, { candidateId: 'candidate-a', name: 'printer-a', secretRef: 'vault:a' });
+    await bindAs(first, { candidateId: 'candidate-b', name: 'printer-b', secretRef: 'vault:b' });
+    await first.close();
+    // A well-formed frame that breaks the replay rules: a send for an effect that was never planned.
+    const log = await createNodeMachineEventLog({
+      directory: join(root, 'printer-a'),
+      fileName: 'operations.jsonl',
+      owner: {
+        assertCurrent() {
+          /* No host owns the store while the fixture writes. */
+        },
+      },
+      parse: plainJson,
+    });
+    await log.append({ type: 'machine-effect-sending', operationId: 'orphan', observedAt });
+    await log.close();
+    const damaged = await readFile(join(root, 'printer-a', 'operations.jsonl'));
+
+    connects.mockClear();
+    const second = await openCredentialHost(root);
+    expect(connects.mock.calls).toEqual([['candidate-b']]);
+    expect(second.onError).toHaveBeenCalledOnce();
+    expect(second.onError.mock.calls[0]?.[0]).toMatchObject({
+      message: 'MACHINE_OPERATIONS_LOG_CORRUPT',
+      cause: { message: 'NODE_MACHINE_EFFECT_ORPHAN_TRANSITION' },
+    });
+    await vi.waitFor(async () => {
+      await expect(second.client.list({})).resolves.toMatchObject({
+        entries: [
+          { machineId: 'printer-a', name: 'printer-a', freshness: 'stale' },
+          { machineId: 'printer-b', freshness: 'current' },
+        ],
+      });
+    });
+    await expect(
+      second.client.preparePrint({ machineId: 'printer-a', artifact: printArtifact, configuration: {} }),
+    ).rejects.toThrow('MACHINE_OPERATIONS_LOG_CORRUPT');
+    await expect(
+      second.client.controlRun({
+        machineId: 'printer-a',
+        operationId: 'pause-1',
+        command: 'pause',
+        expectedProviderRunId: 'run-1',
+      }),
+    ).rejects.toThrow('MACHINE_OPERATIONS_LOG_CORRUPT');
+    await expect(second.client.reconcileOperation({ machineId: 'printer-a', operationId: 'orphan' })).rejects.toThrow(
+      'MACHINE_OPERATIONS_LOG_CORRUPT',
+    );
+    await expect(
+      second.client.requestPrint({
+        requestId: 'request-a',
+        machineId: 'printer-a',
+        artifact: printArtifact,
+        configuration: {},
+        requestedBy: agent,
+      }),
+    ).rejects.toThrow('MACHINE_OPERATIONS_LOG_CORRUPT');
+    await expect(
+      second.client.requestPrint({
+        requestId: 'request-b',
+        machineId: 'printer-b',
+        artifact: printArtifact,
+        configuration: {},
+        requestedBy: agent,
+      }),
+    ).resolves.toMatchObject({ state: 'awaiting-approval' });
+    expect(await readdir(join(root, 'printer-a'))).not.toContain('requests');
+    // The unreadable printer can still be removed; its log goes with its history, byte for byte.
+    await expect(second.client.removeBinding({ machineId: 'printer-a' })).resolves.toEqual({
+      status: 'removed',
+      machineId: 'printer-a',
+    });
+    await second.close();
+    expect(await readFile(join(root, `printer-a.removed-${Date.parse(observedAt)}`, 'operations.jsonl'))).toEqual(
+      damaged,
+    );
+  });
+
+  it('should keep every other printer working when one printer cannot record its possible send at restart', async () => {
+    const root = await storeRoot();
+    const first = await openCredentialHost(root);
+    await bindAs(first, { candidateId: 'candidate-a', name: 'printer-a', secretRef: 'vault:a' });
+    await bindAs(first, { candidateId: 'candidate-b', name: 'printer-b', secretRef: 'vault:b' });
+    await first.close();
+    // A pause that may have left when the host stopped: recovery owes it a durable `unknown` before anything reconnects.
+    const log = await createNodeMachineEventLog({
+      directory: join(root, 'printer-a'),
+      fileName: 'operations.jsonl',
+      owner: {
+        assertCurrent() {
+          /* No host owns the store while the fixture writes. */
+        },
+      },
+      parse: plainJson,
+    });
+    await log.append({
+      type: 'machine-effect-intent',
+      machineId: 'printer-a',
+      providerId: 'binding-provider',
+      physicalMachineId: 'physical-a',
+      operationId: 'pause-1',
+      inputDigest: `sha256:${'0'.repeat(64)}`,
+      intent: { kind: 'pause', expectedProviderRunId: 'run-1' },
+      plannedAt: observedAt,
+    });
+    await log.append({ type: 'machine-effect-sending', operationId: 'pause-1', observedAt });
+    await log.close();
+    const pending = await readFile(join(root, 'printer-a', 'operations.jsonl'));
+
+    connects.mockClear();
+    refusedAppends.add(join(await realpath(root), 'printer-a'));
+    try {
+      const second = await openCredentialHost(root);
+      expect(connects.mock.calls).toEqual([['candidate-b']]);
+      expect(second.onError).toHaveBeenCalledOnce();
+      expect(second.onError.mock.calls[0]?.[0]).toMatchObject({
+        message: 'MACHINE_OPERATIONS_LOG_CORRUPT',
+        cause: { message: 'FIXTURE_APPEND_REFUSED' },
+      });
+      await vi.waitFor(async () => {
+        await expect(second.client.list({})).resolves.toMatchObject({
+          entries: [
+            { machineId: 'printer-a', freshness: 'stale' },
+            { machineId: 'printer-b', freshness: 'current' },
+          ],
+        });
+      });
+      // The possible send is neither settled nor sent again.
+      await expect(
+        second.client.reconcileOperation({ machineId: 'printer-a', operationId: 'pause-1' }),
+      ).rejects.toThrow('MACHINE_OPERATIONS_LOG_CORRUPT');
+      await second.close();
+    } finally {
+      refusedAppends.clear();
+    }
+    expect(await readFile(join(root, 'printer-a', 'operations.jsonl'))).toEqual(pending);
+  });
+
+  it('should import a legacy binding once and reconnect it as an ordinary printer', async () => {
+    connects.mockClear();
+    const root = await storeRoot();
+    const legacy = await legacyJournal(root);
+    await legacy.append({
+      type: 'host-authority-initialized',
+      hostId: 'host-1',
+      authorityId: 'authority-1',
+      generation: 'generation-1',
+    });
+    await legacy.append({
+      type: 'machine-binding-committed',
+      workspaceId: 'c'.repeat(64),
+      machineId: 'Workshop X1C',
+      providerId: 'binding-provider',
+      physicalId: 'physical-a',
+      candidate: printerA,
+      configuration: {},
+      connection: { secretRef: 'vault:legacy', serviceTrust: {} },
+    });
+    await legacy.close();
+    const fixture = await openCredentialHost(root);
+    expect(connects.mock.calls).toEqual([['candidate-a']]);
+    await vi.waitFor(async () => {
+      await expect(fixture.client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({
+        name: 'Workshop X1C',
+        freshness: 'current',
+        descriptor: { id: 'physical-a' },
+      });
+    });
+    await fixture.close();
+    expect(JSON.parse(await readFile(join(root, 'store.json'), 'utf8'))).toMatchObject({
+      version: 1,
+      migrated: { journals: 1, machines: 1, droppedRequests: 0, droppedEffects: 0 },
+    });
+    expect(fixture.onError).not.toHaveBeenCalled();
   });
 });
 
@@ -1672,10 +2051,9 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
     const onError = vi.fn();
     const host = await createNodeMachineHost({
-      authorityRoot: root,
+      storeRoot: root,
       hostId: 'host-1',
       authorityId: 'authority-1',
-      generation: 'generation-1',
       admission,
       providers: [provider_],
       runtime,
@@ -1693,13 +2071,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     const ports = new MessageChannel();
     const server = fixture.host.serve({
       port: ports.port1,
-      session: fixture.admission.issueTrustedSession({
-        actor: { kind: 'user', id: 'operator' },
-        authorityId: 'authority-1',
-        workspaceId: 'workspace-1',
-        grants,
-      }),
-      workspaceId: 'workspace-1',
+      session: fixture.host.issueSession({ actor: { kind: 'user', id: 'operator' }, grants }),
     });
     const client = connectMachineChannel(ports.port2);
     await client.ready;
@@ -1757,7 +2129,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
   });
 
   it('should connect a printer that was off at start, retrying after 2 s, 5 s, 10 s, 30 s, then every 60 s', async () => {
-    const root = await authorityRoot();
+    const root = await storeRoot();
     await bindOnce(root);
     outcomes.push(...Array.from({ length: 6 }, () => new Error('FIXTURE_OFFLINE')));
     useFakeTimers();
@@ -1785,7 +2157,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
   it.each(['disconnected', 'end', 'throw'] as const)(
     'should replace a session whose observation reports %s and start the backoff over once it connects',
     async (loss) => {
-      const root = await authorityRoot();
+      const root = await storeRoot();
       await bindOnce(root);
       useFakeTimers();
       const fixture = await openServed(root);
@@ -1821,7 +2193,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
       'FIXTURE_CERTIFICATE_CHANGED',
     ],
   ] as const)('should stop retrying and leave the machine stale when %s', async (_case, refusal, code) => {
-    const root = await authorityRoot();
+    const root = await storeRoot();
     await bindOnce(root);
     useFakeTimers();
     const fixture = await openServed(root);
@@ -1848,7 +2220,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
   });
 
   it('should cancel a pending retry and abandon an attempt in flight when the host closes', async () => {
-    const root = await authorityRoot();
+    const root = await storeRoot();
     await bindOnce(root);
     outcomes.push(new Error('FIXTURE_OFFLINE'));
     useFakeTimers();
@@ -1871,14 +2243,14 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
   });
 
   it('should never retry a removed binding and abandon its attempt in flight', async () => {
-    const root = await authorityRoot();
+    const root = await storeRoot();
     await bindOnce(root);
     outcomes.push(new Error('FIXTURE_OFFLINE'), 'hang');
     useFakeTimers();
     const fixture = await openSupervised(root);
     await expectAttemptAfter(2000);
     const [signal] = connects.mock.lastCall!;
-    await expect(fixture.host.removeBinding({ workspaceId: 'workspace-1', ...machine })).resolves.toEqual({
+    await expect(fixture.host.removeBinding(machine)).resolves.toEqual({
       status: 'removed',
       ...machine,
     });
@@ -1891,7 +2263,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
 
   it('should never re-send a start whose reply was lost with the dropped session', async () => {
     submit.mockReset();
-    const root = await authorityRoot();
+    const root = await storeRoot();
     await bindOnce(root);
     useFakeTimers();
     const fixture = await openServed(root);
@@ -1936,7 +2308,10 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     expect(submit).toHaveBeenCalledOnce();
     vi.useRealTimers();
     await fixture.close();
-    const journal = await readJournal(root);
-    expect(journal.filter(({ event }) => effectRecord(event, 'machine-effect-sending', 'start-1'))).toHaveLength(1);
+    const operationsLog = await readFile(join(root, 'workshop-x1c', 'operations.jsonl'), 'utf8');
+    const sendings = operationsLog
+      .split('\n')
+      .filter((line) => line.includes('"type":"machine-effect-sending"') && line.includes('"operationId":"start-1"'));
+    expect(sendings).toHaveLength(1);
   });
 });

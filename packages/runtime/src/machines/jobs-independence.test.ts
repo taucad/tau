@@ -14,6 +14,7 @@ const productionFiles = [
   join(machineDirectory, 'machine-directory.ts'),
   join(runtimeDirectory, 'host/node.ts'),
   join(runtimeDirectory, 'host/node-machine-event-log.ts'),
+  join(runtimeDirectory, 'host/node-machine-store.ts'),
 ] as const;
 
 describe('machines jobs boundary', () => {

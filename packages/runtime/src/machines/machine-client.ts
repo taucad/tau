@@ -170,13 +170,13 @@ export type MachineOperationSnapshot = Readonly<{
   receipt?: MachineOperationReceipt;
 }>;
 
-/** Read the current workspace machine directory. @public */
+/** Read the machine directory: every printer bound on this computer. @public */
 export type MachineListInput = Readonly<{ signal?: AbortSignal }>;
 
-/** Read one logical machine from the current workspace directory. @public */
+/** Read one logical machine from the machine directory. @public */
 export type MachineGetInput = Readonly<{ machineId: string; signal?: AbortSignal }>;
 
-/** Watch a workspace directory from an optional durable cursor. @public */
+/** Watch the machine directory from an optional cursor. @public */
 export type MachineWatchInput = Readonly<{ cursor?: MachineDirectoryCursor; signal?: AbortSignal }>;
 
 /** Browser-safe machines facet shared by the workbench and agent tools. @public */

@@ -82,11 +82,15 @@ export type MachineRequestPrintInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-/** Read requests, newest first, optionally for one machine. @public */
-export type MachineListPrintRequestsInput = Readonly<{ machineId?: string; signal?: AbortSignal }>;
+/** Read requests, newest first, optionally for one machine and one project (`artifact.projectId`). @public */
+export type MachineListPrintRequestsInput = Readonly<{ machineId?: string; projectId?: string; signal?: AbortSignal }>;
 
-/** Observe request transitions as they are journaled. @public */
-export type MachineWatchPrintRequestsInput = Readonly<{ machineId?: string; signal?: AbortSignal }>;
+/** Observe request transitions as they are recorded, optionally for one machine and one project. @public */
+export type MachineWatchPrintRequestsInput = Readonly<{
+  machineId?: string;
+  projectId?: string;
+  signal?: AbortSignal;
+}>;
 
 /** Approve or deny one awaiting request; approval carries the operation ids the host will use. @public */
 export type MachineResolvePrintRequestInput = Readonly<{

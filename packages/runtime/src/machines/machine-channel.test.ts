@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { defineConfiguration } from '#configuration/index.js';
 import { createHostAdmissionAuthority } from '#host/host-admission.js';
 import type { HostRouteGrant } from '#host/host-admission.js';
-import { connectMachineChannel, exposeMachineChannel } from '#machines/machine-channel.js';
+import { connectMachineChannel, exposeMachineChannel, machineAdmissionScope } from '#machines/machine-channel.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type { MachinePreparedPrint } from '#machines/machine-client.js';
 import type { MachineDirectory, MachineDirectoryFrame, MachineDirectorySnapshot } from '#machines/machine-directory.js';
@@ -57,14 +57,10 @@ const candidate: MachineCandidate = {
   observedAt: '2026-09-14T00:00:00Z',
   expiresAt: '2026-09-14T00:01:00Z',
 };
+const projectId = 'proj_0123456789abcdefghijK';
 const artifact: MachineArtifactReference = {
-  revision: {
-    authorityId: 'authority',
-    workspaceId: 'workspace',
-    revisionId: 'revision-1' as MachineArtifactReference['revision']['revisionId'],
-    treeDigest: `sha256:${'1'.repeat(64)}` as MachineArtifactReference['digest'],
-  },
-  path: 'part.gcode.3mf',
+  projectId,
+  path: '.tau/artifacts/2222/part.gcode.3mf',
   digest: `sha256:${'2'.repeat(64)}` as MachineArtifactReference['digest'],
   length: 128,
   mediaType: 'application/vnd.bambulab.gcode-3mf',
@@ -103,7 +99,6 @@ const snapshot: MachineDirectorySnapshot = {
   cursor: {
     hostId: 'host',
     authorityId: 'authority',
-    workspaceId: 'workspace',
     generation: 'generation',
     position: 0,
     revision: 0,
@@ -132,16 +127,22 @@ const grants: readonly HostRouteGrant[] = [
   { route: 'machines', operation: 'machines.watch' },
 ];
 
-const open = (
-  selectedGrants = grants,
-  directoryOverride: Partial<MachineDirectory> = {},
-  operationsOverride: Partial<MachineChannelHostOperations> = {},
-) => {
+const open = ({
+  grants: selectedGrants = grants,
+  directory: directoryOverride = {},
+  operations: operationsOverride = {},
+  scope = machineAdmissionScope,
+}: Readonly<{
+  grants?: readonly HostRouteGrant[];
+  directory?: Partial<MachineDirectory>;
+  operations?: Partial<MachineChannelHostOperations>;
+  scope?: string;
+}> = {}) => {
   const admission = createHostAdmissionAuthority({ hostId: 'host' });
   const session = admission.issueTrustedSession({
     actor: { kind: 'user', id: 'user' },
     authorityId: 'authority',
-    workspaceId: 'workspace',
+    workspaceId: scope,
     grants: selectedGrants,
   });
   const directory: MachineDirectory = {
@@ -231,7 +232,6 @@ const open = (
     admission,
     session,
     authorityId: 'authority',
-    workspaceId: 'workspace',
     directory,
     providers: [provider],
     operations,
@@ -334,9 +334,11 @@ describe('machine channel', () => {
 
   it('should carry the saved-credential flag on discovery frames and accept it back on beginBinding', async () => {
     const saved: MachineCandidate = { ...candidate, credential: 'saved' };
-    const fixture = open(undefined, undefined, {
-      async *discover() {
-        yield { type: 'found', candidate: saved };
+    const fixture = open({
+      operations: {
+        async *discover() {
+          yield { type: 'found', candidate: saved };
+        },
       },
     });
     try {
@@ -357,7 +359,7 @@ describe('machine channel', () => {
   });
 
   it('should refuse removeBinding without its exact grant before host work', async () => {
-    const fixture = open(grants.filter(({ operation }) => operation !== 'machines.removeBinding'));
+    const fixture = open({ grants: grants.filter(({ operation }) => operation !== 'machines.removeBinding') });
     try {
       await expect(fixture.client.removeBinding({ machineId: 'machine-1' })).rejects.toThrow('ROUTE_DENIED');
       expect(fixture.operations.removeBinding).not.toHaveBeenCalled();
@@ -377,7 +379,10 @@ describe('machine channel', () => {
       capturedAt: '2026-09-14T00:00:02Z',
       expiresAt: '2026-09-14T00:00:17Z',
     }));
-    const fixture = open([{ route: 'machines', operation: 'machines.list' }], {}, { discover, captureStill });
+    const fixture = open({
+      grants: [{ route: 'machines', operation: 'machines.list' }],
+      operations: { discover, captureStill },
+    });
     try {
       const iterator = fixture.client
         .discover({ providerId: 'fixture-provider', configuration: {} })
@@ -392,10 +397,82 @@ describe('machine channel', () => {
     }
   });
 
+  it('should refuse an artifact reference outside a project before host work', async () => {
+    const fixture = open();
+    const requester = { kind: 'user', id: 'user', label: 'Operator' } as const;
+    try {
+      for (const invalid of [
+        { ...artifact, projectId: 'project-1' },
+        { ...artifact, projectId: `${projectId}x` },
+        { ...artifact, path: '../secret.gcode.3mf' },
+        { ...artifact, path: 'parts/../../secret.gcode.3mf' },
+        { ...artifact, path: '/etc/part.gcode.3mf' },
+        { ...artifact, path: 'parts//part.gcode.3mf' },
+        { ...artifact, path: './part.gcode.3mf' },
+        { ...artifact, path: '' },
+      ]) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- each reference is refused on its own.
+        await expect(
+          fixture.client.requestPrint({
+            requestId: 'request-invalid',
+            machineId: 'machine-1',
+            artifact: invalid,
+            configuration: {},
+            requestedBy: requester,
+          }),
+        ).rejects.toThrow();
+        // oxlint-disable-next-line eslint/no-await-in-loop -- each reference is refused on its own.
+        await expect(
+          fixture.client.preparePrint({ machineId: 'machine-1', artifact: invalid, configuration: {} }),
+        ).rejects.toThrow();
+      }
+      expect(fixture.operations.requestPrint).not.toHaveBeenCalled();
+      expect(fixture.operations.preparePrint).not.toHaveBeenCalled();
+    } finally {
+      fixture.client.close();
+      fixture.server.dispose();
+    }
+  });
+
+  it('should pass the project filter of request reads and watches to the host', async () => {
+    const watchPrintRequests = vi.fn(async function* () {
+      yield request;
+    });
+    const fixture = open({ operations: { watchPrintRequests } });
+    try {
+      await expect(fixture.client.listPrintRequests({ projectId })).resolves.toEqual([request]);
+      expect(fixture.operations.listPrintRequests).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ projectId }),
+      );
+      const watched = fixture.client.watchPrintRequests({ machineId: 'machine-1', projectId })[Symbol.asyncIterator]();
+      await expect(watched.next()).resolves.toEqual({ done: false, value: request });
+      expect(watchPrintRequests).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ machineId: 'machine-1', projectId }),
+      );
+      await watched.return?.();
+      await expect(fixture.client.listPrintRequests({ projectId: 'project-1' })).rejects.toThrow();
+      expect(fixture.operations.listPrintRequests).toHaveBeenCalledOnce();
+    } finally {
+      fixture.client.close();
+      fixture.server.dispose();
+    }
+  });
+
+  it('should refuse a session issued under any scope but the machines scope', async () => {
+    const fixture = open({ scope: 'workspace' });
+    try {
+      await expect(fixture.client.list({})).rejects.toThrow('WORKSPACE_MISMATCH');
+      expect(fixture.directory.snapshot).not.toHaveBeenCalled();
+    } finally {
+      fixture.client.close();
+      fixture.server.dispose();
+    }
+  });
+
   it('settles an awaiting operation when its trusted session is revoked', async () => {
     const pending = Promise.withResolvers<MachineDirectorySnapshot>();
     const read = vi.fn(async () => pending.promise);
-    const fixture = open(undefined, { snapshot: read });
+    const fixture = open({ directory: { snapshot: read } });
     const result = fixture.client.list({});
     await vi.waitFor(() => {
       expect(read).toHaveBeenCalledOnce();

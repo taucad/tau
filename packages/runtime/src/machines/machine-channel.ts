@@ -9,6 +9,7 @@ import type {
 } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 import type { ContentDigest } from '@taucad/cache-core';
+import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
@@ -49,12 +50,7 @@ import type {
   MachineDirectorySnapshot,
 } from '#machines/machine-directory.js';
 import { parseMachineProvider } from '#machines/machine.js';
-import type {
-  MachineArtifactReference,
-  MachineBindingOutcome,
-  MachineProvider,
-  MachineStill,
-} from '#machines/machine.js';
+import type { MachineBindingOutcome, MachineProvider, MachineStill } from '#machines/machine.js';
 import type {
   MachineListPrintRequestsInput,
   MachineRequestPrintInput,
@@ -175,17 +171,17 @@ const bindingRemovalSchema = z.strictObject({ status: z.literal('removed'), mach
 const digestSchema = z.custom<ContentDigest>(
   (value) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value),
 );
-const revisionIdSchema = z.custom<MachineArtifactReference['revision']['revisionId']>(
-  (value) => typeof value === 'string' && value.length > 0 && value.length <= 256 && value.isWellFormed(),
-);
+const projectIdSchema = z.string().regex(/^proj_[\dA-Za-z]{21}$/u);
+const isProjectRelativePath = (value: string): boolean => {
+  try {
+    return value.isWellFormed() && assertRootedPath(value) === value;
+  } catch {
+    return false;
+  }
+};
 const artifactSchema = z.strictObject({
-  revision: z.strictObject({
-    authorityId: identitySchema,
-    workspaceId: identitySchema,
-    revisionId: revisionIdSchema,
-    treeDigest: digestSchema,
-  }),
-  path: identitySchema,
+  projectId: projectIdSchema,
+  path: z.string().min(1).max(512).refine(isProjectRelativePath, 'Expected a normalized project-relative path.'),
   digest: digestSchema,
   length: z
     .number()
@@ -310,7 +306,17 @@ const printRequestSchema = z.strictObject({
   failure: z.strictObject({ code: identitySchema, message: textSchema }).optional(),
   resolvedBy: requesterSchema.optional(),
 });
-const requestScopeSchema = z.strictObject({ machineId: identitySchema.optional() });
+const requestScopeSchema = z.strictObject({
+  machineId: identitySchema.optional(),
+  projectId: projectIdSchema.optional(),
+});
+
+/**
+ * The one admission scope every machines session is issued and admitted under. Printers belong to the store, not to
+ * a workspace or project, so no machine API names it.
+ * @internal
+ */
+export const machineAdmissionScope = 'tau:machines';
 
 const freeze = <Value>(value: Value): Value => {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -322,11 +328,18 @@ const freeze = <Value>(value: Value): Value => {
   return value;
 };
 
-/** Admit one bounded print request record for the wire or the authority journal. @internal
+/** Admit one bounded print request record for the wire or the machine store. @internal
  * @param value - Untrusted record value.
  * @returns Detached, frozen record.
  */
 export const parsePrintRequest = (value: unknown): PrintRequest => freeze(printRequestSchema.parse(value));
+
+/** Admit one bounded prepared-print record for the wire or the machine store. @internal
+ * @param value - Untrusted record value.
+ * @returns Detached, frozen record.
+ */
+export const parseMachinePreparedPrint = (value: unknown): MachinePreparedPrint =>
+  freeze(preparedPrintSchema.parse(value));
 
 const validator = <Value>(parse: (value: unknown) => Value): WireValidator<Value> => ({
   safeParse(value) {
@@ -513,7 +526,7 @@ const relay = async function* <Value>(
 };
 
 /** Serve one trusted session's typed machines route.
- * @param input - Trusted channel, admission, scope, directory, providers and host operations.
+ * @param input - Trusted channel, admission, authority, directory, providers and host operations.
  * @returns The channel lifecycle handle; disposal never closes host-owned services.
  * @public
  */
@@ -522,7 +535,6 @@ export const exposeMachineChannel = (input: {
   readonly admission: HostAdmissionAuthority;
   readonly session: HostSessionHandle;
   readonly authorityId: string;
-  readonly workspaceId: string;
   readonly directory: MachineDirectory;
   readonly providers: readonly MachineProvider[];
   readonly operations: MachineChannelHostOperations;
@@ -536,7 +548,7 @@ export const exposeMachineChannel = (input: {
     const admitted = input.admission.admit({
       session: input.session,
       authorityId: input.authorityId,
-      workspaceId: input.workspaceId,
+      workspaceId: machineAdmissionScope,
       route: 'machines',
       operation,
     });
@@ -563,7 +575,7 @@ export const exposeMachineChannel = (input: {
           return providers;
         }
         if (name === 'list' || name === 'get') {
-          const directory = await abortable(input.directory.snapshot({ workspaceId: admitted.workspaceId }), combined);
+          const directory = await abortable(input.directory.snapshot(), combined);
           combined.throwIfAborted();
           admitted.assertCurrent();
           if (name === 'list') {
@@ -669,7 +681,6 @@ export const exposeMachineChannel = (input: {
         }
         yield* relay(
           input.directory.watch({
-            workspaceId: admitted.workspaceId,
             cursor: (args as WatchInput).cursor,
             signal: combined,
           }),

@@ -153,6 +153,11 @@ export const runtimeAssetsPlugin = (): Plugin => {
       emittedAssets.set(this.environment, new Map());
       emittedReferences.set(this.environment, new Map());
     },
+    // Rollup's rebuild cache skips transform for an unchanged module and replays its emissions, but
+    // buildStart dropped the references its placeholders name, so re-transform it. Undefined leaves
+    // every other module to later plugins. Rolldown does not implement this hook.
+    // ponytail: asset owners re-read and re-hash their assets on every rebuild; cache per module if slow.
+    shouldTransformCachedModule: ({ code }) => code.includes('__TAUCAD_RUNTIME_ASSET__') || undefined,
     transform: {
       filter: { code: 'import.meta' },
       handler(code, id) {

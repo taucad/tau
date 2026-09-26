@@ -547,6 +547,75 @@ describe('runtimeAssetsPlugin', () => {
     expect(readFileSync(path.join(outputDirectory, '.vite/manifest.json'), 'utf8')).not.toContain('.wasm');
   });
 
+  it('should resolve and prune the assets of cached modules on a Vite watch rebuild', async () => {
+    const fixtureDirectory = mkdtempSync(path.resolve(tmpdir(), 'tau-runtime-ssr-watch-'));
+    const outputDirectory = path.join(fixtureDirectory, 'dist');
+    temporaryDirectories.push(fixtureDirectory);
+    const entry = path.join(fixtureDirectory, 'entry.mjs');
+    const entrySource = [
+      `import { keptAsset } from './kept.mjs';`,
+      `import { droppedAsset } from './dropped.mjs';`,
+      `export const asset = keptAsset();`,
+    ].join('\n');
+    writeFileSync(path.join(fixtureDirectory, 'kept.wasm'), 'kept');
+    writeFileSync(path.join(fixtureDirectory, 'dropped.wasm'), 'dropped');
+    writeFileSync(
+      path.join(fixtureDirectory, 'kept.mjs'),
+      `export const keptAsset = () => new URL('./kept.wasm', import.meta.url).href;`,
+    );
+    writeFileSync(
+      path.join(fixtureDirectory, 'dropped.mjs'),
+      `export const droppedAsset = () => new URL('./dropped.wasm', import.meta.url).href;`,
+    );
+    writeFileSync(entry, entrySource);
+
+    const watcher = await build({
+      configFile: false,
+      logLevel: 'silent',
+      root: fixtureDirectory,
+      plugins: [runtimeAssetsPlugin()],
+      build: { ssr: entry, outDir: outputDirectory, watch: {} },
+    });
+    if (!('close' in watcher)) {
+      expect.fail('Vite returned a bundle instead of a watcher');
+    }
+    let builds = 0;
+    // Only the entry changes, so the rebuild takes both asset modules from the bundler's cache. The
+    // file watcher attaches after a build ends, so keep editing until the rebuild starts.
+    const editing = setInterval(() => {
+      if (builds === 1) {
+        writeFileSync(entry, `${entrySource}\n// edited`);
+      }
+    }, 100);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        watcher.on('event', (event) => {
+          if (event.code === 'ERROR') {
+            reject(new Error(event.error.message, { cause: event.error }));
+          } else if (event.code === 'START' && builds === 1) {
+            clearInterval(editing);
+          } else if (event.code === 'END') {
+            builds += 1;
+            if (builds === 2) {
+              resolve();
+            }
+          }
+        });
+      });
+    } finally {
+      clearInterval(editing);
+      await watcher.close();
+    }
+
+    const emitted = readdirSync(outputDirectory, { recursive: true }).map(String);
+    expect(emitted.filter((file) => file.endsWith('.wasm'))).toHaveLength(1);
+    const entryOutput = emitted.find((file) => /entry\.(?:mjs|js)$/.test(file)) ?? 'missing';
+    const builtEntry = (await import(pathToFileURL(path.join(outputDirectory, entryOutput)).href)) as {
+      readonly asset: string;
+    };
+    expect(readFileSync(fileURLToPath(builtEntry.asset), 'utf8')).toBe('kept');
+  });
+
   it('should transform a server-environment module in a dev server', async () => {
     // Vite runs buildStart only for the client environment during dev unless a plugin opts in, so a
     // server environment reaching the transform without its per-environment state is a real regression.

@@ -87,7 +87,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
           {modes.map((mode) => (
             <label
               key={mode.value}
-              className='flex cursor-action items-start gap-3 rounded-md border p-3 transition-colors hover:border-primary/50 hover:bg-accent/50 has-checked:border-primary'
+              className='flex cursor-action items-start gap-3 rounded-md border p-3 transition-colors hover:border-primary/50 hover:bg-accent/50 has-checked:border-primary has-[input:focus-visible]:focus-outline'
             >
               <input
                 className='mt-1 accent-primary'

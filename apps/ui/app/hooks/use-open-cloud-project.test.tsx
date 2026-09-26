@@ -26,8 +26,26 @@ const held: ProjectListItem = {
   slugs: { workspaceSlug: 'home', projectSlug: 'gearbox-alpha' },
 };
 
-const { mockCreateProject } = vi.hoisted(() => ({ mockCreateProject: vi.fn() }));
-vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects: [held] }) }));
+/* In this device's Trash: held, so *Open* must not try to create it again. */
+const trashed: ProjectListItem = {
+  ...held,
+  ...projectToManifest({ ...held, id: 'proj_ccccccccccccccccccccc', name: 'Old Hinge' }),
+  slugs: { workspaceSlug: 'home', projectSlug: 'old-hinge' },
+  deletedAt: 5,
+};
+
+const { mockCreateProject, mockToastInfo, useProjectsOptions } = vi.hoisted(() => ({
+  mockCreateProject: vi.fn(),
+  mockToastInfo: vi.fn<(message: string, options: { action: { label: string; onClick: () => void } }) => void>(),
+  useProjectsOptions: [] as unknown[],
+}));
+vi.mock('#hooks/use-projects.js', () => ({
+  useProjects: (options: unknown) => {
+    useProjectsOptions.push(options);
+    return { projects: [held, trashed] };
+  },
+}));
+vi.mock('#components/ui/sonner.js', () => ({ toast: { info: mockToastInfo } }));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createProject: mockCreateProject }) }));
 
 const { cloudProjectStub, useOpenCloudProject } = await import('#hooks/use-open-cloud-project.js');
@@ -41,6 +59,7 @@ const renderOpen = () => renderHook(() => ({ open: useOpenCloudProject(), locati
 describe('useOpenCloudProject', () => {
   beforeEach(() => {
     mockCreateProject.mockReset();
+    mockToastInfo.mockReset();
     mockCreateProject.mockResolvedValue({
       id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
       slugs: { workspaceSlug: 'home', projectSlug: 'bracket-beta' },
@@ -66,6 +85,25 @@ describe('useOpenCloudProject', () => {
 
     expect(mockCreateProject).not.toHaveBeenCalled();
     expect(result.current.location.pathname).toBe('/w/home/gearbox-alpha');
+  });
+
+  it('should say a project in this device’s Trash is there, offering the Trash, rather than failing', async () => {
+    const { result } = renderOpen();
+
+    await act(async () => result.current.open({ id: trashed.id, name: 'Old Hinge', role: 'owner' }));
+
+    expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+    expect(mockCreateProject).not.toHaveBeenCalled();
+    expect(result.current.location.pathname).toBe('/projects');
+    expect(mockToastInfo).toHaveBeenCalledOnce();
+    const [message, options] = mockToastInfo.mock.calls[0] ?? [];
+    expect(message).toBe('Old Hinge is in Trash on this device');
+    expect(options?.action.label).toBe('Show Trash');
+    act(() => {
+      mockToastInfo.mock.calls[0]?.[1].action.onClick();
+    });
+
+    expect(result.current.location.search).toBe('?trash=1');
   });
 });
 

@@ -187,8 +187,8 @@ const writeSalt = (key: string, salt: string): void => {
 /**
  * This device's own random salt for a workspace: what a signed-out person's
  * pseudonym derives from (P29), and a signed-in person's until the API's salt
- * arrives. Random rather than the device id, because the device id names a
- * chat segment in the tree and a pseudonym derived from it could be recomputed.
+ * arrives. Random rather than the device id, so a pseudonym is never derived
+ * from an identifier this host also holds for another purpose.
  */
 const deviceSalt = (workspace: string): string => {
   const key = saltKey(workspace);

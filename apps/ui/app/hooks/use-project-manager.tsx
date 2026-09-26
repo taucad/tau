@@ -85,7 +85,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 import type {
   PreparedWorkspaceCatalog,
@@ -954,7 +954,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     ],
   );
 
-  const createProject = useCallback(
+  const createProjectOnce = useCallback(
     async (options: CreateProjectOptions): Promise<CreatedProject> => {
       /* The id is a directory here and a repository name on the Tau Hosted
          Remote, so a supplied one is checked against the same rule a minted one
@@ -1130,6 +1130,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       queryClient,
       resumePendingProjectOperation,
     ],
+  );
+
+  /* A supplied id is checked and then written, so two creations of it — an
+     *Open* racing materialize on sign-in, or two tabs — hold one lock per id
+     across the check and the write; the second sees the first's project and is
+     refused. A minted id cannot collide, so it takes no lock. */
+  const createProject = useCallback(
+    async (options: CreateProjectOptions): Promise<CreatedProject> =>
+      options.id === undefined
+        ? createProjectOnce(options)
+        : withNamedLock(`tau:create-project:${options.id}`, async () => createProjectOnce(options)),
+    [createProjectOnce],
   );
 
   const runDiscoveryPass = useCallback(

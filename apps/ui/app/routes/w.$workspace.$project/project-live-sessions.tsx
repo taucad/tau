@@ -49,7 +49,7 @@ import {
   useRevisionClientStatus,
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
-import type { RevisionCommands } from '#hooks/use-revision-status.js';
+import type { RevisionClient, RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { selectProjectKernelRefusal } from '#machines/project.machine.js';
@@ -138,7 +138,8 @@ function ProjectSessionBinding({
   const { fileManagerRef } = useFileManager();
   const { parameterService, projectRef, editorRef } = useProject();
   const client = useRevisionClientLifecycle();
-  const { connectRemote } = useRevisionCommands();
+  const revisionCommands = useRevisionCommands();
+  const { connectRemote } = revisionCommands;
   const cloudIntent = useTauCloudIntent(projectId);
   const chatSessions = useChatSessionStore();
   const session = useProjectSession(projectId);
@@ -324,12 +325,13 @@ function ProjectSessionBinding({
   return (
     <>
       <UnsavedParameterDraftsDialog projectId={projectId} />
-      {cloudIntent === undefined || cloudIntent === 'notice' || client === undefined ? null : (
+      {cloudIntent === undefined || cloudIntent === 'connected' || client === undefined ? null : (
         <TauCloudIntentConnector
           projectId={projectId}
           intent={cloudIntent}
           status={status}
-          connectRemote={connectRemote}
+          client={client}
+          commands={revisionCommands}
         />
       )}
     </>
@@ -341,21 +343,30 @@ function ProjectSessionBinding({
  * backup by default, D20's materialized projects). Mounted only while something
  * is owed, so a project without an intent never asks for the session or the plan.
  *
- * @param props - The project, its intent, its projection and the connect verb.
+ * @param props - The project, its intent, its projection, its client (read live
+ * by the toast's *Turn off backup*) and the session's remote verbs.
  * @returns Nothing; it only acts.
  */
 function TauCloudIntentConnector({
   projectId,
   intent,
   status,
-  connectRemote,
+  client,
+  commands,
 }: {
   readonly projectId: string;
   readonly intent: TauCloudIntent;
   readonly status: RevisionStatusProjection | undefined;
-  readonly connectRemote: RevisionCommands['connectRemote'];
+  readonly client: RevisionClient;
+  readonly commands: RevisionCommands;
 }): undefined {
-  useTauCloudIntentConnection({ projectId, intent, status, connectRemote });
+  useTauCloudIntentConnection({
+    projectId,
+    intent,
+    status,
+    readRemote: () => client.status()?.remote,
+    commands,
+  });
   return undefined;
 }
 

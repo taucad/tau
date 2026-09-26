@@ -1176,8 +1176,9 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
    * Which device this document is (W13, W17).
    *
    * Sent from the page because the id lives in `localStorage`, which the worker
-   * cannot read. It names a chat log segment, so a worker that was never told
-   * writes no chat refs rather than guessing an id two profiles could share.
+   * cannot read. Records name a random record device instead; this id decides
+   * whether chat refs are recorded at all — a worker never told writes none —
+   * and counts as own for a segment written before record devices existed.
    */
   useEffect(() => {
     if (client === undefined) {

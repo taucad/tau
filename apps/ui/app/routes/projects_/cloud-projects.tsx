@@ -20,7 +20,12 @@ import { Cloud, Users } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardFooter, CardHeader } from '@taucad/ui/components/card';
-import { tauCloudIntent, useMaterializeOnSignInLocation } from '#hooks/use-cloud-projects.js';
+import {
+  materializedCloudProjects,
+  tauCloudIntent,
+  useMaterializeOnSignInLocation,
+  withNamedLock,
+} from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { cloudProjectStub } from '#hooks/use-open-cloud-project.js';
@@ -51,19 +56,25 @@ export const isCloudOnly = (row: LibraryRow): row is CloudOnlyRow => 'cloudOnly'
  * The one list (D20): this device's projects, marked when Tau Cloud also holds
  * them, then the ones only Tau Cloud holds.
  *
- * @param projects - This device's projects.
- * @param cloud - The account's Tau Cloud listing.
- * @param includeCloudOnly - `false` in the Trash, which lists this device's projects only.
+ * @param input - The projects this view lists; every project this device holds,
+ * the Trash included, so a trashed one is never offered as Tau Cloud's alone;
+ * the account's Tau Cloud listing; and `includeCloudOnly`, `false` in the Trash.
  * @returns The rows.
  * @public
  */
-export const toLibraryRows = (
-  projects: readonly ProjectListItem[],
-  cloud: readonly CloudProject[],
-  includeCloudOnly: boolean,
-): LibraryRow[] => {
+export const toLibraryRows = ({
+  projects,
+  held: heldProjects,
+  cloud,
+  includeCloudOnly,
+}: Readonly<{
+  projects: readonly ProjectListItem[];
+  held: readonly ProjectListItem[];
+  cloud: readonly CloudProject[];
+  includeCloudOnly: boolean;
+}>): LibraryRow[] => {
   const onCloud = new Set(cloud.map((entry) => entry.id));
-  const held = new Set(projects.map((project) => project.id));
+  const held = new Set([...heldProjects, ...projects].map((project) => project.id));
   return [
     ...projects.map((project) => (onCloud.has(project.id) ? { ...project, onCloud: true } : project)),
     ...(includeCloudOnly
@@ -134,7 +145,7 @@ export function OpenCloudProjectButton({
       variant='outline'
       className={className}
       disabled={isOpening}
-      aria-label={`Open ${entry.name}`}
+      aria-busy={isOpening}
       onClick={async () => {
         setIsOpening(true);
         try {
@@ -145,6 +156,7 @@ export function OpenCloudProjectButton({
       }}
     >
       {isOpening ? 'Opening…' : 'Open'}
+      <span className='sr-only'> {entry.name}</span>
     </Button>
   );
 }
@@ -230,50 +242,70 @@ export function CloudProjectCard({
  * remote's id — the first half of *Open* — and marked so its first open
  * connects Tau Cloud and pulls, the second half.
  *
- * Once per library mount for a signed-in account; a project this device already
- * holds (trashed included) is refused by `createProject` and stays as it is.
+ * For a signed-in account, once its listing has settled (never mid-fetch, so an
+ * account switch never acts on the previous account's rows). A project this
+ * device holds (trashed included) or has brought once before — and may have
+ * deleted since — is skipped; the pass holds a Web Lock, so two tabs never run
+ * it at once, and `createProject`'s per-id lock refuses a racing *Open*.
  *
  * ponytail: files arrive on the first open's pull, not in the background — the
  * library has no revision root of its own; give it a headless one if offline
  * access before a first open matters.
  *
- * @param input - The account's Tau Cloud listing and whether it is the
- * server's own answer; this device's projects and whether they are still loading.
+ * @param input - The account's Tau Cloud listing, whether it is the server's
+ * own answer and whether it is being read again; every project this device
+ * holds (the Trash included) and whether that listing is still loading.
  * @public
  */
 export const useMaterializeCloudProjects = ({
   cloud,
   isSettled,
-  projects,
+  isFetching,
+  held,
   isLoading,
 }: Readonly<{
   cloud: readonly CloudProject[];
   isSettled: boolean;
-  projects: readonly ProjectListItem[];
+  isFetching: boolean;
+  held: readonly ProjectListItem[];
   isLoading: boolean;
 }>): void => {
   const location = useMaterializeOnSignInLocation();
   const auth = useResolvedAuth();
   const { createProject } = useProjectManager();
-  const hasRun = useRef(false);
+  /* Asked for once per mount: a refused creation is not retried on every render. */
+  const attempted = useRef(new Set<string>());
   useEffect(() => {
-    if (location === undefined || auth !== 'authed' || !isSettled || isLoading || hasRun.current) {
+    if (location === undefined || auth !== 'authed' || !isSettled || isFetching || isLoading) {
       return;
     }
-    hasRun.current = true;
-    const held = new Set(projects.map((project) => project.id));
+    const heldIds = new Set(held.map((project) => project.id));
+    const wanted = cloud.filter(
+      (entry) => !heldIds.has(entry.id) && !attempted.current.has(entry.id) && !materializedCloudProjects.has(entry.id),
+    );
+    if (wanted.length === 0) {
+      return;
+    }
+    for (const entry of wanted) {
+      attempted.current.add(entry.id);
+    }
     /* One pass, in order, so two creations never race one directory allocation. */
     const materialize = async (): Promise<void> => {
-      for (const entry of cloud.filter((candidate) => !held.has(candidate.id))) {
+      for (const entry of wanted) {
+        /* Another tab's pass, or an earlier one here, may have brought it while this one waited for the lock. */
+        if (materializedCloudProjects.has(entry.id)) {
+          continue;
+        }
         try {
           // oxlint-disable-next-line no-await-in-loop -- sequential by design: each creation allocates a directory.
           await createProject({ ...cloudProjectStub(entry), location });
+          materializedCloudProjects.add(entry.id);
           tauCloudIntent.set(entry.id, 'open');
         } catch {
           /* Already on this device, or the workspace refused: the row stays Tau Cloud's. */
         }
       }
     };
-    void materialize();
-  }, [auth, cloud, createProject, isLoading, isSettled, location, projects]);
+    void withNamedLock('tau:materialize-cloud-projects', materialize);
+  }, [auth, cloud, createProject, held, isFetching, isLoading, isSettled, location]);
 };

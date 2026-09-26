@@ -10,7 +10,8 @@ import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectLibraryUrl, projectUrl } from '#utils/project-url.utils.js';
+import { toast } from '#components/ui/sonner.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
 
@@ -52,19 +53,32 @@ export const cloudProjectStub = (entry: CloudProject): CreateProjectOptions => (
  * projection — with no chat turn.
  *
  * A project this device already holds is navigated to instead, which is what an
- * invitation accepted twice lands in.
+ * invitation accepted twice lands in; one in its Trash is still held — creating
+ * it again would be refused — so the verb says where it is and offers the Trash.
  *
  * @returns The verb, which throws whatever `createProject` throws.
  * @public
  */
 export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) => {
-  const { projects } = useProjects();
+  const { projects } = useProjects({ includeDeleted: true });
   const { createProject } = useProjectManager();
   const navigate = useNavigate();
 
   return useCallback(
     async (entry: CloudProject): Promise<void> => {
       const held = projects.find((project) => project.id === entry.id);
+      if (held?.deletedAt !== undefined) {
+        toast.info(`${entry.name} is in Trash on this device`, {
+          description: 'Restore it from Trash to open it.',
+          action: {
+            label: 'Show Trash',
+            onClick() {
+              void navigate(`${projectLibraryUrl}?trash=1`);
+            },
+          },
+        });
+        return;
+      }
       if (held?.slugs !== undefined) {
         await navigate(projectUrl(held.slugs));
         return;

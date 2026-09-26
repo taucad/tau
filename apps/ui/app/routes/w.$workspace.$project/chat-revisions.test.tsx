@@ -1242,24 +1242,52 @@ describe('Backup by default (D19)', () => {
     localStorage.clear();
   });
 
-  it('offers the opt-out before the first revision leaves the device', async () => {
+  it.each(['default', 'noticed'] as const)(
+    'offers the opt-out, with its consequence, before the first revision leaves the device (%s)',
+    async (intent) => {
+      const user = userEvent.setup();
+      tauCloudIntent.set('p', intent);
+
+      renderPane();
+
+      const line = await screen.findByRole('group', { name: 'Backup by default' });
+      expect(line).toHaveTextContent('Backs up to Tau Cloud automatically.');
+      expect(line).toHaveTextContent('Stops backing up. The copy already on Tau Cloud stays.');
+      await user.click(within(line).getByRole('button', { name: 'Turn off backup' }));
+
+      /* Nothing was connected yet, so there is nothing to disconnect; the intent is gone, so a reload stays off. */
+      expect(revisionStatusHarness.commands.disconnectRemote).not.toHaveBeenCalled();
+      expect(tauCloudIntent.get('p')).toBeUndefined();
+      expect(screen.queryByRole('group', { name: 'Backup by default' })).not.toBeInTheDocument();
+    },
+  );
+
+  it('cancels a default connection still being made rather than disconnecting it', async () => {
     const user = userEvent.setup();
-    tauCloudIntent.set('p', 'default');
-
+    tauCloudIntent.set('p', 'connected');
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-1',
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    };
     renderPane();
+    const line = await screen.findByRole('group', { name: 'Backup by default' });
+    /* The live remote, read when the button is pressed, has moved on from the drawn one. */
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connecting' },
+    };
 
-    expect(await screen.findByText('Backs up to Tau Cloud automatically.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Turn off backup' }));
+    await user.click(within(line).getByRole('button', { name: 'Turn off backup' }));
 
-    /* Nothing was connected yet, so there is nothing to disconnect; the intent is gone, so a reload stays off. */
+    expect(revisionStatusHarness.commands.cancelRemote).toHaveBeenCalledOnce();
     expect(revisionStatusHarness.commands.disconnectRemote).not.toHaveBeenCalled();
-    expect(localStorage.getItem('tau:tau-cloud-intent:p')).toBeNull();
-    expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
+    expect(tauCloudIntent.get('p')).toBeUndefined();
   });
 
   it('reads Saved · Backed up after the default connection, with no Connect step, and turns it off', async () => {
     const user = userEvent.setup();
-    tauCloudIntent.set('p', 'notice');
+    tauCloudIntent.set('p', 'connected');
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
@@ -1282,7 +1310,7 @@ describe('Backup by default (D19)', () => {
 
   it('dismisses the line and keeps the backup', async () => {
     const user = userEvent.setup();
-    tauCloudIntent.set('p', 'notice');
+    tauCloudIntent.set('p', 'connected');
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
       headRevisionId: 'rev-1',
@@ -1290,9 +1318,8 @@ describe('Backup by default (D19)', () => {
     };
 
     renderPane();
-    const sentence = await screen.findByText('Backs up to Tau Cloud automatically.');
-    const line = sentence.closest('[data-slot="backup-by-default"]');
-    await user.click(within(line as HTMLElement).getByRole('button', { name: 'Dismiss' }));
+    const line = await screen.findByRole('group', { name: 'Backup by default' });
+    await user.click(within(line).getByRole('button', { name: 'Dismiss' }));
 
     expect(revisionStatusHarness.commands.disconnectRemote).not.toHaveBeenCalled();
     expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();

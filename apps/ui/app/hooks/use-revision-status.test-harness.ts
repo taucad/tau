@@ -75,9 +75,9 @@ export const revisionStatusHarness = {
   diff: [] as readonly RevisionDiffEntry[],
   /** Every revision a surface asked for a diff of, in order (C52). */
   diffRequests: [] as string[],
-  /** Every branch a surface re-walked the graph for, in order (B8). */
+  /** Every branch a surface re-walked the graph for, in order (rule 20's log cost). */
   logRequests: [] as string[],
-  /** Every revision a surface asked for on its own, by id (B2). */
+  /** Every revision a surface asked for on its own, by id (B4). */
   rowRequests: [] as string[],
   comparison: emptyComparison(),
   comparisonError: undefined as Error | undefined,
@@ -198,7 +198,7 @@ export const revisionStatusMock = (): Record<string, unknown> => {
   /* One client object for the whole suite, because the product's
    * `useRevisionClient` is memoized on the worker: a mock that minted a fresh
    * object per render made every downstream `useMemo` miss, which is the very
-   * defect B9 exists to catch. */
+   * defect rule 20's log cost exists to catch. */
   const client = {
     status: () => revisionStatusHarness.status,
     subscribe: () => () => undefined,

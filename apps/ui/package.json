@@ -17,6 +17,7 @@
     "@taucad/agent-tools": "workspace:*",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/assimp": "workspace:*",
+    "@taucad/bambu": "workspace:*",
     "@taucad/billing": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/build123d": "workspace:*",

@@ -2534,6 +2534,9 @@ importers:
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../../packages/plugins/assimp
+      '@taucad/bambu':
+        specifier: workspace:*
+        version: link:../../packages/plugins/bambu
       '@taucad/billing':
         specifier: workspace:*
         version: link:../libs/billing

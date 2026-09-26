@@ -22,7 +22,7 @@ import {
 import type { PrinterBounds, PrinterBox, PrinterGeometry, PrinterPanel } from '#components/printer/printer-geometry.js';
 import { eventValueAt } from '#components/printer/printer-playback.js';
 import type { PlaybackStore } from '#components/printer/printer-playback.js';
-import { plateModelMatrix } from '#components/printer/printer-plates.js';
+import { plateModelMatrix, printerHotendModel } from '#components/printer/printer-plates.js';
 import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 import {
   createToolpathPalette,
@@ -135,6 +135,8 @@ type MachineParts = Readonly<{
   walls: readonly EnclosureWall[];
   plateGroup: THREE.Group;
   toolhead: THREE.Group;
+  /** The drawn hotend the plate-focus scene swaps for the Replicad model once it loads. */
+  hotendStandIn: THREE.Group;
   beam: THREE.Mesh | undefined;
   nozzleMaterial: THREE.MeshStandardMaterial;
   lightMaterial: THREE.MeshStandardMaterial;
@@ -200,7 +202,9 @@ const buildMachine = ({
   const nozzle = new THREE.Mesh(new THREE.ConeGeometry(3.5, nozzleLength, 16), nozzleMaterial);
   nozzle.rotation.x = -Math.PI / 2;
   nozzle.position.z = nozzleLength / 2;
-  toolhead.add(heater, nozzle);
+  const hotendStandIn = new THREE.Group();
+  hotendStandIn.add(heater, nozzle);
+  toolhead.add(hotendStandIn);
   if (!isWholePrinter) {
     const heatSink = new THREE.Mesh(
       new THREE.CylinderGeometry(5.5, 5.5, hotendHeatSinkLength, 20),
@@ -208,7 +212,7 @@ const buildMachine = ({
     );
     heatSink.rotation.x = Math.PI / 2;
     heatSink.position.z = nozzleLength + 8 + hotendHeatSinkLength / 2;
-    toolhead.add(heatSink);
+    hotendStandIn.add(heatSink);
   }
 
   if (isWholePrinter) {
@@ -327,6 +331,7 @@ const buildMachine = ({
     walls,
     plateGroup,
     toolhead,
+    hotendStandIn,
     beam,
     nozzleMaterial,
     lightMaterial,
@@ -381,8 +386,8 @@ const createFlatPlate = (
   };
 };
 
-/** Every geometry, material and texture a loaded GLB owns; it is never shared with another view. */
-const disposeLoadedModel = (scene: THREE.Object3D): void => {
+/** Every geometry, material and texture a loaded GLB owns, except `kept`, a scene material it borrowed. */
+const disposeLoadedModel = (scene: THREE.Object3D, kept?: THREE.Material): void => {
   const resources = new Set<{ dispose: () => void }>();
   scene.traverse((child) => {
     if (child instanceof THREE.Mesh) {
@@ -398,10 +403,68 @@ const disposeLoadedModel = (scene: THREE.Object3D): void => {
       }
     }
   });
+  if (kept) {
+    resources.delete(kept);
+  }
   for (const resource of resources) {
     resource.dispose();
   }
 };
+
+/**
+ * The X1C hotend from `@taucad/bambu` on the plate-focus toolhead, its nozzle
+ * taking the scene's glowing nozzle material. The drawn stand-in shows while it
+ * loads and stays if it cannot.
+ */
+function PrinterHotendModel({
+  toolhead,
+  standIn,
+  nozzleMaterial,
+}: Readonly<{
+  toolhead: THREE.Group;
+  standIn: THREE.Group;
+  nozzleMaterial: THREE.MeshStandardMaterial;
+}>): undefined {
+  'use no memo'; // R3F owns imperative Three.js objects.
+  const invalidate = useThree((state) => state.invalidate);
+  useEffect(() => {
+    let scene: THREE.Object3D | undefined;
+    let isActive = true;
+    const load = async (): Promise<void> => {
+      try {
+        const gltf = await gltfLoader.loadAsync(printerHotendModel.href);
+        scene = gltf.scene;
+      } catch {
+        return;
+      }
+      scene.applyMatrix4(plateModelMatrix);
+      scene.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.name.toLowerCase().includes('nozzle')) {
+          (child.material as THREE.Material).dispose();
+          child.material = nozzleMaterial;
+        }
+      });
+      if (!isActive) {
+        disposeLoadedModel(scene, nozzleMaterial);
+        return;
+      }
+      standIn.visible = false;
+      toolhead.add(scene);
+      invalidate();
+    };
+    // async-iife: bootstrap — React effects cannot await the load; the cleanup flag owns its lifecycle.
+    void load();
+    return () => {
+      isActive = false;
+      if (scene) {
+        toolhead.remove(scene);
+        disposeLoadedModel(scene, nozzleMaterial);
+      }
+      standIn.visible = true;
+    };
+  }, [invalidate, nozzleMaterial, standIn, toolhead]);
+  return undefined;
+}
 
 /**
  * The selected plate on the plate group: its GLB once one is published and
@@ -547,6 +610,13 @@ function PrinterObjects({
       {/* Keyed: R3F keeps the first object when a primitive's `object` alone changes. */}
       <primitive key={machine.root.uuid} object={machine.root} />
       <PrinterPlateSurface geometry={geometry} plate={plate} parent={machine.plateGroup} />
+      {isWholePrinter ? null : (
+        <PrinterHotendModel
+          toolhead={machine.toolhead}
+          standIn={machine.hotendStandIn}
+          nozzleMaterial={machine.nozzleMaterial}
+        />
+      )}
     </>
   );
 }

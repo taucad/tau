@@ -692,6 +692,10 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
         unwrittenReaders.set(chatId, parked);
         const wake = (): void => {
           parked.delete(wake);
+          // An aborted reader leaves no empty Set behind, as `host.read` does.
+          if (parked.size === 0 && unwrittenReaders.get(chatId) === parked) {
+            unwrittenReaders.delete(chatId);
+          }
           input.signal?.removeEventListener('abort', wake);
           resolve();
         };

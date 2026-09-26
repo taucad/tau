@@ -1,8 +1,21 @@
 /**
- * The version-1 daemon wire, kept for the compatibility window (I32; seam blueprint "Mixed builds"): a v2 daemon still
- * serves a v1 page or CLI (`@taucad/cli@0.1.0-beta.0` is published), and a v2 client that meets a v1 daemon (a hello
- * with no `wire` field) speaks v1 and replays reads only. Deleted when the window closes; from then on a v2 client
- * refuses a hello naming another wire with `WIRE_VERSION_UNSUPPORTED`.
+ * The version-1 daemon wire, kept for the compatibility window (I32; seam blueprint "Mixed builds"). The v1 peers are
+ * an installed desktop daemon older than a newer web page, and older page or desktop builds; the published
+ * `@taucad/cli@0.1.0-beta.0` never dials the daemon (its only command is `export`), and host, agent-host and mcp are
+ * unpublished. A v2 daemon still serves a v1 client, and a v2 client that meets a v1 daemon (a hello with no `wire`
+ * field) speaks v1 and replays reads only.
+ *
+ * Removed once the oldest supported desktop build ships wire 2. From then on a v2 client refuses a hello naming
+ * another wire with `WIRE_VERSION_UNSUPPORTED`. Removal checklist:
+ * - this file and `launchers/node/agent-wire-v1-session.ts`;
+ * - in `channel/agent-channel-client.ts`: the `v1Tail`, `v1Execute` and `v1Read` helpers, every `wire === 1` branch,
+ *   and `helloWire`'s v1 answer (a hello with no `wire` becomes unsupported);
+ * - in `launchers/node/agent-channel.ts`: the `request` call, the `events` listen, `liveEvents` with no chat, the v1
+ *   session, and `AgentWireCompatProtocol` / `agentWireCompatSchemas` in favour of `AgentWireProtocol` /
+ *   `agentWireProtocolSchemas`;
+ * - the public `replayedStartOutcome` export (`src/index.ts`), whose only product caller is the v1 session;
+ * - the compatibility sentence in `.nx/version-plans/agent-host-seam-contract.md`'s successor, and the mixed-builds
+ *   cases in `test/seam/seam.daemon.test.ts`.
  *
  * Browser-safe: zod and zod-only schemas. The daemon's half lives in `launchers/node/agent-wire-v1-session.ts`.
  */

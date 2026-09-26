@@ -1020,15 +1020,16 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           }
         : {}),
     });
-    /* The run reporter follows every chat a parsed command names, once the
-     * command is answered, so the rows it wrote are there to read. Durable rows
-     * are only pulled per chat (SC-R14), so it learns the chats here. `attach`
-     * only reads, so it starts no follow (W4.r1). */
+    /* The run reporter follows every chat a parsed, unrefused command names,
+     * once the command is answered, so the rows it wrote are there to read.
+     * Durable rows are only pulled per chat (SC-R14), so it learns the chats
+     * here. `attach` only reads, unless it took over a run a restart left open
+     * and recorded it `failed` (`chatToReport`, W4.r2). */
     const launcher = revisions.record({
       ...base,
       execute: async (command) => {
         const answer = await base.execute(command);
-        const chatId = chatToReport(command);
+        const chatId = chatToReport(command, answer);
         if (chatId !== undefined) {
           agentRunReporter?.watch(chatId);
         }

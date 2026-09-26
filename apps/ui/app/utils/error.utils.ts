@@ -262,10 +262,12 @@ function parseError(error: Error): ChatError {
 /**
  * Parses a dispatch that failed before its run existed.
  *
- * Identical to {@link parseErrorForPersistence}, except that a refusal carrying
- * no code of its own is stamped with {@link chatTurnNotStartedCode}. A coded
- * refusal keeps its code: the credit preflight throws the gateway's own 402
- * payload, and that still belongs on the credits card.
+ * Identical to {@link parseErrorForPersistence}, except that a refusal is
+ * stamped with {@link chatTurnNotStartedCode} when it carries no code, or only
+ * a code thrown on the error itself (a host or channel refusal: nothing ran,
+ * so restarting the turn is the recovery). A code in the structured message
+ * is kept: the credit preflight throws the gateway's own 402 payload, and that
+ * still belongs on the credits card.
  *
  * @param error - The admission failure.
  * @returns The persisted error the chat's card reads.

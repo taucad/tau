@@ -26,11 +26,7 @@ import { useGraphics, useGraphicsSelector, useModelInteractionSelector, useRende
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import type { RafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
-import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
-import {
-  createSectionViewRaycastClipState,
-  useSectionView,
-} from '#components/geometry/graphics/three/use-section-view.js';
+import { resolveSectionViewRaycastClip } from '#components/geometry/graphics/three/use-section-view.js';
 import { measureInputMachine } from '#machines/measure-input.machine.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 
@@ -127,7 +123,6 @@ export function MeasureTool(): React.JSX.Element {
   const pointerTarget: HTMLElement = events.connected ?? gl.domElement;
   const graphicsActor = useGraphics();
   const renderFrame = useRenderFrame();
-  const sectionView = useSectionView();
   const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
   const pickableMeshesVersion = useGraphicsSelector((state) => state.context.pickableMeshesVersion);
   const modelDisplayRevision = useModelInteractionSelector((state) => state.context.displayRevision);
@@ -153,13 +148,6 @@ export function MeasureTool(): React.JSX.Element {
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
   const measureInputActor = useMemo(() => createActor(measureInputMachine), []);
-  const raycastClipState = useMemo<RaycastClipState | undefined>(() => {
-    return createSectionViewRaycastClipState({
-      enableMesh: sectionView.enableMesh,
-      isActive: sectionView.isActive,
-      plane: sectionView.plane,
-    });
-  }, [sectionView.enableMesh, sectionView.isActive, sectionView.plane]);
   const pointerMoveCoalescerRef = useRef<RafCoalescer<MeasurePointerCoordinates> | undefined>(undefined);
   const wasCameraMovingRef = useRef(cameraMoving);
 
@@ -225,7 +213,8 @@ export function MeasureTool(): React.JSX.Element {
       const firstIntersection = raycastFirstVisibleMeshHit({
         raycaster: raycasterRef.current,
         meshes: getCachedMeshes(),
-        clipping: raycastClipState,
+        // Read here, not selected: a section drag step must not re-render the tool or reset its pointer coalescer.
+        clipping: resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame),
       });
 
       let allSnapPoints: SnapPoint[] = [];
@@ -268,7 +257,7 @@ export function MeasureTool(): React.JSX.Element {
         point: closest?.position ?? firstIntersection?.point,
       };
     },
-    [camera, getCachedMeshes, gl.domElement, invalidate, raycastClipState, snapDistance],
+    [camera, getCachedMeshes, gl.domElement, graphicsActor, invalidate, renderFrame, snapDistance],
   );
 
   useEffect(() => {

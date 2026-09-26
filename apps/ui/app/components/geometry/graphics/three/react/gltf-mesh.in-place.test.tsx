@@ -98,8 +98,8 @@ vi.mock('#machines/model-interaction.machine.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/use-section-view.js', () => ({
-  createSectionViewRaycastClipState: () => undefined,
-  useSectionView: () => mocks.sectionView,
+  resolveSectionViewRaycastClip: () => undefined,
+  useSectionViewFlags: () => mocks.sectionView,
 }));
 
 const { GltfMesh } = await import('#components/geometry/graphics/three/react/gltf-mesh.js');

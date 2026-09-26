@@ -188,7 +188,7 @@ fn query(prepared: &Prepared, operation: Operation) -> Vec<u8> {
                 .unwrap();
             mesh_bytes(&mesh)
         }
-        Operation::ReportMesh => mesh_bytes(&document.reported_mesh().unwrap().unwrap()),
+        Operation::ReportMesh => mesh_bytes(&document.reported_mesh().unwrap()),
         Operation::Cut => {
             let (subject, target) = prepared.cut.unwrap();
             serde_json::to_vec(&document.regular_solid_containment(subject, target).unwrap())

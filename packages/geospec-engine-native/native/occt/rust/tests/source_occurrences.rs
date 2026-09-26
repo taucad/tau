@@ -22,7 +22,22 @@ fn should_transfer_ordered_source_occurrences_without_report_preparation() {
     }));
 
     let nominal = document.facts().unwrap();
-    assert_eq!(source.as_ref(), nominal.occurrences.as_slice());
+    // F10: source rows leave the unread XDE labels empty; all else is equal.
+    assert!(source.iter().all(|row| {
+        row.label.is_empty() && row.product_label.is_empty() && row.name.is_empty()
+    }));
+    let unlabelled: Vec<_> = nominal
+        .occurrences
+        .iter()
+        .cloned()
+        .map(|mut row| {
+            row.label.clear();
+            row.product_label.clear();
+            row.name.clear();
+            row
+        })
+        .collect();
+    assert_eq!(source.as_ref(), unlabelled.as_slice());
     let report = document.reported_facts_and_mesh().unwrap();
     assert_eq!(report.facts.occurrences.len(), source.len());
     let expected_bounds = [

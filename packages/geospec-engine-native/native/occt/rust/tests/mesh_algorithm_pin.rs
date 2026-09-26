@@ -33,9 +33,7 @@ fn report_soup(name: &str) -> (usize, u64) {
     )
     .expect("retained fixture must be readable");
     let document = Document::from_step(&bytes).unwrap();
-    let mesh = BrepSubject::reported_mesh(&document)
-        .unwrap()
-        .expect("STEP subjects have a report mesh");
+    let mesh = BrepSubject::reported_mesh(&document).unwrap();
     let positions = mesh.positions.iter().flatten().map(|value| value.to_bits());
     let bytes = positions.flat_map(u64::to_le_bytes).chain(
         mesh.triangles

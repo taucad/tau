@@ -7,7 +7,7 @@ import type {
   GeoSpecRunnerRunOptions,
 } from '#runner/worker/index.js';
 import { createNoMatchingGeoSpecTestsIssue } from '#runner/worker/index.js';
-import type { GeoSpecTestCase } from '#runner/types.js';
+import type { GeoSpecModuleBundleCache, GeoSpecTestCase } from '#runner/types.js';
 import type { VmIssue } from '@taucad/esbuild/vm';
 
 const createRunnerClosedIssue = (): VmIssue => ({
@@ -71,6 +71,8 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
   const listeners = new Set<(event: GeoSpecRunnerEvent) => void>();
   let activeDrain: Promise<void> | undefined;
   let closePromise: Promise<void> | undefined;
+  // Runs are exclusive (activeDrain), so one cache serves every run; entries revalidate their dependency bytes.
+  const bundleCache: GeoSpecModuleBundleCache = new Map();
 
   const emit = (event: GeoSpecRunnerEvent): void => {
     for (const listener of listeners) {
@@ -128,6 +130,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           testTimeout: runOptions.testTimeout,
           matcherWallBackstop: runOptions.matcherWallBackstop,
           forensic: runOptions.forensic,
+          bundleCache,
           ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
           ...(options.nativeAssertions ? { nativeAssertions: options.nativeAssertions } : {}),
           ...(options.nativeModelLoader ? { nativeModelLoader: options.nativeModelLoader } : {}),
@@ -221,6 +224,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
         state.aborted ??= 'runner closed';
         closePromise = (async () => {
           await activeDrain;
+          bundleCache.clear();
           emit({ type: 'close' });
         })();
       }

@@ -519,6 +519,22 @@ describe('serial runner shell', () => {
     ]);
   });
 
+  it('should reuse each file bundle across runs until the file changes', async () => {
+    const options = runnerOptions();
+    const runner = createSerialGeoSpecRunner(options);
+    const bundleOf = async () => {
+      const result = await runner.run({ files: ['first.geospec.ts'] });
+      return result.files[0]?.result.bundle;
+    };
+
+    const first = await bundleOf();
+    expect(first).toBeDefined();
+    expect(await bundleOf()).toBe(first);
+    options.filesystem.setText('first.geospec.ts', passing('edited'));
+    expect(await bundleOf()).not.toBe(first);
+    await runner.close();
+  });
+
   it('should report a closed runner', async () => {
     const runner = createSerialGeoSpecRunner(runnerOptions());
     await runner.close();

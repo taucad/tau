@@ -292,7 +292,6 @@ const main = async (): Promise<void> => {
         'src/desktop-assimp.spec.ts',
         'src/desktop-main-editor-kernels.spec.ts',
         'src/desktop-converter.spec.ts',
-        'src/desktop-demos.spec.ts',
         'src/desktop-ephemeral-isolation.spec.ts',
         'src/desktop-image-geospec.spec.ts',
         'src/desktop-thumbnail-lifecycle.spec.ts',

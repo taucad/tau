@@ -440,8 +440,11 @@ const scaleFixtures = [
 ].map((id) => performanceLabFixtures.find((fixture) => fixture.id === id)!);
 
 /**
- * Scale claims beside watertight, one per capability family: exact facts, validity and structure next to
- * interference and wall thickness, which tessellate (with analyzeMesh below), so MT/ST comparisons time evaluation.
+ * Scale claims beside watertight, one per capability family. On the STEP scale fixtures, interference and
+ * wall thickness settle within milliseconds of admission without tessellating: interference refuses an
+ * assembly it cannot certify (or one over the report-bundle limit) and passes a part with no pairs, and wall
+ * thickness refuses outside its qualified domain. Their cells time admission plus that settlement; only the
+ * analyzeMesh queries below tessellate, so only they compare MT/ST evaluation.
  */
 const scaleFamilies: readonly ExploratoryClaim[] = [
   { matcher: 'toHaveVolume', kind: 'volume', expected: { value: 0, tolerance: 0 }, formats: ['step', 'glb'] },

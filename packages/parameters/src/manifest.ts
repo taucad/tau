@@ -1334,7 +1334,10 @@ const projectDraft07 = (schema: JsonStructureSchema): ParameterSchemaProjection<
         continue;
       }
       if (projectionKeywords.has(key)) {
-        projected[key] = visit(child, `${pointer}/${escapePointer(key)}`);
+        // Data keywords hold instance values: their keys are property names, never keywords to re-spell.
+        projected[key] = carrierDataKeywords.has(key)
+          ? structuredClone(child)
+          : visit(child, `${pointer}/${escapePointer(key)}`);
         continue;
       }
       diagnostics.push({

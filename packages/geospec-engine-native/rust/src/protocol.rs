@@ -196,7 +196,7 @@ impl Observations {
 pub struct Engine {
     pub(crate) observations: Rc<Observations>,
     pub(crate) subjects: HashMap<String, Rc<Subject>>,
-    /// Raw STEP digest to retained exact-source subjects; bounded by subject count.
+    /// Raw STEP digest to every retained STEP subject; bounded by subject count.
     pub(crate) step_sources: HashMap<String, Vec<String>>,
     /// Full validated mesh closure to one successfully admitted subject.
     pub(crate) mesh_sources: HashMap<String, String>,

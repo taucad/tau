@@ -385,36 +385,49 @@ export const performanceLabQualifiedCases = authorityCases as readonly Performan
 /** Passing feature cases and ordinary mismatches authored from frozen analytic construction. */
 export const performanceLabAnalyticCases = analyticCases as readonly PerformanceLabAnalyticCase[];
 
+/** One authored claim of a capability family; `expected` is a placeholder, since exploratory cases time evaluation. */
+type ExploratoryClaim = {
+  matcher: string;
+  kind: string;
+  expected: unknown;
+  formats: ReadonlyArray<LabFixture['format']>;
+};
+
+const watertight: ExploratoryClaim = { matcher: 'toBeWatertight', kind: 'watertight', expected: true, formats: [] };
+
 /**
  * Build an unverified model exploration case.
  * @param fixtureId - Registered model fixture.
- * @returns A nullary watertight claim without a certified result.
+ * @param family - Authored claim; the nullary watertight claim keeps the original case id.
+ * @returns A claim without a certified result.
  */
-const exploratoryCase = (fixtureId: string): PerformanceLabCase => ({
-  id: `exploratory-${fixtureId}`,
-  fixtureId,
-  matcher: 'toBeWatertight',
-  arguments: [],
-  claim: {
-    claimId: `simd-lab/exploratory-${fixtureId}`,
-    capability: 'toBeWatertight',
-    payload: { expected: true, kind: 'watertight' },
-    polarity: 'positive',
-    subjectSlots: ['subject'],
-    workUnitBudget: 8_000_000,
-  },
-  expectedStatus: 'unverified',
-  baseline: 'unverified',
-  note: 'Exploratory user-workspace model; no independent expected assertion.',
-});
+const exploratoryCase = (fixtureId: string, family = watertight): PerformanceLabCase => {
+  const id = family === watertight ? `exploratory-${fixtureId}` : `exploratory-${fixtureId}-${family.matcher}`;
+  return {
+    id,
+    fixtureId,
+    matcher: family.matcher,
+    arguments: family === watertight ? [] : [family.expected],
+    claim: {
+      claimId: `simd-lab/${id}`,
+      capability: family.matcher,
+      payload: { expected: family.expected, kind: family.kind },
+      polarity: 'positive',
+      subjectSlots: ['subject'],
+      workUnitBudget: 8_000_000,
+    },
+    expectedStatus: 'unverified',
+    baseline: 'unverified',
+    note: 'Exploratory user-workspace model; no independent expected assertion.',
+  };
+};
 
 export const performanceLabExploratoryCases: readonly PerformanceLabCase[] = [
   exploratoryCase('involute-gear-glb'),
   exploratoryCase('elegant-vase-glb'),
 ];
 
-/** Long-running controls and larger workspace models are explicit opt-in cases. */
-export const performanceLabScaleCases: readonly PerformanceLabCase[] = [
+const scaleFixtures = [
   'planetary-gearbox-step',
   'planetary-cad-step',
   'helical-gear-step',
@@ -424,7 +437,53 @@ export const performanceLabScaleCases: readonly PerformanceLabCase[] = [
   'planetary-cad-glb',
   'many-occurrences-4096-step',
   'large-mesh-48-glb',
-].map((id) => exploratoryCase(id));
+].map((id) => performanceLabFixtures.find((fixture) => fixture.id === id)!);
+
+/**
+ * Scale claims beside watertight, one per capability family: exact facts, validity and structure next to
+ * interference and wall thickness, which tessellate (with analyzeMesh below), so MT/ST comparisons time evaluation.
+ */
+const scaleFamilies: readonly ExploratoryClaim[] = [
+  { matcher: 'toHaveVolume', kind: 'volume', expected: { value: 0, tolerance: 0 }, formats: ['step', 'glb'] },
+  { matcher: 'toBeValidBrep', kind: 'validBrep', expected: {}, formats: ['step'] },
+  { matcher: 'toHaveProductStructure', kind: 'productStructure', expected: { count: 1 }, formats: ['step'] },
+  { matcher: 'toHaveNoComponentInterference', kind: 'componentInterference', expected: {}, formats: ['step'] },
+  {
+    matcher: 'toHaveMinimumWallThickness',
+    kind: 'minimumWallThickness',
+    expected: { value: { greaterThanOrEqual: 1 }, tolerance: 0 },
+    formats: ['step'],
+  },
+];
+
+/** Long-running controls and larger workspace models are explicit opt-in cases. */
+export const performanceLabScaleCases: readonly PerformanceLabCase[] = scaleFixtures.flatMap(({ id, format }) => [
+  exploratoryCase(id),
+  ...scaleFamilies.filter(({ formats }) => formats.includes(format)).map((family) => exploratoryCase(id, family)),
+]);
+
+/** An unverified scale-tier query; it has no accepted authority row. */
+export type PerformanceLabScaleQuery = Omit<PerformanceLabQuery, 'expectedStatus' | 'baseline' | 'authority'> & {
+  expectedStatus: 'unverified';
+  baseline: 'unverified';
+};
+
+/** An analyzeMesh query on every scale fixture: the query that tessellates a STEP subject. */
+export const performanceLabScaleQueries: readonly PerformanceLabScaleQuery[] = scaleFixtures.map(({ id }) => ({
+  id: `exploratory-${id}-analyzeMesh`,
+  fixtureId: id,
+  capability: 'analyzeMesh',
+  claim: {
+    claimId: `simd-lab/exploratory-${id}-analyzeMesh`,
+    capability: 'analyzeMesh',
+    payload: null,
+    polarity: 'positive',
+    subjectSlots: ['subject'],
+    workUnitBudget: 8_000_000,
+  },
+  expectedStatus: 'unverified',
+  baseline: 'unverified',
+}));
 
 export const performanceLabCases: readonly PerformanceLabCase[] = [
   ...performanceLabQualifiedCases,

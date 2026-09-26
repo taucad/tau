@@ -23,7 +23,7 @@ export type GeoSpecPoolWorkerHostOptions = {
   modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
   /** Native assertion client shared with this worker's model admissions. */
   nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions'];
-  /** Managed native admissions drained before worker shutdown. */
+  /** Managed native admissions, released after every shard and collection pass and before shutdown. */
   nativeModelLoader?: ManagedGeoSpecNativeModelLoader;
   /** STEP loader exposed to authored tests through `geospec/step`. */
   stepLoader?: RunGeoSpecModuleOptions['stepLoader'];

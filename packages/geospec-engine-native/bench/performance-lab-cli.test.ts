@@ -21,6 +21,7 @@ import {
   performanceLabFixtures,
   performanceLabNativeQueries,
   performanceLabScaleCases,
+  performanceLabScaleQueries,
 } from '#bench/performance-lab';
 // oxlint-disable-next-line no-restricted-imports -- Test-only current-source overlay inventory.
 import currentAuthority from './fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
@@ -230,7 +231,7 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
         .flatMap(({ cases }) => cases)
         .map(({ id }) => id),
     ),
-    new Set([...selected, ...performanceLabScaleCases].map(({ id }) => id)),
+    new Set([...selected, ...performanceLabScaleCases, ...performanceLabScaleQueries].map(({ id }) => id)),
   );
   const fixture = performanceLabFixtures.find(({ id }) => id === 'rational-plate');
   assert.ok(fixture);

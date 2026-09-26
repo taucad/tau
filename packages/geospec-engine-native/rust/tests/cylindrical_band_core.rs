@@ -442,7 +442,6 @@ impl BrepSubject for Control {
                 entity: address(band),
                 facts: FaceFacts {
                     index: band.public_face_ordinal,
-                    parameter_bounds: band.parameter_bounds,
                     area: 1.0,
                     center_of_mass: band.origin,
                     surface: SurfaceFacts::Cylinder {
@@ -456,8 +455,6 @@ impl BrepSubject for Control {
                     max: [40.0; 3],
                 },
                 reversed: band.transferred_reversed,
-                edge_indices: vec![1, 2, 3],
-                shape_label: Some("0:1:1:3:1".into()),
             };
             // Unselected ordinal slots are report-only scaffolding; the selected
             // slot retains the exact public ordinal/private address from C1.
@@ -474,7 +471,47 @@ impl BrepSubject for Control {
             occurrence_faces[band.occurrence as usize] = Rc::from(faces);
         }
         Ok(ReportedBrepBundle {
-            facts: self.facts()?,
+            facts: Rc::new(DocumentFacts {
+                source_length_unit: "millimetre".into(),
+                source_unit_to_millimeters: 1.0,
+                occurrences: (0..=self.reported.occurrence)
+                    .map(|index| OccurrenceFacts {
+                        name: if index == 1 { "shaft" } else { "housing" }.into(),
+                        placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                        bounds: Bounds {
+                            min: [-40.0; 3],
+                            max: [40.0; 3],
+                        },
+                        path: if index == 1 { "shaft" } else { "housing" }.into(),
+                        parent: None,
+                        product: 0,
+                        product_name: "core-product".into(),
+                        instance_name: None,
+                        ordinal_path: vec![index + 1],
+                    })
+                    .collect(),
+                subshapes: vec![],
+                datum_placements: vec![],
+                semantic_datums: vec![],
+                shape: ShapeFacts {
+                    bounds: Bounds {
+                        min: [-40.0; 3],
+                        max: [40.0; 3],
+                    },
+                    volume: 1.0,
+                    surface_area: 1.0,
+                    center_of_mass: [0.0; 3],
+                    topology: TopologyCounts {
+                        compounds: 0,
+                        solids: 1,
+                        shells: 1,
+                        faces: 3,
+                        wires: 3,
+                        edges: 3,
+                        vertices: 2,
+                    },
+                },
+            }),
             whole_faces: Rc::from([]),
             occurrence_faces,
             mesh: Rc::new(TriangleMesh {
@@ -484,72 +521,11 @@ impl BrepSubject for Control {
         })
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(Rc::new(DocumentFacts {
-            source_length_unit: "millimetre".into(),
-            source_unit_to_millimeters: 1.0,
-            products: vec![],
-            occurrences: (0..=self.reported.occurrence)
-                .map(|index| OccurrenceFacts {
-                    label: format!("occurrence-{index}"),
-                    product_label: "core-product".into(),
-                    name: if index == 1 { "shaft" } else { "housing" }.into(),
-                    placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                    bounds: Bounds {
-                        min: [-40.0; 3],
-                        max: [40.0; 3],
-                    },
-                    path: if index == 1 { "shaft" } else { "housing" }.into(),
-                    parent: None,
-                    product: 0,
-                    product_name: "core-product".into(),
-                    instance_name: None,
-                    ordinal_path: vec![index + 1],
-                })
-                .collect(),
-            faces: vec![],
-            subshapes: vec![],
-            datum_placements: vec![],
-            semantic_datums: vec![],
-            shape: ShapeFacts {
-                valid: true,
-                bounds: Bounds {
-                    min: [-40.0; 3],
-                    max: [40.0; 3],
-                },
-                volume: 1.0,
-                surface_area: 1.0,
-                center_of_mass: [0.0; 3],
-                topology: TopologyCounts {
-                    compounds: 0,
-                    solids: 1,
-                    shells: 1,
-                    faces: 3,
-                    wires: 3,
-                    edges: 3,
-                    vertices: 2,
-                },
-            },
-        }))
-    }
-
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         unreachable!("no whole-face fallback")
     }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!("reuse retained report")
-    }
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        unreachable!("no edge query")
-    }
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         unreachable!("C1 admission owns validity")
-    }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        unreachable!("no extrema fallback")
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        unreachable!("no point classifier")
     }
     fn classify_face_points(
         &self,
@@ -558,15 +534,6 @@ impl BrepSubject for Control {
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
         unreachable!("no point classifier")
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        unreachable!("no solid fallback")
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
-        unreachable!("no wall fallback")
     }
     fn tessellate(
         &self,
@@ -761,7 +728,7 @@ fn selected_public_ordinal_is_not_the_private_query_address() {
     band.private_query_face = 7;
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     let ((value, route), used) = with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         let route = cylindrical_band_face(&endpoint(&band)).ok().unwrap();
         (
             context
@@ -792,7 +759,7 @@ fn distinct_face_reuse_is_claim_local_and_cold_warm_charges_match() {
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     for _ in 0..2 {
         let (_, used) = with_context(&subject, 2, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             let a = context
                 .nominal_cylindrical_band(address(&band), 0)
                 .ok()
@@ -818,7 +785,7 @@ fn distinct_face_budget_precedes_query_and_never_inverts() {
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     for polarity in [Polarity::Positive, Polarity::Negative] {
         let (error, used) = with_context(&subject, 1, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             context
                 .nominal_cylindrical_band(address(&band), 0)
                 .err()
@@ -837,7 +804,7 @@ fn each_pair_pays_even_when_both_roles_reuse_one_face() {
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     for _ in 0..2 {
         let (_, used) = with_context(&subject, 4, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             for _ in 0..2 {
                 let (a, b) =
                     selected_cylindrical_band_pair(&endpoint(&band), &endpoint(&band), context)
@@ -851,7 +818,7 @@ fn each_pair_pays_even_when_both_roles_reuse_one_face() {
     assert_eq!(mock.calls.borrow().len(), 2);
     for polarity in [Polarity::Positive, Polarity::Negative] {
         let (error, used) = with_context(&subject, 2, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             selected_cylindrical_band_pair(&endpoint(&band), &endpoint(&band), context)
                 .err()
                 .unwrap()
@@ -880,7 +847,7 @@ fn missing_or_mismatched_selector_associations_have_no_fallback() {
     assert!(cylindrical_band_face(&whole).is_err());
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     let (error, used) = with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         context
             .nominal_cylindrical_band(address(&band), 1)
             .err()
@@ -910,7 +877,7 @@ fn backend_association_failures_and_unsupported_are_noninvertible() {
             }
             let (subject, mock) = control(band.clone(), Ok(wrong));
             let (error, used) = with_context(&subject, 2, |context| {
-                assert!(context.brep_facts().is_ok());
+                assert!(context.brep_gate().is_ok());
                 context
                     .nominal_cylindrical_band(address(&band), 0)
                     .err()
@@ -928,7 +895,7 @@ fn backend_association_failures_and_unsupported_are_noninvertible() {
             }),
         );
         let (error, _) = with_context(&subject, 2, |context| {
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             context
                 .nominal_cylindrical_band(address(&band), 0)
                 .err()
@@ -943,7 +910,7 @@ fn clearance_capacity_counts_record_allocation_and_pointer_buffer() {
     let band = raw_certificate();
     let (subject, _) = control(band.clone(), Ok(band.clone()));
     with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         assert!(context
             .check_cylindrical_band_capacity(&[256 * 1024])
             .is_err());
@@ -970,7 +937,7 @@ fn exported_pre_call_reservation_counts_prior_live_and_checks_overflow() {
     let band = raw_certificate();
     let (subject, mock) = control(band.clone(), Ok(band.clone()));
     with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         assert!(context.nominal_cylindrical_band(address(&band), 0).is_ok());
         let reservation = continuous::CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES as u64;
         assert!(context
@@ -990,7 +957,7 @@ fn exported_pre_call_reservation_counts_prior_live_and_checks_overflow() {
     });
     assert_eq!(mock.calls.borrow().len(), 1);
     let (_, used) = with_context(&subject, 2, |context| {
-        assert!(context.brep_facts().is_ok());
+        assert!(context.brep_gate().is_ok());
         let header = std::mem::size_of::<Vec<Rc<NominalCylindricalBand>>>() as u64;
         assert!(context
             .set_cylindrical_band_output_bytes(256 * 1024 - header)

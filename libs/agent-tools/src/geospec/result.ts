@@ -20,17 +20,6 @@ type RunGeoSpecTestFailure = RunGeoSpecTestsSuccess['failures'][number];
 type RunGeoSpecTestDiagnostic = NonNullable<RunGeoSpecTestFailure['diagnostics']>[number];
 type RunGeoSpecNativeReport = NonNullable<RunGeoSpecTestFailure['reports']>[number];
 
-const base64ArgumentChunk = 8192;
-
-const encodeBase64 = (bytes: Uint8Array<ArrayBuffer>): string => {
-  let binary = '';
-  for (let index = 0; index < bytes.length; index += base64ArgumentChunk) {
-    binary += String.fromCodePoint(...bytes.subarray(index, index + base64ArgumentChunk));
-  }
-  // oxlint-disable-next-line no-restricted-globals -- btoa is the common browser/Node standard Base64 encoder; bounded chunks avoid argument-limit failures.
-  return btoa(binary);
-};
-
 const fullGeoSpecTestName = (test: GeoSpecTestCase): string => [...test.suite, test.name].join(' > ');
 
 const runtimeIssueText = (issue: unknown): string | undefined => {
@@ -90,6 +79,7 @@ const transportDiagnostics = (
     ...(diagnostic.details === undefined ? {} : { details: structuredClone(diagnostic.details) }),
   }));
 
+// The model reads claim, result and evidence as JSON; canonical engine bytes stay with the engine-side report.
 const transportNativeReports = (test: GeoSpecTestCase): RunGeoSpecNativeReport[] | undefined => {
   const reports = test.assertions.flatMap((assertion): RunGeoSpecNativeReport[] => {
     const report = assertion.nativeReport;
@@ -105,9 +95,6 @@ const transportNativeReports = (test: GeoSpecTestCase): RunGeoSpecNativeReport[]
         result: structuredClone(report.result),
         diagnostics: report.diagnostics.map((diagnostic) => structuredClone(diagnostic)),
         ...(report.evidence === undefined ? {} : { evidence: structuredClone(report.evidence) }),
-        canonicalClaimBase64: encodeBase64(report.canonicalClaim),
-        canonicalPlanBase64: encodeBase64(report.canonicalPlan),
-        canonicalResultBase64: encodeBase64(report.canonicalResult),
       },
     ];
   });

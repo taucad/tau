@@ -1,6 +1,6 @@
 use geospec_engine_native_occt::{
     BrepConnector, BrepEntity, BrepSubject, Document, OcctConnector, SurfaceFacts,
-    TessellationProfile, WallOptions, WallThicknessOutcome,
+    TessellationProfile,
 };
 use std::path::PathBuf;
 
@@ -54,7 +54,7 @@ fn mesh_hash(mesh: &geospec_engine_native_core::backend::TriangleMesh) -> u64 {
 
 fn run_query_order(first: TessellationProfile, second: TessellationProfile, label: &str) {
     let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
-    let nominal_facts = document.facts().unwrap();
+    let nominal_occurrences = document.source_occurrences().unwrap();
     let nominal_faces = document.faces().unwrap();
 
     let first_mesh = BrepSubject::tessellate(&document, BrepEntity::Whole, first).unwrap();
@@ -62,14 +62,22 @@ fn run_query_order(first: TessellationProfile, second: TessellationProfile, labe
     let report = document.reported_facts_and_mesh().unwrap();
     let second_mesh = BrepSubject::tessellate(&document, BrepEntity::Whole, second).unwrap();
 
-    assert_eq!(document.facts().unwrap().as_ref(), nominal_facts.as_ref());
-    assert_eq!(document.faces().unwrap().as_ref(), nominal_faces.as_ref());
+    // Whole faces carry unmeasured (NaN) boxes (F6); Debug text compares them.
     assert_eq!(
-        nominal_facts.shape.bounds.min.map(f64::to_bits),
+        format!("{:?}", document.source_occurrences().unwrap()),
+        format!("{nominal_occurrences:?}")
+    );
+    assert_eq!(
+        format!("{:?}", document.faces().unwrap()),
+        format!("{nominal_faces:?}")
+    );
+    // The two roots' source boxes span the nominal whole box.
+    assert_eq!(
+        nominal_occurrences[0].bounds.min.map(f64::to_bits),
         [(-5.0_f64).to_bits(); 3]
     );
     assert_eq!(
-        nominal_facts.shape.bounds.max.map(f64::to_bits),
+        nominal_occurrences[1].bounds.max.map(f64::to_bits),
         [35.0_f64.to_bits(), 5.0_f64.to_bits(), 5.0_f64.to_bits()]
     );
     assert_eq!(report.facts.shape.bounds.min, SOURCE_REPORTED_WHOLE_MIN);
@@ -90,8 +98,8 @@ fn run_query_order(first: TessellationProfile, second: TessellationProfile, labe
 
     let report_facts = &report.facts;
     eprintln!(
-        "query-order={label} nominal-facts-fnv1a64={:016x} report-facts-fnv1a64={:016x} report-mesh-fnv1a64={:016x} query-mesh-fnv1a64={first_hash:016x}",
-        fnv1a64(format!("{nominal_facts:?}").as_bytes()),
+        "query-order={label} nominal-occurrences-fnv1a64={:016x} report-facts-fnv1a64={:016x} report-mesh-fnv1a64={:016x} query-mesh-fnv1a64={first_hash:016x}",
+        fnv1a64(format!("{nominal_occurrences:?}").as_bytes()),
         fnv1a64(format!("{report_facts:?}").as_bytes()),
         mesh_hash(&report.mesh),
     );
@@ -100,33 +108,14 @@ fn run_query_order(first: TessellationProfile, second: TessellationProfile, labe
 #[test]
 fn streamed_compound_validation_preserves_original_and_meshed_facts() {
     let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
-    let nominal = document.facts().unwrap();
     let report = document.reported_facts_and_mesh().unwrap();
-    assert!(nominal.shape.valid);
-    assert!(report.facts.shape.valid);
-    assert_eq!(nominal.shape.topology.solids, 2);
-    assert_eq!(nominal.shape.topology.faces, 12);
+    // Validity is the source proof; the report facts carry none (F2).
+    assert!(document.validity().unwrap().valid);
+    assert_eq!(report.facts.shape.topology.solids, 2);
+    assert_eq!(report.facts.shape.topology.faces, 12);
     assert_eq!(report.facts.shape.bounds.min, SOURCE_REPORTED_WHOLE_MIN);
     assert_eq!(report.facts.shape.bounds.max, SOURCE_REPORTED_WHOLE_MAX);
     assert_eq!(report.mesh.triangles.len(), 24);
-
-    let mut reported_shape = report.facts.shape.clone();
-    // The established reporting bounds include tolerance; all other shape
-    // facts must remain equal after independent validation of the meshed copy.
-    reported_shape.bounds = nominal.shape.bounds;
-    assert_eq!(reported_shape, nominal.shape);
-    assert_eq!(
-        reported_shape.volume.to_bits(),
-        nominal.shape.volume.to_bits()
-    );
-    assert_eq!(
-        reported_shape.surface_area.to_bits(),
-        nominal.shape.surface_area.to_bits()
-    );
-    assert_eq!(
-        reported_shape.center_of_mass.map(f64::to_bits),
-        nominal.shape.center_of_mass.map(f64::to_bits)
-    );
 }
 
 #[test]
@@ -152,19 +141,11 @@ fn original_validation_reuse_preserves_complete_facts_across_query_orders() {
     let direct_validity = direct.validity().unwrap();
 
     let reported = Document::from_step(&bytes).unwrap();
-    let report = reported.reported_facts_and_mesh().unwrap();
-    assert!(report.facts.shape.valid);
+    reported.reported_facts_and_mesh().unwrap();
     BrepSubject::tessellate(&reported, BrepEntity::Whole, COARSE).unwrap();
     let reported_validity = reported.validity().unwrap();
 
-    let boolean = Document::from_step(&bytes).unwrap();
-    let common = boolean.common_volume(0, 1).unwrap();
-    assert_eq!(common.volume.to_bits(), 0.0_f64.to_bits());
-    // First validity on a fresh document exercises the C++ fallback. A validity
-    // already retained in Rust's OnceCell intentionally remains unchanged.
-    let boolean_validity = boolean.validity().unwrap();
-
-    for actual in [direct_validity, reported_validity, boolean_validity] {
+    for actual in [direct_validity, reported_validity] {
         assert_eq!(actual.as_ref(), &expected);
         assert_eq!(
             actual.max_tolerance.map(f64::to_bits),
@@ -250,42 +231,9 @@ fn fixed_report_bundle_preserves_nominal_queries_and_copy_history_entities() {
 }
 
 #[test]
-fn wall_translation_preserves_actual_consumed_requests() {
-    let measured = Document::from_step(&fixture("ap242-box.step"))
-        .unwrap()
-        .minimum_wall_thickness(&WallOptions {
-            work_unit_budget: 100_000,
-            mesh_linear_tolerance_mm: 0.02,
-            mesh_angular_tolerance_degrees: 0.5,
-        })
-        .unwrap();
-    let WallThicknessOutcome::Measured(measured) = measured else {
-        panic!("closed box must yield measured wall evidence")
-    };
-    assert!(measured.consumed > 0);
-
-    let empty = Document::from_step(&fixture("regular-solid-controls.step"))
-        .unwrap()
-        .minimum_wall_thickness(&WallOptions {
-            work_unit_budget: 100_000,
-            mesh_linear_tolerance_mm: 0.02,
-            mesh_angular_tolerance_degrees: 0.5,
-        })
-        .unwrap();
-    let WallThicknessOutcome::Empty { consumed, .. } = empty else {
-        panic!("mixed regular-solid control must yield empty wall evidence")
-    };
-    eprintln!(
-        "wall-consumed measured={} empty={consumed}",
-        measured.consumed
-    );
-}
-
-#[test]
 fn curved_profile_order_preserves_fixed_report_and_nominal_queries() {
     let bytes = fixture("ap242-radius1-height10.step");
     let baseline = Document::from_step(&bytes).unwrap();
-    let nominal = baseline.facts().unwrap();
     let nominal_faces = baseline.faces().unwrap();
     let fixed = baseline.reported_facts_and_mesh().unwrap();
     for (label, first, second) in [("coarse-fine", COARSE, FINE), ("fine-coarse", FINE, COARSE)] {
@@ -306,8 +254,10 @@ fn curved_profile_order_preserves_fixed_report_and_nominal_queries() {
             assert_eq!(report.occurrence_faces, fixed.occurrence_faces);
             assert_eq!(report.mesh, fixed.mesh);
         }
-        assert_eq!(document.facts().unwrap(), nominal);
-        assert_eq!(document.faces().unwrap(), nominal_faces);
+        assert_eq!(
+            format!("{:?}", document.faces().unwrap()),
+            format!("{nominal_faces:?}")
+        );
         eprintln!("curved-order={label} first-triangles={} second-triangles={} fixed-report-triangles={} fixed-report-fnv={:016x}", first_mesh.triangles.len(), second_mesh.triangles.len(), fixed.mesh.triangles.len(), mesh_hash(&fixed.mesh));
     }
 }

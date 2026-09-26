@@ -1,11 +1,12 @@
-//! PERF-DEMAND-01 report facets: mesh demands never wait on report facts.
+//! PERF-DEMAND-01 report facets: mesh demands never wait on report facts, and
+//! the report mesh is retained once, as the analysis record (F9).
 
 use std::cell::Cell;
 
 use super::*;
 use crate::backend::brep::{
-    BrepIdentityProfile, CommonVolume, EdgeFacts, Extrema, PointState, TopologyCounts,
-    ValidityFacts, WallOptions, WallThicknessOutcome,
+    BrepIdentityProfile, DocumentFacts, PointState, ReportedBrepBundle, ReportedFaces,
+    TopologyCounts, ValidityFacts,
 };
 
 #[derive(Default)]
@@ -13,6 +14,7 @@ struct Calls {
     combined: Cell<usize>,
     mesh: Cell<usize>,
     facts: Cell<usize>,
+    faces: Cell<usize>,
 }
 
 /// `facets == false` is a connector that only reports the combined bundle.
@@ -66,10 +68,8 @@ fn bundle(mesh: Rc<TriangleMesh>) -> ReportedBrepBundle {
         facts: Rc::new(DocumentFacts {
             source_length_unit: "millimetre".into(),
             source_unit_to_millimeters: 1.0,
-            products: Vec::new(),
             occurrences: Vec::new(),
             shape: crate::backend::brep::ShapeFacts {
-                valid: true,
                 bounds: Bounds {
                     min: [0.0; 3],
                     max: [1.0; 3],
@@ -87,7 +87,6 @@ fn bundle(mesh: Rc<TriangleMesh>) -> ReportedBrepBundle {
                     vertices: 8,
                 },
             },
-            faces: Vec::new(),
             subshapes: Vec::new(),
             datum_placements: Vec::new(),
             semantic_datums: Vec::new(),
@@ -99,6 +98,17 @@ fn bundle(mesh: Rc<TriangleMesh>) -> ReportedBrepBundle {
 }
 
 impl BrepSubject for FacetBrep {
+    fn step_subject_metadata(
+        &self,
+    ) -> Result<Option<crate::backend::brep::StepSubjectMetadata>, BackendError> {
+        Ok(Some(crate::backend::brep::StepSubjectMetadata {
+            schema: None,
+            source_byte_length: 0,
+            free_shape_count: 0,
+            native_read_stream: true,
+        }))
+    }
+
     fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
         bump(&self.calls.combined);
         failure(self.fail_mesh, "mesh")?;
@@ -106,43 +116,68 @@ impl BrepSubject for FacetBrep {
         Ok(bundle(cube()))
     }
 
-    fn reported_mesh(&self) -> Result<Option<Rc<TriangleMesh>>, BackendError> {
+    // The combined connector keeps the trait defaults' slices of its bundle.
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
         if !self.facets {
-            return Ok(None);
+            return Ok(self.reported_facts_and_mesh()?.mesh.as_ref().clone());
         }
         bump(&self.calls.mesh);
         failure(self.fail_mesh, "mesh")?;
-        Ok(Some(cube()))
+        Ok(cube().as_ref().clone())
     }
 
-    fn reported_facts(&self, mesh: Rc<TriangleMesh>) -> Result<ReportedBrepBundle, BackendError> {
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        if !self.facets {
+            return Ok(self.reported_facts_and_mesh()?.facts.shape.clone());
+        }
         bump(&self.calls.facts);
+        // Both facets share one copy+mesh generation.
+        failure(self.fail_mesh, "mesh")?;
         failure(self.fail_facts, "facts")?;
-        Ok(bundle(mesh))
+        Ok(bundle(cube()).facts.shape.clone())
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        unreachable!()
+    fn reported_faces(&self, _: bool) -> Result<ReportedFaces, BackendError> {
+        if !self.facets {
+            let bundle = self.reported_facts_and_mesh()?;
+            return Ok(ReportedFaces {
+                whole_faces: bundle.whole_faces,
+                occurrence_faces: bundle.occurrence_faces,
+            });
+        }
+        // Face tables read the source: no generation, so no mesh failure.
+        bump(&self.calls.faces);
+        Ok(ReportedFaces {
+            whole_faces: Rc::from(Vec::new()),
+            occurrence_faces: Vec::new(),
+        })
     }
+
+    fn source_occurrences(
+        &self,
+    ) -> Result<Rc<[crate::backend::brep::OccurrenceFacts]>, BackendError> {
+        if !self.facets {
+            return Ok(self
+                .reported_facts_and_mesh()?
+                .facts
+                .occurrences
+                .clone()
+                .into());
+        }
+        Ok(Rc::from(Vec::new()))
+    }
+
+    fn document_rows(&self) -> Result<crate::backend::brep::DocumentRows, BackendError> {
+        if !self.facets {
+            self.reported_facts_and_mesh()?;
+        }
+        Ok(crate::backend::brep::DocumentRows::default())
+    }
+
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         unreachable!()
     }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!()
-    }
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        unreachable!()
-    }
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
-        unreachable!()
-    }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        unreachable!()
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        unreachable!()
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
         unreachable!()
     }
     fn classify_face_points(
@@ -151,12 +186,6 @@ impl BrepSubject for FacetBrep {
         _: &[[f64; 3]],
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
-        unreachable!()
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
         unreachable!()
     }
     fn tessellate(
@@ -205,7 +234,7 @@ fn claim(subjects: &[Rc<Subject>], mesh: bool) -> (u64, Option<String>) {
     let result = if mesh {
         context.charge_mesh_demand()
     } else {
-        context.brep_facts().map(drop)
+        context.brep_shape().map(drop)
     };
     let refusal = match result {
         Ok(()) => None,
@@ -276,26 +305,119 @@ fn mesh_failure_refuses_both_facets_in_either_order() {
 }
 
 #[test]
-fn facets_charge_and_retain_like_the_combined_report_with_one_build_each() {
-    let (combined, calls) = brep(false, false, false);
-    let (expected, subject) = run(combined, true);
-    assert_eq!(expected, [(MESH_UNITS, None), (1, None)]);
-    let expected_bytes = subject.retained_report_bytes();
-    assert!(expected_bytes > 0);
-    assert_eq!(calls.combined.get(), 1);
-
-    // Mesh first reports the facets separately; facts first reports both at once.
-    for (mesh_first, facet_calls) in [(true, [0, 1, 1]), (false, [1, 0, 0])] {
-        let (facets, calls) = brep(true, false, false);
-        let (outcomes, subject) = run(facets, mesh_first);
-        assert_eq!(outcomes, expected);
-        assert_eq!(subject.retained_report_bytes(), expected_bytes);
-        let subjects = [subject];
+fn facts_demands_build_no_mesh_record_and_each_facet_builds_once() {
+    for facets in [true, false] {
+        let (brep, calls) = brep(facets, false, false);
+        let subjects = [subject(brep)];
+        assert_eq!(claim(&subjects, false), (1, None));
+        assert!(subjects[0].mesh_record().is_none());
+        let facts_bytes = subjects[0].retained_report_bytes();
         assert_eq!(claim(&subjects, true), (MESH_UNITS, None));
         assert_eq!(claim(&subjects, false), (1, None));
+        assert_eq!(claim(&subjects, true), (MESH_UNITS, None));
+        // The record alone is charged: 88 B per triangle (ruling 14).
+        let record = (12 * 88
+            + size_of::<MeshAnalysisRecord>()
+            + size_of::<Primitive>()
+            + subjects[0].display_name.len()
+            + 2) as u64;
+        assert_eq!(subjects[0].retained_report_bytes(), facts_bytes + record);
+        // A combined connector reports once per facet slice: the shape for
+        // the facts, then the mesh.
+        let expected = if facets { [0, 1, 1] } else { [2, 0, 0] };
         assert_eq!(
             [&calls.combined, &calls.mesh, &calls.facts].map(Cell::get),
-            facet_calls
+            expected
         );
     }
+}
+
+#[test]
+fn a_report_soup_moves_into_its_record_and_other_meshes_expand() {
+    let soup = TriangleMesh {
+        positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        triangles: vec![[0, 1, 2]],
+    };
+    let buffer = soup.positions.as_ptr();
+    let record = report_mesh_record(soup, "soup").unwrap();
+    assert_eq!(record.positions.as_ptr(), buffer);
+    assert_eq!(record.triangles, vec![[0, 1, 2]]);
+
+    let indexed = cube().as_ref().clone();
+    let expanded = indexed
+        .triangles
+        .iter()
+        .flat_map(|triangle| triangle.map(|index| indexed.positions[index as usize]))
+        .collect::<Vec<_>>();
+    let record = report_mesh_record(indexed, "cube").unwrap();
+    assert_eq!(record.positions, expanded);
+    assert_eq!(record.triangles[11], [33, 34, 35]);
+    assert_eq!(record.primitives[0].vertex_count, 36);
+
+    let unrepresentable = TriangleMesh {
+        positions: vec![[1e300, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        triangles: vec![[0, 1, 2]],
+    };
+    assert_eq!(
+        report_mesh_record(unrepresentable, "far")
+            .unwrap_err()
+            .message,
+        "Report mesh cannot be represented by its declared finite f32 profile."
+    );
+}
+
+#[test]
+fn the_selector_index_reads_facts_facets_without_the_report_mesh() {
+    // F8: face tables, occurrences and rows, plus the whole-shape facts of an
+    // occurrence-free document; a failing report mesh cannot refuse it.
+    let (brep, calls) = brep(true, false, false);
+    let subjects = [subject(brep)];
+    assert!(subjects[0].selector_index().unwrap().is_some());
+    assert!(subjects[0].mesh_record().is_none());
+    assert_eq!(
+        [&calls.combined, &calls.mesh, &calls.facts, &calls.faces].map(Cell::get),
+        [0, 0, 1, 1]
+    );
+}
+
+#[test]
+fn step_analyze_mesh_reads_occurrences_and_rows_without_the_report_facts() {
+    // F8: a failing report facts facet cannot refuse analyzeMesh on STEP.
+    let (brep, calls) = brep(true, false, true);
+    let subjects = [subject(brep)];
+    let budget = Budget::new(10_000);
+    let expected = Json::Null;
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::AnalyzeMesh,
+        "mesh",
+        &expected,
+        &budget,
+        None,
+    );
+    let evaluation = crate::matchers::mesh::analyze_mesh(&mut context);
+    assert!(matches!(
+        evaluation,
+        Evaluation::Ancillary { success: true, .. }
+    ));
+    assert_eq!(
+        [&calls.combined, &calls.mesh, &calls.facts].map(Cell::get),
+        [0, 1, 0]
+    );
+}
+
+#[test]
+fn a_measured_face_table_replaces_the_address_table() {
+    let (brep, calls) = brep(true, true, true);
+    let subjects = [subject(brep)];
+    let subject = &subjects[0];
+    subject.report_faces(false).unwrap();
+    subject.report_faces(false).unwrap();
+    let address = subject.retained_report_bytes();
+    subject.report_faces(true).unwrap();
+    // A measured table serves both demands and is retained alone.
+    subject.report_faces(false).unwrap();
+    subject.report_faces(true).unwrap();
+    assert_eq!(calls.faces.get(), 2);
+    assert_eq!(subject.retained_report_bytes(), address);
 }

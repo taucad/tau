@@ -84,7 +84,6 @@ fn observe(name: &str, value: &ContinuousWallDomain) {
 fn authored_box_has_complete_directed_rectangle_certificate() {
     // Frozen from export_ap242.py: centered build123d Box(10,20,30).
     let doc = Document::from_step(&fixture("ap242-box.step")).unwrap();
-    let before = doc.facts().unwrap();
     let faces = doc.faces().unwrap();
     let value = doc.continuous_wall_domain(BrepEntity::Whole).unwrap();
     observe("ap242-box.step", &value);
@@ -158,44 +157,23 @@ fn authored_box_has_complete_directed_rectangle_certificate() {
             assert_eq!(outward_normals[index], expected);
         }
     }
-    assert_eq!(before.as_ref(), doc.facts().unwrap().as_ref());
-    assert_eq!(faces.as_ref(), doc.faces().unwrap().as_ref());
-    eprintln!("NOMINAL ap242-box.step unchanged {before:?}");
+    // Whole faces leave their boxes unmeasured (NaN); Debug text compares them.
+    assert_eq!(format!("{faces:?}"), format!("{:?}", doc.faces().unwrap()));
+    eprintln!("NOMINAL ap242-box.step unchanged {faces:?}");
 }
 
 #[test]
 fn preserved_cylinder_records_unqualified_period_obligation() {
     let doc = Document::from_step(&fixture("ap242-radius1-height10.step")).unwrap();
-    let before = doc.facts().unwrap();
     // The intended positive cylinder certificate remains an OPEN obligation in
     // intent-before-query.json. The first failed positive run is preserved.
     // STEP #66 authors U=6.28318530718; no fitted angular tolerance is permitted.
-    let lateral = before
-        .faces
-        .iter()
-        .find(|face| {
-            matches!(
-                face.surface,
-                geospec_engine_native_occt::SurfaceFacts::Cylinder { .. }
-            )
-        })
-        .unwrap();
-    let uv = lateral.parameter_bounds;
-    eprintln!(
-        "CYLINDER-PERIOD uv={uv:?} bits={:?} analyticPeriod={} analyticPeriodBits={}",
-        uv.map(f64::to_bits),
-        std::f64::consts::TAU,
-        std::f64::consts::TAU.to_bits()
-    );
-    assert_ne!(uv[1] - uv[0], std::f64::consts::TAU);
-    assert_eq!([uv[2], uv[3]], [0.0, 10.0]);
+    // (F10: faces no longer carry UV bounds; the refusal below is the evidence.)
     let error = doc.continuous_wall_domain(BrepEntity::Whole).unwrap_err();
     eprintln!("REFUSAL ap242-radius1-height10.step {error:?}");
     assert_eq!(error.kind, BackendErrorKind::Unsupported);
     assert_eq!(error.message,
         "Continuous cylinder requires a finite increasing axial interval and an exact full analytic U period.");
-    assert_eq!(before.as_ref(), doc.facts().unwrap().as_ref());
-    eprintln!("NOMINAL ap242-radius1-height10.step unchanged {before:?}");
 }
 
 #[test]
@@ -205,12 +183,10 @@ fn ordinary_multiple_solid_and_cavity_subjects_are_unsupported() {
         "subject-and-cavity-target.step",
     ] {
         let doc = Document::from_step(&fixture(name)).unwrap();
-        let before = doc.facts().unwrap();
-        assert!(before.shape.valid);
+        assert!(doc.validity().unwrap().valid);
         let error = doc.continuous_wall_domain(BrepEntity::Whole).unwrap_err();
         eprintln!("REFUSAL {name} {error:?}");
         assert_eq!(error.kind, BackendErrorKind::Unsupported);
         assert!(!error.message.is_empty());
-        assert_eq!(before.as_ref(), doc.facts().unwrap().as_ref());
     }
 }

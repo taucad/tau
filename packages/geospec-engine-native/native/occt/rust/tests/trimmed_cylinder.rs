@@ -833,11 +833,13 @@ fn rotated_full_band_uses_rims_instead_of_world_bounds() {
     assert_close(extent.from, 0.0);
     assert_close(extent.to, 10.0);
 
+    // The face's world box, measured on demand.
+    let bounds = document.face_optimal_bounds(face.facts.index).unwrap();
     let mut projected_min = f64::INFINITY;
     let mut projected_max = f64::NEG_INFINITY;
-    for x in [face.bounds.min[0], face.bounds.max[0]] {
-        for y in [face.bounds.min[1], face.bounds.max[1]] {
-            for z in [face.bounds.min[2], face.bounds.max[2]] {
+    for x in [bounds.min[0], bounds.max[0]] {
+        for y in [bounds.min[1], bounds.max[1]] {
+            for z in [bounds.min[2], bounds.max[2]] {
                 let projection = (x - extent.origin[0]) * extent.axis[0]
                     + (y - extent.origin[1]) * extent.axis[1]
                     + (z - extent.origin[2]) * extent.axis[2];

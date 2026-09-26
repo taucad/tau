@@ -94,22 +94,11 @@ impl Prepared {
 
     pub(crate) fn demand(&self) -> AnalysisDemand {
         match self {
-            Self::ComponentInterference(_) => AnalysisDemand {
-                mesh: true,
-                brep: true,
+            Self::ComponentInterference(_) | Self::VoidContinuity(_) => AnalysisDemand {
                 csg: true,
                 ..AnalysisDemand::default()
             },
-            Self::MinimumWallThickness(_) => AnalysisDemand {
-                brep: true,
-                wall: true,
-                ..AnalysisDemand::default()
-            },
-            Self::VoidContinuity(_) => AnalysisDemand {
-                brep: true,
-                csg: true,
-                ..AnalysisDemand::default()
-            },
+            Self::MinimumWallThickness(_) => AnalysisDemand::default(),
         }
     }
 
@@ -153,46 +142,62 @@ impl Prepared {
         let Self::ComponentInterference(value) = self else {
             return Ok(());
         };
+        // Each pattern side is tested once per label, not per pair; a pair
+        // matches a pattern in either orientation.
+        let sides = |pair: &PairPattern| -> Result<Vec<(bool, bool)>, EcmaRegexError> {
+            components
+                .iter()
+                .map(|component| {
+                    Ok((
+                        pair.left.matches(&component.label, Some(engine))?,
+                        pair.right.matches(&component.label, Some(engine))?,
+                    ))
+                })
+                .collect()
+        };
+        let hit = |sides: &[(bool, bool)], left: usize, right: usize| {
+            (sides[left].0 && sides[right].1) || (sides[right].0 && sides[left].1)
+        };
+        let pair_sides = value
+            .pairs
+            .iter()
+            .flatten()
+            .map(sides)
+            .collect::<Result<Vec<_>, _>>()?;
+        let allowance_sides = value
+            .allowances
+            .iter()
+            .map(|allowance| sides(&allowance.pair))
+            .collect::<Result<Vec<_>, _>>()?;
         let mut all_pairs = Vec::new();
-        let mut matched_patterns = vec![false; value.pairs.as_ref().map_or(0, Vec::len)];
+        let mut matched_patterns = vec![false; pair_sides.len()];
         let mut allowance_by_pair = BTreeMap::new();
-        for left in 0..components.len() {
-            for right in left + 1..components.len() {
-                let left_component = &components[left];
-                let right_component = &components[right];
-                let selected = match &value.pairs {
-                    None => true,
-                    Some(patterns) => {
-                        let mut matched = false;
-                        for (index, pattern) in patterns.iter().enumerate() {
-                            if pair_matches(
-                                pattern,
-                                &left_component.label,
-                                &right_component.label,
-                                engine,
-                            )? {
-                                matched = true;
-                                matched_patterns[index] = true;
-                            }
+        // Without `pairs` every pair is selected implicitly and nothing is
+        // materialized; without allowances either, no pair needs a visit.
+        if value.pairs.is_some() || !allowance_sides.is_empty() {
+            for left in 0..components.len() {
+                for right in left + 1..components.len() {
+                    let left_component = &components[left];
+                    let right_component = &components[right];
+                    let mut selected = false;
+                    for (index, sides) in pair_sides.iter().enumerate() {
+                        if hit(sides, left, right) {
+                            selected = true;
+                            matched_patterns[index] = true;
                         }
-                        matched
                     }
-                };
-                if selected {
-                    all_pairs.push(SelectedPair {
-                        left: left_component.id,
-                        right: right_component.id,
-                        left_label: left_component.label.clone(),
-                        right_label: right_component.label.clone(),
-                    });
-                }
-                for (allowance_index, allowance) in value.allowances.iter().enumerate() {
-                    if pair_matches(
-                        &allowance.pair,
-                        &left_component.label,
-                        &right_component.label,
-                        engine,
-                    )? {
+                    if selected {
+                        all_pairs.push(SelectedPair {
+                            left: left_component.id,
+                            right: right_component.id,
+                            left_label: left_component.label.clone(),
+                            right_label: right_component.label.clone(),
+                        });
+                    }
+                    if let Some(allowance_index) = allowance_sides
+                        .iter()
+                        .position(|sides| hit(sides, left, right))
+                    {
                         allowance_by_pair.insert(
                             (
                                 left_component.id.min(right_component.id),
@@ -200,7 +205,6 @@ impl Prepared {
                             ),
                             allowance_index,
                         );
-                        break;
                     }
                 }
             }
@@ -499,19 +503,6 @@ fn string_array(value: &Json, label: &str) -> Result<Vec<String>, ProtocolError>
         .collect()
 }
 
-fn pair_matches(
-    pair: &PairPattern,
-    left: &str,
-    right: &str,
-    engine: &dyn EcmaRegexEngine,
-) -> Result<bool, EcmaRegexError> {
-    Ok(
-        (pair.left.matches(left, Some(engine))? && pair.right.matches(right, Some(engine))?)
-            || (pair.left.matches(right, Some(engine))?
-                && pair.right.matches(left, Some(engine))?),
-    )
-}
-
 pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
     match prepared {
         Prepared::ComponentInterference(value) => evaluate_interference(value, context),
@@ -723,7 +714,10 @@ pub(crate) fn evaluate_overlap(
 }
 
 fn evaluate_wall(prepared: &Wall, context: &mut EvaluationContext<'_>) -> Evaluation {
-    match context.brep_facts() {
+    // The wall domain is classified on the source shape, so the gate is BRep
+    // presence plus its one demand unit (verified admission facts are that
+    // presence); the report bundle is not built.
+    match context.step_units_facts() {
         Ok(Some(_)) => {}
         Ok(None) => {
             return brep_refusal(
@@ -1579,7 +1573,13 @@ fn nominal_point_mismatch(points: &PointEvidence) -> Vec<Diagnostic> {
     vec![diagnostic]
 }
 
+/// STEP overlap tessellates its own occurrences and never reads the report
+/// mesh, so it charges the BRep demand only (ruling 11 drops the report-mesh
+/// charge); mesh subjects keep their mesh-record charge.
 fn charge_overlap_mesh_base(context: &mut EvaluationContext<'_>) -> Result<(), Evaluation> {
+    if context.subject().brep.is_some() {
+        return context.source_occurrence_structure().map(drop);
+    }
     context.charge_mesh_demand()
 }
 
@@ -1844,6 +1844,113 @@ mod tests {
         let pair = &prepared.selected_pairs.unwrap().unwrap()[0];
         assert_eq!((pair.left, pair.right), (1, 2));
         assert_eq!(prepared.allowance_by_pair.unwrap().get(&(1, 2)), Some(&0));
+    }
+
+    /// Prefix matching stands in for ECMAScript and counts every test.
+    struct PrefixRegex(std::cell::Cell<usize>);
+
+    impl EcmaRegexEngine for PrefixRegex {
+        fn validate(&self, _: &str, _: &str) -> Result<(), EcmaRegexError> {
+            Ok(())
+        }
+
+        fn test(&self, pattern: &str, _: &str, value: &str) -> Result<bool, EcmaRegexError> {
+            self.0.set(self.0.get() + 1);
+            Ok(value.starts_with(pattern))
+        }
+    }
+
+    #[test]
+    fn barrier_tests_each_pattern_side_once_per_label_and_matches_the_pairwise_oracle() {
+        let labels = [
+            "shaft/1",
+            "housing/1",
+            "shaft/2",
+            "housing/2",
+            "bolt/1",
+            "shaft/3",
+        ];
+        let components = identities(
+            &labels
+                .iter()
+                .enumerate()
+                .map(|(index, label)| (index as u32 * 3 + 1, *label))
+                .collect::<Vec<_>>(),
+        );
+        let pair_specs = [("shaft", "housing"), ("bolt", "nut")];
+        let allowance_specs = [("housing", "shaft/2"), ("shaft", "housing")];
+        let pattern = |(left, right): (&str, &str)| PairPattern {
+            left: TextPattern::Regex {
+                pattern: left.into(),
+                flags: String::new(),
+            },
+            right: TextPattern::Regex {
+                pattern: right.into(),
+                flags: String::new(),
+            },
+        };
+        let hits = |(left, right): (&str, &str), a: &str, b: &str| {
+            (a.starts_with(left) && b.starts_with(right))
+                || (b.starts_with(left) && a.starts_with(right))
+        };
+        for authored in [false, true] {
+            let engine = PrefixRegex(std::cell::Cell::new(0));
+            let mut prepared = Prepared::ComponentInterference(Interference {
+                expected: Json::Object(Vec::new()),
+                tolerance: DEFAULT_TOLERANCE_MM,
+                pairs: authored.then(|| pair_specs.map(pattern).to_vec()),
+                allowances: allowance_specs
+                    .map(|spec| Allowance {
+                        pair: pattern(spec),
+                        max_volume: Some(0.5),
+                    })
+                    .to_vec(),
+                selected_pairs: None,
+                unmatched_pairs: Vec::new(),
+                allowance_by_pair: None,
+            });
+            prepared
+                .resolve_component_patterns(&components, &engine)
+                .unwrap();
+            let patterns = usize::from(authored) * pair_specs.len() + allowance_specs.len();
+            assert_eq!(engine.0.get(), 2 * patterns * components.len());
+
+            // Brute force over every unordered pair, both orientations.
+            let (mut selected, mut matched, mut allowances) =
+                (Vec::new(), [false; 2], BTreeMap::new());
+            for (index, left) in components.iter().enumerate() {
+                for right in &components[index + 1..] {
+                    let (a, b) = (left.label.as_str(), right.label.as_str());
+                    let mut any = false;
+                    for (spec, seen) in pair_specs.iter().zip(&mut matched) {
+                        if hits(*spec, a, b) {
+                            (any, *seen) = (true, true);
+                        }
+                    }
+                    if any {
+                        selected.push(SelectedPair {
+                            left: left.id,
+                            right: right.id,
+                            left_label: left.label.clone(),
+                            right_label: right.label.clone(),
+                        });
+                    }
+                    if let Some(allowance) =
+                        allowance_specs.iter().position(|spec| hits(*spec, a, b))
+                    {
+                        allowances.insert((left.id, right.id), allowance);
+                    }
+                }
+            }
+            let Prepared::ComponentInterference(prepared) = prepared else {
+                unreachable!()
+            };
+            assert_eq!(prepared.selected_pairs, Some(authored.then_some(selected)));
+            let unmatched: Vec<usize> = if authored { vec![1] } else { Vec::new() };
+            assert_eq!(prepared.unmatched_pairs, unmatched);
+            assert_eq!(matched, [true, false]);
+            assert_eq!(prepared.allowance_by_pair, Some(allowances));
+        }
     }
 
     #[test]

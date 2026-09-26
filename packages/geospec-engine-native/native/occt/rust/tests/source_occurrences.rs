@@ -21,8 +21,8 @@ fn should_transfer_ordered_source_occurrences_without_report_preparation() {
             && row.bounds.max.iter().all(|value| value.is_finite())
     }));
 
-    let nominal = document.facts().unwrap();
-    assert_eq!(source.as_ref(), nominal.occurrences.as_slice());
+    // F10: source rows leave the unread XDE name empty.
+    assert!(source.iter().all(|row| row.name.is_empty()));
     let report = document.reported_facts_and_mesh().unwrap();
     assert_eq!(report.facts.occurrences.len(), source.len());
     let expected_bounds = [
@@ -36,8 +36,6 @@ fn should_transfer_ordered_source_occurrences_without_report_preparation() {
     {
         assert_eq!(source_row.path, report_row.path);
         assert_eq!(source_row.ordinal_path, report_row.ordinal_path);
-        assert_eq!(source_row.label, report_row.label);
-        assert_eq!(source_row.product_label, report_row.product_label);
         assert_eq!(source_row.parent, report_row.parent);
         assert_eq!(source_row.product, report_row.product);
         assert_eq!(
@@ -51,7 +49,7 @@ fn should_transfer_ordered_source_occurrences_without_report_preparation() {
     }
     // The occurrence boxes happen to match bit-for-bit here; the whole-shape
     // report box has its separate tolerance expansion.
-    assert_ne!(nominal.shape.bounds, report.facts.shape.bounds);
+    assert_ne!(source[0].bounds.min, report.facts.shape.bounds.min);
 }
 
 #[test]

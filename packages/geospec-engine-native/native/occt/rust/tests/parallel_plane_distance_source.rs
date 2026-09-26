@@ -40,17 +40,15 @@ fn should_resolve_each_original_face_through_its_distinct_source_occurrence() {
     assert_eq!(second.key.source_face_entity, 1110);
     assert!(first.source_same_sense && second.source_same_sense);
     assert!(first.private_query_face > 0 && second.private_query_face > 0);
-    let facts = document.facts().unwrap();
+    let occurrences = document.source_occurrence_structure().unwrap();
+    assert_eq!(occurrences[first.occurrence as usize].product_name, "cubeA");
     assert_eq!(
-        facts.occurrences[first.occurrence as usize].product_name,
+        occurrences[second.occurrence as usize].product_name,
         "cubeA"
     );
     assert_eq!(
-        facts.occurrences[second.occurrence as usize].product_name,
-        "cubeA"
-    );
-    assert_eq!(
-        document.occurrence_faces(first.occurrence).unwrap()[first.public_face_ordinal as usize]
+        document.reported_faces(false).unwrap().occurrence_faces[first.occurrence as usize]
+            [first.public_face_ordinal as usize]
             .facts
             .index,
         first.public_face_ordinal
@@ -82,7 +80,7 @@ fn should_resolve_distinct_source_faces_in_one_occurrence() {
     assert!(first.transferred_reversed);
     assert!(!second.transferred_reversed);
     assert_eq!(
-        document.facts().unwrap().occurrences[first.occurrence as usize].product_name,
+        document.source_occurrence_structure().unwrap()[first.occurrence as usize].product_name,
         "cubeA"
     );
 }

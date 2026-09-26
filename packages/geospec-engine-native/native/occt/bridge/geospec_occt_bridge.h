@@ -12,6 +12,7 @@ extern "C" {
 #endif
 
 typedef struct geospec_occt_document geospec_occt_document;
+typedef struct geospec_occt_operand_memo geospec_occt_operand_memo;
 
 enum geospec_occt_status {
   GEOSPEC_OCCT_OK = 0,
@@ -57,13 +58,6 @@ enum geospec_occt_point_state {
   GEOSPEC_OCCT_POINT_IN = 0,
   GEOSPEC_OCCT_POINT_ON = 1,
   GEOSPEC_OCCT_POINT_OUT = 2
-};
-
-enum geospec_occt_support_type {
-  GEOSPEC_OCCT_SUPPORT_VERTEX = 0,
-  GEOSPEC_OCCT_SUPPORT_EDGE = 1,
-  GEOSPEC_OCCT_SUPPORT_FACE = 2,
-  GEOSPEC_OCCT_SUPPORT_UNKNOWN = 3
 };
 
 enum geospec_occt_subshape_type {
@@ -272,17 +266,6 @@ typedef struct geospec_occt_validity_facts {
   int closed_wires;
 } geospec_occt_validity_facts;
 
-typedef struct geospec_occt_extrema_result {
-  double distance;
-  double point_a[3];
-  double point_b[3];
-} geospec_occt_extrema_result;
-
-typedef struct geospec_occt_common_volume_result {
-  double volume;
-  double centroid[3];
-} geospec_occt_common_volume_result;
-
 typedef struct geospec_occt_regular_solid_containment_result {
   int contained;
   uint32_t residual_solid_count;
@@ -385,42 +368,14 @@ typedef struct geospec_occt_edge_treatment_row {
   int fillet_reason;
 } geospec_occt_edge_treatment_row;
 
-typedef struct geospec_occt_wall_options {
-  uint64_t work_unit_budget;
-  double mesh_linear_tolerance_mm;
-  double mesh_angular_tolerance_degrees;
-} geospec_occt_wall_options;
-
-typedef struct geospec_occt_wall_result {
-  int outcome;
-  uint64_t consumed;
-  uint64_t limit;
-  double value;
-  double location[3];
-  double point_a[3];
-  double point_b[3];
-  uint32_t solid_index;
-  uint32_t tie_count;
-  uint32_t face_a;
-  uint32_t face_b;
-  int surface_a;
-  int surface_b;
-  int support_a;
-  int support_b;
-  uint32_t checked_pairs;
-  uint32_t extrema_failed;
-  uint32_t zero_length;
-  uint32_t no_material_interval;
-} geospec_occt_wall_result;
-
 typedef struct geospec_occt_report_sizes {
+  // Number of occurrence face tables (one per occurrence) in a faces facet.
   size_t occurrence_count;
   size_t whole_face_count;
   size_t occurrence_face_count;
   size_t position_count;
   size_t triangle_count;
   size_t shape_bytes;
-  size_t occurrence_bytes;
   size_t whole_face_bytes;
   size_t occurrence_face_bytes;
   size_t position_bytes;
@@ -590,14 +545,9 @@ void geospec_occt_release(geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT
 size_t geospec_occt_triangulated_face_count(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 
-// Admission keeps source identity and addresses only. Source shape, occurrence
-// bounds, occurrence face/edge and whole-face numerics are computed on first
-// demand by their getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR.
-int geospec_occt_document_facts(const geospec_occt_document* document,
-                                geospec_occt_shape_facts* out_shape,
-                                double* out_source_unit_to_millimeters,
-                                geospec_occt_string* source_unit,
-                                geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Admission keeps source identity and addresses only. Occurrence bounds, edge
+// addresses and whole-face numerics are computed on first demand by their
+// getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR.
 int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* out_source_unit_to_millimeters, size_t* out_occurrence_count,
@@ -609,20 +559,30 @@ int geospec_occt_step_subject_metadata(
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 enum geospec_occt_report_facet {
+  // The soup of the isolated copy+mesh generation.
   GEOSPEC_OCCT_REPORT_MESH = 1,
-  GEOSPEC_OCCT_REPORT_FACTS = 2
+  // Whole-shape facts on that generation; `valid` is not measured.
+  GEOSPEC_OCCT_REPORT_FACTS = 2,
+  // Whole and occurrence face tables from the source public faces: the
+  // address part (index, query index, orientation, surface and analytic
+  // parameters); no generation. Edge counts are zero.
+  GEOSPEC_OCCT_REPORT_FACES = 4,
+  // With FACES: face areas, centres of mass and non-triangulated Add boxes.
+  GEOSPEC_OCCT_REPORT_FACE_MEASURES = 8
 };
 
 // Prepare the requested facets into the transfer slot. A successful copy+mesh
-// is retained with its history until a facts facet is prepared or the document
-// is freed, so facts after a mesh facet reuse the same meshed generation.
+// is retained until both the mesh and facts facets have been prepared from it
+// or the document is freed, so either order meshes once.
 int geospec_occt_report_prepare(
     const geospec_occt_document* document, uint32_t facets,
     geospec_occt_report_sizes* out_sizes,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 // Private control: caller proves a dedicated OCCT closure and exclusively owns
 // the caller-inclusive grant for this call. A copy+mesh built by the call runs
-// the mesher in the selected mode; facts stay serial. Zero is the plain call.
+// the mesher in the selected mode, and the pool reservation ends with it;
+// everything else is serial. Zero is the plain call. A faces-only call takes
+// no grant and reports serial mode.
 int geospec_occt_report_prepare_dedicated(
     const geospec_occt_document* document, uint32_t facets, int grant_width,
     int* out_used_parallel, geospec_occt_report_sizes* out_sizes,
@@ -632,17 +592,9 @@ size_t geospec_occt_report_generation_builds(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_report_discard(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_report_document_facts(
+int geospec_occt_report_shape_facts(
     const geospec_occt_document* document,
     geospec_occt_shape_facts* out_shape,
-    double* out_source_unit_to_millimeters,
-    geospec_occt_string* source_unit,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_report_occurrence(
-    const geospec_occt_document* document, size_t index,
-    geospec_occt_occurrence_facts* out_occurrence,
-    geospec_occt_string* label, geospec_occt_string* product_label,
-    geospec_occt_string* name,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_report_face(
     const geospec_occt_document* document, size_t index,
@@ -663,9 +615,6 @@ int geospec_occt_report_mesh(
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 size_t geospec_occt_product_count(const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_product(const geospec_occt_document* document, size_t index,
-                         geospec_occt_string* label, geospec_occt_string* name,
-                         geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 size_t geospec_occt_occurrence_count(const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_occurrence(const geospec_occt_document* document, size_t index,
@@ -697,13 +646,11 @@ size_t geospec_occt_query_face_count(
 int geospec_occt_face(const geospec_occt_document* document, size_t index,
                       geospec_occt_face_facts* out_face,
                       geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// A null out_bounds skips the face's AddOptimal box.
 int geospec_occt_face_location(const geospec_occt_document* document,
                                size_t index, geospec_occt_bounds* out_bounds,
                                int* out_reversed,
                                geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_face_label(const geospec_occt_document* document,
-                            size_t index, geospec_occt_string* shape_label,
-                            geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 size_t geospec_occt_subshape_count(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
@@ -743,27 +690,11 @@ int geospec_occt_resolve_source_face(
     const uint32_t* occurrence_route, size_t occurrence_route_count,
     geospec_occt_resolved_source_face* out_face,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_occurrence_face(
-    const geospec_occt_document* document, uint32_t occurrence, size_t index,
-    geospec_occt_located_face_facts* out_face,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_occurrence_face_label(
-    const geospec_occt_document* document, uint32_t occurrence, size_t index,
-    geospec_occt_string* shape_label,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_occurrence_face_edge(
-    const geospec_occt_document* document, uint32_t occurrence, size_t face_index,
-    size_t edge_index, uint32_t* out_edge,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 // Maps the occurrence's edge addresses on first demand, so it can fail.
 int geospec_occt_occurrence_edge_count(
     const geospec_occt_document* document, uint32_t occurrence,
     size_t* out_count, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_occurrence_edge(
-    const geospec_occt_document* document, uint32_t occurrence, size_t index,
-    geospec_occt_edge_facts* out_edge,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 int geospec_occt_validity(const geospec_occt_document* document,
                           geospec_occt_validity_facts* out_validity,
@@ -776,33 +707,23 @@ int geospec_occt_validity_dedicated(
     int* out_used_parallel, geospec_occt_validity_facts* out_validity,
     geospec_occt_string* reason,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_extrema(const geospec_occt_document* document,
-                         geospec_occt_entity a, geospec_occt_entity b,
-                         geospec_occt_extrema_result* out_extrema,
-                         geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_classify_points(
-    const geospec_occt_document* document, uint32_t occurrence,
-    const double* points, size_t point_count, int* states, size_t state_capacity,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_common_volume(
-    const geospec_occt_document* document, uint32_t occurrence_a,
-    uint32_t occurrence_b, geospec_occt_common_volume_result* out_common,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-// Private controls: caller proves a dedicated OCCT closure and exclusively
-// owns the caller-inclusive grant within its first-initialized pool cap.
-int geospec_occt_common_volume_dedicated(
-    const geospec_occt_document* document, uint32_t occurrence_a,
-    uint32_t occurrence_b, int grant_width, int* out_used_parallel,
-    geospec_occt_common_volume_result* out_common,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment(
     const geospec_occt_document* document, geospec_occt_entity subject,
     geospec_occt_entity target,
     geospec_occt_regular_solid_containment_result* out_result,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// C7: a claim-local memo of per-occurrence regular-solid operands and scoped
+// bore inventories for one document. The caller releases it after the claim;
+// a null memo re-qualifies per query. Occurrence operands of the queries
+// below come from `memo` when it is not null.
+geospec_occt_operand_memo* geospec_occt_operand_memo_new(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
+void geospec_occt_operand_memo_release(
+    geospec_occt_operand_memo* memo) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment_dedicated(
     const geospec_occt_document* document, geospec_occt_entity subject,
-    geospec_occt_entity target, int grant_width, int* out_used_parallel,
+    geospec_occt_entity target, geospec_occt_operand_memo* memo,
+    int grant_width, int* out_used_parallel,
     geospec_occt_regular_solid_containment_result* out_result,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_cylinder_axial_extent(
@@ -817,11 +738,13 @@ int geospec_occt_nominal_cylindrical_band_query(
 // kind 0: complete bore material in end slab; kind 1: complete capped cylinder.
 int geospec_occt_selected_interference_material_query(
     const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_operand_memo* memo,
     geospec_occt_nominal_cylindrical_band* band, uint32_t* kind,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 int geospec_occt_selected_bore_void_query(
     const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_operand_memo* memo,
     geospec_occt_nominal_cylindrical_band* band,
     geospec_occt_circular_bore_candidate* clear_interior,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
@@ -901,11 +824,6 @@ int geospec_occt_classify_face_points(
     const geospec_occt_document* document, geospec_occt_entity face,
     const double* points, size_t point_count, double tolerance,
     int* states, size_t state_capacity,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_minimum_wall_thickness(
-    const geospec_occt_document* document,
-    const geospec_occt_wall_options* options,
-    geospec_occt_wall_result* out_wall,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 int geospec_occt_tessellate(const geospec_occt_document* document,

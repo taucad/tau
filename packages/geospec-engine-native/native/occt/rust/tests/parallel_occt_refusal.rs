@@ -14,8 +14,4 @@ fn adapter_refuses_a_pool_first_initialized_for_serial_calls() {
     let direct = Document::from_step(input).unwrap();
     let via_unit = OcctConnector.open_step(input).unwrap();
     assert_eq!(direct.validity().unwrap(), via_unit.validity().unwrap());
-    assert_eq!(
-        direct.common_volume(0, 1).unwrap(),
-        via_unit.common_volume(0, 1).unwrap()
-    );
 }

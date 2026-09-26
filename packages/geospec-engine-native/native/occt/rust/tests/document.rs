@@ -1,5 +1,5 @@
 use geospec_engine_native_core::backend::BackendErrorKind;
-use geospec_engine_native_occt::{Document, SurfaceFacts, TopologyCounts};
+use geospec_engine_native_occt::{BrepSubject, Document, SurfaceFacts, TopologyCounts};
 use std::path::PathBuf;
 
 // The bridge reports TopExp_Explorer traversal multiplicities. Each closed box
@@ -30,6 +30,23 @@ fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(path).expect("retained fixture must be readable")
 }
 
+// The source shape box: the fold of the whole-face AddOptimal boxes (F6).
+// The report shape box carries its tolerance expansion instead.
+fn source_box(document: &Document) -> ([f64; 3], [f64; 3]) {
+    let faces = BrepSubject::faces(document).unwrap();
+    (0..faces.len() as u32)
+        .map(|face| document.face_optimal_bounds(face).unwrap())
+        .fold(
+            ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
+            |(min, max), value| {
+                (
+                    std::array::from_fn(|axis| min[axis].min(value.min[axis])),
+                    std::array::from_fn(|axis| max[axis].max(value.max[axis])),
+                )
+            },
+        )
+}
+
 fn close(actual: f64, expected: f64, tolerance: f64) {
     assert!(
         (actual - expected).abs() <= tolerance,
@@ -46,37 +63,33 @@ fn close3(actual: [f64; 3], expected: [f64; 3], tolerance: f64) {
 #[test]
 fn ap242_box_retains_shape_face_and_mesh_facts() {
     let document = Document::from_step(&fixture("ap242-box.step")).unwrap();
-    let facts = document.facts().unwrap();
+    let admission = document.admission_facts().unwrap();
+    let shape = document.reported_shape().unwrap();
+    let faces = BrepSubject::faces(&document).unwrap();
 
-    assert_eq!(facts.source_length_unit, "millimetre");
-    close(facts.source_unit_to_millimeters, 1.0, 1e-12);
-    assert!(facts.shape.valid);
-    assert!(facts
-        .products
-        .iter()
-        .any(|product| product.name == "COMPOUND"));
-    close(facts.shape.volume, 6_000.0, 1e-8);
-    close(facts.shape.surface_area, 2_200.0, 1e-8);
-    close3(facts.shape.bounds.min, [-5.0, -10.0, -15.0], 1e-8);
-    close3(facts.shape.bounds.max, [5.0, 10.0, 15.0], 1e-8);
-    close3(facts.shape.center_of_mass, [0.0, 0.0, 0.0], 1e-8);
+    assert_eq!(admission.source_length_unit, "millimetre");
+    close(admission.source_unit_to_millimeters, 1.0, 1e-12);
+    assert!(document.validity().unwrap().valid);
+    close(shape.volume, 6_000.0, 1e-8);
+    close(shape.surface_area, 2_200.0, 1e-8);
+    close3(source_box(&document).0, [-5.0, -10.0, -15.0], 1e-8);
+    close3(source_box(&document).1, [5.0, 10.0, 15.0], 1e-8);
+    close3(shape.center_of_mass, [0.0, 0.0, 0.0], 1e-8);
     assert_eq!(
-        topology_multiplicities(facts.shape.topology),
+        topology_multiplicities(shape.topology),
         box_topology_multiplicities(1)
     );
-    assert_eq!(facts.faces.len(), 6);
+    assert_eq!(faces.len(), 6);
     assert_eq!(
-        facts
-            .faces
+        faces
             .iter()
-            .map(|face| face.index)
+            .map(|face| face.facts.index)
             .collect::<Vec<_>>(),
         vec![0, 1, 2, 3, 4, 5]
     );
-    assert!(facts
-        .faces
+    assert!(faces
         .iter()
-        .all(|face| matches!(&face.surface, SurfaceFacts::Plane { .. })));
+        .all(|face| matches!(&face.facts.surface, SurfaceFacts::Plane { .. })));
     // GNE-OCCT-FACE-ORACLE-01: independent STEPControl_Reader / TopExp unique
     // faces / BRepGProp::SurfaceProperties(false, false), frozen before candidate
     // inspection. This exact runtime-byte oracle replaces the mistaken ideal
@@ -95,16 +108,14 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
         (5, 0x4068_ffff_ffff_ffff),
     ];
     assert_eq!(
-        facts
-            .faces
+        faces
             .iter()
-            .map(|face| (face.index, face.area.to_bits()))
+            .map(|face| (face.facts.index, face.facts.area.to_bits()))
             .collect::<Vec<_>>(),
         expected_face_areas
     );
-    for face in &facts.faces {
-        assert!(face.parameter_bounds.iter().all(|value| value.is_finite()));
-        if let SurfaceFacts::Plane { normal, .. } = &face.surface {
+    for face in faces.iter() {
+        if let SurfaceFacts::Plane { normal, .. } = &face.facts.surface {
             close(
                 normal.iter().map(|value| value * value).sum::<f64>(),
                 1.0,
@@ -113,11 +124,11 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
         }
     }
     close(
-        facts.faces.iter().map(|face| face.area).sum(),
+        faces.iter().map(|face| face.facts.area).sum(),
         2_200.0,
         1e-8,
     );
-    assert!(facts.occurrences.is_empty());
+    assert!(document.source_occurrence_structure().unwrap().is_empty());
 
     let mesh = document.tessellate(0.1, 0.5).unwrap();
     assert_eq!(mesh.positions.len(), 8);
@@ -156,8 +167,8 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
             .reduce(f64::max)
             .unwrap(),
     ];
-    close3(mesh_min, facts.shape.bounds.min, 1e-8);
-    close3(mesh_max, facts.shape.bounds.max, 1e-8);
+    close3(mesh_min, source_box(&document).0, 1e-8);
+    close3(mesh_max, source_box(&document).1, 1e-8);
     assert!(mesh
         .triangles
         .iter()
@@ -168,81 +179,72 @@ fn ap242_box_retains_shape_face_and_mesh_facts() {
 #[test]
 fn inch_cube_preserves_declared_units_and_converted_geometry() {
     let document = Document::from_step(&fixture("inch-cube.step")).unwrap();
-    let facts = document.facts().unwrap();
+    let admission = document.admission_facts().unwrap();
+    let shape = document.reported_shape().unwrap();
+    let faces = BrepSubject::faces(&document).unwrap();
 
-    assert_eq!(facts.source_length_unit, "INCH");
-    close(facts.source_unit_to_millimeters, 25.4, 1e-12);
-    assert!(facts.shape.valid);
-    close(facts.shape.volume, 25.4_f64.powi(3), 1e-8);
-    close(facts.shape.surface_area, 6.0 * 25.4_f64.powi(2), 1e-8);
-    close3(facts.shape.bounds.min, [0.0, 0.0, 0.0], 1e-8);
-    close3(facts.shape.bounds.max, [25.4, 25.4, 25.4], 1e-8);
-    close3(facts.shape.center_of_mass, [12.7, 12.7, 12.7], 1e-8);
+    assert_eq!(admission.source_length_unit, "INCH");
+    close(admission.source_unit_to_millimeters, 25.4, 1e-12);
+    assert!(document.validity().unwrap().valid);
+    close(shape.volume, 25.4_f64.powi(3), 1e-8);
+    close(shape.surface_area, 6.0 * 25.4_f64.powi(2), 1e-8);
+    close3(source_box(&document).0, [0.0, 0.0, 0.0], 1e-8);
+    close3(source_box(&document).1, [25.4, 25.4, 25.4], 1e-8);
+    close3(shape.center_of_mass, [12.7, 12.7, 12.7], 1e-8);
     assert_eq!(
-        topology_multiplicities(facts.shape.topology),
+        topology_multiplicities(shape.topology),
         box_topology_multiplicities(1)
     );
-    assert_eq!(facts.faces.len(), 6);
-    assert!(facts
-        .faces
+    assert_eq!(faces.len(), 6);
+    assert!(faces
         .iter()
-        .all(|face| matches!(&face.surface, SurfaceFacts::Plane { .. })));
+        .all(|face| matches!(&face.facts.surface, SurfaceFacts::Plane { .. })));
     assert_eq!(document.tessellate(0.1, 0.5).unwrap().triangles.len(), 12);
 }
 
 #[test]
 fn assembly_retains_occurrence_references_composed_placements_and_bounds() {
     let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
-    let facts = document.facts().unwrap();
+    let admission = document.admission_facts().unwrap();
+    let shape = document.reported_shape().unwrap();
+    let occurrences = document.source_occurrences().unwrap();
 
-    assert_eq!(facts.source_length_unit, "millimetre");
-    assert!(facts.shape.valid);
-    close(facts.shape.volume, 2_000.0, 1e-8);
-    close(facts.shape.surface_area, 1_200.0, 1e-8);
-    close3(facts.shape.bounds.min, [-5.0, -5.0, -5.0], 1e-8);
-    close3(facts.shape.bounds.max, [35.0, 5.0, 5.0], 1e-8);
-    close3(facts.shape.center_of_mass, [15.0, 0.0, 0.0], 1e-8);
+    assert_eq!(admission.source_length_unit, "millimetre");
+    assert!(document.validity().unwrap().valid);
+    close(shape.volume, 2_000.0, 1e-8);
+    close(shape.surface_area, 1_200.0, 1e-8);
+    close3(source_box(&document).0, [-5.0, -5.0, -5.0], 1e-8);
+    close3(source_box(&document).1, [35.0, 5.0, 5.0], 1e-8);
+    close3(shape.center_of_mass, [15.0, 0.0, 0.0], 1e-8);
     assert_eq!(
-        topology_multiplicities(facts.shape.topology),
+        topology_multiplicities(shape.topology),
         box_topology_multiplicities(2)
     );
-    assert_eq!(facts.occurrences.len(), 2);
-    assert!(facts.occurrences.iter().all(|occurrence| facts
-        .products
-        .iter()
-        .any(|product| product.label == occurrence.product_label)));
-    assert_eq!(
-        facts
-            .occurrences
-            .iter()
-            .map(|value| (value.label.as_str(), value.product_label.as_str()))
-            .collect::<Vec<_>>(),
-        vec![("0:1:1:1:1", "0:1:1:2"), ("0:1:1:1:2", "0:1:1:3")]
-    );
+    assert_eq!(occurrences.len(), 2);
     close3(
         [
-            facts.occurrences[0].placement[3],
-            facts.occurrences[0].placement[7],
-            facts.occurrences[0].placement[11],
+            occurrences[0].placement[3],
+            occurrences[0].placement[7],
+            occurrences[0].placement[11],
         ],
         [0.0, 0.0, 0.0],
         1e-12,
     );
     close3(
         [
-            facts.occurrences[1].placement[3],
-            facts.occurrences[1].placement[7],
-            facts.occurrences[1].placement[11],
+            occurrences[1].placement[3],
+            occurrences[1].placement[7],
+            occurrences[1].placement[11],
         ],
         [30.0, 0.0, 0.0],
         1e-12,
     );
-    close3(facts.occurrences[0].bounds.min, [-5.0, -5.0, -5.0], 1e-8);
-    close3(facts.occurrences[0].bounds.max, [5.0, 5.0, 5.0], 1e-8);
-    close3(facts.occurrences[1].bounds.min, [25.0, -5.0, -5.0], 1e-8);
-    close3(facts.occurrences[1].bounds.max, [35.0, 5.0, 5.0], 1e-8);
+    close3(occurrences[0].bounds.min, [-5.0, -5.0, -5.0], 1e-8);
+    close3(occurrences[0].bounds.max, [5.0, 5.0, 5.0], 1e-8);
+    close3(occurrences[1].bounds.min, [25.0, -5.0, -5.0], 1e-8);
+    close3(occurrences[1].bounds.max, [35.0, 5.0, 5.0], 1e-8);
     close(
-        facts.occurrences[1].bounds.min[0] - facts.occurrences[0].bounds.max[0],
+        occurrences[1].bounds.min[0] - occurrences[0].bounds.max[0],
         20.0,
         1e-8,
     );
@@ -252,25 +254,24 @@ fn assembly_retains_occurrence_references_composed_placements_and_bounds() {
 #[test]
 fn nist_document_retains_bspline_faces() {
     let document = Document::from_step(&fixture("nist-pmi-bspline.step")).unwrap();
-    let facts = document.facts().unwrap();
+    let shape = document.reported_shape().unwrap();
+    let faces = BrepSubject::faces(&document).unwrap();
 
-    assert!(facts.shape.valid);
-    assert_eq!(facts.shape.topology.faces, 156);
-    assert_eq!(facts.faces.len(), 156);
+    assert!(document.validity().unwrap().valid);
+    assert_eq!(shape.topology.faces, 156);
+    assert_eq!(faces.len(), 156);
     assert_eq!(
-        facts
-            .faces
+        faces
             .iter()
-            .filter(|face| matches!(&face.surface, SurfaceFacts::Bspline { .. }))
+            .filter(|face| matches!(&face.facts.surface, SurfaceFacts::Bspline { .. }))
             .count(),
         4
     );
-    for face in facts
-        .faces
+    for face in faces
         .iter()
-        .filter(|face| matches!(&face.surface, SurfaceFacts::Bspline { .. }))
+        .filter(|face| matches!(&face.facts.surface, SurfaceFacts::Bspline { .. }))
     {
-        match &face.surface {
+        match &face.facts.surface {
             SurfaceFacts::Bspline {
                 u_degree,
                 v_degree,

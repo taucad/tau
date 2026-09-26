@@ -11,17 +11,17 @@ fn original_clearance_subjects_have_complete_located_box_domains() {
         )
         .expect("unchanged independently authored STEP bytes");
         let document = Document::from_step(&bytes).expect("ordinary original STEP admission");
-        let facts = document.facts().expect("actual occurrence identities");
-        eprintln!(
-            "CLEARANCE_SUBJECT fixture={name} occurrences={:#?}",
-            facts.occurrences
-        );
-        assert_eq!(facts.occurrences.len(), 2);
-        for (ordinal, occurrence) in facts.occurrences.iter().enumerate() {
+        let occurrences = document
+            .source_occurrence_structure()
+            .expect("actual occurrence identities");
+        eprintln!("CLEARANCE_SUBJECT fixture={name} occurrences={occurrences:#?}");
+        assert_eq!(occurrences.len(), 2);
+        let faces = document.reported_faces(false).unwrap().occurrence_faces;
+        for (ordinal, occurrence) in occurrences.iter().enumerate() {
             let domain = document.selected_continuous_domain(ordinal as u32);
             eprintln!(
-                "CLEARANCE_DOMAIN fixture={name} name={:?} ordinal={ordinal} result={domain:#?}",
-                occurrence.name
+                "CLEARANCE_DOMAIN fixture={name} path={:?} ordinal={ordinal} result={domain:#?}",
+                occurrence.path
             );
             let domain =
                 domain.expect("original clearance operand must qualify without changing it");
@@ -32,16 +32,12 @@ fn original_clearance_subjects_have_complete_located_box_domains() {
             ));
             assert_eq!(domain.domain_face_to_occurrence_face.len(), 6);
             assert_eq!(domain.domain_edge_to_occurrence_edge.len(), 12);
-            let faces = document.occurrence_faces(ordinal as u32).unwrap();
-            let edges = document.occurrence_edges(ordinal as u32).unwrap();
+            let faces = &faces[ordinal];
             assert_eq!(faces.len(), 6);
-            assert_eq!(edges.len(), 12);
             for index in &domain.domain_face_to_occurrence_face {
                 assert!(*index >= 1 && *index <= faces.len() as u32);
             }
-            for index in &domain.domain_edge_to_occurrence_edge {
-                assert!(*index >= 1 && *index <= edges.len() as u32);
-            }
+            // Edge ordinals are range-checked by the query itself.
         }
     }
 }

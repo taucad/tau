@@ -30,7 +30,32 @@ impl BrepSubject for Control {
     }
     fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
         Ok(ReportedBrepBundle {
-            facts: self.facts()?,
+            facts: Rc::new(DocumentFacts {
+                source_length_unit: "millimetre".into(),
+                source_unit_to_millimeters: 1.0,
+                occurrences: vec![],
+                subshapes: vec![],
+                datum_placements: vec![],
+                semantic_datums: vec![],
+                shape: ShapeFacts {
+                    bounds: Bounds {
+                        min: [0.0; 3],
+                        max: [1.0; 3],
+                    },
+                    volume: 1.0,
+                    surface_area: 6.0,
+                    center_of_mass: [0.5; 3],
+                    topology: TopologyCounts {
+                        compounds: 0,
+                        solids: 1,
+                        shells: 1,
+                        faces: 6,
+                        wires: 6,
+                        edges: 12,
+                        vertices: 8,
+                    },
+                },
+            }),
             whole_faces: Rc::from([]),
             occurrence_faces: vec![],
             mesh: Rc::new(TriangleMesh {
@@ -39,54 +64,11 @@ impl BrepSubject for Control {
             }),
         })
     }
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(Rc::new(DocumentFacts {
-            source_length_unit: "millimetre".into(),
-            source_unit_to_millimeters: 1.0,
-            products: vec![],
-            occurrences: vec![],
-            faces: vec![],
-            subshapes: vec![],
-            datum_placements: vec![],
-            semantic_datums: vec![],
-            shape: ShapeFacts {
-                valid: true,
-                bounds: Bounds {
-                    min: [0.0; 3],
-                    max: [1.0; 3],
-                },
-                volume: 1.0,
-                surface_area: 6.0,
-                center_of_mass: [0.5; 3],
-                topology: TopologyCounts {
-                    compounds: 0,
-                    solids: 1,
-                    shells: 1,
-                    faces: 6,
-                    wires: 6,
-                    edges: 12,
-                    vertices: 8,
-                },
-            },
-        }))
-    }
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         unreachable!("no face query")
     }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!("no face query")
-    }
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        unreachable!("no edge query")
-    }
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         unreachable!("query validates its own operands")
-    }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        unreachable!("no extrema substitute")
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        unreachable!("no sampled containment")
     }
     fn classify_face_points(
         &self,
@@ -95,15 +77,6 @@ impl BrepSubject for Control {
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
         unreachable!("no sampled containment")
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        unreachable!("no common-volume substitute")
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
-        unreachable!("no wall query")
     }
     fn tessellate(
         &self,

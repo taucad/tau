@@ -39,9 +39,9 @@ fn perforated_genuine_chamfer_with_surviving_rails_remains_unknown() {
         ("chamfer-perforated.step", true),
     ] {
         let d = Document::from_step(&std::fs::read(inputs().join(file)).unwrap()).unwrap();
-        let facts = d.facts().unwrap();
-        assert_eq!(facts.occurrences.len(), 1);
-        let faces = d.occurrence_faces(0).unwrap();
+        let mut faces = d.reported_faces(false).unwrap().occurrence_faces;
+        assert_eq!(faces.len(), 1);
+        let faces = faces.remove(0);
         // Independent authored strip: x+z=28, swept along Y. The bore does not
         // touch either length-30 rail. This identifies geometry, not a label.
         let selected: Vec<_> = faces

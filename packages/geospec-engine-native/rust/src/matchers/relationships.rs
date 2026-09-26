@@ -116,7 +116,6 @@ impl Prepared {
 
     pub(crate) fn demand(&self) -> AnalysisDemand {
         AnalysisDemand {
-            brep: true,
             selectors: true,
             ..AnalysisDemand::default()
         }
@@ -681,7 +680,8 @@ fn clearance_finish_reservation(
 }
 
 pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
-    if let Err(evaluation) = context.brep_facts() {
+    // F3: the BRep unit and the source; no report facet.
+    if let Err(evaluation) = context.brep_gate() {
         return evaluation;
     }
     if context.subject().brep.is_none() {
@@ -1221,7 +1221,7 @@ fn prove_contact(
     // A target occurrence may contribute a real boundary face, never an
     // unrelated infinite support. Keep enumeration tied to its retained source
     // inventory, precharge all rows before testing, and bound it to 64 faces.
-    let bundle = context.subject().report_bundle()?.ok_or_else(|| {
+    let bundle = context.subject().report_faces(false)?.ok_or_else(|| {
         finite_contact_failure("Contact needs the actual located-face inventory.")
     })?;
     let mut targets = Vec::new();
@@ -2733,7 +2733,45 @@ mod tests {
             use crate::backend::{brep::*, TriangleMesh};
             use std::rc::Rc;
             Ok(ReportedBrepBundle {
-                facts: self.facts()?,
+                facts: Rc::new(DocumentFacts {
+                    source_length_unit: "millimetre".into(),
+                    source_unit_to_millimeters: 1.0,
+                    occurrences: vec![OccurrenceFacts {
+                        name: "housing".into(),
+                        placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                        bounds: Bounds {
+                            min: [-40.0; 3],
+                            max: [40.0; 3],
+                        },
+                        path: "housing".into(),
+                        parent: None,
+                        product: 0,
+                        product_name: "core-product".into(),
+                        instance_name: None,
+                        ordinal_path: vec![1],
+                    }],
+                    subshapes: vec![],
+                    datum_placements: vec![],
+                    semantic_datums: vec![],
+                    shape: ShapeFacts {
+                        bounds: Bounds {
+                            min: [-40.0; 3],
+                            max: [40.0; 3],
+                        },
+                        volume: 1.0,
+                        surface_area: 1.0,
+                        center_of_mass: [0.0; 3],
+                        topology: TopologyCounts {
+                            compounds: 0,
+                            solids: 1,
+                            shells: 1,
+                            faces: 3,
+                            wires: 3,
+                            edges: 3,
+                            vertices: 2,
+                        },
+                    },
+                }),
                 whole_faces: Rc::from([]),
                 occurrence_faces: vec![self
                     .bands
@@ -2745,7 +2783,6 @@ mod tests {
                         },
                         facts: FaceFacts {
                             index: b.public_face_ordinal,
-                            parameter_bounds: b.parameter_bounds,
                             area: 1.,
                             center_of_mass: b.origin,
                             surface: SurfaceFacts::Cylinder {
@@ -2759,8 +2796,6 @@ mod tests {
                             max: [40.; 3],
                         },
                         reversed: false,
-                        edge_indices: vec![1, 2, 3],
-                        shape_label: None,
                     })
                     .collect::<Vec<_>>()
                     .into()],
@@ -2770,92 +2805,13 @@ mod tests {
                 }),
             })
         }
-        fn facts(&self) -> Result<Rc<crate::backend::brep::DocumentFacts>, BackendError> {
-            use crate::backend::brep::*;
-            use std::rc::Rc;
-            Ok(Rc::new(DocumentFacts {
-                source_length_unit: "millimetre".into(),
-                source_unit_to_millimeters: 1.0,
-                products: vec![],
-                occurrences: (0..1)
-                    .map(|index| OccurrenceFacts {
-                        label: format!("occurrence-{index}"),
-                        product_label: "core-product".into(),
-                        name: if index == 1 { "shaft" } else { "housing" }.into(),
-                        placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                        bounds: Bounds {
-                            min: [-40.0; 3],
-                            max: [40.0; 3],
-                        },
-                        path: if index == 1 { "shaft" } else { "housing" }.into(),
-                        parent: None,
-                        product: 0,
-                        product_name: "core-product".into(),
-                        instance_name: None,
-                        ordinal_path: vec![index + 1],
-                    })
-                    .collect(),
-                faces: vec![],
-                subshapes: vec![],
-                datum_placements: vec![],
-                semantic_datums: vec![],
-                shape: ShapeFacts {
-                    valid: true,
-                    bounds: Bounds {
-                        min: [-40.0; 3],
-                        max: [40.0; 3],
-                    },
-                    volume: 1.0,
-                    surface_area: 1.0,
-                    center_of_mass: [0.0; 3],
-                    topology: TopologyCounts {
-                        compounds: 0,
-                        solids: 1,
-                        shells: 1,
-                        faces: 3,
-                        wires: 3,
-                        edges: 3,
-                        vertices: 2,
-                    },
-                },
-            }))
-        }
 
         fn faces(&self) -> Result<std::rc::Rc<[crate::backend::brep::LocatedFace]>, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
-        fn occurrence_faces(
-            &self,
-            _: u32,
-        ) -> Result<std::rc::Rc<[crate::backend::brep::LocatedFace]>, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
-        fn occurrence_edges(
-            &self,
-            _: u32,
-        ) -> Result<std::rc::Rc<[crate::backend::brep::EdgeFacts]>, BackendError> {
             unreachable!("only trim query belongs to this control")
         }
         fn validity(
             &self,
         ) -> Result<std::rc::Rc<crate::backend::brep::ValidityFacts>, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
-        fn extrema(
-            &self,
-            _: BrepEntity,
-            _: BrepEntity,
-        ) -> Result<crate::backend::brep::Extrema, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
-        fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
-        fn common_volume(
-            &self,
-            _: u32,
-            _: u32,
-        ) -> Result<crate::backend::brep::CommonVolume, BackendError> {
             unreachable!("only trim query belongs to this control")
         }
         fn classify_face_points(
@@ -2864,12 +2820,6 @@ mod tests {
             _: &[[f64; 3]],
             _: f64,
         ) -> Result<Vec<PointState>, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
-        fn minimum_wall_thickness(
-            &self,
-            _: &crate::backend::brep::WallOptions,
-        ) -> Result<crate::backend::brep::WallThicknessOutcome, BackendError> {
             unreachable!("only trim query belongs to this control")
         }
         fn tessellate(
@@ -3084,7 +3034,7 @@ mod tests {
                 &budget,
                 None,
             );
-            assert!(context.brep_facts().is_ok());
+            assert!(context.brep_gate().is_ok());
             assert!(context
                 .set_cylindrical_band_output_bytes(prior_bytes)
                 .is_ok());

@@ -363,7 +363,8 @@ const ViewerContent = memo(function ({
   const componentNameForPointer = useModelInteractionSelector((state) => {
     const unit = getModelInteractionUnitState(state.context, modelInteractionUnitId);
     const { hoveredComponentId } = unit;
-    if (!hoveredComponentId) {
+    // The open action menu already names its part, and the badge would draw over it.
+    if (!hoveredComponentId || viewerActionMenu) {
       return undefined;
     }
     return unit.manifest?.nodesById[hoveredComponentId]?.name;

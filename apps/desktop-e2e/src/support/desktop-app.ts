@@ -212,6 +212,9 @@ export const launchDesktopApp = async (options: {
       ...(packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: clientRoot }),
       TAU_DESKTOP_TOKEN: options.token,
       TAU_E2E_PICK_DIRECTORY: pickedDirectory,
+      /* Printer access codes go to the throwaway profile's file vault, never the
+       * person's login keychain, whatever the shell running the suite sets. */
+      TAU_SECRET_VAULT: 'file',
       ...options.env,
     },
   });

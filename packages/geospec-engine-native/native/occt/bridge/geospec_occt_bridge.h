@@ -720,6 +720,10 @@ geospec_occt_operand_memo* geospec_occt_operand_memo_new(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_operand_memo_release(
     geospec_occt_operand_memo* memo) GEOSPEC_OCCT_NOEXCEPT;
+// Diagnostic count of occurrence operand qualifications run on this document
+// (memo misses and memo-less queries).
+size_t geospec_occt_occurrence_qualifications(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment_dedicated(
     const geospec_occt_document* document, geospec_occt_entity subject,
     geospec_occt_entity target, geospec_occt_operand_memo* memo,

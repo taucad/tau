@@ -1592,7 +1592,9 @@ struct geospec_occt_document {
   // facts facets until both have run; the transfer slot stays above.
   mutable std::unique_ptr<ReportGeneration> report_generation;
   mutable size_t report_generation_builds = 0;
-  // Diagnostic count of bore interiors the S3 certificate cleared.
+  // Diagnostic counts: occurrence operands qualified (regular_solid_operand
+  // behind occurrence_operand) and bore interiors the S3 certificate cleared.
+  mutable size_t occurrence_qualifications = 0;
   mutable size_t certified_clear_bores = 0;
   mutable std::optional<std::pair<MeshKey, MeshData>> transfer_mesh;
   mutable std::optional<std::vector<geospec_occt_circular_bore_candidate>>
@@ -1868,9 +1870,13 @@ bool occurrence_operand(const geospec_occt_document& document,
                         uint32_t occurrence, geospec_occt_operand_memo* memo,
                         TopoDS_Solid& solid, std::string& message) {
   const TopoDS_Shape& shape = document.occurrences[occurrence].shape;
-  if (memo == nullptr) return regular_solid_operand(shape, solid, message);
+  if (memo == nullptr) {
+    ++document.occurrence_qualifications;
+    return regular_solid_operand(shape, solid, message);
+  }
   auto found = memo->operands.find(occurrence);
   if (found == memo->operands.end()) {
+    ++document.occurrence_qualifications;
     geospec_occt_operand_memo::Operand value;
     value.qualified = regular_solid_operand(shape, value.solid, value.message);
     found = memo->operands.emplace(occurrence, std::move(value)).first;
@@ -6747,6 +6753,11 @@ geospec_occt_operand_memo* geospec_occt_operand_memo_new(
 
 void geospec_occt_operand_memo_release(geospec_occt_operand_memo* memo) noexcept {
   delete memo;
+}
+
+size_t geospec_occt_occurrence_qualifications(
+    const geospec_occt_document* document) noexcept {
+  return document == nullptr ? 0 : document->occurrence_qualifications;
 }
 
 int geospec_occt_regular_solid_containment_dedicated(

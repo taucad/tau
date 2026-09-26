@@ -325,7 +325,8 @@ fn connector_trait_dispatch_keeps_exact_facts_and_uses_the_bounded_worker() {
         );
     }
 
-    let bore_input = include_bytes!("fixtures/circular-bores/01-through.step");
+    // The obstructed bore is the one whose clearance only the Common decides.
+    let bore_input = include_bytes!("fixtures/circular-bores/08-obstructed-through.step");
     let serial_bore = serial_connector.open_step(bore_input).unwrap();
     let parallel_bore = connector.open_step(bore_input).unwrap();
     let expected_bores = serial_bore.circular_bores(16).unwrap();

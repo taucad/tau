@@ -253,7 +253,8 @@ fn should_keep_dedicated_inner_operations_bounded_and_byte_identical() {
     }
     eprintln!("inner-op=cut exact-fact-bytes={}", expected_cut_bytes.len());
 
-    let bore_input = include_bytes!("fixtures/circular-bores/01-through.step");
+    // The obstructed bore is the one whose clearance only the Common decides.
+    let bore_input = include_bytes!("fixtures/circular-bores/08-obstructed-through.step");
     let bore_serial = Document::from_step(bore_input).unwrap();
     let bore_parallel = Document::from_step(bore_input).unwrap();
     let expected_bores = bore_serial.circular_bores(16).unwrap();

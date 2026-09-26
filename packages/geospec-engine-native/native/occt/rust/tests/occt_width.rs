@@ -141,7 +141,10 @@ fn prepare(connector: &ParallelOcctConnector, operation: Operation) -> Vec<Prepa
                 Operation::Mesh | Operation::ReportMesh => {
                     include_bytes!("fixtures/nist-pmi-bspline.step")
                 }
-                Operation::Bore => include_bytes!("fixtures/circular-bores/01-through.step"),
+                // Only the obstructed bore's clearance still needs the Common.
+                Operation::Bore => {
+                    include_bytes!("fixtures/circular-bores/08-obstructed-through.step")
+                }
                 _ => include_bytes!("fixtures/regular-solid-controls.step"),
             };
             let document = connector.open_step(input).unwrap();

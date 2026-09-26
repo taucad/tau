@@ -1,36 +1,30 @@
 import type {
-  AgentLiveEvent,
-  AgentLogEvent,
   AgentSessionModel,
   ClientContext,
-  EventLogBatch,
-  HostRunSnapshot,
   JsonValue,
   ModelProviderKind,
   ModelSystemPromptBlock,
-  RunTrigger,
   StorageDurabilityClass,
   TauAgentAdmissionConfig,
-  UserProviderMessage,
   WireProtocolSchemas,
 } from '@taucad/agent-host';
+import { jsonValueSchema, userProviderMessageSchema } from '@taucad/agent-host';
 import {
   agentChannelModelSchema,
   agentChannelSystemPromptBlockSchema,
   agentChannelToolChoiceSchema,
-  agentLogEventSchema,
-  jsonValueSchema,
-  providerMessageSchema,
-  userProviderMessageSchema,
-} from '@taucad/agent-host';
+  agentWireHelloSchema,
+  agentWireProtocolSchemas,
+} from '@taucad/agent-host/wire';
+import type { AgentWireHello, AgentWireProtocol } from '@taucad/agent-host/wire';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { z } from 'zod';
 import { skillMetadataSchema } from '@taucad/chat/schemas';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 
-/** Maximum durable events transferred in one follower replay window. */
-export const agentHostTailBatchLimit = 16;
+/** The page's build, the worker's hello `build` (I32); the timestamp `vite.config.ts` injects, as `build-skew.ts` reads it. */
+export const agentHostWorkerBuild = String(typeof tauBuildId === 'number' ? tauBuildId : 0);
 
 type AgentHostCapabilityChecks = {
   readonly worker: boolean;
@@ -93,7 +87,6 @@ export type AgentHostAdmissionConfig = Omit<
 };
 
 export type AgentHostWorkerInitializeRequest = {
-  readonly type: 'initialize';
   readonly fileSystemPort: MessagePort;
   readonly projectRootPort: MessagePort;
   readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
@@ -153,139 +146,45 @@ export type AgentHostExternalContext = {
   readonly snapshot?: JsonValue | undefined;
 };
 
-type AgentHostWorkerStartRequestBase = {
-  readonly type: 'start';
-  readonly chatId: string;
-  readonly runId: string;
-  readonly message: UserProviderMessage;
-  readonly config?: AgentHostAdmissionConfig | undefined;
-  readonly agent?: AgentHostExternalAgent | undefined;
-  /** Present only beside {@link AgentHostWorkerStartRequestBase.agent}. */
-  readonly context?: AgentHostExternalContext | undefined;
-  /**
-   * How the host that runs this turn records what it writes (V19).
-   *
-   * Carried here because one client object is sent to *both* transports: this
-   * is a `strictObject`, so a browser-placed turn would be rejected whole the
-   * moment the client started attaching the mode a daemon-placed turn needs.
-   * The browser worker records its own revisions in the page's authority and
-   * ignores both fields.
-   */
-  readonly mode?: 'direct' | 'candidate' | undefined;
-  /** Revision the turn's base is recorded under; minted by the host when absent. */
-  readonly baseRevisionId?: string | undefined;
-};
-
-export type AgentHostWorkerStartRequest = AgentHostWorkerStartRequestBase &
-  (
-    | { readonly trigger: 'submit'; readonly retainedMessageIds?: never }
-    | { readonly trigger: Exclude<RunTrigger, 'submit'>; readonly retainedMessageIds: readonly string[] }
-  );
-
 type AgentHostWorkerSettlement =
   | (Omit<TurnFinalizedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined })
   | (Omit<TurnConflictedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined })
   | (Omit<TurnFailedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined });
 
-export type AgentHostWorkerCommandInput =
-  | AgentHostWorkerStartRequest
-  | { readonly type: 'steer'; readonly chatId: string; readonly runId: string; readonly message: string }
-  | { readonly type: 'cancel'; readonly chatId: string; readonly runId: string }
-  | { readonly type: 'resume'; readonly chatId: string }
-  | {
-      readonly type: 'record-settlement';
-      readonly chatId: string;
-      readonly event: AgentHostWorkerSettlement;
-    }
-  | {
-      readonly type: 'resolve-interrupt';
-      readonly chatId: string;
-      readonly runId: string;
-      readonly interruptId: string;
-      readonly outcome: 'approved' | 'denied' | 'cancelled';
-      /** The option the human actually chose, when the request offered a list. */
-      readonly optionId?: string | undefined;
-      readonly payload?: JsonValue | undefined;
-    }
-  | { readonly type: 'tail'; readonly chatId: string; readonly cursor: number; readonly limit: number }
-  | { readonly type: 'attach'; readonly chatId: string; readonly cursor: number; readonly limit: number };
+/** One revision settlement the page records in the chat's log. ponytail: worker-only until W8 deletes it (drift 7). */
+export type AgentHostWorkerSettlementRecord = { readonly chatId: string; readonly event: AgentHostWorkerSettlement };
 
-type WithBroadcastEnvelope<Command> = Command extends AgentHostWorkerCommandInput
-  ? Command & { readonly requestId: string; readonly sessionId: string }
-  : never;
-
-/** Generation-addressed BroadcastChannel command; this fan-out protocol deliberately remains enveloped. */
-export type AgentHostWorkerCommand = WithBroadcastEnvelope<AgentHostWorkerCommandInput>;
-
-export type AgentHostWorkerCallRequest =
-  | { readonly type: 'capabilities'; readonly durability: StorageDurabilityClass }
-  | AgentHostWorkerInitializeRequest
-  | AgentHostWorkerCommandInput
-  | { readonly type: 'close' };
-
-export type AgentHostWorkerResultResponse = {
-  readonly type: 'result';
-  readonly requestId: string;
-  readonly operation: Exclude<AgentHostWorkerCommand['type'], 'tail' | 'attach'>;
-  readonly snapshot: HostRunSnapshot;
-};
-
-export type AgentHostWorkerTailResponse = {
-  readonly type: 'tail';
-  readonly requestId: string;
-  readonly chatId: string;
-  readonly batch: EventLogBatch;
-};
-
-export type AgentHostWorkerAttachResponse = {
-  readonly type: 'attach';
-  readonly requestId: string;
-  readonly chatId: string;
-  readonly batch: EventLogBatch;
-  readonly leadership:
-    | { readonly role: 'leader'; readonly generation: string }
-    | { readonly role: 'follower'; readonly generation?: string | undefined };
-  readonly snapshot?: HostRunSnapshot | undefined;
-  readonly takeover: boolean;
-};
-
-export type AgentHostWorkerErrorResponse = {
-  readonly type: 'error';
-  readonly requestId: string;
-  readonly code: string;
-  readonly message: string;
-};
-
-export type ForwardedAgentHostResponse =
-  | AgentHostWorkerResultResponse
-  | AgentHostWorkerTailResponse
-  | AgentHostWorkerAttachResponse
-  | AgentHostWorkerErrorResponse;
-
-export type AgentHostWorkerCallResponse =
-  | { readonly type: 'capabilities'; readonly report: AgentHostCapabilityReport }
-  | { readonly type: 'initialized' }
-  | Omit<AgentHostWorkerResultResponse, 'requestId'>
-  | Omit<AgentHostWorkerTailResponse, 'requestId'>
-  | Omit<AgentHostWorkerAttachResponse, 'requestId'>
-  | { readonly type: 'closed' };
-
-export type AgentHostWorkerEvent = { readonly chatId: string; readonly event: AgentLogEvent };
-export type AgentHostWorkerLiveEvent = { readonly chatId: string; readonly event: AgentLiveEvent };
-
+/**
+ * The page↔worker protocol: the agent wire's verbs and `read` (`@taucad/agent-host/wire`), the live deltas, and the
+ * worker-only calls. ponytail: `capabilities`, `initialize` and `close` stay until W6 makes them the hello, and
+ * `record-settlement` until W8 deletes it.
+ */
 export type AgentHostWorkerProtocol = {
-  readonly calls: {
-    readonly request: { readonly args: AgentHostWorkerCallRequest; readonly result: AgentHostWorkerCallResponse };
-  };
-  readonly notifies: Record<never, never>;
-  readonly listens: {
-    readonly events: { readonly args: undefined; readonly wireArgs: unknown; readonly event: AgentHostWorkerEvent };
-    readonly liveEvents: {
+  readonly hello: AgentWireHello;
+  readonly calls: Omit<AgentWireProtocol['calls'], 'revision'> & {
+    readonly capabilities: {
+      readonly args: { readonly durability: StorageDurabilityClass };
+      readonly result: AgentHostCapabilityReport;
+    };
+    readonly initialize: {
+      readonly args: AgentHostWorkerInitializeRequest;
+      readonly result: undefined;
+      readonly wireResult: unknown;
+    };
+    readonly close: {
       readonly args: undefined;
       readonly wireArgs: unknown;
-      readonly event: AgentHostWorkerLiveEvent;
+      readonly result: undefined;
+      readonly wireResult: unknown;
+    };
+    readonly 'record-settlement': {
+      readonly args: AgentHostWorkerSettlementRecord;
+      readonly result: undefined;
+      readonly wireResult: unknown;
     };
   };
+  readonly notifies: Record<never, never>;
+  readonly listens: Pick<AgentWireProtocol['listens'], 'liveEvents'>;
 };
 
 export type AgentHostWorkerConnect = {
@@ -352,7 +251,6 @@ export const agentHostAdmissionConfigSchema = z.strictObject({
   contextMessages: z.array(userProviderMessageSchema).optional(),
 });
 
-const commandBase = { chatId: nonEmptyString };
 /**
  * Wire validator for {@link AgentHostExternalAgent}.
  *
@@ -379,120 +277,43 @@ export const agentHostExternalContextSchema = z.strictObject({
   snapshot: jsonValueSchema.optional(),
 });
 
-const startBase = {
-  ...commandBase,
-  type: z.literal('start'),
-  runId: nonEmptyString,
-  message: userProviderMessageSchema,
-  config: agentHostAdmissionConfigSchema.optional(),
-  agent: agentHostExternalAgentSchema.optional(),
-  context: agentHostExternalContextSchema.optional(),
-  /* Mirrors `agent-wire.ts`'s `startBase`: the client sends one start object to
-   * both transports, and this one is strict. */
-  mode: z.enum(['direct', 'candidate']).optional(),
-  baseRevisionId: nonEmptyString.optional(),
-};
-const startRequestSchema = z.union([
-  z.strictObject({ ...startBase, trigger: z.literal('submit') }),
-  z.strictObject({
-    ...startBase,
-    trigger: z.enum(['edit', 'regenerate']),
-    retainedMessageIds: z.array(nonEmptyString),
-  }),
-]);
-const tailWindow = {
-  cursor: z.number().int().nonnegative(),
-  limit: z.number().int().positive().max(agentHostTailBatchLimit),
-};
-const commandSchemas = [
-  ...startRequestSchema.options,
-  z.strictObject({ ...commandBase, type: z.literal('steer'), runId: nonEmptyString, message: z.string() }),
-  z.strictObject({ ...commandBase, type: z.literal('cancel'), runId: nonEmptyString }),
-  z.strictObject({ ...commandBase, type: z.literal('resume') }),
-  z.strictObject({
-    ...commandBase,
-    type: z.literal('record-settlement'),
-    event: z.discriminatedUnion('type', [
-      z.strictObject({
-        type: z.literal('turn.finalized'),
-        turnId: nonEmptyString,
-        runId: nonEmptyString,
-        chatId: nonEmptyString,
-        projectId: nonEmptyString,
-        checkoutId: nonEmptyString.optional(),
-        revisionId: nonEmptyString.optional(),
-        branch: nonEmptyString.optional(),
-        changedPaths: z.array(z.string()),
-        treeId: nonEmptyString.optional(),
-        trigger: z.literal('turn'),
-        runIds: z.array(nonEmptyString),
-      }),
-      z.strictObject({
-        type: z.literal('turn.conflicted'),
-        turnId: nonEmptyString,
-        runId: nonEmptyString,
-        chatId: nonEmptyString,
-        checkoutId: nonEmptyString.optional(),
-      }),
-      z.strictObject({
-        type: z.literal('turn.failed'),
-        turnId: nonEmptyString,
-        runId: nonEmptyString,
-        chatId: nonEmptyString,
-        checkoutId: nonEmptyString.optional(),
-        reason: z.string(),
-        /* Why, as the page phrases it (P4); `reason` stays the diagnostic. */
-        code: nonEmptyString.optional(),
-      }),
-    ]),
-  }),
-  z.strictObject({
-    ...commandBase,
-    type: z.literal('resolve-interrupt'),
-    runId: nonEmptyString,
-    interruptId: nonEmptyString,
-    outcome: z.enum(['approved', 'denied', 'cancelled']),
-    /* Mirrors `agent-wire.ts`: this is a `strictObject`, so a resolution
-     * carrying the field would otherwise be rejected whole by the browser
-     * worker's leader broadcast (4-review S1). */
-    optionId: nonEmptyString.optional(),
-    payload: jsonValueSchema.optional(),
-  }),
-  z.strictObject({ ...commandBase, type: z.literal('attach'), ...tailWindow }),
-  z.strictObject({ ...commandBase, type: z.literal('tail'), ...tailWindow }),
-] as const;
-const broadcastEnvelope = { requestId: nonEmptyString, sessionId: nonEmptyString };
-export const agentHostWorkerCommandSchema = z.union(
-  commandSchemas.map((schema) => schema.extend(broadcastEnvelope)) as unknown as typeof commandSchemas,
-);
-
-/** Deliberately not strict: the frame around this envelope is the unreadable part. */
-const commandReturnAddressSchema = z.object({
-  type: z.literal('command'),
-  senderId: nonEmptyString,
-  command: z.object({ requestId: nonEmptyString }),
+/** Wire validator for {@link AgentHostWorkerSettlementRecord}. */
+export const agentHostSettlementRecordSchema = z.strictObject({
+  chatId: nonEmptyString,
+  event: z.discriminatedUnion('type', [
+    z.strictObject({
+      type: z.literal('turn.finalized'),
+      turnId: nonEmptyString,
+      runId: nonEmptyString,
+      chatId: nonEmptyString,
+      projectId: nonEmptyString,
+      checkoutId: nonEmptyString.optional(),
+      revisionId: nonEmptyString.optional(),
+      branch: nonEmptyString.optional(),
+      changedPaths: z.array(z.string()),
+      treeId: nonEmptyString.optional(),
+      trigger: z.literal('turn'),
+      runIds: z.array(nonEmptyString),
+    }),
+    z.strictObject({
+      type: z.literal('turn.conflicted'),
+      turnId: nonEmptyString,
+      runId: nonEmptyString,
+      chatId: nonEmptyString,
+      checkoutId: nonEmptyString.optional(),
+    }),
+    z.strictObject({
+      type: z.literal('turn.failed'),
+      turnId: nonEmptyString,
+      runId: nonEmptyString,
+      chatId: nonEmptyString,
+      checkoutId: nonEmptyString.optional(),
+      reason: z.string(),
+      /* Why, as the page phrases it (P4); `reason` stays the diagnostic. */
+      code: nonEmptyString.optional(),
+    }),
+  ]),
 });
-
-/**
- * Read who to answer from a broadcast `command` frame this build cannot parse.
- *
- * A follower's forwarding wait is bounded by the leader's heartbeat alone, so a
- * live leader that drops a command in silence leaves that request pending for
- * the life of the tab — no response, no timeout, no banner. Every command a
- * leader receives is therefore answered, and a frame that fails the strict
- * broadcast schema is answered through this envelope. When the sender or the
- * request id is itself unreadable there is nobody to answer, and the leader's
- * console record is all that survives.
- *
- * @param value - The raw broadcast frame.
- * @returns The tab and request to refuse, or `undefined` when neither survives.
- */
-export const readCommandReturnAddress = (
-  value: unknown,
-): { readonly senderId: string; readonly requestId: string } | undefined => {
-  const parsed = commandReturnAddressSchema.safeParse(value).data;
-  return parsed && { senderId: parsed.senderId, requestId: parsed.command.requestId };
-};
 
 const capabilityChecksSchema = z.strictObject({
   worker: z.boolean(),
@@ -516,7 +337,6 @@ const capabilityReportSchema = z.union([
   }),
 ]);
 const initializeRequestSchema = z.strictObject({
-  type: z.literal('initialize'),
   fileSystemPort: messagePortSchema,
   projectRootPort: messagePortSchema,
   computeMode: z.enum(['off', 'memory', 'durable']).optional(),
@@ -537,148 +357,22 @@ const initializeRequestSchema = z.strictObject({
   runtimeConfig: z.strictObject({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() }),
   testingEnabled: z.boolean().optional(),
 });
-const agentHostWorkerCallRequestSchema = z.union([
-  z.strictObject({
-    type: z.literal('capabilities'),
-    durability: z.enum(['exclusive-append', 'stream-append', 'transactional-rewrite', 'ephemeral']),
-  }),
-  initializeRequestSchema,
-  ...commandSchemas,
-  z.strictObject({ type: z.literal('close') }),
-]);
+const durabilitySchema = z.enum(['exclusive-append', 'stream-append', 'transactional-rewrite', 'ephemeral']);
+const { revision: _revision, ...wireCalls } = agentWireProtocolSchemas.calls;
 
-export const hostRunSnapshotSchema = z.strictObject({
-  chatId: nonEmptyString,
-  runId: nonEmptyString,
-  turnId: nonEmptyString,
-  state: z.enum(['admitted', 'running', 'paused', 'completed', 'failed', 'cancelled']),
-  messages: z.array(providerMessageSchema),
-  failure: z
-    .strictObject({
-      code: nonEmptyString,
-      message: z.string(),
-      status: z.number().int().optional(),
-      /* The refusal's own fields (an `INSUFFICIENT_CREDIT` denial's required
-       * and available atoms). Opaque here: the code owns the shape and the
-       * surface that renders it owns the schema. Without this key the strict
-       * object rejected every snapshot of a credit-refused run, so `attach`
-       * failed on exactly the chats whose banner needed the numbers. */
-      details: z.record(z.string(), z.unknown()).optional(),
-    })
-    .optional(),
-});
-
-export const eventLogBatchSchema = z
-  .strictObject({
-    cursor: z.number().int().nonnegative(),
-    nextCursor: z.number().int().nonnegative(),
-    endCursor: z.number().int().nonnegative(),
-    events: z.array(agentLogEventSchema).max(agentHostTailBatchLimit),
-  })
-  .refine(({ cursor, events, nextCursor }) => nextCursor === cursor + events.length, {
-    path: ['nextCursor'],
-    message: 'must equal cursor plus event count',
-  })
-  .refine(({ nextCursor, endCursor }) => endCursor >= nextCursor, {
-    path: ['endCursor'],
-    message: 'before nextCursor',
-  });
-
-const agentLiveEventBase = {
-  chatId: nonEmptyString,
-  runId: nonEmptyString,
-  messageId: nonEmptyString,
-  contentIndex: z.number().int().nonnegative(),
-};
-const agentLiveToolEventBase = {
-  ...agentLiveEventBase,
-  toolCallId: nonEmptyString,
-  toolName: nonEmptyString,
-};
-export const agentLiveEventSchema = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('text-start'), ...agentLiveEventBase }),
-  z.strictObject({
-    type: z.literal('thinking-start'),
-    ...agentLiveEventBase,
-    timestamp: z.number().int().nonnegative().optional(),
-  }),
-  z.strictObject({ type: z.enum(['text-delta', 'thinking-delta']), ...agentLiveEventBase, delta: z.string() }),
-  z.strictObject({ type: z.literal('text-end'), ...agentLiveEventBase, content: z.string() }),
-  z.strictObject({
-    type: z.literal('thinking-end'),
-    ...agentLiveEventBase,
-    content: z.string(),
-    timestamp: z.number().int().nonnegative().optional(),
-  }),
-  z.strictObject({ type: z.literal('tool-input-start'), ...agentLiveToolEventBase }),
-  z.strictObject({ type: z.literal('tool-input-delta'), ...agentLiveToolEventBase, delta: z.string() }),
-  z.strictObject({ type: z.literal('tool-input-end'), ...agentLiveToolEventBase, input: jsonValueSchema }),
-  z.strictObject({
-    type: z.literal('tool-output-update'),
-    ...agentLiveToolEventBase,
-    output: jsonValueSchema,
-    isError: z.boolean(),
-  }),
-]);
-const leadershipSchema = z.union([
-  z.strictObject({ role: z.literal('leader'), generation: nonEmptyString }),
-  z.strictObject({ role: z.literal('follower'), generation: z.string().optional() }),
-]);
-
-export const forwardedAgentHostResponseSchema = z.union([
-  z.strictObject({ type: z.literal('error'), requestId: nonEmptyString, code: nonEmptyString, message: z.string() }),
-  z.strictObject({
-    type: z.literal('result'),
-    requestId: nonEmptyString,
-    operation: z.enum(['start', 'steer', 'cancel', 'resume', 'record-settlement', 'resolve-interrupt']),
-    snapshot: hostRunSnapshotSchema,
-  }),
-  z.strictObject({
-    type: z.literal('tail'),
-    requestId: nonEmptyString,
-    chatId: nonEmptyString,
-    batch: eventLogBatchSchema,
-  }),
-  z.strictObject({
-    type: z.literal('attach'),
-    requestId: nonEmptyString,
-    chatId: nonEmptyString,
-    batch: eventLogBatchSchema,
-    leadership: leadershipSchema,
-    snapshot: hostRunSnapshotSchema.optional(),
-    takeover: z.boolean(),
-  }),
-]);
-
-const agentHostWorkerCallResponseSchema = z.union([
-  z.strictObject({ type: z.literal('capabilities'), report: capabilityReportSchema }),
-  z.strictObject({ type: z.literal('initialized') }),
-  z.strictObject({
-    type: z.literal('result'),
-    operation: z.enum(['start', 'steer', 'cancel', 'resume', 'record-settlement', 'resolve-interrupt']),
-    snapshot: hostRunSnapshotSchema,
-  }),
-  z.strictObject({ type: z.literal('tail'), chatId: nonEmptyString, batch: eventLogBatchSchema }),
-  z.strictObject({
-    type: z.literal('attach'),
-    chatId: nonEmptyString,
-    batch: eventLogBatchSchema,
-    leadership: leadershipSchema,
-    snapshot: hostRunSnapshotSchema.optional(),
-    takeover: z.boolean(),
-  }),
-  z.strictObject({ type: z.literal('closed') }),
-]);
-const workerEventSchema = z.strictObject({ chatId: nonEmptyString, event: agentLogEventSchema });
-const workerLiveEventSchema = z.strictObject({ chatId: nonEmptyString, event: agentLiveEventSchema });
-
+/** Wire validators for {@link AgentHostWorkerProtocol}: the agent wire's own, plus the worker-only calls (drift 12, 13). */
 export const agentHostWorkerProtocolSchemas = {
-  calls: { request: { args: agentHostWorkerCallRequestSchema, result: agentHostWorkerCallResponseSchema } },
-  notifies: {},
-  listens: {
-    events: { args: z.null(), event: workerEventSchema },
-    liveEvents: { args: z.null(), event: workerLiveEventSchema },
+  hello: agentWireHelloSchema,
+  calls: {
+    ...wireCalls,
+    capabilities: { args: z.strictObject({ durability: durabilitySchema }), result: capabilityReportSchema },
+    // The rpc carries an absent argument as `null`; an empty result is not read.
+    initialize: { args: initializeRequestSchema, result: z.unknown() },
+    close: { args: z.null(), result: z.unknown() },
+    'record-settlement': { args: agentHostSettlementRecordSchema, result: z.unknown() },
   },
+  notifies: {},
+  listens: { liveEvents: agentWireProtocolSchemas.listens.liveEvents },
 } satisfies WireProtocolSchemas<AgentHostWorkerProtocol>;
 
 const agentHostWorkerConnectSchema = z.strictObject({

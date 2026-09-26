@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import type { Model, ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';

@@ -66,6 +66,7 @@ export default defineConfig({
     include: [
       'app/workers/agent-host.browser.test.ts',
       'app/workers/agent-host-executor-view.browser.test.ts',
+      'app/workers/seam.browser.test.ts',
       'app/workers/gltf-codec.browser.test.ts',
       'app/workers/headless-capture-in-worker.browser.test.ts',
       'app/workers/skill-resources.browser.test.ts',

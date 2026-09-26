@@ -12,7 +12,7 @@ import {
   Repeat,
   Timer,
 } from 'lucide-react';
-import type { ExternalAgentStop } from '@taucad/agent-host';
+import type { ExternalAgentStop } from '@taucad/agent-host/wire';
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';

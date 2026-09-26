@@ -1,0 +1,11 @@
+{"t":1,"kind":"send","actor":"client","commandId":"k1","generation":1}
+{"t":2,"kind":"append","actor":"g1","commandId":"k1","generation":1}
+{"t":3,"kind":"crash","actor":"env","generation":1}
+{"t":4,"kind":"close","actor":"client","generation":1}
+{"t":5,"kind":"claim","actor":"g2","generation":2}
+{"t":6,"kind":"send","actor":"client","commandId":"k1","generation":2}
+{"t":7,"kind":"answer","actor":"g2","commandId":"k1","status":"replayed","effect":"durable","generation":2}
+{"t":8,"kind":"answer","actor":"client","commandId":"k1","status":"replayed","effect":"durable","generation":2}
+{"t":9,"kind":"read","actor":"client","cursor":0,"generation":2}
+{"t":10,"kind":"batch","actor":"g2","cursor":1,"generation":2}
+{"t":11,"kind":"done","actor":"env"}

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { externalAgentDescriptorSchema } from '@taucad/agent-host';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 
 import { ENV } from '#environment.config.js';
 

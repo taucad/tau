@@ -18,6 +18,10 @@ import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-paylo
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
 import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock } from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
+import { gatewayProviderKinds } from '#wire/admission.schema.js';
+import { gatewayErrorCodes } from '#wire/gateway.js';
+import type { GatewayErrorCode } from '#wire/gateway.js';
+import type { RefusalCode } from '#wire/refusals.js';
 
 const openAiGatewayPath = 'v1/llm/openai/v1';
 const anthropicGatewayPath = 'v1/llm/anthropic';
@@ -27,31 +31,19 @@ const piCookieAuthValidationHeaders = {
   authorization: 'cookie-authenticated',
 } as const;
 
-/** Stable gateway failures surfaced across the W3 transport boundary. @public */
-export const gatewayModelErrorCodes = [
-  'BILLING_RECOVERY_UNAVAILABLE',
-  'FUNDED_HELPER_LIMIT',
-  'FUNDED_OPERATION_LIMIT',
-  'INSUFFICIENT_CREDIT',
-  'MODEL_NOT_IN_CATALOG',
+/** Failures this transport raises itself, beside the gateway's own codes. */
+const transportErrorCodes = [
   'MODEL_PROVIDER_UNSUPPORTED',
-  'ORIGIN_NOT_ALLOWED',
-  'PROVIDER_ACCOUNT_EXHAUSTED',
-  'RATE_LIMITED',
-  /* The serialized request is past the gateway's byte bound; resending the same
-   * history is refused identically, so it reads as a chat-length state. */
-  'REQUEST_TOO_LARGE',
-  'UNAUTHENTICATED',
-  'INVALID_REQUEST',
-  'PROVIDER_UNAVAILABLE',
-  'UPSTREAM_REJECTED',
   'MALFORMED_RESPONSE',
   'NETWORK_ERROR',
   'UNKNOWN_GATEWAY_ERROR',
-] as const;
+] as const satisfies readonly RefusalCode[];
 
-/** Stable gateway failure code. @public */
-export type GatewayModelErrorCode = (typeof gatewayModelErrorCodes)[number];
+/** Stable gateway failure code: the gateway's own codes plus the transport's (registry owners `gateway`, `transport`). @public */
+export type GatewayModelErrorCode = GatewayErrorCode | (typeof transportErrorCodes)[number];
+
+const isGatewayModelErrorCode = (value: string): value is GatewayModelErrorCode =>
+  gatewayErrorCodes.some((code) => code === value) || transportErrorCodes.some((code) => code === value);
 
 /** Typed failure returned by Tau's model gateway. @public */
 export class GatewayModelTransportError extends Error {
@@ -83,15 +75,9 @@ export class GatewayModelTransportError extends Error {
   }
 }
 
-const openAiGatewayProviderKinds = new Set<ModelProviderKind>([
-  'openai',
-  'vertexai',
-  'cerebras',
-  'together',
-  'morph',
-  'xai',
-  'moonshot',
-]);
+const openAiGatewayProviderKinds = new Set<ModelProviderKind>(
+  gatewayProviderKinds.filter((kind) => kind !== 'anthropic'),
+);
 
 /**
  * Whether Tau's OpenAI gateway route speaks the catalog provider's wire.
@@ -111,7 +97,7 @@ export const isOpenAiGatewayProviderKind = (providerKind: ModelProviderKind | un
  * @public
  */
 export const isGatewayProviderKind = (providerKind: string | undefined): boolean =>
-  providerKind === 'anthropic' || isOpenAiGatewayProviderKind(providerKind as ModelProviderKind | undefined);
+  gatewayProviderKinds.some((kind) => kind === providerKind);
 
 /**
  * Whether the catalog provider is OpenAI itself rather than an
@@ -223,8 +209,8 @@ const readDetails = (value: WireRecord): Record<string, unknown> | undefined =>
   zodUtility.isObject(value['details']) ? value['details'] : undefined;
 
 const gatewayErrorCode = (value: unknown, status: number): GatewayModelErrorCode => {
-  if (typeof value === 'string' && gatewayModelErrorCodes.some((code) => code === value)) {
-    return value as GatewayModelErrorCode;
+  if (typeof value === 'string' && isGatewayModelErrorCode(value)) {
+    return value;
   }
   if (typeof value === 'string') {
     return 'UNKNOWN_GATEWAY_ERROR';
@@ -281,12 +267,12 @@ const gatewayEnvelopeError = (
  */
 const flattenedGatewayError = (payload: WireRecord, status: number): GatewayModelTransportError | undefined => {
   const code = readString(payload, 'code');
-  if (code === undefined || !gatewayModelErrorCodes.some((known) => known === code)) {
+  if (code === undefined || !isGatewayModelErrorCode(code)) {
     return undefined;
   }
   const details = readDetails(payload);
   return new GatewayModelTransportError({
-    code: code as GatewayModelErrorCode,
+    code,
     message: readString(payload, 'message') ?? readString(payload, 'error') ?? code,
     status,
     ...(details === undefined ? {} : { details }),

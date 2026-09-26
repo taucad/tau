@@ -10,7 +10,6 @@ import {
   agentHostAdmissionConfigSchema,
   agentHostExternalAgentSchema,
   agentHostExternalContextSchema,
-  agentHostTailBatchLimit,
 } from '#workers/agent-host.contract.js';
 import {
   projectAgentHostEvent,
@@ -22,13 +21,13 @@ import {
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { Topic } from '@taucad/events';
 import { emptyChatLedger, foldReadAnswer, isResumableRunFailure } from '@taucad/agent-host';
-import type { AgentHostRefusalCode } from '@taucad/agent-host';
+import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
+import type { RefusalCode } from '@taucad/agent-host/wire';
 import type { MyUIMessage } from '@taucad/chat';
 
-type AgentLogEvent = Parameters<Parameters<AgentHostClient['subscribe']>[0]>[1];
-type AgentLiveEvent = Parameters<Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0]>[1];
 type HostRunSnapshot = Awaited<ReturnType<AgentHostClient['start']>>;
 type HostEventBatch = Awaited<ReturnType<AgentHostClient['attach']>>;
+type ReadAnswer = Awaited<ReturnType<AgentHostClient['read']>>;
 
 /** ponytail: a bound on refolds and stale pages per replay; a log that keeps moving under a read is reported. */
 const maxReadPages = 10_000;
@@ -286,8 +285,10 @@ const liveRunEnded = async (
   const ended = Promise.withResolvers<void>();
   const endedRuns = new Set<string>();
   let liveRunId: string | undefined;
-  const unsubscribe = client.subscribe((eventChatId, event) => {
-    if (eventChatId !== chatId || event.type !== 'run.lifecycle' || !terminal(event.state)) {
+  /* From the start of the log: the terminal row may already be behind the attach below, and `endedRuns` holds it.
+   * ponytail: a whole-log read on this rare path; W9's projection answers it from the ledger. */
+  const unsubscribe = client.subscribe({ chatId, cursor: 0 }, (_chatId, event) => {
+    if (event.type !== 'run.lifecycle' || !terminal(event.state)) {
       return;
     }
     endedRuns.add(event.runId);
@@ -300,7 +301,7 @@ const liveRunEnded = async (
   };
   abortSignal?.addEventListener('abort', abort, { once: true });
   try {
-    const current = await client.attach({ chatId, cursor: 0, limit: 1 });
+    const current = await client.attach({ chatId, cursor: 0 });
     const live = current.snapshot;
     if (live === undefined || terminal(live.state)) {
       return;
@@ -647,20 +648,11 @@ const browserHostAdmissionSchema = z.union([
     context: agentHostExternalContextSchema.optional(),
   }),
 ]);
+/* Loose: the rest of the body (its `execution` placement among it) is the client's own bookkeeping. The revision
+ * mode and base no longer ride the admission: placement answers both (drift 4, W8 TS-R12). */
 const browserAdmissionBodySchema = z.object({
   admission: z.strictObject({ version: z.literal(1), idempotencyKey: z.string().min(1) }),
   browserHost: browserHostAdmissionSchema,
-  /* The turn's placement, as `createRunBody` composed it. Only the two revision
-   * fields are read here: the host that runs the turn is the one that records
-   * it, so the mode has to travel with the admission rather than stay in the
-   * page (V19, G-REV-MODE). Loose, because the rest of the target is the
-   * client's own bookkeeping. */
-  execution: z
-    .object({
-      mode: z.enum(['direct', 'candidate']).optional(),
-      baseRevisionId: z.string().min(1).optional(),
-    })
-    .optional(),
 });
 
 const admissionIssue = (error: z.ZodError): string => {
@@ -996,7 +988,7 @@ const createHostStream = <Message extends UIMessage>(input: {
      * has to be handed the *whole* log before the first chunk is written — it
      * rebuilds every run this stream will not, and the AI SDK snapshots the
      * transcript the moment `reconnectToStream` settles. Pages are 16 events
-     * (`agentHostTailBatchLimit`), so a four-run chat is ten round trips.
+     * (`agentWireLimits.batchRows`), so a four-run chat is ten round trips.
      *
      * ponytail: the whole log is held in memory for the length of the replay.
      * Fine at a chat's natural size (the operator's four-run log is 700 KB);
@@ -1005,16 +997,16 @@ const createHostStream = <Message extends UIMessage>(input: {
      */
     const collectLog = async (hostClient: AgentHostClient, first: HostEventBatch): Promise<AgentLogEvent[]> => {
       /* Every page goes through the ledger's read fold (CL-R13): a page that does not start at this reader's
-       * cursor is stale and read again, and a version-1 host's clamp — the log is shorter than this reader has
-       * read — refolds from the start instead of ending the replay on a log that is not the one it was reading.
-       * Rows already projected are skipped by `seen`. */
+       * cursor is stale and read again, and a refusal — the log is not the one this reader was reading — refolds
+       * from the start instead of ending the replay on it (SC-R12). Rows already projected are skipped by `seen`. */
       let events: AgentLogEvent[] = [];
-      let batch = first;
+      let batch: ReadAnswer = first;
       for (let page = 0; ; page++) {
-        const fold = foldReadAnswer(ledger, { status: 'batch', ...batch });
-        if (fold.kind === 'folded') {
+        const fold = foldReadAnswer(ledger, batch);
+        if (fold.kind === 'folded' && batch.status === 'batch') {
           ledger = fold.ledger;
-          events.push(...batch.events);
+          // ponytail: rows cross the wire unparsed; W9's projection reads them through the ledger's tolerant reader.
+          events.push(...(batch.events as AgentLogEvent[]));
           if (ledger.position.cursor >= batch.endCursor) {
             cursor = ledger.position.cursor;
             return events;
@@ -1026,6 +1018,10 @@ const createHostStream = <Message extends UIMessage>(input: {
           );
           ledger = emptyChatLedger;
           events = [];
+        } else if (fold.kind === 'refused') {
+          throw Object.assign(new Error(`The host refused to read chat ${input.chatId} (${fold.reason}).`), {
+            code: fold.reason === 'owner-fenced' ? 'LEADERSHIP_LOST' : 'COMMAND_UNREADABLE',
+          });
         }
         if (page > maxReadPages) {
           throw Object.assign(new Error(`The log of chat ${input.chatId} did not settle while it was read.`), {
@@ -1034,7 +1030,7 @@ const createHostStream = <Message extends UIMessage>(input: {
         }
         cursor = ledger.position.cursor;
         // oxlint-disable-next-line no-await-in-loop -- pages are read in order from the reader's cursor.
-        batch = await hostClient.tail({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
+        batch = await hostClient.read({ chatId: input.chatId, cursor, last: ledger.position.last });
       }
     };
     const reconcileSnapshot = (snapshot: HostRunSnapshot | undefined, reopens = false): boolean => {
@@ -1072,7 +1068,7 @@ const createHostStream = <Message extends UIMessage>(input: {
     };
     const replay = async (hostClient: AgentHostClient): Promise<boolean> => {
       attaching ??= [];
-      const batch = await hostClient.attach({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
+      const batch = await hostClient.attach({ chatId: input.chatId, cursor, last: ledger.position.last });
       if (batch.snapshot) {
         recordAttachedRun(input.chatId, batch.snapshot);
       }
@@ -1133,15 +1129,8 @@ const createHostStream = <Message extends UIMessage>(input: {
       if (runId !== undefined) {
         activeClients.set(input.chatId, { client, runId });
       }
-      unsubscribe = client.subscribe((chatId, event) => {
-        if (chatId === input.chatId) {
-          queueSubscribedEvent(event);
-        }
-      });
-      unsubscribeLive = client.subscribeLive?.((chatId, event) => {
-        if (chatId === input.chatId) {
-          queueSubscribedEvent(event);
-        }
+      unsubscribeLive = client.subscribeLive?.(input.chatId, (_chatId, event) => {
+        queueSubscribedEvent(event);
       });
       /* Browser turns settle on the project's revision root, while daemon
        * turns settle in the host log. Both publish through this one topic.
@@ -1159,6 +1148,11 @@ const createHostStream = <Message extends UIMessage>(input: {
         }
       };
       await replay(client);
+      /* Durable rows are pulled from where the replay ended (SC-R14): one outstanding read, so nothing is pushed
+       * past this reader and nothing between the replay and the follow is lost. */
+      unsubscribe = client.subscribe({ chatId: input.chatId, cursor }, (_chatId, event) => {
+        queueSubscribedEvent(event);
+      });
       /* A terminal snapshot found on initial attach has no later frame to
        * retain a client for. Every run this stream is actively observing or
        * driving can still publish its P71 settlement after lifecycle
@@ -1248,7 +1242,7 @@ const createHostStream = <Message extends UIMessage>(input: {
          * opening, replaying and closing — no continuation, no message. A
          * refusal that names its recovery is the outcome. */
         throw new AgentHostWorkerError(
-          'RESUME_UNAVAILABLE' satisfies AgentHostRefusalCode,
+          'RESUME_UNAVAILABLE' satisfies RefusalCode,
           'This turn has nothing left to continue. Send it again to start a new one.',
         );
       } else if (continuesRefusedRun) {
@@ -1269,7 +1263,7 @@ const createHostStream = <Message extends UIMessage>(input: {
         // Everything the log already held is projected; what follows is this
         // attempt's, failure included.
         replayingContinuedFailure = false;
-        const operation = client.resume(input.chatId);
+        const operation = client.resume(input.chatId, runId);
         if (cancelled) {
           cancelRun();
         }
@@ -1441,13 +1435,7 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
       chatId: options.chatId,
       messages: options.messages,
       runId: admission.admission.idempotencyKey,
-      admission: {
-        ...hostAdmission(admission.browserHost, options.trigger),
-        ...(admission.execution?.mode === undefined ? {} : { mode: admission.execution.mode }),
-        ...(admission.execution?.baseRevisionId === undefined
-          ? {}
-          : { baseRevisionId: admission.execution.baseRevisionId }),
-      },
+      admission: hostAdmission(admission.browserHost, options.trigger),
       abortSignal: options.abortSignal,
     });
   }

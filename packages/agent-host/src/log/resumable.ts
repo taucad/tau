@@ -1,27 +1,15 @@
 import { util as zodUtility } from 'zod';
-import { externalAgentStopCodes } from '#launchers/node/agent-wire.js';
-import resumableFailureCodes from '#log/resumable-failure-codes.json' with { type: 'json' };
 import type { RunFailureDetail } from '#log/event-types.js';
+import { externalAgentStopCodes } from '#wire/external-agent.schema.js';
+import { isResumable } from '#wire/refusals.js';
 
-/**
- * Failure codes whose run can be continued at the step it stopped on.
- *
- * A model call that failed — refused before it was funded, or dropped in the
- * middle of its stream — leaves the turn's history whole, and the only thing
- * missing is that one call. It is whole because the session settles what it
- * started: a tool the stream dispatched mid-response (`prestartTool`) records
- * its real result before the run is marked failed, so a resume continues from
- * the work that happened rather than re-applying it. Compaction failures also
- * retain the failed turn and re-enter start-of-turn compaction after their
- * synthesized marker is rewound. `RUN_ABANDONED` is written only for a run whose
- * host is gone; `UNAUTHENTICATED` clears by signing in again. Failures that
- * cannot improve on retry, such as lost leadership or a model absent from the
- * catalog, are dispatched afresh.
- *
- * One JSON list, read by this predicate, `ChatLog.tla` and the Lean tables; W4's registry takes it over as the codes
- * of retry class `resume` (D11).
+/*
+ * A code is resumable when its registry entry's retry class is `resume` or `reauth` (D11, D21). A model call that
+ * failed — refused before it was funded, or dropped in its stream — leaves the turn's history whole, because the
+ * session settles what it started; compaction failures re-enter start-of-turn compaction; `RUN_ABANDONED` is written
+ * only for a run whose host is gone. `resumable-failure-codes.json` is the same set for `ChatLog.tla`, kept equal by
+ * `wire/refusals.test.ts`.
  */
-const resumableCodes: ReadonlySet<string> = new Set<string>(resumableFailureCodes);
 
 /**
  * Whether an external agent's own stop leaves the turn continuable.
@@ -66,4 +54,4 @@ const externalStopIsResumable = (failure: RunFailureDetail): boolean => {
  * @public
  */
 export const isResumableRunFailure = (failure: RunFailureDetail | undefined): boolean =>
-  failure?.code !== undefined && (resumableCodes.has(failure.code) || externalStopIsResumable(failure));
+  failure?.code !== undefined && (isResumable(failure.code) || externalStopIsResumable(failure));

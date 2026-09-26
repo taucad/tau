@@ -17,7 +17,7 @@ import type { ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
-import { GatewayModelTransportError, gatewayModelErrorCodes } from '#transport/gateway-model-transport.js';
+import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
 import type { HostCompactionError } from '#harness/compaction.js';
 
@@ -736,6 +736,8 @@ describe('createTauAgentHost', () => {
       MALFORMED_RESPONSE: true,
       NETWORK_ERROR: true,
       UNKNOWN_GATEWAY_ERROR: false,
+      // A voided attempt was never charged or answered; the person sends again (W11).
+      ATTEMPT_VOIDED: false,
       // Compaction failures resume through start-of-turn reprojection and the degradation ladder.
       SUMMARY_REQUIRED: true,
       NO_EVICTABLE_HISTORY: true,
@@ -751,7 +753,6 @@ describe('createTauAgentHost', () => {
     /* eslint-enable @typescript-eslint/naming-convention -- ends the wire-code key exception. */
     const ruled = Object.entries(resumability);
 
-    expect(gatewayModelErrorCodes.filter((code) => !(code in resumability))).toEqual([]);
     expect(
       ruled.filter(([code]) => isResumableRunFailure({ message: `fixture ${code}`, code })).map(([code]) => code),
     ).toEqual(ruled.filter(([, resumable]) => resumable).map(([code]) => code));
@@ -1971,6 +1972,58 @@ describe('the host run ledger', () => {
 
     expect(afterFirst).toBe(1);
     expect(reads).toBe(afterFirst);
+    await host.close();
+  });
+
+  // SC-R14 (W4.r1): a row appended while an empty read is in flight wakes that read; it must not park past it.
+  it('should answer a read with a row appended while its empty read was in flight', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    let raced = false;
+    const host: TauAgentHost = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            readBatch: async (request) => {
+              const answer = await log.readBatch(request);
+              if (!raced && answer.status === 'batch' && answer.events.length === 0) {
+                raced = true;
+                await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+              }
+              return answer;
+            },
+          };
+        },
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'read-race',
+      }),
+    );
+    const parked = new AbortController();
+    const timer = setTimeout(() => {
+      parked.abort();
+    }, 2000);
+
+    const answer = await host.read({
+      chatId: 'chat-ledger',
+      cursor: completedFirstTurn.length,
+      limit: 16,
+      maxBytes: 1_048_576,
+      signal: parked.signal,
+    });
+    clearTimeout(timer);
+
+    // Answered by the row's wake, not by the reader giving up and re-reading.
+    expect({ gaveUp: parked.signal.aborted, answer }).toMatchObject({
+      gaveUp: false,
+      answer: { status: 'batch', events: [{ type: 'turn.failed' }] },
+    });
     await host.close();
   });
 

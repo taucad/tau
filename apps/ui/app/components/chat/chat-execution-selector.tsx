@@ -10,7 +10,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useAgentHostPlacements, useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { externalAgentRefusalReasons } from '#lib/external-agent.js';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
 import type { TauAgentHostId } from '@taucad/chat';
 

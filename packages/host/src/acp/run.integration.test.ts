@@ -25,13 +25,8 @@ import type { Client, SessionConfigOption, SessionUpdate, StopReason } from '@ag
 
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type {
-  AgentChannelAdmissionConfig,
-  AgentLogEvent,
-  JsonObject,
-  ProviderMessage,
-  ToolRegistry,
-} from '@taucad/agent-host';
+import type { AgentChannelAdmissionConfig } from '@taucad/agent-host/wire';
+import type { AgentLogEvent, JsonObject, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
 import { reduceEventLog } from '@taucad/agent-host';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
@@ -235,19 +230,25 @@ const runTurn = async (
     readonly config?: Partial<AgentChannelAdmissionConfig>;
   },
 ): Promise<void> => {
-  await harness.launcher.execute({
+  const answer = await harness.launcher.execute({
     type: 'start',
-    trigger: 'submit',
-    chatId: input.chatId,
-    runId: input.runId,
-    message: { id: input.messageId ?? `user-${input.runId}`, role: 'user', content: input.text },
-    config: {
-      agent: { kind: 'acp', id: input.agentId ?? 'codex' },
-      systemPrompt: '',
-      toolChoice: 'auto',
-      ...input.config,
+    commandId: `start-${input.runId}`,
+    payload: {
+      trigger: 'submit',
+      chatId: input.chatId,
+      runId: input.runId,
+      message: { id: input.messageId ?? `user-${input.runId}`, role: 'user', content: input.text },
+      config: {
+        agent: { kind: 'acp', id: input.agentId ?? 'codex' },
+        systemPrompt: '',
+        toolChoice: 'auto',
+        ...input.config,
+      },
     },
   });
+  if (answer.status === 'refused') {
+    throw new Error(answer.message);
+  }
   await until(
     async () => {
       const events = await readLog(harness.workspaceRoot, input.chatId);
@@ -535,17 +536,20 @@ describe('the external agent run kind', () => {
       try {
         const started = await launcher.execute({
           type: 'start',
-          trigger: 'submit',
-          chatId,
-          runId,
-          message: { id: 'user-1', role: 'user', content: 'write the file and run mcp' },
-          config: {
-            agent: { kind: 'acp', id: agentId },
-            systemPrompt: '',
-            toolChoice: 'auto',
+          commandId: 'cmd-1',
+          payload: {
+            trigger: 'submit',
+            chatId,
+            runId,
+            message: { id: 'user-1', role: 'user', content: 'write the file and run mcp' },
+            config: {
+              agent: { kind: 'acp', id: agentId },
+              systemPrompt: '',
+              toolChoice: 'auto',
+            },
           },
         });
-        expect(started).toMatchObject({ type: 'result', operation: 'start' });
+        expect(started).toMatchObject({ status: 'applied', effect: 'durable' });
 
         // The approval is durable *before* anyone is attached (PH13 / OQ-X4).
         const hasApproval = async (): Promise<boolean> => {
@@ -556,10 +560,8 @@ describe('the external agent run kind', () => {
         const [pending] = await launcher.pendingInterrupts(runId);
         await launcher.execute({
           type: 'resolve-interrupt',
-          chatId,
-          runId,
-          interruptId: pending?.interruptId ?? '',
-          outcome: 'approved',
+          commandId: 'cmd-2',
+          payload: { chatId, runId, interruptId: pending?.interruptId ?? '', outcome: 'approved' },
         });
 
         await until(
@@ -645,11 +647,14 @@ describe('the external agent run kind', () => {
 
       await launcher.execute({
         type: 'start',
-        trigger: 'submit',
-        chatId,
-        runId,
-        message: { id: 'user-1', role: 'user', content: 'write the file' },
-        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+        commandId: 'cmd-1',
+        payload: {
+          trigger: 'submit',
+          chatId,
+          runId,
+          message: { id: 'user-1', role: 'user', content: 'write the file' },
+          config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+        },
       });
       const awaitingApproval = async (): Promise<boolean> => {
         const requests = await launcher.pendingInterrupts(runId);
@@ -659,11 +664,8 @@ describe('the external agent run kind', () => {
       const [pending] = await launcher.pendingInterrupts(runId);
       await launcher.execute({
         type: 'resolve-interrupt',
-        chatId,
-        runId,
-        interruptId: pending?.interruptId ?? '',
-        outcome: 'approved',
-        optionId,
+        commandId: 'cmd-2',
+        payload: { chatId, runId, interruptId: pending?.interruptId ?? '', outcome: 'approved', optionId },
       });
 
       await until(
@@ -721,18 +723,21 @@ describe('the external agent run kind', () => {
 
     await launcher.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId,
-      runId,
-      message: { id: 'user-1', role: 'user', content: 'go slow please' },
-      config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      commandId: 'cmd-1',
+      payload: {
+        trigger: 'submit',
+        chatId,
+        runId,
+        message: { id: 'user-1', role: 'user', content: 'go slow please' },
+        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      },
     });
     await until(
       async () => messagesOf(await readLog(workspaceRoot, chatId)).some((message) => message.role === 'assistant'),
       'the first assistant chunk',
       { dump: async () => readLog(workspaceRoot, chatId) },
     );
-    await launcher.execute({ type: 'cancel', chatId, runId });
+    await launcher.execute({ type: 'cancel', commandId: 'cmd-2', payload: { chatId, runId } });
 
     await until(
       async () => lifecycleOf(await readLog(workspaceRoot, chatId)).includes('cancelled'),
@@ -761,15 +766,18 @@ describe('the external agent run kind', () => {
 
     await launcher.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId,
-      runId,
-      message: { id: 'user-1', role: 'user', content: 'noask' },
-      config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      commandId: 'cmd-1',
+      payload: {
+        trigger: 'submit',
+        chatId,
+        runId,
+        message: { id: 'user-1', role: 'user', content: 'noask' },
+        config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
+      },
     });
     await until(async () => sent(frames, 'initialize') === 1, 'the unanswered initialize request');
     const started = Date.now();
-    await launcher.execute({ type: 'cancel', chatId, runId });
+    await launcher.execute({ type: 'cancel', commandId: 'cmd-2', payload: { chatId, runId } });
     expect(Date.now() - started).toBeLessThan(10_000);
     expect(lifecycleOf(await readLog(workspaceRoot, chatId))).toContain('cancelled');
     expect(sent(frames, 'session/prompt')).toBe(0);
@@ -807,9 +815,9 @@ describe('the external agent run kind', () => {
       'utf8',
     );
 
-    const attached = await launcher.execute({ type: 'attach', chatId, cursor: 0, limit: 16 });
+    const attached = await launcher.execute({ type: 'attach', commandId: 'cmd-1', payload: { chatId } });
 
-    expect(attached).toMatchObject({ type: 'attach', takeover: true });
+    expect(attached).toMatchObject({ status: 'applied', details: { takeover: true } });
     await until(
       async () => lifecycleOf(await readLog(workspaceRoot, chatId)).includes('failed'),
       'the ambiguous resumed run to fail',
@@ -1022,7 +1030,11 @@ describe('the external agent run kind', () => {
     const chatId = 'chat-external-resume-retry';
 
     await runTurn(harness, { chatId, runId: 'run-external-resume-retry', text: 'fail:rate noask' });
-    await harness.launcher.execute({ type: 'resume', chatId });
+    await harness.launcher.execute({
+      type: 'resume',
+      commandId: 'cmd-resume',
+      payload: { chatId, runId: 'run-external-resume-retry' },
+    });
     await until(async () => sent(harness.frames, 'session/prompt') === 2, 'the continuation prompt', {
       dump: async () => readLog(harness.workspaceRoot, chatId),
     });
@@ -1037,7 +1049,11 @@ describe('the external agent run kind', () => {
     expect(sessionIdOf(prompts[1] ?? '')).toBe(sessionIdOf(prompts[0] ?? ''));
     expect(prompts[1]).toContain('Continue from where you stopped.');
     expect(prompts[1]).not.toContain('fail:rate');
-    await harness.launcher.execute({ type: 'cancel', chatId, runId: 'run-external-resume-retry' });
+    await harness.launcher.execute({
+      type: 'cancel',
+      commandId: 'cmd-cancel',
+      payload: { chatId, runId: 'run-external-resume-retry' },
+    });
   }, 90_000);
 
   /*
@@ -1088,7 +1104,7 @@ describe('the external agent run kind', () => {
       'utf8',
     );
 
-    await launcher.execute({ type: 'attach', chatId, cursor: 0, limit: 16 });
+    await launcher.execute({ type: 'attach', commandId: 'cmd-1', payload: { chatId } });
     await until(
       async () => lifecycleOf(await readLog(workspaceRoot, chatId)).at(-1) === 'failed',
       'the ambiguous resumed run to fail again',
@@ -1207,11 +1223,14 @@ describe('the external agent run kind', () => {
 
     await launcher.execute({
       type: 'start',
-      trigger: 'submit',
-      chatId,
-      runId,
-      message: { id: 'user-1', role: 'user', content: 'write the file' },
-      config: { agent: { kind: 'acp', id: 'claude' }, systemPrompt: '', toolChoice: 'auto' },
+      commandId: 'cmd-1',
+      payload: {
+        trigger: 'submit',
+        chatId,
+        runId,
+        message: { id: 'user-1', role: 'user', content: 'write the file' },
+        config: { agent: { kind: 'acp', id: 'claude' }, systemPrompt: '', toolChoice: 'auto' },
+      },
     });
     await until(
       async () => {
@@ -1231,10 +1250,8 @@ describe('the external agent run kind', () => {
     const [pending] = await launcher.pendingInterrupts(runId);
     await launcher.execute({
       type: 'resolve-interrupt',
-      chatId,
-      runId,
-      interruptId: pending?.interruptId ?? '',
-      outcome: 'denied',
+      commandId: 'cmd-2',
+      payload: { chatId, runId, interruptId: pending?.interruptId ?? '', outcome: 'denied' },
     });
   }, 90_000);
 
@@ -1244,13 +1261,19 @@ describe('the external agent run kind', () => {
     await expect(
       launcher.execute({
         type: 'start',
-        trigger: 'submit',
-        chatId: 'chat-external-missing',
-        runId: 'run-external-missing',
-        message: { id: 'user-1', role: 'user', content: 'hello' },
-        config: { agent: { kind: 'acp', id: 'gemini' }, systemPrompt: '', toolChoice: 'auto' },
+        commandId: 'cmd-1',
+        payload: {
+          trigger: 'submit',
+          chatId: 'chat-external-missing',
+          runId: 'run-external-missing',
+          message: { id: 'user-1', role: 'user', content: 'hello' },
+          config: { agent: { kind: 'acp', id: 'gemini' }, systemPrompt: '', toolChoice: 'auto' },
+        },
       }),
-    ).rejects.toThrow(/cannot start the gemini agent/u);
+    ).resolves.toMatchObject({
+      status: 'refused',
+      message: expect.stringMatching(/cannot start the gemini agent/u) as unknown as string,
+    });
   }, 30_000);
 });
 

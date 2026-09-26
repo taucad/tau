@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { ProviderMetadata, UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@taucad/agent-host';
-import { externalAgentStopSchema } from '@taucad/agent-host';
+import { externalAgentStopSchema } from '@taucad/agent-host/wire';
+import type { RefusalCode } from '@taucad/agent-host/wire';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
@@ -32,14 +33,26 @@ type JsonValue = ProviderMessage['content'];
  * code names the overloaded card for both, which is what a customer whose
  * provider is unavailable is told either way — and it is the only way a
  * mid-stream 499 or 5xx cut reaches that card instead of the generic one.
+ *
+ * Typed against the refusal registry (SC-G3), so a renamed or dropped code fails the typecheck.
+ * ponytail: the page's own list until W9's PV-S10 derives its cards.
+ *
+ * @internal
  */
-const gatewayCodeCategories = new Map<string, ErrorCategory>([
-  ['INSUFFICIENT_CREDIT', errorCategory.credits],
-  ['PROVIDER_ACCOUNT_EXHAUSTED', errorCategory.overloaded],
-  ['PROVIDER_UNAVAILABLE', errorCategory.overloaded],
-  ['RATE_LIMITED', errorCategory.rateLimit],
-  ['UPSTREAM_REJECTED', errorCategory.server],
-]);
+/* eslint-disable @typescript-eslint/naming-convention -- keyed by the registry's SCREAMING_SNAKE refusal codes. */
+export const gatewayCodeCategories = {
+  INSUFFICIENT_CREDIT: errorCategory.credits,
+  PROVIDER_ACCOUNT_EXHAUSTED: errorCategory.overloaded,
+  PROVIDER_UNAVAILABLE: errorCategory.overloaded,
+  RATE_LIMITED: errorCategory.rateLimit,
+  UPSTREAM_REJECTED: errorCategory.server,
+} as const satisfies Partial<Record<RefusalCode, ErrorCategory>>;
+/* eslint-enable @typescript-eslint/naming-convention -- end of the card map. */
+
+const cardCategoryOf = (code: string): ErrorCategory | undefined =>
+  Object.hasOwn(gatewayCodeCategories, code)
+    ? gatewayCodeCategories[code as keyof typeof gatewayCodeCategories]
+    : undefined;
 
 const errorText = (value: unknown, fallback: string): string => {
   if (typeof value === 'string') {
@@ -54,7 +67,7 @@ const errorText = (value: unknown, fallback: string): string => {
       // The gateway code is authoritative; the status is only the fallback for
       // codes that name no category of their own.
       const category =
-        gatewayCodeCategories.get(code) ??
+        cardCategoryOf(code) ??
         (typeof status === 'number'
           ? httpStatusToCategory(status)
           : /* `rateLimit` is the external agent's *stop* card, and that card is

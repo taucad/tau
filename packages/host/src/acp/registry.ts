@@ -27,7 +27,7 @@ import { promisify } from 'node:util';
 
 import { modelChoice, openAcpSession } from '#acp/session.js';
 import type { AcpSession } from '#acp/session.js';
-import type { ExternalAgentDescriptor, ExternalAgentRefusalCode } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor, ExternalAgentRefusalCode } from '@taucad/agent-host/wire';
 
 const execFileAsync = promisify(execFile);
 

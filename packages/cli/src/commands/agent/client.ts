@@ -8,18 +8,13 @@
  * starts. Anything less is refused rather than guessed at.
  */
 
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { text as readStream } from 'node:stream/consumers';
 
-import type {
-  AgentChannelResponse,
-  AgentLogEvent,
-  ChatLedger,
-  EventLogBatch,
-  ExternalAgentLogin,
-  ProviderMessage,
-} from '@taucad/agent-host';
+import type { AgentLogEvent, ChatLedger, ProviderMessage } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
+import type { CommandAnswer, ExternalAgentLogin, HostCommand, RetryClass } from '@taucad/agent-host/wire';
 
 import { cliError, exitCodes, sanitize } from '#output.js';
 import type { CliError } from '#output.js';
@@ -27,8 +22,8 @@ import type { CliError } from '#output.js';
 /** Largest prompt accepted from a file or from stdin. Bytes. */
 const promptByteLimit = 1_048_576;
 
-/** How long a follow waits before asking for the next page. Milliseconds. */
-const pollInterval = 200;
+/** Silence from the daemon after which a connection counts as dead; the daemon keeps alive every 2 s (T9 E4). */
+const livenessTimeout = 10_000;
 
 /** Run states past which nothing more will be appended for that run. */
 const terminalStates = new Set(['completed', 'failed', 'cancelled']);
@@ -108,14 +103,27 @@ export const openAgentChannel = async (
 
   /* Loaded here, not at module scope: `ws` and the channel client are the
    * expensive half of this module, and `tau tui` paints before it dials. */
-  const [ws, { createAgentChannelClient }] = await Promise.all([
+  const [ws, { agentChannelPort, createAgentChannelClient }] = await Promise.all([
     import('ws'),
     import('@taucad/agent-host/channel-client'),
   ]);
-  const socket = new ws.WebSocket(socketUrl.href, { headers: { authorization: `Bearer ${token}` } });
+  const dial = (): InstanceType<typeof ws.WebSocket> =>
+    new ws.WebSocket(socketUrl.href, { headers: { authorization: `Bearer ${token}` } });
+  const socket = dial();
   /* Wrapped before `open`, deliberately: the daemon posts its channel hello the
-   * instant the upgrade completes, and `ws` drops a frame nobody listens for. */
-  const client = createAgentChannelClient(socket, { sessionKey: 'tau-agent' });
+   * instant the upgrade completes, and `ws` drops a frame nobody listens for.
+   * The first dial is this one, so its refusal is classified below; every
+   * redial after a lost connection opens a fresh socket (T9 E7). */
+  let first: ReturnType<typeof agentChannelPort> | undefined = agentChannelPort(socket);
+  const client = createAgentChannelClient({
+    connect: () => {
+      const endpoint = first ?? dial();
+      first = undefined;
+      return endpoint;
+    },
+    livenessTimeout,
+    sessionKey: 'tau-agent',
+  });
   try {
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve);
@@ -138,69 +146,145 @@ export const openAgentChannel = async (
   return { client, url };
 };
 
+/** What the person does next about a refused command, by the code's retry class (D11). */
+const nextStep: Record<RetryClass, string> = {
+  never: 'Change something before sending it again.',
+  wait: 'Send the same command again once that clears.',
+  resume: 'The run can be resumed.',
+  reauth: 'Sign in again, then resume the run.',
+};
+
 /**
- * Narrow a channel answer to the run projection a command asked for.
+ * Report a lost connection as the unknown outcome it is (T7): the command may or may not have landed.
  *
  * @internal
- * @param answer - Whatever the daemon replied with.
- * @returns The `result` frame.
+ * @param error - Whatever a channel call rejected with.
+ * @param what - The command or read that was in flight.
+ * @returns A `CliError` under the close code for a `ChannelClosedError`; the error itself otherwise.
  */
-export const expectResult = (answer: AgentChannelResponse): Extract<AgentChannelResponse, { type: 'result' }> => {
-  if (answer.type !== 'result') {
+const closedError = async (error: unknown, what: string): Promise<unknown> => {
+  const channel = await import('@taucad/agent-host/channel-client');
+  return error instanceof channel.ChannelClosedError
+    ? cliError(
+        error.code,
+        `The connection to the host closed (${error.code}) before it answered; the ${what} may not have been applied. Read the chat to find out.`,
+        exitCodes.unknown,
+      )
+    : error;
+};
+
+/**
+ * Send one keyed command and return its answer, or refuse with the host's code.
+ *
+ * The key is minted once by the caller and the channel's outbox re-sends it after a redial (SC-R6), so a command
+ * that landed before the connection dropped answers `replayed` rather than running twice.
+ *
+ * @internal
+ * @param client - The connected client.
+ * @param command - The command, with its key.
+ * @returns The answer, when the host applied it.
+ */
+export const sendCommand = async (
+  client: AgentChannelClient,
+  command: HostCommand,
+): Promise<Exclude<CommandAnswer, { status: 'refused' }>> => {
+  let answer: CommandAnswer;
+  try {
+    answer = await client.execute(command);
+  } catch (error) {
+    throw await closedError(error, `${command.type} command`);
+  }
+  if (answer.status === 'refused') {
+    const { refusalOf } = await import('@taucad/agent-host/wire');
     throw cliError(
-      'HOST_ANSWER_UNEXPECTED',
-      `The host answered a "${answer.type}" frame where a run projection was expected.`,
-      exitCodes.error,
+      answer.code,
+      `${answer.code}: ${oneLine(answer.message)} ${nextStep[refusalOf(answer.code).retry]}`,
+      answer.effect === 'unknown' ? exitCodes.unknown : exitCodes.refused,
     );
   }
   return answer;
 };
 
 /**
- * Read one bounded replay page.
+ * One line for an applied command's answer.
  *
  * @internal
- * @param input - The connected client, the chat, and the cursor to read from.
- * @returns The page the daemon served.
+ * @param answer - The host's answer.
+ * @returns `applied at 12`, or the state it named when nothing was recorded.
  */
-export const readPage = async (input: {
+export const answerLine = (answer: Exclude<CommandAnswer, { status: 'refused' }>): string =>
+  answer.effect === 'durable'
+    ? `${answer.status} at ${String(answer.cursor)}`
+    : `nothing recorded: ${oneLine(JSON.stringify(answer.details))}`;
+
+/**
+ * Open a chat for reading: `attach` records a run a daemon restart left hanging (W6 RH-R9) and names the log's end.
+ *
+ * @internal
+ * @param client - The connected client.
+ * @param chatId - The chat to open.
+ * @returns The chat's end cursor at attach time.
+ */
+export const attachChat = async (client: AgentChannelClient, chatId: string): Promise<number> => {
+  const answer = await sendCommand(client, { type: 'attach', commandId: randomUUID(), payload: { chatId } });
+  const end = answer.effect === 'not-applied' ? answer.details['endCursor'] : undefined;
+  return typeof end === 'number' ? end : 0;
+};
+
+/**
+ * One long-poll read from the ledger's own position, folded (SC-R14).
+ *
+ * @internal
+ * @param input - The client, the chat, the reader's ledger, and the signal that ends the wait.
+ * @returns The ledger after the batch, the rows it held, and the log's end; a reset returns the empty ledger.
+ */
+export const readNext = async (input: {
   readonly client: AgentChannelClient;
   readonly chatId: string;
-  readonly cursor: number;
-  /**
-   * Reconnect rather than merely read.
-   *
-   * `attach` is the one command that recovers a run a daemon restart left
-   * hanging — an external run's `resumeExternal` is reachable from nowhere else
-   * — so a follow sends it once, for its first page, and reads the rest with
-   * `tail`. Sending it on every poll would ask the daemon to re-recover a run it
-   * is already executing.
-   */
-  readonly attach?: boolean;
-}): Promise<EventLogBatch> => {
-  const { agentChannelTailBatchLimit } = await import('@taucad/agent-host');
-  const answer = await input.client.execute({
-    type: input.attach === true ? 'attach' : 'tail',
-    chatId: input.chatId,
-    cursor: input.cursor,
-    limit: agentChannelTailBatchLimit,
-  });
-  if (answer.type !== 'tail' && answer.type !== 'attach') {
-    throw cliError(
-      'HOST_ANSWER_UNEXPECTED',
-      `The host answered a "${answer.type}" frame where a replay page was expected.`,
-      exitCodes.error,
-    );
+  readonly ledger: ChatLedger;
+  readonly signal?: AbortSignal | undefined;
+}): Promise<{
+  readonly ledger: ChatLedger;
+  readonly events: readonly AgentLogEvent[];
+  readonly endCursor: number;
+  readonly reset: boolean;
+}> => {
+  const { readFolded } = await import('@taucad/agent-host');
+  const { ledger, chatId } = input;
+  let step;
+  try {
+    step = await readFolded({
+      read: async (request) => input.client.read(request),
+      chatId,
+      ledger,
+      signal: input.signal,
+    });
+  } catch (error) {
+    throw await closedError(error, `read of chat ${chatId}`);
   }
-  /* A version-1 daemon answers a cursor past the log's end from its end: the log is not the one this reader was
-   * reading, and following on from there would print a rewound transcript as if it continued (W3 CL-R13). */
-  if (answer.batch.cursor !== input.cursor) {
-    throw cliError(
-      'LOG_READ_CLAMPED',
-      `The host answered chat ${input.chatId} from cursor ${String(answer.batch.cursor)}, not ${String(input.cursor)}: the log changed under this reader. Read it again from the start.`,
-    );
+  switch (step.kind) {
+    case 'folded': {
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- rows are opaque on the wire; the ledger folded them, and rendering duck-types them.
+      return {
+        ledger: step.ledger,
+        events: step.events as readonly AgentLogEvent[],
+        endCursor: step.endCursor,
+        reset: false,
+      };
+    }
+    case 'reset':
+    case 'stale': {
+      /* W3 CL-R13: a reset log is refolded from the start by the helper; SC-R13: a batch at another cursor is
+       * discarded, and read again. */
+      return { ledger: step.ledger, events: [], endCursor: step.endCursor, reset: step.kind === 'reset' };
+    }
+    case 'refused': {
+      throw cliError(
+        'LOG_READ_REFUSED',
+        `The host refused to read chat ${chatId} (${step.reason}). Read it again from the start.`,
+      );
+    }
   }
-  return answer.batch;
 };
 
 /**
@@ -216,9 +300,13 @@ export const isSettled = (state: string | undefined): boolean => state !== undef
  * Whether anyone is still reading stdout.
  *
  * A reader that closes early (`… | head -c 20`) is only observable to a writer
- * when a write fails, and a quiet follow may have nothing to write for minutes
- * — so this asks with a zero-length write, which reaches the pipe and reports
- * EPIPE without emitting a byte. Without it, `tail | head` never ends.
+ * when a write fails, and a page may hold nothing this command prints — so this
+ * asks with a zero-length write, which reaches the pipe and reports EPIPE
+ * without emitting a byte. Without it, `tail | head` never ends.
+ *
+ * ponytail: asked once per page, so a follow parked in a long poll notices a
+ * closed pipe at the chat's next row; abort the read on stdout `close` if a
+ * quiet chat ever holds a dead pipeline open too long.
  */
 const sinkAlive = async (): Promise<boolean> =>
   new Promise<boolean>((resolve) => {
@@ -230,14 +318,12 @@ const sinkAlive = async (): Promise<boolean> =>
 /**
  * Replay a chat from a cursor, optionally following it until its run settles.
  *
- * Each page is awaited before the next is asked for, so the daemon is never
- * asked to buffer ahead of the consumer, and a reader that closes its pipe
- * stops the loop instead of leaving it polling forever.
+ * One read is outstanding at a time (SC-R14): a read is answered as soon as a row exists after the cursor, so a follow
+ * waits on the host rather than on a timer, and each page is written before the next is asked for. A reader that
+ * closes its pipe stops the loop at the next page.
  *
- * A follow opens with `attach`, never `tail`: reconnecting is the one act that
- * recovers a run a daemon restart left hanging, and a follower is exactly the
- * client that wants it. A `show` (or the interrupt scan behind `respond`) reads
- * with `tail`, because reading a transcript must not restart anything.
+ * Every replay opens with `attach`, which names the log's end — where a `show` stops — and records a run a daemon
+ * restart left hanging. It restarts nothing: resuming is the person's `resume`, never a read's.
  *
  * @internal
  * @param input - The client, the chat, where to start, whether to keep
@@ -257,40 +343,39 @@ export const replayChat = async (input: {
   /** The chat ledger over the rows read. */
   readonly ledger: ChatLedger;
 }> => {
-  const { emptyChatLedger, foldChatLedger } = await import('@taucad/agent-host');
-  let cursor = input.from;
+  const { emptyChatLedger } = await import('@taucad/agent-host');
+  const end = await attachChat(input.client, input.chatId);
   /* The chat ledger over the rows read (W3 CL-S8): from a later `from` it holds only those rows, which still name
    * the chat's current run and its state. */
-  let ledger = emptyChatLedger;
+  let ledger: ChatLedger = { ...emptyChatLedger, position: { cursor: input.from } };
   let login: ExternalAgentLogin | undefined;
   let refusal: ExternalRefusal | undefined;
-  let attach = input.follow;
   const stateOf = (): string | undefined =>
     ledger.currentRunId === undefined ? undefined : ledger.runs[ledger.currentRunId]?.lifecycle;
+  const done = () => ({
+    cursor: ledger.position.cursor,
+    state: stateOf(),
+    refusal,
+    ledger,
+  });
+  if (!input.follow && ledger.position.cursor >= end) {
+    return done();
+  }
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- a cursored replay is sequential by definition.
-    const batch = await readPage({ client: input.client, chatId: input.chatId, cursor, attach });
-    attach = false;
-    ledger = foldChatLedger(ledger, batch.events);
-    for (const event of batch.events) {
+    const page = await readNext({ client: input.client, chatId: input.chatId, ledger });
+    ledger = page.ledger;
+    for (const event of page.events) {
       login = externalLoginOf(event) ?? login;
       const coded = externalRefusalOf(event);
       refusal = coded === undefined ? refusal : { ...coded, ...(login === undefined ? {} : { login }) };
       // oxlint-disable-next-line no-await-in-loop -- each record is flushed before the next is written.
       await input.onEvent(event);
     }
-    cursor = batch.nextCursor;
-
-    const caughtUp = batch.events.length === 0 || cursor >= batch.endCursor;
-    // oxlint-disable-next-line no-await-in-loop -- the reader is re-checked on every pass.
+    const caughtUp = ledger.position.cursor >= (input.follow ? page.endCursor : end);
+    // oxlint-disable-next-line no-await-in-loop -- the reader is re-checked on every page.
     if ((caughtUp && (!input.follow || isSettled(stateOf()))) || !(await sinkAlive())) {
-      return { cursor, state: stateOf(), refusal, ledger };
-    }
-    if (caughtUp) {
-      // oxlint-disable-next-line no-await-in-loop -- let the daemon append before asking again.
-      await new Promise((resolve) => {
-        setTimeout(resolve, pollInterval);
-      });
+      return done();
     }
   }
 };

@@ -10,7 +10,8 @@ import { WebSocket } from 'ws';
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
-import type { AgentSessionModel, ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { AgentSessionModel } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -33,7 +34,7 @@ import type { AgentServerHandle } from '#agent-server.js';
 import { createAcpExternalAgentPort, discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { createHostMcpEndpoint } from '#mcp-server.js';
 import type { HostMcpEndpoint } from '#mcp-server.js';
-import { startRunReporter } from '#run-reporter.js';
+import { chatToReport, startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
 import { createHostToolRegistry } from '#agent-tools.js';
 import type { HostSystemSkillBundle, HostToolFileSystem } from '#agent-tools.js';
@@ -1019,7 +1020,21 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           }
         : {}),
     });
-    const launcher = revisions.record(base);
+    /* The run reporter follows every chat a parsed command names, once the
+     * command is answered, so the rows it wrote are there to read. Durable rows
+     * are only pulled per chat (SC-R14), so it learns the chats here. `attach`
+     * only reads, so it starts no follow (W4.r1). */
+    const launcher = revisions.record({
+      ...base,
+      execute: async (command) => {
+        const answer = await base.execute(command);
+        const chatId = chatToReport(command);
+        if (chatId !== undefined) {
+          agentRunReporter?.watch(chatId);
+        }
+        return answer;
+      },
+    });
     const externalAgents = externalAgentDescriptors(discovery);
     const server = startAgentServer({
       launcher,
@@ -1046,20 +1061,12 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     agentMcp = mcp;
     agentExternalAgents = externalAgents;
     /* PH19 ruling 2: the API keeps a run *directory*. The reporter reads the
-     * launcher's own durable stream — the same stream the log is written from —
-     * and puts identity and state on the control socket, never content. It is
+     * launcher's own durable rows — the rows the log is written from — and
+     * puts identity and state on the control socket, never content. It is
      * started here rather than beside the control connection because a run
      * outlives every relay reconnect, and `sendControl` is a no-op while the
-     * socket is down.
-     *
-     * The *base* stream, not the recorder's: the wrapper holds a terminal
-     * marker until the turn's revision is durable, which is a guarantee clients
-     * need and the run directory does not — it keeps no content. Riding the
-     * wrapper delayed every terminal frame by a whole-tree capture and, worse,
-     * grew this subscriber's queue for the length of it, past which the
-     * launcher's fan-out errors it and the reporter never resubscribes
-     * (5-review S2). */
-    agentRunReporter = startRunReporter({ events: (signal) => base.events(signal), send: sendControlOrThrow });
+     * socket is down. */
+    agentRunReporter = startRunReporter({ read: base.read, send: sendControlOrThrow });
     emit({ type: 'agent', state: 'ready', url: server.url().href, externalAgents });
     /* A daemon with the agent capability is *useful* the moment this channel
      * answers: pairing, the relay, and the compute child are all downstream of

@@ -43,6 +43,13 @@
         "command": "node scripts/src/validate-project-tags.ts"
       }
     },
+    "validate-timeouts": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "vitest run --root packages/agent-host src/test/timeout-inventory.test.ts"
+      }
+    },
     "validate-tsgo-runtime-references": {
       "executor": "nx:run-commands",
       "options": {

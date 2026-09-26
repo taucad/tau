@@ -11,7 +11,7 @@ export {
   userProviderMessageSchema,
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
-export { agentHostRefusalCodes, createTauAgentHost } from '#host/tau-agent-host.js';
+export { createTauAgentHost } from '#host/tau-agent-host.js';
 export { isResumableRunFailure } from '#log/resumable.js';
 export {
   emptyChatLedger,
@@ -29,52 +29,15 @@ export type {
   ReplayedStartOutcome,
   RunEntry,
 } from '#log/chat-ledger.js';
-/* The daemon channel vocabulary. Zod only — the WebSocket client half validates
- * against these same schemas inside a browser bundle, so they must not ride the
- * Node-only `/node-launcher` subpath. */
-export {
-  admissionConfigFor,
-  agentChannelAdmissionConfigSchema,
-  agentChannelCommandSchema,
-  agentChannelEventSchema,
-  agentChannelLiveEventSchema,
-  agentChannelRevisionEventSchema,
-  agentChannelModelCostSchema,
-  agentChannelModelSchema,
-  agentChannelProtocolSchemas,
-  agentChannelResponseSchema,
-  agentChannelSystemPromptBlockSchema,
-  agentChannelTailBatchLimit,
-  agentChannelToolChoiceSchema,
-  externalAgentAuthMethodSchema,
-  externalAgentDescriptorSchema,
-  externalAgentLoginSchema,
-  externalAgentRefusalCodes,
-  externalAgentStopCodes,
-  externalAgentStopSchema,
-} from '#launchers/node/agent-wire.js';
-export type {
-  AgentChannelAdmissionConfig,
-  AgentChannelCommand,
-  AgentChannelEvent,
-  AgentChannelLeadership,
-  AgentChannelLiveEvent,
-  AgentChannelProtocol,
-  AgentChannelRequest,
-  AgentChannelRevisionCommand,
-  AgentChannelRevisionEvent,
-  AgentChannelResponse,
-  AgentChannelResultOperation,
-  ExternalAgentDescriptor,
-  ExternalAgentLogin,
-  ExternalAgentRefusalCode,
-  ExternalAgentStop,
-  ExternalAgentStopCode,
-} from '#launchers/node/agent-wire.js';
-/* The transport union and its close vocabulary. Types only — the client half
- * itself ships from `@taucad/agent-host/channel-client`. */
+export { followChat, readFolded } from '#log/follow-chat.js';
+export type { ChatRead, FoldedRead } from '#log/follow-chat.js';
+/* The seam's owner half, shared by the daemon launcher and the browser worker. The wire vocabulary itself ships
+ * from `@taucad/agent-host/wire`. */
+export { createCommandOwner } from '#channel/command-owner.js';
+export type { CommandEffect, CommandOwnerOptions } from '#channel/command-owner.js';
+/* The transport union. Types only — the client half itself ships from `@taucad/agent-host/channel-client`. */
 export type { AgentChannelEndpoint } from '#channel/endpoint.js';
-export type { AgentChannelClient, AgentChannelCloseReason } from '#channel/agent-channel-client.js';
+export type { AgentChannelClient } from '#channel/agent-channel-client.js';
 /* R3: apps never import `@taucad/rpc`, so the few channel types an app needs to
  * declare its own worker protocol are re-exported from here. */
 export type { Channel, ChannelServer, ChannelServerHandle, WireProtocolSchemas, WithTransferables } from '@taucad/rpc';
@@ -82,7 +45,6 @@ export {
   GatewayModelTransportError,
   createCachedSystemPromptBlocks,
   createGatewayModelTransport,
-  gatewayModelErrorCodes,
   isGatewayProviderKind,
   isOpenAiGatewayProviderKind,
 } from '#transport/gateway-model-transport.js';
@@ -173,7 +135,7 @@ export type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from 
 export { materializeAttachments } from '#harness/session-record.js';
 export type { AttachmentReader, DocumentBlockBuilder, MaterializedAttachments } from '#harness/session-record.js';
 export type {
-  AgentHostRefusalCode,
+  CommandKey,
   CreateTauAgentHostOptions,
   ExternalAgentLogEvent,
   ExternalAgentPort,

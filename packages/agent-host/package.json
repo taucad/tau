@@ -36,6 +36,7 @@
     "./node": "./src/node.ts",
     "./node-launcher": "./src/launchers/node/index.ts",
     "./channel-client": "./src/channel/index.ts",
+    "./wire": "./src/wire/index.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -66,6 +67,11 @@
         "import": "./dist/channel/index.mjs",
         "default": "./dist/channel/index.mjs"
       },
+      "./wire": {
+        "types": "./dist/wire/index.d.mts",
+        "import": "./dist/wire/index.mjs",
+        "default": "./dist/wire/index.mjs"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -79,13 +85,17 @@
     "@earendil-works/pi-ai": "0.84.4",
     "@msgpack/msgpack": "catalog:",
     "@taucad/filesystem": "workspace:*",
-    "uint8array-extras": "catalog:",
-    "zod": "catalog:"
+    "@taucad/rpc": "workspace:*",
+    "uint8array-extras": "catalog:"
   },
   "devDependencies": {
+    "@taucad/formal": "workspace:*",
     "@taucad/nx": "workspace:*",
-    "@taucad/rpc": "workspace:*",
     "@vitest/browser-playwright": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
   }
 }

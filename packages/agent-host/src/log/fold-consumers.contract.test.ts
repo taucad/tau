@@ -8,14 +8,19 @@ import { describe, expect, it } from 'vitest';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const source = (path: string) => readFileSync(`${root}${path}`, 'utf8');
-const ledgerExport = /\b(foldChatLedger|foldReadAnswer|replayedStartOutcome|unsettledAttempts|mergeLogSegments)\b/u;
+/* The fold, its read helpers (`readFolded`, `followChat` over `foldReadAnswer`), or the host's own ledger (W4.r1: the
+ * browser worker keeps no fold and no start replay; it asks the host). */
+const ledgerExport =
+  /\b(?:foldChatLedger|foldReadAnswer|readFolded|followChat|replayedStartOutcome|unsettledAttempts|mergeLogSegments)\b|\bhost\.ledger\(/u;
 const lifecycleCheck = /type [!=]== 'run\.lifecycle'/u;
 /** A scan: searching or filtering rows for lifecycle state, the shape of a private fold. */
 const lifecycleScan = /\.(?:findLast|filter|findIndex|find|some)\([^\n]*'run\.lifecycle'/u;
 
-/** Consumers that read a log and now fold it through the export. */
+/**
+ * Consumers that read a log and now fold it through the export. The node launcher left the list with W4: it keeps no
+ * fold, and answers from the host's ledger through the command owner (SC-R7).
+ */
 const folding = [
-  'packages/agent-host/src/launchers/node/node-agent-launcher.ts',
   'apps/ui/app/workers/agent-host.impl.ts',
   'apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts',
   'apps/ui/app/db/chat-file-storage.ts',
@@ -40,7 +45,6 @@ const pushedRowChecks: Readonly<Record<string, string>> = {
   'packages/host/src/run-reporter.ts': 'directory relay (PH19)',
   // The attempt an external resume continues from; W7's attempt rows replace it.
   'packages/host/src/acp/run.ts': 'external resume attempt (W7)',
-  'packages/host/src/revisions.ts': 'folded first; the row type selects the trigger',
   // The suite's own per-attempt oracle clauses, over attempts the ledger places.
   'apps/ui-e2e/src/support/chat-admission-log.ts': 'e2e oracle clauses over ledger attempts',
 };

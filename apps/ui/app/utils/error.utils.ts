@@ -202,6 +202,10 @@ export function parseErrorForPersistence(error: Error): ChatError {
 
 const parsedErrors = new WeakMap<Error, ChatError>();
 
+/** The code a thrown refusal carries on the error itself, not in a structured message. */
+const thrownCode = (error: Error): string | undefined =>
+  'code' in error && typeof error.code === 'string' ? error.code : undefined;
+
 function parseError(error: Error): ChatError {
   // Handle client-side network errors (these never reach the API)
   if (isTransportError(error)) {
@@ -244,12 +248,14 @@ function parseError(error: Error): ChatError {
     };
   }
 
-  // Fallback for unexpected formats
+  // Fallback for unexpected formats. A refusal thrown by the host or the channel keeps its code, which names its card.
+  const code = thrownCode(error);
   return {
     category: errorCategory.generic,
     title: errorCategoryTitles[errorCategory.generic],
     message: error.message,
     raw: error.message,
+    ...(code === undefined ? {} : { code }),
   };
 }
 
@@ -266,5 +272,8 @@ function parseError(error: Error): ChatError {
  */
 export function parseAdmissionFailureForPersistence(error: Error): ChatError {
   const parsed = parseErrorForPersistence(error);
-  return parsed.code === undefined ? { ...parsed, code: chatTurnNotStartedCode } : parsed;
+  // A thrown code is not a card of its own here: nothing ran, so the restart is the recovery.
+  return parsed.code === undefined || parsed.code === thrownCode(error)
+    ? { ...parsed, code: chatTurnNotStartedCode }
+    : parsed;
 }

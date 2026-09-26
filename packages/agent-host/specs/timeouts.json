@@ -1,0 +1,547 @@
+{
+  "scan": [
+    "packages/agent-host/src",
+    "packages/rpc/src",
+    "packages/revisions/src",
+    "packages/host/src",
+    "packages/cli/src",
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/services-broker.ts",
+    "apps/desktop/src/tau",
+    "apps/ui/app/workers/agent-host.impl.ts",
+    "apps/ui/app/workers/agent-host-leader.ts",
+    "apps/ui/app/workers/agent-host.worker.ts",
+    "apps/ui/app/services",
+    "apps/ui/app/lib/agent-host-placement.ts",
+    "apps/ui/app/chat-clients",
+    "apps/ui/app/hooks/use-revision-status.ts",
+    "apps/ui/app/machines/file-manager.worker.revisions.ts"
+  ],
+  "rows": [
+    {
+      "id": "A3",
+      "bound": "Checkout idle window",
+      "site": "packages/revisions/src/checkout.machine.ts",
+      "token": "idleWindow",
+      "class": "Debounce",
+      "owner": "W5"
+    },
+    {
+      "id": "A8",
+      "bound": "Pull render window",
+      "site": "packages/revisions/src/sync.machine.ts",
+      "token": "pullRenderWindow",
+      "class": "Presentation",
+      "owner": "W5"
+    },
+    {
+      "id": "A9",
+      "bound": "Pull deadline",
+      "site": "packages/revisions/src/sync.machine.ts",
+      "token": "pullDeadline",
+      "class": "External edge",
+      "owner": "W5"
+    },
+    {
+      "id": "A10",
+      "bound": "Sync debounce",
+      "site": "packages/revisions/src/sync.machine.ts",
+      "token": "syncDebounce",
+      "class": "Debounce",
+      "owner": "W5"
+    },
+    {
+      "id": "A11",
+      "bound": "Sync backoff",
+      "site": "packages/revisions/src/sync.machine.ts",
+      "token": "syncBackoff",
+      "class": "Backoff",
+      "owner": "W5"
+    },
+    {
+      "id": "A12",
+      "bound": "Push network deadline, 60 s (RM-S16)",
+      "site": "packages/revisions/src/sync.machine.ts",
+      "token": "pushDeadline",
+      "class": "External edge",
+      "owner": "W5"
+    },
+    {
+      "id": "A13",
+      "bound": "Git command deadline",
+      "site": "packages/revisions/src/git-command.ts",
+      "token": "stop('deadline')",
+      "class": "External edge",
+      "owner": "W5"
+    },
+    {
+      "id": "B1",
+      "bound": "Admission",
+      "site": "packages/host/src/revisions.ts",
+      "token": "admissions.has(input.runId)",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "B1b",
+      "bound": "Admission, worker leg",
+      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
+      "token": "admissions.has(input.runId)",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "B2",
+      "bound": "Sync quiesce at close",
+      "site": "packages/revisions/src/revision-effects.ts",
+      "token": "timeoutMilliseconds",
+      "class": "External edge",
+      "owner": "W8"
+    },
+    {
+      "id": "B3",
+      "bound": "Close flush",
+      "site": "packages/host/src/revisions.ts",
+      "token": "closeFlushMilliseconds",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "B4",
+      "bound": "Registry",
+      "site": "packages/host/src/revisions.ts",
+      "token": "registryMilliseconds",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "B5",
+      "bound": "Verb, and the publish verb (B6) through it",
+      "site": "packages/host/src/revisions.ts",
+      "token": "settled.resolve(timedOut)",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "B7",
+      "bound": "Branch verb, worker leg",
+      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
+      "token": "branchRegistryMilliseconds * 2",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "B7b",
+      "bound": "Branch verb, page (awaitBranchCreated)",
+      "site": "apps/ui/app/hooks/use-revision-status.ts",
+      "token": "branchRegistryMilliseconds * 2",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "B8",
+      "bound": "Cut wait (awaitCut)",
+      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
+      "token": "syncQuiesceMilliseconds",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "B9",
+      "bound": "Desktop quit hold",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "settle('timeout')",
+      "class": "External edge",
+      "owner": "W8"
+    },
+    {
+      "id": "B11",
+      "bound": "GitHub credential renewal",
+      "site": "apps/ui/app/hooks/use-revision-status.ts",
+      "token": "lease.timer = undefined",
+      "class": "External edge",
+      "owner": "W8"
+    },
+    {
+      "id": "B12",
+      "bound": "Desktop agent-host release",
+      "site": "apps/desktop/src/main/services-broker.ts",
+      "token": "release timed out",
+      "class": "External edge",
+      "owner": "W6"
+    },
+    {
+      "id": "B13",
+      "bound": "Desktop utility quiescence",
+      "site": "apps/desktop/src/main/services-broker.ts",
+      "token": "settleQuiescence?.({ status: 'timeout' })",
+      "class": "External edge",
+      "owner": "W6"
+    },
+    {
+      "id": "B14",
+      "bound": "Runtime-port request to main",
+      "site": "apps/desktop/src/tau/services-host.ts",
+      "token": "runtimePortTimeout",
+      "class": "Peer",
+      "owner": "W6",
+      "fixedBy": "W6"
+    },
+    {
+      "id": "B15",
+      "bound": "Agent-host configuration from main",
+      "site": "apps/desktop/src/tau/services-host.impl.ts",
+      "token": "agentHostConfigTimeout",
+      "class": "Peer",
+      "owner": "W6",
+      "fixedBy": "W6"
+    },
+    {
+      "id": "C1",
+      "bound": "Leader heartbeat",
+      "site": "apps/ui/app/workers/agent-host.impl.ts",
+      "token": "leaderHeartbeatInterval",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "C2",
+      "bound": "Follower liveness",
+      "site": "apps/ui/app/workers/agent-host-leader.ts",
+      "token": "expire('heartbeat'",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "C3",
+      "bound": "Tail answer",
+      "site": "apps/ui/app/workers/agent-host-leader.ts",
+      "token": "expire('tail'",
+      "class": "Peer",
+      "owner": "W6",
+      "fixedBy": "W6"
+    },
+    {
+      "id": "C4",
+      "bound": "Forwarded command, re-armed per addressed generation",
+      "site": "apps/ui/app/workers/agent-host-leader.ts",
+      "token": "check, options.heartbeatTimeout",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "C5",
+      "bound": "Follower recovery retry",
+      "site": "apps/ui/app/workers/agent-host.impl.ts",
+      "token": "followerRetryIds.delete(chatId)",
+      "class": "Backoff",
+      "owner": "W6"
+    },
+    {
+      "id": "D1",
+      "bound": "Capability probe",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "capabilityProbeTimeout",
+      "class": "Peer",
+      "owner": "W6",
+      "fixedBy": "W6"
+    },
+    {
+      "id": "D3",
+      "bound": "Run idle",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "runIdleTimeout",
+      "class": "Peer",
+      "owner": "W7",
+      "fixedBy": "W7"
+    },
+    {
+      "id": "D4",
+      "bound": "Worker close",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "options.closeTimeout",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "D5",
+      "bound": "Worker initialization",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "initializationTimeout",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "D6",
+      "bound": "Settlement",
+      "site": "apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts",
+      "token": "settlementExpiry",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "D7",
+      "bound": "Settlement grace",
+      "site": "apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts",
+      "token": "resolve, settlementTimeout",
+      "class": "Peer",
+      "owner": "W8",
+      "fixedBy": "W8"
+    },
+    {
+      "id": "D8",
+      "bound": "Registration",
+      "site": "apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts",
+      "token": "registrationTimeout",
+      "class": "Peer",
+      "owner": "W6",
+      "fixedBy": "W6"
+    },
+    {
+      "id": "D9",
+      "bound": "Turn service",
+      "site": "apps/ui/app/chat-clients/_internal/chat-host-binding.ts",
+      "token": "turnServiceWaitTimeout",
+      "class": "Peer",
+      "owner": "W9",
+      "fixedBy": "W9"
+    },
+    {
+      "id": "D10",
+      "bound": "Admission claim",
+      "site": "apps/ui/app/chat-clients/_internal/use-turn-admission.ts",
+      "token": "admissionExpiry",
+      "class": "Peer",
+      "owner": "W9",
+      "fixedBy": "W9"
+    },
+    {
+      "id": "D11",
+      "bound": "Model catalog poll",
+      "site": "apps/ui/app/chat-clients/_internal/use-turn-admission.ts",
+      "token": "setTimeout(resolve, 100)",
+      "class": "Peer",
+      "owner": "W9",
+      "fixedBy": "W9"
+    },
+    {
+      "id": "E1",
+      "bound": "rpc hello",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "defaultHelloTimeout",
+      "class": "Liveness",
+      "owner": "W4"
+    },
+    {
+      "id": "E2",
+      "bound": "rpc close",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "closeHandshakeTimeout",
+      "class": "Liveness",
+      "owner": "W4"
+    },
+    {
+      "id": "E3",
+      "bound": "rpc keepalive",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "keepaliveInterval",
+      "class": "Liveness",
+      "owner": "W4"
+    },
+    {
+      "id": "E3b",
+      "bound": "rpc keepalive, worker owner (1 s)",
+      "site": "apps/ui/app/workers/agent-host.worker.ts",
+      "token": "keepaliveInterval",
+      "class": "Liveness",
+      "owner": "W4"
+    },
+    {
+      "id": "E3c",
+      "bound": "rpc keepalive, daemon owner (2 s)",
+      "site": "packages/agent-host/src/launchers/node/agent-channel.ts",
+      "token": "defaultKeepaliveInterval",
+      "class": "Liveness",
+      "owner": "W4"
+    },
+    {
+      "id": "E4",
+      "bound": "rpc liveness",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "livenessBound",
+      "class": "Liveness",
+      "owner": "W4"
+    },
+    {
+      "id": "E4b",
+      "bound": "rpc liveness, page to worker (3.5 s)",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "workerLivenessTimeout",
+      "class": "Liveness",
+      "owner": "W4"
+    },
+    {
+      "id": "E4c",
+      "bound": "rpc liveness, page to daemon (10 s)",
+      "site": "apps/ui/app/lib/agent-host-placement.ts",
+      "token": "daemonLivenessTimeout",
+      "class": "Liveness",
+      "owner": "W4"
+    },
+    {
+      "id": "E4d",
+      "bound": "rpc liveness, CLI to daemon (10 s)",
+      "site": "packages/cli/src/commands/agent/client.ts",
+      "token": "livenessTimeout",
+      "class": "Liveness",
+      "owner": "W4"
+    },
+    {
+      "id": "E5",
+      "bound": "Socket open",
+      "site": "apps/ui/app/lib/agent-host-placement.ts",
+      "token": "settle(new Error('The agent host did not answer in time.'))",
+      "class": "External edge",
+      "owner": "W4"
+    },
+    {
+      "id": "E7",
+      "bound": "Daemon redial, shared by every agent channel client",
+      "site": "packages/agent-host/src/channel/agent-channel-client.ts",
+      "token": "redialTimer",
+      "class": "Backoff",
+      "owner": "W4"
+    },
+    {
+      "id": "E11",
+      "bound": "Host socket open",
+      "site": "packages/host/src/host-daemon.ts",
+      "token": "socketOpenTimeout",
+      "class": "External edge",
+      "owner": "W6"
+    },
+    {
+      "id": "E12",
+      "bound": "Host reconnect cap",
+      "site": "packages/host/src/host-daemon.ts",
+      "token": "reconnectDelayMaximum",
+      "class": "Backoff",
+      "owner": "W6"
+    },
+    {
+      "id": "E13",
+      "bound": "ACP session/close, and E22's cancel settlement until W10 splits it",
+      "site": "packages/host/src/acp/session.ts",
+      "token": "sessionCloseTimeout",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
+      "id": "E14",
+      "bound": "Watch coalesce",
+      "site": "packages/host/src/revisions.ts",
+      "token": "coalescing = undefined",
+      "class": "Debounce",
+      "owner": "W8"
+    },
+    {
+      "id": "E14b",
+      "bound": "Watch echo window for paths the host is applying",
+      "site": "packages/host/src/revisions.ts",
+      "token": "applyingPaths.get(path)",
+      "class": "Debounce",
+      "owner": "W8"
+    },
+    {
+      "id": "E19",
+      "bound": "ACP idle session",
+      "site": "packages/host/src/acp/run.ts",
+      "token": "idleTimeout",
+      "class": "Debounce",
+      "owner": "W10"
+    },
+    {
+      "id": "E23",
+      "bound": "ACP text checkpoint",
+      "site": "packages/host/src/acp/session.ts",
+      "token": "textIdleFlushDelay",
+      "class": "Debounce",
+      "owner": "W10"
+    },
+    {
+      "id": "E24",
+      "bound": "ACP CLI version probe",
+      "site": "packages/host/src/acp/registry.ts",
+      "token": "acpCliProbeTimeout",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
+      "id": "E25",
+      "bound": "ACP model probe",
+      "site": "packages/host/src/acp/registry.ts",
+      "token": "modelProbeTimeout",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
+      "id": "E26",
+      "bound": "Relay session lifetime",
+      "site": "packages/host/src/host-daemon.ts",
+      "token": "remainingLifetime",
+      "class": "External edge",
+      "owner": "W6"
+    },
+    {
+      "id": "E27",
+      "bound": "Agent server socket close grace",
+      "site": "packages/host/src/agent-server.ts",
+      "token": "closeGrace",
+      "class": "External edge",
+      "owner": "W6"
+    },
+    {
+      "id": "E28",
+      "bound": "Relay socket close grace",
+      "site": "packages/host/src/frame-splice.ts",
+      "token": "closeTimer",
+      "class": "External edge",
+      "owner": "W6"
+    },
+    {
+      "id": "E29",
+      "bound": "rpc bridge call",
+      "site": "packages/rpc/src/bridge/bridge-call.ts",
+      "token": "pendingCalls.delete(entry!)",
+      "class": "Peer",
+      "owner": "runtime",
+      "fixedBy": "outside this charter: the runtime owner (rpc bridge-call timer)"
+    },
+    {
+      "id": "E30",
+      "bound": "Desktop bridge connect before DESKTOP_ROOT_NOT_GRANTED",
+      "site": "apps/ui/app/lib/agent-host-placement.ts",
+      "token": "options.openTimeout ?? socketOpenTimeout",
+      "class": "Peer",
+      "owner": "W6",
+      "fixedBy": "W6"
+    },
+    {
+      "id": "N1",
+      "bound": "Not a timer: a parameter named after",
+      "site": "packages/agent-host/src/harness/compaction.ts",
+      "token": "laterCutoff",
+      "class": "None",
+      "owner": "W4"
+    }
+  ]
+}

@@ -44,7 +44,7 @@ type AgentHostGatewayFailure = {
   /**
    * The wire error type, which is what decides the run's coded failure.
    *
-   * Tau's own gateway refuses with one of `gatewayModelErrorCodes` here, and
+   * Tau's own gateway refuses with one of `gatewayErrorCodes` here, and
    * `gatewayErrorCode` maps anything else — an upstream provider's own
    * `api_error`, for one — to `UNKNOWN_GATEWAY_ERROR`, which
    * `isResumableRunFailure` rejects. So the default refusal is one the turn

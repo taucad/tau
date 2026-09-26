@@ -14,8 +14,8 @@
  */
 import type { ComputeStoreControl } from '@taucad/runtime/types';
 import { z } from 'zod';
-import { externalAgentDescriptorSchema } from '@taucad/agent-host';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { isDesktopTarget as isDesktopBuildTarget } from '#lib/build-target.js';
 
 /**
@@ -115,10 +115,11 @@ export type DesktopBridge = {
      *
      * The far end is `serveAgentChannel(port, launcher)` in the services
      * utility — ruling C3's launcher 2 — so the page drives it with
-     * `createAgentChannelClient` from `@taucad/agent-host/channel-client`:
-     * structured frames, no codec, the same T0 vocabulary the daemon serves
-     * over a WebSocket. Main refuses a root the user never granted, and the
-     * promise then never settles rather than resolving onto a port to nowhere.
+     * `createAgentChannelClient` from `@taucad/agent-host/channel-client`,
+     * whose `connect` calls this again for every redial: structured frames, no
+     * codec, the same keyed wire vocabulary the daemon serves over a WebSocket.
+     * Main refuses a root the user never granted, and the promise then never
+     * settles rather than resolving onto a port to nowhere.
      */
     connect(workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable'): Promise<MessagePort>;
     /** Keep launcher 2 alive for one project session in this renderer. */

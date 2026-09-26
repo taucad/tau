@@ -97,7 +97,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@taucad/rpc": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",

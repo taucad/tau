@@ -33,7 +33,26 @@ import {
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
 import type { GitRemoteCredential } from '@taucad/revisions';
-import type { AgentChannelClient, AgentChannelRequest, AgentChannelResponse, JsonValue } from '@taucad/agent-host';
+import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
+
+type RevisionAnswer = Awaited<ReturnType<AgentChannelClient['revision']>>;
+
+/** A daemon channel that only speaks revisions; the agent verbs are not this hook's. */
+const revisionChannel = (
+  fields: Pick<AgentChannelClient, 'revision' | 'revisionEvents' | 'close'>,
+): AgentChannelClient & typeof fields => ({
+  execute: async () => {
+    throw new Error('The revision hook sends no agent commands.');
+  },
+  read: async () => {
+    throw new Error('The revision hook reads no chat log.');
+  },
+  async *liveEvents() {
+    yield* [];
+  },
+  onClose: () => () => undefined,
+  ...fields,
+});
 
 const projectId = 'alpha';
 
@@ -310,27 +329,16 @@ describe('the page client of the worker revision root', () => {
       });
       return nextToast();
     };
-    const channel = {
-      execute: async (): Promise<AgentChannelResponse> => ({
-        type: 'revision',
-        result: null,
-        status: { projectId, branch: 'main', headRevisionId: 'revision-1' },
-      }),
-      async *events() {
-        yield* [];
-      },
-      async *liveEvents() {
-        yield* [];
-      },
+    const channel = revisionChannel({
+      revision: async () => ({ result: null, status: { projectId, branch: 'main', headRevisionId: 'revision-1' } }),
       async *revisionEvents() {
         for (;;) {
           // oxlint-disable-next-line no-await-in-loop -- a stream is sequential by definition.
           yield { kind: 'toast', value: (await nextToast()) as unknown as JsonValue };
         }
       },
-      onClose: () => () => undefined,
       close: () => undefined,
-    } satisfies AgentChannelClient;
+    });
     return {
       client: createHostRevisionClient({ projectId, connect: async () => channel }),
       toast: (value) => {
@@ -341,38 +349,24 @@ describe('the page client of the worker revision root', () => {
   };
 
   it('projects and drives a host-owned revision root without opening a worker store', async () => {
-    const seen: AgentChannelRequest[] = [];
-    const execute = vi.fn(async (request: AgentChannelRequest): Promise<AgentChannelResponse> => {
+    const seen: JsonValue[] = [];
+    const revision = vi.fn(async (request: JsonValue): Promise<RevisionAnswer> => {
       seen.push(request);
-      if (request.type !== 'revision') {
-        throw new Error('Expected a revision request.');
-      }
       return {
-        type: 'revision',
         result:
-          typeof request.request === 'object' &&
-          request.request !== null &&
-          'command' in request.request &&
-          request.request['command'] === 'log'
+          typeof request === 'object' && request !== null && 'command' in request && request['command'] === 'log'
             ? [{ id: 'revision-1', revisionNumber: 1 }]
             : null,
         status: { projectId, branch: 'main', headRevisionId: 'revision-1' },
       };
     });
-    const channel = {
-      execute,
-      async *events() {
-        yield* [];
-      },
-      async *liveEvents() {
-        yield* [];
-      },
+    const channel = revisionChannel({
+      revision,
       async *revisionEvents() {
         yield* [];
       },
-      onClose: () => () => undefined,
       close: vi.fn(),
-    } satisfies AgentChannelClient;
+    });
     const client = createHostRevisionClient({
       projectId,
       connect: async () => channel,
@@ -387,18 +381,15 @@ describe('the page client of the worker revision root', () => {
       });
     });
     client.send({ command: 'createBranch', name: 'isolated-run' });
-    await expect.poll(() => execute.mock.calls.length).toBe(3);
+    await expect.poll(() => revision.mock.calls.length).toBe(3);
     await expect(client.log({ limit: 8 })).resolves.toEqual([{ id: 'revision-1', revisionNumber: 1 }]);
     client.send({ command: 'adoptHostFinalized', checkoutId: 'live', revisionId: 'revision-1', treeId: 'tree-1' });
     await settle();
     expect(seen).toEqual([
-      { type: 'revision', request: { command: 'status' } },
-      { type: 'revision', request: { command: 'open' } },
-      {
-        type: 'revision',
-        request: { command: 'createBranch', name: 'isolated-run' },
-      },
-      { type: 'revision', request: { command: 'log', limit: 8 } },
+      { command: 'status' },
+      { command: 'open' },
+      { command: 'createBranch', name: 'isolated-run' },
+      { command: 'log', limit: 8 },
     ]);
     client.close();
     expect(channel.close).toHaveBeenCalledOnce();
@@ -406,20 +397,13 @@ describe('the page client of the worker revision root', () => {
 
   it('closes a host channel that finishes opening after the project closed', async () => {
     const connected = Promise.withResolvers<AgentChannelClient>();
-    const channel = {
-      execute: vi.fn(),
-      async *events() {
-        yield* [];
-      },
-      async *liveEvents() {
-        yield* [];
-      },
+    const channel = revisionChannel({
+      revision: vi.fn(),
       async *revisionEvents() {
         yield* [];
       },
-      onClose: () => () => undefined,
       close: vi.fn(),
-    } satisfies AgentChannelClient;
+    });
     const client = createHostRevisionClient({
       projectId,
       connect: async () => connected.promise,
@@ -431,34 +415,21 @@ describe('the page client of the worker revision root', () => {
     await settle();
 
     expect(channel.close).toHaveBeenCalledOnce();
-    expect(channel.execute).not.toHaveBeenCalled();
+    expect(channel.revision).not.toHaveBeenCalled();
     expect(client.status()).toBeUndefined();
   });
 
   it('replays a native chat projection to a later route subscriber', async () => {
-    const channel = {
-      execute: vi.fn(
-        async (): Promise<AgentChannelResponse> => ({
-          type: 'revision',
-          result: null,
-          status: { projectId, branch: 'main' },
-        }),
-      ),
-      async *events() {
-        yield* [];
-      },
-      async *liveEvents() {
-        yield* [];
-      },
+    const channel = revisionChannel({
+      revision: vi.fn(async (): Promise<RevisionAnswer> => ({ result: null, status: { projectId, branch: 'main' } })),
       async *revisionEvents() {
         yield {
           kind: 'event',
           value: { type: 'chats.projected', projectId, chatIds: ['remote-chat'] },
         };
       },
-      onClose: () => () => undefined,
       close: vi.fn(),
-    } satisfies AgentChannelClient;
+    });
     const client = createHostRevisionClient({ projectId, connect: async () => channel });
     client.open();
     await settle();

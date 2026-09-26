@@ -47,6 +47,7 @@ import type { AcpAdapter, HostMcpEndpoint, ProjectRevisions, TurnCheckout } from
 import { createHostGeoSpecRunner, createHostToolRegistry } from '@taucad/host/agent-tools';
 import type { HostGeoSpecRuntimeClient, HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import { packageVersion } from '@taucad/runtime/metadata';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
 import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/utility';
 import { systemSkillBundles } from '@taucad/skills/resources';
@@ -1006,6 +1007,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * `@taucad/rpc` reports the port's death and closes the channel itself, and
      * always-on lives in the launcher, which deliberately survives. */
     serveAgentChannel(port, launcher, {
+      build: packageVersion,
       sessionKey: agentSessionKey,
       revisions: projectRevisions.channel,
     });

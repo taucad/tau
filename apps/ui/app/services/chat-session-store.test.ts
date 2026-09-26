@@ -188,6 +188,12 @@ type StubDeps = {
   [K in Exclude<keyof ChatSessionDeps, 'client'>]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient };
 
+/** One read page for `chatId`, as the host answers it. */
+const page = <Fields extends { readonly cursor: number; readonly nextCursor: number; readonly endCursor: number }>(
+  chatId: string,
+  fields: Fields,
+): Fields & { readonly status: 'batch'; readonly chatId: string } => ({ status: 'batch', chatId, ...fields });
+
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 
 /**
@@ -363,30 +369,32 @@ function refusedAgentHostClient(chatId: string, runId: string): AgentHostClient 
     cancel: vi.fn(),
     resume: vi.fn(),
     resolveInterrupt: vi.fn(),
-    attach: vi.fn(async () => ({
-      cursor: 0,
-      nextCursor: 0,
-      endCursor: 0,
-      events: [],
-      snapshot: {
-        chatId,
-        runId,
-        turnId: 'm_user',
-        state: 'failed',
-        messages: [],
-        failure: {
-          code: 'INSUFFICIENT_CREDIT',
-          message: 'Insufficient Tau credit for this model request.',
-          status: 402,
-          details: {
-            requiredCreditAtoms: '3084332',
-            availableCreditAtoms: '1000000',
-            routeId: 'openai-gpt-6-astra',
+    attach: vi.fn(async () =>
+      page(chatId, {
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+        snapshot: {
+          chatId,
+          runId,
+          turnId: 'm_user',
+          state: 'failed',
+          messages: [],
+          failure: {
+            code: 'INSUFFICIENT_CREDIT',
+            message: 'Insufficient Tau credit for this model request.',
+            status: 402,
+            details: {
+              requiredCreditAtoms: '3084332',
+              availableCreditAtoms: '1000000',
+              routeId: 'openai-gpt-6-astra',
+            },
           },
-        },
-      } as const,
-    })),
-    tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
+        } as const,
+      }),
+    ),
+    read: vi.fn(async () => page(chatId, { cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
     subscribe: vi.fn(() => () => undefined),
     close: vi.fn(async () => undefined),
   };
@@ -2033,14 +2041,23 @@ describe('ChatSessionStore', () => {
         cancel: vi.fn(),
         resume: vi.fn(),
         resolveInterrupt: vi.fn(),
-        attach: vi.fn(async () => ({
-          cursor: 0,
-          nextCursor: 0,
-          endCursor: 0,
-          events: [],
-          snapshot: { chatId, runId, turnId: userMessage.id, state: 'completed', messages: [] } as const,
-        })),
-        tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
+        attach: vi.fn(async () =>
+          page(chatId, {
+            cursor: 0,
+            nextCursor: 0,
+            endCursor: 0,
+            events: [],
+            snapshot: { chatId, runId, turnId: userMessage.id, state: 'completed', messages: [] } as const,
+          }),
+        ),
+        read: vi.fn(async () =>
+          page(chatId, {
+            cursor: 0,
+            nextCursor: 0,
+            endCursor: 0,
+            events: [],
+          }),
+        ),
         subscribe: vi.fn(() => () => undefined),
         close: vi.fn(async () => undefined),
       };
@@ -2149,8 +2166,23 @@ describe('ChatSessionStore', () => {
         cancel: vi.fn(async () => ({ ...running, state: 'cancelled' }) as const),
         resume: vi.fn(),
         resolveInterrupt: vi.fn(),
-        attach: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [], snapshot: running })),
-        tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
+        attach: vi.fn(async () =>
+          page(chatId, {
+            cursor: 0,
+            nextCursor: 0,
+            endCursor: 0,
+            events: [],
+            snapshot: running,
+          }),
+        ),
+        read: vi.fn(async () =>
+          page(chatId, {
+            cursor: 0,
+            nextCursor: 0,
+            endCursor: 0,
+            events: [],
+          }),
+        ),
         subscribe: vi.fn(() => () => undefined),
         close: vi.fn(async () => undefined),
       };

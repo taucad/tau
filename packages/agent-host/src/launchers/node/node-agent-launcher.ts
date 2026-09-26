@@ -12,9 +12,9 @@
  *     the Web-Lock/BroadcastChannel machinery the browser needs for N tabs has
  *     no analogue here — the launcher is unconditionally the leader.
  *
- * What does *not* differ is the vocabulary: {@link executeAgentChannelCommand}
- * answers the same commands the browser worker answers over a MessagePort, so a
- * client projection cannot tell the two apart.
+ * What does *not* differ is the vocabulary: the shared command owner answers
+ * the same keyed commands the browser worker answers, so a client projection
+ * cannot tell the two apart.
  *
  * Always-on is the defining property: `start` and `resume` return as soon as
  * the admission is **durable**, and the run then continues with zero attached
@@ -26,7 +26,7 @@ import { join } from 'node:path';
 
 import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
-import { emptyChatLedger, foldChatLedger, replayedStartOutcome } from '#log/chat-ledger.js';
+import { emptyChatLedger } from '#log/chat-ledger.js';
 import { createNodeAttachmentReader, createNodeEventLog } from '#node.js';
 import { createPortableId } from '#harness/session-record.js';
 import type {
@@ -46,15 +46,36 @@ import type {
   ToolRegistry,
 } from '#waist/ports.js';
 import type { AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
-import type { ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
-import { admissionConfigFor, agentChannelTailByteLimit } from '#launchers/node/agent-wire.js';
-import type {
-  AgentChannelCommand,
-  AgentChannelEvent,
-  AgentChannelLiveEvent,
-  AgentChannelResponse,
-  AgentChannelTailWindow,
-} from '#launchers/node/agent-wire.js';
+import type { ExternalAgentPort, TauAgentAdmissionConfig, TauAgentHost } from '#host/tau-agent-host.js';
+import type { AgentChannelAdmissionConfig } from '#wire/admission.schema.js';
+import { createCommandOwner } from '#channel/command-owner.js';
+import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
+import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
+import type { RefusalCode } from '#wire/refusals.js';
+
+/**
+ * Narrow a validated command into the admission request the host core takes.
+ *
+ * @param config - Optional client admission settings.
+ * @param fallback - Host-owned defaults for omitted settings.
+ * @returns The normalized admission configuration.
+ */
+const admissionConfigFor = (
+  config: AgentChannelAdmissionConfig | undefined,
+  fallback: {
+    readonly systemPrompt: string;
+    readonly model?: TauAgentAdmissionConfig['model'];
+  },
+): TauAgentAdmissionConfig => ({
+  systemPrompt: config?.systemPrompt ?? fallback.systemPrompt,
+  ...(config?.systemPromptBlocks ? { systemPromptBlocks: config.systemPromptBlocks } : {}),
+  model: config?.model ?? fallback.model,
+  toolChoice: config?.toolChoice ?? 'auto',
+  ...(config?.allowedTools ? { allowedTools: config.allowedTools } : {}),
+  ...(config?.snapshot === undefined ? {} : { snapshot: config.snapshot }),
+  ...(config?.contextPayload ? { clientContext: config.contextPayload } : {}),
+  ...(config?.contextMessages ? { contextMessages: config.contextMessages } : {}),
+});
 
 /** One segment, never a path: a chat id is a directory name under `.tau/chats`. */
 const requirePathSegment = (value: string, label: string): string => {
@@ -132,9 +153,9 @@ const createInterruptInbox = (): InterruptApprovalPort & {
  */
 const fanOutQueueLimit = 1024;
 
-/** A multi-subscriber fan-out that never blocks the producer. */
-const createFanOut = <Event>() => {
-  const controllers = new Set<ReadableStreamDefaultController<Event>>();
+/** A multi-subscriber fan-out of live deltas, one chat per subscriber, that never blocks the producer (SC-R15). */
+const createFanOut = <Event extends { readonly chatId: string }>() => {
+  const controllers = new Map<ReadableStreamDefaultController<Event>, string>();
   const drop = (controller: ReadableStreamDefaultController<Event>, reason?: Error): void => {
     controllers.delete(controller);
     if (reason) {
@@ -147,7 +168,10 @@ const createFanOut = <Event>() => {
   };
   return {
     publish: (event: Event): void => {
-      for (const controller of controllers) {
+      for (const [controller, chatId] of controllers) {
+        if (chatId !== event.chatId) {
+          continue;
+        }
         /* An unbounded queue is the producer's problem, not the subscriber's:
          * a client that stops reading would otherwise grow this process's
          * heap for every event of every run it is not consuming. */
@@ -167,7 +191,7 @@ const createFanOut = <Event>() => {
         }
       }
     },
-    subscribe: (signal: AbortSignal): AsyncIterable<Event> => {
+    subscribe: (signal: AbortSignal, chatId: string): AsyncIterable<Event> => {
       let cleanup = (): void => undefined;
       return new ReadableStream<Event>({
         start(controller) {
@@ -188,7 +212,7 @@ const createFanOut = <Event>() => {
             signal.removeEventListener('abort', close);
           };
           cleanup = close;
-          controllers.add(controller);
+          controllers.set(controller, chatId);
           if (signal.aborted) {
             close();
           } else {
@@ -201,7 +225,7 @@ const createFanOut = <Event>() => {
       });
     },
     close: (): void => {
-      for (const controller of controllers) {
+      for (const controller of controllers.keys()) {
         controllers.delete(controller);
         controller.close();
       }
@@ -263,8 +287,10 @@ export type HostAuthoredLogEvent = WithoutLogPosition<
 export type NodeAgentLauncher = {
   /** The assembled host, for callers that need the lifecycle surface directly. */
   readonly host: TauAgentHost;
-  /** Answer one T0 command. Never tied to a client's socket lifetime. */
-  execute(command: AgentChannelCommand): Promise<AgentChannelResponse>;
+  /** Answer one keyed command (SC-R4–SC-R9). Never tied to a client's socket lifetime. */
+  execute(command: HostCommand): Promise<CommandAnswer>;
+  /** One long-poll read of a chat's durable rows (SC-R11–SC-R14). */
+  read(input: ReadInput): Promise<ReadAnswer>;
   /**
    * Append one host-authored record to a chat's durable log, and publish it.
    *
@@ -283,10 +309,8 @@ export type NodeAgentLauncher = {
    * @param event - The record, without its log position.
    */
   append(chatId: string, event: HostAuthoredLogEvent): Promise<void>;
-  /** Durable event stream for every chat this launcher owns. */
-  events(signal: AbortSignal): AsyncIterable<AgentChannelEvent>;
-  /** Ephemeral model-delta stream for every chat this launcher owns. */
-  liveEvents(signal: AbortSignal): AsyncIterable<AgentChannelLiveEvent>;
+  /** Ephemeral model deltas for one chat, bounded per subscriber (SC-R15). */
+  liveEvents(input: Readonly<{ chatId: string; signal: AbortSignal }>): AsyncIterable<AgentLiveEvent>;
   /** Unresolved approval requests for one run. */
   pendingInterrupts(runId: string): Promise<readonly InterruptRequest[]>;
   close(): Promise<void>;
@@ -318,8 +342,16 @@ export type NodeAgentLauncher = {
  */
 export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): NodeAgentLauncher => {
   const createId = options.createId ?? createPortableId;
-  const durable = createFanOut<AgentChannelEvent>();
-  const live = createFanOut<AgentChannelLiveEvent>();
+  const live = createFanOut<AgentLiveEvent>();
+  /** Readers parked on a chat nothing has opened yet; woken by its first open. */
+  const unwrittenReaders = new Map<string, Set<() => void>>();
+  const wakeUnwrittenReaders = (chatId: string): void => {
+    const parked = unwrittenReaders.get(chatId);
+    unwrittenReaders.delete(chatId);
+    for (const wake of parked ?? []) {
+      wake();
+    }
+  };
   const interruptPort = createInterruptInbox();
   const generations = new Map<string, string>();
   /** Runs still executing after their admission answered; drained by `close()`. */
@@ -350,20 +382,16 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
     }
     const opened = (async (): Promise<DurableEventLog> => {
       const log = await createNodeEventLog({ filePath: eventLogPath(chatId), access: 'write' });
+      wakeUnwrittenReaders(chatId);
       return {
-        append: async (candidate: AgentLogEvent) => {
+        append: async (candidate: AgentLogEvent) =>
           /* The binding's durability class, stated on the run's admission as the page's bindings state theirs:
            * `appendFile` then `sync()` per append, and the directory synced once at creation (W3 §11). */
-          const event: AgentLogEvent =
+          log.append(
             candidate.type === 'run.lifecycle' && candidate.state === 'admitted'
               ? { ...candidate, storageDurability: 'exclusive-append' }
-              : candidate;
-          const outcome = await log.append(event);
-          if (outcome.appended) {
-            durable.publish({ chatId, event });
-          }
-          return outcome;
-        },
+              : candidate,
+          ),
         read: async () => log.read(),
         readBatch: async (input) => log.readBatch(input),
         messages: async () => log.messages(),
@@ -407,7 +435,7 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
      * agent is refused by the host with `EXTERNAL_AGENT_UNAVAILABLE`. */
     ...(options.externalAgents ? { externalRunners: { acp: options.externalAgents } } : {}),
     onLiveEvent: (event: AgentLiveEvent) => {
-      live.publish({ chatId: event.chatId, event });
+      live.publish(event);
     },
   });
 
@@ -503,102 +531,67 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
 
   const assertOpen = (): void => {
     if (closed) {
-      throw Object.assign(new Error('The Tau agent launcher is closed.'), { code: 'LAUNCHER_CLOSED' });
+      throw Object.assign(new Error('The Tau agent launcher is closed.'), {
+        code: 'HOST_CLOSED' satisfies RefusalCode,
+      });
     }
   };
 
   /**
-   * Externally executed runs, by chat and by run.
+   * Re-project one chat for a reconnecting client, recovering it if needed. Rows come from `read`; the answer names
+   * the run and whether this call recorded it abandoned.
    *
-   * A second registry beside the pi host's own because the two run kinds share
-   * a log, not a lifecycle: an ACP turn has no `AgentSession`, no model stream
-   * and no tool loop for the host to abort — only a child process and a
-   * protocol-level `session/cancel`.
+   * @param chatId - The chat being opened.
+   * @returns The attach details: the run's projection, the takeover fact and the chat's end cursor.
    */
-  /**
-   * Re-project one chat for a reconnecting client, recovering it if needed.
-   *
-   * @param command - The client's attach window.
-   * @returns The attach projection, its leadership marker and whether this call recovered the run.
-   */
-  /**
-   * The client's replay window, bounded by this daemon's own byte budget.
-   *
-   * A client that names no budget still gets one: sixteen records is not a
-   * bound when one of them can hold a whole file (P5).
-   *
-   * @param command - The client's `tail` or `attach` window.
-   * @returns The window this daemon will actually serve.
-   */
-  const readWindow = <Command extends AgentChannelTailWindow & { readonly chatId: string }>(
-    command: Command,
-  ): Command & { readonly maxBytes: number } => ({
-    ...command,
-    maxBytes: Math.min(command.maxBytes ?? agentChannelTailByteLimit, agentChannelTailByteLimit),
-  });
-
-  const attach = async (
-    command: Extract<AgentChannelCommand, { readonly type: 'attach' }>,
-  ): Promise<Extract<AgentChannelResponse, { readonly type: 'attach' }>> => {
-    const batch = await host.readEvents(readWindow(command));
-    if (batch.endCursor === 0) {
-      return {
-        type: 'attach',
-        chatId: command.chatId,
-        batch,
-        leadership: { role: 'leader', generation: generationFor(command.chatId) },
-        takeover: false,
-      };
+  const attach = async (chatId: string): Promise<Readonly<Record<string, unknown>>> => {
+    if (await isUnwritten(chatId)) {
+      return { takeover: false, endCursor: 0 };
     }
+    generationFor(chatId);
     /* Non-throwing: a chat whose log holds no run still has the transcript the
      * client reconnected for, and refusing here made it unopenable (T4-08). */
-    let snapshot = await host.describeRun(command.chatId);
+    let snapshot = await host.describeRun(chatId);
     /* A run left non-terminal by a daemon restart is recorded here — the one
      * place every reconnecting client passes through. Recorded, not resumed:
      * `resume` re-asks the provider for a turn nobody requested (I4). A run
      * this process is already executing is not abandoned at all, which
      * `markAbandoned` decides from the host's own memory. */
     let takeover = false;
-    if (snapshot && !isTerminal(snapshot.state) && !(await host.waitForAdmission(command.chatId))) {
-      const marked = await host.markAbandoned(command.chatId);
+    if (snapshot && !isTerminal(snapshot.state) && !(await host.waitForAdmission(chatId))) {
+      const marked = await host.markAbandoned(chatId);
       takeover = marked?.runId === snapshot.runId && isTerminal(marked.state);
       snapshot = marked ?? snapshot;
     }
-    return {
-      type: 'attach',
-      chatId: command.chatId,
-      batch: await host.readEvents(readWindow(command)),
-      leadership: { role: 'leader', generation: generationFor(command.chatId) },
-      ...(snapshot ? { snapshot } : {}),
-      takeover,
-    };
+    const { position } = await host.ledger(chatId);
+    return { ...(snapshot ? { snapshot } : {}), takeover, endCursor: position.cursor };
   };
 
-  const execute = async (command: AgentChannelCommand): Promise<AgentChannelResponse> => {
+  /** The run's state after a verb, for an answer that recorded nothing. */
+  const stateOf = async (chatId: string): Promise<Readonly<Record<string, unknown>>> => {
+    const run = await host.describeRun(chatId);
+    return run ? { state: run.state, runId: run.runId } : { state: 'none' };
+  };
+
+  const effect = async (command: HostCommand): Promise<Readonly<Record<string, unknown>> | undefined> => {
     assertOpen();
-    /* A read of a chat nothing wrote is empty, and opens nothing: opening the
-     * log creates its directory, file and writer lock, and every desktop
-     * project open probes a sentinel chat this way (W0.12, L2b HD-8).
-     * ponytail: `tail` only; W6's RH-R1 makes every read verb open for read. */
-    if (command.type === 'tail' && (await isUnwritten(command.chatId))) {
-      return { type: 'tail', chatId: command.chatId, batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] } };
+    if (command.type === 'attach') {
+      return attach(command.payload.chatId);
     }
-    generationFor(command.chatId);
+    const { chatId } = command.payload;
+    const { commandId } = command;
+    generationFor(chatId);
     switch (command.type) {
-      case 'tail': {
-        return { type: 'tail', chatId: command.chatId, batch: await host.readEvents(readWindow(command)) };
-      }
-      case 'attach': {
-        return attach(command);
-      }
       case 'start': {
-        const external = command.config?.agent;
+        const { payload } = command;
+        const external = payload.config?.agent;
         const base = {
-          chatId: command.chatId,
-          runId: command.runId,
-          message: command.message,
+          chatId,
+          runId: payload.runId,
+          message: payload.message,
+          commandId,
           config: {
-            ...admissionConfigFor(command.config, { systemPrompt: options.systemPrompt, model: options.model }),
+            ...admissionConfigFor(payload.config, { systemPrompt: options.systemPrompt, model: options.model }),
             /* The host routes on this *before* it composes anything, so the Tau
              * fields above are inert for an external turn. */
             ...(external
@@ -613,76 +606,40 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
               : {}),
           },
         };
-        /* V9: the run id is the idempotency key. A client that re-sends its
-         * `start` over a reconnected socket is answered with the run it already
-         * has — admitting it again would refuse the id as taken and lose the
-         * turn. The browser worker reads the same function. */
-        const log = await openEventLog(command.chatId);
-        switch (replayedStartOutcome(foldChatLedger(emptyChatLedger, await log.read()), command.runId)) {
-          case 'settled': {
-            return { type: 'result', operation: 'start', snapshot: await host.snapshot(command.chatId) };
-          }
-          case 'resume': {
-            /* A run this process is still executing needs no continuation at
-             * all: answer the re-send with the run it already has. */
-            const live = await host.waitForAdmission(command.chatId, command.runId);
-            return {
-              type: 'result',
-              operation: 'start',
-              snapshot:
-                live ??
-                (await acknowledge({
-                  chatId: command.chatId,
-                  runId: command.runId,
-                  completion: host.resume(command.chatId),
-                })),
-            };
-          }
-          /* ponytail: an admission a dead leader never committed goes to admission as before, which refuses its
-           * id (L2a D6); M1's `idle.orphaned` recovers it (W7). */
-          case 'recover':
-          case 'admit': {
-            break;
-          }
-        }
         const completion = host.admit(
-          command.trigger === 'submit'
+          payload.trigger === 'submit'
             ? { ...base, trigger: 'submit' }
-            : { ...base, trigger: command.trigger, retainedMessageIds: command.retainedMessageIds },
+            : { ...base, trigger: payload.trigger, retainedMessageIds: payload.retainedMessageIds ?? [] },
         );
-        return {
-          type: 'result',
-          operation: 'start',
-          snapshot: await acknowledge({ chatId: command.chatId, runId: command.runId, completion }),
-        };
+        const admitted = await acknowledge({ chatId, runId: payload.runId, completion });
+        return { state: admitted.state, runId: admitted.runId };
       }
       case 'resume': {
-        return {
-          type: 'result',
-          operation: 'resume',
-          snapshot: await acknowledge({ chatId: command.chatId, completion: host.resume(command.chatId) }),
-        };
+        const resumed = await acknowledge({ chatId, completion: host.resume(chatId, { commandId }) });
+        return { state: resumed.state, runId: resumed.runId };
       }
       case 'steer': {
-        await host.steer({ runId: command.runId, message: command.message });
-        break;
+        await host.steer({ runId: command.payload.runId, message: command.payload.message });
+        // ponytail: a steer is delivered to the live session, not recorded; W7 writes its row (I18).
+        return { delivery: 'queued' };
       }
       case 'cancel': {
-        await host.cancel({ runId: command.runId });
-        break;
+        await host.cancel({ runId: command.payload.runId, commandId });
+        return stateOf(chatId);
       }
       case 'interrupt': {
+        const { payload } = command;
         const request: InterruptRequest = {
-          interruptId: command.interruptId,
-          runId: command.runId,
-          kind: command.kind,
-          prompt: command.prompt,
-          ...(command.payload === undefined ? {} : { payload: command.payload }),
+          interruptId: payload.interruptId,
+          runId: payload.runId,
+          kind: payload.kind,
+          prompt: payload.prompt,
+          ...(payload.payload === undefined ? {} : { payload: payload.payload }),
         };
         /* `host.interrupt` only settles when the approval is *decided*, which
          * may be days later and from another client. Answer as soon as the
          * request is durable instead, and let the pause outlive this call. */
-        const paused = host.interrupt(request);
+        const paused = host.interrupt({ ...request, commandId });
         const observeFailure = async (): Promise<void> => {
           await paused;
         };
@@ -691,33 +648,70 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
          * as a typed refusal instead of a silent no-op. */
         const failure = observeFailure();
         detach(failure);
-        await Promise.race([interruptPort.awaitRequest(command.interruptId), failure]);
-        break;
+        await Promise.race([interruptPort.awaitRequest(payload.interruptId), failure]);
+        return stateOf(chatId);
       }
       case 'resolve-interrupt': {
+        const { payload } = command;
         await host.resolveInterrupt({
-          runId: command.runId,
-          interruptId: command.interruptId,
-          outcome: command.outcome,
-          ...(command.optionId === undefined ? {} : { optionId: command.optionId }),
-          ...(command.payload === undefined ? {} : { payload: command.payload }),
+          runId: payload.runId,
+          interruptId: payload.interruptId,
+          outcome: payload.outcome,
+          commandId,
+          ...(payload.optionId === undefined ? {} : { optionId: payload.optionId }),
+          ...(payload.payload === undefined ? {} : { payload: payload.payload }),
         });
-        break;
+        return stateOf(chatId);
       }
     }
-    return { type: 'result', operation: command.type, snapshot: await host.snapshot(command.chatId) };
+  };
+
+  const execute = createCommandOwner({
+    /* A chat nothing wrote has the empty ledger, and opens nothing: opening the
+     * log creates its directory, file and writer lock, and every desktop
+     * project open probes a sentinel chat this way (W0.12, L2b HD-8). */
+    ledger: async (chatId) => ((await isUnwritten(chatId)) ? emptyChatLedger : host.ledger(chatId)),
+    effect,
+  });
+
+  const read = async (input: ReadInput): Promise<ReadAnswer> => {
+    assertOpen();
+    const { chatId } = input;
+    // oxlint-disable-next-line no-await-in-loop -- a long poll re-checks after each wake.
+    while (await isUnwritten(chatId)) {
+      if (input.cursor > 0) {
+        return { status: 'refused', chatId, reason: 'cursor-ahead', expected: { endCursor: 0 } };
+      }
+      if (closed || input.signal?.aborted) {
+        return { status: 'batch', chatId, cursor: 0, nextCursor: 0, endCursor: 0, events: [] };
+      }
+      // Parked without opening the log (W0.12): the chat's first open wakes it, and the host parks it from there.
+      // oxlint-disable-next-line no-await-in-loop -- one park per check.
+      await new Promise<void>((resolve) => {
+        const parked = unwrittenReaders.get(chatId) ?? new Set();
+        unwrittenReaders.set(chatId, parked);
+        const wake = (): void => {
+          parked.delete(wake);
+          input.signal?.removeEventListener('abort', wake);
+          resolve();
+        };
+        parked.add(wake);
+        input.signal?.addEventListener('abort', wake, { once: true });
+      });
+    }
+    return host.read(input);
   };
 
   return {
     host,
     execute,
+    read,
     append: async (chatId, event) => {
       generationFor(chatId);
       const { runId, ...body } = event;
       await host.recordSettlement({ chatId, runId, event: body });
     },
-    events: (signal) => durable.subscribe(signal),
-    liveEvents: (signal) => live.subscribe(signal),
+    liveEvents: ({ chatId, signal }) => live.subscribe(signal, chatId),
     pendingInterrupts: async (runId) => host.pendingInterrupts(runId),
     close: async () => {
       if (closed) {
@@ -733,7 +727,9 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
         }),
       );
       logs.clear();
-      durable.close();
+      for (const chatId of unwrittenReaders.keys()) {
+        wakeUnwrittenReaders(chatId);
+      }
       live.close();
     },
   };

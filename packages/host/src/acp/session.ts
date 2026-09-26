@@ -73,10 +73,9 @@ import type {
 } from '@agentclientprotocol/sdk';
 
 import type { ExternalAgentTurn } from '@taucad/agent-host/node-launcher';
+import type { ExternalAgentLogin, ExternalAgentStop } from '@taucad/agent-host/wire';
 import type {
   ExternalAgentLogEvent,
-  ExternalAgentLogin,
-  ExternalAgentStop,
   JsonObject,
   JsonValue,
   ProviderMessage,

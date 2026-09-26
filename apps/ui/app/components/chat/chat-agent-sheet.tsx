@@ -19,7 +19,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Copy, Plus, Server, Zap } from 'lucide-react';
 import type { AcpAgentExecution, TauAgentHostId } from '@taucad/chat';
 import type { ReasoningLevel } from '@taucad/chat/constants';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { Button } from '@taucad/ui/components/button';
 import {
   Command,

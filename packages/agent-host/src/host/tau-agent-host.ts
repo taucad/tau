@@ -44,6 +44,8 @@ import type { EventLogBatch } from '#log/event-log-appender.js';
 import type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
 import type { ClientContext } from '#harness/cad-middleware.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import type { RefusalCode } from '#wire/refusals.js';
+import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
 
 type SessionEvent = LogRowBody;
 
@@ -58,7 +60,12 @@ type TauAgentTurnRequestBase = {
   readonly runId: string;
   readonly message: UserProviderMessage;
   readonly config?: TauAgentAdmissionConfig | undefined;
+  /** The gesture's key, stamped on the admission's rows so a re-send answers from the applied set (D15). */
+  readonly commandId?: string | undefined;
 };
+
+/** A command's key, for the host verbs a keyed command drives (D15, SC-R7). @public */
+export type CommandKey = Readonly<{ commandId?: string | undefined }>;
 
 /**
  * Which agent runs the turn.
@@ -479,7 +486,7 @@ export type TauAgentHost = {
   /** Commit and execute one new user turn. */
   admit(request: TauAgentTurnRequest): Promise<readonly ProviderMessage[]>;
   /** Rebuild one chat from its event log and continue a non-terminal run. */
-  resume(chatId: string): Promise<readonly ProviderMessage[]>;
+  resume(chatId: string, key?: CommandKey): Promise<readonly ProviderMessage[]>;
   /**
    * Wait until a concurrently started admission is durable and return its projection.
    *
@@ -512,20 +519,27 @@ export type TauAgentHost = {
    */
   markAbandoned(chatId: string): Promise<HostRunSnapshot | undefined>;
   /** Abort an active run, durably pause it, and wait through the W5 port. */
-  interrupt(request: InterruptRequest): Promise<InterruptResolution>;
-  /** Resolve a W5 request from an external presenter. */
-  resolveInterrupt(resolution: InterruptResolution & { readonly runId: string }): Promise<void>;
+  interrupt(request: InterruptRequest & CommandKey): Promise<InterruptResolution>;
+  /** Resolve a W5 request from an external presenter; settles once the resolution row is durable (SC-R9). */
+  resolveInterrupt(resolution: InterruptResolution & { readonly runId: string } & CommandKey): Promise<void>;
   /** Return unresolved W5 requests for one run. */
   pendingInterrupts(runId: string): Promise<readonly InterruptRequest[]>;
   /** Queue steering on an active run. */
   steer(input: { readonly runId: string; readonly message: string }): Promise<void>;
   /** Cancel an active run without creating an approval request, then wait out its settlement. */
-  cancel(input: { readonly runId: string }): Promise<void>;
+  cancel(input: { readonly runId: string } & CommandKey): Promise<void>;
   /** Rebuild the current run projection from W1, refusing `NO_RUN_ADMITTED` when there is none. */
   snapshot(chatId: string): Promise<HostRunSnapshot>;
   /** The same projection as {@link TauAgentHost.snapshot}, answering `undefined` rather than refusing. */
   describeRun(chatId: string): Promise<HostRunSnapshot | undefined>;
-  /** Read one bounded event batch for follower projection. */
+  /** The chat's ledger: its applied set, generation and runs (W3), for the command owner. */
+  ledger(chatId: string): Promise<ChatLedger>;
+  /**
+   * One long-poll read (SC-R14): a batch as soon as a row exists after `cursor`, else wait for the next append or the
+   * signal. Refuses rather than clamps (SC-R12); a fenced chat answers `owner-fenced`.
+   */
+  read(input: ReadInput): Promise<ReadAnswer>;
+  /** Read one bounded event batch for follower projection (the version-1 clamp; W6's follower forwarding). */
   readEvents(input: {
     readonly chatId: string;
     readonly cursor: number;
@@ -604,49 +618,6 @@ const isInterruptPayload = (value: JsonValue | undefined): value is InterruptPay
 export type HostRunState = ChatRunState;
 
 /**
- * Every code a refusal on the admission, resume or settlement path carries (I3).
- *
- * One code per *recovery*, because the only question a consumer has is "what do
- * I do now?". `RUN_ADMISSION_CONFLICT` named five conditions at once — a live
- * run, three duplicate run ids and an external one — so the page's recovery had
- * to match a regular expression over the message text, and still could not tell
- * "wait for the run that is running" from "this run id is taken, never retry".
- * `libs/chat` re-exports this union as the wire contract, so a new code cannot
- * be added to one side of the boundary alone.
- *
- * @public
- */
-export const agentHostRefusalCodes = [
-  /** The chat holds a non-terminal run, in memory or durably. Carries `state` and, when one is bound, `runId`: wait for that run, bounded, then admit once. */
-  'CHAT_RUN_LIVE',
-  /** A reservation, an active run or a durable lifecycle already holds this run id. Carries `runId`; never retry — attach, or answer with its settlement. */
-  'RUN_ID_TAKEN',
-  /** Nothing on this chat can be continued. Minted by the transport that asked for the resume, never thrown here: `resume` answers an uncontinuable chat with its history unchanged, and the caller that pressed Resume turns that into this refusal so the card says so instead of appearing to do nothing. */
-  'RESUME_UNAVAILABLE',
-  /** A non-terminal run whose executing host is gone, as {@link TauAgentHost.markAbandoned} records it. Offer Resume. */
-  'RUN_ABANDONED',
-  /** This chat admitted no run. Readers that can live without one call `describeRun`, which answers `undefined`. */
-  'NO_RUN_ADMITTED',
-  /** A rewinding trigger did not retain an unchanged strict history prefix. */
-  'HISTORY_PREFIX_INVALID',
-  /** A second, differing settlement for one run. */
-  'SETTLEMENT_CONFLICT',
-  /** A settlement for a run nothing admitted. */
-  'SETTLEMENT_WITHOUT_RUN',
-  /** The revision root refused a lease this run already holds. */
-  'TURN_ALREADY_LEASED',
-  /** Another tab or process leads this chat now. */
-  'LEADERSHIP_LOST',
-  /** The chat's current run holds a row a newer build wrote: update Tau to continue it; the chat stays readable (CL-R2). Never retry. */
-  'RUN_UNREADABLE',
-  /** The chat's history cannot be replayed: start a new chat; the log is kept for diagnosis (CL-R2). Never retry. */
-  'HISTORY_INVALID',
-] as const;
-
-/** One member of {@link agentHostRefusalCodes}. @public */
-export type AgentHostRefusalCode = (typeof agentHostRefusalCodes)[number];
-
-/**
  * The refusal a chat that already holds a run answers an admission with.
  *
  * One builder for both readings of the same fact — the in-memory reservation or
@@ -662,7 +633,7 @@ const chatRunLiveRefusal = (input: {
   readonly state: HostRunState;
 }): Error =>
   Object.assign(new Error(`Chat ${input.chatId} has a ${input.state} run; admit the next turn after it ends.`), {
-    code: 'CHAT_RUN_LIVE' satisfies AgentHostRefusalCode,
+    code: 'CHAT_RUN_LIVE' satisfies RefusalCode,
     state: input.state,
     ...(input.runId === undefined ? {} : { runId: input.runId }),
   });
@@ -679,7 +650,7 @@ const chatRunLiveRefusal = (input: {
  */
 const runIdTakenRefusal = (input: { readonly runId: string; readonly held: string }): Error =>
   Object.assign(new Error(`Run ${input.runId} ${input.held}.`), {
-    code: 'RUN_ID_TAKEN' satisfies AgentHostRefusalCode,
+    code: 'RUN_ID_TAKEN' satisfies RefusalCode,
     runId: input.runId,
   });
 
@@ -882,7 +853,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
 
   const assertOpen = (): void => {
     if (closed) {
-      throw new Error('The Tau agent host is closed.');
+      throw Object.assign(new Error('The Tau agent host is closed.'), { code: 'HOST_CLOSED' satisfies RefusalCode });
     }
   };
 
@@ -992,6 +963,60 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   /** Serializes every writer on one chat's log; see {@link append}. */
   const chatAppends = new Map<string, Promise<void>>();
 
+  /**
+   * Keyed commands waiting for their decision row (D15). The first append of `runId` holding a row `takes` accepts is
+   * stamped with `commandId`, so W3's fold records it in `applied`; `landed` settles with that append.
+   */
+  type Claim = Readonly<{
+    /** The run the row belongs to; a `resume` names its chat instead, since the ledger picks the run. */
+    runId?: string;
+    chatId?: string;
+    commandId: string | undefined;
+    takes: (body: SessionEvent) => boolean;
+    /** Settles with `undefined` once the claimed append is durable, or with the error that refused it. */
+    landed: PromiseWithResolvers<Error | undefined>;
+  }>;
+  const claims = new Set<Claim>();
+
+  /**
+   * Run `work` with a claim on its decision row; the claim ends with the work whether or not the row landed.
+   *
+   * @param claim - The run, the key and the decision row.
+   * @param work - The verb, handed the promise that settles with the claimed append.
+   * @returns What the work returns.
+   */
+  const claimed = async <Result>(
+    claim: Omit<Claim, 'landed'>,
+    work: (landed: Promise<Error | undefined>) => Promise<Result>,
+  ): Promise<Result> => {
+    const entry: Claim = { ...claim, landed: Promise.withResolvers<Error | undefined>() };
+    claims.add(entry);
+    try {
+      return await work(entry.landed.promise);
+    } finally {
+      claims.delete(entry);
+    }
+  };
+
+  /** Readers parked at a chat's end, woken by its next durable row (SC-R14). */
+  const readers = new Map<string, Set<() => void>>();
+  const lifecycleRow =
+    (state: RunLifecycleState) =>
+    (body: SessionEvent): boolean =>
+      body.type === 'run.lifecycle' && body.state === state;
+  const interruptRow =
+    (interruptId: string, phase: 'requested' | 'resolved') =>
+    (body: SessionEvent): boolean =>
+      body.type === 'interrupt.recorded' && body.interruptId === interruptId && body.phase === phase;
+
+  const wakeReaders = (chatId: string): void => {
+    const parked = readers.get(chatId);
+    readers.delete(chatId);
+    for (const wake of parked ?? []) {
+      wake();
+    }
+  };
+
   const reserve = (chatId: string, runId?: string): AdmissionReservation => {
     const state = memoryRunStateOf(chatId);
     if (runOperationCode(state, 'admit') !== 'ok') {
@@ -1055,14 +1080,43 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
      * a session whose leadership was replaced mid-run must be fenced off, not
      * quietly re-stamped with whoever leads now. */
     const leaderEpoch = input.leaderEpoch ?? leaderEpochFor(input.chatId);
-    let ledger = await ledgerOf(input.log);
+    const ledger = await ledgerOf(input.log);
+    const claim = [...claims].find(
+      (entry) =>
+        (entry.runId ?? input.runId) === input.runId &&
+        (entry.chatId ?? input.chatId) === input.chatId &&
+        input.events.some(entry.takes),
+    );
+    if (claim) {
+      claims.delete(claim);
+    }
     const stamped = stampRows({
       ledger,
       leaderEpoch,
       runId: input.runId,
       recordedAt: now().toISOString(),
+      ...(claim?.commandId === undefined ? {} : { commandId: claim.commandId }),
       bodies: input.events,
     });
+    try {
+      await appendStamped({ ...input, leaderEpoch, ledger, stamped });
+      claim?.landed.resolve(undefined);
+    } catch (error) {
+      claim?.landed.resolve(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  };
+
+  const appendStamped = async (input: {
+    readonly chatId: string;
+    readonly log: DurableEventLog;
+    readonly runId: string;
+    readonly leaderEpoch: string;
+    readonly ledger: ChatLedger;
+    readonly stamped: readonly AgentLogEvent[];
+  }): Promise<void> => {
+    const { leaderEpoch, stamped } = input;
+    let { ledger } = input;
     /* ponytail: the invocation rule (PrepareOnlyWhenResolved) waits for its writer, the settled row (W7 GI-S6);
      * enforced before then, a charged lost reply could never continue (EQ1). */
     const gated = gateRows(ledger, stamped, { invocations: false });
@@ -1100,6 +1154,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (outcome.appended) {
         ledger = foldChatLedger(ledger, [row]);
         ledgers.set(input.log, ledger);
+        wakeReaders(input.chatId);
       }
     }
   };
@@ -1749,273 +1804,277 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const described = await describeRun(chatId);
     if (!described) {
       throw Object.assign(new Error(`Chat ${chatId} has no admitted run to describe.`), {
-        code: 'NO_RUN_ADMITTED' satisfies AgentHostRefusalCode,
+        code: 'NO_RUN_ADMITTED' satisfies RefusalCode,
       });
     }
     return described;
   };
 
   return {
-    admit: async (request) => {
-      assertOpen();
-      const reservation = reserve(request.chatId, request.runId);
-      let executing = false;
-      try {
-        const log = await logFor(request.chatId);
-        const events = await log.read();
-        const ledger = await ledgerOf(log);
-        assertExecutable(request.chatId, ledger);
-        if (runOperationCode(chatRunState(ledger), 'admit') !== 'ok') {
-          /* The same refusal the in-memory check raises, from the same builder:
-           * a fresh worker's host has no run in memory, so this is the only
-           * branch a reload-then-send ever reaches, and a recovery that could
-           * not recognise it waited on nothing. */
-          throw chatRunLiveRefusal({
-            chatId: request.chatId,
-            runId: ledger.currentRunId,
-            state: chatRunState(ledger),
-          });
-        }
-        /* A *lifecycle* record is what makes this run id taken. Refusing on any
-         * record at all refused every turn whose id a settlement had already
-         * been written under, which is how one abandoned lease made a chat
-         * single-turn for the rest of its life. */
-        if (ledger.runs[request.runId]?.lifecycle !== undefined) {
-          throw runIdTakenRefusal({ runId: request.runId, held: 'has already been admitted' });
-        }
-        // A history with nothing in it has nothing to rewind, so a rewinding
-        // trigger *is* a first turn and runs as one. Gating on the log's
-        // *records* instead wedged the chat whose first turn was stopped inside
-        // the admission window: the log holds `admitted, cancelled`, the
-        // projection is empty, and `0 >= 0` refused every later retry and edit
-        // with `HISTORY_PREFIX_INVALID` forever.
-        const projection = request.trigger === 'submit' ? [] : reduceEventLog(events);
-        if (request.trigger !== 'submit' && projection.length > 0) {
-          const messages = projection;
-          /* The rewind point is the turn the caller names, and the prefix it
-           * keeps is this log's own.
-           *
-           * A caller's transcript ids are not these: one run is one assistant
-           * message on a page and any number of provider messages here, so a
-           * caller can only ever name the *user* message its turn belongs to —
-           * that id it minted and this log stored verbatim. Matching its
-           * `retainedMessageIds` against this projection refused every rewind
-           * whose retained prefix contained an assistant message, which is
-           * every turn after the first (F2).
-           *
-           * ponytail: `retainedMessageIds` stays on the start input for the
-           * caller that rewinds to a turn this log has never seen — the branch
-           * below. The cleanup is to drop it from the waist entirely and make
-           * the rewound turn the only thing a rewinding trigger carries. */
-          const rewindTo = messages.findIndex((message) => message.id === request.message.id);
-          if (
-            rewindTo === -1 &&
-            (request.retainedMessageIds.length > messages.length ||
-              request.retainedMessageIds.some((id, index) => messages[index]?.id !== id))
-          ) {
-            throw Object.assign(new Error('Retry/edit/regenerate must retain an unchanged strict history prefix.'), {
-              code: 'HISTORY_PREFIX_INVALID',
+    admit: async (request) =>
+      claimed({ runId: request.runId, commandId: request.commandId, takes: lifecycleRow('admitted') }, async () => {
+        assertOpen();
+        const reservation = reserve(request.chatId, request.runId);
+        let executing = false;
+        try {
+          const log = await logFor(request.chatId);
+          const events = await log.read();
+          const ledger = await ledgerOf(log);
+          assertExecutable(request.chatId, ledger);
+          if (runOperationCode(chatRunState(ledger), 'admit') !== 'ok') {
+            /* The same refusal the in-memory check raises, from the same builder:
+             * a fresh worker's host has no run in memory, so this is the only
+             * branch a reload-then-send ever reaches, and a recovery that could
+             * not recognise it waited on nothing. */
+            throw chatRunLiveRefusal({
+              chatId: request.chatId,
+              runId: ledger.currentRunId,
+              state: chatRunState(ledger),
             });
           }
-          await append({
-            chatId: request.chatId,
-            log,
-            runId: request.runId,
-            events: [
-              {
-                type: 'history.rewound',
-                trigger: request.trigger,
-                retainedMessageIds:
-                  rewindTo === -1
-                    ? request.retainedMessageIds
-                    : messages.slice(0, rewindTo).map((message) => message.id),
-              },
-            ],
-          });
-        }
-        const external = request.config?.agent;
-        if (external) {
-          /* Routed before `execute`, so an external turn never composes a Tau
-           * admission: it carries no Tau model, prompt or tool grant. */
-          /* The reservation is held until `runExternal` registers the run, and
-           * `finally` releases it: releasing it first let a second start be
-           * admitted before this one's `admitted` row landed (L2a D2).
-           *
-           * The chat's own session (VSC3), read on every trigger. A rewind keeps
-           * the selection and drops the session: the vendor thread holds a turn
-           * Tau has just retracted, so it is closed and a new one is opened. */
-          const remembered = externalSessionOf(events, external.id);
-          let state = remembered;
-          if (request.trigger !== 'submit') {
-            await closeExternalChat(request.chatId);
-            if (remembered) {
-              const { acpSessionId: _retired, ...carried } = remembered;
-              state = carried;
-            }
+          /* A *lifecycle* record is what makes this run id taken. Refusing on any
+           * record at all refused every turn whose id a settlement had already
+           * been written under, which is how one abandoned lease made a chat
+           * single-turn for the rest of its life. */
+          if (ledger.runs[request.runId]?.lifecycle !== undefined) {
+            throw runIdTakenRefusal({ runId: request.runId, held: 'has already been admitted' });
           }
-          await runExternal({
+          // A history with nothing in it has nothing to rewind, so a rewinding
+          // trigger *is* a first turn and runs as one. Gating on the log's
+          // *records* instead wedged the chat whose first turn was stopped inside
+          // the admission window: the log holds `admitted, cancelled`, the
+          // projection is empty, and `0 >= 0` refused every later retry and edit
+          // with `HISTORY_PREFIX_INVALID` forever.
+          const projection = request.trigger === 'submit' ? [] : reduceEventLog(events);
+          if (request.trigger !== 'submit' && projection.length > 0) {
+            const messages = projection;
+            /* The rewind point is the turn the caller names, and the prefix it
+             * keeps is this log's own.
+             *
+             * A caller's transcript ids are not these: one run is one assistant
+             * message on a page and any number of provider messages here, so a
+             * caller can only ever name the *user* message its turn belongs to —
+             * that id it minted and this log stored verbatim. Matching its
+             * `retainedMessageIds` against this projection refused every rewind
+             * whose retained prefix contained an assistant message, which is
+             * every turn after the first (F2).
+             *
+             * ponytail: `retainedMessageIds` stays on the start input for the
+             * caller that rewinds to a turn this log has never seen — the branch
+             * below. The cleanup is to drop it from the waist entirely and make
+             * the rewound turn the only thing a rewinding trigger carries. */
+            const rewindTo = messages.findIndex((message) => message.id === request.message.id);
+            if (
+              rewindTo === -1 &&
+              (request.retainedMessageIds.length > messages.length ||
+                request.retainedMessageIds.some((id, index) => messages[index]?.id !== id))
+            ) {
+              throw Object.assign(new Error('Retry/edit/regenerate must retain an unchanged strict history prefix.'), {
+                code: 'HISTORY_PREFIX_INVALID',
+              });
+            }
+            await append({
+              chatId: request.chatId,
+              log,
+              runId: request.runId,
+              events: [
+                {
+                  type: 'history.rewound',
+                  trigger: request.trigger,
+                  retainedMessageIds:
+                    rewindTo === -1
+                      ? request.retainedMessageIds
+                      : messages.slice(0, rewindTo).map((message) => message.id),
+                },
+              ],
+            });
+          }
+          const external = request.config?.agent;
+          if (external) {
+            /* Routed before `execute`, so an external turn never composes a Tau
+             * admission: it carries no Tau model, prompt or tool grant. */
+            /* The reservation is held until `runExternal` registers the run, and
+             * `finally` releases it: releasing it first let a second start be
+             * admitted before this one's `admitted` row landed (L2a D2).
+             *
+             * The chat's own session (VSC3), read on every trigger. A rewind keeps
+             * the selection and drops the session: the vendor thread holds a turn
+             * Tau has just retracted, so it is closed and a new one is opened. */
+            const remembered = externalSessionOf(events, external.id);
+            let state = remembered;
+            if (request.trigger !== 'submit') {
+              await closeExternalChat(request.chatId);
+              if (remembered) {
+                const { acpSessionId: _retired, ...carried } = remembered;
+                state = carried;
+              }
+            }
+            await runExternal({
+              chatId: request.chatId,
+              runId: request.runId,
+              agent: external,
+              message: request.message,
+              ...(state ? { state } : {}),
+              /* Defined by construction: `external` was read off it. */
+              config: request.config,
+            });
+            return reduceEventLog(await log.read());
+          }
+          executing = true;
+          return await execute({
             chatId: request.chatId,
             runId: request.runId,
-            agent: external,
+            log,
             message: request.message,
-            ...(state ? { state } : {}),
-            /* Defined by construction: `external` was read off it. */
+            reservation,
             config: request.config,
           });
-          return reduceEventLog(await log.read());
-        }
-        executing = true;
-        return await execute({
-          chatId: request.chatId,
-          runId: request.runId,
-          log,
-          message: request.message,
-          reservation,
-          config: request.config,
-        });
-      } finally {
-        if (!executing) {
-          reservation.resolveReady(undefined);
-          reservation.resolveAdmitted(undefined);
-          releaseReservation(reservation);
-        }
-      }
-    },
-    resume: async (chatId) => {
-      assertOpen();
-      const reservation = reserve(chatId);
-      let executing = false;
-      try {
-        const log = await logFor(chatId);
-        let events = await log.read();
-        if (events.length === 0) {
-          throw new Error(`Chat ${chatId} has no durable session log.`);
-        }
-        const ledger = await ledgerOf(log);
-        assertExecutable(chatId, ledger);
-        const runId = ledger.currentRunId;
-        if (runId === undefined || runOperationCode(chatRunState(ledger), 'resume') !== 'ok') {
-          /* The ledger's `resume` row is every state but `none`, and `none` is
-           * exactly a chat whose log admitted no run. Nothing to continue: the
-           * caller gets the history as it stands rather than a fabricated
-           * lifecycle for a run that never ran. */
-          return reduceEventLog(events);
-        }
-        const entry = ledger.runs[runId];
-        const state = entry?.lifecycle;
-        if (entry === undefined || state === undefined) {
-          return reduceEventLog(events);
-        }
-        /* A settled attempt is closed (I1): it reopens only through the one predicate the fold and the gate use
-         * (I10), for a run the gateway refused resumably. A native pause waiting on a person continues once its
-         * request resolves. Without this the host re-ran a settled run and the page's second, differing settlement
-         * was refused `SETTLEMENT_CONFLICT` with no way forward. */
-        if (entry.appendState === 'settled' && state !== 'paused' && !reopens(entry, { state: 'running' })) {
-          return reduceEventLog(events);
-        }
-        if (terminalStates.has(state)) {
-          if (entry.appendState !== 'settled' && !isResumableRunFailure(entry.failure)) {
-            return reduceEventLog(events);
-          }
-          /* An external stop clears nothing: its trailing assistant message is
-           * the agent's own work, and the vendor session still holds the turn
-           * this resume continues. */
-          const cleared = externalTurnOf(events) ? undefined : failureMarkerClearance(reduceEventLog(events));
-          if (cleared) {
-            await append({ chatId, log, runId, events: [cleared] });
-            events = await log.read();
+        } finally {
+          if (!executing) {
+            reservation.resolveReady(undefined);
+            reservation.resolveAdmitted(undefined);
+            releaseReservation(reservation);
           }
         }
-        if (externalTurnOf(events)) {
-          /* An external run has no `AgentSession` to continue — its runner
-           * reconnects to the agent's own session from the remembered state.
-           * The reservation is held until that run registers (L2a D2). */
-          if (!externalByChat.has(chatId)) {
-            await resumeExternal(chatId);
-          }
-          return reduceEventLog(await log.read());
-        }
-        bindReservationRun(reservation, runId);
-
-        if (state === 'paused') {
-          const pendingKey = Object.values(entry.pendingInterrupts).at(-1);
-          const pending = events.find(
-            (event): event is InterruptRecordedEvent =>
-              event.type === 'interrupt.recorded' &&
-              event.leaderEpoch === pendingKey?.leaderEpoch &&
-              event.sequence === pendingKey.sequence,
-          );
-          let resolution: InterruptResolution | undefined = entry.lastResolution;
-          if (pending) {
-            if (!isInterruptPayload(pending.payload)) {
-              throw new Error(`Interrupt ${pending.interruptId} has no durable W5 request payload.`);
-            }
-            resolution = await waitForDurableResolution({
-              chatId,
-              log,
-              request: {
-                interruptId: pending.interruptId,
-                runId,
-                kind: pending.payload.kind,
-                prompt: pending.payload.prompt,
-                payload: pending.payload.context,
-              },
+      }),
+    resume: async (chatId, key) =>
+      claimed({ chatId, commandId: key?.commandId, takes: lifecycleRow('running') }, async () => {
+        assertOpen();
+        const reservation = reserve(chatId);
+        let executing = false;
+        try {
+          const log = await logFor(chatId);
+          let events = await log.read();
+          if (events.length === 0) {
+            throw Object.assign(new Error(`Chat ${chatId} has no durable session log.`), {
+              code: 'NO_RUN_ADMITTED' satisfies RefusalCode,
             });
-            events = await log.read();
           }
-          if (resolution?.outcome !== 'approved') {
+          const ledger = await ledgerOf(log);
+          assertExecutable(chatId, ledger);
+          const runId = ledger.currentRunId;
+          if (runId === undefined || runOperationCode(chatRunState(ledger), 'resume') !== 'ok') {
+            /* The ledger's `resume` row is every state but `none`, and `none` is
+             * exactly a chat whose log admitted no run. Nothing to continue: the
+             * caller gets the history as it stands rather than a fabricated
+             * lifecycle for a run that never ran. */
             return reduceEventLog(events);
           }
-        }
+          const entry = ledger.runs[runId];
+          const state = entry?.lifecycle;
+          if (entry === undefined || state === undefined) {
+            return reduceEventLog(events);
+          }
+          /* A settled attempt is closed (I1): it reopens only through the one predicate the fold and the gate use
+           * (I10), for a run the gateway refused resumably. A native pause waiting on a person continues once its
+           * request resolves. Without this the host re-ran a settled run and the page's second, differing settlement
+           * was refused `SETTLEMENT_CONFLICT` with no way forward. */
+          if (entry.appendState === 'settled' && state !== 'paused' && !reopens(entry, { state: 'running' })) {
+            return reduceEventLog(events);
+          }
+          if (terminalStates.has(state)) {
+            if (entry.appendState !== 'settled' && !isResumableRunFailure(entry.failure)) {
+              return reduceEventLog(events);
+            }
+            /* An external stop clears nothing: its trailing assistant message is
+             * the agent's own work, and the vendor session still holds the turn
+             * this resume continues. */
+            const cleared = externalTurnOf(events) ? undefined : failureMarkerClearance(reduceEventLog(events));
+            if (cleared) {
+              await append({ chatId, log, runId, events: [cleared] });
+              events = await log.read();
+            }
+          }
+          if (externalTurnOf(events)) {
+            /* An external run has no `AgentSession` to continue — its runner
+             * reconnects to the agent's own session from the remembered state.
+             * The reservation is held until that run registers (L2a D2). */
+            if (!externalByChat.has(chatId)) {
+              await resumeExternal(chatId);
+            }
+            return reduceEventLog(await log.read());
+          }
+          bindReservationRun(reservation, runId);
 
-        const history = reduceEventLog(events);
-        const missingOutputs = pendingToolCalls(history);
-        const disconnectedOutputs = missingOutputs.map(
-          (call): ProviderMessage => ({
-            id: createId(),
-            role: 'tool-output',
-            toolCallId: call.toolCallId,
-            toolName: call.toolName,
-            content: {
-              errorCode: 'CLIENT_DISCONNECTED',
-              message: 'The prior host stopped before this tool returned. Verify state before retrying.',
-            },
-            isError: true,
-            metadata: { timestamp: now().getTime() },
-          }),
-        );
-        const recoveryEvents: SessionEvent[] = [
-          { type: 'run.lifecycle', state: 'running' },
-          ...disconnectedOutputs.map((message): SessionEvent => ({ type: 'message.appended', message })),
-        ];
-        const tail = history.at(-1);
-        const reminder = await createInterruptRecoveryMessage({
-          messages: [...history, ...disconnectedOutputs],
-          timestamp: now().getTime(),
-        });
-        if (missingOutputs.length > 0 && !reminder) {
-          throw new Error('Interrupted tool history could not produce a recovery reminder.');
-        }
-        if (reminder) {
-          recoveryEvents.push({
-            type: 'message.appended',
-            message: reminder,
+          if (state === 'paused') {
+            const pendingKey = Object.values(entry.pendingInterrupts).at(-1);
+            const pending = events.find(
+              (event): event is InterruptRecordedEvent =>
+                event.type === 'interrupt.recorded' &&
+                event.leaderEpoch === pendingKey?.leaderEpoch &&
+                event.sequence === pendingKey.sequence,
+            );
+            let resolution: InterruptResolution | undefined = entry.lastResolution;
+            if (pending) {
+              if (!isInterruptPayload(pending.payload)) {
+                throw new Error(`Interrupt ${pending.interruptId} has no durable W5 request payload.`);
+              }
+              resolution = await waitForDurableResolution({
+                chatId,
+                log,
+                request: {
+                  interruptId: pending.interruptId,
+                  runId,
+                  kind: pending.payload.kind,
+                  prompt: pending.payload.prompt,
+                  payload: pending.payload.context,
+                },
+              });
+              events = await log.read();
+            }
+            if (resolution?.outcome !== 'approved') {
+              return reduceEventLog(events);
+            }
+          }
+
+          const history = reduceEventLog(events);
+          const missingOutputs = pendingToolCalls(history);
+          const disconnectedOutputs = missingOutputs.map(
+            (call): ProviderMessage => ({
+              id: createId(),
+              role: 'tool-output',
+              toolCallId: call.toolCallId,
+              toolName: call.toolName,
+              content: {
+                errorCode: 'CLIENT_DISCONNECTED',
+                message: 'The prior host stopped before this tool returned. Verify state before retrying.',
+              },
+              isError: true,
+              metadata: { timestamp: now().getTime() },
+            }),
+          );
+          const recoveryEvents: SessionEvent[] = [
+            { type: 'run.lifecycle', state: 'running' },
+            ...disconnectedOutputs.map((message): SessionEvent => ({ type: 'message.appended', message })),
+          ];
+          const tail = history.at(-1);
+          const reminder = await createInterruptRecoveryMessage({
+            messages: [...history, ...disconnectedOutputs],
+            timestamp: now().getTime(),
           });
-        } else if (tail?.role === 'assistant') {
-          await append({ chatId, log, runId, events: [{ type: 'run.lifecycle', state: 'completed' }] });
-          return reduceEventLog(await log.read());
+          if (missingOutputs.length > 0 && !reminder) {
+            throw new Error('Interrupted tool history could not produce a recovery reminder.');
+          }
+          if (reminder) {
+            recoveryEvents.push({
+              type: 'message.appended',
+              message: reminder,
+            });
+          } else if (tail?.role === 'assistant') {
+            await append({ chatId, log, runId, events: [{ type: 'run.lifecycle', state: 'completed' }] });
+            return reduceEventLog(await log.read());
+          }
+          await append({ chatId, log, runId, events: recoveryEvents });
+          executing = true;
+          return await execute({ chatId, runId, log, reservation });
+        } finally {
+          if (!executing) {
+            reservation.resolveReady(undefined);
+            reservation.resolveAdmitted(undefined);
+            releaseReservation(reservation);
+          }
         }
-        await append({ chatId, log, runId, events: recoveryEvents });
-        executing = true;
-        return await execute({ chatId, runId, log, reservation });
-      } finally {
-        if (!executing) {
-          reservation.resolveReady(undefined);
-          reservation.resolveAdmitted(undefined);
-          releaseReservation(reservation);
-        }
-      }
-    },
+      }),
     waitForAdmission: async (chatId, runId) => {
       assertOpen();
       /* An external run holds no reservation and no `AgentSession` — its
@@ -2065,7 +2124,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             type: 'run.lifecycle',
             state: 'failed',
             detail: {
-              code: 'RUN_ABANDONED' satisfies AgentHostRefusalCode,
+              code: 'RUN_ABANDONED' satisfies RefusalCode,
               message: 'The host executing this run is gone. Resume the turn to continue it.',
             },
           },
@@ -2073,44 +2132,57 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       });
       return describeRun(chatId);
     },
-    interrupt: async (request) => {
-      assertOpen();
-      const active = await activeRunFor(request.runId);
-      if (!active) {
-        throw new Error(`Run ${request.runId} is not active.`);
-      }
-      active.session.abort();
-      await (active.completion ?? active.session.agent.waitForIdle());
-      const log = await logFor(active.chatId);
-      await append({
-        chatId: active.chatId,
-        log,
-        runId: request.runId,
-        events: [
-          {
-            type: 'interrupt.recorded',
-            interruptId: request.interruptId,
-            phase: 'requested',
-            reason: request.prompt,
-            payload: {
-              kind: request.kind,
-              prompt: request.prompt,
-              ...(request.payload === undefined ? {} : { context: request.payload }),
+    interrupt: async ({ commandId, ...request }) =>
+      claimed({ runId: request.runId, commandId, takes: interruptRow(request.interruptId, 'requested') }, async () => {
+        assertOpen();
+        const active = await activeRunFor(request.runId);
+        if (!active) {
+          throw Object.assign(new Error(`Run ${request.runId} is not active.`), {
+            code: 'RUN_NOT_LIVE' satisfies RefusalCode,
+          });
+        }
+        active.session.abort();
+        await (active.completion ?? active.session.agent.waitForIdle());
+        const log = await logFor(active.chatId);
+        await append({
+          chatId: active.chatId,
+          log,
+          runId: request.runId,
+          events: [
+            {
+              type: 'interrupt.recorded',
+              interruptId: request.interruptId,
+              phase: 'requested',
+              reason: request.prompt,
+              payload: {
+                kind: request.kind,
+                prompt: request.prompt,
+                ...(request.payload === undefined ? {} : { context: request.payload }),
+              },
             },
-          },
-          { type: 'run.lifecycle', state: 'paused' },
-        ],
-      });
-      return waitForDurableResolution({ chatId: active.chatId, log, request });
-    },
-    resolveInterrupt: async ({ runId, ...resolution }) => {
+            { type: 'run.lifecycle', state: 'paused' },
+          ],
+        });
+        return waitForDurableResolution({ chatId: active.chatId, log, request });
+      }),
+    resolveInterrupt: async ({ runId, commandId, ...resolution }) => {
       const pending = await options.interruptPort.pending({ runId });
       if (!pending.some((request) => request.interruptId === resolution.interruptId)) {
-        throw new Error(
-          `Interrupt ${resolution.interruptId} is not pending on run ${runId}: it was already resolved, cancelled with the run, or never issued.`,
+        throw Object.assign(
+          new Error(
+            `Interrupt ${resolution.interruptId} is not pending on run ${runId}: it was already resolved, cancelled with the run, or never issued.`,
+          ),
+          { code: 'INTERRUPT_NOT_PENDING' satisfies RefusalCode },
         );
       }
-      await options.interruptPort.resume(resolution);
+      await claimed({ runId, commandId, takes: interruptRow(resolution.interruptId, 'resolved') }, async (landed) => {
+        await options.interruptPort.resume(resolution);
+        // The pause's own path records the resolution; answer once it is durable (SC-R9).
+        const refused = await landed;
+        if (refused !== undefined) {
+          throw refused;
+        }
+      });
     },
     pendingInterrupts: async (runId) => options.interruptPort.pending({ runId }),
     steer: async ({ runId, message }) => {
@@ -2125,40 +2197,93 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       }
       const active = await activeRunFor(runId);
       if (!active) {
-        throw new Error(`Run ${runId} is not active.`);
+        throw Object.assign(new Error(`Run ${runId} is not active.`), { code: 'RUN_NOT_LIVE' satisfies RefusalCode });
       }
       active.session.steer(message);
     },
-    cancel: async ({ runId }) => {
-      assertOpen();
-      const external = externalByRun.get(runId);
-      if (external) {
-        external.controller.abort();
-        /* An outstanding approval outlives the abort: the runner's turn is
-         * suspended inside `approve`, and a protocol that asked the *client* for
-         * a decision cannot finish until the client gives one. Cancelling it is
-         * that answer — without it the wait below never returns (V8). */
-        await cancelPendingInterrupts(runId);
-        /* D12 keeps the four meanings apart: requesting cancellation is not
-         * observing settlement. A caller that reads the snapshot next must see
-         * the runner's terminal `cancelled`, exactly as the Tau branch below
-         * waits out its session. Detaching a client never comes through here. */
-        await external.completion;
-        return;
-      }
-      const active = await activeRunFor(runId);
-      if (!active) {
-        return;
-      }
-      active.session.abort();
-      /* No drain here, unlike the external branch: a Tau run is ended by
-       * `interrupt` *before* its durable pause begins, so an active Tau run never
-       * holds a pending interrupt — a paused chat is answered by
-       * `resolveInterrupt`, not by cancel (6-review F2, falsified). */
-      await (active.completion ?? active.session.agent.waitForIdle());
-    },
+    cancel: async ({ runId, commandId }) =>
+      claimed({ runId, commandId, takes: lifecycleRow('cancelled') }, async () => {
+        assertOpen();
+        const external = externalByRun.get(runId);
+        if (external) {
+          external.controller.abort();
+          /* An outstanding approval outlives the abort: the runner's turn is
+           * suspended inside `approve`, and a protocol that asked the *client* for
+           * a decision cannot finish until the client gives one. Cancelling it is
+           * that answer — without it the wait below never returns (V8). */
+          await cancelPendingInterrupts(runId);
+          /* D12 keeps the four meanings apart: requesting cancellation is not
+           * observing settlement. A caller that reads the snapshot next must see
+           * the runner's terminal `cancelled`, exactly as the Tau branch below
+           * waits out its session. Detaching a client never comes through here. */
+          await external.completion;
+          return;
+        }
+        const active = await activeRunFor(runId);
+        if (!active) {
+          return;
+        }
+        active.session.abort();
+        /* No drain here, unlike the external branch: a Tau run is ended by
+         * `interrupt` *before* its durable pause begins, so an active Tau run never
+         * holds a pending interrupt — a paused chat is answered by
+         * `resolveInterrupt`, not by cancel (6-review F2, falsified). */
+        await (active.completion ?? active.session.agent.waitForIdle());
+      }),
     snapshot,
     describeRun,
+    ledger: async (chatId) => ledgerOf(await logFor(chatId)),
+    read: async ({ signal, ...request }) => {
+      const { chatId } = request;
+      for (;;) {
+        if (fencedChats.has(chatId)) {
+          return { status: 'refused', chatId, reason: 'owner-fenced' };
+        }
+        /* SC-R14: register the wake before reading, so a row appended while the read is in flight wakes it
+         * instead of being missed until the next append (W4.r1). */
+        const parked = readers.get(chatId) ?? new Set<() => void>();
+        readers.set(chatId, parked);
+        const woken = Promise.withResolvers<void>();
+        const wake = (): void => {
+          parked.delete(wake);
+          if (parked.size === 0 && readers.get(chatId) === parked) {
+            readers.delete(chatId);
+          }
+          signal?.removeEventListener('abort', wake);
+          woken.resolve();
+        };
+        parked.add(wake);
+        signal?.addEventListener('abort', wake, { once: true });
+        let answer: Awaited<ReturnType<DurableEventLog['readBatch']>>;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- a long poll re-reads after each wake.
+          const log = await logFor(chatId);
+          // oxlint-disable-next-line no-await-in-loop -- the same re-read.
+          answer = await log.readBatch(request);
+        } catch (error) {
+          wake();
+          throw error;
+        }
+        if (answer.status === 'refused') {
+          wake();
+          return { status: 'refused', chatId, reason: answer.reason, expected: answer.expected };
+        }
+        if (answer.events.length > 0 || closed || signal?.aborted) {
+          wake();
+          return {
+            status: 'batch',
+            chatId,
+            cursor: answer.cursor,
+            nextCursor: answer.nextCursor,
+            endCursor: answer.endCursor,
+            events: [...answer.events],
+          };
+        }
+        // Park until the next durable row, the reader's own abort, or the host closing.
+        // oxlint-disable-next-line no-await-in-loop -- one park per empty read.
+        await woken.promise;
+      }
+    },
     readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
       const log = await logFor(chatId);
       // The version-1 wire's read: a cursor past the end is clamped here, and only here (CL-R7).
@@ -2179,6 +2304,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     },
     relinquish: async (chatId) => {
       fencedChats.add(chatId);
+      wakeReaders(chatId);
       leaderEpochs.delete(chatId);
       const active = activeByChat.get(chatId);
       active?.session.abort();
@@ -2208,6 +2334,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         return;
       }
       closed = true;
+      for (const chatId of readers.keys()) {
+        wakeReaders(chatId);
+      }
       for (const reservation of reservationsByChat.values()) {
         reservation.resolveReady(undefined);
         reservation.resolveAdmitted(undefined);

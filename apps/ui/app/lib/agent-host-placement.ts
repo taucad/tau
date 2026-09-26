@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { packageVersion } from '@taucad/runtime/metadata';
-import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
+import { agentChannelPort, createAgentChannelClient } from '@taucad/agent-host/channel-client';
+import type { AgentChannelEndpoint } from '@taucad/agent-host/channel-client';
 import type { CadAgentExecution, TauAgentHostId } from '@taucad/chat';
-import { externalAgentDescriptorSchema } from '@taucad/agent-host';
-import type { AgentChannelClient, ExternalAgentDescriptor } from '@taucad/agent-host';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
+import type { AgentChannelClient } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { createRemoteHostSession, listRemoteHosts, RemoteHostApiError } from '#lib/remote-host-client.js';
 import { desktopBridge, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
@@ -550,16 +552,23 @@ const relayedAgentUrl = async (deviceId: string, options: OpenAgentHostChannelOp
   return session.agentUrl;
 };
 
+/** The client's liveness bound on a daemon that keeps alive every two seconds (T9 E3, E4). Milliseconds. */
+const daemonLivenessTimeout = 10_000;
+
 /**
- * Dial one daemon and hand back an open T0 channel.
+ * Dial one daemon and hand back its agent channel client.
  *
  * No secret is ever assembled here (ruling 2): rung 1 rides the daemon's own
  * `HttpOnly` cookie on a same-origin upgrade, and rung 2 rides the API session
  * cookie. A URL never carries a token.
  *
+ * The first dial happens here, and its refusal is thrown with the rung that gave
+ * up. The client redials through the same ladder when the wire dies (a relayed
+ * session is minted afresh each time) and re-sends its unanswered commands by key.
+ *
  * @param hostId - `origin` for rung 1, otherwise a paired device id.
  * @param options - Socket, session and discovery overrides for tests.
- * @returns An open channel client.
+ * @returns A channel client whose first connection is open.
  * @throws {AgentHostPlacementError} With the rung that gave up.
  * @public
  */
@@ -567,38 +576,52 @@ export const openAgentHostChannel = async (
   hostId: TauAgentHostId,
   options: OpenAgentHostChannelOptions = {},
 ): Promise<AgentChannelClient> => {
-  if (hostId === 'desktop') {
-    /* Wrapped the instant the port arrives, before any command: the utility
-     * posts its channel hello on claim, and `wrapMessagePort` is what starts
-     * the port — a listener attached later never sees that first frame. */
-    return createAgentChannelClient(await desktopAgentPort(options), { sessionKey: 'tau-agent' });
-  }
-  const rung: AgentHostPlacementRung = hostId === 'origin' ? 1 : 2;
-  let url: string;
-  if (rung === 1) {
-    const origin = options.origin ?? pageOrigin();
-    if (origin === undefined) {
-      throw new AgentHostPlacementError('ORIGIN_NOT_HOSTED', 1, 'This page was not served by an agent host.');
+  const dial = async (): Promise<AgentChannelEndpoint> => {
+    if (hostId === 'desktop') {
+      /* Wrapped the instant the port arrives: the utility posts its channel
+       * hello on claim, and wrapping is what starts the port. */
+      return agentChannelPort(await desktopAgentPort(options));
     }
-    url = originAgentSocketUrl(origin);
-  } else {
-    url = await relayedAgentUrl(hostId, options);
-  }
-  const socket = (options.createSocket ?? ((next: string) => new WebSocket(next)))(url);
-  /* Wrapped before `open`, deliberately: the daemon posts its channel hello the
-   * instant the upgrade completes, and a listener attached later never sees it. */
-  const client = createAgentChannelClient(socket);
-  try {
-    await awaitSocketOpen(socket, options.openTimeout);
-  } catch (error) {
-    client.close('open-failed');
-    throw new AgentHostPlacementError(
-      rung === 1 ? 'ORIGIN_NOT_HOSTED' : 'HOST_UNREACHABLE',
-      rung,
-      error instanceof Error ? error.message : 'The agent host could not be reached.',
-    );
-  }
-  return client;
+    const rung: AgentHostPlacementRung = hostId === 'origin' ? 1 : 2;
+    let url: string;
+    if (rung === 1) {
+      const origin = options.origin ?? pageOrigin();
+      if (origin === undefined) {
+        throw new AgentHostPlacementError('ORIGIN_NOT_HOSTED', 1, 'This page was not served by an agent host.');
+      }
+      url = originAgentSocketUrl(origin);
+    } else {
+      url = await relayedAgentUrl(hostId, options);
+    }
+    const socket = (options.createSocket ?? ((next: string) => new WebSocket(next)))(url);
+    /* Wrapped before `open`, deliberately: the daemon posts its channel hello the
+     * instant the upgrade completes, and a listener attached later never sees it. */
+    const port = agentChannelPort(socket);
+    try {
+      await awaitSocketOpen(socket, options.openTimeout);
+    } catch (error) {
+      port.close();
+      throw new AgentHostPlacementError(
+        rung === 1 ? 'ORIGIN_NOT_HOSTED' : 'HOST_UNREACHABLE',
+        rung,
+        error instanceof Error ? error.message : 'The agent host could not be reached.',
+      );
+    }
+    return port;
+  };
+  const first = await dial();
+  let firstUnused = true;
+  return createAgentChannelClient({
+    connect: async () => {
+      if (firstUnused) {
+        firstUnused = false;
+        return first;
+      }
+      return dial();
+    },
+    livenessTimeout: daemonLivenessTimeout,
+    sessionKey: 'tau-agent',
+  });
 };
 
 /**

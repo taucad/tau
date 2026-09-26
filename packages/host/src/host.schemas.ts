@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 
 export const pairingResponseSchema = z.object({
   deviceCode: z.string().min(16),

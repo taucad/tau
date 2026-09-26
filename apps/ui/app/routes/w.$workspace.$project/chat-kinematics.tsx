@@ -155,23 +155,7 @@ function JointRow({
     <div data-slot='kinematics-joint' className='@container/parameter my-1.5 px-2.5'>
       <div className='flex min-w-0 flex-col gap-1 @[240px]/parameter:flex-row @[240px]/parameter:items-start @[240px]/parameter:gap-2'>
         <span className='min-w-0 shrink-0 truncate text-sm leading-6 @[240px]/parameter:w-[40%]'>{label}</span>
-        <div
-          data-testid={`kinematics-dof-${dof.id}`}
-          className='flex min-w-0 flex-1 flex-col gap-0.5'
-          onKeyDown={(event) => {
-            // Spin-button keys: unmodified Home and End jump to a limited joint's limits; arrows step in SliderInput.
-            const isRangeEndKey =
-              (event.key === 'Home' || event.key === 'End') &&
-              !event.shiftKey &&
-              !event.ctrlKey &&
-              !event.altKey &&
-              !event.metaKey;
-            if (onCommit !== undefined && limits !== undefined && isRangeEndKey) {
-              event.preventDefault();
-              commit(event.key === 'Home' ? min : max);
-            }
-          }}
-        >
+        <div data-testid={`kinematics-dof-${dof.id}`} className='flex min-w-0 flex-1 flex-col gap-0.5'>
           <ParametersNumberField
             value={displayValue}
             formattedValue={formatNumber(displayValue)}
@@ -179,6 +163,9 @@ function JointRow({
             details={details}
             rangeMin={min}
             rangeMax={max}
+            // An unlimited joint's range is a scrub window, so Home and End have no limit to reach.
+            hasMinimum={limits !== undefined}
+            hasMaximum={limits !== undefined}
             step={display.step}
             isReadOnly={onCommit === undefined}
             aria-label={label}

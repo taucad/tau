@@ -18,8 +18,14 @@ export type SliderInputProperties = Omit<
   readonly value: number;
   readonly displayValue?: string;
   readonly editingValue?: string;
+  /** Start of the scrub track and the arrow-key range. */
   readonly min: number;
+  /** End of the scrub track and the arrow-key range. */
   readonly max: number;
+  /** False when `min` only starts a scrub window: the field then announces no minimum, and Home moves the caret. */
+  readonly hasMinimum?: boolean;
+  /** False when `max` only ends a scrub window: the field then announces no maximum, and End moves the caret. */
+  readonly hasMaximum?: boolean;
   readonly step: number;
   readonly stepBase?: number;
   readonly leadingContent?: React.ReactNode;
@@ -32,6 +38,8 @@ export type SliderInputProperties = Omit<
   readonly disabled?: boolean;
   readonly 'aria-label': string;
   readonly 'aria-describedby'?: string;
+  /** The value as read aloud, with its unit when it has one. Defaults to `displayValue`. */
+  readonly 'aria-valuetext'?: string;
   readonly onScrubChange?: (value: number) => void;
   readonly onScrubCommit?: (value: number) => void;
   readonly onScrubCancel?: () => void;
@@ -73,6 +81,21 @@ const roundValue = (value: number, decimalCount: number): number => {
   return Math.round(value * rounder) / rounder;
 };
 
+/** The limit an unmodified Home or End sets; with a modifier the key keeps editing the text (Shift+End selects). */
+const getKeyLimit = (
+  event: React.KeyboardEvent,
+  lowerLimit: number | undefined,
+  upperLimit: number | undefined,
+): number | undefined => {
+  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
+    return undefined;
+  }
+  if (event.key === 'Home') {
+    return lowerLimit;
+  }
+  return event.key === 'End' ? upperLimit : undefined;
+};
+
 export const snapToStep = (value: number, step: number, min = 0): number => {
   if (step <= 0) {
     return value;
@@ -82,12 +105,29 @@ export const snapToStep = (value: number, step: number, min = 0): number => {
   return roundValue(snapped, decimalCount);
 };
 
+/**
+ * The shared Blender-style numeric field: drag it to scrub the value, or click or Tab into it to type one.
+ *
+ * Its text field implements the WAI-ARIA APG spin button pattern (https://www.w3.org/WAI/ARIA/apg/patterns/spinbutton/):
+ * `role="spinbutton"` with `aria-valuenow`, `aria-valuetext`, and `aria-valuemin`/`aria-valuemax` for each end of
+ * `min`–`max` that is a real limit (`hasMinimum`, `hasMaximum`).
+ *
+ * Keyboard contract while the field has focus. Keys it handles do not reach ancestors.
+ * - ArrowUp/ArrowDown: step by `step` within `min`–`max` and commit, or call `onStep` when given.
+ * - Home/End: set the minimum/maximum and commit, only without modifiers and only when that end is a real limit.
+ *   Otherwise they edit the text as usual, so Shift+End still selects to the end.
+ * - Enter: commit the typed value and leave the field.
+ * - Escape: restore the value from before editing and leave the field.
+ * - Other keys edit the text.
+ */
 export const SliderInput = ({
   value,
   displayValue = String(value),
   editingValue,
   min,
   max,
+  hasMinimum = true,
+  hasMaximum = true,
   step,
   stepBase = min,
   leadingContent,
@@ -100,6 +140,7 @@ export const SliderInput = ({
   className,
   'aria-label': ariaLabel,
   'aria-describedby': ariaDescribedBy,
+  'aria-valuetext': ariaValueText = displayValue,
   onScrubChange,
   onScrubCommit,
   onScrubCancel,
@@ -130,6 +171,8 @@ export const SliderInput = ({
 
   const range = max - min;
   const fillPercent = range > 0 ? clamp(((value - min) / range) * 100, 0, 100) : 0;
+  const lowerLimit = hasMinimum ? min : undefined;
+  const upperLimit = hasMaximum ? max : undefined;
 
   const handlePointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -290,6 +333,15 @@ export const SliderInput = ({
         event.currentTarget.blur();
         return;
       }
+      const limit = getKeyLimit(event, lowerLimit, upperLimit);
+      if (limit !== undefined) {
+        event.preventDefault();
+        event.stopPropagation();
+        setText(String(limit));
+        setHasUserEdit(false);
+        onInputCommit?.(limit);
+        return;
+      }
       if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
         return;
       }
@@ -306,7 +358,21 @@ export const SliderInput = ({
       setHasUserEdit(false);
       onInputCommit?.(nextValue);
     },
-    [disabled, isReadOnly, max, min, onInputCommit, onInputEnter, onInputEscape, onStep, step, stepBase, value],
+    [
+      disabled,
+      isReadOnly,
+      lowerLimit,
+      max,
+      min,
+      onInputCommit,
+      onInputEnter,
+      onInputEscape,
+      onStep,
+      step,
+      stepBase,
+      upperLimit,
+      value,
+    ],
   );
 
   return (
@@ -363,9 +429,14 @@ export const SliderInput = ({
           autoFocus={shouldAutoFocus}
           autoComplete='off'
           type='text'
+          role='spinbutton'
           inputMode='decimal'
           aria-label={ariaLabel}
           aria-describedby={ariaDescribedBy}
+          aria-valuenow={value}
+          aria-valuemin={lowerLimit}
+          aria-valuemax={upperLimit}
+          aria-valuetext={ariaValueText}
           value={inputValue}
           disabled={disabled}
           readOnly={isReadOnly}

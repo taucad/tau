@@ -89,7 +89,7 @@ type ModelComponentActionDescriptor =
       readonly min: number;
       readonly max: number;
       readonly step: number;
-      readonly trailingAdornment: React.ReactNode;
+      readonly trailingAdornment: string;
       readonly onValueChange: (value: number) => void;
     };
 

@@ -292,7 +292,7 @@ test.describe('Chat viewer model component context menu', () => {
     const addToChatMenuItem = selectors.getByRole('menuitem', { name: /add to chat/i });
     const isolateMenuItem = selectors.getByRole('menuitem', { name: /^isolate$/i });
     const resetOpacityMenuItem = selectors.getByRole('menuitem', { name: 'Reset opacity' });
-    const opacityInput = selectors.getByRole('textbox', { name: 'Opacity' });
+    const opacityInput = selectors.getByRole('spinbutton', { name: 'Opacity' });
     const opacityRow = selectors.getByCss('[data-slot="viewer-model-component-action-slider-item"]');
     await target.expectVisible(focusMenuItem, 15_000);
     await target.expectVisible(addToChatMenuItem);
@@ -448,7 +448,7 @@ test.describe('Chat viewer model component context menu', () => {
     }
     const initialOpacityStates = await readRenderedComponentStates(opacityComponentId);
     await target.mouseClick(opacityHit.x, opacityHit.y, { button: 'right' });
-    const opacityInput = selectors.getByRole('textbox', { name: 'Opacity' });
+    const opacityInput = selectors.getByRole('spinbutton', { name: 'Opacity' });
     const opacityRow = selectors.getByCss('[data-slot="viewer-model-component-action-slider-item"]');
     const eventBaseline = await target.events();
     await target.expectVisible(opacityInput);

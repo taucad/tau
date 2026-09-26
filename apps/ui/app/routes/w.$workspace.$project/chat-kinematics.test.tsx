@@ -183,7 +183,7 @@ function renderPane({
 const workbenchShown = { chat: true, workbench: true };
 const workbenchHidden = { chat: true, workbench: false };
 
-const field = (name: string) => screen.getByRole('textbox', { name });
+const field = (name: string) => screen.getByRole('spinbutton', { name });
 const statusRegion = () => screen.getByRole('status', { name: 'Kinematics status' });
 const alertRegion = () => screen.getByRole('alert', { name: 'Kinematics error' });
 
@@ -205,6 +205,22 @@ describe('KinematicsPanelBody', () => {
     expect(screen.getByText('Root base · 5 links · 4 joints')).toBeInTheDocument();
     expect(screen.getByText('Drag parts in the viewer to move them while this pane is open.')).toBeInTheDocument();
     expect(statusRegion()).toHaveTextContent('Ready');
+  });
+
+  it('should announce each joint value with its unit and only the limits the joint declares', () => {
+    renderPane();
+
+    expect(field('arm')).toHaveAttribute('aria-valuenow', '0');
+    expect(field('arm')).toHaveAttribute('aria-valuetext', '0 °');
+    expect(Number(field('arm').getAttribute('aria-valuemin'))).toBeCloseTo(-45);
+    expect(Number(field('arm').getAttribute('aria-valuemax'))).toBeCloseTo(90);
+    expect(field('slide')).toHaveAttribute('aria-valuetext', '0 mm');
+    expect(Number(field('slide').getAttribute('aria-valuemax'))).toBeCloseTo(50);
+    // An unlimited joint scrubs a window around its value, which is no range to announce.
+    expect(field('sun')).toHaveAttribute('aria-valuetext', '0 °');
+    expect(field('sun')).not.toHaveAttribute('aria-valuemin');
+    expect(field('sun')).not.toHaveAttribute('aria-valuemax');
+    expect(field('carrier')).not.toHaveAttribute('aria-valuemax');
   });
 
   it('should show a small coupling ratio to four significant digits', () => {
@@ -435,8 +451,8 @@ describe('KinematicsPanelBody', () => {
     await user.type(screen.getByRole('searchbox', { name: 'Filter joints' }), 'arm');
 
     expect(field('arm')).toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: 'sun' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: 'carrier' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'sun' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'carrier' })).not.toBeInTheDocument();
   });
 
   it('should name the Drivers and Followers regions when the entry path has a space', () => {

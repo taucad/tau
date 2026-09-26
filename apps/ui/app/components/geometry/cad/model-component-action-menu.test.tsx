@@ -370,7 +370,7 @@ describe('model component action menu', () => {
       />,
     );
 
-    const input = screen.getByRole('textbox', { name: 'Opacity' });
+    const input = screen.getByRole('spinbutton', { name: 'Opacity' });
     expect(input).toHaveValue('100');
     expect(screen.getByText('%')).toBeInTheDocument();
     await user.click(input);

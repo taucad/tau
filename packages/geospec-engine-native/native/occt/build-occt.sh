@@ -56,6 +56,9 @@ expected_read_only_module_hash="fc674e922ac2ced447ed635431261dc05462f81272f3d9b6
 no_cjk_patch_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/resource-unicode-no-cjk.patch"
 expected_no_cjk_patch_hash="7127027140614d0cf1c8715a4858df45931babba4b0ab4537323b3188a7fd641"
 expected_no_cjk_source_hash="d69fa6c514111129c494ac54c2fd3d9b36d9d2d27faee7f17a8d1216bc06abb1"
+torus_patch_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/geombndlib-torus-closed-form.patch"
+expected_torus_patch_hash="fd61d98c80b96ac1c131c24c96e23cce6fb9a3c65b998b4b6d11d6f4db557fb6"
+expected_torus_source_hash="b4c1b40fb4513f333f1c03f402ed7500c68a324670ee29f19b497ce32195f249"
 
 for tool in cmake diff find ninja patch shasum tar; do
   command -v "${tool}" >/dev/null || { printf 'ERROR: %s is required\n' "${tool}" >&2; exit 3; }
@@ -189,6 +192,21 @@ actual_no_cjk_source_hash="$(shasum -a 256 "${no_cjk_source}" | awk '{print $1}'
 }
 printf '✓ Resource_Unicode patch %s applied after STEP read-only to fresh verified source\n' "${expected_no_cjk_patch_hash}"
 
+[[ -f "${torus_patch_file}" ]] || { printf 'ERROR: GeomBndLib_Torus patch is missing: %s\n' "${torus_patch_file}" >&2; exit 1; }
+actual_torus_patch_hash="$(shasum -a 256 "${torus_patch_file}" | awk '{print $1}')"
+[[ "${actual_torus_patch_hash}" == "${expected_torus_patch_hash}" ]] || {
+  printf 'ERROR: GeomBndLib_Torus patch hash mismatch: %s\n' "${actual_torus_patch_hash}" >&2
+  exit 1
+}
+patch -t -F 0 -p1 -d "${build_source}" -i "${torus_patch_file}"
+torus_source="${build_source}/src/ModelingData/TKGeomBase/GeomBndLib/GeomBndLib_Torus.cxx"
+actual_torus_source_hash="$(shasum -a 256 "${torus_source}" | awk '{print $1}')"
+[[ "${actual_torus_source_hash}" == "${expected_torus_source_hash}" ]] || {
+  printf 'ERROR: patched GeomBndLib_Torus source hash mismatch: %s\n' "${actual_torus_source_hash}" >&2
+  exit 1
+}
+printf '✓ GeomBndLib_Torus patch %s applied after Resource_Unicode to fresh verified source\n' "${expected_torus_patch_hash}"
+
 # Objects name their sources relative to the pinned tree (occt/src/...), never the build cache, and the
 # caller's C and C++ flag sets (the mixed and pthread recipes) get the same mapping.
 prefix_map="-ffile-prefix-map=${build_source}=occt"
@@ -207,6 +225,7 @@ cmake -S "${build_source}" -B "${build_dir}" -G Ninja \
   -DGEOSPEC_OCCT_GAUSS_PATCH_SHA256:STRING="${expected_gauss_patch_hash}" \
   -DGEOSPEC_OCCT_STEP_READ_ONLY_PATCH_SHA256:STRING="${expected_read_only_patch_hash}" \
   -DGEOSPEC_OCCT_RESOURCE_UNICODE_PATCH_SHA256:STRING="${expected_no_cjk_patch_hash}" \
+  -DGEOSPEC_OCCT_TORUS_BOX_PATCH_SHA256:STRING="${expected_torus_patch_hash}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="${install_dir}" \
   -DINSTALL_DIR="${install_dir}" \

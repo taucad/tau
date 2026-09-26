@@ -45,7 +45,12 @@ import {
 import type { ChatRequest, ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { agentHostConfig, createRunBody, dialAgentHost, hostAdmission } from '#chat-clients/_internal/turn-body.js';
+import {
+  agentHostClientConfig,
+  createRunBody,
+  dialAgentHost,
+  hostAdmission,
+} from '#chat-clients/_internal/turn-body.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 import { turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
 import { createAgentHostClient, createBrowserAgentHostClient } from '#services/agent-host-client.js';
@@ -240,10 +245,10 @@ export function ChatTurnHost(): ReactNode {
            * `hostId`, so a same-kind execution is free to bring its own model. */
           const liveExecution =
             agentRef.current.execution.kind === execution.kind ? agentRef.current.execution : execution;
-          const config = agentHostConfig({
+          /* No catalog, no default row: opening a chat offline still attaches and replays it. */
+          const config = agentHostClientConfig({
             agent: { ...agentRef.current, execution: liveExecution },
             chatId: activeChatId,
-            runId: activeChatId,
             resolvedModel: resolveModelRef.current(liveExecution.model),
           });
           return createBrowserAgentHostClient({
@@ -261,11 +266,8 @@ export function ChatTurnHost(): ReactNode {
             durability: capabilities.durability,
             authority: { projectId, workspaceId: prepared.execution.workspaceId },
             gatewayBaseUrl: ENV.TAU_API_URL,
-            systemPrompt: config.systemPrompt,
-            systemPromptBlocks: config.systemPromptBlocks,
-            model: config.model,
+            ...config,
             runtimeConfig: createUiRuntimeConfig(ENV),
-            testingEnabled: config.testingEnabled,
           });
         },
       };

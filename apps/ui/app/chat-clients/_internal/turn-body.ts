@@ -1,4 +1,4 @@
-import type { CadAgentConfigInput, ModelProvider, TauAgentHostId } from '@taucad/chat';
+import type { CadAgentConfigInput, TauAgentHostId } from '@taucad/chat';
 import { getCadSystemPrompt } from '@taucad/chat/prompts';
 import { getProviderFacingToolInputSchemas } from '@taucad/chat/schemas';
 import type { ChatExecutionTarget } from '@taucad/chat/schemas';
@@ -13,6 +13,7 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import { admittedReasoning } from '#utils/model-reasoning.js';
 import type {
   AgentHostAdmissionConfig,
+  AgentHostModel,
   AgentHostExternalAgent,
   AgentHostExternalContext,
 } from '#workers/agent-host.contract.js';
@@ -27,7 +28,7 @@ import type { TurnTrigger } from '#chat-clients/turn-intent.js';
  */
 
 export type BrowserHostAdmissionConfig = Omit<AgentHostAdmissionConfig, 'model'> & {
-  readonly model: AgentHostClientOptions['model'];
+  readonly model: AgentHostModel;
 };
 
 /**
@@ -82,6 +83,95 @@ export const createRunBody = (input: {
 // oxlint-disable-next-line unicorn/prefer-structured-clone -- JSON serialization intentionally drops undefined fields.
 const toStrictJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+type TauAgentConfigInput = CadAgentConfigInput & {
+  readonly execution: Extract<CadAgentConfigInput['execution'], { readonly kind: 'tau' }>;
+};
+
+const requireTauExecution: (agent: CadAgentConfigInput) => asserts agent is TauAgentConfigInput = (agent) => {
+  if (agent.execution.kind !== 'tau') {
+    throw new TypeError('Browser agent host requires Tau execution.');
+  }
+};
+
+/** The CAD system prompt and its cache blocks for one chat on one model row. */
+const hostPrompt = (
+  agent: TauAgentConfigInput,
+  chatId: string,
+  model: ResolvedModel['model'],
+): Pick<BrowserHostAdmissionConfig, 'systemPrompt' | 'systemPromptBlocks'> => {
+  const prompt = getCadSystemPrompt(agent.kernel, agent.mode, agent.testingEnabled, {
+    chatId,
+    modelId: agent.execution.model,
+    contextWindow: model?.details.contextWindow,
+    knowledgeCutoff: model?.details.knowledgeCutoff,
+    supportsImageInput: modelSupportsInput(model?.support, 'image'),
+  });
+  return {
+    systemPrompt: [prompt.static, prompt.dynamic].join('\n\n'),
+    // One cache breakpoint per block that carries content. The workspace slot is
+    // empty on this path, and emitting it anyway spent a breakpoint on nothing.
+    systemPromptBlocks: createCachedSystemPromptBlocks({
+      staticPrompt: prompt.static,
+      dynamicPrompt: prompt.dynamic,
+    }) as AgentHostAdmissionConfig['systemPromptBlocks'],
+  };
+};
+
+/** The model wire for the chat's model, or nothing while the catalog has not named its provider. */
+const hostModel = (agent: TauAgentConfigInput, model: ResolvedModel['model']): AgentHostModel | undefined => {
+  const providerKind = model?.provider.id;
+  if (providerKind === undefined) {
+    return undefined;
+  }
+  /* The chat's level replaces the catalog default, clamped to what this model
+   * offers — the picker reads the same helper, so what it shows is what runs. */
+  const reasoning = admittedReasoning(model, agent.execution.effort);
+  return {
+    id: agent.execution.model,
+    providerKind,
+    contextWindow: model?.details.contextWindow ?? 128_000,
+    ...(model?.details.maxTokens === undefined ? {} : { maxTokens: model.details.maxTokens }),
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(model?.details.cost === undefined
+      ? {}
+      : {
+          cost: {
+            input: model.details.cost.inputTokens,
+            output: model.details.cost.outputTokens,
+            cacheRead: model.details.cost.cacheReadTokens,
+            cacheWrite: model.details.cost.cacheWriteTokens,
+          },
+        }),
+  };
+};
+
+/**
+ * What the browser host worker is initialised with for one chat.
+ *
+ * The model is left out while the catalog cannot name its provider — offline,
+ * or with the API down. Attaching to the chat's log, replaying it and resuming a
+ * run on the model its log committed need no catalog, so opening a chat must not
+ * fail on one; a turn still names its own model in its admission, which
+ * {@link agentHostConfig} refuses to compose without one.
+ *
+ * @param input - The agent config, chat and resolved model row.
+ * @returns The prompt blocks, the model wire when known, and the testing flag.
+ */
+export const agentHostClientConfig = (input: {
+  readonly agent: CadAgentConfigInput;
+  readonly chatId: string;
+  readonly resolvedModel: ResolvedModel;
+}): Pick<AgentHostClientOptions, 'systemPrompt' | 'systemPromptBlocks' | 'model' | 'testingEnabled'> => {
+  const { agent } = input;
+  requireTauExecution(agent);
+  const model = hostModel(agent, input.resolvedModel.model);
+  return {
+    ...hostPrompt(agent, input.chatId, input.resolvedModel.model),
+    ...(model === undefined ? {} : { model }),
+    testingEnabled: agent.testingEnabled,
+  };
+};
+
 /**
  * The browser host's admission for one Tau turn.
  *
@@ -95,48 +185,16 @@ export const agentHostConfig = (input: {
   readonly resolvedModel: ResolvedModel;
 }): BrowserHostAdmissionConfig => {
   const { agent, resolvedModel } = input;
-  if (agent.execution.kind !== 'tau') {
-    throw new TypeError('Browser agent host requires Tau execution.');
-  }
+  requireTauExecution(agent);
   const { model } = resolvedModel;
-  const prompt = getCadSystemPrompt(agent.kernel, agent.mode, agent.testingEnabled, {
-    chatId: input.chatId,
-    modelId: agent.execution.model,
-    contextWindow: model?.details.contextWindow,
-    knowledgeCutoff: model?.details.knowledgeCutoff,
-    supportsImageInput: modelSupportsInput(model?.support, 'image'),
-  });
-  // One cache breakpoint per block that carries content. The workspace slot is
-  // empty on this path, and emitting it anyway spent a breakpoint on nothing.
-  const systemPromptBlocks = createCachedSystemPromptBlocks({
-    staticPrompt: prompt.static,
-    dynamicPrompt: prompt.dynamic,
-  }) as AgentHostAdmissionConfig['systemPromptBlocks'];
+  const hostedModel = hostModel(agent, model);
+  if (hostedModel === undefined) {
+    throw new Error('Browser agent host requires resolved model provider metadata.');
+  }
   const snapshotContext = agent.snapshot ? buildBrowserAgentHostSnapshotContext(agent.snapshot) : undefined;
-  const providerKind = requireProviderKind(model?.provider.id);
-  /* The chat's level replaces the catalog default, clamped to what this model
-   * offers — the picker reads the same helper, so what it shows is what runs. */
-  const reasoning = admittedReasoning(model, agent.execution.effort);
   return {
-    systemPrompt: [prompt.static, prompt.dynamic].join('\n\n'),
-    systemPromptBlocks,
-    model: {
-      id: agent.execution.model,
-      providerKind,
-      contextWindow: model?.details.contextWindow ?? 128_000,
-      ...(model?.details.maxTokens === undefined ? {} : { maxTokens: model.details.maxTokens }),
-      ...(reasoning === undefined ? {} : { reasoning }),
-      ...(model?.details.cost === undefined
-        ? {}
-        : {
-            cost: {
-              input: model.details.cost.inputTokens,
-              output: model.details.cost.outputTokens,
-              cacheRead: model.details.cost.cacheReadTokens,
-              cacheWrite: model.details.cost.cacheWriteTokens,
-            },
-          }),
-    },
+    ...hostPrompt(agent, input.chatId, model),
+    model: hostedModel,
     toolChoice: agent.toolChoice,
     allowedTools: getProviderFacingToolInputSchemas({
       toolChoice: agent.toolChoice,
@@ -236,10 +294,3 @@ export const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): 
   hostId === 'desktop'
     ? openAgentHostChannel(hostId, { projectId, workspaceRoot: await desktopWorkspaceRoot(projectId) })
     : openAgentHostChannel(hostId);
-
-const requireProviderKind = (provider: ModelProvider | undefined): ModelProvider => {
-  if (!provider) {
-    throw new Error('Browser agent host requires resolved model provider metadata.');
-  }
-  return provider;
-};

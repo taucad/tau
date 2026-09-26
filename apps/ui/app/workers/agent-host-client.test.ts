@@ -440,6 +440,38 @@ describe('createBrowserAgentHostClient', () => {
     expect(initializeRequest.projectRootPort).toBeInstanceOf(MessagePort);
   });
 
+  /* Offline the catalog names no model; opening a chat still attaches and replays its log. */
+  it('initializes the worker without a default model row while the catalog is unavailable', async () => {
+    vi.stubGlobal('Worker', vi.fn());
+    vi.stubGlobal('BroadcastChannel', vi.fn());
+    vi.stubGlobal('navigator', { locks: {}, storage: { getDirectory: vi.fn() } });
+    const worker = new FakeAgentHostWorker();
+    const channel = new MessageChannel();
+    const projectRootChannel = new MessageChannel();
+    const client = createBrowserAgentHostClient({
+      openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+      openProjectRootBridge: () =>
+        ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+      projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
+      durability: 'exclusive-append',
+      authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
+      gatewayBaseUrl: 'https://api.tau.test',
+      systemPrompt: 'Build CAD.',
+      systemPromptBlocks: [
+        { type: 'text', text: 'static' },
+        { type: 'text', text: 'dynamic' },
+      ],
+      runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+      createWorker: () => worker as unknown as Worker,
+    });
+
+    await expect(client.close()).resolves.toBeUndefined();
+    const initializeRequest = worker.requests[0];
+    expect(initializeRequest?.type).toBe('initialize');
+    expect(initializeRequest).toMatchObject({ authority: { projectId: 'project-one', workspaceId: 'workspace-one' } });
+    expect(initializeRequest).not.toHaveProperty('model', expect.anything());
+  });
+
   it('transfers workspace and project-root ports and drives start, steer, cancel, resume, events, and close', async () => {
     vi.stubGlobal('Worker', vi.fn());
     vi.stubGlobal('BroadcastChannel', vi.fn());

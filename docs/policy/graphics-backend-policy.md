@@ -53,7 +53,7 @@ When opacity is below one, set `transparent: true` on both backends. Library wra
 
 Highlights, ghosts, labels, contours, gizmos, and other overlays must state `depthTest` and `depthWrite` deliberately. Preserve opaque focused-surface depth writes; dimmed/ghost surfaces and overlay outlines must not occlude later geometry unless their contract explicitly requires it.
 
-Tau's transparent `Line2NodeMaterial` owns the sRGB-space blend correction for fat-line overlays. Do not substitute the stock WebGPU line material for those consumers or apply that correction to opaque edge materials.
+Overlays must display identically on both backends. The WebGL canvas is premultiplied, like WebGPU's; a straight-alpha canvas darkens every fractional-alpha pixel. WebGPU blends in a linear half-float frame target, so Tau's transparent `Line2NodeMaterial` and the WebGPU infinite grid composite themselves in sRGB space against a viewport copy (`compositeOverViewportSrgb`) and draw with `NoBlending`. Such a composite overwrites the target, so it must discard uncovered fragments, and fat lines carry analytic edge coverage instead of alpha-to-coverage, whose dropped samples WebGPU resolves in linear space. Do not substitute the stock WebGPU line material for those consumers or apply that correction to opaque edge materials.
 
 ### 5. Preserve depth ordering
 

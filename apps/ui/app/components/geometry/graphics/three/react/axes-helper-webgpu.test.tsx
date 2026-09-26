@@ -183,7 +183,15 @@ describe('AxesWebGpuFatLine resource guard', () => {
     expect(warmedCamera).toBe(cameraRig.perspectiveCamera);
     expect(harness.gl.compileAsync.mock.calls[1]?.[1]).toBe(cameraRig.orthographicCamera);
 
-    harness.gl.resolveNext();
+    // The warm-up builds the node graph outside a render; the live frame must rebuild it.
+    const line = meshChildren[0] as ActualThree.Mesh;
+    const material = line.material as ActualThree.Material;
+    const versionBeforeWarmup = material.version;
+    await act(async () => {
+      harness.gl.resolveNext();
+      await Promise.resolve();
+    });
+    expect(material.version).toBeGreaterThan(versionBeforeWarmup);
     harness.unmountScene();
   });
 });

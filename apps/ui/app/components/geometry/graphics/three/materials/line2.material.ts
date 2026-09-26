@@ -6,7 +6,7 @@
 /* oxlint-disable unicorn-js/no-zero-fractions -- numeric literals match upstream Line2NodeMaterial.js */
 /* oxlint-disable unicorn-js/prevent-abbreviations -- identifiers match upstream Line2NodeMaterial.js */
 
-import type { Line2NodeMaterialParameters as ThreeLine2NodeMaterialParameters } from 'three/webgpu';
+import type { Node, Line2NodeMaterialParameters as ThreeLine2NodeMaterialParameters } from 'three/webgpu';
 import { NoBlending } from 'three';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
 import {
@@ -31,6 +31,7 @@ import {
   modelViewMatrix,
   positionGeometry,
   positionView,
+  screenCoordinate,
   screenDPR,
   screenUV,
   smoothstep,
@@ -80,6 +81,16 @@ const tauOpaqueViewportTextureSingleton = viewportTexture();
  */
 export const tauOpaqueViewportTexture = (uv: typeof screenUV = screenUV, level: unknown = null): unknown =>
   (tauOpaqueViewportTextureSingleton as { sample: (uv: unknown, level: unknown) => unknown }).sample(uv, level);
+
+/**
+ * Alpha-composite a linear colour over a sampled copy of the target in sRGB (gamma) space,
+ * as WebGL's premultiplied 8-bit canvas blends, and return the premultiplied result with its
+ * composited alpha. Callers draw it with `NoBlending`: the destination is already inside it.
+ */
+export const compositeOverViewportSrgb = (rgb: unknown, alpha: unknown, viewportColor: unknown): Node => {
+  const blendedSrgb = sRGBTransferOETF(rgb).mul(alpha).add(sRGBTransferOETF(viewportColor.rgb).mul(alpha.oneMinus()));
+  return vec4(sRGBTransferEOTF(blendedSrgb), alpha.add(viewportColor.a.mul(alpha.oneMinus())));
+};
 
 /**
  * Fat-line node material for overlays on the WebGPU viewport (`reversedDepthBuffer: true`).
@@ -140,8 +151,7 @@ export const tauOpaqueViewportTexture = (uv: typeof screenUV = screenUV, level: 
  * CB-3 entry quotes. We close the seam for line materials by transferring both operands
  * into sRGB space via `sRGBTransferOETF`, mixing, and converting the result back to
  * working color space with `sRGBTransferEOTF` before assigning `outputNode.rgb`. The
- * grid material still blends in linear space and remains the only overlay surface on
- * the deferred CB-3 path until a similar treatment lands there.
+ * infinite grid uses the same {@link compositeOverViewportSrgb} over its own viewport copy.
  *
  * The viewport sample uses {@link tauOpaqueViewportTexture} (a non-mip singleton over
  * `viewportTexture()`) rather than upstream `viewportOpaqueMipTexture` because the
@@ -189,6 +199,30 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
 
   public constructor(parameters?: ThreeLine2NodeMaterialParameters) {
     super(parameters);
+  }
+
+  /**
+   * Screen-space overlays composited in sRGB space carry their own analytic coverage in alpha.
+   * Hardware alpha-to-coverage would turn that composited alpha into dropped samples, and WebGPU
+   * resolves samples in the linear frame target, which lightens every partly covered pixel of a
+   * thin line (about half the ink of WebGL's sRGB-space resolve for the 1.25 px viewport axes).
+   */
+  public get usesAnalyticCoverage(): boolean {
+    return (
+      this.transparent &&
+      this.useViewportSrgbBlend &&
+      !this.edgePresentationCoverage &&
+      (this as any).worldUnits !== true
+    );
+  }
+
+  /** @inheritdoc */
+  public override get alphaToCoverage(): boolean {
+    return super.alphaToCoverage && !this.usesAnalyticCoverage;
+  }
+
+  public override set alphaToCoverage(value: boolean) {
+    super.alphaToCoverage = value;
   }
 
   /**
@@ -262,6 +296,7 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
     const useDash = self._useDash as boolean;
     const useWorldUnits = self._useWorldUnits as boolean;
     const useEdgePresentationCoverage = self.edgePresentationCoverage === true;
+    const useAnalyticCoverage = self.usesAnalyticCoverage === true;
 
     const trimSegment = Fn(({ start, end }: { readonly start: any; readonly end: any }) => {
       const nearEstimate = cameraNear.negate();
@@ -323,6 +358,28 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
 
       const dir = ndcEnd.xy.sub(ndcStart.xy).toVar();
 
+      if (useAnalyticCoverage && !useWorldUnits) {
+        // The segment in target pixels (top-left origin, as `screenCoordinate`): the nearer
+        // endpoint, the unit direction, and the extent along it on either side of that anchor.
+        // Every vertex of the segment writes the same values. `viewport.xy` offsets a sub-viewport
+        // draw such as the gizmo cube's; WebGPU viewports share `screenCoordinate`'s origin.
+        const toTargetPx = (ndc: any): any =>
+          vec2(
+            ndc.x.mul(0.5).add(0.5).mul(viewport.z).add(viewport.x),
+            ndc.y.mul(-0.5).add(0.5).mul(viewport.w).add(viewport.y),
+          );
+        const startPx = toTargetPx(ndcStart);
+        const endPx = toTargetPx(ndcEnd);
+        const lengthPx = endPx.sub(startPx).length();
+        const anchorIsStart = ndcStart.xy.length().lessThan(ndcEnd.xy.length());
+        varyingProperty('vec4', 'tauLineScreenPx').assign(
+          vec4(anchorIsStart.select(startPx, endPx), endPx.sub(startPx).div(lengthPx)),
+        );
+        varyingProperty('vec2', 'tauLineExtentPx').assign(
+          anchorIsStart.select(vec2(0.0, lengthPx), vec2(lengthPx.negate(), 0.0)),
+        );
+      }
+
       dir.x.assign(dir.x.mul(aspect));
       dir.assign(dir.normalize());
 
@@ -373,7 +430,10 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
           offset.assign(offset.add(dir));
         });
 
-        offset.assign(offset.mul(materialLineWidth));
+        // Analytic coverage needs the quad half a device pixel wider on each side to fade into.
+        offset.assign(
+          offset.mul(useAnalyticCoverage ? materialLineWidth.add(screenDPR.reciprocal()) : materialLineWidth),
+        );
 
         offset.assign(offset.div(viewport.w.div(screenDPR)));
 
@@ -459,6 +519,25 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
 
         distance.greaterThan(halfPresentationWidth).discard();
         alpha.assign(1.0);
+      } else if (useAnalyticCoverage) {
+        // Box-filtered coverage from the fragment's distance to the line core, in device pixels,
+        // so every sample of an edge pixel carries the same premultiplied value. The distance
+        // comes from the fragment position, not the interpolated across-line `uv`: a segment
+        // clipped far off screen has vertices so distant that its interpolants lose precision.
+        // Distance to the segment (round caps included) from the fragment position alone.
+        const halfWidthPx = materialLineWidth.mul(screenDPR).mul(0.5);
+        const screenLine = varyingProperty('vec4', 'tauLineScreenPx');
+        const extent = varyingProperty('vec2', 'tauLineExtentPx');
+        const relative = screenCoordinate.sub(screenLine.xy);
+        const across = relative.x.mul(screenLine.w).sub(relative.y.mul(screenLine.z));
+        const along = relative.dot(screenLine.zw);
+        const beyond = extent.x.sub(along).max(along.sub(extent.y)).max(0.0);
+        const distancePx = vec2(across, beyond).length();
+        alpha.assign(halfWidthPx.add(0.5).sub(distancePx).clamp(0.0, 1.0));
+        // The composite replaces the target (`NoBlending`) from a viewport copy shared by every
+        // overlay line and taken before the first draws, so an uncovered fragment would paint
+        // that stale copy over any line drawn earlier — it erased most of the x axis.
+        alpha.lessThanEqual(0.0).discard();
       } else if (useAlphaToCoverage && renderer.currentSamples > 0) {
         const aUv = vUv.x;
         const bUv = vUv.y.greaterThan(0.0).select(vUv.y.sub(1.0), vUv.y.add(1.0));
@@ -509,17 +588,10 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
       // Tau-owned non-mip singleton (see `tauOpaqueViewportTexture` above) — the mip
       // chain that upstream `viewportOpaqueMipTexture` generates every frame is never
       // read by this blend. Both operands are premultiplied, as WebGL's canvas values are.
-      const colorSrgb = sRGBTransferOETF(self.colorNode.rgb);
-      const viewportSrgb = sRGBTransferOETF(viewportColor.rgb);
-      const blendedSrgb = colorSrgb.mul(opacityNode).add(viewportSrgb.mul(opacityNode.oneMinus()));
-
       // The composite already contains the destination, so it replaces it with the composited
       // alpha. Blending it again forced opaque alpha over the transparent canvas, turning the
       // tint × opacity mix against transparent black into a dark opaque line.
-      self.outputNode = vec4(
-        sRGBTransferEOTF(blendedSrgb),
-        opacityNode.add(viewportColor.a.mul(opacityNode.oneMinus())),
-      );
+      self.outputNode = compositeOverViewportSrgb(self.colorNode.rgb, opacityNode, viewportColor);
       self.blending = NoBlending;
     }
 

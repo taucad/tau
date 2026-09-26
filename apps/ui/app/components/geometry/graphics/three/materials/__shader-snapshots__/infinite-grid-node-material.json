@@ -1,11 +1,18 @@
 {
   "blendColor": 0,
+  "blending": 0,
   "color": 16777215,
   "depthWrite": false,
   "envMapRotation": [0, 0, 0, "XYZ"],
   "forceSinglePass": true,
+  "images": [
+    {
+      "url": {}
+    }
+  ],
   "inputNodes": {
     "colorNode": "<nodeRef>",
+    "outputNode": "<nodeRef>",
     "vertexNode": "<nodeRef>"
   },
   "metadata": {
@@ -37,6 +44,210 @@
     },
     {
       "inputNodes": {
+        "nodes": ["<nodeRef>", "<nodeRef>"]
+      },
+      "type": "JoinNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "rawInputs": ["<nodeRef>"],
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "rawInputs": ["<nodeRef>"],
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "components": "xyz",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "components": "w",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "rawInputs": ["<nodeRef>"],
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "components": "xyz",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "groupNode": "<nodeRef>",
+        "uvNode": "<nodeRef>"
+      },
+      "nodeType": null,
+      "precision": null,
+      "sampler": true,
+      "type": "ViewportTextureNode",
+      "updateMatrix": false,
+      "updateType": "none",
+      "value": "<nodeRef>",
+      "valueType": null
+    },
+    {
+      "name": "object",
+      "shared": false,
+      "type": "UniformGroupNode",
+      "version": 0
+    },
+    {
+      "type": "ScreenNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "oneMinus",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "components": "w",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "oneMinus",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
         "shaderNode": "<nodeRef>"
       },
       "type": "Node"
@@ -51,6 +262,31 @@
   "reflectivity": 1,
   "refractionRatio": 0.98,
   "side": 2,
+  "textures": [
+    {
+      "anisotropy": 1,
+      "center": [0, 0],
+      "channel": 0,
+      "colorSpace": "",
+      "flipY": true,
+      "format": 1023,
+      "generateMipmaps": false,
+      "image": "<nodeRef>",
+      "internalFormat": null,
+      "magFilter": 1003,
+      "mapping": 300,
+      "minFilter": 1008,
+      "name": "",
+      "normalized": false,
+      "offset": [0, 0],
+      "premultiplyAlpha": false,
+      "repeat": [1, 1],
+      "rotation": 0,
+      "type": 1009,
+      "unpackAlignment": 4,
+      "wrap": [1001, 1001]
+    }
+  ],
   "transparent": true,
   "type": "MeshBasicNodeMaterial"
 }

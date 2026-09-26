@@ -42,7 +42,7 @@ import { warmMonaco } from '#lib/monaco-warmup.js';
  * menu through the row's own `data-state`.
  */
 const rowClass =
-  'group/row fade-row flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-0.5 pl-0.5 text-sm text-sidebar-foreground transition-colors [--fade-scrim-into:var(--sidebar-background)] focus-within:bg-sidebar-accent focus-within:[--fade-scrim-into:var(--sidebar-accent)] hover:bg-sidebar-accent hover:[--fade-scrim-into:var(--sidebar-accent)] data-[active=true]:bg-sidebar-accent data-[active=true]:[--fade-scrim-into:var(--sidebar-accent)] has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent has-[[aria-haspopup=menu][data-state=open]]:[--fade-scrim-into:var(--sidebar-accent)] data-[state=open]:bg-sidebar-accent data-[state=open]:[--fade-scrim-into:var(--sidebar-accent)] pointer-coarse:[--fade-label-size:var(--fade-label-size-actions)]';
+  'group/row fade-row flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-0.5 pl-0.5 text-sm text-sidebar-foreground [--fade-scrim-into:var(--sidebar-background)] focus-within:bg-sidebar-accent focus-within:[--fade-scrim-into:var(--sidebar-accent)] hover:bg-sidebar-accent hover:[--fade-scrim-into:var(--sidebar-accent)] data-[active=true]:bg-sidebar-accent data-[active=true]:[--fade-scrim-into:var(--sidebar-accent)] has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent has-[[aria-haspopup=menu][data-state=open]]:[--fade-scrim-into:var(--sidebar-accent)] data-[state=open]:bg-sidebar-accent data-[state=open]:[--fade-scrim-into:var(--sidebar-accent)] pointer-coarse:[--fade-label-size:var(--fade-label-size-actions)]';
 
 /**
  * The row's class. Renaming moves the focus outline onto the row (D17): the

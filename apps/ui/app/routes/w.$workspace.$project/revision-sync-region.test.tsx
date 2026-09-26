@@ -1005,7 +1005,14 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
   it('should show a free account’s usage as x of 1 GB', () => {
     renderRegion(facet({ kind: 'tau', phase: 'connected', storage: { used: 340 * 1024 ** 2, quota: 1024 ** 3 } }));
 
-    expect(screen.getByRole('status', { name: 'Backup status' })).toHaveTextContent('340.0 MB of 1 GB');
+    expect(screen.getByRole('status', { name: 'Backup status' })).toHaveTextContent('340 MB of 1 GB');
+  });
+
+  /* RV-W8 F12: the used figure trims its zeros like the allowance does. */
+  it('should read a full free plan as 1 GB of 1 GB', () => {
+    renderRegion(facet({ kind: 'tau', phase: 'connected', storage: { used: 1024 ** 3 + 1, quota: 1024 ** 3 } }));
+
+    expect(screen.getByText('1 GB of 1 GB')).toBeInTheDocument();
   });
 
   /* D18: retained packs are their own figure, never added to what the plan counts. */
@@ -1019,8 +1026,8 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     );
 
     const row = screen.getByRole('status', { name: 'Backup status' });
-    expect(row).toHaveTextContent('340.0 MB of 1 GB');
-    expect(row).toHaveTextContent('12.0 MB kept for recovery, not counted');
+    expect(row).toHaveTextContent('340 MB of 1 GB');
+    expect(row).toHaveTextContent('12 MB kept for recovery, not counted');
   });
 
   it('should keep retained packs out of the meter and name them in its caption', () => {
@@ -1035,7 +1042,7 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
       'aria-valuenow',
       String(Math.round((900 / 1024) * 100)),
     );
-    expect(screen.getByText('12.0 MB kept for recovery, not counted')).toBeInTheDocument();
+    expect(screen.getByText('12 MB kept for recovery, not counted')).toBeInTheDocument();
   });
 
   it('should draw no retained figure when nothing is retained', () => {
@@ -1094,6 +1101,25 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
         'inputs/enclosure-scan.step',
         'inputs/reference.stl',
       ]);
+    });
+
+    /* RV-W8 F2: D20's ceiling is the same on every plan, so even an owner who could upgrade gets the list alone. */
+    it('should give the repository ceiling the file list and no plan action, even for an owner on Free', () => {
+      const region = renderRegion(
+        overQuota,
+        refused(
+          'Tau: repository size limit exceeded — this push needs 5242880 bytes more than this repository may hold.',
+        ),
+        { role: 'owner' },
+      );
+
+      const row = screen.getByRole('status', { name: 'Backup status' });
+      expect(within(row).queryByRole('button')).not.toBeInTheDocument();
+      expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toStrictEqual([
+        'inputs/enclosure-scan.step',
+        'inputs/reference.stl',
+      ]);
+      expect(region.upgrade).not.toHaveBeenCalled();
     });
 
     it('should direct a write collaborator to the owner with no plan action', () => {

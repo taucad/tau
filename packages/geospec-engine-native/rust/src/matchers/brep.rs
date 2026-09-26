@@ -2,17 +2,18 @@
 
 use std::collections::HashSet;
 
+#[cfg(test)]
+use crate::backend::brep::DocumentFacts;
 use crate::{
     analysis::selection::{EcmaRegexEngine, EcmaRegexError, TextPattern},
     backend::{
         brep::{
             Bounds, BrepSubject, CircularBoreDisposition, CircularBoreInventory,
             CircularBoreNonMember, CircularBoreTermination, CircularBoreUnqualified, CurveFacts,
-            DocumentFacts, EdgeTreatmentBoundaryRole, EdgeTreatmentCertificate,
-            EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind,
-            EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason,
-            EdgeTreatmentResidualKind, OccurrenceFacts, SurfaceFacts, TopologyCounts,
-            ValidityFacts,
+            EdgeTreatmentBoundaryRole, EdgeTreatmentCertificate, EdgeTreatmentDisposition,
+            EdgeTreatmentInventory, EdgeTreatmentKind, EdgeTreatmentLabel,
+            EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidualKind,
+            OccurrenceFacts, ShapeFacts, SurfaceFacts, TopologyCounts, ValidityFacts,
         },
         BackendError, BackendErrorKind,
     },
@@ -831,7 +832,18 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             Err(error) => backend_refused(prepared.capability(), error),
         };
     }
-    let facts = match context.brep_facts() {
+    // Validity and feature claims read the source through the BRep gate (F3);
+    // topology counts read the report facts facet. Bores and edge treatments
+    // demand their own facets.
+    let topology = if let Prepared::TopologyCounts(_) = prepared {
+        match context.brep_shape() {
+            Ok(value) => value.map(|shape| shape.topology),
+            Err(evaluation) => return evaluation,
+        }
+    } else {
+        None
+    };
+    let brep = match context.brep_gate() {
         Ok(Some(value)) => value,
         Ok(None) => {
             return refused(
@@ -855,13 +867,6 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
         return evaluate_edge_treatment(prepared, context);
     }
     let subject = context.subject();
-    let Some(brep) = subject.brep.as_deref() else {
-        return refused(
-            prepared.capability(),
-            missing_brep_evidence(prepared),
-            BREP_SUGGESTION,
-        );
-    };
     let outcome = match prepared {
         Prepared::StepUnits(_) => unreachable!(),
         Prepared::ProductStructure(_) | Prepared::AssemblyOccurrences(_) => unreachable!(),
@@ -869,7 +874,9 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             Ok(value) => evaluate_validity(expected, &value),
             Err(error) => return backend_refused(prepared.capability(), error),
         },
-        Prepared::TopologyCounts(expected) => evaluate_topology(expected, facts.shape.topology),
+        Prepared::TopologyCounts(expected) => {
+            evaluate_topology(expected, topology.expect("a BRep subject has report facts"))
+        }
         Prepared::PlanarFace(expected) => evaluate_features(expected_planar(expected), brep),
         Prepared::CylindricalFace(expected) => evaluate_features(expected_cylinder(expected), brep),
         Prepared::CircularHole(_) | Prepared::CircularHolePattern(_) => unreachable!(),
@@ -887,19 +894,19 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
 /// particular, minimum wall thickness remains owned by its proof lane.
 pub(crate) fn brep_evidence(
     brep: &dyn BrepSubject,
-    facts: &DocumentFacts,
+    shape: &ShapeFacts,
     bores: &CircularBoreInventory,
     edge_treatments: &EdgeTreatmentInventory,
 ) -> Result<Json, BackendError> {
     let validity = brep.validity()?;
     let mut features = derive_features(brep)?;
     populate_bores(&mut features, brep, bores)?;
-    let bounds = facts.shape.bounds;
+    let bounds = shape.bounds;
     let size = std::array::from_fn(|axis| bounds.max[axis] - bounds.min[axis]);
     let center = std::array::from_fn(|axis| (bounds.min[axis] + bounds.max[axis]) / 2.0);
     Ok(Json::object([
         ("validity", validity_json(&validity)),
-        ("topologyCounts", topology_json(facts.shape.topology)),
+        ("topologyCounts", topology_json(shape.topology)),
         (
             "boundingBox",
             Json::object([
@@ -912,9 +919,9 @@ pub(crate) fn brep_evidence(
         (
             "massProperties",
             Json::object([
-                ("surfaceArea", Json::Number(facts.shape.surface_area)),
-                ("volume", Json::Number(facts.shape.volume)),
-                ("centerOfMass", point_json(facts.shape.center_of_mass)),
+                ("surfaceArea", Json::Number(shape.surface_area)),
+                ("volume", Json::Number(shape.volume)),
+                ("centerOfMass", point_json(shape.center_of_mass)),
             ]),
         ),
         (
@@ -951,7 +958,10 @@ pub(crate) fn brep_evidence(
 
 /// Reusable operation evaluator for Lead-owned `analyzeBrep` dispatch.
 pub(crate) fn evaluate_brep(context: &mut EvaluationContext<'_>) -> Evaluation {
-    let facts = match context.brep_facts() {
+    if let Err(evaluation) = context.edge_treatment_face_limit() {
+        return evaluation;
+    }
+    let shape = match context.brep_shape() {
         Ok(Some(value)) => value,
         Ok(None) => return brep_evidence_unavailable(),
         Err(evaluation) => return evaluation,
@@ -967,7 +977,7 @@ pub(crate) fn evaluate_brep(context: &mut EvaluationContext<'_>) -> Evaluation {
     let Some(brep) = context.subject().brep.as_deref() else {
         return brep_evidence_unavailable();
     };
-    match brep_evidence(brep, &facts, &bores, &edge_treatments) {
+    match brep_evidence(brep, shape, &bores, &edge_treatments) {
         Ok(brep) => {
             let mut diagnostics = if bore_inventory_is_partial(&bores) {
                 let mut diagnostic = bore_uncertainty(context.capability, &bores);
@@ -1604,12 +1614,14 @@ fn derive_features(brep: &dyn BrepSubject) -> Result<Features, BackendError> {
             }
             SurfaceFacts::Cylinder { axis, radius, .. } => {
                 let principal = Axis::dominant(*axis);
+                // The only reader of a whole-face box (F6).
+                let bounds = brep.face_optimal_bounds(face.facts.index)?;
                 let row = CylinderFace {
                     radius: *radius,
                     axis: principal,
                     center: face.facts.center_of_mass,
-                    axis_min: face.bounds.min[principal.index()],
-                    axis_max: face.bounds.max[principal.index()],
+                    axis_min: bounds.min[principal.index()],
+                    axis_max: bounds.max[principal.index()],
                 };
                 cylinders.push(row);
             }
@@ -1688,6 +1700,7 @@ fn populate_bores(
             });
         };
         let principal = Axis::dominant(axis);
+        let bounds = brep.face_optimal_bounds(candidate.public_face_ordinal)?;
         features.holes.push(Hole {
             diameter: radius * 2.0,
             through: topology
@@ -1697,8 +1710,8 @@ fn populate_bores(
             axis: principal,
             center: face.facts.center_of_mass,
             // Retained nominal display values; never used to qualify topology.
-            axis_min: face.bounds.min[principal.index()],
-            axis_max: face.bounds.max[principal.index()],
+            axis_min: bounds.min[principal.index()],
+            axis_max: bounds.max[principal.index()],
         });
     }
     if !bore_inventory_is_partial(bores) {

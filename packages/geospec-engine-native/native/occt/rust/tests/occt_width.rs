@@ -178,7 +178,7 @@ fn query(prepared: &Prepared, operation: Operation) -> Vec<u8> {
                 .unwrap();
             mesh_bytes(&mesh)
         }
-        Operation::ReportMesh => mesh_bytes(&document.reported_mesh().unwrap().unwrap()),
+        Operation::ReportMesh => mesh_bytes(&document.reported_mesh().unwrap()),
         Operation::Common => format!("{:?}", document.common_volume(0, 1).unwrap()).into_bytes(),
         Operation::Cut => {
             let (subject, target) = prepared.cut.unwrap();

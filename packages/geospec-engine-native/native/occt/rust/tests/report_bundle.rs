@@ -63,7 +63,11 @@ fn run_query_order(first: TessellationProfile, second: TessellationProfile, labe
     let second_mesh = BrepSubject::tessellate(&document, BrepEntity::Whole, second).unwrap();
 
     assert_eq!(document.facts().unwrap().as_ref(), nominal_facts.as_ref());
-    assert_eq!(document.faces().unwrap().as_ref(), nominal_faces.as_ref());
+    // Whole faces carry unmeasured (NaN) boxes (F6); Debug text compares them.
+    assert_eq!(
+        format!("{:?}", document.faces().unwrap()),
+        format!("{nominal_faces:?}")
+    );
     assert_eq!(
         nominal_facts.shape.bounds.min.map(f64::to_bits),
         [(-5.0_f64).to_bits(); 3]
@@ -103,7 +107,8 @@ fn streamed_compound_validation_preserves_original_and_meshed_facts() {
     let nominal = document.facts().unwrap();
     let report = document.reported_facts_and_mesh().unwrap();
     assert!(nominal.shape.valid);
-    assert!(report.facts.shape.valid);
+    // F2: the report facts facet never analyzes its copy's validity.
+    assert!(!report.facts.shape.valid);
     assert_eq!(nominal.shape.topology.solids, 2);
     assert_eq!(nominal.shape.topology.faces, 12);
     assert_eq!(report.facts.shape.bounds.min, SOURCE_REPORTED_WHOLE_MIN);
@@ -111,9 +116,10 @@ fn streamed_compound_validation_preserves_original_and_meshed_facts() {
     assert_eq!(report.mesh.triangles.len(), 24);
 
     let mut reported_shape = report.facts.shape.clone();
-    // The established reporting bounds include tolerance; all other shape
-    // facts must remain equal after independent validation of the meshed copy.
+    // The established reporting bounds include tolerance and the report
+    // carries no validity; all other shape facts equal the source's.
     reported_shape.bounds = nominal.shape.bounds;
+    reported_shape.valid = nominal.shape.valid;
     assert_eq!(reported_shape, nominal.shape);
     assert_eq!(
         reported_shape.volume.to_bits(),
@@ -153,7 +159,7 @@ fn original_validation_reuse_preserves_complete_facts_across_query_orders() {
 
     let reported = Document::from_step(&bytes).unwrap();
     let report = reported.reported_facts_and_mesh().unwrap();
-    assert!(report.facts.shape.valid);
+    assert!(!report.facts.shape.valid);
     BrepSubject::tessellate(&reported, BrepEntity::Whole, COARSE).unwrap();
     let reported_validity = reported.validity().unwrap();
 
@@ -307,7 +313,10 @@ fn curved_profile_order_preserves_fixed_report_and_nominal_queries() {
             assert_eq!(report.mesh, fixed.mesh);
         }
         assert_eq!(document.facts().unwrap(), nominal);
-        assert_eq!(document.faces().unwrap(), nominal_faces);
+        assert_eq!(
+            format!("{:?}", document.faces().unwrap()),
+            format!("{nominal_faces:?}")
+        );
         eprintln!("curved-order={label} first-triangles={} second-triangles={} fixed-report-triangles={} fixed-report-fnv={:016x}", first_mesh.triangles.len(), second_mesh.triangles.len(), fixed.mesh.triangles.len(), mesh_hash(&fixed.mesh));
     }
 }

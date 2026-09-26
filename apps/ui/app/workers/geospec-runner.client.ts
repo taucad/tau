@@ -5,6 +5,7 @@ import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { randomUuid } from '@taucad/utils/id';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
+import { createBrowserGeoSpecWorker } from '#services/browser-geospec-worker.js';
 import type { GeoSpecRunnerWorkerRequest, GeoSpecRunnerWorkerResponse } from '#workers/geospec-runner.types.js';
 
 type CreateGeoSpecWorker = () => Worker;
@@ -55,12 +56,6 @@ const defaultTimeout = rpcExecutionTimeout - defaultInitTimeout - defaultAbortGr
  * @public
  */
 export const geoSpecClientWorstCaseTimeout = defaultInitTimeout + defaultTimeout + defaultAbortGrace;
-
-const createDefaultGeoSpecWorker = (): Worker =>
-  new Worker(new URL('geospec-runner.worker.ts', import.meta.url), {
-    type: 'module',
-    name: 'tau-geospec-runner-worker',
-  });
 
 const createRequestId = (): string => randomUuid();
 
@@ -216,7 +211,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
       return requireSessionId();
     }
 
-    worker = (options.createWorker ?? createDefaultGeoSpecWorker)();
+    worker = (options.createWorker ?? createBrowserGeoSpecWorker)();
     worker.addEventListener('message', onMessage);
     worker.addEventListener('error', onError);
 

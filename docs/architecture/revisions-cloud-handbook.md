@@ -116,7 +116,7 @@ Server codes and the class each raises in `packages/revisions/src/remotes.ts`:
 | `GIT_SYNC_NOT_ENTITLED`           | 403                    | `REMOTE_NOT_ENTITLED`                                          | _Upgrade_                                                                                                                                                                                                                                                   |
 | `PROJECT_ROLE_INSUFFICIENT`       | 403                    | `REMOTE_FORBIDDEN` (terminal, `syncFailureReason` `forbidden`) | the server's own sentence from the transport, "This project needs write access."; on _Connect_, the registration route's "Only the project owner can back this project up to Tau Cloud." Never _Upgrade_ — the collaborator's plan is not what refused them |
 | `PROJECT_NOT_FOUND`               | 404                    | `REMOTE_NOT_FOUND`, terminal                                   | a non-member is told the project does not exist, deliberately                                                                                                                                                                                               |
-| `GIT_REPOSITORY_NOT_FOUND`        | 404                    | `REMOTE_NOT_FOUND`, terminal                                   | the project is registered but has never committed a manifest                                                                                                                                                                                               |
+| `GIT_REPOSITORY_NOT_FOUND`        | 404                    | `REMOTE_NOT_FOUND`, terminal                                   | the project is registered but has never committed a manifest                                                                                                                                                                                                |
 | `GIT_REPOSITORY_DELETED`          | 410                    | `REMOTE_NOT_FOUND`, terminal                                   | "This project has been deleted." The sync machine stops                                                                                                                                                                                                     |
 | `GIT_QUOTA_EXCEEDED`              | 413                    | `REMOTE_QUOTA_EXCEEDED`                                        | the owner's plan allowance, with the shortfall                                                                                                                                                                                                              |
 | `GIT_REPOSITORY_CEILING_EXCEEDED` | 413                    | `REMOTE_QUOTA_EXCEEDED`                                        | the server's sentence and the affected files                                                                                                                                                                                                                |
@@ -126,30 +126,35 @@ Server codes and the class each raises in `packages/revisions/src/remotes.ts`:
 | `GIT_LEASE_DISK_FULL`             | 503 + `Retry-After: 5` | `REMOTE_UNAVAILABLE` (retried)                                 | _Not backed up_, queued; clears when a lease frees disk                                                                                                                                                                                                     |
 
 A `pre-receive` refusal carries **no** HTTP status, so two rules hold together. The server relays the
-hook's report-status bytes verbatim (NI13), and the client classifies the D20 ceiling refusal by the
-fixed marker the hook opens it with:
+hook's report-status bytes verbatim (NI13), and the client classifies the D20 ceiling refusal and the
+D17 plan-quota refusal by the fixed markers the hook opens them with:
 
 ```ts
-// packages/revisions/src/refusal-markers.ts:20 — and apps/api/app/api/git/git.constants.ts:146,
-// which names this leaf as its source. Two copies, because the API does not depend on the
-// package; each is tested, and they change together.
+// packages/revisions/src/refusal-markers.ts:20 and :30 — and apps/api/app/api/git/git.constants.ts:244
+// and :61, which name this leaf as their source. Two copies of each, because the API does not depend
+// on the package; each is tested, and they change together.
 const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
+const quotaRefusalMarker = 'Tau: storage quota exceeded';
 ```
 
-A message carrying that marker becomes `REMOTE_QUOTA_EXCEEDED` (`syncFailureReason` `quota`, whose one
-action is **Upgrade**), and carries the hook's own sentence plus the ten largest files the push adds,
-printed under `Tau: the largest files it adds are:`. Every other hook refusal stays `REMOTE_REJECTED`,
-whose action is _Sync now_.
+A message carrying either marker becomes `REMOTE_QUOTA_EXCEEDED` (`syncFailureReason` `quota`), and
+carries the hook's own sentence plus the ten largest files the push adds, printed under
+`Tau: the largest files it adds are:`. Its one action follows the caller (D17): _Upgrade_ for an owner
+whose plan has a larger one, the file list alone for a top-tier owner or a collaborator — and the file
+list alone for a ceiling refusal whoever asks, because no plan raises the ceiling. Every other hook
+refusal stays `REMOTE_REJECTED`, whose action is _Sync now_.
 
-The marker is read on **both** paths a `pre-receive` refusal can take, through one shared predicate:
-`isCeilingRefusal` in `packages/revisions/src/refusal-markers.ts:33`, an import-free leaf re-exported
-from the package index (`index.ts:104`) while the string itself stays module-private. On the native
-leg the refusal arrives as a thrown transport error and `remotes.ts` classifies it (import at `:17`,
-used at `:571`); on the `isomorphic-git` leg it comes back as a per-ref push result and the sync
-scheduler applies the same predicate before settling the reason (`sync.machine.ts:33`, used at
-`:1223`). Without that, a ceiling refusal on the browser leg would show the right sentence under the
-wrong button — and _Sync now_ is the one thing that cannot clear a ceiling, because the retry pushes
-the same bytes again.
+The markers are read on **both** paths a `pre-receive` refusal can take, through one shared
+predicate: `isStorageRefusal` in `packages/revisions/src/refusal-markers.ts:44` (either marker), with
+`isCeilingRefusal` at `:58` (the ceiling alone, which the Sync row and the strip read to withhold
+_Upgrade_). Both are import-free and re-exported from the package index (`index.ts:104`). On the
+native leg the refusal arrives as a thrown transport error and `remotes.ts` classifies it (import at
+`:17`, used at `:571`); on the `isomorphic-git` leg it comes back as a per-ref push result and the sync
+scheduler applies the same predicate before settling the reason (`sync.machine.ts:36`, used at
+`:1367`). Without that, a storage refusal on the browser leg would show the right sentence under the
+wrong button — and _Sync now_ is the one thing that cannot clear it, because the retry pushes the same
+bytes again. The API's backstop `413 GIT_REPOSITORY_CEILING_EXCEEDED` opens with the ceiling marker
+too, so it is read the same way.
 
 ## 5. Collaboration
 

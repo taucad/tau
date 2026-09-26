@@ -133,6 +133,12 @@ impl Document {
         unsafe { ffi::geospec_occt_triangulated_face_count(self.raw.as_ptr()) }
     }
 
+    /// Diagnostic count of bore interiors the separation certificate cleared
+    /// without a Common in this document's inventories.
+    pub fn certified_clear_bores(&self) -> usize {
+        unsafe { ffi::geospec_occt_certified_clear_bores(self.raw.as_ptr()) }
+    }
+
     /// Validity under a dedicated grant. The bridge reuses the admission proof
     /// or re-runs serially, so the returned flag is always false.
     ///
@@ -4104,6 +4110,7 @@ mod ffi {
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_circular_bores_discard(document: *const Document);
+        pub fn geospec_occt_certified_clear_bores(document: *const Document) -> usize;
         pub fn geospec_occt_edge_treatment_counts_get(
             document: *const Document,
             counts: *mut EdgeTreatmentCounts,

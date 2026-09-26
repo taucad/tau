@@ -1592,6 +1592,8 @@ struct geospec_occt_document {
   // facts facets until both have run; the transfer slot stays above.
   mutable std::unique_ptr<ReportGeneration> report_generation;
   mutable size_t report_generation_builds = 0;
+  // Diagnostic count of bore interiors the S3 certificate cleared.
+  mutable size_t certified_clear_bores = 0;
   mutable std::optional<std::pair<MeshKey, MeshData>> transfer_mesh;
   mutable std::optional<std::vector<geospec_occt_circular_bore_candidate>>
       circular_bores;
@@ -2156,8 +2158,11 @@ int circular_bore_end(
 // material outside it, so no other boundary inside means no material inside.
 // Exact face boxes (geometry plus tolerance, never triangulation) mapped into
 // the bore frame, or closed-form separation of parallel cylinders, tori around
-// the bore and planes, beyond every owner tolerance. False means "not proven":
-// the caller runs the Common, so this shortcut never decides a byte.
+// the bore and planes, beyond every owner tolerance. Separations are measured
+// where the band and the face are, never at a stored surface Location, which a
+// source may place anywhere on its axis or plane: a tilt allowance only covers
+// the lever it is taken over. False means "not proven": the caller runs the
+// Common, so this shortcut never decides a byte.
 bool bore_interior_certified_clear(
     const geospec_occt_document& document, const BoreSolidContext& owner,
     const TopoDS_Face& band,
@@ -2169,6 +2174,8 @@ bool bore_interior_certified_clear(
   const double from = candidate.band.from;
   const double to = candidate.band.to;
   const double margin = owner.maximum_tolerance + Precision::Confusion();
+  const gp_Pnt from_point = origin.Translated(gp_Vec(axis).Multiplied(from));
+  const gp_Pnt to_point = origin.Translated(gp_Vec(axis).Multiplied(to));
   const TopoDS_Shape& first_end =
       document.public_faces[candidate.ends[0].adjacent_public_face_ordinal].shape;
   const TopoDS_Shape& second_end =
@@ -2179,11 +2186,15 @@ bool bore_interior_certified_clear(
     const double dy = lo[1] > 0 ? lo[1] : (hi[1] < 0 ? -hi[1] : 0.0);
     return std::hypot(dx, dy) >= r;  // beyond the closed disk
   };
-  const auto parallel_offset = [&](const gp_Ax1& other, double& tilt,
-                                   double& distance) {
+  // The tilt between another axis and the bore axis, and the bore-axis offset
+  // of the point on the other axis nearest `near`.
+  const auto parallel_offset = [&](const gp_Ax1& other, const gp_Pnt& near,
+                                   double& tilt, double& distance) {
     const double angle = other.Direction().Angle(axis);
     tilt = std::min(angle, M_PI - angle);
-    const gp_Vec offset(origin, other.Location());
+    const gp_Vec along(other.Direction());
+    const gp_Vec offset(origin, other.Location().Translated(along.Multiplied(
+                                    gp_Vec(other.Location(), near).Dot(along))));
     const gp_Vec direction(axis);
     distance = (offset - direction.Multiplied(offset.Dot(direction))).Magnitude();
   };
@@ -2234,33 +2245,44 @@ bool bore_interior_certified_clear(
       local.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
       if (outside(lo, hi)) continue;
     }
-    const double slack_scale = std::sqrt(world.SquareExtent());
+    // Every face point lies within half the box diagonal of the box centre, so
+    // its foot on a tilted axis moves the offset by at most that times
+    // sin(tilt); a circle of radius rho about the tilted axis projects no
+    // nearer than rho cos(tilt) >= rho - rho sin(tilt).
+    const double diagonal = std::sqrt(world.SquareExtent());
+    const gp_Pnt centre(0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (z0 + z1));
     double tilt = 0.0, distance = 0.0;
     if (surface.GetType() == GeomAbs_Cylinder) {
       const gp_Cylinder cylinder = surface.Cylinder();
-      parallel_offset(cylinder.Axis(), tilt, distance);
-      if (tilt < 1e-6 && std::abs(distance - cylinder.Radius()) >=
-                             r + margin + slack_scale * std::sin(tilt)) {
+      parallel_offset(cylinder.Axis(), centre, tilt, distance);
+      if (tilt < 1e-6 &&
+          std::abs(distance - cylinder.Radius()) >=
+              r + margin + (diagonal + cylinder.Radius()) * std::sin(tilt)) {
         continue;
       }
     } else if (surface.GetType() == GeomAbs_Torus) {  // bore through its hole
+      // Measured at the centre the hole test is about; the tube circle
+      // projects no nearer than R cos(tilt).
       const gp_Torus torus = surface.Torus();
-      parallel_offset(torus.Axis(), tilt, distance);
-      if (tilt < 1e-6 && torus.MajorRadius() - torus.MinorRadius() - distance >=
-                             r + margin + slack_scale * std::sin(tilt)) {
+      parallel_offset(torus.Axis(), torus.Location(), tilt, distance);
+      if (tilt < 1e-6 &&
+          torus.MajorRadius() - torus.MinorRadius() - distance >=
+              r + margin + (diagonal + torus.MajorRadius()) * std::sin(tilt)) {
         continue;
       }
     } else if (surface.GetType() == GeomAbs_Plane) {
+      // The closed band cylinder spans the plane offsets of its end centres
+      // widened by r |normal x axis|, so beyond margin on one side is clear.
       const gp_Pln plane = surface.Plane();
-      const gp_Dir normal = plane.Axis().Direction();
-      if (normal.IsNormal(axis, Precision::Angular())) {  // along the axis
-        if (std::abs(gp_Vec(plane.Location(), origin).Dot(gp_Vec(normal))) >=
-            r + margin) {
-          continue;
-        }
-      } else if (normal.IsParallel(axis, Precision::Angular())) {  // across it
-        const double station = gp_Vec(origin, plane.Location()).Dot(gp_Vec(axis));
-        if (station <= from - margin || station >= to + margin) continue;
+      const gp_Vec normal(plane.Axis().Direction());
+      const double from_offset = gp_Vec(plane.Location(), from_point).Dot(normal);
+      const double to_offset = gp_Vec(plane.Location(), to_point).Dot(normal);
+      const double spread = r * normal.Crossed(gp_Vec(axis)).Magnitude();
+      if (std::min(from_offset, to_offset) - spread >= margin ||
+          std::max(from_offset, to_offset) + spread <= -margin) {
+        continue;
+      }
+      if (plane.Axis().Direction().IsParallel(axis, Precision::Angular())) {  // across the band
         bool analytic = true;  // extrema are trusted on lines and circles only
         for (TopExp_Explorer edges(face, TopAbs_EDGE); edges.More() && analytic;
              edges.Next()) {
@@ -2270,9 +2292,12 @@ bool bore_interior_certified_clear(
           analytic = type == GeomAbs_Line || type == GeomAbs_Circle;
         }
         if (analytic) {
+          // Where the plane meets the axis: its offset is affine along it.
+          const double crossing =
+              from + from_offset / (from_offset - to_offset) * (to - from);
           BRepExtrema_DistShapeShape clearance(
               BRepBuilderAPI_MakeVertex(
-                  origin.Translated(gp_Vec(axis).Multiplied(station)))
+                  origin.Translated(gp_Vec(axis).Multiplied(crossing)))
                   .Vertex(),
               face);
           if (clearance.IsDone() && clearance.NbSolution() > 0 &&
@@ -2284,6 +2309,7 @@ bool bore_interior_certified_clear(
     }
     return false;  // not proven: run the Common
   }
+  ++document.certified_clear_bores;
   return true;
 }
 
@@ -7344,6 +7370,11 @@ int geospec_occt_circular_bore(
 void geospec_occt_circular_bores_discard(
     const geospec_occt_document* document) noexcept {
   if (document != nullptr) document->circular_bores.reset();
+}
+
+size_t geospec_occt_certified_clear_bores(
+    const geospec_occt_document* document) noexcept {
+  return document == nullptr ? 0 : document->certified_clear_bores;
 }
 
 int geospec_occt_edge_treatment_counts_get(

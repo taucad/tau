@@ -294,7 +294,7 @@ const remoteMachineDefinition = setup({
         storage:
           event.used === undefined || event.quota === undefined
             ? context.storage
-            : { used: event.used, quota: event.quota },
+            : { ...context.storage, used: event.used, quota: event.quota },
       }),
     },
   },

@@ -40,6 +40,8 @@ type SectionSurfaceParticipant = {
   readonly meshIndex: number | undefined;
   readonly primitiveIndex: number | undefined;
   readonly topologyTrianglesByGeometryTriangle: Map<number, number[]>;
+  /** The material orders of the triangles in `topologyTrianglesByGeometryTriangle`, filled with it. */
+  readonly usedMaterialOrders: Set<number>;
 };
 
 type SectionSurfaceMesh = THREE.Mesh;
@@ -80,6 +82,8 @@ export type SectionSurfaceTopology = Readonly<{
   triangles: readonly TopologyTriangle[];
   edges: readonly CanonicalEdge[];
   components: readonly SurfaceComponent[];
+  /** The index into `components` of each topology triangle, built with the topology so slices only read it. */
+  componentByTriangle: Int32Array;
   distanceTolerance: number;
   buildMilliseconds: number;
 }>;
@@ -698,6 +702,16 @@ const buildCanonicalTopologyRecipe = (input: {
   };
 };
 
+const indexComponentsByTriangle = (triangleCount: number, components: readonly SurfaceComponent[]): Int32Array => {
+  const componentByTriangle = new Int32Array(triangleCount);
+  for (const [componentIndex, component] of components.entries()) {
+    for (const triangle of component.triangles) {
+      componentByTriangle[triangle] = componentIndex;
+    }
+  }
+  return componentByTriangle;
+};
+
 const hydrateCanonicalTopology = (
   input: TopologyBuildInput,
   recipe: SectionCanonicalTopologyWorkerResult,
@@ -726,6 +740,10 @@ const hydrateCanonicalTopology = (
       triangles: [recipe.edges[offset + 2]!, recipe.edges[offset + 3]!],
     });
   }
+  const components = recipe.components.map((component) => ({
+    triangles: [...component.triangles],
+    edges: [...component.edges],
+  }));
   return {
     status: 'ready',
     topology: {
@@ -733,10 +751,8 @@ const hydrateCanonicalTopology = (
       sourceKey: input.sourceKey,
       triangles: input.triangles,
       edges,
-      components: recipe.components.map((component) => ({
-        triangles: [...component.triangles],
-        edges: [...component.edges],
-      })),
+      components,
+      componentByTriangle: indexComponentsByTriangle(input.triangles.length, components),
       distanceTolerance: sourceTopologyEpsilon(input.positions),
       buildMilliseconds: recipe.buildMilliseconds,
     },
@@ -874,6 +890,7 @@ const createFallbackTopologyInput = (options: {
 
   for (const participant of options.participants) {
     participant.topologyTrianglesByGeometryTriangle.clear();
+    participant.usedMaterialOrders.clear();
     const { position } = participant.mesh.geometry.attributes;
     if (!position || position.itemSize < 3) {
       return topologyFailure(options.sourceKey, 'missing-position', 'is missing a VEC3 position attribute');
@@ -934,6 +951,7 @@ const createFallbackTopologyInput = (options: {
       }
       const participantTriangleIndex = Math.floor(offset / 3);
       const [material, materialOrder] = materialAtTriangle(participant.mesh, participantTriangleIndex);
+      participant.usedMaterialOrders.add(materialOrder);
       const topologyTriangleIndex = triangles.length;
       triangles.push({
         vertices,
@@ -997,10 +1015,7 @@ const participantVisibility = (participant: SectionSurfaceParticipant): 'visible
     return 'hidden';
   }
   const materials = Array.isArray(participant.mesh.material) ? participant.mesh.material : [participant.mesh.material];
-  const usedMaterialOrders = new Set<number>();
-  for (const triangle of participant.topologyTrianglesByGeometryTriangle.keys()) {
-    usedMaterialOrders.add(materialAtTriangle(participant.mesh, triangle)[1]);
-  }
+  const { usedMaterialOrders } = participant;
   const usedMaterials =
     usedMaterialOrders.size > 0
       ? [...usedMaterialOrders].map((order) => materials[order] ?? materials[0]!)
@@ -1030,6 +1045,7 @@ const createParticipant = (options: {
     meshIndex: options.association?.meshes,
     primitiveIndex: options.association?.primitives,
     topologyTrianglesByGeometryTriangle: new Map(),
+    usedMaterialOrders: new Set(),
   };
 };
 
@@ -1279,6 +1295,7 @@ const decodeManifoldTopology = async (options: {
         return fail(`primitive ${primitiveIndex} has no loaded render participant`);
       }
       participant.topologyTrianglesByGeometryTriangle.clear();
+      participant.usedMaterialOrders.clear();
       for (let primitiveOffset = 0; primitiveOffset < primitiveIndices.length; primitiveOffset += 3) {
         const vertices = manifoldIndices.slice(indexOffset + primitiveOffset, indexOffset + primitiveOffset + 3) as [
           number,
@@ -1304,6 +1321,7 @@ const decodeManifoldTopology = async (options: {
         }
         const participantTriangleIndex = primitiveOffset / 3;
         const [material, materialOrder] = materialAtTriangle(participant.mesh, participantTriangleIndex);
+        participant.usedMaterialOrders.add(materialOrder);
         const topologyTriangleIndex = triangles.length;
         triangles.push({
           vertices,
@@ -1382,6 +1400,7 @@ const combineExactTopologies = (
       triangles,
       edges,
       components,
+      componentByTriangle: indexComponentsByTriangle(triangles.length, components),
       distanceTolerance: Math.max(...topologies.map((topology) => topology.distanceTolerance)),
       buildMilliseconds,
     },
@@ -1687,7 +1706,6 @@ const candidateTopologyTriangles = (source: SectionSurfaceSource, worldPlane: TH
   const localPlane = new THREE.Plane();
   const inverse = new THREE.Matrix4();
   for (const participant of source.participants) {
-    participant.mesh.updateWorldMatrix(true, false);
     inverse.copy(participant.mesh.matrixWorld).invert();
     localPlane.copy(worldPlane).applyMatrix4(inverse);
     const bvh = getOrBuildBvh(participant.mesh.geometry);
@@ -1711,7 +1729,15 @@ const candidateTopologyTriangles = (source: SectionSurfaceSource, worldPlane: TH
   return candidates;
 };
 
-/** Slices one admitted logical source through paired halfedge adjacency. @internal */
+/**
+ * Slices one admitted logical source through paired halfedge adjacency.
+ *
+ * Callers update each source root and its descendants' world matrices before slicing, once per frame.
+ * The slice reads the matrices of the root and its participant meshes as they are and updates no
+ * scene node, instead of walking the scene for every source.
+ *
+ * @internal
+ */
 export const sliceSectionSurfaceSource = (options: {
   visibleSource: VisibleSectionSurfaceSource;
   worldPlane: THREE.Plane;
@@ -1732,7 +1758,6 @@ export const sliceSectionSurfaceSource = (options: {
     return source.topology;
   }
   const { topology } = source.topology;
-  source.root.updateWorldMatrix(true, true);
   const sourcePlane = options.worldPlane
     .clone()
     .applyMatrix4(new THREE.Matrix4().copy(source.root.matrixWorld).invert());
@@ -1798,12 +1823,6 @@ export const sliceSectionSurfaceSource = (options: {
   const unseen = new Set([...cutEdges.keys()].sort((left, right) => left - right));
   const contours: THREE.Vector3[][] = [];
   const cutComponents = new Set<number>();
-  const componentByTriangle = new Int32Array(topology.triangles.length);
-  for (const [componentIndex, component] of topology.components.entries()) {
-    for (const triangle of component.triangles) {
-      componentByTriangle[triangle] = componentIndex;
-    }
-  }
   const materialLengths = new Map<THREE.Material, { length: number; order: number }>();
   while (unseen.size > 0) {
     const start = unseen.values().next().value;
@@ -1883,7 +1902,7 @@ export const sliceSectionSurfaceSource = (options: {
     const canonical = canonicalizeRing(ring, sourcePlane.normal);
     if (canonical.length >= 3) {
       contours.push(canonical);
-      cutComponents.add(componentByTriangle[start]!);
+      cutComponents.add(topology.componentByTriangle[start]!);
     }
   }
   contours.sort((left, right) => comparePosition(left[0]!, right[0]!));

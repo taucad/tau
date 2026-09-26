@@ -182,7 +182,6 @@ pub struct DocumentFacts {
     pub occurrences: Vec<OccurrenceFacts>,
     pub shape: ShapeFacts,
     pub faces: Vec<FaceFacts>,
-    pub pmi: Vec<PmiFacts>,
     pub subshapes: Vec<SubshapeFacts>,
     pub datum_placements: Vec<DatumPlacementFacts>,
     pub semantic_datums: Vec<SemanticDatumFacts>,
@@ -298,25 +297,6 @@ pub enum SurfaceFacts {
     Extrusion,
     Offset,
     Other,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PmiFacts {
-    pub label: String,
-    pub name: String,
-    pub kind: PmiKind,
-    pub shape_labels: Vec<String>,
-    /// Ordered first group is the prefix; ordered second group is the suffix.
-    pub first_association_count: usize,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PmiKind {
-    Dimension,
-    GeometricTolerance,
-    Datum,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]

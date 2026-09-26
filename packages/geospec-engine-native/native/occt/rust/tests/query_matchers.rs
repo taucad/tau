@@ -227,33 +227,6 @@ fn retained_ap242_fixture_preserves_analytic_and_semantic_facts() {
             .count(),
         4
     );
-    assert_eq!(
-        facts
-            .pmi
-            .iter()
-            .filter(|row| matches!(row.kind, geospec_engine_native_occt::PmiKind::Dimension))
-            .count(),
-        28
-    );
-    assert_eq!(
-        facts
-            .pmi
-            .iter()
-            .filter(|row| matches!(
-                row.kind,
-                geospec_engine_native_occt::PmiKind::GeometricTolerance
-            ))
-            .count(),
-        10
-    );
-    assert_eq!(
-        facts
-            .pmi
-            .iter()
-            .filter(|row| matches!(row.kind, geospec_engine_native_occt::PmiKind::Datum))
-            .count(),
-        11
-    );
     let mut datum_labels = facts
         .semantic_datums
         .iter()

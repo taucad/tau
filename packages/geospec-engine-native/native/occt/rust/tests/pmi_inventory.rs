@@ -328,8 +328,4 @@ fn pmi_inventory_same_occurrence_distinct_faces_and_role_groups() {
     let second = document.pmi_source_faces(1110).unwrap().value.unwrap();
     assert_eq!(first[0].occurrence, second[0].occurrence);
     assert_ne!(first[0].public_face_ordinal, second[0].public_face_ordinal);
-    let facts = document.facts().unwrap();
-    for record in &facts.pmi {
-        assert!(record.first_association_count <= record.shape_labels.len());
-    }
 }

@@ -2796,7 +2796,6 @@ mod tests {
                     })
                     .collect(),
                 faces: vec![],
-                pmi: vec![],
                 subshapes: vec![],
                 datum_placements: vec![],
                 semantic_datums: vec![],

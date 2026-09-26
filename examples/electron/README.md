@@ -81,15 +81,15 @@ flowchart LR
 
 ```typescript
 import { useRuntime } from '@taucad/react';
-import { registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
+import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { exposeElectronRuntime } from '@taucad/runtime/electron/preload';
 import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
 import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
 ```
 
 ```typescript
-import { openrscadKernel } from '@taucad/openrscad';
+import { openrscad } from '@taucad/openrscad';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-import { geometryCache, parameterCache } from '@taucad/middleware';
+import { middleware, parameterUnits } from '@taucad/middleware';
 import { defineRuntime } from '@taucad/runtime/worker';
 ```

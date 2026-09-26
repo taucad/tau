@@ -22,7 +22,13 @@ import {
   hasSceneTagInHierarchy,
 } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { SceneTagKey } from '#components/geometry/graphics/three/utils/scene-tags.js';
-import { useGraphics, useGraphicsSelector, useModelInteractionSelector, useRenderFrame } from '#hooks/use-graphics.js';
+import {
+  useGraphics,
+  useGraphicsSelector,
+  useKinematicsRef,
+  useModelInteractionSelector,
+  useRenderFrame,
+} from '#hooks/use-graphics.js';
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import type { RafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
@@ -126,6 +132,8 @@ export function MeasureTool(): React.JSX.Element {
   const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
   const pickableMeshesVersion = useGraphicsSelector((state) => state.context.pickableMeshesVersion);
   const modelDisplayRevision = useModelInteractionSelector((state) => state.context.displayRevision);
+  // Read when the cache is consulted, so a playing clip does not re-render the tool every frame.
+  const kinematicsRef = useKinematicsRef();
   const measurements = useGraphicsSelector((state) => state.context.measurements);
   const currentStart = useGraphicsSelector((state) => state.context.currentMeasurementStart);
   const snapDistance = useGraphicsSelector((state) => state.context.measureSnapDistance);
@@ -152,7 +160,8 @@ export function MeasureTool(): React.JSX.Element {
   const wasCameraMovingRef = useRef(cameraMoving);
 
   // Cache mesh list to avoid expensive scene.traverse() on every mouse event.
-  // Invalidated when geometry or component display changes.
+  // Invalidated when geometry, component display or a kinematic pose changes: a pose moves meshes, and the
+  // snap points cached under them hold world positions.
   const cachedMeshesRef = useRef<THREE.Mesh[]>([]);
   const cachedMeshKeyRef = useRef<string | undefined>(undefined);
   // Keep scene ref in sync for getCachedMeshes (stable callback reference)
@@ -160,20 +169,23 @@ export function MeasureTool(): React.JSX.Element {
   const geometryKeyRef = useRef(geometryKey);
   const pickableMeshesVersionRef = useRef(pickableMeshesVersion);
   const modelDisplayRevisionRef = useRef(modelDisplayRevision);
+  const kinematicsActorRef = useRef(kinematicsRef);
   useLayoutEffect(() => {
     currentStartRef.current = currentStart;
     sceneRef.current = scene;
     geometryKeyRef.current = geometryKey;
     pickableMeshesVersionRef.current = pickableMeshesVersion;
     modelDisplayRevisionRef.current = modelDisplayRevision;
-  }, [currentStart, geometryKey, modelDisplayRevision, pickableMeshesVersion, scene]);
+    kinematicsActorRef.current = kinematicsRef;
+  }, [currentStart, geometryKey, kinematicsRef, modelDisplayRevision, pickableMeshesVersion, scene]);
 
   // Cache detectSnapPoints results keyed by (mesh.id, faceIndex) to avoid
   // running the expensive geometry pipeline on every mouse move over the same face.
   const snapCacheRef = useRef(new Map<string, SnapPoint[]>());
 
   const getCachedMeshes = useRef((): THREE.Mesh[] => {
-    const currentKey = `${geometryKeyRef.current}:${pickableMeshesVersionRef.current}:${modelDisplayRevisionRef.current}`;
+    const poseRevision = kinematicsActorRef.current.getSnapshot().context.revision;
+    const currentKey = `${geometryKeyRef.current}:${pickableMeshesVersionRef.current}:${modelDisplayRevisionRef.current}:${poseRevision}`;
     if (currentKey === cachedMeshKeyRef.current) {
       return cachedMeshesRef.current;
     }

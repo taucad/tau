@@ -83,6 +83,7 @@ import { getModelInteractionUnitState } from '#machines/model-interaction.machin
 import type { ModelInteractionContext, ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
   collectSectionSurfaceSources,
+  getSectionSourceWorldMatrix,
   sliceSectionSurfaceSource,
 } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 import {
@@ -101,6 +102,7 @@ import type {
 
 const _inverseMeshWorld = /* @__PURE__ */ new THREE.Matrix4();
 const _parentInverse = /* @__PURE__ */ new THREE.Matrix4();
+const _sourceWorld = /* @__PURE__ */ new THREE.Matrix4();
 
 export type SectionSourceRecord = Readonly<{
   key: string;
@@ -484,7 +486,8 @@ export function buildSectionFillGeometryKey(record: SectionSourceRecord, plane: 
   return [
     record.key,
     record.source.revision,
-    matrixKey(record.source.root.matrixWorld),
+    // The source's own placement, so a posed part is recut where it now is.
+    matrixKey(getSectionSourceWorldMatrix(record.source, _sourceWorld)),
     planeKey(plane),
     record.visibleSource.visibility,
   ].join('|');
@@ -575,15 +578,15 @@ function disposeHelperRecord(root: THREE.Group, helper: SectionHelperRecord): vo
   }
 }
 
-function updateHelperMatrix(helper: SectionHelperRecord, mesh: THREE.Object3D): void {
+function updateHelperMatrix(helper: SectionHelperRecord, worldMatrix: THREE.Matrix4): void {
   const parentObject = helper.fillMesh.parent;
   if (parentObject) {
     _parentInverse.copy(parentObject.matrixWorld).invert();
-    helper.fillMesh.matrix.multiplyMatrices(_parentInverse, mesh.matrixWorld);
+    helper.fillMesh.matrix.multiplyMatrices(_parentInverse, worldMatrix);
     helper.borderSegments?.matrix.copy(helper.fillMesh.matrix);
   } else {
-    helper.fillMesh.matrix.copy(mesh.matrixWorld);
-    helper.borderSegments?.matrix.copy(mesh.matrixWorld);
+    helper.fillMesh.matrix.copy(worldMatrix);
+    helper.borderSegments?.matrix.copy(worldMatrix);
   }
 
   helper.fillMesh.updateMatrixWorld(true);
@@ -860,7 +863,7 @@ export function SectionContourFills({
         [
           record.key,
           record.source.revision,
-          matrixKey(record.source.root.matrixWorld),
+          matrixKey(getSectionSourceWorldMatrix(record.source, _sourceWorld)),
           record.visibleSource.visibility,
         ].join('|'),
       )
@@ -959,7 +962,8 @@ export function SectionContourFills({
         addSectionCapTiming(performanceFrame, 'candidateBroadphase', slice.candidateBroadphaseMilliseconds);
         addSectionCapTiming(performanceFrame, 'topologySlice', slice.topologySliceMilliseconds);
       }
-      _inverseMeshWorld.copy(record.source.root.matrixWorld).invert();
+      const sourceWorld = getSectionSourceWorldMatrix(record.source);
+      _inverseMeshWorld.copy(sourceWorld).invert();
       candidateBuilds.set(record.key, {
         geometryKey: nextGeometryKey,
         capBuild: {
@@ -971,7 +975,7 @@ export function SectionContourFills({
           unresolvedTrueCutEdgeCount: slice.unresolvedTrueCutEdgeCount,
           topologyPath: record.source.topology.status === 'ready' ? record.source.topology.topology.path : 'fallback',
           baseTintHex: extractTintHex(slice.dominantMaterial),
-          meshWorldMatrix: record.source.root.matrixWorld.clone(),
+          meshWorldMatrix: sourceWorld,
           meshWorldInverse: _inverseMeshWorld.clone(),
         },
       });
@@ -1285,7 +1289,7 @@ export function SectionContourFills({
       });
       frameSource.borderRenderOrder = outline.renderOrder;
       assignBorderMaterial(helper, frameSource.borderMaterial, outline.renderOrder);
-      updateHelperMatrix(helper, record.source.root);
+      updateHelperMatrix(helper, capBuild.meshWorldMatrix);
       const boundary = buildSectionCapBoundaryPositions({
         multiPolygon: capBuildResults[index]!.polygon.multiPolygon,
         basis: planeBasis,

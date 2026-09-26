@@ -141,6 +141,10 @@ vi.mock('#components/geometry/graphics/three/use-section-view.js', () => ({
   useSectionViewFlags: () => mocks.sectionView,
 }));
 
+vi.mock('#components/geometry/graphics/three/react/kinematics-viewer.js', () => ({
+  useKinematicsViewer: () => () => undefined,
+}));
+
 vi.mock('#components/geometry/graphics/metadata/gltf-component-manifest.js', () => ({
   buildGltfComponentManifest: () => ({
     capabilities: {

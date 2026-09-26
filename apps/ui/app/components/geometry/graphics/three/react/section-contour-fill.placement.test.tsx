@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
+import type { GeometryComponentManifest } from '@taucad/types';
 import {
   buildSectionCapStyleKey,
   buildSectionCapTopologySourceSetKey,
@@ -27,6 +28,7 @@ import {
   extractSectionContours,
 } from '#components/geometry/graphics/three/utils/plane-mesh-contour.js';
 import { mergeTriangulatedContours } from '#components/geometry/graphics/three/utils/earcut-contour.js';
+import { registerGltfSectionSurfaceSources } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
 import type { SectionCapWorkerInputSource } from '#components/geometry/graphics/three/utils/section-cap-overlap-worker-protocol.js';
@@ -257,6 +259,44 @@ describe('SectionContourFills source records', () => {
     mesh.position.set(1, 0, 0);
     mesh.updateMatrixWorld(true);
     expect(buildSectionFillGeometryKey(record, plane)).not.toBe(sameFrameKey);
+  });
+
+  it('invalidates the geometry key when a kinematic pose moves a registered part away from its scene root', async () => {
+    const node = new THREE.Group();
+    node.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ color: 0xff_00_00 })));
+    const root = new THREE.Group();
+    root.add(node);
+    const manifest: GeometryComponentManifest = {
+      schemaVersion: 1,
+      rootId: 'root',
+      nodeOrder: [],
+      nodesById: {},
+      capabilities: {
+        canHide: true,
+        canIsolate: true,
+        canFocus: true,
+        canAdjustOpacity: true,
+        hasDrawings: false,
+        hasPreciseTopology: false,
+        exports: [],
+      },
+    };
+    await registerGltfSectionSurfaceSources({
+      scene: root,
+      manifest,
+      unitId: 'unit',
+      parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
+    });
+    const record = collectSectionSourceRecords(root)[0]!;
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    const asBuiltKey = buildSectionFillGeometryKey(record, plane);
+
+    // The pose composer moves the part's node; the glTF scene root the source registered under stays put.
+    node.matrixAutoUpdate = false;
+    node.matrix.makeRotationZ(Math.PI / 2);
+    node.updateMatrixWorld(true);
+
+    expect(buildSectionFillGeometryKey(record, plane)).not.toBe(asBuiltKey);
   });
 
   it('keeps geometry keys independent from source tint changes', () => {

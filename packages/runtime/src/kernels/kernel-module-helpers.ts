@@ -188,9 +188,9 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
 }
 
 /**
- * Create an admitted native declaration from a kernel producer's Draft-7 schema.
+ * Create an admitted native declaration from a kernel producer's JSON Schema.
  * @param defaults - Producer defaults in native coordinates.
- * @param schema - Producer Draft-7/OGC schema.
+ * @param schema - Producer JSON Schema, Draft-07 or 2020-12 as its `$schema` declares, with optional OGC keywords.
  * @param identity - Caller-owned stable schema identity and name.
  * @returns An admitted immutable native parameter declaration.
  * @public

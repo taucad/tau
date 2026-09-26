@@ -212,6 +212,8 @@ export const executeGeoSpecFile = async (options: {
         ...(options.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: options.matcherWallBackstop }),
         ...(options.forensic === undefined ? {} : { forensic: options.forensic }),
         ...(context.modelLoader ? { modelLoader: context.modelLoader } : {}),
+        ...(runner.nativeAssertions ? { nativeAssertions: runner.nativeAssertions } : {}),
+        ...(runner.nativeModelLoader ? { nativeModelLoader: runner.nativeModelLoader } : {}),
         ...(runner.stepLoader ? { stepLoader: runner.stepLoader } : {}),
         ...(runner.builtinModules ? { builtinModules: runner.builtinModules } : {}),
         ...(runner.internalProfile ? { internalProfile: runner.internalProfile } : {}),

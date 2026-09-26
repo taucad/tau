@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   GeoSpecPoolHostMessage,
   GeoSpecPoolWorkerHandle,
@@ -10,7 +10,13 @@ import { createGeoSpecPoolRunner, mergeShardResults } from '#runner/pool/pool.js
 import { sanitizePoolResult } from '#runner/pool/transport.js';
 import type { GeoSpecRunResult, GeoSpecTestCase } from '#runner/types.js';
 
-const bundle = { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
+const bundle = {
+  code: '',
+  issues: [],
+  success: true,
+  dependencies: [],
+  unresolvedPaths: [],
+};
 
 const passing = (name: string): GeoSpecRunResult => ({
   success: true,
@@ -38,7 +44,11 @@ const scriptedWorker = (script: {
   progress?: boolean;
   /** Emit one forensic measurement before a shard settlement. */
   forensic?: boolean;
-}): { handle: GeoSpecPoolWorkerHandle; sent: GeoSpecPoolHostMessage[]; terminated: () => boolean } => {
+}): {
+  handle: GeoSpecPoolWorkerHandle;
+  sent: GeoSpecPoolHostMessage[];
+  terminated: () => boolean;
+} => {
   const sent: GeoSpecPoolHostMessage[] = [];
   let listener: ((message: GeoSpecPoolWorkerMessage) => void) | undefined;
   let exit: ((details: { unexpected: boolean; message?: string }) => void) | undefined;
@@ -56,7 +66,14 @@ const scriptedWorker = (script: {
       }
       if (message.type === 'list-tests') {
         const names = script.onList?.(message.file) ?? [];
-        queueMicrotask(() => listener?.({ type: 'tests-listed', shardId: message.shardId, file: message.file, names }));
+        queueMicrotask(() =>
+          listener?.({
+            type: 'tests-listed',
+            shardId: message.shardId,
+            file: message.file,
+            names,
+          }),
+        );
         return;
       }
       const reply = script.onShard?.(message.shard.file, message.shard.testNamePattern);
@@ -64,7 +81,13 @@ const scriptedWorker = (script: {
         return;
       }
       if (script.progress === true) {
-        queueMicrotask(() => listener?.({ type: 'file-start', shardId: message.shard.id, file: message.shard.file }));
+        queueMicrotask(() =>
+          listener?.({
+            type: 'file-start',
+            shardId: message.shard.id,
+            file: message.shard.file,
+          }),
+        );
       }
       if (script.forensic === true) {
         queueMicrotask(() =>
@@ -100,18 +123,456 @@ const complete = (
   result: GeoSpecRunResult,
   over: Partial<GeoSpecPoolWorkerMessage> = {},
 ): GeoSpecPoolWorkerMessage => {
-  const message = { type: 'shard-complete', shardId: shard.id, file: shard.file, result, durationMs: 1, ...over };
+  const message = {
+    type: 'shard-complete',
+    shardId: shard.id,
+    file: shard.file,
+    result,
+    durationMs: 1,
+    ...over,
+  };
   return message as GeoSpecPoolWorkerMessage;
 };
 
 describe('createGeoSpecPoolRunner', () => {
+  it('should refuse a second run while its worker holds a delayed shard reply', async () => {
+    let listener: ((message: GeoSpecPoolWorkerMessage) => void) | undefined;
+    const sent: GeoSpecPoolHostMessage[] = [];
+    const handle: GeoSpecPoolWorkerHandle = {
+      postMessage(message) {
+        sent.push(message);
+      },
+      onMessage(next) {
+        listener = next;
+        queueMicrotask(() => {
+          next({ type: 'ready' });
+        });
+      },
+      onExit() {
+        /* The test controls shard replies. */
+      },
+      terminate() {
+        /* No live thread in this scripted handle. */
+      },
+    };
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => handle,
+      workers: 1,
+    });
+    try {
+      const first = runner.run({ files: ['a.geospec.ts'] });
+      await expect.poll(() => sent.filter((message) => message.type === 'run-shard').length).toBe(1);
+      const second = await runner.run({ files: ['b.geospec.ts'] });
+      expect(second).toMatchObject({
+        success: false,
+        failed: 1,
+        files: [],
+        issues: [
+          {
+            code: 'GEOSPEC_RUNNER_BUSY',
+            message: 'GeoSpec runner already has an active run.',
+          },
+        ],
+      });
+      expect(sent.filter((message) => message.type === 'run-shard').map((message) => message.shard.file)).toEqual([
+        'a.geospec.ts',
+      ]);
+      listener?.(complete({ id: 0, file: 'a.geospec.ts' }, passing('a')));
+      expect(await first).toMatchObject({
+        success: true,
+        files: [{ file: 'a.geospec.ts', result: { tests: [{ name: 'a' }] } }],
+      });
+
+      const third = runner.run({ files: ['c.geospec.ts'] });
+      await expect.poll(() => sent.filter((message) => message.type === 'run-shard').length).toBe(2);
+      listener?.(complete({ id: 0, file: 'c.geospec.ts' }, passing('c')));
+      expect(await third).toMatchObject({
+        success: true,
+        files: [{ file: 'c.geospec.ts', result: { tests: [{ name: 'c' }] } }],
+      });
+    } finally {
+      await runner.close();
+    }
+  });
+
+  it('should release the run reservation when input validation throws', async () => {
+    const worker = scriptedWorker({
+      onShard: (file) => complete({ id: 0, file }, passing(file)),
+    });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
+    try {
+      await expect(runner.run({ files: ['../outside.geospec.ts'] })).rejects.toThrow();
+      expect(await runner.run({ files: ['inside.geospec.ts'] })).toMatchObject({
+        success: true,
+        files: [{ file: 'inside.geospec.ts' }],
+      });
+    } finally {
+      await runner.close();
+    }
+  });
+
+  it('should own and terminate a worker returned after close began during spawn', async () => {
+    const creation = Promise.withResolvers<GeoSpecPoolWorkerHandle>();
+    let terminations = 0;
+    const handle: GeoSpecPoolWorkerHandle = {
+      postMessage() {
+        throw new Error('A late worker must not receive work.');
+      },
+      onMessage() {
+        /* The late handle is never admitted to a channel. */
+      },
+      onExit() {
+        /* The late handle is never admitted to a channel. */
+      },
+      terminate() {
+        terminations += 1;
+      },
+    };
+    const runner = createGeoSpecPoolRunner({
+      createWorker: async () => creation.promise,
+      workers: 1,
+    });
+    const running = runner.run({ files: ['a.geospec.ts'] });
+    const rejectedRun = expect(running).rejects.toThrow('closed during worker creation');
+    const closing = runner.close();
+    expect(await Promise.race([closing, Promise.resolve('pending')])).toBe('pending');
+    creation.resolve(handle);
+    await closing;
+    await rejectedRun;
+    expect(terminations).toBe(1);
+  });
+
+  it('should give concurrent close callers the same native cleanup barrier', async () => {
+    let listener: ((message: GeoSpecPoolWorkerMessage) => void) | undefined;
+    let terminations = 0;
+    const handle: GeoSpecPoolWorkerHandle = {
+      postMessage(message) {
+        if (message.type === 'initialize') {
+          queueMicrotask(() => {
+            listener?.({ type: 'initialized' });
+          });
+        }
+      },
+      onMessage(next) {
+        listener = next;
+        queueMicrotask(() => {
+          next({ type: 'ready' });
+        });
+      },
+      onExit() {
+        /* This handle exits only when terminated. */
+      },
+      terminate() {
+        terminations += 1;
+      },
+    };
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => handle,
+      workers: 1,
+      gracefulShutdown: true,
+      initializeWorker: (worker) => {
+        worker.postMessage({ type: 'initialize' });
+      },
+    });
+    await runner.run({ files: [] });
+    const first = runner.close();
+    const second = runner.close();
+    expect(second).toBe(first);
+    expect(await Promise.race([second, Promise.resolve('pending')])).toBe('pending');
+    listener?.({ type: 'initialized' });
+    await Promise.all([first, second]);
+    expect(terminations).toBe(1);
+  });
+
+  it('should not mistake a late initialization reply for native cleanup completion', async () => {
+    let listener: ((message: GeoSpecPoolWorkerMessage) => void) | undefined;
+    let initializationRequested = false;
+    let shutdownRequested = false;
+    let terminated = false;
+    const handle: GeoSpecPoolWorkerHandle = {
+      postMessage(message) {
+        if (message.type === 'initialize') {
+          initializationRequested = true;
+        }
+        if (message.type === 'shutdown') {
+          shutdownRequested = true;
+        }
+      },
+      onMessage(next) {
+        listener = next;
+        queueMicrotask(() => {
+          next({ type: 'ready' });
+        });
+      },
+      onExit() {
+        /* The test controls both acknowledgements. */
+      },
+      terminate() {
+        terminated = true;
+      },
+    };
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => handle,
+      workers: 1,
+      gracefulShutdown: true,
+      initializeWorker: (worker) => {
+        worker.postMessage({ type: 'initialize' });
+      },
+    });
+    const running = runner.run({ files: [] });
+    const rejectedRun = expect(running).rejects.toThrow('closed during worker initialization');
+    await expect.poll(() => initializationRequested).toBe(true);
+    const closing = runner.close();
+    await expect.poll(() => shutdownRequested).toBe(true);
+    listener?.({ type: 'initialized' });
+    expect(await Promise.race([closing, Promise.resolve('pending')])).toBe('pending');
+    expect(terminated).toBe(false);
+    listener?.({ type: 'initialized' });
+    await closing;
+    await rejectedRun;
+    expect(terminated).toBe(true);
+  });
+
+  it('should give concurrent close callers the same prompt shutdown error and terminate once', async () => {
+    let listener: ((message: GeoSpecPoolWorkerMessage) => void) | undefined;
+    let terminations = 0;
+    const handle: GeoSpecPoolWorkerHandle = {
+      postMessage(message) {
+        if (message.type === 'initialize') {
+          queueMicrotask(() => {
+            listener?.({ type: 'initialized' });
+          });
+        } else if (message.type === 'shutdown') {
+          queueMicrotask(() => {
+            listener?.({
+              type: 'initialization-error',
+              message: 'engine close failed',
+            });
+          });
+        }
+      },
+      onMessage(next) {
+        listener = next;
+        queueMicrotask(() => {
+          next({ type: 'ready' });
+        });
+      },
+      onExit() {
+        /* The failed shutdown is followed by explicit termination. */
+      },
+      terminate() {
+        terminations += 1;
+      },
+    };
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => handle,
+      workers: 1,
+      gracefulShutdown: true,
+      initializeWorker: (worker) => {
+        worker.postMessage({ type: 'initialize' });
+      },
+    });
+    await runner.run({ files: [] });
+    const first = runner.close();
+    const second = runner.close();
+    expect(second).toBe(first);
+    await Promise.all([
+      expect(first).rejects.toThrow('engine close failed'),
+      expect(second).rejects.toThrow('engine close failed'),
+    ]);
+    expect(terminations).toBe(1);
+  });
+
+  it.each(['ack', 'forced-exit'] as const)(
+    'should settle an active shard when close ends its worker by %s',
+    async (mode) => {
+      let listener: ((message: GeoSpecPoolWorkerMessage) => void) | undefined;
+      let onExit: ((details: { unexpected: boolean; message?: string }) => void) | undefined;
+      let activeShard: { id: number; file: string } | undefined;
+      let terminations = 0;
+      const handle: GeoSpecPoolWorkerHandle = {
+        postMessage(message) {
+          if (message.type === 'initialize') {
+            queueMicrotask(() => {
+              listener?.({ type: 'initialized' });
+            });
+          } else if (message.type === 'run-shard') {
+            activeShard = message.shard;
+          } else if (message.type === 'shutdown' && mode === 'ack') {
+            queueMicrotask(() => {
+              if (activeShard) {
+                listener?.({
+                  type: 'shard-complete',
+                  shardId: activeShard.id,
+                  file: activeShard.file,
+                  result: passing('done'),
+                  durationMs: 1,
+                });
+              }
+              listener?.({ type: 'initialized' });
+            });
+          }
+        },
+        onMessage(next) {
+          listener = next;
+          queueMicrotask(() => {
+            next({ type: 'ready' });
+          });
+        },
+        onExit(next) {
+          onExit = next;
+        },
+        terminate() {
+          terminations += 1;
+          onExit?.({ unexpected: false, message: 'worker closed' });
+        },
+      };
+      const runner = createGeoSpecPoolRunner({
+        createWorker: () => handle,
+        workers: 1,
+        gracefulShutdown: true,
+        initializeWorker: (worker) => {
+          worker.postMessage({ type: 'initialize' });
+        },
+      });
+      const running = runner.run({ files: ['a.geospec.ts'] });
+      await expect.poll(() => activeShard).toBeDefined();
+      if (mode === 'forced-exit') {
+        vi.useFakeTimers();
+      }
+      try {
+        const closing = runner.close();
+        if (mode === 'forced-exit') {
+          const refusedClose = expect(closing).rejects.toThrow('Native pool shutdown timed out.');
+          await vi.advanceTimersByTimeAsync(10_001);
+          await refusedClose;
+        } else {
+          await closing;
+        }
+        const result = await running;
+        expect(result.success).toBe(false);
+        expect(result.issues?.map((issue) => issue.code)).toContain('GEOSPEC_RUNNER_ABORTED');
+        expect(terminations).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('should wait for a native cleanup acknowledgement before terminating the worker', async () => {
+    let listener: ((message: GeoSpecPoolWorkerMessage) => void) | undefined;
+    let shutdownRequested = false;
+    let terminated = false;
+    const handle: GeoSpecPoolWorkerHandle = {
+      postMessage(message) {
+        if (message.type === 'initialize') {
+          queueMicrotask(() => {
+            listener?.({ type: 'initialized' });
+          });
+        }
+        if (message.type === 'shutdown') {
+          shutdownRequested = true;
+        }
+      },
+      onMessage(next) {
+        listener = next;
+        queueMicrotask(() => {
+          next({ type: 'ready' });
+        });
+      },
+      onExit() {
+        /* The scripted worker stays live until termination. */
+      },
+      terminate() {
+        terminated = true;
+      },
+    };
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => handle,
+      workers: 1,
+      gracefulShutdown: true,
+      initializeWorker: (worker) => {
+        worker.postMessage({ type: 'initialize' });
+      },
+    });
+    await runner.run({ files: [] });
+    const closing = runner.close();
+    await vi.waitFor(() => {
+      expect(shutdownRequested).toBe(true);
+    });
+    expect(terminated).toBe(false);
+    listener?.({ type: 'initialized' });
+    await closing;
+    expect(terminated).toBe(true);
+  });
+
+  it('should close initialized peers when a native worker rejects initialization', async () => {
+    const sent: GeoSpecPoolHostMessage[][] = [[], []];
+    const terminated = [false, false];
+    let created = 0;
+    const handles = [0, 1].map((index): GeoSpecPoolWorkerHandle => {
+      let listener: ((message: GeoSpecPoolWorkerMessage) => void) | undefined;
+      return {
+        postMessage(message) {
+          sent[index]!.push(message);
+          if (message.type === 'initialize') {
+            queueMicrotask(() => {
+              listener?.(
+                index === 0
+                  ? { type: 'initialized' }
+                  : {
+                      type: 'initialization-error',
+                      message: 'native unavailable',
+                    },
+              );
+            });
+          }
+          if (message.type === 'shutdown') {
+            queueMicrotask(() => {
+              listener?.({ type: 'initialized' });
+            });
+          }
+        },
+        onMessage(next) {
+          listener = next;
+          queueMicrotask(() => {
+            next({ type: 'ready' });
+          });
+        },
+        onExit() {
+          /* The scripted worker stays live until termination. */
+        },
+        terminate() {
+          terminated[index] = true;
+        },
+      };
+    });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => handles[created++]!,
+      workers: 2,
+      gracefulShutdown: true,
+      initializeWorker: (worker) => {
+        worker.postMessage({ type: 'initialize' });
+      },
+    });
+    await expect(runner.run({ files: ['a.geospec.ts'] })).rejects.toThrow('native unavailable');
+    expect(sent[0]).toContainEqual({ type: 'shutdown' });
+    expect(terminated).toStrictEqual([true, true]);
+  });
+
   it('should forward worker forensic events with their shard identity', async () => {
     const events: GeoSpecRunnerEvent[] = [];
     const worker = scriptedWorker({
       forensic: true,
       onShard: (file) => complete({ id: 0, file }, passing(file)),
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
     runner.on('forensic', (event) => events.push(event));
 
     await runner.run({ files: ['a.geospec.ts'], forensic: true });
@@ -139,11 +600,17 @@ describe('createGeoSpecPoolRunner', () => {
       runner.on(type, (event) => events.push(event));
     }
 
-    const result = await runner.run({ files: ['b.geospec.ts', 'a.geospec.ts'] });
+    const result = await runner.run({
+      files: ['b.geospec.ts', 'a.geospec.ts'],
+    });
     await runner.close();
 
     expect(result.files.map((file) => file.file)).toStrictEqual(['b.geospec.ts', 'a.geospec.ts']);
-    expect({ success: result.success, passed: result.passed, selected: result.selectedTests }).toStrictEqual({
+    expect({
+      success: result.success,
+      passed: result.passed,
+      selected: result.selectedTests,
+    }).toStrictEqual({
       success: true,
       passed: 2,
       selected: 2,
@@ -156,10 +623,18 @@ describe('createGeoSpecPoolRunner', () => {
     const worker = scriptedWorker({
       onShard: (file) => {
         shardMessages += 1;
-        return { type: 'shard-error', shardId: 0, file, message: 'the worker blew up' };
+        return {
+          type: 'shard-error',
+          shardId: 0,
+          file,
+          message: 'the worker blew up',
+        };
       },
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
 
     const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
@@ -180,7 +655,11 @@ describe('createGeoSpecPoolRunner', () => {
         return complete({ id: 0, file }, passing(pattern ?? 'whole'));
       },
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+      timings,
+    });
 
     const result = await runner.run({ files: ['slow.geospec.ts'] });
     await runner.close();
@@ -226,7 +705,11 @@ describe('createGeoSpecPoolRunner', () => {
         return complete({ id: 0, file }, passing('whole'));
       },
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+      timings,
+    });
 
     await runner.run({ files: ['slow.geospec.ts'] });
     await runner.close();
@@ -237,14 +720,25 @@ describe('createGeoSpecPoolRunner', () => {
   it('should record shard timings so the next run schedules on them', async () => {
     const timings = openShardTimings(undefined);
     const worker = scriptedWorker({
-      onShard: (file) => complete({ id: 0, file }, passing(file), { durationMs: 4321, workerMemoryBytes: 99 }),
+      onShard: (file) =>
+        complete({ id: 0, file }, passing(file), {
+          durationMs: 4321,
+          workerMemoryBytes: 99,
+        }),
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+      timings,
+    });
 
     await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
-    expect(timings.read('a.geospec.ts')).toStrictEqual({ durationMs: 4321, peakRssBytes: 99 });
+    expect(timings.read('a.geospec.ts')).toStrictEqual({
+      durationMs: 4321,
+      peakRssBytes: 99,
+    });
   });
 
   it('should follow affinity: a warm worker gets the shard it already loaded', async () => {
@@ -253,10 +747,16 @@ describe('createGeoSpecPoolRunner', () => {
     const worker = scriptedWorker({
       onShard: (file) => {
         runs.push(file);
-        return complete({ id: 0, file }, passing(file), { primaryLoadKey: 'shared-key' });
+        return complete({ id: 0, file }, passing(file), {
+          primaryLoadKey: 'shared-key',
+        });
       },
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+      timings,
+    });
 
     await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
     await runner.close();
@@ -284,7 +784,10 @@ describe('createGeoSpecPoolRunner', () => {
         // The pool never terminates a healthy worker mid-run.
       },
     };
-    const runner = createGeoSpecPoolRunner({ createWorker: () => handle, workers: 1 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => handle,
+      workers: 1,
+    });
 
     const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
@@ -295,7 +798,11 @@ describe('createGeoSpecPoolRunner', () => {
 
   it('should terminate a worker that misses the shard watchdog', async () => {
     const worker = scriptedWorker({ onShard: () => undefined });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, shardTimeout: 10 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+      shardTimeout: 10,
+    });
 
     const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
@@ -312,7 +819,10 @@ describe('createGeoSpecPoolRunner', () => {
         return complete({ id: 0, file }, failing(file));
       },
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
 
     await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'], bail: true });
     await runner.close();
@@ -329,9 +839,14 @@ describe('createGeoSpecPoolRunner', () => {
         return complete({ id: 0, file }, passing(file));
       },
     });
-    runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
 
-    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
+    const result = await runner.run({
+      files: ['a.geospec.ts', 'b.geospec.ts'],
+    });
     await runner.close();
 
     expect(result.issues?.[0]?.code).toBe('GEOSPEC_RUNNER_ABORTED');
@@ -342,7 +857,10 @@ describe('createGeoSpecPoolRunner', () => {
     const worker = scriptedWorker({
       onShard: (file) => complete({ id: 0, file }, { success: true, passed: true, tests: [], bundle }),
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
 
     const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
@@ -352,7 +870,10 @@ describe('createGeoSpecPoolRunner', () => {
 
   it('should refuse to run once closed', async () => {
     const worker = scriptedWorker({});
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
     await runner.close();
     await runner.close();
 
@@ -362,14 +883,26 @@ describe('createGeoSpecPoolRunner', () => {
   });
 
   it('should pass the run-wide test-name pattern to every shard', async () => {
-    const worker = scriptedWorker({ onShard: (file) => complete({ id: 0, file }, passing(file)) });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    const worker = scriptedWorker({
+      onShard: (file) => complete({ id: 0, file }, passing(file)),
+    });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
 
-    await runner.run({ files: ['a.geospec.ts'], testNamePattern: /volume/u, testTimeout: 1234 });
+    await runner.run({
+      files: ['a.geospec.ts'],
+      testNamePattern: /volume/u,
+      testTimeout: 1234,
+    });
     await runner.close();
 
     const dispatched = worker.sent.find((message) => message.type === 'run-shard');
-    expect(dispatched).toMatchObject({ testNamePattern: '/volume/u', testTimeout: 1234 });
+    expect(dispatched).toMatchObject({
+      testNamePattern: '/volume/u',
+      testTimeout: 1234,
+    });
   });
 });
 
@@ -405,7 +938,12 @@ describe('sanitizePoolResult', () => {
       nativeXde: { delete: () => undefined },
     };
 
-    const sanitized = sanitizePoolResult({ success: true, passed: true, tests: [subjectTest(live)], bundle });
+    const sanitized = sanitizePoolResult({
+      success: true,
+      passed: true,
+      tests: [subjectTest(live)],
+      bundle,
+    });
 
     expect(sanitized.success && sanitized.tests[0]?.assertions[0]?.subject).toStrictEqual({
       kind: 'geometry-subject-ref',
@@ -428,7 +966,12 @@ describe('sanitizePoolResult', () => {
   });
 
   it('should carry a non-subject value across unchanged', () => {
-    const sanitized = sanitizePoolResult({ success: true, passed: true, tests: [subjectTest(42)], bundle });
+    const sanitized = sanitizePoolResult({
+      success: true,
+      passed: true,
+      tests: [subjectTest(42)],
+      bundle,
+    });
 
     expect(sanitized.success && sanitized.tests[0]?.assertions[0]?.subject).toBe(42);
   });
@@ -438,14 +981,24 @@ describe('sanitizePoolResult', () => {
       success: true,
       passed: true,
       tests: [],
-      bundle: { ...bundle, code: 'export const x = 1;', sourceMap: '{"version":3}' },
+      bundle: {
+        ...bundle,
+        code: 'export const x = 1;',
+        sourceMap: '{"version":3}',
+      },
     });
 
     expect(sanitized.bundle).toMatchObject({ code: '', sourceMap: '' });
   });
 
   it('should elide the bundle of a failed run and tolerate its absence', () => {
-    expect(sanitizePoolResult({ success: false, issues: [], bundle: { ...bundle, code: 'x' } }).bundle?.code).toBe('');
+    expect(
+      sanitizePoolResult({
+        success: false,
+        issues: [],
+        bundle: { ...bundle, code: 'x' },
+      }).bundle?.code,
+    ).toBe('');
     expect(sanitizePoolResult({ success: false, issues: [] }).bundle).toBeUndefined();
   });
 });
@@ -491,9 +1044,15 @@ describe('memory-class scheduling', () => {
         },
       };
     };
-    const runner = createGeoSpecPoolRunner({ createWorker: makeWorker, workers: 2, timings });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: makeWorker,
+      workers: 2,
+      timings,
+    });
 
-    const result = await runner.run({ files: ['heavy-a.geospec.ts', 'heavy-b.geospec.ts'] });
+    const result = await runner.run({
+      files: ['heavy-a.geospec.ts', 'heavy-b.geospec.ts'],
+    });
     await runner.close();
 
     expect(result.success).toBe(true);
@@ -504,9 +1063,17 @@ describe('memory-class scheduling', () => {
 describe('the remaining refusal legs', () => {
   it('should fail a shard whose worker answered with a test list', async () => {
     const worker = scriptedWorker({
-      onShard: (file) => ({ type: 'tests-listed', shardId: 0, file, names: ['s > one'] }),
+      onShard: (file) => ({
+        type: 'tests-listed',
+        shardId: 0,
+        file,
+        names: ['s > one'],
+      }),
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
 
     const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
@@ -523,9 +1090,14 @@ describe('the remaining refusal legs', () => {
         return complete({ id: 0, file }, passing(file));
       },
     });
-    runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
 
-    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
+    const result = await runner.run({
+      files: ['a.geospec.ts', 'b.geospec.ts'],
+    });
     await runner.close();
 
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted: requested');
@@ -540,9 +1112,14 @@ describe('the remaining refusal legs', () => {
         return complete({ id: 0, file }, passing(file));
       },
     });
-    runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
 
-    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
+    const result = await runner.run({
+      files: ['a.geospec.ts', 'b.geospec.ts'],
+    });
     await runner.close();
 
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted.');
@@ -555,7 +1132,10 @@ describe('the worker channel', () => {
       onShard: (file) => complete({ id: 0, file }, passing(file)),
       progress: true,
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+    });
 
     const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
@@ -583,9 +1163,14 @@ describe('the worker channel', () => {
         // The worker is already gone.
       },
     };
-    const runner = createGeoSpecPoolRunner({ createWorker: () => handle, workers: 1 });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => handle,
+      workers: 1,
+    });
 
-    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
+    const result = await runner.run({
+      files: ['a.geospec.ts', 'b.geospec.ts'],
+    });
     await runner.close();
 
     expect(result.files).toHaveLength(2);
@@ -599,7 +1184,11 @@ describe('the worker channel', () => {
       onList: () => ['s > one'],
       onShard: (file) => complete({ id: 0, file }, passing(file)),
     });
-    const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => worker.handle,
+      workers: 1,
+      timings,
+    });
 
     await runner.run({
       files: ['slow.geospec.ts'],
@@ -610,8 +1199,18 @@ describe('the worker channel', () => {
     await runner.close();
 
     expect(worker.sent.filter((message) => message.type !== 'shutdown')).toMatchObject([
-      { type: 'list-tests', testTimeout: 7000, matcherWallBackstop: 9000, forensic: true },
-      { type: 'run-shard', testTimeout: 7000, matcherWallBackstop: 9000, forensic: true },
+      {
+        type: 'list-tests',
+        testTimeout: 7000,
+        matcherWallBackstop: 9000,
+        forensic: true,
+      },
+      {
+        type: 'run-shard',
+        testTimeout: 7000,
+        matcherWallBackstop: 9000,
+        forensic: true,
+      },
     ]);
   });
 });

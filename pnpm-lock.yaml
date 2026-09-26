@@ -3463,6 +3463,9 @@ importers:
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../core/geometry
+      '@taucad/geospec-engine-native':
+        specifier: workspace:*
+        version: link:../geospec-engine-native
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../plugins/gltf
@@ -4253,6 +4256,9 @@ importers:
 
   packages/revisions:
     dependencies:
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../libs/filesystem
       '@taucad/project-core':
         specifier: workspace:*
         version: link:../core/project
@@ -4265,16 +4271,13 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-      "@taucad/filesystem":
-        specifier: workspace:*
-        version: link:../../libs/filesystem
     devDependencies:
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
       xstate:
         specifier: 'catalog:'
         version: 5.32.1
-      "@taucad/utils":
-        specifier: workspace:*
-        version: link:../../libs/utils
 
   packages/runtime:
     dependencies:

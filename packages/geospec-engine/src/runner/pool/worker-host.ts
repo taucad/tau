@@ -40,6 +40,8 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
   const runner = {
     filesystem: options.filesystem,
     ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
+    ...(options.nativeAssertions ? { nativeAssertions: options.nativeAssertions } : {}),
+    ...(options.nativeModelLoader ? { nativeModelLoader: options.nativeModelLoader } : {}),
     ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
     ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
   };
@@ -51,12 +53,22 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
   // inside the worker (the OCCT heap is shared).
   let chain: Promise<void> = Promise.resolve();
   const enqueue = (work: () => Promise<void>): void => {
-    // Settled either way: a rejected predecessor must not stall the queue.
+    const predecessor = chain;
     chain = (async () => {
       try {
-        await chain;
-      } finally {
+        await predecessor;
+      } catch {
+        // A rejected predecessor must not stall shutdown behind it.
+      }
+      try {
         await work();
+      } catch (error) {
+        try {
+          options.postMessage({ type: 'initialization-error', message: errorMessage(error) });
+        } catch {
+          // A closed message port has no remaining receiver; do not leak a
+          // rejected queue promise after its worker has been torn down.
+        }
       }
     })();
   };
@@ -75,8 +87,31 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
     }
     if (message.type === 'shutdown') {
       bundleCache.clear();
-      await context.resourceScope.dispose();
-      await options.onShutdown?.();
+      let failed = false;
+      let failure: unknown;
+      try {
+        await context.resourceScope.dispose();
+        await options.nativeModelLoader?.releaseAll();
+      } catch (error) {
+        failed = true;
+        failure = error;
+      }
+      try {
+        await options.onShutdown?.();
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
+      }
+      if (failed) {
+        options.postMessage({ type: 'initialization-error', message: errorMessage(failure) });
+        return;
+      }
+      if (options.nativeAssertions) {
+        // Native-only cleanup acknowledgement over the existing worker wire.
+        options.postMessage({ type: 'initialized' });
+      }
       return;
     }
 

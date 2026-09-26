@@ -30,7 +30,7 @@ export type GeoSpecPreviewResult = {
 declare module 'vitest/node' {
   // oxlint-disable-next-line typescript/consistent-type-definitions -- Module augmentation must merge Vitest's interface.
   interface BrowserCommandContext {
-    readonly context: BrowserContext;
+    context: BrowserContext;
   }
 }
 

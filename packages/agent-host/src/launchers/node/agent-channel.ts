@@ -62,7 +62,8 @@ const defaultKeepaliveInterval = 2000;
  * @param endpoint - Socket, message port, or already-wrapped port.
  * @param launcher - The always-on host answering the vocabulary.
  * @param options - The owner's build, keepalive and revision root.
- * @returns The channel handle for this one connection.
+ * @returns The channel handle for this one connection. The agent wire notifies nothing, so the handle names no
+ * protocol (and not the internal v1 compatibility one).
  * @public
  *
  * @example <caption>Serve one accepted WebSocket</caption>
@@ -82,7 +83,7 @@ export const serveAgentChannel = (
   endpoint: AgentChannelEndpoint,
   launcher: NodeAgentLauncher,
   options: ServeAgentChannelOptions,
-): ChannelServerHandle<AgentWireCompatProtocol> => {
+): ChannelServerHandle => {
   /* I32: the compatibility window is open, so this connection also answers a v1 client (`request`, `events`, and
    * `liveEvents` with no chat), from the same launcher. */
   const v1 = createV1Session(launcher, options.revisions);

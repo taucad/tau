@@ -1,7 +1,7 @@
 import { followChat } from '@taucad/agent-host';
 import type { AgentLogEvent, ChatLedger, ChatRead } from '@taucad/agent-host';
 import { commandPayloads } from '@taucad/agent-host/wire';
-import type { CommandVerb } from '@taucad/agent-host/wire';
+import type { CommandAnswer, CommandVerb } from '@taucad/agent-host/wire';
 
 import type { HostControlOutbound, HostRunState } from '#host.schemas.js';
 
@@ -98,10 +98,17 @@ export const startRunReporter = (options: RunReporterOptions): RunReporter => {
     }
   };
   const watched = new Set<string>();
+  /** Chats named again while their follow was ending: followed once more, so a run admitted in its final read is not
+   * dropped (W4.r2). */
+  const again = new Set<string>();
   const pump = async (chatId: string): Promise<void> => {
-    // A chat's pull ends once its current run is terminal; the next command that names the chat watches it again.
+    /* A chat's pull ends once caught up and its current run is terminal, or it has none; the next command that names
+     * the chat watches it again. */
     const until = (ledger: ChatLedger): boolean => {
-      const lifecycle = ledger.currentRunId === undefined ? undefined : ledger.runs[ledger.currentRunId]?.lifecycle;
+      if (ledger.currentRunId === undefined) {
+        return true;
+      }
+      const lifecycle = ledger.runs[ledger.currentRunId]?.lifecycle;
       return lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled';
     };
     for await (const { events } of followChat(options.read, chatId, { signal: controller.signal, until })) {
@@ -121,23 +128,27 @@ export const startRunReporter = (options: RunReporterOptions): RunReporter => {
       }
     }
   };
-  return {
-    watch(chatId: string): void {
-      if (watched.has(chatId)) {
-        return;
+  const watch = (chatId: string): void => {
+    if (watched.has(chatId)) {
+      again.add(chatId);
+      return;
+    }
+    watched.add(chatId);
+    // async-iife: bootstrap -- the pull ends with the run or the launcher; `close()` is the only settlement a caller has.
+    void (async (): Promise<void> => {
+      try {
+        await pump(chatId);
+      } catch {
+        /* The launcher closed under the read; there is nothing left to report to. */
       }
-      watched.add(chatId);
-      // async-iife: bootstrap -- the pull ends with the run or the launcher; `close()` is the only settlement a caller has.
-      void (async (): Promise<void> => {
-        try {
-          await pump(chatId);
-        } catch {
-          /* The launcher closed under the read; there is nothing left to report to. */
-        } finally {
-          watched.delete(chatId);
-        }
-      })();
-    },
+      watched.delete(chatId);
+      if (again.delete(chatId) && !controller.signal.aborted) {
+        watch(chatId);
+      }
+    })();
+  };
+  return {
+    watch,
     flush(): void {
       const pending = [...undelivered.values()];
       for (const frame of pending) {
@@ -151,15 +162,24 @@ export const startRunReporter = (options: RunReporterOptions): RunReporter => {
 };
 
 /**
- * The chat a command names, when the reporter should follow it: a command whose payload parses, other than `attach`,
- * which only reads (W4.r1).
+ * The chat an answered command names, when the reporter should follow it: a command whose payload parses and that was
+ * not refused. `attach` only reads (W4.r1), unless it took over a run a restart left open, which it records `failed`
+ * (W4.r2).
  *
  * @param command - The command as the daemon received it, not yet parsed.
+ * @param answer - The command's answer.
  * @returns The chat to watch, if any.
  * @public
  */
-export const chatToReport = (command: Readonly<{ type: string; payload?: unknown }>): string | undefined => {
-  if (command.type === 'attach' || !Object.hasOwn(commandPayloads, command.type)) {
+export const chatToReport = (
+  command: Readonly<{ type: string; payload?: unknown }>,
+  answer: CommandAnswer,
+): string | undefined => {
+  if (answer.status === 'refused' || !Object.hasOwn(commandPayloads, command.type)) {
+    return undefined;
+  }
+  const takeover = 'details' in answer && answer.details['takeover'] === true;
+  if (command.type === 'attach' && !takeover) {
     return undefined;
   }
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowed by the hasOwn check above.

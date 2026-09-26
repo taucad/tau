@@ -226,12 +226,113 @@ describe('startRunReporter', () => {
     ]);
   });
 
-  it('names the chat of a parsed command, and none for attach or an unreadable payload', () => {
+  // W4.r2: a follow of a chat with no run ends once caught up, instead of parking until the daemon closes.
+  it('ends a follow once caught up on a chat with no run', async () => {
+    const rows: Row[] = [message('chat-1', 'run-1', 1)];
+    const answered = readOf(rows);
+    let parked = 0;
+    const reporter = startRunReporter({
+      read: async (input) => {
+        const answer = await answered(input);
+        if (answer.status === 'batch' && answer.events.length > 0) {
+          return answer;
+        }
+        // A long poll: nothing new parks the read until its signal ends.
+        parked += 1;
+        await new Promise((resolve) => {
+          input.signal?.addEventListener('abort', resolve, { once: true });
+        });
+        parked -= 1;
+        return answer;
+      },
+      send: () => undefined,
+    });
+    reporter.watch('chat-1');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    const parkedBeforeClose = parked;
+    reporter.close();
+
+    expect(parkedBeforeClose).toBe(0);
+  });
+
+  // W4.r2: a run admitted while the last run's follow is in its final read is followed, not dropped.
+  it("follows a run whose watch landed during the previous follow's final read", async () => {
+    const rows: Row[] = [
+      lifecycle({ chatId: 'chat-1', runId: 'run-1', state: 'admitted', sequence: 1 }),
+      lifecycle({ chatId: 'chat-1', runId: 'run-1', state: 'completed', sequence: 2 }),
+    ];
+    const finalRead = Promise.withResolvers<void>();
+    const inFinalRead = Promise.withResolvers<void>();
+    const sent: HostControlOutbound[] = [];
+    const reporter = startRunReporter({
+      read: async ({ chatId, cursor }) => {
+        // One row per batch, answered from the log as it was when the read was asked.
+        const events = rows.filter((row) => row.chatId === chatId).map((row) => row.event);
+        const batch = events.slice(cursor, cursor + 1);
+        const answer: ReadAnswer = {
+          status: 'batch',
+          chatId,
+          cursor,
+          nextCursor: cursor + batch.length,
+          endCursor: events.length,
+          events: batch,
+        };
+        if (cursor === 1) {
+          inFinalRead.resolve();
+          await finalRead.promise;
+        }
+        return answer;
+      },
+      send: (frame) => sent.push(frame),
+    });
+    reporter.watch('chat-1');
+    await inFinalRead.promise;
+    rows.push(
+      lifecycle({ chatId: 'chat-1', runId: 'run-2', state: 'admitted', sequence: 3 }),
+      lifecycle({ chatId: 'chat-1', runId: 'run-2', state: 'completed', sequence: 4 }),
+    );
+    reporter.watch('chat-1');
+    finalRead.resolve();
+    await drain(sent, 4);
+    reporter.close();
+
+    expect(sent.map((frame) => (frame.type === 'run' ? `${frame.runId}:${frame.state}` : frame.type))).toEqual([
+      'run-1:admitted',
+      'run-1:completed',
+      'run-2:admitted',
+      'run-2:completed',
+    ]);
+  });
+
+  it('names the chat of an answered command, and none for a refusal, a plain attach or an unreadable payload', () => {
+    const key = { commandId: 'cmd-1', generation: 1 } as const;
+    const applied = { ...key, status: 'applied', effect: 'durable', cursor: 0 } as const;
+    const refused = {
+      ...key,
+      status: 'refused',
+      effect: 'not-applied',
+      code: 'RUN_ID_TAKEN',
+      message: 'taken',
+    } as const;
+    const read = { ...key, status: 'applied', effect: 'not-applied', details: { takeover: false } } as const;
     expect([
-      chatToReport({ type: 'cancel', payload: { chatId: 'chat-1', runId: 'run-1' } }),
-      chatToReport({ type: 'attach', payload: { chatId: 'chat-1' } }),
-      chatToReport({ type: 'start' }),
-      chatToReport({ type: 'no-such-verb', payload: { chatId: 'chat-1' } }),
-    ]).toEqual(['chat-1', undefined, undefined, undefined]);
+      chatToReport({ type: 'cancel', payload: { chatId: 'chat-1', runId: 'run-1' } }, applied),
+      chatToReport({ type: 'cancel', payload: { chatId: 'chat-1', runId: 'run-1' } }, refused),
+      chatToReport({ type: 'attach', payload: { chatId: 'chat-1' } }, read),
+      chatToReport({ type: 'start' }, applied),
+      chatToReport({ type: 'no-such-verb', payload: { chatId: 'chat-1' } }, applied),
+    ]).toEqual(['chat-1', undefined, undefined, undefined, undefined]);
+  });
+
+  // W4.r2: the attach that records a restart's abandoned run wrote `failed`, and the directory must hear it.
+  it('names the chat of an attach that took over an abandoned run', () => {
+    expect(
+      chatToReport(
+        { type: 'attach', payload: { chatId: 'chat-1' } },
+        { commandId: 'cmd-1', generation: 1, status: 'applied', effect: 'not-applied', details: { takeover: true } },
+      ),
+    ).toBe('chat-1');
   });
 });

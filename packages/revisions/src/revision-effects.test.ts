@@ -3339,6 +3339,105 @@ describe('the revision stream subscription (W5b; RV-W5b F3, F5, F9)', () => {
     expect(performance.now() - stopped).toBeLessThan(1000);
     actor.stop();
   });
+
+  /* W13e: the echo of this device's own push costs no git request at all. */
+  it('pulls on an entry only when a ref it moved is at a head this device does not hold', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const commit = async (content: string): Promise<RevisionId> => {
+      const receipt = await context.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['main.ts', content]]),
+        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        summary: { generated: 'Main' },
+      });
+      return revisionId(receipt.commitId);
+    };
+    const pushed = await commit('pushed\n');
+    const theirs = await commit('theirs\n');
+    /* What this device's push left: main's tracking ref, and a chat ref native
+     * `git push` writes no tracking ref for. */
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: pushed });
+    await context.port.updateRef({ name: 'refs/tau/chats/c1', expectedHead: undefined, head: pushed });
+    const transport = { listRemoteRefs: 0, fetch: 0 };
+    let reading = 0;
+    let stream: RevisionStreamHandlers | undefined;
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        readRef: async (name) => {
+          reading += 1;
+          try {
+            return await context.port.readRef(name);
+          } finally {
+            reading -= 1;
+          }
+        },
+        listRemoteRefs: async () => {
+          transport.listRemoteRefs += 1;
+          return [{ name: 'refs/heads/main', head: pushed }];
+        },
+        fetch: async () => {
+          transport.fetch += 1;
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => context.filesystem,
+      remoteMoves: (_input, handlers) => {
+        stream = handlers;
+        return () => undefined;
+      },
+    });
+    /* The host's pull on every move it is told of: the scheduler's `remoteMoved` → `sync.fetch`. */
+    const pulls: Array<Promise<unknown>> = [];
+    const host = createActor(
+      createMachine({
+        invoke: { id: 'moves', src: actors.sync.remoteMoves, input: { projectId: 'project-1' } },
+        on: {
+          remoteMoved: (_, enq) => {
+            enq(() => {
+              pulls.push(run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 }));
+            });
+            return {};
+          },
+        },
+      }),
+    );
+    host.start();
+    host.getSnapshot().children['moves']?.send({ type: 'watch', remote: 'tau' });
+    stream?.watching?.();
+    const deliver = async (moved: readonly string[], heads: ReadonlyArray<readonly [string, string]>) => {
+      stream?.moved({ generation: 1, refs: moved, heads: new Map(heads) });
+      await vi.waitFor(() => {
+        expect(reading).toBe(0);
+      });
+      await Promise.all(pulls);
+      return { pulls: pulls.length, ...transport };
+    };
+
+    /* The echo: main at the head its push tracked, the chat at the local head it pushed, and an
+     * operation log, which is never pulled. */
+    await expect(
+      deliver(
+        ['refs/heads/main', 'refs/tau/chats/c1', 'refs/tau/ops/device-b'],
+        [
+          ['refs/heads/main', pushed],
+          ['refs/tau/chats/c1', pushed],
+          ['refs/tau/ops/device-b', theirs],
+        ],
+      ),
+    ).resolves.toEqual({ pulls: 0, listRemoteRefs: 0, fetch: 0 });
+    /* Another device's head pulls. */
+    await expect(deliver(['refs/heads/main'], [['refs/heads/main', theirs]])).resolves.toMatchObject({
+      pulls: 1,
+      listRemoteRefs: 1,
+    });
+    /* So does an entry without heads — an older server's, or a removal. */
+    await expect(deliver(['refs/heads/main'], [])).resolves.toMatchObject({ pulls: 2, listRemoteRefs: 2 });
+    host.stop();
+  }, 30_000);
 });
 
 describe('the fact a released turn publishes', () => {

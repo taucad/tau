@@ -32,8 +32,18 @@ import type { RevisionPortError } from '#revision-port.js';
  */
 export const revisionStreamId = (projectId: string): string => `revision:${projectId}`;
 
-/** One wake-up: the newest generation a page announced and every ref it moved. @public */
-export type RevisionStreamMove = Readonly<{ generation: number; refs: readonly string[] }>;
+/**
+ * One wake-up: the newest generation a page announced, every ref it moved and,
+ * for each ref whose newest entry named it, the head it moved to (W13e). A ref
+ * with no head — an older server, a removal, a host's own wake-up that names
+ * nothing — is one only a fetch can settle.
+ * @public
+ */
+export type RevisionStreamMove = Readonly<{
+  generation: number;
+  refs: readonly string[];
+  heads?: ReadonlyMap<string, string>;
+}>;
 
 /** What the loop tells its host. @public */
 export type RevisionStreamHandlers = Readonly<{
@@ -87,17 +97,54 @@ const pageOf = (body: unknown): StreamPage | undefined => {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- each field is checked below.
     const entry = (event ?? {}) as Readonly<{
       type?: unknown;
-      payload?: Readonly<{ generation?: unknown; refs?: unknown }>;
+      payload?: Readonly<{ generation?: unknown; refs?: unknown; heads?: unknown }>;
     }>;
-    const { generation, refs } = entry.payload ?? {};
-    return entry.type === 'revision.committed' &&
-      typeof generation === 'number' &&
-      Array.isArray(refs) &&
-      refs.every((ref) => typeof ref === 'string')
-      ? [{ generation, refs }]
-      : [];
+    const { generation, refs, heads } = entry.payload ?? {};
+    if (
+      entry.type !== 'revision.committed' ||
+      typeof generation !== 'number' ||
+      !Array.isArray(refs) ||
+      !refs.every((ref) => typeof ref === 'string')
+    ) {
+      return [];
+    }
+    /* Only a string head for a ref this entry names counts; anything else is no head, which pulls. */
+    const named = typeof heads === 'object' && heads !== null ? Object.entries(heads) : [];
+    return [
+      {
+        generation,
+        refs,
+        heads: new Map(
+          named.filter((pair): pair is [string, string] => refs.includes(pair[0]) && typeof pair[1] === 'string'),
+        ),
+      },
+    ];
   });
   return { nextSequence: page.nextSequence, moves };
+};
+
+/*
+ * One wake-up per page: the fetch it starts reads every ref anyway. A ref's head
+ * is its newest entry's, so another device's move after this device's echo is
+ * never hidden by it (W13e).
+ */
+const pageMove = (moves: readonly RevisionStreamMove[]): RevisionStreamMove => {
+  const heads = new Map<string, string>();
+  for (const move of moves) {
+    for (const ref of move.refs) {
+      const head = move.heads?.get(ref);
+      if (head === undefined) {
+        heads.delete(ref);
+      } else {
+        heads.set(ref, head);
+      }
+    }
+  }
+  return {
+    generation: Math.max(...moves.map((move) => move.generation)),
+    refs: [...new Set(moves.flatMap((move) => move.refs))],
+    heads,
+  };
 };
 
 const delay = async (milliseconds: number, signal: AbortSignal): Promise<void> => {
@@ -202,13 +249,8 @@ export const watchRevisionStream = (options: RevisionStreamOptions, handlers: Re
         if (page === undefined) {
           throw new Error('The revision stream answered without a sequence.');
         }
-        const [first, ...rest] = page.moves;
-        if (after !== undefined && first !== undefined && !stopped()) {
-          /* One wake-up per page: the fetch it starts reads every ref anyway. */
-          handlers.moved({
-            generation: Math.max(first.generation, ...rest.map((move) => move.generation)),
-            refs: [...new Set([first, ...rest].flatMap((move) => move.refs))],
-          });
+        if (after !== undefined && page.moves.length > 0 && !stopped()) {
+          handlers.moved(pageMove(page.moves));
         }
         after = page.nextSequence;
         failures = 0;

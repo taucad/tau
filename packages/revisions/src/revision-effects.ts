@@ -125,7 +125,7 @@ import type {
 } from '#remote.machine.js';
 import type { RemoteStorage, RemoteStorageSupplier } from '#remote.types.js';
 import { isHostLocalRef, remoteKindOf, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
-import type { RevisionStreamHandlers } from '#revision-stream.js';
+import type { RevisionStreamHandlers, RevisionStreamMove } from '#revision-stream.js';
 import { createSyncQueue } from '#sync-queue.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
@@ -4214,6 +4214,40 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* D13: the project's `revision` entries, for the remote the scheduler names. */
       remoteMoves: createCallbackLogic<AnyEventObject, SyncRemoteMovesActorInput>(({ input, sendBack, receive }) => {
         /*
+         * The echo of this device's own push (W13e): every ref the entry moved
+         * already names the announced head here, so a pull would bring nothing
+         * and none is asked for — not even the advertisement. The pushed local
+         * ref counts as well as the tracking ref: the API announces before it
+         * answers the push, so the entry usually arrives before the push's reply
+         * has written the tracking ref, and native `git push` writes none for a
+         * ref outside `refs/heads/*`. Operation logs are never pulled (RV-W7 #1).
+         * A ref without a head — an older server, a removal — pulls, as does
+         * any read that fails.
+         */
+        const holdsEveryHead = async (remote: string, move: RevisionStreamMove): Promise<boolean> => {
+          const { heads } = move;
+          if (heads === undefined || heads.size === 0) {
+            return false;
+          }
+          try {
+            const held = await Promise.all(
+              move.refs
+                .filter((ref) => !ref.startsWith(`${opsRefPrefix}/`))
+                .map(async (ref) => {
+                  const head = heads.get(ref);
+                  return (
+                    head !== undefined &&
+                    ((await port.readRef(ref)) === head ||
+                      (await port.readRef(remoteTrackingRef(remote, ref))) === head)
+                  );
+                }),
+            );
+            return held.every(Boolean);
+          } catch {
+            return false;
+          }
+        };
+        /*
          * One session per `watch` (RV-W5b F3): a stream's handlers act only while
          * their session is the current one, so a stopped stream's late refusal
          * can neither end the live stream's ownership nor report a refusal.
@@ -4256,9 +4290,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 current.tailKnown();
               },
               moved: (move) => {
-                if (live()) {
-                  sendBack({ type: 'remoteMoved', generation: move.generation, refs: move.refs });
+                if (!live()) {
+                  return;
                 }
+                const report = async (): Promise<void> => {
+                  if (!(await holdsEveryHead(current.remote, move)) && live()) {
+                    sendBack({ type: 'remoteMoved', generation: move.generation, refs: move.refs });
+                  }
+                };
+                // async-iife: bootstrap -- local reads that never reject; `live()` drops a verdict that outlived its session.
+                void report();
               },
               refused: (error) => {
                 if (!live()) {

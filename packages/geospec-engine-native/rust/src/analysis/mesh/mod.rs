@@ -285,6 +285,11 @@ pub struct MeshAnalysis {
     mesh_quality: OnceCell<Rc<MeshQuality>>,
     watertight: OnceCell<Rc<Watertight>>,
     pieces: OnceCell<Rc<Vec<Piece>>>,
+    /// The first connected-component result a prepared batch accepted, by
+    /// normalized tolerance bits; later plans on this subject reuse it.
+    // ponytail: one tolerance per subject bounds retention to one result; key a
+    // byte-bounded map by tolerance if specs alternate tolerances.
+    components: OnceCell<(u64, Rc<ConnectedComponents>)>,
 }
 
 impl MeshAnalysis {
@@ -348,6 +353,22 @@ impl MeshAnalysis {
     #[cfg(test)]
     pub fn connected_components(&self, tolerance_mm: f64) -> ConnectedComponents {
         ConnectedComponents::from_clusters(self.component_clusters(tolerance_mm))
+    }
+
+    /// A result an earlier plan accepted for these tolerance bits.
+    pub(crate) fn retained_components(
+        &self,
+        tolerance_bits: u64,
+    ) -> Option<Rc<ConnectedComponents>> {
+        self.components
+            .get()
+            .filter(|(bits, _)| *bits == tolerance_bits)
+            .map(|(_, value)| Rc::clone(value))
+    }
+
+    /// Retains an accepted result; refusals never reach here (policy §16).
+    pub(crate) fn retain_components(&self, tolerance_bits: u64, value: &Rc<ConnectedComponents>) {
+        let _ = self.components.set((tolerance_bits, Rc::clone(value)));
     }
 }
 
@@ -1254,6 +1275,7 @@ pub fn analyze(record: &Rc<MeshAnalysisRecord>) -> Result<MeshAnalysis, BackendE
         mesh_quality: OnceCell::new(),
         watertight: OnceCell::new(),
         pieces: OnceCell::new(),
+        components: OnceCell::new(),
     })
 }
 
@@ -1624,6 +1646,66 @@ mod tests {
         let analysis = analyze(&Rc::new(record)).unwrap();
         assert_eq!(analysis.connected_components(0.999_999).count, 2);
         assert_eq!(analysis.connected_components(1.0).count, 1);
+    }
+
+    #[test]
+    fn later_plans_reuse_an_accepted_component_result_under_their_own_limits() {
+        use crate::{analysis::batch::BatchAnalysis, backend::AnalysisRetentionLimits};
+        let mut record = box_record(0.0);
+        let right = box_record(2.0);
+        record.positions.extend(right.positions);
+        record.triangles.extend(
+            right
+                .triangles
+                .into_iter()
+                .map(|triangle| triangle.map(|index| index + 8)),
+        );
+        record.triangle_primitives.extend(vec![1; 12]);
+        record.primitives.push(Primitive {
+            name: "right#0".into(),
+            vertex_start: 8,
+            vertex_count: 8,
+        });
+        let analysis = analyze(&Rc::new(record)).unwrap();
+        let plan = |tolerance: f64, max_mesh_bytes| {
+            let limits = AnalysisRetentionLimits {
+                max_mesh_bytes,
+                max_mesh_entries: 1,
+                max_solid_entries: 0,
+            };
+            BatchAnalysis::new([("s".to_owned(), tolerance.to_bits())], limits).unwrap()
+        };
+
+        let first = plan(0.0, u64::MAX)
+            .connected_components("s", 0.0, &analysis)
+            .unwrap();
+        let second = plan(-0.0, u64::MAX)
+            .connected_components("s", -0.0, &analysis)
+            .unwrap();
+        assert_eq!(first.count, 2);
+        assert!(
+            Rc::ptr_eq(&first, &second),
+            "a second plan must not rebuild"
+        );
+
+        // A plan whose limit the retained result exceeds still refuses it.
+        let refusal = plan(0.0, 1)
+            .connected_components("s", 0.0, &analysis)
+            .unwrap_err();
+        assert_eq!(
+            refusal.message,
+            "Connected-component results exceed the declared analysis retention byte limit."
+        );
+
+        // Another tolerance is built, not served from the retained result.
+        let joined = plan(1.0, u64::MAX)
+            .connected_components("s", 1.0, &analysis)
+            .unwrap();
+        assert_eq!(joined.count, 1);
+        assert!(Rc::ptr_eq(
+            &analysis.retained_components(0).unwrap(),
+            &first
+        ));
     }
 
     #[test]

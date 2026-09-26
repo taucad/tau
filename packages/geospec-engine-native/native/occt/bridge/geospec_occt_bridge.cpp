@@ -10,6 +10,7 @@
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -115,6 +116,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <iterator>
@@ -1771,7 +1773,9 @@ bool regular_solid_set(const TopoDS_Shape& shape, bool allow_empty,
     }
     for (TopExp_Explorer explorer(solid, TopAbs_SHELL); explorer.More();
          explorer.Next()) {
-      if (!TopoDS::Shell(explorer.Current()).Closed()) {
+      // Computed edge-use parity, not the stored flag a healer may write;
+      // closed non-manifold shells stay admissible r-set boundaries.
+      if (!BRep_Tool::IsClosed(explorer.Current())) {
         message = "A regular-solid shape contains an open shell.";
         return false;
       }
@@ -2067,17 +2071,166 @@ int circular_bore_end(
   return -1;
 }
 
+// True only when every face of the owning solid other than the band provably
+// stays out of the open bore cylinder r x (from, to), which is all the bore
+// Common decides: the band bounds that connected cylinder laterally with
+// material outside it, so no other boundary inside means no material inside.
+// Exact face boxes (geometry plus tolerance, never triangulation) mapped into
+// the bore frame, or closed-form separation of parallel cylinders, tori around
+// the bore and planes, beyond every owner tolerance. False means "not proven":
+// the caller runs the Common, so this shortcut never decides a byte.
+bool bore_interior_certified_clear(
+    const geospec_occt_document& document, const BoreSolidContext& owner,
+    const TopoDS_Face& band,
+    const geospec_occt_circular_bore_candidate& candidate,
+    const gp_Pnt& origin, const gp_Dir& axis) {
+  gp_Trsf to_local;
+  to_local.SetTransformation(gp_Ax3(origin, axis));
+  const double r = candidate.band.radius;
+  const double from = candidate.band.from;
+  const double to = candidate.band.to;
+  const double margin = owner.maximum_tolerance + Precision::Confusion();
+  const TopoDS_Shape& first_end =
+      document.public_faces[candidate.ends[0].adjacent_public_face_ordinal].shape;
+  const TopoDS_Shape& second_end =
+      document.public_faces[candidate.ends[1].adjacent_public_face_ordinal].shape;
+  const auto outside = [&](const double lo[3], const double hi[3]) {
+    if (hi[2] <= from || lo[2] >= to) return true;  // beyond the open band
+    const double dx = lo[0] > 0 ? lo[0] : (hi[0] < 0 ? -hi[0] : 0.0);
+    const double dy = lo[1] > 0 ? lo[1] : (hi[1] < 0 ? -hi[1] : 0.0);
+    return std::hypot(dx, dy) >= r;  // beyond the closed disk
+  };
+  const auto parallel_offset = [&](const gp_Ax1& other, double& tilt,
+                                   double& distance) {
+    const double angle = other.Direction().Angle(axis);
+    tilt = std::min(angle, M_PI - angle);
+    const gp_Vec offset(origin, other.Location());
+    const gp_Vec direction(axis);
+    distance = (offset - direction.Multiplied(offset.Dot(direction))).Magnitude();
+  };
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+  TopExp::MapShapes(owner.solid, TopAbs_FACE, faces);
+  for (int index = 1; index <= faces.Extent(); ++index) {
+    const TopoDS_Face face = TopoDS::Face(faces(index));
+    if (face.IsSame(band)) continue;
+    Bnd_Box world;
+    BRepBndLib::Add(face, world, false);
+    if (world.IsVoid() || world.IsOpen()) return false;
+    double x0, y0, z0, x1, y1, z1, lo[3], hi[3];
+    world.Get(x0, y0, z0, x1, y1, z1);
+    for (int a = 0; a < 3; ++a) {
+      lo[a] = std::numeric_limits<double>::max();
+      hi[a] = -lo[a];
+    }
+    for (int corner = 0; corner < 8; ++corner) {  // world corners, bore frame
+      gp_Pnt p((corner & 1) ? x1 : x0, (corner & 2) ? y1 : y0,
+               (corner & 4) ? z1 : z0);
+      p.Transform(to_local);
+      const double q[3] = {p.X(), p.Y(), p.Z()};
+      for (int a = 0; a < 3; ++a) {
+        lo[a] = std::min(lo[a], q[a]);
+        hi[a] = std::max(hi[a], q[a]);
+      }
+    }
+    // Type and analytic parameters only: the unrestricted adaptor is exact.
+    const BRepAdaptor_Surface surface(face, false);
+    if (face.IsSame(first_end) || face.IsSame(second_end)) {  // mouth or bottom
+      if (surface.GetType() != GeomAbs_Plane) return false;
+      const double station = face.IsSame(first_end) ? from : to;
+      const double zone = 2.0 * BRep_Tool::Tolerance(face) + Precision::Confusion();
+      if (lo[2] < station - zone || hi[2] > station + zone) {
+        const gp_Pln plane = surface.Plane();
+        if (!plane.Axis().Direction().IsParallel(axis, Precision::Angular()) ||
+            plane.Distance(origin.Translated(gp_Vec(axis).Multiplied(station))) >
+                Precision::Confusion()) {
+          return false;
+        }
+      }
+      continue;
+    }
+    if (outside(lo, hi)) continue;
+    Bnd_Box local;  // the same box family, computed in the bore frame
+    BRepBndLib::Add(face.Moved(TopLoc_Location(to_local)), local, false);
+    if (!local.IsVoid() && !local.IsOpen()) {
+      local.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+      if (outside(lo, hi)) continue;
+    }
+    const double slack_scale = std::sqrt(world.SquareExtent());
+    double tilt = 0.0, distance = 0.0;
+    if (surface.GetType() == GeomAbs_Cylinder) {
+      const gp_Cylinder cylinder = surface.Cylinder();
+      parallel_offset(cylinder.Axis(), tilt, distance);
+      if (tilt < 1e-6 && std::abs(distance - cylinder.Radius()) >=
+                             r + margin + slack_scale * std::sin(tilt)) {
+        continue;
+      }
+    } else if (surface.GetType() == GeomAbs_Torus) {  // bore through its hole
+      const gp_Torus torus = surface.Torus();
+      parallel_offset(torus.Axis(), tilt, distance);
+      if (tilt < 1e-6 && torus.MajorRadius() - torus.MinorRadius() - distance >=
+                             r + margin + slack_scale * std::sin(tilt)) {
+        continue;
+      }
+    } else if (surface.GetType() == GeomAbs_Plane) {
+      const gp_Pln plane = surface.Plane();
+      const gp_Dir normal = plane.Axis().Direction();
+      if (normal.IsNormal(axis, Precision::Angular())) {  // along the axis
+        if (std::abs(gp_Vec(plane.Location(), origin).Dot(gp_Vec(normal))) >=
+            r + margin) {
+          continue;
+        }
+      } else if (normal.IsParallel(axis, Precision::Angular())) {  // across it
+        const double station = gp_Vec(origin, plane.Location()).Dot(gp_Vec(axis));
+        if (station <= from - margin || station >= to + margin) continue;
+        bool analytic = true;  // extrema are trusted on lines and circles only
+        for (TopExp_Explorer edges(face, TopAbs_EDGE); edges.More() && analytic;
+             edges.Next()) {
+          const TopoDS_Edge edge = TopoDS::Edge(edges.Current());
+          if (BRep_Tool::Degenerated(edge)) continue;
+          const GeomAbs_CurveType type = BRepAdaptor_Curve(edge).GetType();
+          analytic = type == GeomAbs_Line || type == GeomAbs_Circle;
+        }
+        if (analytic) {
+          BRepExtrema_DistShapeShape clearance(
+              BRepBuilderAPI_MakeVertex(
+                  origin.Translated(gp_Vec(axis).Multiplied(station)))
+                  .Vertex(),
+              face);
+          if (clearance.IsDone() && clearance.NbSolution() > 0 &&
+              clearance.Value() >= r + margin) {
+            continue;
+          }
+        }
+      }
+    }
+    return false;  // not proven: run the Common
+  }
+  return true;
+}
+
+// A non-empty CSF_DEBUG_BOP makes every OCCT Boolean run two BRepAlgoAPI_Check
+// passes and write BREP files (BRepAlgoAPI_BooleanOperation.cxx). GeoSpec
+// refuses rather than run an environment-dependent path (policy §16).
+bool boolean_debug_requested(std::string& message) {
+  const char* value = std::getenv("CSF_DEBUG_BOP");
+  if (value == nullptr || value[0] == '\0') return false;
+  message = "CSF_DEBUG_BOP is set; GeoSpec does not run OCCT Booleans that "
+            "check and dump their arguments.";
+  return true;
+}
+
 bool build_circular_bores(
     const geospec_occt_document& document, size_t max_candidates,
     size_t retained_candidate_size, size_t retained_inventory_size,
     std::vector<geospec_occt_circular_bore_candidate>& output,
-    std::string& message, bool& native_error, bool run_parallel = false) {
+    std::string& message, bool& native_error, bool run_parallel = false,
+    const TopoDS_Solid* qualified_owner = nullptr) {
   constexpr size_t kMaximumCandidates = 4096;
   constexpr size_t kMaximumOwnedBytes = 1024 * 1024;
   const size_t limit = std::min(max_candidates, kMaximumCandidates);
   size_t count = 0;
   for (const FaceView& view : document.public_faces) {
-    if (BRepAdaptor_Surface(view.shape).GetType() != GeomAbs_Plane) ++count;
+    if (BRepAdaptor_Surface(view.shape, false).GetType() != GeomAbs_Plane) ++count;
   }
   if (count > limit) {
     message = "Circular bore candidate count exceeds the requested bound.";
@@ -2121,7 +2274,7 @@ bool build_circular_bores(
   for (size_t public_ordinal = 0;
        public_ordinal < document.public_faces.size(); ++public_ordinal) {
     const FaceView& view = document.public_faces[public_ordinal];
-    const BRepAdaptor_Surface surface(view.shape);
+    const BRepAdaptor_Surface surface(view.shape, false);  // type only
     if (surface.GetType() == GeomAbs_Plane) continue;
     if (public_ordinal > std::numeric_limits<uint32_t>::max()) {
       native_error = true;
@@ -2171,8 +2324,13 @@ bool build_circular_bores(
       slot = std::make_unique<BoreSolidContext>();
       std::string qualification;
       TopoDS_Solid qualified;
-      slot->valid = regular_solid_operand(solids(owner_ordinal), qualified,
-                                          qualification) &&
+      // A scoped caller that already qualified this exact solid passes it:
+      // qualification is a pure function of the solid (one BRepCheck, C7).
+      const bool prequalified = qualified_owner != nullptr && solids.Extent() == 1 &&
+                                qualified_owner->IsEqual(solids(owner_ordinal));
+      if (prequalified) qualified = *qualified_owner;
+      slot->valid = (prequalified || regular_solid_operand(solids(owner_ordinal),
+                                                           qualified, qualification)) &&
                     maximum_topology_tolerance(
                         solids(owner_ordinal), slot->maximum_tolerance);
       if (slot->valid) {
@@ -2280,6 +2438,14 @@ bool build_circular_bores(
       output.push_back(candidate);
       continue;
     }
+    if (bore_interior_certified_clear(document, owner, view.shape, candidate,
+                                      origin, axis)) {
+      candidate.disposition = GEOSPEC_OCCT_CIRCULAR_BORE_QUALIFIED;
+      candidate.reason = 0;
+      output.push_back(candidate);
+      continue;
+    }
+    if (boolean_debug_requested(message)) return false;
 
     const gp_Pnt start = origin.Translated(
         axis_vector.Multiplied(candidate.band.from));
@@ -2306,6 +2472,10 @@ bool build_circular_bores(
     common.SetArguments(arguments);
     common.SetTools(tools);
     common.SetNonDestructive(true);
+    // A regular_solid_operand-qualified owner (finite positive volume, closed
+    // shells) and a primitive cylinder are never inverted, so the inverted
+    // check cannot widen their boxes; it only costs two classifier builds.
+    common.SetCheckInverted(false);
     common.SetRunParallel(run_parallel);
     common.Build();
     if (!common.IsDone() || common.HasErrors()) {
@@ -2393,7 +2563,7 @@ struct EdgeTreatmentScope {
 };
 
 bool transition_surface(const TopoDS_Face& face) {
-  const GeomAbs_SurfaceType type = BRepAdaptor_Surface(face).GetType();
+  const GeomAbs_SurfaceType type = BRepAdaptor_Surface(face, false).GetType();
   return type == GeomAbs_Plane || type == GeomAbs_Cone ||
          type == GeomAbs_Cylinder || type == GeomAbs_Torus;
 }
@@ -2792,7 +2962,7 @@ std::vector<size_t> rails_with_support_type(
   for (size_t index = 0; index < uses.size(); ++index) {
     const EdgeTreatmentUseData& use = uses[index];
     if (use.value.seam != 0 || use.adjacent.IsNull()) continue;
-    if (BRepAdaptor_Surface(use.adjacent).GetType() == type &&
+    if (BRepAdaptor_Surface(use.adjacent, false).GetType() == type &&
         BRepAdaptor_Curve(use.edge).GetType() == curve_type_value) {
       result.push_back(index);
     }
@@ -3886,7 +4056,7 @@ bool build_edge_treatments(const geospec_occt_document& document,
       row.occurrence_path = scope.occurrence_path;
       if (label != nullptr) row.label = *label;
 
-      const GeomAbs_SurfaceType type = BRepAdaptor_Surface(view.shape).GetType();
+      const GeomAbs_SurfaceType type = BRepAdaptor_Surface(view.shape, false).GetType();
       if (!transition_surface(view.shape)) {
         row.chamfer = unqualified_edge_treatment(
             GEOSPEC_OCCT_EDGE_TREATMENT_UNSUPPORTED_SURFACE);
@@ -5667,7 +5837,17 @@ int geospec_occt_continuous_wall(
   }
   *output = {};
   return guarded(error, [&]() -> int {
-    ShapeIndex faces, edges;
+    // The qualified domains are one solid with six (box) or three (cylinder)
+    // faces. Refuse on those counts before validation, the classifier and the
+    // tolerance scans; the wall matcher maps every refusal to one fixed text.
+    ShapeIndex solids, counted, faces, edges;
+    TopExp::MapShapes(document->shape, TopAbs_SOLID, solids);
+    TopExp::MapShapes(document->shape, TopAbs_FACE, counted);
+    if (solids.Extent() != 1 || (counted.Extent() != 6 && counted.Extent() != 3)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "Continuous wall requires one solid with six or three faces.",
+                  error);
+    }
     std::string message;
     if (!classify_continuous_wall(document->shape, *output, faces, edges,
                                   message)) {
@@ -6557,6 +6737,9 @@ int geospec_occt_regular_solid_containment_dedicated(
         !regular_solid_operand(target_shape, target, message)) {
       return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
     }
+    if (boolean_debug_requested(message)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
+    }
     std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
     const int scope_status = dedicated_pool_scope(
         grant_width, used_parallel, reservation, error);
@@ -6570,6 +6753,8 @@ int geospec_occt_regular_solid_containment_dedicated(
     cut.SetArguments(arguments);
     cut.SetTools(tools);
     cut.SetNonDestructive(true);
+    // Both operands are regular_solid_operand-qualified, never inverted.
+    cut.SetCheckInverted(false);
     cut.SetRunParallel(*used_parallel != 0);
     cut.Build();
     if (!cut.IsDone() || cut.HasErrors()) {
@@ -6779,6 +6964,54 @@ int geospec_occt_nominal_cylindrical_band_query(
   });
 }
 
+// The selected-bore certificate after the band and the material solid are
+// established; `solid` is `regular_solid_operand(occurrence.shape)`.
+static int selected_bore_void(
+    const geospec_occt_document* document, geospec_occt_entity face,
+    const geospec_occt_nominal_cylindrical_band& associated, const TopoDS_Solid& solid,
+    geospec_occt_nominal_cylindrical_band* band,
+    geospec_occt_circular_bore_candidate* clear_interior, geospec_occt_string* error) {
+  const auto& occurrence = document->occurrences[face.occurrence];
+  std::string message;
+  if (occurrence.public_faces.size() > 4096) {
+    return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore material has too many faces.", error);
+  }
+  // A scoped view reuses A7 without changing its document-local semantics.
+  // Its sole solid is the ENTIRE selected material, never just a face owner.
+  geospec_occt_document scoped;
+  scoped.shape = occurrence.shape;
+  scoped.public_faces = occurrence.public_faces;
+  std::vector<geospec_occt_circular_bore_candidate> candidates;
+  bool native_error = false;
+  if (!build_circular_bores(scoped, 4096, 0, 0, candidates, message, native_error,
+                            false, &solid)) {
+    return fail(native_error ? GEOSPEC_OCCT_NATIVE_ERROR : GEOSPEC_OCCT_UNSUPPORTED,
+                message, error);
+  }
+  for (const auto& candidate : candidates) {
+    if (candidate.public_face_ordinal != associated.public_face_ordinal ||
+        candidate.private_query_face != face.face) continue;
+    if (candidate.disposition != GEOSPEC_OCCT_CIRCULAR_BORE_QUALIFIED ||
+        candidate.owning_solid_ordinal != 0 ||
+        candidate.interior_residual_solid_count != 0 ||
+        candidate.ends[0].termination != GEOSPEC_OCCT_CIRCULAR_BORE_MOUTH ||
+        candidate.ends[1].termination != GEOSPEC_OCCT_CIRCULAR_BORE_MOUTH) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED,
+                  "Selected material does not certify a clear two-mouth bore.", error);
+    }
+    if (candidate.band.radius != associated.radius || candidate.band.from != associated.from ||
+        candidate.band.to != associated.to ||
+        !std::equal(candidate.band.origin, candidate.band.origin + 3, associated.origin) ||
+        !std::equal(candidate.band.axis, candidate.band.axis + 3, associated.axis)) {
+      return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore and source band disagree.", error);
+    }
+    *band = associated;
+    *clear_interior = candidate;
+    return GEOSPEC_OCCT_OK;
+  }
+  return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore face has no complete material certificate.", error);
+}
+
 int geospec_occt_selected_bore_void_query(
     const geospec_occt_document* document, geospec_occt_entity face,
     geospec_occt_nominal_cylindrical_band* band,
@@ -6794,49 +7027,13 @@ int geospec_occt_selected_bore_void_query(
     const int status = geospec_occt_nominal_cylindrical_band_query(
         document, face, &associated, error);
     if (status != GEOSPEC_OCCT_OK) return status;
-    const auto& occurrence = document->occurrences[face.occurrence];
     TopoDS_Solid solid;
     std::string message;
-    if (!regular_solid_operand(occurrence.shape, solid, message)) {
+    if (!regular_solid_operand(document->occurrences[face.occurrence].shape, solid, message)) {
       return fail(GEOSPEC_OCCT_UNSUPPORTED,
                   "Selected bore requires one complete regular material solid: " + message, error);
     }
-    if (occurrence.public_faces.size() > 4096) {
-      return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore material has too many faces.", error);
-    }
-    // A scoped view reuses A7 without changing its document-local semantics.
-    // Its sole solid is the ENTIRE selected material, never just a face owner.
-    geospec_occt_document scoped;
-    scoped.shape = occurrence.shape;
-    scoped.public_faces = occurrence.public_faces;
-    std::vector<geospec_occt_circular_bore_candidate> candidates;
-    bool native_error = false;
-    if (!build_circular_bores(scoped, 4096, 0, 0, candidates, message, native_error)) {
-      return fail(native_error ? GEOSPEC_OCCT_NATIVE_ERROR : GEOSPEC_OCCT_UNSUPPORTED,
-                  message, error);
-    }
-    for (const auto& candidate : candidates) {
-      if (candidate.public_face_ordinal != associated.public_face_ordinal ||
-          candidate.private_query_face != face.face) continue;
-      if (candidate.disposition != GEOSPEC_OCCT_CIRCULAR_BORE_QUALIFIED ||
-          candidate.owning_solid_ordinal != 0 ||
-          candidate.interior_residual_solid_count != 0 ||
-          candidate.ends[0].termination != GEOSPEC_OCCT_CIRCULAR_BORE_MOUTH ||
-          candidate.ends[1].termination != GEOSPEC_OCCT_CIRCULAR_BORE_MOUTH) {
-        return fail(GEOSPEC_OCCT_UNSUPPORTED,
-                    "Selected material does not certify a clear two-mouth bore.", error);
-      }
-      if (candidate.band.radius != associated.radius || candidate.band.from != associated.from ||
-          candidate.band.to != associated.to ||
-          !std::equal(candidate.band.origin, candidate.band.origin + 3, associated.origin) ||
-          !std::equal(candidate.band.axis, candidate.band.axis + 3, associated.axis)) {
-        return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore and source band disagree.", error);
-      }
-      *band = associated;
-      *clear_interior = candidate;
-      return GEOSPEC_OCCT_OK;
-    }
-    return fail(GEOSPEC_OCCT_UNSUPPORTED, "Selected bore face has no complete material certificate.", error);
+    return selected_bore_void(document, face, associated, solid, band, clear_interior, error);
   });
 }
 
@@ -6897,8 +7094,11 @@ int geospec_occt_selected_interference_material_query(
     const gp_Dir axis(band.axis[0], band.axis[1], band.axis[2]);
     const gp_Pnt origin(band.origin[0], band.origin[1], band.origin[2]);
     if (band.transferred_reversed) {
+      // The band and material solid above are exactly what the bore query
+      // would re-establish (same inputs, pure functions), so it reuses them.
+      geospec_occt_nominal_cylindrical_band certified{};
       geospec_occt_circular_bore_candidate clear{};
-      status = geospec_occt_selected_bore_void_query(document, face, &band, &clear, error);
+      status = selected_bore_void(document, face, band, solid, &certified, &clear, error);
       if (status != GEOSPEC_OCCT_OK) return status;
       // In this nominal domain the slab axis is exactly Cartesian. Every
       // other face is a bounded plane, so linear height extrema occur on

@@ -591,7 +591,6 @@ fn prepares_and_normalizes_all_eleven_matchers() {
     for (capability, expected) in valid_expectations() {
         let prepared = prepared(capability, expected);
         assert_eq!(prepared.capability(), capability);
-        assert!(prepared.demand().brep);
         assert!(matches!(prepared.normalized_payload(), Json::Object(_)));
     }
 }

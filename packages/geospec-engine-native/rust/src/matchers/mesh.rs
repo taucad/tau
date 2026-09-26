@@ -333,18 +333,11 @@ impl Prepared {
             | Self::SurfaceArea(_)
             | Self::Volume(_)
             | Self::Mass(_)
-            | Self::CenterOfMass { .. } => AnalysisDemand {
-                mesh: true,
-                brep: true,
-                ..AnalysisDemand::default()
-            },
+            | Self::CenterOfMass { .. }
+            | Self::Watertight
+            | Self::MeshIntegrity(_) => AnalysisDemand::default(),
             Self::ConnectedComponents { tolerance_mm, .. } => AnalysisDemand {
-                mesh: true,
                 connected_components_tolerance_bits: Some(normalized_bits(*tolerance_mm)),
-                ..AnalysisDemand::default()
-            },
-            Self::Watertight | Self::MeshIntegrity(_) => AnalysisDemand {
-                mesh: true,
                 ..AnalysisDemand::default()
             },
         }

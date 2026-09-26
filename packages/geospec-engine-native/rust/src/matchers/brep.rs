@@ -186,10 +186,7 @@ impl Prepared {
     }
 
     pub(crate) fn demand(&self) -> AnalysisDemand {
-        AnalysisDemand {
-            brep: true,
-            ..AnalysisDemand::default()
-        }
+        AnalysisDemand::default()
     }
 
     pub(crate) fn validate_regexes(

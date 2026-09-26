@@ -1,9 +1,9 @@
 /**
  * Build plates the printer simulation draws, and the plate a file was sliced for.
  *
- * `PrinterPlateModel` is the seam for the exact plate models `@taucad/bambu`
- * will publish: until a plate carries `model`, the scene draws a flat plate in
- * its colour and finish. A GLB follows glTF (Y-up metres); the scene maps it
+ * The plates are `@taucad/bambu`'s Replicad models, pre-rendered to GLB;
+ * while one loads, or if it cannot, the scene draws a flat plate in its
+ * colour and finish. A GLB follows glTF (Y-up metres); the scene maps it
  * into the plate frame (millimetres, X right, Y back, Z up, origin at the
  * printable area's front-left corner, Z = 0 on the print surface).
  *
@@ -12,12 +12,12 @@
 
 import { Matrix4 } from 'three';
 import { resolveCoordinateTransform } from '@taucad/spatial';
+import { bambuX1cHotend, bambuX1cPlates } from '@taucad/bambu/plate';
+import type { BambuPlateModel } from '@taucad/bambu/plate';
 import { canonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
-/* oxlint-disable tau-lint/no-hardcoded-color -- Three.js material tints for physical plate surfaces */
-
 /** One X1C build plate id, as Tau's slicers name it. */
-export type PrinterPlateId = 'cool' | 'engineering' | 'high-temperature' | 'textured-pei';
+export type PrinterPlateId = BambuPlateModel['id'];
 
 /** A build plate the scene can draw. */
 export type PrinterPlateModel = Readonly<{
@@ -27,58 +27,38 @@ export type PrinterPlateModel = Readonly<{
   bedTypeNames: readonly string[];
   /** `#RRGGBB` of the print surface. */
   color: string;
-  /** How the flat stand-in reflects light until the model arrives. */
+  /** How the flat stand-in reflects light while the model loads, or if it cannot. */
   finish: 'smooth' | 'matte' | 'textured';
-  /** Pre-rendered GLB of the plate; absent until the plate lane publishes it. */
+  /** Pre-rendered GLB of the plate, authored in Replicad by `@taucad/bambu`. */
   model?: URL;
 }>;
 
-// ponytail: colours and finishes are placeholders pending the plate lane's exact Replicad models.
-/** The four plates Bambu Lab ships for the X1 series. */
-export const x1cPlates: readonly PrinterPlateModel[] = [
-  {
-    id: 'cool',
-    label: 'Cool Plate',
-    bedTypeNames: ['Cool Plate', 'cool_plate', 'cool'],
-    color: '#2e3034',
-    finish: 'smooth',
-  },
-  {
-    id: 'engineering',
-    label: 'Engineering Plate',
-    bedTypeNames: ['Engineering Plate', 'eng_plate', 'engineering'],
-    color: '#44474d',
-    finish: 'matte',
-  },
-  {
-    id: 'high-temperature',
-    label: 'High Temp Plate',
-    bedTypeNames: ['High Temp Plate', 'hot_plate', 'high-temperature'],
-    color: '#1f2023',
-    finish: 'smooth',
-  },
-  {
-    id: 'textured-pei',
-    label: 'Textured PEI Plate',
-    bedTypeNames: ['Textured PEI Plate', 'textured_plate', 'textured-pei'],
-    color: '#b88a4a',
-    finish: 'textured',
-  },
-];
+/** The four plates Bambu Lab ships for the X1 series, as `@taucad/bambu` models them. */
+export const x1cPlates: readonly PrinterPlateModel[] = bambuX1cPlates.map(
+  ({ id, label, bedTypeNames, surface, model }) => ({
+    id,
+    label,
+    bedTypeNames,
+    color: surface.color,
+    finish: surface.finish,
+    model,
+  }),
+);
+
+/** The X1C hotend tip drawn at the extruding nozzle: its origin is the nozzle tip. */
+export const printerHotendModel: URL = bambuX1cHotend.model;
 
 /** The plate frame: Z up, the printer's front toward -Y, millimetres. */
 const plateFrame = { up: '+z', forward: '-y', metersPerUnit: 0.001 } as const;
 
 /**
- * Places a plate GLB in the plate frame: the one transform from glTF's Y-up
+ * Places a plate or hotend GLB in the plate frame: the one transform from glTF's Y-up
  * metres, resolved the way the CAD viewer maps Tau's own GLBs into its Z-up
  * world, plus metres to millimetres.
  */
 export const plateModelMatrix: Readonly<Matrix4> = new Matrix4().fromArray(
   resolveCoordinateTransform({ source: canonicalGltfWorld, target: plateFrame }).matrix,
 );
-
-/* oxlint-enable tau-lint/no-hardcoded-color */
 
 /** The plate drawn when a file does not say which one it was sliced for. */
 export const defaultPrinterPlate: PrinterPlateModel = x1cPlates.find(({ id }) => id === 'textured-pei')!;

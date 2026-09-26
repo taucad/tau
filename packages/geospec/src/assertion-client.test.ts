@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { JSONValue } from '@taucad/runtime/types';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from '#assertion-client/index.js';
-import type { GeoSpecNativeEngine } from '#assertion-client/index.js';
+import type { GeoSpecNativeClaimEvaluation, GeoSpecNativeEngine } from '#assertion-client/index.js';
 import { evaluateGeoSpecNativeClaim } from '#engine/client.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
 
 const encode = (value: JSONValue): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
 const decode = (value: Uint8Array<ArrayBuffer>): JSONValue => JSON.parse(new TextDecoder().decode(value)) as JSONValue;
-const recordingCanonicalize = (input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => Uint8Array.from(input);
 
 const record = (value: JSONValue): Record<string, JSONValue> => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -18,8 +17,8 @@ const record = (value: JSONValue): Record<string, JSONValue> => {
 
 class RecordingEngine implements GeoSpecNativeEngine {
   public canonicalInput?: JSONValue;
-  public evaluatedPlan?: Uint8Array<ArrayBuffer>;
   public initializeCalls = 0;
+  public returnedClaim?: Uint8Array<ArrayBuffer>;
   public returnedPlan?: Uint8Array<ArrayBuffer>;
   public returnedResult?: Uint8Array<ArrayBuffer>;
   private readonly defaultWorkUnitBudget: unknown;
@@ -30,24 +29,14 @@ class RecordingEngine implements GeoSpecNativeEngine {
     this.status = status;
   }
 
-  public canonicalPlan(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+  public evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation {
     this.canonicalInput = decode(request);
-    const requestRecord = record(this.canonicalInput);
-    this.returnedPlan = encode({
-      canonicalProfile: 'geospec-jcs-v1',
-      normalizedBy: 'rust',
-      plan: requestRecord['plan']!,
-    });
-    return this.returnedPlan;
-  }
-
-  public evaluatePlan(plan: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-    this.evaluatedPlan = Uint8Array.from(plan);
-    const request = record(this.canonicalInput!);
-    const authoredPlan = record(request['plan']!);
+    const authoredPlan = record(record(this.canonicalInput)['plan']!);
     const { claims } = authoredPlan;
     const [claimValue] = Array.isArray(claims) ? claims : [];
     const claim = record(claimValue ?? null);
+    this.returnedPlan = encode({ canonicalProfile: 'geospec-jcs-v1', normalizedBy: 'rust', plan: authoredPlan });
+    this.returnedClaim = this.canonicalClaim(claim);
     this.returnedResult = encode({
       results: [
         {
@@ -61,7 +50,15 @@ class RecordingEngine implements GeoSpecNativeEngine {
         },
       ],
     });
-    return this.returnedResult;
+    return {
+      canonicalClaim: this.returnedClaim,
+      canonicalPlan: this.returnedPlan,
+      canonicalResult: this.returnedResult,
+    };
+  }
+
+  protected canonicalClaim(claim: Record<string, JSONValue>): Uint8Array<ArrayBuffer> {
+    return encode(claim);
   }
 
   public processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
@@ -89,7 +86,7 @@ const hash = 'a'.repeat(64);
 describe('runner-independent GeoSpec assertion client', () => {
   it('executes the 24 legacy matchers and both fixed native contracts', async () => {
     const engine = new RecordingEngine();
-    const client = createGeoSpecAssertionClient({ canonicalize: recordingCanonicalize, engine, workUnitLimit: 50_000 });
+    const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 50_000 });
     const matchers = client.expectGeo({ subjectHash: hash });
     const names = [
       ...Object.keys(geoSpecMatcherDescriptors),
@@ -109,7 +106,6 @@ describe('runner-independent GeoSpec assertion client', () => {
   it('sends authored arguments and core polarity, then retains exact returned bytes', async () => {
     const engine = new RecordingEngine();
     const client = createGeoSpecAssertionClient({
-      canonicalize: recordingCanonicalize,
       claimId: (matcher, sequence) => `${matcher}-${sequence}`,
       engine,
       subjectSlot: 'part',
@@ -136,13 +132,10 @@ describe('runner-independent GeoSpec assertion client', () => {
       polarity: 'negative',
       workUnitBudget: 123_456,
     });
-    expect(engine.evaluatedPlan).toStrictEqual(engine.returnedPlan);
     expect(report.claim).toStrictEqual(Array.isArray(claims) ? claims[0] : undefined);
-    expect(report.canonicalClaim).toStrictEqual(recordingCanonicalize(encode(report.claim)));
-    expect(report.canonicalPlan).toStrictEqual(engine.returnedPlan);
-    expect(report.canonicalResult).toStrictEqual(engine.returnedResult);
-    expect(report.canonicalPlan).not.toBe(engine.returnedPlan);
-    expect(report.canonicalResult).not.toBe(engine.returnedResult);
+    expect(report.canonicalClaim).toBe(engine.returnedClaim);
+    expect(report.canonicalPlan).toBe(engine.returnedPlan);
+    expect(report.canonicalResult).toBe(engine.returnedResult);
     expect(report.result).toStrictEqual({
       claimId: 'toHaveBoundingBox-1',
       status: 'passed',
@@ -158,7 +151,7 @@ describe('runner-independent GeoSpec assertion client', () => {
     { polarity: 'negative', status: 'refused' },
   ] as const)('rejects a $polarity $status core report with the exact report bytes', async ({ polarity, status }) => {
     const engine = new RecordingEngine(8_000_000, status);
-    const client = createGeoSpecAssertionClient({ canonicalize: recordingCanonicalize, engine, workUnitLimit: 10_000 });
+    const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 10_000 });
     const chain = client.expectGeo({ subjectHash: hash });
     const operation = polarity === 'positive' ? chain.toBeWatertight() : chain.not.toBeWatertight();
 
@@ -186,7 +179,6 @@ describe('runner-independent GeoSpec assertion client', () => {
     const engine = new RecordingEngine(8_000_000, 'failed');
     const report = evaluateGeoSpecNativeClaim({
       arguments: [],
-      canonicalize: recordingCanonicalize,
       capability: 'toBeWatertight',
       claimId: 'raw-failure',
       engine,
@@ -202,19 +194,17 @@ describe('runner-independent GeoSpec assertion client', () => {
     expect(report.canonicalResult).toStrictEqual(engine.returnedResult);
   });
 
-  it('preserves native canonicalization errors unchanged', async () => {
-    const nativeError = new Error('native canonicalization failed');
-    const client = createGeoSpecAssertionClient({
-      canonicalize: () => {
-        throw nativeError;
-      },
-      engine: new RecordingEngine(),
-      workUnitLimit: 10_000,
-    });
+  it('preserves native evaluation errors unchanged', async () => {
+    const nativeError = new Error('native evaluation failed');
+    const engine = new RecordingEngine();
+    engine.evaluateClaim = () => {
+      throw nativeError;
+    };
+    const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 10_000 });
 
     try {
       await client.expectGeo({ subjectHash: hash }).toBeWatertight();
-      expect.fail('The native canonicalization error should reject the assertion.');
+      expect.fail('The native evaluation error should reject the assertion.');
     } catch (error) {
       expect(error).toBe(nativeError);
     }
@@ -238,14 +228,15 @@ describe('runner-independent GeoSpec assertion client', () => {
   ])(
     'retains exact native-codec claim bytes for independent $label literals',
     ({ arguments: arguments_, canonicalClaim, claimId }) => {
-      const engine = new RecordingEngine();
       const expectedClaim = record(JSON.parse(canonicalClaim) as JSONValue);
+      const engine = new (class extends RecordingEngine {
+        protected override canonicalClaim(claim: Record<string, JSONValue>): Uint8Array<ArrayBuffer> {
+          expect(claim).toStrictEqual(expectedClaim);
+          return new TextEncoder().encode(canonicalClaim);
+        }
+      })();
       const report = evaluateGeoSpecNativeClaim({
         arguments: arguments_,
-        canonicalize: (input) => {
-          expect(decode(input)).toStrictEqual(expectedClaim);
-          return new TextEncoder().encode(canonicalClaim);
-        },
         capability: 'toHaveVolume',
         claimId,
         engine,
@@ -265,7 +256,7 @@ describe('runner-independent GeoSpec assertion client', () => {
 
   it('preserves the raw mesh content-hash namespace', async () => {
     const engine = new RecordingEngine();
-    const client = createGeoSpecAssertionClient({ canonicalize: recordingCanonicalize, engine, workUnitLimit: 1 });
+    const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 1 });
 
     await client.expectGeo({ contentHash: hash }).toBeWatertight();
     const request = record(engine.canonicalInput!);
@@ -275,8 +266,8 @@ describe('runner-independent GeoSpec assertion client', () => {
 
   it('reuses the engine-owned default budget once per engine across clients', async () => {
     const engine = new RecordingEngine(8_000_000);
-    const first = createGeoSpecAssertionClient({ canonicalize: recordingCanonicalize, engine });
-    const second = createGeoSpecAssertionClient({ canonicalize: recordingCanonicalize, engine });
+    const first = createGeoSpecAssertionClient({ engine });
+    const second = createGeoSpecAssertionClient({ engine });
 
     await first.expectGeo({ subjectHash: hash }).toBeWatertight();
     let request = record(engine.canonicalInput!);
@@ -294,7 +285,7 @@ describe('runner-independent GeoSpec assertion client', () => {
 
   it('honors an explicit client budget without replacing it from initialize', async () => {
     const engine = new RecordingEngine(8_000_000);
-    const client = createGeoSpecAssertionClient({ canonicalize: recordingCanonicalize, engine, workUnitLimit: 99 });
+    const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 99 });
 
     await client.expectGeo({ subjectHash: hash }).toBeWatertight();
     const request = record(engine.canonicalInput!);
@@ -308,7 +299,6 @@ describe('runner-independent GeoSpec assertion client', () => {
     'rejects malformed engine-owned default work-unit budget %#',
     async (defaultWorkUnitBudget) => {
       const client = createGeoSpecAssertionClient({
-        canonicalize: recordingCanonicalize,
         engine: new RecordingEngine(defaultWorkUnitBudget),
       });
 
@@ -326,7 +316,6 @@ describe('runner-independent GeoSpec assertion client', () => {
     { subject: { subjectHash: hash }, limit: Number.MAX_SAFE_INTEGER + 1, message: 'positive exact safe integer' },
   ])('rejects malformed native transport options %#', async ({ subject, limit, message }) => {
     const client = createGeoSpecAssertionClient({
-      canonicalize: recordingCanonicalize,
       engine: new RecordingEngine(),
       workUnitLimit: limit,
     });

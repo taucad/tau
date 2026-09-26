@@ -28,7 +28,6 @@ it('should run all 12 approved rows through the installed Vitest matcher', async
     const admission = admitSubject(nativeEngine, authority.admissions.get(row.geometryId));
     const recorder = createForwardingRecorder(nativeEngine);
     const client = createGeoSpecAssertionClient({
-      canonicalize,
       claimId: () => claim.claimId,
       engine: recorder.engine,
       subjectSlot: claim.subjectSlots[0],

@@ -31,10 +31,7 @@ fn current_registry_f1_plan_reaches_independent_verifier_after_fresh_admission()
     let row = &controls["controls"][0];
     assert_eq!(row["id"], "target");
     let primary = row["primaryUtf8"].as_str().unwrap().as_bytes();
-    assert_eq!(
-        format!("{:x}", Sha256::digest(primary)),
-        row["subjectContentHash"]
-    );
+    assert_eq!(sha256_hex(primary), row["subjectContentHash"]);
     let expected = candidate(&row["analysis"]);
     assert_eq!(expected.predicates, [true; 4]);
     let source = PlateSource::decode(primary.to_vec()).unwrap();
@@ -81,9 +78,9 @@ fn current_registry_f1_plan_reaches_independent_verifier_after_fresh_admission()
         plan["registryVersion"] = json!(registry);
         let bytes = canonicalize(&serde_json::to_vec(&plan).unwrap()).unwrap();
         let binding = VerificationBinding {
-            subject_content_hash: format!("{:x}", Sha256::digest(primary)),
+            subject_content_hash: sha256_hex(primary),
             subject_hash: subject_hash.into(),
-            plan_hash: format!("{:x}", Sha256::digest(&bytes)),
+            plan_hash: sha256_hex(&bytes),
             verifier_source_hash: definition.clone(),
         };
         let result = verify(
@@ -139,7 +136,7 @@ fn current_registry_f1_plan_reaches_independent_verifier_after_fresh_admission()
     );
 }
 
-use sha2::{Digest, Sha256};
+use geospec_engine_native_core::sha256_hex;
 
 fn controls() -> Value {
     let bytes = std::env::var_os("GEOSPEC_F1_VERIFIER_CONTROLS").map_or_else(
@@ -147,7 +144,7 @@ fn controls() -> Value {
         |path| std::fs::read(path).unwrap(),
     );
     assert_eq!(
-        format!("{:x}", Sha256::digest(&bytes)),
+        sha256_hex(&bytes),
         "ac9c8237b8b46bf3af12cfb3db8761eef29c30bfe67ab5e5fb589c7c047f5e84"
     );
     serde_json::from_slice(&bytes).unwrap()
@@ -278,7 +275,7 @@ fn ordinary_bound_plans_verify_full_envelope_for_both_polarities() {
             let binding = VerificationBinding {
                 subject_content_hash: row["subjectContentHash"].as_str().unwrap().into(),
                 subject_hash: row["subjectHash"].as_str().unwrap().into(),
-                plan_hash: format!("{:x}", Sha256::digest(&current)),
+                plan_hash: sha256_hex(&current),
                 verifier_source_hash: definition.clone(),
             };
             let result = match &source {

@@ -789,7 +789,10 @@ fn digest(root: &Path, context: &[u8], inputs: &[&str], external: &[(String, Pat
         println!("cargo:rerun-if-changed={}", path.display());
         hash_file(&mut hash, label, path);
     }
-    format!("{:x}", hash.finalize())
+    hash.finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn hash_file(hash: &mut Sha256, label: &str, path: &Path) {

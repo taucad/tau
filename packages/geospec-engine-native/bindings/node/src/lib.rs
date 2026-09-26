@@ -163,6 +163,14 @@ impl Engine {
             .map_err(fail)
     }
 
+    #[napi(js_name = "evaluateClaim")]
+    pub fn evaluate_claim(&self, request: Buffer) -> Result<Buffer, &'static str> {
+        self.engine()?
+            .evaluate_claim(request.as_ref())
+            .map(Buffer::from)
+            .map_err(fail)
+    }
+
     #[napi(js_name = "flushCache")]
     pub fn flush_cache(&self) -> Result<Buffer, &'static str> {
         self.engine()?;

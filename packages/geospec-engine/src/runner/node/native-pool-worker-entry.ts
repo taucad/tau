@@ -2,7 +2,7 @@
 
 import { memoryUsage } from 'node:process';
 import { parentPort, workerData } from 'node:worker_threads';
-import { Engine, canonicalize } from '@taucad/geospec-engine-native/node';
+import { Engine } from '@taucad/geospec-engine-native/node';
 import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
 // oxlint-disable-next-line import/no-unassigned-import -- Worker-host registration is isolate-local.
@@ -38,7 +38,7 @@ export const startNativePoolWorker = (port: NativePoolPort, options: NativePoolW
     });
     startGeoSpecPoolWorkerHost({
       filesystem,
-      nativeAssertions: { engine, canonicalize },
+      nativeAssertions: { engine },
       nativeModelLoader,
       postMessage: (message) => {
         port.postMessage(message);

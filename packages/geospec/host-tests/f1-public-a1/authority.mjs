@@ -7,6 +7,7 @@ import { readFixture } from '../fixtures/read-fixture.mjs';
 /** @typedef {import('@taucad/runtime/types').JSONValue} JSONValue */
 /** @typedef {import('geospec/assertion-client').GeoSpecCanonicalClaimReport} GeoSpecCanonicalClaimReport */
 /** @typedef {import('geospec/assertion-client').GeoSpecNativeEngine} GeoSpecNativeEngine */
+/** @typedef {import('geospec/assertion-client').GeoSpecNativeClaimEvaluation} GeoSpecNativeClaimEvaluation */
 /** @typedef {string | Uint8Array<ArrayBuffer>} ByteSource */
 /** @typedef {(input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>} Canonicalize */
 /** @typedef {{ byteLength: number, sha256: string, utf8: string }} ByteRecord */
@@ -19,7 +20,7 @@ import { readFixture } from '../fixtures/read-fixture.mjs';
 /** @typedef {{ claimId: string, diagnostics: readonly JSONValue[], evidence?: JSONValue, status: GeoSpecCanonicalClaimReport['status'] } & GeoSpecCanonicalClaimReport['result']} AuthorityResult */
 /** @typedef {{ name: string, message: string, constructorName: string | null, assertionError: boolean }} ErrorRecord */
 /** @typedef {Omit<GeoSpecCanonicalClaimReport, 'canonicalClaim' | 'canonicalPlan' | 'canonicalResult' | 'evidence'> & { canonicalClaim: ByteRecord, canonicalPlan: ByteRecord, canonicalResult: ByteRecord, canonicalResultClaim: ByteRecord, evidence: JSONValue | null }} ReportRecord */
-/** @typedef {{ operation: string, input: ByteRecord, output?: ByteRecord, error?: ErrorRecord }} RecorderCall */
+/** @typedef {{ operation: string, input: ByteRecord, output?: ByteRecord, plan?: ByteRecord, error?: ErrorRecord }} RecorderCall */
 /** @typedef {{ id: string, admission: { comparison: Record<string, boolean> }, comparison: Record<string, boolean>, error: ErrorRecord | null, flushError?: ErrorRecord | null, invocationError?: ErrorRecord | null, recorderCalls: RecorderCall[], report: ReportRecord | null }} HarnessOutputRow */
 /** @typedef {{ schemaVersion: number, route: string, rows: HarnessOutputRow[] }} HarnessOutput */
 
@@ -176,14 +177,20 @@ export const errorRecord = (error, assertionError = false) => ({
 export const createForwardingRecorder = (engine) => {
   /** @type {RecorderCall[]} */
   const calls = [];
-  /** @type {(operation: string, input: Uint8Array<ArrayBuffer>, invoke: () => Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>} */
+  /** @type {<Output extends Uint8Array<ArrayBuffer> | GeoSpecNativeClaimEvaluation>(operation: string, input: Uint8Array<ArrayBuffer>, invoke: () => Output) => Output} */
   const forward = (operation, input, invoke) => {
     /** @type {RecorderCall} */
     const call = { operation, input: byteRecord(input) };
     calls.push(call);
     try {
       const output = invoke();
-      call.output = byteRecord(output);
+      if (output instanceof Uint8Array) {
+        call.output = byteRecord(output);
+      } else {
+        // An evaluateClaim call records its canonical result as `output` and its canonical plan beside it.
+        call.output = byteRecord(output.canonicalResult);
+        call.plan = byteRecord(output.canonicalPlan);
+      }
       return output;
     } catch (error) {
       call.error = errorRecord(error);
@@ -192,8 +199,7 @@ export const createForwardingRecorder = (engine) => {
   };
   /** @type {GeoSpecNativeEngine} */
   const forwardingEngine = {
-    canonicalPlan: (request) => forward('canonicalPlan', request, () => engine.canonicalPlan(request)),
-    evaluatePlan: (plan) => forward('evaluatePlan', plan, () => engine.evaluatePlan(plan)),
+    evaluateClaim: (request) => forward('evaluateClaim', request, () => engine.evaluateClaim(request)),
     processRequest: (request) => forward('processRequest', request, () => engine.processRequest(request)),
   };
   return { calls, engine: forwardingEngine };
@@ -201,8 +207,9 @@ export const createForwardingRecorder = (engine) => {
 
 /** @type {(calls: RecorderCall[], canonicalize: Canonicalize) => ReportRecord | null} */
 export const reportFromRecorder = (calls, canonicalize) => {
-  const planOutput = calls.find((call) => call.operation === 'canonicalPlan' && call.output)?.output;
-  const resultOutput = calls.find((call) => call.operation === 'evaluatePlan' && call.output)?.output;
+  const evaluation = calls.find((call) => call.operation === 'evaluateClaim' && call.output);
+  const planOutput = evaluation?.plan;
+  const resultOutput = evaluation?.output;
   if (!planOutput || !resultOutput) {
     return null;
   }

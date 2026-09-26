@@ -1,6 +1,5 @@
-use crate::Engine;
+use crate::{sha256_hex, Engine};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
 fn admitted_triangle() -> (Engine, String) {
     let positions: [[f64; 3]; 3] = [[10.0, 10.0, 0.0], [246.0, 10.0, 0.0], [10.0, 246.0, 32.0]];
@@ -16,7 +15,7 @@ fn admitted_triangle() -> (Engine, String) {
         mesh.extend_from_slice(&index.to_le_bytes());
     }
 
-    let content_hash = format!("{:x}", Sha256::digest(&mesh));
+    let content_hash = sha256_hex(&mesh);
     let request = json!({
         "method": "ingestSubject",
         "requestId": "current-bounds-ingest",

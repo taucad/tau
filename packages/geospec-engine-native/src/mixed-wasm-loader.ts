@@ -62,6 +62,7 @@ type MixedWasmModule = {
   _geospec_engine_native_process_request(engine: number, request: number, requestLength: number): number;
   _geospec_engine_native_canonical_plan(engine: number, request: number, requestLength: number): number;
   _geospec_engine_native_evaluate_plan(engine: number, plan: number, planLength: number): number;
+  _geospec_engine_native_evaluate_claim(engine: number, request: number, requestLength: number): number;
   _geospec_engine_native_result_is_error(result: number): number;
   _geospec_engine_native_result_length(result: number): number;
   _geospec_engine_native_result_pointer(result: number): number;
@@ -614,6 +615,17 @@ export class MixedWasmBinding {
   public evaluatePlan(plan: HostBytes): HostBytes {
     return withInput(this.#module, { bytes: plan, copies: this.#copies }, (pointer, length) =>
       this.#module._geospec_engine_native_evaluate_plan(this.engine(), pointer, length),
+    );
+  }
+
+  /**
+   * Canonicalize and evaluate a one-claim request.
+   * @param request - Exact submitClaims request bytes with exactly one claim.
+   * @returns The core's plan, claim and result frame.
+   */
+  public evaluateClaim(request: HostBytes): HostBytes {
+    return withInput(this.#module, { bytes: request, copies: this.#copies }, (pointer, length) =>
+      this.#module._geospec_engine_native_evaluate_claim(this.engine(), pointer, length),
     );
   }
 

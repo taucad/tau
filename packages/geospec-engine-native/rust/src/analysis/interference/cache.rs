@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::{
     backend::brep::Bounds,
     cache::{EvidenceAddress, OverlapEvidenceCache, ProducerIdentity},
+    identity::sha256_hex,
     protocol::{CANONICAL_PROFILE, NUMERIC_PROFILE, PROTOCOL_VERSION, REGISTRY_VERSION},
     subject::Subject,
 };
@@ -211,13 +211,13 @@ fn address(
         selected_pairs: selected.map(|pairs| pairs.iter().map(pair_to_dto).collect()),
     };
     let bytes = crate::canonicalize(&serde_json::to_vec(&action).ok()?).ok()?;
-    let action_sha256 = hex_digest(&bytes);
+    let action_sha256 = sha256_hex(&bytes);
     let producer_bytes = crate::canonicalize(&serde_json::to_vec(&action.producer).ok()?).ok()?;
     Some(EvidenceAddress {
         action_sha256,
         family: FAMILY,
         codec: CODEC,
-        producer_profile_sha256: hex_digest(&producer_bytes),
+        producer_profile_sha256: sha256_hex(&producer_bytes),
     })
 }
 
@@ -402,8 +402,4 @@ fn request_from_dto(value: &RequestDto) -> Option<OverlapRequest> {
 
 fn bits(value: f64) -> String {
     format!("{:016x}", normalized_bits(value))
-}
-
-fn hex_digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
 }

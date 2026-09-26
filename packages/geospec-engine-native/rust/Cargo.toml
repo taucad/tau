@@ -17,7 +17,7 @@ regress = { version = "=0.11.1", default-features = false, features = ["std", "u
 ryu-js = "=1.0.2"
 serde = { version = "=1.0.219", features = ["derive"] }
 serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
-sha2 = { version = "=0.10.9", features = ["force-soft"] }
+sha2 = { version = "=0.11.0", default-features = false }
 
 [lib]
 path = "src/lib.rs"
@@ -33,6 +33,10 @@ path = "tests/mesh_conformance.rs"
 [[test]]
 name = "plan_conformance"
 path = "tests/plan_conformance.rs"
+
+[[test]]
+name = "evaluate_claim"
+path = "tests/evaluate_claim.rs"
 
 [[test]]
 name = "matcher_proofs"

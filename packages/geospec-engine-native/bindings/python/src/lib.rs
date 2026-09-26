@@ -197,6 +197,19 @@ impl PyEngine {
         Ok(PyBytes::new(py, &result))
     }
 
+    fn evaluate_claim<'py>(
+        &mut self,
+        py: Python<'py>,
+        request: &[u8],
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let result = self
+            .engine()?
+            .evaluate_claim(request)
+            .map_err(|error| protocol_error(py, error))?;
+        self.engine()?.observe_output_copy(result.len());
+        Ok(PyBytes::new(py, &result))
+    }
+
     fn flush_cache<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         self.engine()?;
         let bytes = self.cache.as_ref().map_or_else(

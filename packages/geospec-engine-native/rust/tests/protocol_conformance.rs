@@ -1,8 +1,9 @@
 use std::error::Error;
 
-use geospec_engine_native_core::{canonicalize, process_request, Engine, ProtocolError};
+use geospec_engine_native_core::{
+    canonicalize, process_request, sha256_hex, Engine, ProtocolError,
+};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
 const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d";
@@ -10,7 +11,7 @@ const CURRENT_NUMERIC_PROFILE: &str =
     include_str!("fixtures/current-profile-v5/numeric-profile.txt");
 
 fn current() -> Value {
-    assert_eq!(format!("{:x}", Sha256::digest(CURRENT)), CURRENT_SHA256);
+    assert_eq!(sha256_hex(CURRENT), CURRENT_SHA256);
     serde_json::from_str(CURRENT).expect("explicit current-profile bindings")
 }
 
@@ -73,15 +74,9 @@ fn engine_with_admitted_mesh(current: &Value) -> Engine {
         .step_by(2)
         .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
         .collect();
-    assert_eq!(
-        format!("{:x}", Sha256::digest(&mesh)),
-        mesh_binding["meshContentHash"]
-    );
+    assert_eq!(sha256_hex(&mesh), mesh_binding["meshContentHash"]);
     let request = mesh_binding["effectiveRequestUtf8"].as_str().unwrap();
-    assert_eq!(
-        format!("{:x}", Sha256::digest(request)),
-        mesh_binding["effectiveRequestSha256"]
-    );
+    assert_eq!(sha256_hex(request), mesh_binding["effectiveRequestSha256"]);
     let mut engine = Engine::new();
     assert_exact(
         engine.ingest_mesh(request.as_bytes(), &mesh),
@@ -104,10 +99,7 @@ fn canonicalizes_and_rejects_the_frozen_codec_vectors_without_reserializing_inpu
     ] {
         let bound = binding(&current, id);
         let input = input(bound);
-        assert_eq!(
-            format!("{:x}", Sha256::digest(&input)),
-            bound["effectiveInputSha256"]
-        );
+        assert_eq!(sha256_hex(&input), bound["effectiveInputSha256"]);
         assert_exact(canonicalize(&input), bound, id);
     }
     for id in [
@@ -186,10 +178,7 @@ fn rejects_invalid_versions_profiles_claim_links_and_budgets_exactly() {
         let id = format!("a1/invalid/{number}");
         let bound = binding(&current, &id);
         let request = input(bound);
-        assert_eq!(
-            format!("{:x}", Sha256::digest(&request)),
-            bound["effectiveInputSha256"]
-        );
+        assert_eq!(sha256_hex(&request), bound["effectiveInputSha256"]);
         assert_exact(process_request(&request), bound, &id);
     }
     let old = binding(&current, "a1/invalid/2");

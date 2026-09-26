@@ -251,7 +251,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       };
       runner = createNativeGeoSpecRunner({
         filesystem: createBridgeVmFileSystem(fileSystem),
-        nativeAssertions: { engine, canonicalize: native.canonicalize },
+        nativeAssertions: { engine },
         model: {
           runtime: trackedRuntime,
           readSource: async (source) => {

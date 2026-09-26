@@ -50,6 +50,7 @@ fn occurrence(index: u32, path: &str) -> OccurrenceFacts {
         product_name: "bracket".into(),
         instance_name: Some(path.into()),
         ordinal_path: vec![index + 1],
+        face_count: 1,
     }
 }
 

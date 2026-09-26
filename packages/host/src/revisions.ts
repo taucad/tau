@@ -529,7 +529,7 @@ export const createProjectRevisionPort = (
     remoteCredential?: (() => NativeGitRemoteCredential | undefined) | undefined;
   }>,
 ): RevisionPort => {
-  const projectId = options.projectId ?? basename(options.workspaceRoot);
+  const projectId = resolveProjectId(options.workspaceRoot, options.projectId);
   return createNativeGitRevisionPort({
     repositoryPath: options.workspaceRoot,
     checkouts: {
@@ -603,7 +603,7 @@ const registryAnswered = async (actor: {
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's actor tree; every half reads the same five values.
 export const createProjectRevisions = (options: ProjectRevisionsOptions): ProjectRevisions => {
-  const projectId = options.projectId ?? basename(options.workspaceRoot);
+  const projectId = resolveProjectId(options.workspaceRoot, options.projectId);
   const { apiBaseUrl } = options;
   let channelRemoteCredential: NativeGitRemoteCredential | undefined;
   const toolchain = options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable };
@@ -1994,6 +1994,35 @@ const readManifestField = (workspaceRoot: string, field: 'id' | 'name'): string 
   }
 };
 
+/* Directories already warned about, so a malformed id is said once per process. */
+const malformedManifestIds = new Set<string>();
+
+/**
+ * The id a project watches, connects and keeps its checkouts under: the caller's, else `tau.json`'s `id` (W15 F2), else the directory's name.
+ *
+ * Every entry resolves it here, so `tau serve`, `tau revisions save` and a
+ * bare port agree. A manifest id outside `[\w-]` is ignored: it names a URL
+ * path and a directory, so `../x` must never reach either.
+ *
+ * @param workspaceRoot - Project directory containing `tau.json`.
+ * @param projectId - The caller's id, which wins when given.
+ * @returns The project id.
+ */
+const resolveProjectId = (workspaceRoot: string, projectId: string | undefined): string => {
+  if (projectId !== undefined) {
+    return projectId;
+  }
+  const manifestId = readManifestField(workspaceRoot, 'id');
+  if (manifestId !== undefined && /^[\w-]+$/u.test(manifestId)) {
+    return manifestId;
+  }
+  if (manifestId !== undefined && !malformedManifestIds.has(workspaceRoot)) {
+    malformedManifestIds.add(workspaceRoot);
+    console.warn(`tau.json id ${JSON.stringify(manifestId)} is not a project id; using the directory name.`);
+  }
+  return basename(workspaceRoot);
+};
+
 /** What a `publish` did, or why it did not (S32, S42). @public */
 export type RevisionPublishOutcome =
   | Readonly<{
@@ -2011,14 +2040,20 @@ export type RevisionSaveOutcome =
       revisionId: string;
       /** Where the files are now, in the pane's words: `main · Rev 3`. */
       line: string;
-      /** How the push that followed ended; `noRemote` when this project backs up nowhere. */
-      backup: SyncPushOutcome | 'noRemote';
+      /**
+       * How the push that followed ended; `noRemote` when this project backs up
+       * nowhere, `timedOut` when the push did not answer in time (its outcome is
+       * unknown, not failed).
+       */
+      backup: SyncPushOutcome | 'noRemote' | 'timedOut';
       /** The scheduler's own sentence, when `backup` is neither `backedUp` nor `noRemote`. */
       reason?: string;
     }>
   /** The files already are the head's revision, or a turn is recording them. */
   | Readonly<{ status: 'unchanged'; line: string }>
-  | Readonly<{ status: 'refused'; reason: string }>;
+  | Readonly<{ status: 'refused'; reason: string }>
+  /** The cut did not answer in time: whether a revision was recorded is unknown, not refused. */
+  | Readonly<{ status: 'timedOut'; reason: string }>;
 
 /** What an `openFromRemote` did, or why it did not (W18 DEF-2). @public */
 export type RevisionOpenOutcome =
@@ -2130,10 +2165,7 @@ export const openProjectRevisions = (
     publishPublication?: ((input: PublishPublicationActorInput) => Promise<PublishPublicationActorOutput>) | undefined;
   }>,
 ): ProjectRevisionVerbs => {
-  /* The manifest's id before the directory's name (W15 F2): a checkout named
-   * anything else still watches and connects as the project it is. */
-  const projectId =
-    options.projectId ?? readManifestField(options.workspaceRoot, 'id') ?? basename(options.workspaceRoot);
+  const projectId = resolveProjectId(options.workspaceRoot, options.projectId);
   const { apiBaseUrl, apiToken } = options;
   const remoteUrl =
     options.remoteUrl ?? (apiBaseUrl === undefined ? undefined : (id: string) => tauRemoteUrl(apiBaseUrl, id));
@@ -2385,6 +2417,7 @@ export const openProjectRevisions = (
       | Readonly<{ status: 'minted'; revisionId: string }>
       | Readonly<{ status: 'unchanged' }>
       | Readonly<{ status: 'refused'; reason: string }>
+      | Readonly<{ status: 'timedOut'; reason: string }>
     >(
       (resolve) => {
         const subscriptions = [
@@ -2419,9 +2452,12 @@ export const openProjectRevisions = (
           }
         };
       },
-      Object.freeze({ status: 'refused', reason: 'This project did not answer in time.' }),
+      Object.freeze({
+        status: 'timedOut',
+        reason: 'This project did not answer in time; the save may still be recorded.',
+      }),
     );
-    if (cut.status === 'refused') {
+    if (cut.status === 'refused' || cut.status === 'timedOut') {
       return cut;
     }
     if (cut.status === 'unchanged') {
@@ -2431,7 +2467,7 @@ export const openProjectRevisions = (
     /* A push already running when this asks was built before the mint, so the
      * scheduler answers with the next one (sync.machine row 65). */
     const pushId = randomUUID();
-    const pushed = await answered<SyncPushOutcome>(
+    const pushed = await answered<SyncPushOutcome | 'timedOut'>(
       (resolve) => {
         const settled = scheduler.on('pushSettled', (event) => {
           if (event.pushId === pushId) {
@@ -2443,7 +2479,7 @@ export const openProjectRevisions = (
           settled.unsubscribe();
         };
       },
-      'failed',
+      'timedOut',
       publishVerbMilliseconds,
     );
     const { sync } = selectRevisionStatus(actor.getSnapshot());
@@ -2457,7 +2493,12 @@ export const openProjectRevisions = (
       backup,
       ...(backup === 'backedUp' || backup === 'noRemote'
         ? {}
-        : { reason: sync.error ?? 'This revision is saved here and was not backed up yet.' }),
+        : {
+            reason:
+              backup === 'timedOut'
+                ? 'The backup did not answer in time; whether it reached the remote is unknown.'
+                : (sync.error ?? 'This revision is saved here and was not backed up yet.'),
+          }),
     });
   };
 

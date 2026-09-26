@@ -17,7 +17,7 @@ const hasSlugs = (
 function ProjectThumbnail({ projectId }: { readonly projectId: string }): React.JSX.Element {
   const thumbnailSource = useProjectThumbnail(projectId);
   return (
-    <span className='flex size-12 items-center justify-center overflow-hidden rounded-md border bg-muted'>
+    <span className='flex size-9 items-center justify-center overflow-hidden rounded-md border bg-muted'>
       {thumbnailSource ? (
         <img src={thumbnailSource} alt='' className='size-full object-cover' />
       ) : (
@@ -49,12 +49,9 @@ export function ProjectNavigationCommandItems(): undefined {
       ...navigableProjects.map((project) => ({
         id: `project-${project.id}`,
         label: project.name,
-        searchValue: project.name,
-        // Same-named projects differ by slug path, recency and description; three lines at most.
-        details: [
-          `${project.slugs.workspaceSlug}/${project.slugs.projectSlug} · ${formatRelativeTime(project.lastActivityAt)}`,
-          ...(project.description.trim() ? [project.description.trim()] : []),
-        ],
+        // The description stays searchable without taking a row; the slug path and recency tell same-named projects apart.
+        searchValue: `${project.name} ${project.description}`,
+        detail: `${project.slugs.workspaceSlug}/${project.slugs.projectSlug} · ${formatRelativeTime(project.lastActivityAt)}`,
         group: 'Projects',
         icon: <ProjectThumbnail projectId={project.id} />,
         link: projectUrl(project.slugs),

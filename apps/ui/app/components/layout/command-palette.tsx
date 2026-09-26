@@ -1,22 +1,17 @@
 import { Menu, Search } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, createContext, useContext } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
+import { defaultFilter } from 'cmdk';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Fragment } from 'react/jsx-runtime';
 import { useNavigate } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import {
-  CommandDialog,
-  CommandInput,
-  CommandList,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-} from '@taucad/ui/components/command';
+import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandItem } from '@taucad/ui/components/command';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { menuItemLayoutClass } from '@taucad/ui/components/menu.variants';
+import { menuGroupHeadingClass, menuItemLayoutClass } from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { SidebarMenuButton } from '#components/ui/sidebar.js';
@@ -70,8 +65,8 @@ export function useCommandPaletteItems(
 export type CommandPaletteItem = {
   id: string;
   label: string;
-  /** Muted single-line rows under the label that tell similarly named items apart. */
-  details?: readonly string[];
+  /** Muted line under the label that tells similarly named items apart. */
+  detail?: string;
   searchValue?: string;
   group: string;
   icon: React.JSX.Element;
@@ -86,19 +81,130 @@ function CommandPaletteItemLabel({ item }: { readonly item: CommandPaletteItem }
   return (
     <div className={cn(menuItemLayoutClass, 'min-w-0')}>
       <span className='shrink-0'>{item.icon}</span>
-      {item.details ? (
+      {item.detail ? (
         <div className='flex min-w-0 flex-col'>
           <span className='truncate'>{item.label}</span>
-          {item.details.map((detail) => (
-            <span key={detail} className='truncate text-xs text-muted-foreground'>
-              {detail}
-            </span>
-          ))}
+          <span className='truncate text-xs text-muted-foreground'>{item.detail}</span>
         </div>
       ) : (
         <span>{item.label}</span>
       )}
     </div>
+  );
+}
+
+const commandValue = (item: CommandPaletteItem): string => `${item.searchValue ?? item.label} ${item.id}`;
+
+type CommandPaletteRow =
+  | { readonly kind: 'heading'; readonly key: string; readonly group: string }
+  | { readonly kind: 'item'; readonly key: string; readonly item: CommandPaletteItem };
+
+/**
+ * Ranks items the way cmdk would — drop non-matches, then order each group and the
+ * groups by best score — so the list only mounts the rows in view instead of handing
+ * cmdk every item to filter.
+ * @param items - Every registered palette item.
+ * @param search - The current query; empty keeps registration order.
+ * @returns Flat heading and item rows for the virtualized list.
+ */
+export function rankCommandPaletteRows(items: readonly CommandPaletteItem[], search: string): CommandPaletteRow[] {
+  const groups = new Map<string, { score: number; matches: Array<{ item: CommandPaletteItem; score: number }> }>();
+
+  for (const item of items) {
+    if (item.visible === false) {
+      continue;
+    }
+    const score = search ? (defaultFilter?.(commandValue(item), search) ?? 0) : 1;
+    if (score <= 0) {
+      continue;
+    }
+    const group = groups.get(item.group) ?? { score: 0, matches: [] };
+    group.matches.push({ item, score });
+    group.score = Math.max(group.score, score);
+    groups.set(item.group, group);
+  }
+
+  return [...groups]
+    .sort(([, left], [, right]) => right.score - left.score)
+    .flatMap(([name, group]): CommandPaletteRow[] => [
+      { kind: 'heading', key: `group-${name}`, group: name },
+      ...group.matches
+        .sort((left, right) => right.score - left.score)
+        .map(({ item }): CommandPaletteRow => ({ kind: 'item', key: item.id, item })),
+    ]);
+}
+
+type CommandPaletteResultsProperties = {
+  readonly items: CommandPaletteItem[];
+  readonly onRun: (item: CommandPaletteItem) => void;
+};
+
+/** Mounted only while the dialog is open, so the query resets on every open. */
+function CommandPaletteResults({ items, onRun }: CommandPaletteResultsProperties): React.JSX.Element {
+  const [search, setSearch] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
+  const rows = useMemo(() => rankCommandPaletteRows(items, search), [items, search]);
+
+  /*
+   * Rows mount only around the viewport. The item overscan also keeps the next rows
+   * mounted, because cmdk's arrow keys can only move to an item that is in the DOM.
+   */
+  // oxlint-disable-next-line react/incompatible-library -- TanStack Virtual returns mutable functions that cannot be compiler-memoized safely.
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: (index) => {
+      const row = rows[index];
+      return row?.kind === 'item' ? (row.item.detail ? 46 : 30) : 24;
+    },
+    getItemKey: (index) => rows[index]?.key ?? index,
+    overscan: 8,
+  });
+
+  return (
+    <>
+      <CommandInput
+        className='h-9 border-0 bg-transparent px-3 text-base shadow-none focus-visible:outline-none dark:bg-transparent'
+        placeholder='Search projects, chats, and actions...'
+        value={search}
+        onValueChange={(value) => {
+          setSearch(value);
+          virtualizer.scrollToOffset(0);
+        }}
+      />
+      <CommandList ref={listRef} className='py-0'>
+        {rows.length === 0 ? <CommandEmpty>No results found.</CommandEmpty> : null}
+        <div className='relative w-full' style={{ height: virtualizer.getTotalSize() }}>
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const row = rows[virtualRow.index];
+            return row ? (
+              <div
+                key={virtualRow.key}
+                ref={virtualizer.measureElement}
+                data-index={virtualRow.index}
+                className={cn('absolute inset-x-0 top-0 px-1', row.kind === 'heading' ? 'pt-1' : 'pb-0.5')}
+                style={{ transform: `translateY(${virtualRow.start}px)` }}
+              >
+                {row.kind === 'heading' ? (
+                  <div className={menuGroupHeadingClass}>{row.group}</div>
+                ) : (
+                  <CommandItem
+                    value={commandValue(row.item)}
+                    disabled={row.item.disabled}
+                    onSelect={() => {
+                      onRun(row.item);
+                    }}
+                  >
+                    <CommandPaletteItemLabel item={row.item} />
+                    {row.item.shortcut ? <KeyShortcut className='ml-auto'>{row.item.shortcut}</KeyShortcut> : null}
+                  </CommandItem>
+                )}
+              </div>
+            ) : null;
+          })}
+        </div>
+      </CommandList>
+    </>
   );
 }
 
@@ -111,62 +217,26 @@ type CommandPaletteProperties = {
 function CommandPalette({ isOpen, onOpenChange, items }: CommandPaletteProperties): React.JSX.Element {
   const navigate = useNavigate();
 
-  const groupedItems = useMemo(() => {
-    const groups: Record<string, CommandPaletteItem[]> = {};
-
-    for (const item of items) {
-      if (item.visible === false) {
-        continue;
+  const runCommand = useCallback(
+    (item: CommandPaletteItem) => {
+      onOpenChange(false);
+      if (item.link) {
+        void navigate(item.link);
+      } else if (!item.disabled && item.action) {
+        item.action();
       }
-
-      groups[item.group] ??= [];
-      groups[item.group]!.push(item);
-    }
-
-    return groups;
-  }, [items]);
-
-  const runCommand = useCallback((command: CommandPaletteItem) => {
-    if (!command.disabled && command.action) {
-      command.action();
-    }
-  }, []);
+    },
+    [navigate, onOpenChange],
+  );
 
   return (
     <CommandDialog
       open={isOpen}
+      shouldFilter={false}
       onOpenChange={onOpenChange}
       contentClassName='*:data-[slot=dialog-close]:hidden [&_[data-slot=command-input-wrapper]>svg]:hidden'
     >
-      <CommandInput
-        className='h-9 border-0 bg-transparent px-3 text-base shadow-none focus-visible:outline-none dark:bg-transparent'
-        placeholder='Search projects, chats, and actions...'
-      />
-      <CommandList className='py-0'>
-        <CommandEmpty>No results found.</CommandEmpty>
-        {Object.entries(groupedItems).map(([groupName, groupItems]) => (
-          <CommandGroup key={groupName} heading={groupName}>
-            {groupItems.map((item) => (
-              <CommandItem
-                key={item.id}
-                value={`${item.searchValue ?? item.label} ${item.id}`}
-                disabled={item.disabled}
-                onSelect={() => {
-                  onOpenChange(false);
-                  if (item.link) {
-                    void navigate(item.link);
-                  } else {
-                    runCommand(item);
-                  }
-                }}
-              >
-                <CommandPaletteItemLabel item={item} />
-                {item.shortcut ? <KeyShortcut className='ml-auto'>{item.shortcut}</KeyShortcut> : null}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        ))}
-      </CommandList>
+      <CommandPaletteResults items={items} onRun={runCommand} />
     </CommandDialog>
   );
 }
@@ -240,7 +310,7 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
     [],
   );
 
-  const getItemValue = useCallback((item: CommandPaletteItem) => `${item.searchValue ?? item.label} ${item.id}`, []);
+  const getItemValue = useCallback((item: CommandPaletteItem) => commandValue(item), []);
   const isItemDisabled = useCallback((item: CommandPaletteItem) => Boolean(item.disabled), []);
 
   return (
@@ -250,6 +320,7 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
         renderLabel={renderItemLabel}
         getValue={getItemValue}
         isDisabled={isItemDisabled}
+        withVirtualization
         searchPlaceHolder='Search projects, chats, and actions...'
         placeholder='Actions'
         title='Search projects, chats, and actions'

@@ -28,6 +28,7 @@ import {
 } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { cloudProjectStub } from '#hooks/use-open-cloud-project.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import type { ProjectListItem } from '#types/project.types.js';
@@ -246,7 +247,10 @@ export function CloudProjectCard({
  * account switch never acts on the previous account's rows). A project this
  * device holds (trashed included) or has brought once before — and may have
  * deleted since — is skipped; the pass holds a Web Lock, so two tabs never run
- * it at once, and `createProject`'s per-id lock refuses a racing *Open*.
+ * it at once, and `createProject`'s per-id lock refuses a racing *Open*. A
+ * project is marked `open` before it is created and recorded as brought once
+ * this device holds it; a creation that leaves nothing behind unmarks it and is
+ * asked again once the listing's ids change, or on the library's next visit.
  *
  * ponytail: files arrive on the first open's pull, not in the background — the
  * library has no revision root of its own; give it a headless one if offline
@@ -273,36 +277,58 @@ export const useMaterializeCloudProjects = ({
   const location = useMaterializeOnSignInLocation();
   const auth = useResolvedAuth();
   const { createProject } = useProjectManager();
-  /* Asked for once per mount: a refused creation is not retried on every render. */
-  const attempted = useRef(new Set<string>());
+  /* Each id asked, with the listing it was asked under: once per listing, however often the library renders. */
+  const asked = useRef(new Map<string, string>());
   useEffect(() => {
     if (location === undefined || auth !== 'authed' || !isSettled || isFetching || isLoading) {
       return;
     }
     const heldIds = new Set(held.map((project) => project.id));
+    /* The listing's ids, not its array: `useProjects` answers a fresh one every render. */
+    const listing = cloud
+      .map((entry) => entry.id)
+      .toSorted()
+      .join(' ');
     const wanted = cloud.filter(
-      (entry) => !heldIds.has(entry.id) && !attempted.current.has(entry.id) && !materializedCloudProjects.has(entry.id),
+      (entry) =>
+        !heldIds.has(entry.id) && asked.current.get(entry.id) !== listing && !materializedCloudProjects.has(entry.id),
     );
     if (wanted.length === 0) {
       return;
     }
     for (const entry of wanted) {
-      attempted.current.add(entry.id);
+      asked.current.set(entry.id, listing);
     }
+    /* Marked before it is created (defect R): its directory, and so its library
+       card, exists before `createProject` answers, and a copy left unmarked is
+       never connected. */
+    const bring = async (entry: CloudProject): Promise<void> => {
+      const existing = tauCloudIntent.get(entry.id);
+      tauCloudIntent.set(entry.id, 'open');
+      try {
+        await createProject({ ...cloudProjectStub(entry), location });
+        materializedCloudProjects.add(entry.id);
+      } catch (error) {
+        /* On this device all the same — refused as already held, or written and
+           then failed: brought, and whatever mark it already had stands. */
+        if ((await getProjectFileSystemConfig(entry.id).catch(() => undefined)) !== undefined) {
+          materializedCloudProjects.add(entry.id);
+          tauCloudIntent.set(entry.id, existing ?? 'open');
+          return;
+        }
+        /* Not created: nothing may point at it. Asked again once the listing's
+           ids change, or on the library's next visit. */
+        tauCloudIntent.set(entry.id, undefined);
+        console.error(`Error bringing ${entry.name} from Tau Cloud:`, error);
+      }
+    };
     /* One pass, in order, so two creations never race one directory allocation. */
     const materialize = async (): Promise<void> => {
       for (const entry of wanted) {
         /* Another tab's pass, or an earlier one here, may have brought it while this one waited for the lock. */
-        if (materializedCloudProjects.has(entry.id)) {
-          continue;
-        }
-        try {
+        if (!materializedCloudProjects.has(entry.id)) {
           // oxlint-disable-next-line no-await-in-loop -- sequential by design: each creation allocates a directory.
-          await createProject({ ...cloudProjectStub(entry), location });
-          materializedCloudProjects.add(entry.id);
-          tauCloudIntent.set(entry.id, 'open');
-        } catch {
-          /* Already on this device, or the workspace refused: the row stays Tau Cloud's. */
+          await bring(entry);
         }
       }
     };

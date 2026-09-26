@@ -974,7 +974,13 @@ describe('the page client of the worker revision root', () => {
       expect(secondRoot.inspect().status).toBe('active');
     });
     expect(firstRoot.inspect().status).toBe('stopped');
-    expect(first.registry.openProjectIds()).toEqual([]);
+    // Closing waits for the operation log's last append, so the registry lets go after the root stops.
+    await vi.waitFor(
+      () => {
+        expect(first.registry.openProjectIds()).toEqual([]);
+      },
+      { timeout: 10_000 },
+    );
   });
 
   /**

@@ -234,9 +234,14 @@ const main = (): void => {
     CC_wasm32_unknown_emscripten: closure.emcc,
     CXX_wasm32_unknown_emscripten: closure.emxx,
     AR_wasm32_unknown_emscripten: closure.emar,
-    CARGO_ENCODED_RUSTFLAGS: mt
-      ? [...closure.wasmSimd.rustFlags, '-C', 'target-feature=+atomics,+bulk-memory,+mutable-globals'].join('\u001F')
-      : closure.wasmSimd.rustFlags.join('\u001F'),
+    CARGO_ENCODED_RUSTFLAGS: [
+      ...closure.wasmSimd.rustFlags,
+      ...(mt ? ['-C', 'target-feature=+atomics,+bulk-memory,+mutable-globals'] : []),
+      // Builder paths stay out of Rust panic locations; the runtime build script ignores remap flags.
+      `--remap-path-prefix=${closure.sourceRoot}=tau`,
+      `--remap-path-prefix=${closure.environment['CARGO_HOME']}=cargo`,
+      `--remap-path-prefix=${resolve(closure.rustPrefix, 'lib/rustlib/src/rust')}=rust-src`,
+    ].join('\u001F'),
     GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
     CXXFLAGS_wasm32_unknown_emscripten: [
       closure.wasmSimd.cxxFlag,
@@ -308,11 +313,6 @@ const main = (): void => {
       ...mtOptions,
       `-DCMAKE_TOOLCHAIN_FILE=${sdk}/emscripten/cmake/Modules/Platform/Emscripten.cmake`,
       `-DCMAKE_CROSSCOMPILING_EMULATOR=${verifiedTool(closure, 'node')}`,
-      `-D3RDPARTY_RAPIDJSON_DIR=${prep}/sources/rapidjson`,
-      `-D3RDPARTY_RAPIDJSON_INCLUDE_DIR=${prep}/sources/rapidjson/include`,
-      `-D3RDPARTY_FREETYPE_DIR=${prep}/sources/freetype`,
-      `-D3RDPARTY_FREETYPE_INCLUDE_DIR_freetype2=${prep}/sources/freetype/include`,
-      `-D3RDPARTY_FREETYPE_INCLUDE_DIR_ft2build=${prep}/sources/freetype/include`,
     ];
     const mtPrefixIdentity = pthreadPrefixIdentity(closure, mtCommand);
     mtIdentity = digest(

@@ -211,6 +211,43 @@ describe('runGeoSpecModule', () => {
     expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['helper.js']);
   });
 
+  it('should reject work that outlived its run when a later run reuses the bundle', async () => {
+    const filesystem = filesystemWith([
+      [
+        'spec.geospec.ts',
+        `
+        import { it } from 'geospec';
+        const ghost = globalThis.__GEOSPEC_TEST_GHOST__;
+        if (ghost === undefined) {
+          globalThis.__GEOSPEC_TEST_GHOST__ = () => it('ghost-from-run-1', () => {});
+        } else {
+          try {
+            ghost();
+          } catch (error) {
+            globalThis.__GEOSPEC_TEST_GHOST_ERROR__ = String(error);
+          }
+        }
+        it('body', () => {});
+      `,
+      ],
+    ]);
+    const bundleCache = new Map();
+    const globals = globalThis as Record<string, unknown>;
+    try {
+      const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+      const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+
+      expect(second.success && second.bundle).toBe(first.success && first.bundle);
+      expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['body']);
+      expect(globals['__GEOSPEC_TEST_GHOST_ERROR__']).toBe(
+        'Error: GeoSpec runner binding is not active. Run the module through runGeoSpecModule().',
+      );
+    } finally {
+      Reflect.deleteProperty(globals, '__GEOSPEC_TEST_GHOST__');
+      Reflect.deleteProperty(globals, '__GEOSPEC_TEST_GHOST_ERROR__');
+    }
+  });
+
   it('should expose the injected model and step loaders to authored modules', async () => {
     const result = await runModule(
       [

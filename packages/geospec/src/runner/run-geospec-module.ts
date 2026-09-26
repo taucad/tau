@@ -294,7 +294,7 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     ...(options.nativeAssertions === undefined ? {} : { nativeAssertions: options.nativeAssertions }),
   });
   const cached = await resolveCachedBundle(options);
-  const runToken = cached?.runToken ?? createRunToken();
+  const runToken = createRunToken();
   const bindings = ensureRunBindings();
   // D-S3: the model loader is INJECTED. The engine's runner hosts own its
   // construction (caching, affinity, resource-scope tracking); this module
@@ -387,7 +387,11 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
       });
     }
 
-    const executed = await vm.execute(bundle.code);
+    // A cached bundle embeds the token of the run that built it. Executing it under this run's own token
+    // leaves work that outlives an earlier run with no binding, instead of this run's.
+    const executed = await vm.execute(
+      cached === undefined ? bundle.code : bundle.code.replaceAll(cached.runToken, runToken),
+    );
     if (!executed.success) {
       return { success: false, issues: executed.issues, bundle };
     }

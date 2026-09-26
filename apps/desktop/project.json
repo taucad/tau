@@ -4,6 +4,7 @@
   "sourceRoot": "apps/desktop/src",
   "projectType": "application",
   "tags": ["scope:ui", "type:app"],
+  "implicitDependencies": ["desktop-quick-look"],
   "targets": {
     "prepare-build123d-python": {
       "executor": "nx:run-commands",
@@ -15,7 +16,6 @@
     },
     "prepare-build123d-python-macos": {
       "executor": "nx:run-commands",
-      "dependsOn": ["prepare-build123d-python"],
       "outputs": ["{projectRoot}/resources/python/darwin-arm64"],
       "options": {
         "cwd": ".",
@@ -32,7 +32,6 @@
     },
     "prepare-picogk-dotnet-macos": {
       "executor": "nx:run-commands",
-      "dependsOn": ["prepare-picogk-dotnet"],
       "outputs": ["{projectRoot}/resources/picogk/darwin-arm64"],
       "options": {
         "cwd": ".",
@@ -44,11 +43,7 @@
       "executor": "nx:run-commands",
       "outputs": ["{projectRoot}/dist"],
       "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
-      "dependsOn": [
-        "prepare-build123d-python",
-        "prepare-picogk-dotnet",
-        { "projects": ["ui"], "target": "build:desktop" }
-      ],
+      "dependsOn": [{ "projects": ["ui"], "target": "build:desktop" }],
       "options": {
         "cwd": "{projectRoot}",
         "command": "electron-vite build"
@@ -74,7 +69,12 @@
     "serve": {
       "executor": "nx:run-commands",
       "continuous": true,
-      "dependsOn": ["build", { "projects": ["scripts"], "target": "populate-ui-env" }],
+      "dependsOn": [
+        "build",
+        "prepare-build123d-python",
+        "prepare-picogk-dotnet",
+        { "projects": ["scripts"], "target": "populate-ui-env" }
+      ],
       "options": {
         "cwd": "{projectRoot}",
         "command": "node --env-file=../ui/.env scripts/run-electron-vite.mts preview --skipBuild",
@@ -83,48 +83,11 @@
         }
       }
     },
-    "generate-quick-look": {
-      "executor": "nx:run-commands",
-      "outputs": ["{projectRoot}/macos/generated"],
-      "options": {
-        "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/desktop/scripts/generate-quick-look-metadata.mts --write"
-      }
-    },
-    "check-quick-look": {
-      "executor": "nx:run-commands",
-      "options": {
-        "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/desktop/scripts/generate-quick-look-metadata.mts --check"
-      }
-    },
-    "build-quick-look-runtime": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["check-quick-look"],
-      "outputs": ["{projectRoot}/macos/generated/runtime"],
-      "options": {
-        "cwd": ".",
-        "commands": [
-          "tsgo -p apps/desktop/macos/runtime/tsconfig.json --noEmit",
-          "vite build --config apps/desktop/macos/runtime/vite.config.ts"
-        ],
-        "parallel": false
-      }
-    },
-    "build-quick-look-extensions": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["build-quick-look-runtime"],
-      "outputs": ["{projectRoot}/macos/dist/extensions"],
-      "options": {
-        "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/desktop/scripts/build-quick-look-extensions.mts"
-      }
-    },
     "package-macos": {
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "build-quick-look-extensions",
+        { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos"
       ],
@@ -138,7 +101,7 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "build-quick-look-extensions",
+        { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos"
       ],
@@ -152,7 +115,7 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "build-quick-look-extensions",
+        { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos"
       ],

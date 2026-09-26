@@ -4,17 +4,16 @@
  * Purpose: Build Tau's two macOS Quick Look app extensions for Apple Silicon.
  * Why: Electron packaging must embed deterministic .appex bundles before signing.
  * Environment: macOS, Xcode command-line tools, generated Quick Look runtime assets.
- * Usage: node --import @oxc-node/core/register scripts/build-quick-look-extensions.mts
+ * Usage: node --import @oxc-node/core/register apps/desktop/macos/scripts/build-quick-look-extensions.mts
  * Exit codes: 0 on a validated arm64 build; non-zero on build or validation failure.
  */
 
 import { cp, mkdir, rm } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const macosRoot = resolve(desktopRoot, 'macos');
+const macosRoot = resolve(import.meta.dirname, '..');
+// Kept between runs: Xcode's OBJROOT holds the explicit system-module builds, so a rebuild is incremental.
 const buildRoot = resolve(macosRoot, 'build');
 const productsRoot = resolve(buildRoot, 'products');
 const extensionsRoot = resolve(macosRoot, 'dist/extensions');
@@ -24,10 +23,7 @@ if (process.platform !== 'darwin') {
   throw new Error('Quick Look extensions can only be built on macOS with Xcode installed.');
 }
 
-await Promise.all([
-  rm(buildRoot, { recursive: true, force: true }),
-  rm(extensionsRoot, { recursive: true, force: true }),
-]);
+await rm(extensionsRoot, { recursive: true, force: true });
 await mkdir(extensionsRoot, { recursive: true });
 
 execFileSync(

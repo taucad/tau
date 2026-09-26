@@ -123,6 +123,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -150,12 +151,6 @@ struct ProductFacts {
 struct LocatedFaceFacts {
   TopoDS_Face shape;
   std::string shape_label;
-};
-
-// One occurrence's ordered private edge addresses and, per private face, the
-// 1-based addresses of its edges: a document slot filled on first edge demand.
-struct OccurrenceEdgeAddresses {
-  std::vector<TopoDS_Edge> edges;
 };
 
 struct EdgeFacts {
@@ -1568,9 +1563,17 @@ int guarded(geospec_occt_string* error, Function&& function) noexcept {
   }
 }
 
+// A process-unique document serial: a memo compares serials, which a later
+// document at a released one's address cannot reuse (R3 O1).
+uint64_t next_document_serial() {
+  static std::atomic<uint64_t> serial{0};
+  return ++serial;
+}
+
 }  // namespace
 
 struct geospec_occt_document {
+  const uint64_t serial = next_document_serial();
   occ::handle<TDocStd_Document> document;
   TopoDS_Shape shape;
   std::string schema;
@@ -1610,8 +1613,9 @@ struct geospec_occt_document {
   mutable NCollection_DataMap<TopoDS_Shape, Bnd_Box, TopTools_ShapeMapHasher>
       face_boxes;
   mutable std::vector<std::optional<geospec_occt_bounds>> occurrence_bounds;
-  mutable std::vector<std::optional<OccurrenceEdgeAddresses>>
-      occurrence_edge_addresses;
+  // Each occurrence's private edge-address count (its MapShapes extent); the
+  // edge handles themselves are not retained.
+  mutable std::vector<std::optional<size_t>> occurrence_edge_counts;
   mutable std::vector<std::optional<FaceFacts>> query_faces;
 };
 
@@ -1631,7 +1635,7 @@ struct geospec_occt_operand_memo {
     std::string message;
     std::vector<geospec_occt_circular_bore_candidate> candidates;
   };
-  const geospec_occt_document* document = nullptr;
+  uint64_t document_serial = 0;
   std::map<uint32_t, Operand> operands;
   std::map<uint32_t, Bores> bores;
 };
@@ -1692,25 +1696,19 @@ const geospec_occt_bounds& source_occurrence_bounds(
   return *slot;
 }
 
-// The edge addresses and incidence admission used to map for every occurrence,
-// in the same MapShapes order; only edge consumers pay for them.
-const OccurrenceEdgeAddresses& source_occurrence_edge_addresses(
-    const geospec_occt_document& document, size_t occurrence) {
-  std::optional<OccurrenceEdgeAddresses>& slot =
-      document.occurrence_edge_addresses[occurrence];
+// The number of private edge addresses admission used to map for every
+// occurrence (the same MapShapes); only edge consumers pay for it.
+size_t source_occurrence_edge_count(const geospec_occt_document& document,
+                                    size_t occurrence) {
+  std::optional<size_t>& slot = document.occurrence_edge_counts[occurrence];
   if (!slot) {
-    const OccurrenceFacts& value = document.occurrences[occurrence];
     const occ::handle<NCollection_BaseAllocator> allocator =
         new NCollection_IncAllocator;
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges(
         size_t(1), allocator);
-    TopExp::MapShapes(value.shape, TopAbs_EDGE, edges);
-    OccurrenceEdgeAddresses addresses;
-    addresses.edges.reserve(static_cast<size_t>(edges.Extent()));
-    for (int index = 1; index <= edges.Extent(); ++index) {
-      addresses.edges.push_back(TopoDS::Edge(edges(index)));
-    }
-    slot = std::move(addresses);
+    TopExp::MapShapes(document.occurrences[occurrence].shape, TopAbs_EDGE,
+                      edges);
+    slot = static_cast<size_t>(edges.Extent());
   }
   return *slot;
 }
@@ -5937,7 +5935,7 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     append_datum_placements(reader, result->occurrences,
                             result->datum_placements);
     result->occurrence_bounds.resize(result->occurrences.size());
-    result->occurrence_edge_addresses.resize(result->occurrences.size());
+    result->occurrence_edge_counts.resize(result->occurrences.size());
     result->query_faces.resize(result->faces.size());
 
     *output = result.release();
@@ -6656,7 +6654,7 @@ int geospec_occt_occurrence_edge_count(const geospec_occt_document* document,
                 "Occurrence edge-count index/output is invalid.", error);
   }
   return guarded(error, [&]() -> int {
-    *count = source_occurrence_edge_addresses(*document, occurrence).edges.size();
+    *count = source_occurrence_edge_count(*document, occurrence);
     return GEOSPEC_OCCT_OK;
   });
 }
@@ -6710,7 +6708,7 @@ geospec_occt_operand_memo* geospec_occt_operand_memo_new(
   if (document == nullptr) return nullptr;
   try {
     auto* memo = new geospec_occt_operand_memo();
-    memo->document = document;
+    memo->document_serial = document->serial;
     return memo;
   } catch (...) {
     return nullptr;
@@ -6732,7 +6730,7 @@ int geospec_occt_regular_solid_containment_dedicated(
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Document/containment output is null.", error);
   }
-  if (memo != nullptr && memo->document != document) {
+  if (memo != nullptr && memo->document_serial != document->serial) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Operand memo belongs to another document.", error);
   }
@@ -7052,7 +7050,7 @@ int geospec_occt_selected_bore_void_query(
   if (document == nullptr || band == nullptr || clear_interior == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Selected bore output/document is null.", error);
   }
-  if (memo != nullptr && memo->document != document) {
+  if (memo != nullptr && memo->document_serial != document->serial) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Operand memo belongs to another document.", error);
   }
   *band = {};
@@ -7080,7 +7078,7 @@ int geospec_occt_selected_interference_material_query(
   if (!document || !output || !kind) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Material output/document is null.", error);
   }
-  if (memo != nullptr && memo->document != document) {
+  if (memo != nullptr && memo->document_serial != document->serial) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Operand memo belongs to another document.", error);
   }
   *output = {};

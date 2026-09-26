@@ -1,6 +1,9 @@
 //! Pure, deterministic selector parsing and resolution over retained neutral facts.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::OnceCell,
+    collections::{HashMap, HashSet},
+};
 
 use super::node24_hypot3;
 use crate::{
@@ -746,6 +749,10 @@ pub(crate) struct SelectorIndex {
     pub datums: Vec<NamedRow>,
     pub groups: Vec<NamedRow>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Axis and plane query pools derived from `faces` on their first query
+    /// (C11); `faces` must not change after either is built.
+    pub axes: OnceCell<Vec<Entity>>,
+    pub planes: OnceCell<Vec<Entity>>,
 }
 
 #[cfg(test)]
@@ -988,6 +995,7 @@ pub(crate) fn build_report_index(
         datums,
         groups,
         diagnostics,
+        ..SelectorIndex::default()
     })
 }
 
@@ -1689,42 +1697,48 @@ fn cardinality(
     )
 }
 
-fn query_pool(kind: EntityType, index: &SelectorIndex) -> Vec<Entity> {
+/// The entities a query ranges over, borrowed from the index; the axis and
+/// plane views are built once per index.
+fn query_pool(kind: EntityType, index: &SelectorIndex) -> &[Entity] {
     match kind {
-        EntityType::Body => index.bodies.clone(),
-        EntityType::Axis => index
-            .faces
-            .iter()
-            .filter(|entity| {
-                entity.facts.axis_direction.is_some()
-                    && matches!(
-                        entity.facts.surface_type.as_deref(),
-                        Some("cylinder" | "cone")
-                    )
-            })
-            .map(|entity| {
-                let mut value = entity.clone();
-                value.entity_type = EntityType::Axis;
-                // resolve.ts faceEntity uses the indexed faceIndex, not an axis ordinal.
-                value.id = match (entity.occurrence_path.as_deref(), entity.facts.face_index) {
-                    (Some(path), Some(face_index)) => format!("axis:{path}#{face_index}"),
-                    _ => entity.id.replacen("face:", "axis:", 1),
-                };
-                value
-            })
-            .collect(),
-        EntityType::Plane => index
-            .faces
-            .iter()
-            .filter(|entity| entity.facts.surface_type.as_deref() == Some("plane"))
-            .map(|entity| {
-                let mut value = entity.clone();
-                value.entity_type = EntityType::Plane;
-                value.id = value.id.replacen("face:", "plane:", 1);
-                value
-            })
-            .collect(),
-        _ => index.faces.clone(),
+        EntityType::Body => &index.bodies,
+        EntityType::Axis => index.axes.get_or_init(|| {
+            index
+                .faces
+                .iter()
+                .filter(|entity| {
+                    entity.facts.axis_direction.is_some()
+                        && matches!(
+                            entity.facts.surface_type.as_deref(),
+                            Some("cylinder" | "cone")
+                        )
+                })
+                .map(|entity| {
+                    let mut value = entity.clone();
+                    value.entity_type = EntityType::Axis;
+                    // resolve.ts faceEntity uses the indexed faceIndex, not an axis ordinal.
+                    value.id = match (entity.occurrence_path.as_deref(), entity.facts.face_index) {
+                        (Some(path), Some(face_index)) => format!("axis:{path}#{face_index}"),
+                        _ => entity.id.replacen("face:", "axis:", 1),
+                    };
+                    value
+                })
+                .collect()
+        }),
+        EntityType::Plane => index.planes.get_or_init(|| {
+            index
+                .faces
+                .iter()
+                .filter(|entity| entity.facts.surface_type.as_deref() == Some("plane"))
+                .map(|entity| {
+                    let mut value = entity.clone();
+                    value.entity_type = EntityType::Plane;
+                    value.id = value.id.replacen("face:", "plane:", 1);
+                    value
+                })
+                .collect()
+        }),
+        _ => &index.faces,
     }
 }
 
@@ -1843,7 +1857,7 @@ pub(crate) fn resolve_budgeted_with_brep(
                         .is_some_and(|path| paths.contains(path))
                 });
                 if in_scope && in_within {
-                    let failure = match predicate_failure(query, &entity, brep, budget) {
+                    let failure = match predicate_failure(query, entity, brep, budget) {
                         Ok(value) => value,
                         Err(error) => return probe_unsupported(expect.clone(), error),
                     };
@@ -1853,7 +1867,7 @@ pub(crate) fn resolve_budgeted_with_brep(
             let mut matches: Vec<_> = evaluated
                 .iter()
                 .filter(|(_, failure)| failure.is_none())
-                .map(|(entity, _)| entity.clone())
+                .map(|(entity, _)| (*entity).clone())
                 .collect();
             if let Some((origin, direction)) = query.hit_by_ray {
                 matches = match apply_ray_probe(matches, origin, direction, brep, budget) {
@@ -1935,7 +1949,7 @@ pub(crate) fn resolve_budgeted_with_brep(
                 .drain(..)
                 .filter(|(_, failure)| failure.is_some())
                 .take(NEAR_MISS_LIMIT)
-                .map(|entry| entry.0)
+                .map(|entry| entry.0.clone())
                 .collect();
             cardinality(
                 matches,
@@ -2461,8 +2475,18 @@ mod tests {
         }
         observations
             .push(json!({"operation":"face inventory unchanged","passed":index.faces==original}));
-        index.faces.push(index.faces[0].clone());
-        let duplicates = query_pool(EntityType::Axis, &index);
+        // C11: the pools borrow the index; the axis view is built once.
+        assert!(std::ptr::eq(query_pool(EntityType::Axis, &index), pool));
+        assert!(std::ptr::eq(
+            query_pool(EntityType::Face, &index),
+            index.faces.as_slice()
+        ));
+        let mut duplicated = SelectorIndex {
+            faces: index.faces.clone(),
+            ..SelectorIndex::default()
+        };
+        duplicated.faces.push(index.faces[0].clone());
+        let duplicates = query_pool(EntityType::Axis, &duplicated);
         let ids: Vec<_> = duplicates.iter().map(|entity| entity.id.as_str()).collect();
         let expected: Vec<_> = oracle["selection"]["duplicateIds"]
             .as_array()

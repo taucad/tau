@@ -489,11 +489,12 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     const clone = path.join(workspace, 'clone');
     await writeFile(path.join(clone, 'part.ts'), 'export const width = 13;\n', 'utf8');
     await gitOk(['commit', '-am', 'mixed push probe'], clone);
-    await gitOk(['update-ref', 'refs/heads/sync/tau/main', 'HEAD'], clone);
+    /* A branch named bare `conflicts` stays refused (D14 keeps the name for conflict lines). */
+    await gitOk(['update-ref', 'refs/heads/conflicts', 'HEAD'], clone);
 
-    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/atomic-probe', 'refs/heads/sync/tau/main'], clone);
+    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/atomic-probe', 'refs/heads/conflicts'], clone);
     expect(pushed.code).not.toBe(0);
-    expect(pushed.stderr).toContain('refs/heads/sync/tau/main');
+    expect(pushed.stderr).toContain('refs/heads/conflicts');
 
     expect(await advertised()).not.toContain('atomic-probe');
   }, 120_000);

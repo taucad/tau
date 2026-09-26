@@ -1,9 +1,9 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import process from 'node:process';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import {
   ceilingRefusalMarker,
   gitLfsObjectKey,
@@ -51,6 +51,114 @@ const runHook = async (
 let hookDirectory: string;
 let hookPath: string;
 
+/* Every stock git on PATH, resolved once: the shim below calls it by path. */
+const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+
+/*
+ * A `git` in front of the real one that logs what the hook's first-parent walk
+ * printed, or fails it on request — so a row can count the history a push read
+ * (RV-W6 F4) and prove the walk fails closed.
+ */
+const revListShim = `#!/bin/sh
+case " $* " in
+  *" --first-parent "*)
+    if [ "\${TAU_TEST_REVLIST_FAIL:-}" = "1" ]; then exit 128; fi
+    out=$("$TAU_TEST_REAL_GIT" "$@") || exit $?
+    [ -z "$out" ] || printf '%s\\n' "$out" | tee -a "$TAU_TEST_REVLIST_LOG"
+    exit 0
+    ;;
+esac
+exec "$TAU_TEST_REAL_GIT" "$@"
+`;
+
+/**
+ * A real repository the installed hook runs in, with Tau's commit shape at hand:
+ * the hook reads the commits a push brings, so a row's tips must exist.
+ */
+const hookRepository = async (options: Readonly<{ failWalk?: boolean }> = {}) => {
+  const fixture = await mkdtemp(path.join(tmpdir(), 'tau-git-hook-repo-'));
+  const shim = path.join(fixture, '.shim');
+  await mkdir(shim);
+  await writeFile(path.join(shim, 'git'), revListShim, 'utf8');
+  await chmod(path.join(shim, 'git'), 0o755);
+  const walkLog = path.join(fixture, '.walk.log');
+  await writeFile(walkLog, '', 'utf8');
+  /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+  const environment: Record<string, string> = {
+    PATH: `${shim}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
+    HOME: fixture,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_AUTHOR_NAME: 'D14',
+    GIT_AUTHOR_EMAIL: 'd14@tau.test',
+    GIT_COMMITTER_NAME: 'D14',
+    GIT_COMMITTER_EMAIL: 'd14@tau.test',
+    TAU_TEST_REAL_GIT: realGit,
+    TAU_TEST_REVLIST_LOG: walkLog,
+    ...(options.failWalk === true ? { TAU_TEST_REVLIST_FAIL: '1' } : {}),
+  };
+  /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+  const git = async (...args: readonly string[]): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const child = spawn(realGit, [...args], {
+        cwd: fixture,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: environment as unknown as NodeJS.ProcessEnv,
+      });
+      const out: Array<Uint8Array<ArrayBuffer>> = [];
+      child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => out.push(chunk));
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve(Buffer.concat(out).toString('utf8').trim());
+          return;
+        }
+        reject(new Error(`git ${args.join(' ')}`));
+      });
+    });
+  /** One hook run over `<old> <new> <ref>` lines, as receive-pack feeds it. */
+  const push = async (
+    lines: string | readonly string[],
+    extra: Readonly<Record<string, string>> = {},
+  ): Promise<{ code: number | undefined; stderr: string }> =>
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+    runHook(lines, { ...environment, TAU_GIT_PUSH_ADMITTED: '1', ...extra }, fixture);
+  /** A commit object as Tau writes one, `jj:trees` and all, on the given parents. */
+  const commit = async (parents: readonly string[], conflicted: boolean): Promise<string> => {
+    const tree = await git('write-tree');
+    const body = [
+      `tree ${tree}`,
+      ...parents.map((parent) => `parent ${parent}`),
+      'author D14 <d14@tau.test> 1790000000 +0000',
+      'committer D14 <d14@tau.test> 1790000000 +0000',
+      ...(conflicted ? [`jj:trees ${tree} ${tree} ${tree}`] : []),
+      '',
+      conflicted ? 'Needs your decision' : `Plain ${String(Math.random())}`,
+      '',
+    ].join('\n');
+    const file = path.join(fixture, '.git', `commit-${String(Math.random()).slice(2)}`);
+    await writeFile(file, body, 'utf8');
+    return git('hash-object', '-t', 'commit', '-w', '--literally', file);
+  };
+  /** How many commits the hook's first-parent walks printed so far. */
+  const walked = async (): Promise<number> => {
+    const log = await readFile(walkLog, 'utf8');
+    return log.split('\n').filter(Boolean).length;
+  };
+  await git('init', '--quiet', '--initial-branch=main', '.');
+  await git('commit', '--quiet', '--allow-empty', '-m', 'base');
+  const base = await git('rev-parse', 'HEAD');
+  return {
+    git,
+    push,
+    commit,
+    walked,
+    base,
+    dispose: async () => rm(fixture, { recursive: true, force: true }),
+  };
+};
+
+const none = '0'.repeat(40);
+
 describe('Tau Hosted Remote constants', () => {
   beforeAll(async () => {
     hookDirectory = await mkdtemp(path.join(tmpdir(), 'tau-git-hook-'));
@@ -64,15 +172,21 @@ describe('Tau Hosted Remote constants', () => {
   });
 
   it('accepts only the pushable ref namespaces (A39), as the installed hook itself', async () => {
+    /* The hook reads what a new ref points at, so its tip is a real commit. */
+    const repository = await hookRepository();
+    onTestFinished(repository.dispose);
     for (const ref of [
       'refs/heads/main',
       'refs/tags/v1',
       'refs/tau/chats/chat_1',
       'refs/tau/evidence/e1',
       'refs/tau/artifacts/a1',
+      /* A conflict line is a branch that travels (D14); `sync/` is no longer host-local (I14). */
+      'refs/heads/conflicts/main/device-a',
+      'refs/heads/sync/tau/main',
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one hook run per ref, by design
-      const accepted = await runHook(ref);
+      const accepted = await repository.push(`${none} ${repository.base} ${ref}`);
       expect(accepted.code, `${ref}: ${accepted.stderr}`).toBe(0);
     }
 
@@ -84,7 +198,6 @@ describe('Tau Hosted Remote constants', () => {
       'refs/tau/retention/records/r1',
       'refs/tau/head',
       'refs/remotes/origin/main',
-      'refs/heads/sync/tau/main',
       'refs/heads/',
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one hook run per ref, by design
@@ -116,9 +229,9 @@ describe('Tau Hosted Remote constants', () => {
   });
 
   it('rejects a mixed push atomically when one ref is host-local', async () => {
-    const refused = await runHook(['refs/heads/main', 'refs/heads/sync/tau/main']);
+    const refused = await runHook(['refs/heads/main', 'refs/remotes/origin/main']);
     expect(refused.code).toBe(1);
-    expect(refused.stderr).toContain('refs/heads/sync/tau/main');
+    expect(refused.stderr).toContain('refs/remotes/origin/main');
   });
 
   it('installs the same allow-list into the pre-receive hook', () => {
@@ -324,19 +437,119 @@ describe('Tau Hosted Remote constants', () => {
   });
 
   /**
+   * Charter D14: a conflicted revision travels only on its conflict line. On
+   * `main`, or any other ref, it is refused in words; the merge that lands a
+   * decision — the conflicted revision as its second parent — is admitted.
+   */
+  it('admits a conflicted revision on a conflict line only, and the merge that decides it on main', async () => {
+    const { git, push, commit, base, dispose } = await hookRepository();
+    onTestFinished(dispose);
+    const other = await commit([base], false);
+    const conflicted = await commit([other, base], true);
+
+    const onLine = await push(`${none} ${conflicted} refs/heads/conflicts/main/device-a`);
+    expect(onLine.code, onLine.stderr).toBe(0);
+    /* The server now holds the line: what it reaches must not hide the revision from the walk. */
+    await git('update-ref', 'refs/heads/conflicts/main/device-a', conflicted);
+
+    for (const [label, from, to, ref] of [
+      ['a conflicted tip on main', base, conflicted, 'refs/heads/main'],
+      ['a child of it on main', base, await commit([conflicted], false), 'refs/heads/main'],
+      ['a new branch at it', none, conflicted, 'refs/heads/feature'],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one hook run per case, by design
+      const refused = await push(`${from} ${to} ${ref}`);
+      expect(refused.code, label).toBe(1);
+      expect(refused.stderr, label).toContain(`Tau: refused ${ref} — ${constants.conflictedRevisionRefusal}`);
+    }
+
+    /* The decision: main's tip first, the conflicted revision among the later parents. */
+    const decided = await commit([base, conflicted], false);
+    const landed = await push(`${base} ${decided} refs/heads/main`);
+    expect(landed.code, landed.stderr).toBe(0);
+  });
+
+  /* RV-W6 F4: the walk reads only what a push brings, stops at what other refs reach, and fails closed. */
+  it('reads no history for N new tags at main, and only the new commits for a branch', async () => {
+    const { git, push, commit, walked, base, dispose } = await hookRepository();
+    onTestFinished(dispose);
+    let tip = base;
+    for (let depth = 0; depth < 40; depth += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- a deep first-parent line, one commit at a time
+      tip = await commit([tip], false);
+    }
+    await git('update-ref', 'refs/heads/main', tip);
+
+    const tags = await push(Array.from({ length: 20 }, (_, index) => `${none} ${tip} refs/tags/v${String(index)}`));
+    expect(tags.code, tags.stderr).toBe(0);
+    expect(await walked(), 'N tags at main walk no history').toBe(0);
+
+    const next = await commit([tip], false);
+    const branch = await push(`${none} ${next} refs/heads/feature`);
+    expect(branch.code, branch.stderr).toBe(0);
+    expect(await walked(), 'a new branch reads only its own new commit').toBe(1);
+  });
+
+  it('refuses a new ref at a conflicted revision a decision already holds, and admits one at the decision', async () => {
+    const { git, push, commit, base, dispose } = await hookRepository();
+    onTestFinished(dispose);
+    const other = await commit([base], false);
+    const conflicted = await commit([other, base], true);
+    const decided = await commit([base, conflicted], false);
+    await git('update-ref', 'refs/heads/main', decided);
+    await git('update-ref', 'refs/heads/conflicts/main/device-a', conflicted);
+
+    const atConflict = await push(`${none} ${conflicted} refs/heads/feature`);
+    expect(atConflict.code).toBe(1);
+    expect(atConflict.stderr).toContain(constants.conflictedRevisionRefusal);
+    const atDecision = await push(`${none} ${decided} refs/tags/decided`);
+    expect(atDecision.code, atDecision.stderr).toBe(0);
+  });
+
+  it('stops at a refused non-fast-forward, and refuses when the walk itself fails', async () => {
+    const repository = await hookRepository();
+    onTestFinished(repository.dispose);
+    const ahead = await repository.commit([repository.base], false);
+    const sideways = await repository.commit([repository.base], true);
+    await repository.git('update-ref', 'refs/heads/main', ahead);
+    const rewound = await repository.push(`${ahead} ${sideways} refs/heads/main`);
+    expect(rewound.code).toBe(1);
+    expect(rewound.stderr).toContain('does not fast-forward');
+    expect(rewound.stderr).not.toContain(constants.conflictedRevisionRefusal);
+    expect(await repository.walked()).toBe(0);
+
+    const failing = await hookRepository({ failWalk: true });
+    onTestFinished(failing.dispose);
+    const refused = await failing.push(`${none} ${failing.base} refs/heads/feature`);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain('could not be checked');
+  });
+
+  /* RV-W6 F8: a bare `conflicts` would shadow every device's lines. */
+  it('keeps refs/heads/conflicts for lines of the form conflicts/<branch>/<device>', async () => {
+    const { push, base, dispose } = await hookRepository();
+    onTestFinished(dispose);
+    for (const ref of ['refs/heads/conflicts', 'refs/heads/conflicts/main']) {
+      // oxlint-disable-next-line no-await-in-loop -- one hook run per ref, by design
+      const refused = await push(`${none} ${base} ${ref}`);
+      expect(refused.code, ref).toBe(1);
+      expect(refused.stderr).toContain('conflicts/ is kept for decisions that travel between devices');
+    }
+    const line = await push(`${none} ${base} refs/heads/conflicts/main/device-a`);
+    expect(line.code, line.stderr).toBe(0);
+  });
+
+  /**
    * Review F6: a bound that cannot measure what is arriving has not been
    * satisfied. The admission flag above it already fails closed; these two now
    * do too, so a git without object quarantine refuses rather than waving a
    * push past both the plan and D20.
    */
   it('refuses a bounded push it cannot measure, rather than passing it', async () => {
-    const refused = await runHook('refs/heads/main', {
-      /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
-      PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-      TAU_GIT_PUSH_ADMITTED: '1',
-      TAU_GIT_QUOTA_REMAINING_BYTES: '4096',
-      /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
-    });
+    const { push, base, dispose } = await hookRepository();
+    onTestFinished(dispose);
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+    const refused = await push(`${none} ${base} refs/heads/next`, { TAU_GIT_QUOTA_REMAINING_BYTES: '4096' });
 
     expect(refused.code, refused.stderr).toBe(1);
     expect(refused.stderr).toContain('cannot be measured');
@@ -345,7 +558,9 @@ describe('Tau Hosted Remote constants', () => {
 
   /** An unbounded push — no plan figure, no ceiling — is not measured and not refused. */
   it('passes a push no bound was set for', async () => {
-    const accepted = await runHook('refs/heads/main');
+    const { push, base, dispose } = await hookRepository();
+    onTestFinished(dispose);
+    const accepted = await push(`${none} ${base} refs/heads/next`);
 
     expect(accepted.code, accepted.stderr).toBe(0);
   });

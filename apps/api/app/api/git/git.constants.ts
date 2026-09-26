@@ -7,8 +7,9 @@ import type { BillingTier } from '@taucad/billing';
 
 /**
  * Refs a client may push (A39). Host-local namespaces —
- * `refs/tau/{owners,workspaces,revisions,transactions,head}`, `refs/remotes/*`
- * and `sync/*` — are refused by `pre-receive` and never leave a host (N28).
+ * `refs/tau/{owners,workspaces,revisions,transactions,head}` and `refs/remotes/*`
+ * — are refused by `pre-receive` and never leave a host (N28). Conflict lines,
+ * `refs/heads/conflicts/*`, are branches and travel (charter D14).
  */
 export const pushableRefPrefixes = [
   'refs/heads/',
@@ -211,9 +212,20 @@ export const serviceAdvertisementPrefix = (service: GitService): string => `${pk
 export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
 
 /**
+ * The words that refuse a conflicted revision outside a conflict line (charter D14).
+ *
+ * A conflicted revision still needs a person's decision, so it travels only on
+ * `refs/heads/conflicts/<branch>/<device>`; `main` and every named branch
+ * advance only by the merge that lands a decision, which has the conflicted
+ * revision as a parent, never on its first-parent line.
+ */
+export const conflictedRevisionRefusal = 'it carries a revision that still needs your decision';
+
+/**
  * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag,
  * compare-and-swap for every ref family (I7/I9, ruling OQ4), append-only chat
- * log segments (charter I9, D22), and the two byte
+ * log segments (charter I9, D22), conflicted revisions on conflict lines only
+ * (charter D14), and the two byte
  * bounds measured on the quarantine directory receive-pack has already written:
  * the owner's plan headroom, and D20's per-repository ceiling with the file
  * list that makes it actionable. A non-zero exit rejects the whole push and git
@@ -269,11 +281,35 @@ segments_only_grow() {
   }
 }
 
+# D14: a conflicted revision — a commit with a \`jj:trees\` header — travels only
+# on a conflict line. Any other ref is refused when its new tip is one, or when
+# one sits on the tip's first-parent line among the commits this push brings:
+# the walk stops at anything a ref other than a conflict line already reaches,
+# so N tags at \`main\` read N tips and no history (RV-W6 F4). The merge that
+# lands a decision has the conflicted revision as a later parent, so it passes,
+# and \`main := C\` or a child of it does not. Only a commit's header block is
+# read, up to the blank line that ends it. Exit 0: carries one; 1: clean;
+# 2: the walk failed, which the caller refuses (fail closed — \`sh\` may have no
+# \`pipefail\`, so the walk's own status is read before anything is piped).
+carries_conflict() {
+  if ! walked=$(git rev-list --first-parent "$1" --not --exclude='refs/heads/conflicts/*' --all 2>/dev/null); then
+    return 2
+  fi
+  { printf '%s\\n' "$1"; [ -z "$walked" ] || printf '%s\\n' "$walked"; } \\
+    | git cat-file --batch 2>/dev/null \\
+    | awk '
+        /^[0-9a-f]+ commit [0-9]+$/ { header = 1; next }
+        header && /^$/ { header = 0; next }
+        header && /^jj:trees / { found = 1 }
+        END { exit found ? 0 : 1 }
+      '
+}
+
 status=0
 arriving=''
 while read -r _old _new ref; do
   case "$ref" in
-    refs/heads/sync|refs/heads/sync/?*|refs/remotes|refs/remotes/?*|refs/tau/owners|refs/tau/owners/?*|refs/tau/workspaces|refs/tau/workspaces/?*|refs/tau/revisions|refs/tau/revisions/?*|refs/tau/transactions|refs/tau/transactions/?*|refs/tau/head|refs/tau/head/?*|refs/tau/retention|refs/tau/retention/?*)
+    refs/remotes|refs/remotes/?*|refs/tau/owners|refs/tau/owners/?*|refs/tau/workspaces|refs/tau/workspaces/?*|refs/tau/revisions|refs/tau/revisions/?*|refs/tau/transactions|refs/tau/transactions/?*|refs/tau/head|refs/tau/head/?*|refs/tau/retention|refs/tau/retention/?*)
       echo "Tau: refused $ref — host-local refs never leave a host." >&2
       status=1
       continue
@@ -305,12 +341,33 @@ while read -r _old _new ref; do
       if ! git merge-base --is-ancestor "$_old^{commit}" "$_new^{commit}" 2>/dev/null; then
         echo "Tau: refused $ref — it does not fast-forward $_old; fetch and merge first." >&2
         status=1
+        continue
       fi
       case "$ref" in
         refs/tau/chats/?*)
           segments_only_grow "$_old" "$_new" "$ref" || status=1
           ;;
       esac
+      ;;
+  esac
+  case "$ref" in
+    refs/heads/conflicts/?*/?*) ;;
+    refs/heads/conflicts|refs/heads/conflicts/*)
+      # RV-W6 F8: \`conflicts\` itself would shadow every device's lines.
+      echo "Tau: refused $ref — conflicts/ is kept for decisions that travel between devices, as refs/heads/conflicts/<branch>/<device>." >&2
+      status=1
+      continue
+      ;;
+    *)
+      verdict=0
+      carries_conflict "$_new" || verdict=$?
+      if [ "$verdict" -eq 0 ]; then
+        echo "Tau: refused $ref — ${conflictedRevisionRefusal}. Decide it in Tau; a conflict travels only on refs/heads/conflicts/." >&2
+        status=1
+      elif [ "$verdict" -ne 1 ]; then
+        echo "Tau: refused $ref — its history could not be checked for undecided revisions. Try again." >&2
+        status=1
+      fi
       ;;
   esac
   arriving="$arriving $_new"

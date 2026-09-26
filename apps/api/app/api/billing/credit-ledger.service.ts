@@ -1194,6 +1194,48 @@ export class CreditLedgerService {
     return row?.operation;
   }
 
+  /**
+   * Two-way attempt lookup (GI-R3): answers the owner's row for the key, or, when there is none, voids the key under
+   * the account-row lock admission takes, so the key is never admitted afterwards. Whichever commits first decides.
+   *
+   * @param input - The authenticated owner and the attempt key it asks about.
+   * @returns The operation row, or `{ voided: true }` when the key was never admitted and never will be.
+   */
+  public async resolveAttempt(input: {
+    environment: BillingEnvironment;
+    authUserId: string;
+    surface: string;
+    attemptKey: string;
+  }): Promise<typeof creditOperation.$inferSelect | { readonly voided: true }> {
+    const found = await this.getOperationForAttempt(input);
+    if (found) {
+      return found;
+    }
+    // The same call admission makes, so a first request racing this lookup serializes on one account row.
+    const accountId = await this.ensureAccountBinding(input);
+    return this.databaseService.database.transaction(async (tx) => {
+      await this.lockAccount(tx, accountId);
+      const [row] = await tx
+        .select()
+        .from(creditOperation)
+        .where(
+          and(
+            eq(creditOperation.accountId, accountId),
+            eq(creditOperation.surface, input.surface),
+            eq(creditOperation.attemptKey, input.attemptKey),
+          ),
+        );
+      if (row) {
+        return row;
+      }
+      await tx
+        .insert(creditAttemptVoid)
+        .values({ accountId, environment: input.environment, surface: input.surface, attemptKey: input.attemptKey })
+        .onConflictDoNothing();
+      return { voided: true } as const;
+    });
+  }
+
   /** Calls the typed, deduplicated current-period issuer only from admission. */
   public async issueCurrentPromotion(input: {
     environment: BillingEnvironment;

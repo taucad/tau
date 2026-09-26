@@ -2768,6 +2768,80 @@ describe('attempt void fence (GI-S3a, GI-R3)', () => {
   });
 });
 
+describe('two-way attempt lookup (GI-S3, GI-R3)', () => {
+  const lookup = (fixture: Fixture, attemptKey: string) => ({
+    environment: fixture.environment,
+    authUserId: fixture.userId,
+    surface: 'chat',
+    attemptKey,
+  });
+  const voidsFor = async (fixture: Fixture, attemptKey: string) =>
+    firstClient`select attempt_key from billing.credit_attempt_void
+      where account_id = ${fixture.accountId} and attempt_key = ${attemptKey}`;
+
+  it('should refuse admission for an attempt key a lookup voided', async () => {
+    const fixture = await createFixture();
+    const key = `voided-${randomUUID()}`;
+
+    expect(await firstLedger.resolveAttempt(lookup(fixture, key))).toEqual({ voided: true });
+    expect(await firstLedger.admitOperation(admission(fixture, key, 5n))).toEqual({
+      status: 'denied',
+      reason: 'attempt_voided',
+    });
+    // The void is idempotent: a second lookup answers voided again and the key still never admits.
+    expect(await secondLedger.resolveAttempt(lookup(fixture, key))).toEqual({ voided: true });
+    expect(await voidsFor(fixture, key)).toHaveLength(1);
+    const [account] = await firstDatabase.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId));
+    expect(required(account, 'account')).toMatchObject({
+      promoHeldAtoms: 0n,
+      planHeldAtoms: 0n,
+      purchasedHeldAtoms: 0n,
+    });
+  });
+
+  it('should answer the pending receipt when admission commits before the lookup', async () => {
+    const fixture = await createFixture();
+    const key = `admitted-${randomUUID()}`;
+    const admitted = await firstLedger.admitOperation(admission(fixture, key, 5n));
+    if (admitted.status !== 'admitted') {
+      throw new Error('Expected admission');
+    }
+
+    expect(await secondLedger.resolveAttempt(lookup(fixture, key))).toMatchObject({
+      id: admitted.operationId,
+      customerState: 'pending',
+    });
+    expect(await voidsFor(fixture, key)).toHaveLength(0);
+  });
+
+  it('should never both void and admit one attempt key when they race', async () => {
+    const fixture = await createFixture();
+    const keys = Array.from({ length: 12 }, (_, index) => `race-${index}-${randomUUID()}`);
+    const outcomes = await Promise.all(
+      keys.map(async (key) => {
+        const [admitted, resolved] = await Promise.all([
+          firstLedger.admitOperation(admission(fixture, key, 1n)),
+          secondLedger.resolveAttempt(lookup(fixture, key)),
+        ]);
+        const operations = await firstDatabase
+          .select({ id: creditOperation.id })
+          .from(creditOperation)
+          .where(and(eq(creditOperation.accountId, fixture.accountId), eq(creditOperation.attemptKey, key)));
+        return { admitted, resolved, operations, voids: await voidsFor(fixture, key) };
+      }),
+    );
+
+    for (const { admitted, resolved, operations, voids } of outcomes) {
+      expect(operations.length + voids.length).toBe(1);
+      if ('voided' in resolved) {
+        expect(admitted).toEqual({ status: 'denied', reason: 'attempt_voided' });
+      } else {
+        expect(admitted).toMatchObject({ status: 'admitted', operationId: resolved.id });
+      }
+    }
+  });
+});
+
 describe('dispatch/customer CHECK (GI-S2, GI-R2)', () => {
   it('should reject a settlement without a recorded dispatch intent', async () => {
     const fixture = await createFixture();
@@ -2875,13 +2949,7 @@ describe('credit operation model (GI-S2, GI-A4)', () => {
         return admitted.status === 'admitted' ? 'applied' : admitted.status === 'replay' ? 'replayed' : 'refused';
       }
       case 'resolve': {
-        // ponytail: GI-S3a ships the fence without its writer; write the void GI-S3b's lookup writes (sequential here).
-        if (before) {
-          return 'replayed';
-        }
-        await secondClient`insert into billing.credit_attempt_void (account_id, environment, surface, attempt_key)
-          values (${accountId}, ${environment}, ${request.surface}, ${request.attemptKey}) on conflict do nothing`;
-        return 'voided';
+        return 'voided' in (await secondLedger.resolveAttempt({ ...request, environment })) ? 'voided' : 'replayed';
       }
       case 'cancel': {
         if (identity) {

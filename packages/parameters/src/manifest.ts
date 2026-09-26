@@ -393,20 +393,25 @@ const asCacheValue = (value: unknown): CacheValue => {
 
 const copySchemaForSdk = (schema: JsonStructureSchema): JsonValue => {
   const copy = structuredClone(schema) as Record<string, unknown>;
-  const pending: unknown[] = [copy];
+  const pending: Array<Readonly<{ value: unknown; names: boolean }>> = [{ value: copy, names: false }];
   while (pending.length > 0) {
-    const value = pending.pop();
-    if (!isRecord(value) && !Array.isArray(value)) {
+    const { value, names } = pending.pop()!;
+    if (Array.isArray(value)) {
+      pending.push(...value.map((child: unknown) => ({ value: child, names: false })));
       continue;
     }
-    if (isRecord(value)) {
-      const uses = value['$uses'];
-      if (Array.isArray(uses)) {
-        value['$uses'] = uses.map((entry: unknown) => (entry === 'JSONSchemaUnits' ? 'JSONStructureUnits' : entry));
+    if (!isRecord(value)) {
+      continue;
+    }
+    const uses = value['$uses'];
+    if (!names && Array.isArray(uses)) {
+      value['$uses'] = uses.map((entry: unknown) => (entry === 'JSONSchemaUnits' ? 'JSONStructureUnits' : entry));
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (names || !carrierDataKeywords.has(key)) {
+        pending.push({ value: child, names: !names && carrierNameMapKeywords.has(key) });
       }
     }
-    const children: unknown[] = Array.isArray(value) ? (value as unknown[]) : Object.values(value);
-    pending.push(...children);
   }
   return copy as JsonValue;
 };
@@ -560,14 +565,15 @@ const validateDefaults = (declaration: ParameterDeclaration): void => {
     ...declaration.resources,
   };
   let referenceCount = 0;
-  const inlineExternalReferences = (value: unknown, currentResource: string): unknown => {
+  // `names` marks a map from names to schemas; data keywords are copied untouched, as `assertNoAuthoredClaims` walks.
+  const inlineExternalReferences = (value: unknown, currentResource: string, names = false): unknown => {
     if (Array.isArray(value)) {
       return value.map((child) => inlineExternalReferences(child, currentResource));
     }
     if (!isRecord(value)) {
       return value;
     }
-    if (typeof value['$ref'] === 'string' && !value['$ref'].startsWith('#')) {
+    if (!names && typeof value['$ref'] === 'string' && !value['$ref'].startsWith('#')) {
       referenceCount += 1;
       if (referenceCount > 256) {
         fail(
@@ -591,6 +597,7 @@ const validateDefaults = (declaration: ParameterDeclaration): void => {
     }
     const typeReference = value['type'];
     if (
+      !names &&
       isRecord(typeReference) &&
       typeof typeReference['$ref'] === 'string' &&
       !typeReference['$ref'].startsWith('#')
@@ -605,11 +612,14 @@ const validateDefaults = (declaration: ParameterDeclaration): void => {
     }
     const output: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
-      output[key] = inlineExternalReferences(child, currentResource);
+      output[key] =
+        !names && carrierDataKeywords.has(key)
+          ? child
+          : inlineExternalReferences(child, currentResource, !names && carrierNameMapKeywords.has(key));
     }
     return output;
   };
-  const allowPartialValues = (value: JsonValue): JsonValue => {
+  const allowPartialValues = (value: JsonValue, names = false): JsonValue => {
     if (Array.isArray(value)) {
       return value.map((child) => allowPartialValues(child));
     }
@@ -617,9 +627,12 @@ const validateDefaults = (declaration: ParameterDeclaration): void => {
       return value;
     }
     return Object.fromEntries(
-      Object.entries(value).flatMap(([key, child]) =>
-        key === 'required' && Array.isArray(child) ? [] : [[key, allowPartialValues(child)]],
-      ),
+      Object.entries(value).flatMap(([key, child]) => {
+        if (names || !carrierDataKeywords.has(key)) {
+          return [[key, allowPartialValues(child, !names && carrierNameMapKeywords.has(key))]];
+        }
+        return key === 'required' && Array.isArray(child) ? [] : [[key, child]];
+      }),
     );
   };
   const schema = allowPartialValues(

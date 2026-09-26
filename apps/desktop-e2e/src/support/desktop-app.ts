@@ -215,6 +215,9 @@ export const launchDesktopApp = async (options: {
       /* Printer access codes go to the throwaway profile's file vault, never the
        * person's login keychain, whatever the shell running the suite sets. */
       TAU_SECRET_VAULT: 'file',
+      /* The per-user machine store and every other Tau config live in the
+       * throwaway profile too, never the person's own. */
+      TAU_CONFIG_DIR: join(userData, 'config'),
       ...options.env,
     },
   });

@@ -15,7 +15,7 @@
  * The one carve-out is each adapter's own config-directory variable.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 
@@ -115,8 +115,14 @@ export type SpawnedAcpAdapter = {
   readonly stream: Stream;
   /** The adapter's most recent stderr, for a typed failure reason. */
   stderr(): string;
-  /** Kill the adapter. Idempotent. */
+  /** Send SIGTERM to the adapter's process group. Idempotent. */
   close(): void;
+  /**
+   * Signal the adapter's whole process group (W10 EA-R7): the adapter leads its
+   * own group, so SIGKILL also ends the tools it started. On Windows SIGKILL is
+   * `taskkill /T /F` over its tree. Idempotent once the adapter has exited.
+   */
+  signal(signal: 'SIGTERM' | 'SIGKILL'): void;
 };
 
 /**
@@ -150,6 +156,10 @@ export const spawnAcpAdapter = (options: {
       cwd: options.cwd,
       env: environment,
       stdio: ['pipe', 'pipe', 'pipe'],
+      /* A group leader on POSIX, so one signal reaches every process it starts
+       * (EA-R7). It no longer shares the host's group, so a terminal's ^C no
+       * longer reaches it; it ends with its stdin instead (blueprint risk). */
+      detached: process.platform !== 'win32',
     },
   );
   let stderr = '';
@@ -200,14 +210,39 @@ export const spawnAcpAdapter = (options: {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Node's duplex web adapters are typed against the DOM stream declarations.
     (Readable.toWeb(child.stdout) as ReadableStream<Uint8Array<ArrayBuffer>>).pipeThrough(tap('agent->client'));
 
+  const signal = (name: 'SIGTERM' | 'SIGKILL'): void => {
+    const { pid } = child;
+    if (pid === undefined) {
+      return;
+    }
+    if (process.platform === 'win32') {
+      /* A pid is reused once its process exits: signal only a live adapter. */
+      if (child.exitCode !== null || child.signalCode !== null) {
+        return;
+      }
+      if (name === 'SIGKILL') {
+        spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+      } else {
+        child.kill(name);
+      }
+      return;
+    }
+    try {
+      /* The group outlives its leader when a tool it started is still running,
+       * so the group is signalled even after the adapter itself has exited. */
+      process.kill(-pid, name);
+    } catch {
+      /* ESRCH: the whole group is gone. */
+    }
+  };
+
   return {
     child,
     stream: ndJsonStream(outbound.writable, inbound),
     stderr: () => stderr,
     close: () => {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill();
-      }
+      signal('SIGTERM');
     },
+    signal,
   };
 };

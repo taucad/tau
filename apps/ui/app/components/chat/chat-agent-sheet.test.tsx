@@ -290,6 +290,20 @@ describe('ChatAgentSheet', () => {
     expect(screen.getByRole('button', { name: 'Agent and model: Codex, GPT-5.6-Sol, Fast mode' })).toBeInTheDocument();
   });
 
+  it('steps back one view on Escape, and closes only from the settings', async () => {
+    const { focusEditor } = renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
+    expect(screen.getByRole('button', { name: 'Back to settings' })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: /^Model: .*Change$/u })).toHaveFocus();
+    expect(focusEditor).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(focusEditor).toHaveBeenCalled();
+  });
+
   it('hands focus back to the editor when it closes, and opens from its shortcut', async () => {
     const { focusEditor } = renderSheet();
     act(() => {

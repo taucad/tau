@@ -9,7 +9,8 @@ import type { BillingTier } from '@taucad/billing';
  * Refs a client may push (A39). Host-local namespaces —
  * `refs/tau/{owners,workspaces,revisions,transactions,head}` and `refs/remotes/*`
  * — are refused by `pre-receive` and never leave a host (N28). Conflict lines,
- * `refs/heads/conflicts/*`, are branches and travel (charter D14).
+ * `refs/heads/conflicts/*`, are branches and travel (charter D14). A device's
+ * operation log, `refs/tau/ops/<device>`, is a Records ref and travels (D15).
  */
 export const pushableRefPrefixes = [
   'refs/heads/',
@@ -17,6 +18,7 @@ export const pushableRefPrefixes = [
   'refs/tau/chats/',
   'refs/tau/evidence/',
   'refs/tau/artifacts/',
+  'refs/tau/ops/',
 ] as const;
 
 /**
@@ -224,7 +226,7 @@ export const conflictedRevisionRefusal = 'it carries a revision that still needs
 /**
  * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag,
  * compare-and-swap for every ref family (I7/I9, ruling OQ4), append-only chat
- * log segments (charter I9, D22), conflicted revisions on conflict lines only
+ * and operation log segments (charter I9, D22, ruling R4), conflicted revisions on conflict lines only
  * (charter D14), and the two byte
  * bounds measured on the quarantine directory receive-pack has already written:
  * the owner's plan headroom, and D20's per-repository ceiling with the file
@@ -244,8 +246,9 @@ if [ "\${TAU_GIT_PUSH_ADMITTED:-}" != "1" ]; then
   exit 1
 fi
 
-# I9 (D22): a device's chat log only grows. Between the old and the new tip of
-# a chat ref, every change under \`events/\` must be a regular file
+# I9 (D22): a device's chat log only grows, and so does its operation log
+# (ruling R4). Between the old and the new tip of a chat or \`refs/tau/ops/*\`
+# ref, every change under \`events/\` must be a regular file
 # (\`100644\`) that was one before and whose old bytes are a byte prefix of
 # its new blob, or a new \`100644\` file; a deletion, a mode or type change
 # (a symlink, an executable, a submodule, a tree) and any rewrite are refused
@@ -256,7 +259,7 @@ fi
 # portable, so an empty old segment is a prefix of anything without reading it.
 segments_only_grow() {
   if ! changes=$(git diff-tree -r --no-renames "$1" "$2" -- events/ 2>/dev/null); then
-    echo "Tau: refused $3 — its chat log could not be compared with the one it replaces." >&2
+    echo "Tau: refused $3 — its $4 could not be compared with the one it replaces." >&2
     return 1
   fi
   printf '%s\\n' "$changes" | {
@@ -274,7 +277,7 @@ segments_only_grow() {
           fi
           ;;
       esac
-      echo "Tau: refused $3 — it rewrites $rest, and a device's chat log only grows." >&2
+      echo "Tau: refused $3 — it rewrites $rest, and a device's $4 only grows." >&2
       refused=1
     done
     exit "$refused"
@@ -345,7 +348,11 @@ while read -r _old _new ref; do
       fi
       case "$ref" in
         refs/tau/chats/?*)
-          segments_only_grow "$_old" "$_new" "$ref" || status=1
+          segments_only_grow "$_old" "$_new" "$ref" "chat log" || status=1
+          ;;
+        # Ruling R4: a device's operation log has the chat segment's shape.
+        refs/tau/ops/?*)
+          segments_only_grow "$_old" "$_new" "$ref" "operation log" || status=1
           ;;
       esac
       ;;

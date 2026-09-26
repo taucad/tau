@@ -181,6 +181,8 @@ describe('Tau Hosted Remote constants', () => {
       'refs/tau/chats/chat_1',
       'refs/tau/evidence/e1',
       'refs/tau/artifacts/a1',
+      /* A device's operation log is a Records ref that travels (D15). */
+      'refs/tau/ops/0f0e0d0c-0b0a-4908-8706-050403020100',
       /* A conflict line is a branch that travels (D14); `sync/` is no longer host-local (I14). */
       'refs/heads/conflicts/main/device-a',
       'refs/heads/sync/tau/main',
@@ -214,7 +216,13 @@ describe('Tau Hosted Remote constants', () => {
    * `refs/tau/chats/*` ref were both deletable with it on (review C25).
    */
   it('refuses a deletion of every pushable ref family', async () => {
-    for (const ref of ['refs/heads/main', 'refs/tags/v1', 'refs/tau/chats/chat_1', 'refs/tau/artifacts/a1']) {
+    for (const ref of [
+      'refs/heads/main',
+      'refs/tags/v1',
+      'refs/tau/chats/chat_1',
+      'refs/tau/artifacts/a1',
+      'refs/tau/ops/0f0e0d0c-0b0a-4908-8706-050403020100',
+    ]) {
       // oxlint-disable-next-line no-await-in-loop -- one hook run per ref, by design
       const refused = await runHook(`${'1'.repeat(40)} ${'0'.repeat(40)} ${ref}`);
       expect(refused.code, `${ref} was deletable: ${refused.stderr}`).toBe(1);
@@ -356,85 +364,100 @@ describe('Tau Hosted Remote constants', () => {
    * The hook runs over a real repository, because the rule is a blob
    * comparison and a stub would only prove the shell parsed.
    */
-  it('passes an ordinary two-device chat append and refuses a rewritten, truncated or dropped segment', async () => {
-    const fixture = await mkdtemp(path.join(tmpdir(), 'tau-git-segments-'));
-    try {
-      /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
-      const environment = {
-        PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-        HOME: fixture,
-        GIT_CONFIG_GLOBAL: '/dev/null',
-        GIT_CONFIG_SYSTEM: '/dev/null',
-        GIT_AUTHOR_NAME: 'I9',
-        GIT_AUTHOR_EMAIL: 'i9@tau.test',
-        GIT_COMMITTER_NAME: 'I9',
-        GIT_COMMITTER_EMAIL: 'i9@tau.test',
-      } as unknown as NodeJS.ProcessEnv;
-      /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
-      const git = async (...args: readonly string[]): Promise<string> =>
-        new Promise((resolve, reject) => {
-          const child = spawn('git', [...args], { cwd: fixture, stdio: ['ignore', 'pipe', 'pipe'], env: environment });
-          const out: Array<Uint8Array<ArrayBuffer>> = [];
-          child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => out.push(chunk));
-          child.on('close', (code) => {
-            if (code === 0) {
-              resolve(Buffer.concat(out).toString('utf8').trim());
-              return;
-            }
-            reject(new Error(`git ${args.join(' ')}`));
+  /* Ruling R4 (W7): the operation log `refs/tau/ops/<device>` has the chat segment's shape and the same rule. */
+  it.each([
+    ['refs/tau/chats/chat_1', 'chat log only grows'],
+    ['refs/tau/ops/device-a', 'operation log only grows'],
+  ] as const)(
+    'passes an ordinary append to %s and refuses a rewritten, truncated or dropped segment',
+    async (ref, sentence) => {
+      const fixture = await mkdtemp(path.join(tmpdir(), 'tau-git-segments-'));
+      try {
+        /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+        const environment = {
+          PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+          HOME: fixture,
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_SYSTEM: '/dev/null',
+          GIT_AUTHOR_NAME: 'I9',
+          GIT_AUTHOR_EMAIL: 'i9@tau.test',
+          GIT_COMMITTER_NAME: 'I9',
+          GIT_COMMITTER_EMAIL: 'i9@tau.test',
+        } as unknown as NodeJS.ProcessEnv;
+        /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+        const git = async (...args: readonly string[]): Promise<string> =>
+          new Promise((resolve, reject) => {
+            const child = spawn('git', [...args], {
+              cwd: fixture,
+              stdio: ['ignore', 'pipe', 'pipe'],
+              env: environment,
+            });
+            const out: Array<Uint8Array<ArrayBuffer>> = [];
+            child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => out.push(chunk));
+            child.on('close', (code) => {
+              if (code === 0) {
+                resolve(Buffer.concat(out).toString('utf8').trim());
+                return;
+              }
+              reject(new Error(`git ${args.join(' ')}`));
+            });
           });
+        /** Commits the working tree's `events/` exactly as given, on top of HEAD. */
+        const commit = async (segments: Readonly<Record<string, string>>): Promise<string> => {
+          await rm(path.join(fixture, 'events'), { recursive: true, force: true });
+          await mkdir(path.join(fixture, 'events'));
+          for (const [name, contents] of Object.entries(segments)) {
+            // oxlint-disable-next-line no-await-in-loop -- a handful of fixture files
+            await writeFile(path.join(fixture, 'events', name), contents, 'utf8');
+          }
+          await git('add', '-A', '.');
+          await git('commit', '--quiet', '--allow-empty', '-m', 'segments');
+          return git('rev-parse', 'HEAD');
+        };
+        const push = async (from: string, to: string): Promise<{ code: number | undefined; stderr: string }> =>
+          runHook(
+            `${from} ${to} ${ref}`,
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+            { ...(environment as Record<string, string>), TAU_GIT_PUSH_ADMITTED: '1' },
+            fixture,
+          );
+
+        await git('init', '--quiet', '--initial-branch=main', '.');
+        const base = await commit({
+          'device-a.jsonl': '{"n":1}\n',
+          'device-b.jsonl': '{"n":1}\n',
+          'device-c.jsonl': '',
         });
-      /** Commits the working tree's `events/` exactly as given, on top of HEAD. */
-      const commit = async (segments: Readonly<Record<string, string>>): Promise<string> => {
-        await rm(path.join(fixture, 'events'), { recursive: true, force: true });
-        await mkdir(path.join(fixture, 'events'));
-        for (const [name, contents] of Object.entries(segments)) {
-          // oxlint-disable-next-line no-await-in-loop -- a handful of fixture files
-          await writeFile(path.join(fixture, 'events', name), contents, 'utf8');
+
+        /* Both devices append, and a third device's first segment arrives. */
+        const appended = await commit({
+          'device-a.jsonl': '{"n":1}\n{"n":2}\n',
+          'device-b.jsonl': '{"n":1}\n{"n":3}\n',
+          'device-c.jsonl': '{"n":1}\n',
+          'device-d.jsonl': '{"n":1}\n',
+        });
+        const accepted = await push(base, appended);
+        expect(accepted.code, accepted.stderr).toBe(0);
+
+        for (const [label, segments] of [
+          ['a rewritten byte', { 'device-a.jsonl': '{"n":9}\n{"n":2}\n', 'device-b.jsonl': '{"n":1}\n{"n":3}\n' }],
+          ['a truncation', { 'device-a.jsonl': '{"n":1}\n', 'device-b.jsonl': '{"n":1}\n{"n":3}\n' }],
+          ['a dropped segment', { 'device-a.jsonl': '{"n":1}\n{"n":2}\n' }],
+        ] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- each tampered tip builds on the accepted one
+          await git('reset', '--quiet', '--hard', appended);
+          // oxlint-disable-next-line no-await-in-loop -- as above
+          const tampered = await commit({ ...segments, 'device-c.jsonl': '{"n":1}\n', 'device-d.jsonl': '{"n":1}\n' });
+          // oxlint-disable-next-line no-await-in-loop -- as above
+          const refused = await push(appended, tampered);
+          expect(refused.code, `${label}: ${refused.stderr}`).toBe(1);
+          expect(refused.stderr).toContain(sentence);
         }
-        await git('add', '-A', '.');
-        await git('commit', '--quiet', '--allow-empty', '-m', 'segments');
-        return git('rev-parse', 'HEAD');
-      };
-      const push = async (from: string, to: string): Promise<{ code: number | undefined; stderr: string }> =>
-        runHook(
-          `${from} ${to} refs/tau/chats/chat_1`,
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-          { ...(environment as Record<string, string>), TAU_GIT_PUSH_ADMITTED: '1' },
-          fixture,
-        );
-
-      await git('init', '--quiet', '--initial-branch=main', '.');
-      const base = await commit({ 'device-a.jsonl': '{"n":1}\n', 'device-b.jsonl': '{"n":1}\n', 'device-c.jsonl': '' });
-
-      /* Both devices append, and a third device's first segment arrives. */
-      const appended = await commit({
-        'device-a.jsonl': '{"n":1}\n{"n":2}\n',
-        'device-b.jsonl': '{"n":1}\n{"n":3}\n',
-        'device-c.jsonl': '{"n":1}\n',
-        'device-d.jsonl': '{"n":1}\n',
-      });
-      const accepted = await push(base, appended);
-      expect(accepted.code, accepted.stderr).toBe(0);
-
-      for (const [label, segments] of [
-        ['a rewritten byte', { 'device-a.jsonl': '{"n":9}\n{"n":2}\n', 'device-b.jsonl': '{"n":1}\n{"n":3}\n' }],
-        ['a truncation', { 'device-a.jsonl': '{"n":1}\n', 'device-b.jsonl': '{"n":1}\n{"n":3}\n' }],
-        ['a dropped segment', { 'device-a.jsonl': '{"n":1}\n{"n":2}\n' }],
-      ] as const) {
-        // oxlint-disable-next-line no-await-in-loop -- each tampered tip builds on the accepted one
-        await git('reset', '--quiet', '--hard', appended);
-        // oxlint-disable-next-line no-await-in-loop -- as above
-        const tampered = await commit({ ...segments, 'device-c.jsonl': '{"n":1}\n', 'device-d.jsonl': '{"n":1}\n' });
-        // oxlint-disable-next-line no-await-in-loop -- as above
-        const refused = await push(appended, tampered);
-        expect(refused.code, `${label}: ${refused.stderr}`).toBe(1);
-        expect(refused.stderr).toContain('chat log only grows');
+      } finally {
+        await rm(fixture, { recursive: true, force: true });
       }
-    } finally {
-      await rm(fixture, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   /**
    * Charter D14: a conflicted revision travels only on its conflict line. On

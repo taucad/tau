@@ -8,6 +8,15 @@ export default defineConfig(
     main: {
       build: {
         outDir: 'dist/main',
+        /* Main and the utility process it starts build as one graph, so the
+         * runtime modules both import are emitted once. Each input becomes
+         * `<name>.js` in `dist/main`, where `src/main/main.ts` resolves it. */
+        rolldownOptions: {
+          input: {
+            index: resolve(import.meta.dirname, 'src/main/index.ts'),
+            'kernel-host': resolve(import.meta.dirname, 'src/tau/kernel-host.ts'),
+          },
+        },
       },
     },
     preload: {

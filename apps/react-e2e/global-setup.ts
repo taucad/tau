@@ -52,8 +52,9 @@ const inspectTarget = async (target: ReactE2ETarget): Promise<ReactTargetInspect
     Object.assign(report, {
       electronExampleArtifacts: {
         mainIndex: main.includes('index.js'),
-        mainKernelHosts: main.filter((name) => name.startsWith('kernel-host-') && name.endsWith('.js')).length,
-        rendererKernelHosts: renderer.filter((name) => name.startsWith('kernel-host-')).length,
+        // A `?modulePath` import would emit `kernel-host-<hash>.js` from a separate build instead.
+        mainKernelHosts: main.filter((name) => name === 'kernel-host.js').length,
+        rendererKernelHosts: renderer.filter((name) => name.startsWith('kernel-host')).length,
       },
     });
   }

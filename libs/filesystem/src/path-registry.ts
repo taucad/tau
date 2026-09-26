@@ -15,9 +15,9 @@
  * A path no row names is authored, versioned, agent-writable and observed on
  * the UI plane — except inside `.tau`, where the default is
  * {@link reservedTauPathClassification} (P13). The authored `.tau` controls —
- * `.tau/parameters/**`, `.tau/skills/**`, `.tau/AGENTS.md` — are rows of their
- * own, which is what keeps that default from swallowing them the way a blanket
- * `.tau` exclusion once did.
+ * `.tau/parameters/**`, `.tau/machines/**`, `.tau/skills/**`, `.tau/AGENTS.md` —
+ * are rows of their own, which is what keeps that default from swallowing them
+ * the way a blanket `.tau` exclusion once did.
  *
  * Every row is compared as the filesystem folds it rather than as spelled: one
  * rule, no row that is reserved under one spelling and the user's under another.
@@ -189,6 +189,18 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
    * win over {@link reservedTauPathClassification}. */
   {
     prefix: '.tau/parameters',
+    class: 'authored',
+    versioned: true,
+    agentAccess: 'read-write',
+    watch: 'ui',
+    anchored: true,
+    match: 'root',
+    directory: true,
+  },
+  /* The project's print intent (`printer.json`). The printers themselves are
+   * per-user files outside every project, never here. */
+  {
+    prefix: '.tau/machines',
     class: 'authored',
     versioned: true,
     agentAccess: 'read-write',

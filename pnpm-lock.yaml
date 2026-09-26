@@ -4054,6 +4054,9 @@ importers:
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../../kinematics
       '@taucad/occt-core':
         specifier: workspace:*
         version: link:../../core/occt
@@ -4073,6 +4076,9 @@ importers:
         specifier: 'catalog:'
         version: 1.2.1
     devDependencies:
+      '@msgpack/msgpack':
+        specifier: 'catalog:'
+        version: 3.1.3
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../esbuild

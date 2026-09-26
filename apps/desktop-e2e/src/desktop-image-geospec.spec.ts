@@ -112,7 +112,7 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
     if (failedTools.length > 0) {
       throw new Error(`Packaged agent tools failed: ${failedTools.join('\n')}`);
     }
-    const screenshotActivities = page.getByRole('button', { name: 'Explored 1 screenshot', exact: true });
+    const screenshotActivities = page.getByRole('button', { name: 'Captured images', exact: true });
     for (const activity of await screenshotActivities.all()) {
       // oxlint-disable-next-line no-await-in-loop -- Each disclosure must open before its child result is queried.
       await activity.click();
@@ -140,7 +140,7 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
         }),
       ),
     ).toBe(true);
-    await page.getByRole('button', { name: 'Explored 2 tests', exact: true }).click();
+    await page.getByRole('button', { name: 'Ran tests', exact: true }).click();
     await expectVisible(page.getByText('Tested 2 requirements', { exact: true }), 300_000);
     const results = page.locator('[data-target-file="checks.geospec.ts"]');
     const passingRequirement = results.getByText(/keeps the cylinder watertight$/u);
@@ -175,14 +175,14 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 120_000);
-    const replayedScreenshotActivities = page.getByRole('button', { name: 'Explored 1 screenshot', exact: true });
+    const replayedScreenshotActivities = page.getByRole('button', { name: 'Captured images', exact: true });
     for (const activity of await replayedScreenshotActivities.all()) {
       // oxlint-disable-next-line no-await-in-loop -- Each disclosure must open before its child result is queried.
       await activity.click();
     }
     await expectVisible(page.getByRole('button', { name: /Captured 1 screenshot of main\.ts/u }));
     await expectVisible(page.getByRole('button', { name: /Captured 1 screenshot of drawing\.ts/u }));
-    await page.getByRole('button', { name: 'Explored 2 tests', exact: true }).click();
+    await page.getByRole('button', { name: 'Ran tests', exact: true }).click();
     const replayedResults = page.locator('[data-target-file="checks.geospec.ts"]');
     await expectVisible(replayedResults.getByText(/keeps the cylinder watertight$/u));
     await expectVisible(replayedResults.getByText(/reports an intentionally impossible volume$/u));

@@ -61,6 +61,18 @@ export type {
 } from '#revisions.js';
 export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
+export { createProjectHost, createProjectHostActor } from '#project-host.js';
+export type {
+  ProjectFileSystem,
+  ProjectHost,
+  ProjectHostActor,
+  ProjectHostActorOptions,
+  ProjectHostCommand,
+  ProjectHostOptions,
+  ProjectHostRuntimeClient,
+} from '#project-host.js';
+export { keyedResource } from '#keyed-resource.js';
+export type { KeyedIncarnation, KeyedResource } from '#keyed-resource.js';
 export { createHostToolRegistry } from '#agent-tools.js';
 export type { HostToolRegistryOptions } from '#agent-tools.js';
 export {

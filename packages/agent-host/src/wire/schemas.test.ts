@@ -40,6 +40,16 @@ describe('the wire module (SC-R1, SC-R2)', () => {
     );
   });
 
+  /* W6.r1 round 5: a chat's log lives under its id, so the wire refuses an id a launcher could not store. */
+  it('should refuse a chat id that is not one storage path segment', () => {
+    for (const chatId of ['a/b', String.raw`a\b`, '.', '..', '']) {
+      expect(wire.commandPayloads.attach.safeParse({ chatId }).success).toBe(false);
+    }
+    for (const chatId of ['chat-1', '.chat', 'a..b']) {
+      expect(wire.commandPayloads.attach.safeParse({ chatId }).success).toBe(true);
+    }
+  });
+
   it('should refuse the dead start fields and a run id past the attempt-key budget (drift item 4; RA-R11)', () => {
     const base = { chatId: 'c', runId: 'r', message: { id: 'm', role: 'user', content: 'hi' }, trigger: 'submit' };
     expect(wire.commandPayloads.start.safeParse({ ...base, mode: 'direct' }).success).toBe(false);

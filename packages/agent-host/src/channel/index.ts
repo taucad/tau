@@ -5,7 +5,7 @@
  * channel, plus the two worker-channel bindings.
  *
  * Browser-safe: nothing here imports `node:`. The daemon-side assembly lives on
- * `@taucad/agent-host/node-launcher` instead.
+ * `@taucad/agent-host/launcher` instead.
  */
 
 export { createAgentChannelClient } from '#channel/agent-channel-client.js';
@@ -17,3 +17,12 @@ export { agentChannelPort } from '#channel/endpoint.js';
 export type { AgentChannelEndpoint } from '#channel/endpoint.js';
 export { connectAgentWorkerChannel, serveAgentWorkerChannel } from '#channel/worker-channel.js';
 export type { AgentWorkerChannelOptions } from '#channel/worker-channel.js';
+export { connectTurnPlacementChannel, serveTurnPlacementChannel } from '#channel/turn-placement-channel.js';
+export type {
+  ConnectTurnPlacementChannelOptions,
+  ServeTurnPlacementChannelOptions,
+  TurnPlacementChannel,
+  TurnPlacementChannelHandle,
+  TurnPlacementSession,
+  TurnPlacementToolPort,
+} from '#channel/turn-placement-channel.js';

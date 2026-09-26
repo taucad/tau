@@ -10,7 +10,8 @@
  * - `timer[k]`: the parent's scheduled `idle:<key>` raise.
  * - `proc[p]`: the stub's process, closing once the parent sent it `close`.
  * - `run[r]`: the facade request, from the slot that holds it or its `turnSettled`; `cx`
- *   (a dropped cancel) is FALSE in the target.
+ *   (a dropped cancel) is FALSE in the target, and `bound` is the stub child's binding
+ *   (`busy.binding`'s `lentReady`, after which its prompt is out).
  *
  * Scope: `AcpSessions.export.cfg` (`Runs = {1}`, `MaxProcs = 2`), whose graph and
  * covering suite are committed.
@@ -55,7 +56,15 @@ const adapter: AcpAdapter = {
 type Cap = 'fresh' | 'margin' | 'expired';
 type Proc = { key: string; st: 'unused' | 'open' | 'closing' | 'closed'; cap: Cap; bound: boolean; soft: boolean };
 /* `queued`: the child holds the lend behind a presentation write (`idle.persisting`). */
-type Run = { key: string; requestId?: string; phase: 'queued' | 'prompting' | 'cancelling' | 'finishing' };
+type Run = {
+  key: string;
+  requestId?: string;
+  phase: 'queued' | 'prompting' | 'cancelling' | 'finishing';
+  /* A lend cancelled while binding: the stub child ends it cancelled, with no prompt (CancelBinding). */
+  cancelledBinding?: boolean;
+  /* The stub child's binding is live and its prompt sent (Bound). */
+  bound?: boolean;
+};
 type Child = { readonly sendBack: (event: AnyEventObject) => void; opened: boolean };
 
 /** One live parent over stub children, with the adapter's process and run records. */
@@ -139,9 +148,15 @@ export const viewOf = (harness: AcpSessionsHarness): SpecView => {
   const run = harness.runs.map((entry) => {
     const slot = slots[implKey(entry.key)];
     const pid = harness.pidOf.get(entry.key) ?? 0;
-    const at = (pc: string, where = pid) => ({ key: entry.key, pc, pid: where, cx: false });
+    const at = (pc: string, where = pid) => ({
+      key: entry.key,
+      pc,
+      pid: where,
+      cx: false,
+      bound: entry.bound === true,
+    });
     if (settled(harness, entry.requestId)) {
-      return at('free', 0);
+      return { ...at('free', 0), bound: false };
     }
     if (slot?.status === 'closing' && slot.queued?.requestId === entry.requestId) {
       return at('waitClose');
@@ -276,7 +291,7 @@ export const startAcpSessions = (): AcpSessionsHarness => {
 /** One spec action with its parameters: a run index, a key, or a process index (0-based). */
 export type AcpOp = Readonly<{ act: string; r?: number; key?: string; p?: number; cap?: Cap; queued?: boolean }>;
 
-type RunView = { key: string; pc: string };
+type RunView = { key: string; pc: string; bound: boolean };
 
 /* The parameters of a spec step, found by comparing the harness's view with the step's target state. */
 const resolve = (current: SpecView, act: string, target: SpecView): AcpOp => {
@@ -322,8 +337,16 @@ const resolve = (current: SpecView, act: string, target: SpecView): AcpOp => {
     case 'CancelQueued': {
       return { act, r: run('waitClose') };
     }
-    case 'PromptAnswered': {
+    case 'PromptAnswered':
+    case 'CancelBinding': {
       return { act, r: run('prompting') };
+    }
+    case 'Bound': {
+      const r = before.findIndex((entry, at) => !entry.bound && after[at]?.bound === true);
+      if (r === -1) {
+        throw new Error('No run binds.');
+      }
+      return { act, r };
     }
     case 'TurnEnded': {
       return { act, r: run('finishing') };
@@ -388,9 +411,21 @@ export const perform = (harness: AcpSessionsHarness, op: AcpOp): void => {
         type: 'turnEnded',
         key: implKey(run.key),
         requestId: run.requestId,
-        outcome: { ok: true, stopReason: 'end_turn' },
+        outcome: run.cancelledBinding === true ? cancelled : { ok: true, stopReason: 'end_turn' },
         resting: true,
       });
+      return;
+    }
+    case 'Bound': {
+      /* The stub child's binding goes live and it prompts: the parent sees nothing. */
+      run.bound = true;
+      return;
+    }
+    case 'CancelBinding': {
+      /* The lend is not bound yet: the child flushes it cancelled and sends the vendor nothing. */
+      run.phase = 'finishing';
+      run.cancelledBinding = true;
+      actor.send({ type: 'cancel', requestId: run.requestId ?? '' });
       return;
     }
     case 'Cancel': {
@@ -489,8 +524,13 @@ export const enabledOps = (harness: AcpSessionsHarness): AcpOp[] => {
         break;
       }
       case 'prompting': {
-        at('PromptAnswered');
-        at('Cancel');
+        if (run.bound) {
+          at('PromptAnswered');
+          at('Cancel');
+        } else {
+          at('Bound');
+          at('CancelBinding');
+        }
         break;
       }
       case 'cancelling': {

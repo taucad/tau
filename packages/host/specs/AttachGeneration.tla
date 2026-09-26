@@ -10,15 +10,16 @@
 \* Switches for W0.11's fix: FixMain keeps the per-root generation monotone (MainFinish never
 \* deletes it); FixUtil defers a connect that arrives while a release is closing. Both FALSE is
 \* L6's as-built model (N2: reuse of a closing launcher; N3: a stale release after the deadline).
-\* Ghost variables (epoch, lEp, boundEp, bad, served) only observe; they never gate behaviour.
+\* Ghost variables (epoch, lEp, boundEp, bad, served) only observe; they never gate behaviour, and
+\* `act` labels each step for the graph export (graphs.AttachGeneration).
 EXTENDS Naturals, Sequences
 
 CONSTANTS Ids, MaxGen, MaxEpoch, MaxL, MaxMsgs, Deadline, FixMain, FixUtil
 
 VARIABLES gen, holders, rel, replied, epoch, connected, msgs,
-          lGen, lEp, launcher, lstate, boundEp, nextL, upc, uRel, bad, served
+          lGen, lEp, launcher, lstate, boundEp, nextL, upc, uRel, bad, served, act
 vars == <<gen, holders, rel, replied, epoch, connected, msgs,
-          lGen, lEp, launcher, lstate, boundEp, nextL, upc, uRel, bad, served>>
+          lGen, lEp, launcher, lstate, boundEp, nextL, upc, uRel, bad, served, act>>
 
 Ls == 1..MaxL
 NoRel == [active |-> FALSE, g |-> 0, ep |-> 0]
@@ -28,24 +29,24 @@ Init == /\ gen = 0 /\ holders = {} /\ rel = NoRel /\ replied = FALSE
         /\ lGen = 0 /\ lEp = 0 /\ launcher = 0
         /\ lstate = [l \in Ls |-> "unused"] /\ boundEp = [l \in Ls |-> 0] /\ nextL = 1
         /\ upc = "idle" /\ uRel = [g |-> 0, ep |-> 0, L |-> 0] /\ bad = "none"
-        /\ served = {}
+        /\ served = {} /\ act = "Init"
 
 UtilVars == <<lGen, lEp, launcher, lstate, boundEp, nextL, upc, uRel, served>>
 
 \* ---------------- main process ----------------
-Retain(a) == /\ gen < MaxGen /\ epoch < MaxEpoch
+Retain(a) == /\ gen < MaxGen /\ epoch < MaxEpoch /\ act' = "Retain"
              /\ (a \notin holders \/ rel.active)
              /\ gen' = gen + 1
              /\ epoch' = IF holders = {} THEN epoch + 1 ELSE epoch
              /\ holders' = holders \cup {a}
              /\ UNCHANGED <<rel, replied, connected, msgs, bad>> /\ UNCHANGED UtilVars
 
-Connect == /\ holders # {} /\ epoch \notin connected /\ Len(msgs) < MaxMsgs
+Connect == /\ holders # {} /\ epoch \notin connected /\ Len(msgs) < MaxMsgs /\ act' = "Connect"
            /\ msgs' = Append(msgs, [type |-> "connect", g |-> gen, ep |-> epoch])
            /\ connected' = connected \cup {epoch}
            /\ UNCHANGED <<gen, holders, rel, replied, epoch, bad>> /\ UNCHANGED UtilVars
 
-Release(a) == /\ a \in holders /\ ~rel.active /\ Len(msgs) < MaxMsgs
+Release(a) == /\ a \in holders /\ ~rel.active /\ Len(msgs) < MaxMsgs /\ act' = "Release"
               /\ holders' = holders \ {a}
               /\ IF holders' = {}
                    THEN /\ rel' = [active |-> TRUE, g |-> gen, ep |-> epoch]
@@ -54,13 +55,13 @@ Release(a) == /\ a \in holders /\ ~rel.active /\ Len(msgs) < MaxMsgs
                    ELSE UNCHANGED <<rel, msgs, replied>>
               /\ UNCHANGED <<gen, epoch, connected, bad>> /\ UNCHANGED UtilVars
 
-MainFinish == /\ rel.active /\ (replied \/ Deadline)
+MainFinish == /\ rel.active /\ (replied \/ Deadline) /\ act' = "MainFinish"
               /\ gen' = IF ~FixMain /\ gen = rel.g THEN 0 ELSE gen
               /\ rel' = NoRel /\ replied' = FALSE
               /\ UNCHANGED <<holders, epoch, connected, msgs, bad>> /\ UNCHANGED UtilVars
 
 \* ---------------- services utility ----------------
-UConnect == /\ msgs # << >> /\ Head(msgs).type = "connect"
+UConnect == /\ msgs # << >> /\ Head(msgs).type = "connect" /\ act' = "UConnect"
             /\ FixUtil => upc = "idle"
             /\ LET m == Head(msgs) IN
                /\ msgs' = Tail(msgs)
@@ -79,26 +80,32 @@ UConnect == /\ msgs # << >> /\ Head(msgs).type = "connect"
                          /\ UNCHANGED bad
             /\ UNCHANGED <<gen, holders, rel, replied, epoch, connected, upc, uRel>>
 
-URelStart == /\ msgs # << >> /\ Head(msgs).type = "release" /\ upc = "idle"
+\* A release is stale when it names a generation the utility no longer serves. As built, that is any other
+\* generation. With FixMain the generation is monotone, so only an older one was outrun (by a remount's
+\* connect); a newer one (a retain whose connect never came) still closes the host (W6.r1 finding 14).
+Outrun(m) == IF FixMain THEN launcher = 0 \/ m.g < lGen ELSE lGen # m.g
+
+URelStart == /\ msgs # << >> /\ Head(msgs).type = "release" /\ upc = "idle" /\ act' = "URelStart"
              /\ LET m == Head(msgs) IN
                 /\ msgs' = Tail(msgs)
-                /\ IF lGen # m.g
+                /\ IF Outrun(m)
                      THEN /\ replied' = TRUE
-                          /\ UNCHANGED <<upc, uRel, lstate, bad>>
+                          /\ UNCHANGED <<upc, uRel, lstate, bad, lGen>>
                      ELSE /\ uRel' = [g |-> m.g, ep |-> m.ep, L |-> launcher]
+                          /\ lGen' = m.g
                           /\ lstate' = IF launcher # 0 THEN [lstate EXCEPT ![launcher] = "closing"] ELSE lstate
                           /\ upc' = "closing"
                           /\ bad' = IF m.ep # lEp THEN "aba-start" ELSE bad
                           /\ UNCHANGED replied
-             /\ UNCHANGED <<gen, holders, rel, epoch, connected, lGen, lEp, launcher, boundEp, nextL, served>>
+             /\ UNCHANGED <<gen, holders, rel, epoch, connected, lEp, launcher, boundEp, nextL, served>>
 
-UCloseDone == /\ upc = "closing"
+UCloseDone == /\ upc = "closing" /\ act' = "UCloseDone"
               /\ lstate' = IF uRel.L # 0 THEN [lstate EXCEPT ![uRel.L] = "closed"] ELSE lstate
               /\ upc' = "check"
               /\ UNCHANGED <<gen, holders, rel, replied, epoch, connected, msgs, bad,
                              lGen, lEp, launcher, boundEp, nextL, uRel, served>>
 
-UCheck == /\ upc = "check"
+UCheck == /\ upc = "check" /\ act' = "UCheck"
           /\ upc' = "idle" /\ replied' = TRUE
           /\ IF lGen # uRel.g \/ (uRel.L # 0 /\ launcher # uRel.L)
                THEN UNCHANGED <<launcher, lGen, bad>>
@@ -117,4 +124,6 @@ NoReuseOfClosingLauncher == bad # "reuse-closing"
 NoStaleReleaseAcceptedAtStart == bad # "aba-start"
 NoStaleReleaseDeletesNewEpoch == bad # "aba-delete"
 ConnectServed == \A e \in 1..MaxEpoch : (e \in connected) ~> (e \in served)
+\* W6.r1 finding 14: once every holder released and the utility answered everything, no launcher is left open.
+ReleasedHostCloses == (holders = {} /\ msgs = << >> /\ upc = "idle") => launcher = 0
 ====

@@ -1750,7 +1750,8 @@ describe('fileManagerMachine', () => {
    * machine.
    */
   describe('worker death after ready', () => {
-    it('should leave ready for error when the bridge port closes', async () => {
+    /* RV1-F1 (W6): the page restarts a dead file-manager worker once without a click. */
+    it('should restart a dead file-manager worker once without a click', async () => {
       const actor = createActor(fileManagerMachine, {
         input: { rootDirectory: '/', shouldInitializeOnStart: true },
       });
@@ -1762,10 +1763,39 @@ describe('fileManagerMachine', () => {
       workerTestState.proxyDeaths[0]!();
 
       await vi.waitFor(() => {
+        expect(workerTestState.instances).toHaveLength(2);
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      expect(workerTestState.instances[0]?.terminate).toHaveBeenCalled();
+      expect(actor.getSnapshot().context.error).toBeUndefined();
+
+      actor.stop();
+    });
+
+    it('should leave ready for error when the bridge port closes twice within the liveness bound', async () => {
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', shouldInitializeOnStart: true },
+      });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      /* The next proxy made is the restarted worker's own, as the first one was the first worker's. */
+      const restartedProxy = workerTestState.proxyDeaths.length;
+      workerTestState.proxyDeaths[0]!();
+      await vi.waitFor(() => {
+        expect(workerTestState.instances).toHaveLength(2);
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      workerTestState.proxyDeaths[restartedProxy]!();
+
+      await vi.waitFor(() => {
         expect(actor.getSnapshot().value).toBe('error');
       });
       expect(actor.getSnapshot().context.error).toBeInstanceOf(Error);
-      expect(workerTestState.instances[0]?.terminate).toHaveBeenCalled();
+      expect(workerTestState.instances[1]?.terminate).toHaveBeenCalled();
+      expect(workerTestState.instances).toHaveLength(2);
 
       actor.stop();
     });

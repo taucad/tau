@@ -1181,7 +1181,7 @@ the cancelled tools left the system unchanged.
         idPrefix: 'generation',
       }),
     );
-    host.assumeLeadership('chat-generation', 'generation-one');
+    host.assumeLeadership('chat-generation', 1);
     const first = host.admit({
       chatId: 'chat-generation',
       runId: 'run-generation',
@@ -1193,12 +1193,14 @@ the cancelled tools left the system unchanged.
     await host.relinquish('chat-generation');
     await firstFailure;
 
-    host.assumeLeadership('chat-generation', 'generation-two');
+    host.assumeLeadership('chat-generation', 2);
     await host.resume('chat-generation');
     const log = await file.open();
     const events = await log.read();
-    expect(events.findLast((event) => event.leaderEpoch === 'generation-one')?.leaderEpoch).toBe('generation-one');
-    expect(events.at(-1)?.leaderEpoch).toBe('generation-two');
+    /* Each incarnation writes under its own term; the term's integer epoch is the ledger's (W6 RH-S3). */
+    const firstRow = events[0]!;
+    expect(events.at(-1)?.leaderEpoch).not.toBe(firstRow.leaderEpoch);
+    expect(events.at(-1)?.epoch).toBeGreaterThan(firstRow.epoch ?? 0);
     await host.close();
   });
 
@@ -2979,7 +2981,7 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
     // A fenced generation writes nothing; the next leader takes the chat and admits.
     expect(await readLog(file)).toEqual([]);
     expect(() => {
-      host.assumeLeadership('chat-fenced', 'generation-2');
+      host.assumeLeadership('chat-fenced', 2);
     }).not.toThrow();
     await host.admit({
       chatId: 'chat-fenced',

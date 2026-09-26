@@ -293,34 +293,25 @@ impl GridPlan {
             .iter()
             .map(StoredDomain::exact)
             .collect::<Result<Vec<_>, _>>()?;
+        let mut axis_masks = [[0_u16; MAX_PLANES_PER_AXIS - 1]; 3];
+        for axis in 0..3 {
+            for interval in 0..self.dimensions[axis] {
+                let midpoint = exact::midpoint(
+                    &exact_planes[axis][interval],
+                    &exact_planes[axis][interval + 1],
+                )?;
+                for (material_index, material) in exact_materials.iter().enumerate() {
+                    if midpoint >= material.minimum[axis] && midpoint <= material.maximum[axis] {
+                        axis_masks[axis][interval] |= 1 << material_index;
+                    }
+                }
+            }
+        }
         let cell_count = checked_product(self.dimensions)?;
         let mut material_masks = Vec::with_capacity(cell_count);
         for cell in 0..cell_count {
-            let indices = indices(cell, self.dimensions);
-            let midpoint = [
-                exact::midpoint(
-                    &exact_planes[0][indices[0]],
-                    &exact_planes[0][indices[0] + 1],
-                )?,
-                exact::midpoint(
-                    &exact_planes[1][indices[1]],
-                    &exact_planes[1][indices[1] + 1],
-                )?,
-                exact::midpoint(
-                    &exact_planes[2][indices[2]],
-                    &exact_planes[2][indices[2] + 1],
-                )?,
-            ];
-            let mut mask = 0_u16;
-            for (material_index, material) in exact_materials.iter().enumerate() {
-                if (0..3).all(|axis| {
-                    midpoint[axis] >= material.minimum[axis]
-                        && midpoint[axis] <= material.maximum[axis]
-                }) {
-                    mask |= 1 << material_index;
-                }
-            }
-            material_masks.push(mask);
+            let [x, y, z] = indices(cell, self.dimensions);
+            material_masks.push(axis_masks[0][x] & axis_masks[1][y] & axis_masks[2][z]);
         }
 
         let mut component_ids = vec![MATERIAL_COMPONENT; cell_count];
@@ -1304,4 +1295,97 @@ fn serial_refusal() -> ContinuousError {
     ContinuousError::unsupported(
         "The path component is not a complete serial chain of nested rectangular sections.",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::box_domain;
+    use super::*;
+
+    // The former cell-by-cell rational classifier is the semantic reference.
+    fn reference_masks(plan: &GridPlan) -> Vec<u16> {
+        let planes = exact_planes(&plan.planes).unwrap();
+        let materials = plan
+            .materials
+            .iter()
+            .map(StoredDomain::exact)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        (0..checked_product(plan.dimensions).unwrap())
+            .map(|cell| {
+                let indices = indices(cell, plan.dimensions);
+                let midpoint: [BigRational; 3] = std::array::from_fn(|axis| {
+                    exact::midpoint(
+                        &planes[axis][indices[axis]],
+                        &planes[axis][indices[axis] + 1],
+                    )
+                    .unwrap()
+                });
+                materials
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, material)| {
+                        (0..3).all(|axis| {
+                            midpoint[axis] >= material.minimum[axis]
+                                && midpoint[axis] <= material.maximum[axis]
+                        })
+                    })
+                    .fold(0_u16, |mask, (index, _)| mask | (1 << index))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn axis_masks_match_exact_cell_reference_for_overlaps_clipping_and_close_planes() {
+        let region = Bounds {
+            min: [0.0; 3],
+            max: [4.0; 3],
+        };
+        let close = f64::from_bits(1.0_f64.to_bits() + 1);
+        let cases = [
+            vec![
+                box_domain(1, [-1.0, 0.0, 0.0], [1.5, 2.0, 4.0]),
+                box_domain(2, [0.5, 1.0, 0.5], [3.0, 3.0, 3.5]),
+                box_domain(3, [2.0, 2.0, 2.0], [5.0, 5.0, 5.0]),
+                box_domain(4, [5.0, 0.0, 0.0], [6.0, 1.0, 1.0]),
+            ],
+            (0..16)
+                .map(|index| {
+                    let start = f64::from(index) * 0.25;
+                    box_domain(index + 1, [start, 0.0, 0.0], [start + 0.5, 2.0, 4.0])
+                })
+                .collect(),
+            vec![
+                box_domain(1, [0.0, 0.0, 0.0], [1.0, 4.0, 4.0]),
+                box_domain(2, [close, 0.0, 0.0], [2.0, 4.0, 4.0]),
+            ],
+        ];
+        for materials in cases {
+            let plan = GridPlan::new(&materials, region).unwrap();
+            let expected = reference_masks(&plan);
+            let grid_units = plan.grid_units().unwrap();
+            let [nx, ny, nz] = plan.dimensions.map(|value| value as u64);
+            let adjacency = (nx - 1) * ny * nz + nx * (ny - 1) * nz + nx * ny * (nz - 1);
+            assert_eq!(
+                grid_units,
+                expected.len() as u64 * (materials.len() as u64 + 2) + adjacency + 1
+            );
+            let topology = plan.build().unwrap();
+            assert_eq!(topology.material_masks, expected);
+            assert_eq!(
+                topology.point_units(2, 0).unwrap(),
+                2 * expected.len() as u64
+            );
+            assert_eq!(
+                topology
+                    .base_point_evidence()
+                    .unwrap()
+                    .cells
+                    .iter()
+                    .map(|cell| cell.material_mask)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
 }

@@ -24,15 +24,6 @@ pub struct CacheOptions {
     pub project_root: String,
 }
 
-impl Default for Engine {
-    fn default() -> Self {
-        Self {
-            inner: Some(create_engine(EngineConfig::entry())),
-            cache: None,
-        }
-    }
-}
-
 impl Engine {
     fn engine(&self) -> Result<&CoreEngine, &'static str> {
         self.inner
@@ -50,9 +41,21 @@ impl Engine {
 #[napi]
 impl Engine {
     #[napi(constructor)]
-    pub fn new(cache_options: Option<CacheOptions>) -> Result<Self, &'static str> {
+    pub fn new(
+        cache_options: Option<CacheOptions>,
+        execution_permits: Option<f64>,
+    ) -> Result<Self, &'static str> {
+        let config = EngineConfig::entry()
+            .with_execution_permits(execution_permits.unwrap_or(1.0))
+            .map_err(|message| Error::new("invalid-request", message))?;
         let Some(options) = cache_options else {
-            return Ok(Self::default());
+            return Ok(Self {
+                inner: Some(
+                    create_engine(config)
+                        .map_err(|message| Error::new("invalid-request", message))?,
+                ),
+                cache: None,
+            });
         };
         if !producer_identity_verified() {
             return Err(Error::new(
@@ -66,7 +69,7 @@ impl Engine {
         );
         Ok(Self {
             inner: Some(
-                create_engine_with_overlap_cache(EngineConfig::entry(), cache.clone())
+                create_engine_with_overlap_cache(config, cache.clone())
                     .map_err(|message| Error::new("invalid-request", message))?,
             ),
             cache: Some(cache),

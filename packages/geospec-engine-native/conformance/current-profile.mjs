@@ -7,6 +7,13 @@
 
 const originalSha256 = '3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476';
 const profileSha256 = 'eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d';
+const successorSha256 = '5dfd1c400ff18b91804cf5514dfc862f47a975bea00877fbd4f2d5ffe609e34f';
+const oldNumericProfileField = '"numericProfile":"geospec-st-logical-requests-v3"';
+const stringAxisIds = new Set([
+  'a2/invalid-claim/string-axis',
+  'plan/invalid-claim/string-axis/canonical',
+  'plan/invalid-claim/string-axis/evaluate',
+]);
 const encoder = new TextEncoder();
 
 /** @type {(bytes: Uint8Array) => Promise<string>} */
@@ -21,6 +28,14 @@ const requireMatch = (condition, label) => {
     throw new Error(`Current conformance binding mismatch: ${label}`);
   }
 };
+
+/**
+ * Project only the serialized numericProfile field; incidental text is not an authority binding.
+ * @internal
+ * @type {(text: string | undefined, successor: string) => string | undefined}
+ */
+export const projectNumericProfile = (text, successor) =>
+  text?.replaceAll(oldNumericProfileField, `"numericProfile":"${successor}"`);
 
 /** @type {(utf8: string | undefined, hex: string | undefined) => Uint8Array} */
 const input = (utf8, hex) => {
@@ -39,11 +54,14 @@ const input = (utf8, hex) => {
  * @param originalBytes - Exact early-corpus.json bytes.
  * @param profileBytes - Exact current-profile-01/plan-corpus.json bytes.
  * @param bindingProfile - Declared constructor configuration, independent of observed output.
+ * @param successorBytes - Optional pinned v5 numeric-profile.txt bytes; omitted keeps the original join.
  * @returns Current inputs/expectations in original order and both authority digests.
  * @internal
- * @type {(originalBytes: Uint8Array, profileBytes: Uint8Array, bindingProfile?: 'core-only' | 'full-backend') => Promise<Corpus & { originalSha256: string, profileSha256: string, bindingProfile: 'core-only' | 'full-backend' }>}
+ * @type {(originalBytes: Uint8Array, profileBytes: Uint8Array, bindingProfile?: 'core-only' | 'full-backend', successorBytes?: Uint8Array) => Promise<Corpus & { originalSha256: string, profileSha256: string, bindingProfile: 'core-only' | 'full-backend', successorSha256?: string }>}
  */
-export const joinCurrentCorpus = async (originalBytes, profileBytes, bindingProfile = 'core-only') => {
+// oxlint-disable-next-line max-params -- The frozen join accepts two authorities and two explicit profile selectors.
+export const joinCurrentCorpus = async (originalBytes, profileBytes, bindingProfile, successorBytes) => {
+  bindingProfile ??= 'core-only';
   requireMatch(['core-only', 'full-backend'].includes(bindingProfile), 'binding profile');
   requireMatch((await digest(originalBytes)) === originalSha256, 'original corpus SHA-256');
   requireMatch((await digest(profileBytes)) === profileSha256, 'current profile SHA-256');
@@ -125,7 +143,38 @@ export const joinCurrentCorpus = async (originalBytes, profileBytes, bindingProf
       };
     }),
   );
-  return { ...original, meshes, records, originalSha256, profileSha256, bindingProfile };
+  const joined = { ...original, meshes, records, originalSha256, profileSha256, bindingProfile };
+  if (successorBytes === undefined) {
+    return joined;
+  }
+  requireMatch((await digest(successorBytes)) === successorSha256, 'v5 successor SHA-256');
+  const successor = new TextDecoder('utf-8', { fatal: true }).decode(successorBytes);
+  requireMatch(successor === 'geospec-demand-v5', 'v5 successor profile');
+  /** @type {(text: string | undefined) => string | undefined} */
+  const project = (text) => projectNumericProfile(text, successor);
+  return {
+    ...joined,
+    successorSha256,
+    meshes: meshes.map((mesh) => ({
+      ...mesh,
+      requestUtf8: project(mesh.requestUtf8),
+      expectedUtf8: project(mesh.expectedUtf8),
+    })),
+    records: records.map((record) => {
+      if (stringAxisIds.has(record.id)) {
+        requireMatch(record.expectedMessage === 'bounding-box axes must be a finite number.', record.id);
+      }
+      return {
+        ...record,
+        // Hex inputs remain byte-identical, including malformed UTF-8 controls.
+        inputUtf8: project(record.inputUtf8),
+        expectedUtf8: project(record.expectedUtf8),
+        expectedMessage: stringAxisIds.has(record.id)
+          ? 'GeoSpec numeric expectation must be an object.'
+          : record.expectedMessage,
+      };
+    }),
+  };
 };
 
 /**

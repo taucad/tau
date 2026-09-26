@@ -1,6 +1,10 @@
 //! Binary admission and explicit entry configuration for the shared engine.
 use crate::protocol::WorkCounter;
-use std::{collections::HashSet, rc::Rc};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::{BTreeMap, HashSet},
+    rc::Rc,
+};
 
 use crate::{
     analysis::mesh::{decode_glb, decode_gltf},
@@ -25,6 +29,8 @@ pub struct EngineConfig {
     pub binary: BinaryAdmissionLimits,
     pub analysis: AnalysisRetentionLimits,
     pub max_retained_subjects: u32,
+    /// Caller-inclusive allocation; internal multithreading remains disabled.
+    pub execution_permits: u32,
 }
 
 impl EngineConfig {
@@ -45,7 +51,24 @@ impl EngineConfig {
                 max_solid_entries: 256,
             },
             max_retained_subjects: 32,
+            execution_permits: 1,
         }
+    }
+
+    /// Validate a host-supplied count before constructing an engine or opening a cache.
+    pub fn with_execution_permits(mut self, permits: f64) -> Result<Self, &'static str> {
+        let host_cap = std::thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(1)
+            .min(u32::MAX as usize);
+        if !permits.is_finite()
+            || permits.fract() != 0.0
+            || !(1.0..=host_cap as f64).contains(&permits)
+        {
+            return Err("Execution permits must be a positive integer including the caller and within the host cap.");
+        }
+        self.execution_permits = permits as u32;
+        Ok(self)
     }
 }
 
@@ -85,6 +108,34 @@ fn relative_resource(name: &str) -> bool {
     !name.is_empty()
         && !name.contains(['\\', ':', '\0'])
         && name.split('/').all(|part| !matches!(part, "" | "." | ".."))
+}
+
+fn mesh_closure_key(
+    format: &str,
+    source_unit: &str,
+    primary_hash: &str,
+    primary_len: usize,
+    bundle: &ResourceBundle,
+) -> (String, BTreeMap<String, String>) {
+    fn part(hash: &mut Sha256, bytes: &[u8]) {
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(bytes);
+    }
+    let mut hash = Sha256::new();
+    part(&mut hash, b"geospec-mesh-closure-v1");
+    part(&mut hash, format.as_bytes());
+    part(&mut hash, source_unit.as_bytes());
+    part(&mut hash, primary_hash.as_bytes());
+    hash.update((primary_len as u64).to_le_bytes());
+    let mut resource_hashes = BTreeMap::new();
+    for (name, bytes) in &bundle.entries {
+        let resource_hash = crate::identity::digest(bytes);
+        part(&mut hash, name.as_bytes());
+        part(&mut hash, resource_hash.as_bytes());
+        hash.update((bytes.len() as u64).to_le_bytes());
+        resource_hashes.insert(name.clone(), resource_hash);
+    }
+    (format!("{:x}", hash.finalize()), resource_hashes)
 }
 
 fn decimal_u64(value: &str, name: &str) -> Result<u64, ProtocolError> {
@@ -238,6 +289,7 @@ impl Engine {
             let name = string_field(object(metadata, "resource metadata")?, "name")?;
             bundle.entries.insert(name.into(), bytes);
         }
+        let mut pending_mesh_index = None;
         let retained = match format {
             "rational-plate" => {
                 if !bundle.entries.is_empty()
@@ -271,6 +323,33 @@ impl Engine {
                     string_field(frame, "outputUnit")?,
                 )
                 .map_err(backend)?;
+                let primary_hash = crate::identity::digest(&primary);
+                let (closure_key, resource_hashes) = mesh_closure_key(
+                    format,
+                    string_field(frame, "sourceUnit")?,
+                    &primary_hash,
+                    primary.len(),
+                    &bundle,
+                );
+                if let Some(subject) = self
+                    .mesh_sources
+                    .get(&closure_key)
+                    .and_then(|key| self.subjects.get(key))
+                {
+                    let record = subject.mesh_record.get().expect("admitted mesh record");
+                    if record.positions.len() as u64 > u64::from(self.config.binary.max_vertices)
+                        || record.triangles.len() as u64
+                            > u64::from(self.config.binary.max_triangles)
+                    {
+                        return Err(limit(
+                            "Decoded mesh exceeds configured vertex or triangle limits.",
+                        ));
+                    }
+                    let identity = subject.semantic_identity.get().expect("admitted identity");
+                    let response = response(identity)?;
+                    self.observations.add(WorkCounter::Admissions, 1);
+                    return Ok(response);
+                }
                 self.observations.add(WorkCounter::Parses, 1);
                 let decoded = if format == "gltf" {
                     decode_gltf(&primary, &bundle, applied.uniform_scale())
@@ -288,9 +367,11 @@ impl Engine {
                     ));
                 }
                 self.observations.add(WorkCounter::IdentityBuilds, 1);
-                let identity = SubjectIdentity::gltf(
-                    &primary,
+                let identity = SubjectIdentity::gltf_prehashed(
+                    primary_hash,
+                    primary.len(),
                     &bundle,
+                    &resource_hashes,
                     &decoded.consumed_resources,
                     if format == "gltf" {
                         GltfFormat::Json
@@ -312,6 +393,12 @@ impl Engine {
                 let _ = retained.semantic_identity.set(identity);
                 self.observations.add(WorkCounter::MeshRecords, 1);
                 let _ = retained.mesh_record.set(Rc::new(decoded.record));
+                // Index only a new semantic subject. Varying irrelevant resources
+                // cannot create unbounded aliases for one retained subject.
+                let subject_key = retained.cache_identity().map_err(backend)?;
+                if !self.subjects.contains_key(&subject_key) {
+                    pending_mesh_index = Some((closure_key, subject_key));
+                }
                 retained
             }
             "step" => {
@@ -333,10 +420,12 @@ impl Engine {
                     .as_ref()
                     .ok_or_else(|| invalid("This engine composition has no BRep connector."))?;
                 let profile = connector.identity_profile();
-                for subject in self.subjects.values() {
-                    if subject.format != SubjectFormat::Step
-                        || subject.pmi_source_bytes() != Some(primary.as_slice())
-                    {
+                let primary_hash = crate::identity::digest(&primary);
+                for key in self.step_sources.get(&primary_hash).into_iter().flatten() {
+                    let Some(subject) = self.subjects.get(key) else {
+                        continue;
+                    };
+                    if subject.pmi_source_bytes() != Some(primary.as_slice()) {
                         continue;
                     }
                     let identity = subject.semantic_identity.get().expect("admitted identity");
@@ -364,8 +453,9 @@ impl Engine {
                     ));
                 }
                 self.observations.add(WorkCounter::IdentityBuilds, 1);
-                let identity = SubjectIdentity::step(
-                    &primary,
+                let identity = SubjectIdentity::step_prehashed(
+                    primary_hash,
+                    primary.len(),
                     &facts.source_length_unit,
                     facts.source_unit_to_millimeters,
                     profile,
@@ -377,6 +467,7 @@ impl Engine {
                     SubjectFormat::Step,
                     "mm".into(),
                 );
+                retained.step_admission_facts = Some(facts);
                 let _ = retained.semantic_identity.set(identity);
                 retained.display_name = step_name.unwrap_or("step").into();
                 retained.brep = Some(document);
@@ -408,6 +499,9 @@ impl Engine {
             .expect("Full-format admission constructs identity");
         let response = response(identity)?;
         self.admit_retained(retained)?;
+        if let Some((closure_key, subject_key)) = pending_mesh_index {
+            self.mesh_sources.insert(closure_key, subject_key);
+        }
         Ok(response)
     }
 
@@ -520,7 +614,20 @@ impl Engine {
                     ProtocolError::new(ErrorKind::BackendFailure, error.to_string())
                 })?;
         }
+        if let Some(subject) = self.subjects.get(&key) {
+            if subject.format == SubjectFormat::Step && subject.pmi_source_bytes().is_some() {
+                let primary_hash = subject.content_hash.clone();
+                if let Some(keys) = self.step_sources.get_mut(&primary_hash) {
+                    keys.retain(|candidate| candidate != &key);
+                    if keys.is_empty() {
+                        self.step_sources.remove(&primary_hash);
+                    }
+                }
+            }
+        }
         self.subjects.remove(&key);
+        self.mesh_sources
+            .retain(|_, subject_key| subject_key != &key);
         self.resident_overlaps.borrow_mut().prune();
         self.subject_generations.remove(&key);
         encode(&Json::object([
@@ -570,7 +677,54 @@ impl Engine {
         }
         self.next_generation = generation;
         self.subject_generations.insert(key.clone(), generation);
+        if retained.format == SubjectFormat::Step && retained.pmi_source_bytes().is_some() {
+            self.step_sources
+                .entry(retained.content_hash.clone())
+                .or_default()
+                .push(key.clone());
+        }
         self.subjects.insert(key, Rc::new(retained));
         Ok(())
+    }
+}
+impl Engine {
+    /// Configure the standalone core-only binding without changing its serial execution.
+    pub fn with_execution_permits(permits: f64) -> Result<Self, &'static str> {
+        let config = EngineConfig::entry().with_execution_permits(permits)?;
+        let mut engine = Self::new();
+        engine.config = config;
+        Ok(engine)
+    }
+}
+#[cfg(test)]
+mod execution_permit_tests {
+    use super::EngineConfig;
+
+    #[test]
+    fn validates_caller_inclusive_execution_permits() {
+        let host_cap = std::thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(1)
+            .min(u32::MAX as usize);
+        assert_eq!(EngineConfig::entry().execution_permits, 1);
+        assert_eq!(
+            EngineConfig::entry()
+                .with_execution_permits(host_cap as f64)
+                .unwrap()
+                .execution_permits,
+            host_cap as u32
+        );
+        for invalid in [
+            0.0,
+            -1.0,
+            1.5,
+            f64::NAN,
+            f64::INFINITY,
+            host_cap as f64 + 1.0,
+        ] {
+            assert!(EngineConfig::entry()
+                .with_execution_permits(invalid)
+                .is_err());
+        }
     }
 }

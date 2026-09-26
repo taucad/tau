@@ -1,6 +1,7 @@
 //! Applied subject identity. This module hashes bytes; it performs no resource I/O.
 
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
 use crate::{
     backend::{resources::ResourceBundle, BackendError, BackendErrorKind},
@@ -171,9 +172,35 @@ impl SubjectIdentity {
 
     /// Call after decoding, with the exact resources the decoder consumed.
     /// Profile literals are composition-owned, never supplied in a host request.
+    #[cfg(test)]
     pub(crate) fn gltf(
         primary: &[u8],
         resources: &ResourceBundle,
+        consumed: &[String],
+        format: GltfFormat,
+        frame: MeshFrame,
+    ) -> Result<Self, BackendError> {
+        let resource_hashes = resources
+            .entries
+            .iter()
+            .map(|(name, bytes)| (name.clone(), digest(bytes)))
+            .collect();
+        Self::gltf_prehashed(
+            digest(primary),
+            primary.len(),
+            resources,
+            &resource_hashes,
+            consumed,
+            format,
+            frame,
+        )
+    }
+
+    pub(crate) fn gltf_prehashed(
+        primary_hash: String,
+        primary_len: usize,
+        resources: &ResourceBundle,
+        resource_hashes: &BTreeMap<String, String>,
         consumed: &[String],
         format: GltfFormat,
         frame: MeshFrame,
@@ -188,7 +215,14 @@ impl SubjectIdentity {
             })?;
             resource_facts.push(Json::object([
                 ("name", Json::string(name)),
-                ("sha256", Json::String(digest(bytes))),
+                (
+                    "sha256",
+                    Json::string(
+                        resource_hashes
+                            .get(name)
+                            .expect("ingress hashed every validated resource"),
+                    ),
+                ),
                 ("byteLength", byte_length(bytes)?),
             ]));
         }
@@ -197,8 +231,8 @@ impl SubjectIdentity {
             (
                 "primary",
                 Json::object([
-                    ("sha256", Json::String(digest(primary))),
-                    ("byteLength", byte_length(primary)?),
+                    ("sha256", Json::String(primary_hash)),
+                    ("byteLength", byte_length_for_len(primary_len)?),
                 ]),
             ),
             ("resources", Json::Array(resource_facts)),
@@ -224,8 +258,29 @@ impl SubjectIdentity {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn step(
         primary: &[u8],
+        source_unit: &str,
+        scale: f64,
+        profile: crate::backend::brep::BrepIdentityProfile,
+        name: Option<&str>,
+    ) -> Result<Self, BackendError> {
+        Self::step_prehashed(
+            digest(primary),
+            primary.len(),
+            source_unit,
+            scale,
+            profile,
+            name,
+        )
+    }
+
+    /// Reuse the engine's digest after exact source lookup; callers derive it
+    /// from the borrowed input bytes, never from host-supplied metadata.
+    pub(crate) fn step_prehashed(
+        primary_hash: String,
+        primary_len: usize,
         source_unit: &str,
         scale: f64,
         profile: crate::backend::brep::BrepIdentityProfile,
@@ -239,8 +294,8 @@ impl SubjectIdentity {
             (
                 "primary",
                 Json::object([
-                    ("sha256", Json::String(digest(primary))),
-                    ("byteLength", byte_length(primary)?),
+                    ("sha256", Json::String(primary_hash)),
+                    ("byteLength", byte_length_for_len(primary_len)?),
                 ]),
             ),
             ("resources", Json::Array(Vec::new())),
@@ -315,18 +370,22 @@ impl SubjectIdentity {
     }
 }
 
-fn digest(bytes: &[u8]) -> String {
+pub(crate) fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
 fn byte_length(bytes: &[u8]) -> Result<Json, BackendError> {
+    byte_length_for_len(bytes.len())
+}
+
+fn byte_length_for_len(len: usize) -> Result<Json, BackendError> {
     // Wire representability, not a production binary admission ceiling.
-    if bytes.len() as u128 > 9_007_199_254_740_991 {
+    if len as u128 > 9_007_199_254_740_991 {
         return Err(invalid(
             "Geometry byte length is not an exact JSON integer.",
         ));
     }
-    Ok(Json::Number(bytes.len() as f64))
+    Ok(Json::Number(len as f64))
 }
 
 fn invalid(message: impl Into<String>) -> BackendError {

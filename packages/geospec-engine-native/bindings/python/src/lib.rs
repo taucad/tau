@@ -45,11 +45,18 @@ impl PyEngine {
 #[pymethods]
 impl PyEngine {
     #[new]
-    #[pyo3(signature = (cache_root=None, project_root=None))]
-    fn new(cache_root: Option<String>, project_root: Option<String>) -> PyResult<Self> {
+    #[pyo3(signature = (cache_root=None, project_root=None, *, execution_permits=None))]
+    fn new(
+        cache_root: Option<String>,
+        project_root: Option<String>,
+        execution_permits: Option<f64>,
+    ) -> PyResult<Self> {
+        let config = EngineConfig::entry()
+            .with_execution_permits(execution_permits.unwrap_or(1.0))
+            .map_err(PyValueError::new_err)?;
         match (cache_root, project_root) {
             (None, None) => Ok(Self {
-                inner: Some(create_engine(EngineConfig::entry())),
+                inner: Some(create_engine(config).map_err(PyValueError::new_err)?),
                 cache: None,
             }),
             (Some(root), Some(project)) => {
@@ -64,7 +71,7 @@ impl PyEngine {
                 );
                 Ok(Self {
                     inner: Some(
-                        create_engine_with_overlap_cache(EngineConfig::entry(), cache.clone())
+                        create_engine_with_overlap_cache(config, cache.clone())
                             .map_err(PyValueError::new_err)?,
                     ),
                     cache: Some(cache),

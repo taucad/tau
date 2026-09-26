@@ -6,6 +6,8 @@ const CORPUS: &str = include_str!("../../conformance/early-corpus.json");
 const CORPUS_SHA256: &str = "3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476";
 const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
 const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d";
+const CURRENT_NUMERIC_PROFILE: &str =
+    include_str!("fixtures/current-profile-v5/numeric-profile.txt");
 
 fn string<'a>(value: &'a Value, field: &str) -> &'a str {
     value[field].as_str().expect(field)
@@ -30,13 +32,19 @@ fn input(record: &Value) -> Vec<u8> {
     )
 }
 
-fn compare(actual: Result<Vec<u8>, ProtocolError>, expected: &Value) -> Value {
+fn compare(actual: Result<Vec<u8>, ProtocolError>, expected: &Value, id: &str) -> Value {
     match actual {
         Ok(actual) => {
             let decoded = serde_json::from_slice::<Value>(&actual).ok();
-            let expected_bytes = expected["expectedUtf8"].as_str();
-            let expected_json = expected_bytes.and_then(|s| serde_json::from_str::<Value>(s).ok());
-            let passed = expected_bytes.is_some_and(|s| actual == s.as_bytes())
+            let expected_bytes = expected["expectedUtf8"]
+                .as_str()
+                .map(|s| s.replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE));
+            let expected_json = expected_bytes
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<Value>(s).ok());
+            let passed = expected_bytes
+                .as_ref()
+                .is_some_and(|s| actual == s.as_bytes())
                 && decoded.is_some()
                 && decoded == expected_json;
             json!({
@@ -51,7 +59,20 @@ fn compare(actual: Result<Vec<u8>, ProtocolError>, expected: &Value) -> Value {
         Err(error) => {
             let _: &dyn std::error::Error = &error;
             let message = error.to_string();
-            let expected_message = expected["expectedMessage"].as_str();
+            let expected_message = expected["expectedMessage"].as_str().map(|message| {
+                // The frozen v3 string-axis oracle predates the typed numeric parser.
+                if matches!(
+                    id,
+                    "a2/invalid-claim/string-axis"
+                        | "plan/invalid-claim/string-axis/canonical"
+                        | "plan/invalid-claim/string-axis/evaluate"
+                ) && message == "bounding-box axes must be a finite number."
+                {
+                    "GeoSpec numeric expectation must be an object."
+                } else {
+                    message
+                }
+            });
             json!({
                 "passed": expected["expectedCode"].as_str() == Some(error.code())
                     && expected_message.map_or(!message.is_empty(), |expected| expected == message),
@@ -108,6 +129,15 @@ fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindi
             assert_eq!(effective, original, "{id}: malformed/version bytes changed");
         }
 
+        // Keep the frozen binding hash, then execute its explicit current
+        // numerical-profile projection against this producer.
+        let effective = std::str::from_utf8(&effective).map_or_else(
+            |_| effective.clone(),
+            |text| {
+                text.replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE)
+                    .into_bytes()
+            },
+        );
         let mut engine = Engine::new();
         let mut admissions = Vec::new();
         for mesh_id in record["ingest"].as_array().expect("ingest IDs") {
@@ -126,7 +156,7 @@ fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindi
                 format!("{:x}", Sha256::digest(request)),
                 bound["effectiveRequestSha256"]
             );
-            let admission = compare(engine.ingest_mesh(request, &data), bound);
+            let admission = compare(engine.ingest_mesh(request, &data), bound, id);
             if admission["passed"] != true {
                 failures.push(format!("{id}: admission {mesh_id}: {admission}"));
             }
@@ -143,7 +173,7 @@ fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindi
             let bound = &mesh_bindings[0];
             let data = bytes(string(mesh, "meshHex"));
             let request = string(bound, "effectiveRequestUtf8").as_bytes();
-            let admission = compare(engine.ingest_mesh(request, &data), bound);
+            let admission = compare(engine.ingest_mesh(request, &data), bound, id);
             assert_eq!(
                 admission["passed"], true,
                 "fresh explicit current-profile admission"
@@ -159,7 +189,7 @@ fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindi
             "evaluatePlan" => engine.evaluate_plan(&effective),
             other => panic!("unknown frozen operation: {other}"),
         };
-        let comparison = compare(actual, binding);
+        let comparison = compare(actual, binding, id);
         if comparison["passed"] != true {
             failures.push(format!("{id}: {comparison}"));
         }

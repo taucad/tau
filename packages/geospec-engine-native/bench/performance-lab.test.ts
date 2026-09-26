@@ -9,6 +9,8 @@ import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 // oxlint-disable-next-line no-restricted-imports -- Test reads the private catalog manifest.
 import manifest from './fixtures/performance-lab/manifest.json' with { type: 'json' };
+// oxlint-disable-next-line no-restricted-imports -- Test the versioned current-source overlay without modifying frozen authority.
+import currentAuthority from './fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
 import {
   classifyPerformanceLabDifference,
   performanceLabAnalyticCases,
@@ -233,6 +235,14 @@ void describe('performance lab catalog', () => {
   });
 
   void it('preserves M3 bytes and pins analytic construction sources without executing geometry', async () => {
+    const manifestBytes = await readFile(
+      resolve(root, 'packages/geospec-engine-native/bench/fixtures/performance-lab/manifest.json'),
+    );
+    assert.equal(createHash('sha256').update(manifestBytes).digest('hex'), currentAuthority.frozenManifestSha256);
+    const frozenNative = manifest.analyticAuthority.sources.find(({ id }) => id === 'native-contract');
+    assert.ok(frozenNative);
+    assert.equal(frozenNative.path, currentAuthority.nativeContract.path);
+    assert.equal(frozenNative.sha256, currentAuthority.nativeContract.frozenSha256);
     const files = [
       {
         path: 'packages/geospec-engine-native/bench/fixtures/performance-lab/authority-cases.json',
@@ -247,7 +257,13 @@ void describe('performance lab catalog', () => {
     await Promise.all(
       files.map(async (source) => {
         const bytes = await readFile(resolve(root, source.path));
-        assert.equal(createHash('sha256').update(bytes).digest('hex'), source.sha256, source.path);
+        assert.equal(
+          createHash('sha256').update(bytes).digest('hex'),
+          source.path === currentAuthority.nativeContract.path
+            ? currentAuthority.nativeContract.currentSha256
+            : source.sha256,
+          source.path,
+        );
       }),
     );
     const sources = new Map(manifest.analyticAuthority.sources.map((source) => [source.id, source]));

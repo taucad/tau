@@ -8,7 +8,7 @@ fn ingest(
     format: &str,
     source: &str,
 ) -> Value {
-    let request = json!({"method":"ingestSubject","requestId":"admit","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","format":format,"frame":{"coordinateSystem":"z-up","sourceUnit":source,"outputUnit":"mm"},"ingestOptions":{},"primaryByteLength":bytes.len(),"resources":buffers.iter().map(|b|json!({"name":"mesh.bin","byteLength":b.len()})).collect::<Vec<_>>()});
+    let request = json!({"method":"ingestSubject","requestId":"admit","protocolVersion":3,"registryVersion":5,"canonicalProfile":"geospec-jcs-v1","format":format,"frame":{"coordinateSystem":"z-up","sourceUnit":source,"outputUnit":"mm"},"ingestOptions":{},"primaryByteLength":bytes.len(),"resources":buffers.iter().map(|b|json!({"name":"mesh.bin","byteLength":b.len()})).collect::<Vec<_>>()});
     serde_json::from_slice(
         &engine
             .ingest_subject(&serde_json::to_vec(&request).unwrap(), bytes, buffers)
@@ -17,7 +17,7 @@ fn ingest(
     .unwrap()
 }
 fn evaluate(engine: &Engine, hash: &str, capability: &str, payload: Value) -> Value {
-    let request = json!({"method":"submitClaims","requestId":"evaluate","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"part","subjectHash":hash}],"claims":[{"claimId":"measure","capability":capability,"subjectSlots":["part"],"payload":payload,"polarity":"positive","workUnitBudget":1000000}]}});
+    let request = json!({"method":"submitClaims","requestId":"evaluate","protocolVersion":3,"registryVersion":5,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"part","subjectHash":hash}],"claims":[{"claimId":"measure","capability":capability,"subjectSlots":["part"],"payload":payload,"polarity":"positive","workUnitBudget":1000000}]}});
     let plan = engine
         .canonical_plan(&serde_json::to_vec(&request).unwrap())
         .unwrap();
@@ -30,7 +30,7 @@ fn external_resource_identity_and_real_step_share_the_composed_engine() {
         "../../../conformance/subject-identity-instance-v2-controls.json"
     ))
     .unwrap();
-    let mut engine = create_engine(EngineConfig::entry());
+    let mut engine = create_engine(EngineConfig::entry()).unwrap();
     for row in fixture["rows"].as_array().unwrap() {
         let hex = row["resourceHex"].as_str().unwrap();
         let bytes = (0..hex.len())
@@ -77,4 +77,14 @@ fn external_resource_identity_and_real_step_share_the_composed_engine() {
         json!({"kind":"volume","expected":{"value":6000.0}}),
     );
     assert_eq!(result["results"][0]["status"], "passed", "{result}");
+}
+
+#[test]
+fn unsupported_grant_is_refused_before_engine_construction() {
+    let mut config = EngineConfig::entry();
+    config.execution_permits = 3;
+    assert_eq!(
+        create_engine(config).err(),
+        Some("Only execution permits 1 and 2 are supported by this OCCT host.")
+    );
 }

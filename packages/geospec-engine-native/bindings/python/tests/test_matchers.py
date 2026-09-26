@@ -1,8 +1,10 @@
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from test_conformance import CORPUS
 
 from geospec import (
     GeoSpecAssertionError,
@@ -12,16 +14,15 @@ from geospec import (
     expect_geo,
 )
 
-pytest_plugins = ["geospec.pytest_plugin"]
-
-
-CORPUS_PATH = Path(__file__).parents[3] / "conformance" / "early-corpus.json"
-CORPUS = json.loads(CORPUS_PATH.read_bytes())
 MESHES = CORPUS["meshes"]
 IDENTITY_PATH = (
-    Path(__file__).parents[3] / "conformance" / "subject-identity-controls.json"
+    Path(__file__).parents[3] / "conformance" / "subject-identity-instance-v2-controls.json"
 )
-IDENTITY = json.loads(IDENTITY_PATH.read_bytes())
+IDENTITY_BYTES = IDENTITY_PATH.read_bytes()
+assert hashlib.sha256(IDENTITY_BYTES).hexdigest() == (
+    "d9835326d035508ba095f22697c76650ffa1e25957b78da7683b89a1cb106849"
+)
+IDENTITY = json.loads(IDENTITY_BYTES)
 
 
 def record(record_id):
@@ -142,7 +143,8 @@ def test_safe_integer_boundary_is_enforced_before_json_rounding():
 
 
 def test_pytest_fixture_uses_the_same_native_engine(geospec_engine):
-    assert geospec_engine.capabilities == ("toHaveBoundingBox",)
+    assert "toHaveBoundingBox" in geospec_engine.capabilities
+    assert len(geospec_engine.capabilities) == 31
 
 
 @pytest.mark.parametrize("ingest_options", [None, {"name": "assembly.part#0"}])
@@ -320,4 +322,6 @@ def test_unconsumed_resource_order_does_not_change_actual_subject_identity(contr
         slot="part",
     )
 
-    assert subject.identity == control["expectedSubjectHash"]
+    # The frozen order control carries the historical v1 hash; the v2 row
+    # independently binds the same resource closure under the current profile.
+    assert subject.identity == row["subjectHash"]

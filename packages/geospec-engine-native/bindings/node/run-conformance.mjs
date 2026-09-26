@@ -14,6 +14,7 @@ import { joinCurrentCorpus, selectCorpusRecords } from '../../conformance/curren
 
 const corpusUrl = new URL('../../conformance/early-corpus.json', import.meta.url);
 const profileUrl = new URL('../../rust/tests/fixtures/current-profile-01/plan-corpus.json', import.meta.url);
+const successorUrl = new URL('../../rust/tests/fixtures/current-profile-v5/numeric-profile.txt', import.meta.url);
 
 /** @type {(record: CorpusRecord) => Buffer} */
 const bytes = (record) => {
@@ -89,7 +90,12 @@ const compareBytes = (actual, expectedUtf8) => {
 
 /** @type {(options: { binding: Binding, host: string, artifacts?: string[], output?: string, recordIds?: string[] }) => Promise<CorpusReport>} */
 export const runEarlyCorpus = async ({ binding, host, artifacts = [], output, recordIds }) => {
-  const corpus = await joinCurrentCorpus(await readFile(corpusUrl), await readFile(profileUrl), 'full-backend');
+  const corpus = await joinCurrentCorpus(
+    await readFile(corpusUrl),
+    await readFile(profileUrl),
+    'full-backend',
+    await readFile(successorUrl),
+  );
   const selected = selectCorpusRecords(corpus, recordIds);
   const meshes = new Map(corpus.meshes.map((mesh) => [mesh.id, mesh]));
   /** @type {CorpusResult[]} */
@@ -186,6 +192,8 @@ export const runEarlyCorpus = async ({ binding, host, artifacts = [], output, re
       sha256: corpus.originalSha256,
       currentProfilePath: fileURLToPath(profileUrl),
       currentProfileSha256: corpus.profileSha256,
+      successorPath: fileURLToPath(successorUrl),
+      successorSha256: corpus.successorSha256,
       bindingProfile: corpus.bindingProfile,
       records: corpus.records.length,
       selectedRecords: selected.length,

@@ -811,7 +811,7 @@ fn sampled_gltf_interference_and_required_pairs_refuse_before_geometry() {
             );
             assert_eq!(
                 response["result"]["numericProfile"],
-                "geospec-st-prototypes-v4"
+                include_str!("fixtures/current-profile-v5/numeric-profile.txt")
             );
             let result = &response["result"]["results"][0];
             assert_eq!(result["status"], "refused");

@@ -331,6 +331,58 @@ fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
 }
 
 #[test]
+fn should_release_step_source_lookup_with_its_subject_generation() {
+    let opens = Rc::new(Cell::new(0));
+    let mut engine = Engine::with_backends(
+        EngineConfig::entry(),
+        Box::new(ProjectionBrepConnector {
+            opens: Rc::clone(&opens),
+            alternate_profile: Rc::new(Cell::new(false)),
+        }),
+        Box::new(UnusedCsg),
+    );
+    for seed in 0..40 {
+        let bytes = format!("raw STEP source {seed}").into_bytes();
+        let request = step_request(&bytes, None);
+        let admission = engine
+            .ingest_subject(&request, bytes.clone(), vec![])
+            .unwrap();
+        assert_eq!(
+            admission,
+            engine.ingest_subject(&request, bytes, vec![]).unwrap()
+        );
+        let admission: Value = serde_json::from_slice(&admission).unwrap();
+        let handle_request = serde_json::to_vec(&json!({
+            "method": "subjectHandle", "requestId": "handle", "protocolVersion": 3,
+            "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1",
+            "subjectHash": admission["result"]["subject"]["subjectHash"]
+        }))
+        .unwrap();
+        let handle: Value =
+            serde_json::from_slice(&engine.subject_handle(&handle_request).unwrap()).unwrap();
+        let released: Value = serde_json::from_slice(
+            &engine
+                .release_subject(
+                    &serde_json::to_vec(&json!({
+                        "method": "releaseSubject", "requestId": "release", "protocolVersion": 3,
+                        "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1",
+                        "subjectHandle": handle["result"]["subjectHandle"]
+                    }))
+                    .unwrap(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(released["result"]["released"], true);
+        assert_eq!(
+            engine.subject_handle(&handle_request).unwrap_err().code(),
+            "invalid-request"
+        );
+    }
+    assert_eq!(opens.get(), 40);
+}
+
+#[test]
 fn should_project_analyze_mesh_stats_into_the_source_operation_envelope() {
     let manifest: Value = serde_json::from_str(include_str!("fixtures/mesh-entry.json")).unwrap();
     let fixture = &manifest["fixtures"][0];

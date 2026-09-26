@@ -5,7 +5,11 @@ import type { HostBytes, HostEngine, HostSubjectLifecycle } from '#host-types.js
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package module.
 import { MixedWasmBinding, canonicalizeMixedWasm, initializeMixedWasm } from '#mixed-wasm-loader.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves in-package contract types.
-import type { WasmInput as MixedWasmInput, WasmResources as MixedWasmResources } from '#mixed-wasm-loader.js';
+import type {
+  WasmExecution as MixedWasmExecution,
+  WasmInput as MixedWasmInput,
+  WasmResources as MixedWasmResources,
+} from '#mixed-wasm-loader.js';
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- The host facade exposes the shared protocol-error identity.
 export { ProtocolError } from '#host-types.js'; // eslint-disable-line import-x/no-extraneous-dependencies -- Package import resolves an in-package public contract.
@@ -16,20 +20,31 @@ export type { HostBytes, HostEngine, HostSubjectLifecycle } from '#host-types.js
 export type WasmInput = MixedWasmInput;
 /** Ordered external binary resources paired with request metadata. @public */
 export type WasmResources = MixedWasmResources;
+/** Explicit single-threaded or MT WASM product selection. @public */
+export type WasmExecution = MixedWasmExecution;
 
 /**
  * Initialize the compiled GeoSpec WASM module.
  * @param input - Optional module byte source or artifact location.
+ * @param execution - Explicit ST or MT product selection.
  * @returns A promise resolved after initialization.
  * @public
  */
-export const initialize = async (input?: WasmInput): Promise<void> => {
-  await initializeMixedWasm(input);
+export const initialize = async (input?: WasmInput, execution?: WasmExecution): Promise<void> => {
+  await initializeMixedWasm(input, execution);
 };
 
 /** Stateful browser/Node facade over the compiled GeoSpec engine. @public */
 export class Engine implements HostEngine, HostSubjectLifecycle {
-  readonly #inner = new MixedWasmBinding();
+  readonly #inner: MixedWasmBinding;
+
+  /**
+   * Construct an engine from the selected initialized WASM product.
+   * @param execution - Explicit ST or MT product selection.
+   */
+  public constructor(execution?: WasmExecution) {
+    this.#inner = new MixedWasmBinding(execution);
+  }
 
   /**
    * Read cumulative observations outside canonical geometry results.
@@ -112,7 +127,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
 }
 
 /**
- * Canonicalize strict finite JSON bytes without semantic normalization.
+ * Canonicalize strict finite JSON bytes without semantic normalization through any initialized ST or MT product.
  * @param input - Exact JSON bytes.
  * @returns Exact canonical JSON bytes.
  * @public

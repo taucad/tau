@@ -11,6 +11,19 @@ CORPUS_PATH = Path(__file__).parents[3] / "conformance" / "early-corpus.json"
 CORPUS_BYTES = CORPUS_PATH.read_bytes()
 PROFILE_PATH = Path(__file__).parents[3] / "rust/tests/fixtures/current-profile-01/plan-corpus.json"
 PROFILE_BYTES = PROFILE_PATH.read_bytes()
+NUMERIC_PROFILE_PATH = Path(__file__).parents[3] / "rust/tests/fixtures/current-profile-v5/numeric-profile.txt"
+V3_NUMERIC_PROFILE_FIELD = '"numericProfile":"geospec-st-logical-requests-v3"'
+STRING_AXIS_IDS = {
+    "a2/invalid-claim/string-axis",
+    "plan/invalid-claim/string-axis/canonical",
+    "plan/invalid-claim/string-axis/evaluate",
+}
+
+
+def project_numeric_profile(text, successor):
+    return text.replace(
+        V3_NUMERIC_PROFILE_FIELD, f'"numericProfile":"{successor}"'
+    )
 
 
 def load_current_corpus(binding_profile="core-only"):
@@ -21,6 +34,8 @@ def load_current_corpus(binding_profile="core-only"):
     assert binding_profile in ("core-only", "full-backend")
     assert digest(CORPUS_BYTES) == original_hash
     assert digest(PROFILE_BYTES) == profile_hash
+    successor = NUMERIC_PROFILE_PATH.read_text()
+    assert successor == "geospec-demand-v5"
     original, profile = json.loads(CORPUS_BYTES), json.loads(PROFILE_BYTES)
     assert original["schemaVersion"] == profile["schemaVersion"] == 1
     assert profile["authority"]["adoptedRuling"] == "W2.C-CURRENT-PROFILE-CONFORMANCE-01"
@@ -55,6 +70,13 @@ def load_current_corpus(binding_profile="core-only"):
         for key in ("expectedUtf8", "expectedCode", "expectedMessage"):
             if key in bound:
                 joined[key] = bound[key]
+        if "inputUtf8" in joined:
+            joined["inputUtf8"] = project_numeric_profile(joined["inputUtf8"], successor)
+        if "expectedUtf8" in joined:
+            joined["expectedUtf8"] = project_numeric_profile(joined["expectedUtf8"], successor)
+        if record["id"] in STRING_AXIS_IDS:
+            assert joined["expectedMessage"] == "bounding-box axes must be a finite number."
+            joined["expectedMessage"] = "GeoSpec numeric expectation must be an object."
         if binding_profile == "full-backend" and record["id"] == "a1/raw/initialize":
             # Runtime create_engine always supplies OCCT and Manifold. Preserve other bytes.
             core_backends = '"backends":{"brep":false,"csg":false}'
@@ -94,6 +116,19 @@ def setup(record):
         assert json.loads(actual) == json.loads(expected)
         admissions.append(actual.decode())
     return engine, admissions
+
+
+def test_execution_permits_fail_before_cache_open():
+    with pytest.raises(ValueError, match="Execution permits must be a positive integer"):
+        geospec_engine_native.Engine(execution_permits=0)
+    with pytest.raises(ValueError, match="Execution permits must be a positive integer"):
+        geospec_engine_native.Engine(
+            cache_root="/missing/cache",
+            project_root="/missing/project",
+            execution_permits=1.5,
+        )
+    engine = geospec_engine_native.Engine(execution_permits=1)
+    engine.close()
 
 
 def execute(engine, record):

@@ -5,11 +5,19 @@
     "declaration": false,
     "declarationMap": false,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "allowJs": true,
     "checkJs": true,
     "types": ["node"]
   },
-  "files": ["prepare-legacy-reference.mts", "build-mixed-wasm.mts", "ci-artifacts.mjs", "ci-artifacts.test.mjs"],
+  "files": [
+    "prepare-legacy-reference.mts",
+    "build-mixed-wasm.mts",
+    "ci-artifacts.mjs",
+    "ci-artifacts.test.mjs",
+    "assemble-package-mt.test.mjs",
+    "build-mixed-wasm.test.mjs"
+  ],
   "include": [],
   "references": []
 }

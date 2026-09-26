@@ -48,7 +48,7 @@ fn inventory_claim(envelope: &Value) -> &Value {
     assert_eq!(envelope["requestId"], "pmi-query");
     assert_eq!(
         envelope["result"]["numericProfile"],
-        "geospec-st-prototypes-v4"
+        include_str!("../../../../rust/tests/fixtures/current-profile-v5/numeric-profile.txt")
     );
     let claims = envelope["result"]["results"]
         .as_array()

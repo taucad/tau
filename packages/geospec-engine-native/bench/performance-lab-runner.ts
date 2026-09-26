@@ -15,6 +15,15 @@ import { encodeGeoSpecCanonicalJson, toGeoSpecProtocolJson } from 'geospec/engin
 import type { GeoSpecEngineImplementation } from 'geospec/engine';
 import type { HostCacheLifecycle, HostEngine, HostSubjectLifecycle } from '#host-types.js';
 
+/** Explicit browser WASM selection; omitted requests retain the existing ST path. @internal */
+export type PerformanceLabWasmExecution =
+  | { readonly variant: 'st' }
+  | {
+      readonly variant: 'mt';
+      readonly permits: number;
+      readonly receipt: string;
+    };
+
 /** One ordinary authored matcher or query call. @internal */
 export type PerformanceLabCase = {
   id: string;
@@ -32,6 +41,7 @@ export type PerformanceLabCase = {
 /** Byte-only input shared by the browser and desktop benchmark hosts. @internal */
 export type PerformanceLabRunInput = {
   engine: 'legacy-wasm' | 'combined-wasm' | 'native-desktop';
+  execution?: PerformanceLabWasmExecution;
   fixture: {
     id: string;
     format: 'step' | 'glb' | 'rational-plate';
@@ -47,9 +57,11 @@ export type PerformanceLabRunInput = {
 
 /** Actual engine module injected by the selected host. @internal */
 export type PerformanceLabEngineModule = {
-  Engine: new () => HostEngine & HostSubjectLifecycle & Partial<Pick<HostCacheLifecycle, 'cacheProducerIdentity'>>;
+  Engine: new (
+    execution?: PerformanceLabWasmExecution,
+  ) => HostEngine & HostSubjectLifecycle & Partial<Pick<HostCacheLifecycle, 'cacheProducerIdentity'>>;
   canonicalize: (bytes: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
-  initialize?: () => Promise<void>;
+  initialize?: (input?: undefined, execution?: PerformanceLabWasmExecution) => Promise<void>;
 };
 
 /** Lazy imports included in startup timing. @internal */
@@ -80,6 +92,7 @@ export type PerformanceLabCaseResult = {
 /** Complete cell evidence; all timing fields are milliseconds. @internal */
 export type PerformanceLabRunResult = {
   engine: PerformanceLabRunInput['engine'];
+  execution?: PerformanceLabWasmExecution;
   backend: string;
   profile: string | WireNull;
   fixtureId: string;
@@ -89,6 +102,7 @@ export type PerformanceLabRunResult = {
   initializationTiming: 'startup' | 'lazy-in-admission-or-evaluation';
   perCase: readonly PerformanceLabCaseResult[];
   timing: {
+    firstResult?: number | WireNull;
     startup: number;
     admission: number;
     evaluation: number;
@@ -115,6 +129,21 @@ const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]): bool
   Object.keys(value).every((key) => keys.includes(key));
 const textId = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 160;
+const absoluteWorkerReceiptUrl = (value: unknown): value is string => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'http:' ||
+      url.protocol === 'https:' ||
+      (url.protocol === 'app:' && url.host === 'tau' && url.username === '' && url.password === '')
+    );
+  } catch {
+    return false;
+  }
+};
 const hex = (bytes: Uint8Array<ArrayBuffer>): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 const digest = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
@@ -217,10 +246,33 @@ const admitRationalPlate = (engine: HostEngine & HostSubjectLifecycle, input: Pe
 export const parsePerformanceLabRunInput = async (value: unknown): Promise<PerformanceLabRunInput> => {
   if (
     !record(value) ||
-    !onlyKeys(value, ['engine', 'fixture', 'cases', 'repeats', 'cache']) ||
+    !onlyKeys(value, ['engine', 'execution', 'fixture', 'cases', 'repeats', 'cache']) ||
     (value['engine'] !== 'legacy-wasm' && value['engine'] !== 'combined-wasm' && value['engine'] !== 'native-desktop')
   ) {
     throw new TypeError('Invalid performance-lab engine.');
+  }
+  const { execution } = value;
+  if (execution !== undefined) {
+    if (
+      value['engine'] !== 'combined-wasm' ||
+      !record(execution) ||
+      !onlyKeys(execution, ['variant', 'permits', 'receipt'])
+    ) {
+      throw new TypeError('WASM execution is only available for combined-wasm.');
+    }
+    if (execution['variant'] === 'st') {
+      if (!onlyKeys(execution, ['variant'])) {
+        throw new TypeError('ST execution has no permit or receipt.');
+      }
+    } else if (
+      execution['variant'] !== 'mt' ||
+      !Number.isSafeInteger(execution['permits']) ||
+      (execution['permits'] as number) < 1 ||
+      (execution['permits'] as number) > 4_294_967_295 ||
+      !absoluteWorkerReceiptUrl(execution['receipt'])
+    ) {
+      throw new TypeError('MT execution requires positive permits and an absolute web or app://tau receipt URL.');
+    }
   }
   const { fixture } = value;
   if (
@@ -311,8 +363,9 @@ const runNative = async (
   const totalAt = performance.now();
   const startupAt = performance.now();
   const module = await load();
-  await module.initialize?.();
-  const engine = new module.Engine();
+  const execution = input.engine === 'combined-wasm' ? (input.execution ?? { variant: 'st' }) : undefined;
+  await module.initialize?.(undefined, execution);
+  const engine = new module.Engine(execution);
   const startup = ms(startupAt);
   const loader = createGeoSpecNativeModelLoader({ engine });
   let admission = 0;
@@ -322,6 +375,7 @@ const runNative = async (
   let buildIdentity: unknown = null;
   let engineObservations: unknown = null;
   const perCase: PerformanceLabCaseResult[] = [];
+  let firstResult: number | WireNull = null;
   let releaseRational: (() => void) | undefined;
   try {
     const admittedAt = performance.now();
@@ -404,6 +458,7 @@ const runNative = async (
           numericProfile,
           ...(await canonicalFields(report.canonicalClaim, report.canonicalResult)),
         });
+        firstResult ??= ms(totalAt);
       }
     }
     /* oxlint-enable no-await-in-loop */
@@ -421,6 +476,7 @@ const runNative = async (
   }
   return {
     engine: input.engine,
+    ...(execution === undefined ? {} : { execution }),
     backend: input.engine,
     profile,
     buildIdentity,
@@ -429,7 +485,14 @@ const runNative = async (
     fixtureId: input.fixture.id,
     cache: cacheLabel(input.cache),
     perCase,
-    timing: { startup, admission, evaluation, cleanup, total: ms(totalAt) },
+    timing: {
+      firstResult,
+      startup,
+      admission,
+      evaluation,
+      cleanup,
+      total: ms(totalAt),
+    },
   };
 };
 
@@ -497,7 +560,11 @@ const runLegacy = async (
       requestId: `lab-ingest:${input.fixture.id}`,
       contentHash: `sha256:${input.fixture.sha256}`,
       format: input.fixture.format === 'rational-plate' ? 'step' : input.fixture.format,
-      frame: { coordinateSystem: 'z-up', sourceUnit: input.fixture.sourceUnit, targetUnit: 'mm' },
+      frame: {
+        coordinateSystem: 'z-up',
+        sourceUnit: input.fixture.sourceUnit,
+        targetUnit: 'mm',
+      },
       provenance: { fixtureId: input.fixture.id },
       options: {},
     },

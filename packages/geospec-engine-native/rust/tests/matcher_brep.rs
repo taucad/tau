@@ -162,6 +162,8 @@ struct RetainedBrep {
     faces: Rc<[LocatedFace]>,
     validity: Rc<ValidityFacts>,
     bore_queries: Rc<Cell<usize>>,
+    report_calls: Rc<Cell<usize>>,
+    fail_report: bool,
 }
 
 impl RetainedBrep {
@@ -170,6 +172,8 @@ impl RetainedBrep {
             facts: Rc::new(retained_facts()),
             faces: Rc::from(retained_faces()),
             bore_queries: Rc::new(Cell::new(0)),
+            report_calls: Rc::new(Cell::new(0)),
+            fail_report: false,
             validity: Rc::new(ValidityFacts {
                 valid: true,
                 checks: Some(vec![ValidityCheck {
@@ -200,6 +204,10 @@ fn unused() -> BackendError {
 }
 
 impl BrepSubject for RetainedBrep {
+    fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        Ok(self.facts.occurrences.clone().into())
+    }
+
     fn edge_treatment_counts(
         &self,
     ) -> Result<crate::backend::brep::EdgeTreatmentCounts, BackendError> {
@@ -288,6 +296,13 @@ impl BrepSubject for RetainedBrep {
     fn reported_facts_and_mesh(
         &self,
     ) -> Result<crate::backend::brep::ReportedBrepBundle, BackendError> {
+        self.report_calls.set(self.report_calls.get() + 1);
+        if self.fail_report {
+            return Err(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "deliberate report failure".into(),
+            });
+        }
         // This test double supplies the explicit coherent report seam. Its empty
         // mesh is unused by these fact-only predicate/early-selection controls.
         let facts = Rc::clone(&self.facts);
@@ -366,13 +381,131 @@ fn retained_subject() -> Subject {
         None,
     )
     .unwrap();
-    let subject = Subject::new(
+    let mut subject = Subject::new(
         identity.primary_hash().into(),
         SubjectFormat::Step,
         "mm".into(),
     );
+    subject.step_admission_facts = Some(crate::backend::brep::BrepAdmissionFacts {
+        source_length_unit: "millimetre".into(),
+        source_unit_to_millimeters: 1.0,
+        occurrence_count: 0,
+    });
     subject.semantic_identity.set(identity).unwrap();
     subject
+}
+
+#[test]
+fn admitted_units_do_not_demand_a_failing_report() {
+    let mut subject = retained_subject();
+    let mut connector = RetainedBrep::complete();
+    connector.fail_report = true;
+    let calls = Rc::clone(&connector.report_calls);
+    subject.brep = Some(Box::new(connector));
+    let subjects = [Rc::new(subject)];
+
+    for (expected, positive) in [("mm", true), ("cm", false)] {
+        let prepared = Prepared::StepUnits(expected.into());
+        let normalized = prepared.normalized_payload();
+        let budget = Budget::new(1);
+        let mut context = EvaluationContext::new(
+            &subjects,
+            Capability::ToHaveStepUnits,
+            "units",
+            &normalized,
+            &budget,
+            None,
+        );
+        let Evaluation::Geometric {
+            positive_satisfied, ..
+        } = evaluate(&prepared, &mut context)
+        else {
+            panic!("admitted units should produce a geometric verdict")
+        };
+        assert_eq!(positive_satisfied, positive);
+        assert_eq!(budget.used(), 1);
+        assert_eq!(calls.get(), 0);
+    }
+    let prepared = Prepared::StepUnits("mm".into());
+    let normalized = prepared.normalized_payload();
+    let budget = Budget::new(0);
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::ToHaveStepUnits,
+        "units-budget",
+        &normalized,
+        &budget,
+        None,
+    );
+    assert!(matches!(
+        evaluate(&prepared, &mut context),
+        Evaluation::Refused { .. }
+    ));
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        subjects[0].report_bundle().unwrap_err().message,
+        "deliberate report failure"
+    );
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn source_structure_claims_reuse_one_projection_without_building_a_failing_report() {
+    let mut subject = retained_subject();
+    let mut connector = RetainedBrep::complete();
+    connector.fail_report = true;
+    let calls = Rc::clone(&connector.report_calls);
+    subject.brep = Some(Box::new(connector));
+    let subjects = [Rc::new(subject)];
+    let products = Prepared::ProductStructure(ProductStructure {
+        names: vec!["left".into(), "right".into()],
+        count: Some(NumericExpectation::Equal(2.0)),
+    });
+    let assembly = Prepared::AssemblyOccurrences(AssemblyOccurrences {
+        occurrences: vec![OccurrenceRule {
+            name: TextPattern::Exact("left".into()),
+            count: Some(NumericExpectation::Equal(1.0)),
+            bounds: None,
+        }],
+        unique_names: true,
+        regex_unsupported: None,
+    });
+    for prepared in [&products, &assembly, &products] {
+        let normalized = prepared.normalized_payload();
+        let budget = Budget::new(1);
+        let mut context = EvaluationContext::new(
+            &subjects,
+            prepared.capability(),
+            "source-structure",
+            &normalized,
+            &budget,
+            None,
+        );
+        assert!(matches!(
+            evaluate(prepared, &mut context),
+            Evaluation::Geometric {
+                positive_satisfied: true,
+                ..
+            }
+        ));
+        assert_eq!(budget.used(), 1);
+        assert_eq!(calls.get(), 0);
+    }
+    let normalized = products.normalized_payload();
+    let budget = Budget::new(0);
+    let mut context = EvaluationContext::new(
+        &subjects,
+        products.capability(),
+        "source-structure",
+        &normalized,
+        &budget,
+        None,
+    );
+    assert!(matches!(
+        evaluate(&products, &mut context),
+        Evaluation::Refused { .. }
+    ));
+    assert_eq!(calls.get(), 0);
 }
 
 fn payload(capability: Capability, expected: Json) -> Json {
@@ -607,7 +740,7 @@ fn retained_neutral_facts_drive_all_eleven_positive_predicates() {
                 names: vec!["left".into(), "right".into()],
                 count: Some(NumericExpectation::Equal(2.0))
             },
-            &facts,
+            &facts.occurrences,
         )
         .unwrap()
         .positive
@@ -623,7 +756,7 @@ fn retained_neutral_facts_drive_all_eleven_positive_predicates() {
                 unique_names: true,
                 regex_unsupported: None,
             },
-            &facts,
+            &facts.occurrences,
             &SelectorRegex::default(),
         )
         .unwrap()
@@ -992,7 +1125,7 @@ fn mismatch_diagnostics_retain_source_details_and_inventory() {
         names: vec!["missing".into()],
         count: Some(NumericExpectation::Equal(1.0)),
     };
-    let outcome = evaluate_products(&products, &facts).unwrap();
+    let outcome = evaluate_products(&products, &facts.occurrences).unwrap();
     assert_eq!(
         outcome.diagnostics[0].details,
         Some(Json::object([
@@ -1178,7 +1311,7 @@ fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
                 names: vec!["missing".into()],
                 count: None,
             },
-            &facts,
+            &facts.occurrences,
         )
         .unwrap()
         .positive
@@ -1194,7 +1327,7 @@ fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
                 unique_names: false,
                 regex_unsupported: None,
             },
-            &facts,
+            &facts.occurrences,
             &SelectorRegex::default(),
         )
         .unwrap()
@@ -1450,7 +1583,7 @@ fn product_structure_preserves_path_and_row_major_placement_witness() {
             names: vec!["left".into()],
             count: Some(NumericExpectation::Equal(1.0)),
         },
-        &facts,
+        &facts.occurrences,
     )
     .unwrap();
     assert!(result.positive);

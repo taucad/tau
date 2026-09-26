@@ -1,6 +1,15 @@
 use geospec_engine_native_runtime::{create_engine, EngineConfig};
 use serde_json::{json, Value};
 
+const CURRENT_PROFILE: &str =
+    include_str!("../../../rust/tests/fixtures/current-profile-v5/numeric-profile.txt");
+
+fn current(value: &str) -> String {
+    value
+        .replace("\"registryVersion\":4", "\"registryVersion\":5")
+        .replace("geospec-st-logical-requests-v2", CURRENT_PROFILE)
+}
+
 #[test]
 fn six_independent_box_rows_match_complete_runtime_bytes_cold_and_warm() {
     let oracle: Value = serde_json::from_str(include_str!(
@@ -9,13 +18,10 @@ fn six_independent_box_rows_match_complete_runtime_bytes_cold_and_warm() {
     .unwrap();
     let mut outcomes = Vec::new();
     for row in oracle["rows"].as_array().unwrap() {
-        let mut engine = create_engine(EngineConfig::entry());
+        let mut engine = create_engine(EngineConfig::entry()).unwrap();
         let admission = engine
             .ingest_subject(
-                oracle["subject"]["ingestRequestUtf8"]
-                    .as_str()
-                    .unwrap()
-                    .as_bytes(),
+                current(oracle["subject"]["ingestRequestUtf8"].as_str().unwrap()).as_bytes(),
                 include_bytes!("../../occt/rust/tests/fixtures/ap242-box.step").to_vec(),
                 vec![],
             )
@@ -26,7 +32,8 @@ fn six_independent_box_rows_match_complete_runtime_bytes_cold_and_warm() {
             oracle["subject"]["subjectHash"]
         );
         for temperature in ["cold", "warm"] {
-            let request = row["authoredRequestUtf8"].as_str().unwrap().as_bytes();
+            let request = current(row["authoredRequestUtf8"].as_str().unwrap());
+            let request = request.as_bytes();
             let plan = engine.canonical_plan(request).unwrap();
             let result = engine.evaluate_plan(&plan).unwrap();
             let submit = engine.process_request(request).unwrap();
@@ -35,9 +42,9 @@ fn six_independent_box_rows_match_complete_runtime_bytes_cold_and_warm() {
                 String::from_utf8(result).unwrap(),
                 String::from_utf8(submit).unwrap(),
             ];
-            let passed = actual[0] == row["canonicalPlanUtf8"].as_str().unwrap()
-                && actual[1] == row["evaluatePlanResultUtf8"].as_str().unwrap()
-                && actual[2] == row["submitClaimsResultUtf8"].as_str().unwrap();
+            let passed = actual[0] == current(row["canonicalPlanUtf8"].as_str().unwrap())
+                && actual[1] == current(row["evaluatePlanResultUtf8"].as_str().unwrap())
+                && actual[2] == current(row["submitClaimsResultUtf8"].as_str().unwrap());
             outcomes.push(json!({"id":row["id"],"temperature":temperature,"passed":passed,
                 "admissionUtf8":String::from_utf8_lossy(&admission),
                 "canonicalPlanUtf8":actual[0],"evaluatePlanResultUtf8":actual[1],"submitClaimsResultUtf8":actual[2]}));

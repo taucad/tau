@@ -1,0 +1,2167 @@
+{
+  "schema": "geospec-native-components-v1",
+  "cohort": "python",
+  "target": "aarch64-apple-darwin",
+  "rustToolchain": "1.88",
+  "cargoRoot": "geospec-engine-native-python@0.0.0",
+  "cargoComponents": [
+    {
+      "name": "allocator-api2",
+      "version": "0.2.21",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Zakarum <zaq.dev@icloud.com>"
+      ],
+      "repository": "https://github.com/zakarumych/allocator-api2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 26,
+        "sha256": "bf3456c0d4bb1ed79f4a1c01eb4b1abb5675465c5ad62eacf08a9caba97d607f"
+      },
+      "features": [
+        "alloc"
+      ],
+      "licenseFiles": [
+        "cargo/20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58-LICENSE-APACHE",
+        "cargo/36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "autocfg",
+      "version": "1.5.1",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0 OR MIT",
+      "authors": [
+        "Josh Stone <cuviper@gmail.com>"
+      ],
+      "repository": "https://github.com/cuviper/autocfg",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 24,
+        "sha256": "9a8c24a05a66ebf0cd7b2cedade9a9f89b9d07f4a2e60923231acf7c4b02582b"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "block-buffer",
+      "version": "0.10.4",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "repository": "https://github.com/RustCrypto/utils",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 11,
+        "sha256": "ff919964c30c3aaa57dd33843beb73386ca1a0194fb3691440171b7e2e704e7c"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE",
+        "cargo/d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "byteorder",
+      "version": "1.5.0",
+      "cohort": "python",
+      "declaredLicense": "Unlicense OR MIT",
+      "authors": [
+        "Andrew Gallant <jamslam@gmail.com>"
+      ],
+      "repository": "https://github.com/BurntSushi/byteorder",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 15,
+        "sha256": "5ac574062d9c7090b08beb90e06b596fe0cf2538d5f74a58c06a828f91b98b31"
+      },
+      "features": [
+        "default",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f-COPYING",
+        "cargo/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f-LICENSE-MIT",
+        "cargo/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c-UNLICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "cc",
+      "version": "1.4.4",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [],
+      "repository": "https://github.com/rust-lang/cc-rs",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 25,
+        "sha256": "f1bcb61cd88d60ed0087a86ec808bf0d18772431074acbce3bb7af3dadf23f84"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.4",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Alex Crichton <alex@alexcrichton.com>"
+      ],
+      "repository": "https://github.com/rust-lang/cfg-if",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 15,
+        "sha256": "1d6d87467f7480c3cec387426ea4a73cc02d829c5c6530166a534b01743fa59a"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "clipper2-rust",
+      "version": "1.0.3",
+      "cohort": "python",
+      "declaredLicense": "BSL-1.0",
+      "authors": [
+        "Lars Brubaker <larsbrubaker@matterhackers.com>"
+      ],
+      "repository": "https://github.com/larsbrubaker/clipper2-rust",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 36,
+        "sha256": "44c4bd5373eea25041a784adc5ae84e22a4d2200ab2268d523305e64b7e295f2"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.2.17",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "repository": "https://github.com/RustCrypto/utils",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 17,
+        "sha256": "a86a9421e73c80f2f1be7114f73fbe2c0d1739bea5620c3077500490ca213c67"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE",
+        "cargo/ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "crypto-common",
+      "version": "0.1.7",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "repository": "https://github.com/RustCrypto/traits",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 10,
+        "sha256": "c6241267ce25fe7f18a92ac82647d6c35279e208205361fc4616e39c43b5c10b"
+      },
+      "features": [
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/3521672491a3479422d5fe1aca6645dd2984090f85da6e5205abfb18fb7a6897-LICENSE-MIT",
+        "cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "dashu-base",
+      "version": "0.5.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Jacob Zhong <cmpute@gmail.com>"
+      ],
+      "repository": "https://github.com/cmpute/dashu",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 21,
+        "sha256": "5210af407ecd5bfcf8aba52ec429a61f48982c99772ef1a302604a0a7ccd9f86"
+      },
+      "features": [
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE",
+        "fallback/MIT.txt"
+      ],
+      "usedFallbackLicenseText": true
+    },
+    {
+      "name": "dashu-int",
+      "version": "0.5.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Jacob Zhong <cmpute@gmail.com>",
+        "Tomek Czajka <tczajka@gmail.com>"
+      ],
+      "repository": "https://github.com/cmpute/dashu",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 139,
+        "sha256": "889766b084cfe28c62c606aa241f80d769b338eb7dc01f64002a0572ea695d55"
+      },
+      "features": [
+        "num-traits",
+        "num-traits_v02",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/13ce2fb7da9c6c3a5a16e86877a604e80237f076b9258115d8f0444127f6a281-NOTICE.md",
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE",
+        "fallback/MIT.txt"
+      ],
+      "usedFallbackLicenseText": true
+    },
+    {
+      "name": "dashu-ratio",
+      "version": "0.5.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Jacob Zhong <cmpute@gmail.com>"
+      ],
+      "repository": "https://github.com/cmpute/dashu",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 53,
+        "sha256": "761dbf5285f71785ae58f6e2f451202791f3f7cf9b8cf8d31712c6e0b5e44ae1"
+      },
+      "features": [
+        "num-traits",
+        "num-traits_v02",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE",
+        "fallback/MIT.txt"
+      ],
+      "usedFallbackLicenseText": true
+    },
+    {
+      "name": "digest",
+      "version": "0.10.7",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "repository": "https://github.com/RustCrypto/traits",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 22,
+        "sha256": "4f6312f3d77cd36cea11ab3431384fce898cc89313dde7055c8c4931f88348cc"
+      },
+      "features": [
+        "alloc",
+        "block-buffer",
+        "core-api",
+        "default",
+        "mac",
+        "std",
+        "subtle"
+      ],
+      "licenseFiles": [
+        "cargo/9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba-LICENSE-MIT",
+        "cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "equivalent",
+      "version": "1.0.2",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0 OR MIT",
+      "authors": [],
+      "repository": "https://github.com/indexmap-rs/equivalent",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 11,
+        "sha256": "8d92d10cff9d6e4c3349722fca1ad2fc64c0479a5ad3a22ea22da5744f1158a3"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "find-msvc-tools",
+      "version": "0.1.12",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [],
+      "repository": "https://github.com/rust-lang/cc-rs",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 19,
+        "sha256": "9683657f73443d9cf49162c973bafa8a6ccc9214bada81eb3cc731743c3c8823"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "foldhash",
+      "version": "0.2.0",
+      "cohort": "python",
+      "declaredLicense": "Zlib",
+      "authors": [
+        "Orson Peters <orsonpeters@gmail.com>"
+      ],
+      "repository": "https://github.com/orlp/foldhash",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 13,
+        "sha256": "9f16a634e4699e582bccaaa2de7a4efe1ecd21d47cd1a98605541512d2085c8b"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "generic-array",
+      "version": "0.14.7",
+      "cohort": "python",
+      "declaredLicense": "MIT",
+      "authors": [
+        "Bart\u0142omiej Kami\u0144ski <fizyk20@gmail.com>",
+        "Aaron Trent <novacrazy@gmail.com>"
+      ],
+      "repository": "https://github.com/fizyk20/generic-array.git",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 17,
+        "sha256": "b0fe5dffa6e36080670c1dd8168d41d4b66cf1269bb0b3c93495be557f86bb89"
+      },
+      "features": [
+        "more_lengths"
+      ],
+      "licenseFiles": [
+        "cargo/c09aae9d3c77b531f56351a9947bc7446511d6b025b3255312d3e3442a9a7583-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "geospec-engine-native-cache-host",
+      "version": "0.0.0",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0",
+      "authors": [],
+      "repository": null,
+      "source": null,
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 3,
+        "sha256": "5432b20a63d60721de1a993a4303cdf0bc28c597757d1eae415752a8adfd28d9"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE"
+      ],
+      "usedFallbackLicenseText": true
+    },
+    {
+      "name": "geospec-engine-native-core",
+      "version": "0.0.0",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0",
+      "authors": [],
+      "repository": null,
+      "source": null,
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 101,
+        "sha256": "bfdd3e9a0f3be98b9b4996ed99c62d72650e44020a759552e71f9f5e9a8950d0"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE"
+      ],
+      "usedFallbackLicenseText": true
+    },
+    {
+      "name": "geospec-engine-native-csg",
+      "version": "0.0.0",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0",
+      "authors": [],
+      "repository": null,
+      "source": null,
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 7,
+        "sha256": "77948dda4d315d1834c0adad765e2e56c3e875e96aa389cd106f97dbf4469b6b"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE"
+      ],
+      "usedFallbackLicenseText": true
+    },
+    {
+      "name": "geospec-engine-native-occt",
+      "version": "0.0.0",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0",
+      "authors": [],
+      "repository": null,
+      "source": null,
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 105,
+        "sha256": "46d32d5f29024ecf8c4c183a75c3687d64a23ce9752471725e6b77638187da4d"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE"
+      ],
+      "usedFallbackLicenseText": true
+    },
+    {
+      "name": "geospec-engine-native-python",
+      "version": "0.0.0",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0",
+      "authors": [],
+      "repository": null,
+      "source": null,
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 18,
+        "sha256": "16a1d5d34f677635e71825bfcb055cd4bccead3d128ac78aa2bde8ab901b105a"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE"
+      ],
+      "usedFallbackLicenseText": true
+    },
+    {
+      "name": "geospec-engine-native-runtime",
+      "version": "0.0.0",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0",
+      "authors": [],
+      "repository": null,
+      "source": null,
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 10,
+        "sha256": "42dfedb54de8adf94f2c5dbd3df0d24ab56561bc331a908dd248c1829e80070a"
+      },
+      "features": [
+        "binding-python"
+      ],
+      "licenseFiles": [
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE"
+      ],
+      "usedFallbackLicenseText": true
+    },
+    {
+      "name": "getrandom",
+      "version": "0.2.17",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "The Rand Project Developers"
+      ],
+      "repository": "https://github.com/rust-random/getrandom",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 39,
+        "sha256": "25718372f329312ee554b7bb609b9adfc3448609fa4484b3d4a491cb4ec71773"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/42fa16951ce7f24b5a467a40e5b449a1d41e662f97ca779864f053f39e097737-LICENSE-MIT",
+        "cargo/aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "gltf",
+      "version": "1.4.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Harvey-Macaulay <alteous@outlook.com>"
+      ],
+      "repository": "https://github.com/gltf-rs/gltf",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 48,
+        "sha256": "cb56e1b8d2de9d6188a0cd609c52eb20d248b83fc7390b473d54404ade2ebd79"
+      },
+      "features": [
+        "names",
+        "utils"
+      ],
+      "licenseFiles": [
+        "cargo/0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2-LICENSE-MIT",
+        "cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "gltf-derive",
+      "version": "1.4.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Harvey-Macaulay <alteous@outlook.com>"
+      ],
+      "repository": "https://github.com/gltf-rs/gltf",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 7,
+        "sha256": "529f9d7e023ca3ef9d476bb11733f162802fc5ec056770202d98e23fc0a9fa20"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE",
+        "cargo/f71fd5946d6674af304514dc7b3b4272aa9117052dd347fb3a9dc9679f33d95f-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "gltf-json",
+      "version": "1.4.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Harvey-Macaulay <alteous@outlook.com>"
+      ],
+      "repository": "https://github.com/gltf-rs/gltf",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 38,
+        "sha256": "b149eacc1fb8a1d98610cb867f21b4bacc498be667381f955845290f35e1561f"
+      },
+      "features": [
+        "default",
+        "names"
+      ],
+      "licenseFiles": [
+        "cargo/0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2-LICENSE-MIT",
+        "cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.16.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Amanieu d'Antras <amanieu@gmail.com>"
+      ],
+      "repository": "https://github.com/rust-lang/hashbrown",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 49,
+        "sha256": "752c85acf5899891abbfe933c2eff9a4dc260f52b3db1c8936a9176eb465ca42"
+      },
+      "features": [
+        "allocator-api2",
+        "default",
+        "default-hasher",
+        "equivalent",
+        "inline-more",
+        "raw-entry"
+      ],
+      "licenseFiles": [
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE",
+        "cargo/ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "heck",
+      "version": "0.5.0",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [],
+      "repository": "https://github.com/withoutboats/heck",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 17,
+        "sha256": "0a898a581d2e553125a3fc2691783233c516779723d4accee859cdb8177309df"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "hmac",
+      "version": "0.12.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "repository": "https://github.com/RustCrypto/MACs",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 23,
+        "sha256": "132955189928daa407e6b8d54cfe12cff956e7d3627de6e4b22ba6aed4615e90"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba-LICENSE-MIT",
+        "cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "indoc",
+      "version": "2.0.7",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/dtolnay/indoc",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 44,
+        "sha256": "7a9b29846a5f7947127c3c47340640e9f29c2a7d09346f64a3c0348c50e31891"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "inflections",
+      "version": "1.1.1",
+      "cohort": "python",
+      "declaredLicense": "MIT",
+      "authors": [
+        "Caleb Meredith <calebmeredith8@gmail.com>"
+      ],
+      "repository": "https://docs.rs/inflections",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 11,
+        "sha256": "acd4a3ba9fc9198d677d557ad23f8289d0107279224fbd9b6d5e7c53e2c10bf6"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/fe5c9498374de7953275f83f35565b289f377ceab4a28d04c7da87723e02a372-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "itoa",
+      "version": "1.0.18",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/dtolnay/itoa",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 15,
+        "sha256": "28b032265e93a639f3ec1603d9d0d7b9af428f4b1c21f8d3d6375e9a05c76b16"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "lazy_static",
+      "version": "1.5.0",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Marvin L\u00f6bel <loebel.marvin@gmail.com>"
+      ],
+      "repository": "https://github.com/rust-lang-nursery/lazy-static.rs",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 22,
+        "sha256": "c2748b6c24d3d48c61757be5e18ff8d562f08f1fc0a87e9e61848ef5dfd75998"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "libc",
+      "version": "0.2.189",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [],
+      "repository": "https://github.com/rust-lang/libc",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 405,
+        "sha256": "cbdc9539dfede7ed75018d482a2af21a2398a8a9247793c334db8d9ed33b0d3e"
+      },
+      "features": [
+        "default",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "manifold-rust",
+      "version": "0.13.1",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0",
+      "authors": [
+        "Lars Brubaker <larsbrubaker@matterhackers.com>"
+      ],
+      "repository": "https://github.com/larsbrubaker/manifold-rust",
+      "source": null,
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 132,
+        "sha256": "b751646fe380da7df4c4b51ae336d04e1ef85ac7ac82356acd19833349253db3"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "memchr",
+      "version": "2.8.3",
+      "cohort": "python",
+      "declaredLicense": "Unlicense OR MIT",
+      "authors": [
+        "Andrew Gallant <jamslam@gmail.com>",
+        "bluss"
+      ],
+      "repository": "https://github.com/BurntSushi/memchr",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 60,
+        "sha256": "1c0754d7204d904ad909514f12810940951870892acc726062ee31e306f46869"
+      },
+      "features": [
+        "alloc",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f-COPYING",
+        "cargo/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f-LICENSE-MIT",
+        "cargo/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c-UNLICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "memoffset",
+      "version": "0.9.1",
+      "cohort": "python",
+      "declaredLicense": "MIT",
+      "authors": [
+        "Gilad Naaman <gilad.naaman@gmail.com>"
+      ],
+      "repository": "https://github.com/Gilnaa/memoffset",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 14,
+        "sha256": "a5e5b4f1127f811502e29b77cf9d7a4a5e475f9281259b8a90a82d06b81d8a96"
+      },
+      "features": [
+        "default"
+      ],
+      "licenseFiles": [
+        "cargo/3234ac55816264ee7b6c7ee27efd61cf0a1fe775806870e3d9b4c41ea73c5cb1-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "num-bigint",
+      "version": "0.4.6",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "The Rust Project Developers"
+      ],
+      "repository": "https://github.com/rust-num/num-bigint",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 52,
+        "sha256": "e818148e12ef2a1c96b0761e9724dd84fbb9effe49d78ab20041a77daee1caa0"
+      },
+      "features": [
+        "default",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "num-integer",
+      "version": "0.1.46",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "The Rust Project Developers"
+      ],
+      "repository": "https://github.com/rust-num/num-integer",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 17,
+        "sha256": "a5b557358745a040d941e3ac3c72f4caa0233f8edbb3359765f99154181a9af2"
+      },
+      "features": [
+        "default",
+        "i128",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "num-modular",
+      "version": "0.6.5",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0",
+      "authors": [],
+      "repository": "https://github.com/cmpute/num-modular",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 21,
+        "sha256": "66bc261ff1c06097fc9377c0ef5db4421f15271071122614480e4332b8fb99f9"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/98b52ccf20010b67d8fd3bdf151f50ecdfc01f25d6de190e015dd436d9f7ea0b-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "num-rational",
+      "version": "0.4.2",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "The Rust Project Developers"
+      ],
+      "repository": "https://github.com/rust-num/num-rational",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 11,
+        "sha256": "a96d861e046acc1a069fef28130d11feef984f3f3de892aa3f460118631dfb15"
+      },
+      "features": [
+        "default",
+        "num-bigint",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "num-traits",
+      "version": "0.2.19",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "The Rust Project Developers"
+      ],
+      "repository": "https://github.com/rust-num/num-traits",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 30,
+        "sha256": "1c26a0f338327694ad37a2bf2c1b9ace4a290fb96c37063d8fcc66d978e2e773"
+      },
+      "features": [
+        "default",
+        "i128",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.4",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Aleksey Kladov <aleksey.kladov@gmail.com>"
+      ],
+      "repository": "https://github.com/matklad/once_cell",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 30,
+        "sha256": "8a0dda8de073db60d70d4eafa2efc2e03125653c9863f526710d12f69ddee6d2"
+      },
+      "features": [
+        "alloc",
+        "default",
+        "race",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.107",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>",
+        "Alex Crichton <alex@alexcrichton.com>"
+      ],
+      "repository": "https://github.com/dtolnay/proc-macro2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 34,
+        "sha256": "ee2332bc63815ce3a8732fef69b54f14de0a907e0b7f3872880ebc42f513a86f"
+      },
+      "features": [
+        "default",
+        "proc-macro"
+      ],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "pyo3",
+      "version": "0.26.0",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "PyO3 Project and Contributors <https://github.com/PyO3>"
+      ],
+      "repository": "https://github.com/pyo3/pyo3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 278,
+        "sha256": "614c00aa521da87f5892ecf5f794783ba729ad5addc80739930ef73aa7f259d8"
+      },
+      "features": [
+        "default",
+        "indoc",
+        "macros",
+        "pyo3-macros",
+        "unindent"
+      ],
+      "licenseFiles": [
+        "cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE",
+        "cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "pyo3-build-config",
+      "version": "0.26.0",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "PyO3 Project and Contributors <https://github.com/PyO3>"
+      ],
+      "repository": "https://github.com/pyo3/pyo3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 12,
+        "sha256": "4b92fc3d1d828004e04024a17ace0fbd2b4851fe7e40588697250a752d042104"
+      },
+      "features": [
+        "default",
+        "resolve-config"
+      ],
+      "licenseFiles": [
+        "cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE",
+        "cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "pyo3-ffi",
+      "version": "0.26.0",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "PyO3 Project and Contributors <https://github.com/PyO3>"
+      ],
+      "repository": "https://github.com/pyo3/pyo3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 109,
+        "sha256": "166b9ec9169e0cc2aa421a17d83dcb4ab91a5762ae7f70131c537ae391e9f137"
+      },
+      "features": [
+        "default"
+      ],
+      "licenseFiles": [
+        "cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE",
+        "cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "pyo3-macros",
+      "version": "0.26.0",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "PyO3 Project and Contributors <https://github.com/PyO3>"
+      ],
+      "repository": "https://github.com/pyo3/pyo3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 8,
+        "sha256": "f24a1b1f32de3037a9ac847b00a42bd71372f238600b480ab44b1716cbf6c999"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE",
+        "cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "pyo3-macros-backend",
+      "version": "0.26.0",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "PyO3 Project and Contributors <https://github.com/PyO3>"
+      ],
+      "repository": "https://github.com/pyo3/pyo3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 27,
+        "sha256": "238648370dc81f18d62dc0c4021bcecea112b19aaec4a39548629a7abbaffd29"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE",
+        "cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "quote",
+      "version": "1.0.47",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/dtolnay/quote",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 36,
+        "sha256": "e4cfec573c6f41039e5a3f061fbd8830172b0cb9e458b7f51619408b17205f1c"
+      },
+      "features": [
+        "default",
+        "proc-macro"
+      ],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "regress",
+      "version": "0.11.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "ridiculousfish <corydoras@ridiculousfish.com>"
+      ],
+      "repository": "https://github.com/ridiculousfish/regress",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 48,
+        "sha256": "707e9c3d16bc0d16680e16783a04b3d7ef906017bfd830027321f4c1ddf859c5"
+      },
+      "features": [
+        "std",
+        "utf16"
+      ],
+      "licenseFiles": [
+        "cargo/3f8a05fc8617c5ce569fa5a4f2301cd847fe00fa011bdaa8f353fd55a2691a54-LICENSE-MIT",
+        "cargo/e36d55837170195cdf934aa6a48c0ad6efba1bde3f5b4a1b9259c171d5aeb647-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "rustc-hash",
+      "version": "2.1.3",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0 OR MIT",
+      "authors": [
+        "The Rust Project Developers"
+      ],
+      "repository": "https://github.com/rust-lang/rustc-hash",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 15,
+        "sha256": "ebab12f2c01d7a47faee9cdf1d783d68f4ed551befb21ae36257f37e45ab7c40"
+      },
+      "features": [
+        "default",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652-LICENSE-MIT",
+        "cargo/95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "rustversion",
+      "version": "1.0.23",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/dtolnay/rustversion",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 40,
+        "sha256": "a88cb5fa14f71f0dcdee952fa8be4531e0852f2c91d77a69c9383dd86ae95e77"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "ryu",
+      "version": "1.0.23",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0 OR BSL-1.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/dtolnay/ryu",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 39,
+        "sha256": "e2cedb4f3324c490eb3f298b24219bb00cf60da93400a6e3eed43b6df99f19cc"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE",
+        "cargo/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566-LICENSE-BOOST"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "ryu-js",
+      "version": "1.0.2",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0 OR BSL-1.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>",
+        "boa-dev"
+      ],
+      "repository": "https://github.com/boa-dev/ryu-js",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 52,
+        "sha256": "ab3cfc95ddfccee35ff89ae0a3f559de237631669158712271d75370851bd53f"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE",
+        "cargo/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566-LICENSE-BOOST"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "serde",
+      "version": "1.0.219",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/serde-rs/serde",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 29,
+        "sha256": "5e9ac7139c2284253c74e417c8e41e717ef80614c767bb4273febf222bfbc478"
+      },
+      "features": [
+        "default",
+        "derive",
+        "serde_derive",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "serde_derive",
+      "version": "1.0.219",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/serde-rs/serde",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 27,
+        "sha256": "c7f16a68242bf6f6e52cce134f85262cacf5e24a856e6c1f96a212516746b624"
+      },
+      "features": [
+        "default"
+      ],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.143",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/serde-rs/json",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 89,
+        "sha256": "5062bc108a8ebbf6aa524aebce55f3e99b80ac946f75722ee038cc09816ae97e"
+      },
+      "features": [
+        "default",
+        "float_roundtrip",
+        "raw_value",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "sha2",
+      "version": "0.10.9",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "repository": "https://github.com/RustCrypto/hashes",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 32,
+        "sha256": "97eb169deff31ea6a5c99497457349f4fe20615acedfbd994e5a56088c531987"
+      },
+      "features": [
+        "default",
+        "force-soft",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE",
+        "cargo/b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "shlex",
+      "version": "2.0.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "comex <comexk@gmail.com>",
+        "Fenhl <fenhl@fenhl.net>",
+        "Adrian Taylor <adetaylor@chromium.org>",
+        "Alex Touchet <alextouchet@outlook.com>",
+        "Daniel Parks <dp+git@oxidized.org>",
+        "Garrett Berg <googberg@gmail.com>"
+      ],
+      "repository": "https://github.com/comex/rust-shlex",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 14,
+        "sha256": "ad7fdf97209b6a07eb1542afa4fbec8f38369441307a7fee1e87a0291d519eb1"
+      },
+      "features": [
+        "default",
+        "std"
+      ],
+      "licenseFiles": [
+        "cargo/4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1-LICENSE-MIT",
+        "cargo/553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "static_assertions",
+      "version": "1.1.0",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Nikolai Vazquez"
+      ],
+      "repository": "https://github.com/nvzqz/static-assertions-rs",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 18,
+        "sha256": "296697c3dbe72b658921eb5ed06fb4eb1c7178be044be6e587b473ed14a97341"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30-LICENSE-APACHE",
+        "cargo/ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "subtle",
+      "version": "2.6.1",
+      "cohort": "python",
+      "declaredLicense": "BSD-3-Clause",
+      "authors": [
+        "Isis Lovecruft <isis@patternsinthevoid.net>",
+        "Henry de Valence <hdevalence@hdevalence.ca>"
+      ],
+      "repository": "https://github.com/dalek-cryptography/subtle",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 11,
+        "sha256": "670165cc3ce1fb9087044b4e5c0ffc1503277412c523b99f4303234ee1b46d7f"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/d1fc1bc0d155df60b2e7705b6b2ae02a05c96f948e1cec6e2fb86360b09f346b-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "syn",
+      "version": "2.0.119",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/dtolnay/syn",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 106,
+        "sha256": "f7b8934465d5f807dee512c74052c044c7fe62729ba4608bfdb3095093c25a89"
+      },
+      "features": [
+        "clone-impls",
+        "default",
+        "derive",
+        "extra-traits",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+        "visit-mut"
+      ],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "target-lexicon",
+      "version": "0.13.5",
+      "cohort": "python",
+      "declaredLicense": "Apache-2.0 WITH LLVM-exception",
+      "authors": [
+        "Dan Gohman <sunfish@mozilla.com>"
+      ],
+      "repository": "https://github.com/bytecodealliance/target-lexicon",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 15,
+        "sha256": "787e9af72c5ba34c8244bbae81c8a87bcb333330f6b847b857bee048fd19cc08"
+      },
+      "features": [
+        "default"
+      ],
+      "licenseFiles": [
+        "cargo/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "typenum",
+      "version": "1.20.1",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [],
+      "repository": "https://github.com/paholg/typenum",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 27,
+        "sha256": "dd3155fe646c2fcb203dec3d6fe52266f5e7ef225bb2e34e5a19a79463e3a78b"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/516b24e051bf5630880ebbd55c40a25ce9552ebaf8970a53e8976eb70e522406-LICENSE-APACHE",
+        "cargo/a825bd853ab71619a4923d7b4311221427848070ff44d990da39b0b274c1683f-LICENSE-MIT",
+        "cargo/db11fec9946737df39ca3898d9cd8c10ec6f6c3a884a6802b0ad0b81b4e8f23a-LICENSE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.24",
+      "cohort": "python",
+      "declaredLicense": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/dtolnay/unicode-ident",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 27,
+        "sha256": "4da596bb377a9ee36a9b7f94af35f9b6f8e250ecbb9e162ee209f64e32f5069a"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE",
+        "cargo/f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1-LICENSE-UNICODE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "unindent",
+      "version": "0.2.4",
+      "cohort": "python",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "David Tolnay <dtolnay@gmail.com>"
+      ],
+      "repository": "https://github.com/dtolnay/indoc",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 10,
+        "sha256": "a5cf9293093a1d068c51c54563e3f371fa49593f16b8125c1e5f482fb8902e61"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+        "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE"
+      ],
+      "usedFallbackLicenseText": false
+    },
+    {
+      "name": "version_check",
+      "version": "0.9.5",
+      "cohort": "python",
+      "declaredLicense": "MIT/Apache-2.0",
+      "authors": [
+        "Sergio Benitez <sb@sergio.bz>"
+      ],
+      "repository": "https://github.com/SergioBenitez/version_check",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "sourceIdentity": {
+        "type": "local-source-tree",
+        "files": 14,
+        "sha256": "8f4f4f389cc194e0d7051f5417e0f0f818c501a5d65f0f9b266755b87849a8cb"
+      },
+      "features": [],
+      "licenseFiles": [
+        "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE",
+        "cargo/b7e650f3fce5c53249d1cdc608b54df156a97edd636cf9d23498d0cfe7aec63e-LICENSE-MIT"
+      ],
+      "usedFallbackLicenseText": false
+    }
+  ],
+  "externalComponents": [
+    {
+      "name": "Open CASCADE Technology",
+      "version": "3d097a0328e71b826377d4814ab05ec3c3d23871",
+      "cohorts": [
+        "python"
+      ],
+      "declaredLicense": "LGPL-2.1-only WITH OCCT-exception-1.0",
+      "source": "https://github.com/Open-Cascade-SAS/OCCT/archive/3d097a0328e71b826377d4814ab05ec3c3d23871.tar.gz",
+      "sourceSha256": "ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3",
+      "licenseFiles": [
+        "OCCT-LGPL-2.1.txt",
+        "OCCT-LGPL-exception.txt"
+      ]
+    },
+    {
+      "name": "manifold-rust",
+      "version": "f3aab1414e5b45037b848624b143d3287d8d3842",
+      "cohorts": [
+        "python"
+      ],
+      "declaredLicense": "Apache-2.0",
+      "source": "https://github.com/larsbrubaker/manifold-rust",
+      "sourceSha256": "b64dacf987327e9132cb06509a946068934b70dbc0bf502778563f159ec6355a",
+      "licenseFiles": [
+        "Manifold-Rust-LICENSE.txt"
+      ]
+    },
+    {
+      "name": "V8 FastMathHypot adaptation",
+      "version": "Node-v24.10.0-9b72b88f4c4565687e3a8c4d8e1232f63a501e15",
+      "cohorts": [
+        "python"
+      ],
+      "declaredLicense": "BSD-3-Clause",
+      "source": "https://github.com/nodejs/node/blob/9b72b88f4c4565687e3a8c4d8e1232f63a501e15/deps/v8/src/builtins/math.tq",
+      "licenseFiles": [
+        "NOTICE.txt"
+      ]
+    }
+  ],
+  "externalLicenseFiles": [
+    {
+      "path": "GeoSpec-LICENSE.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357
+    },
+    {
+      "path": "Manifold-Rust-LICENSE.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357
+    },
+    {
+      "path": "OCCT-LGPL-2.1.txt",
+      "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c",
+      "bytes": 26434
+    },
+    {
+      "path": "OCCT-LGPL-exception.txt",
+      "sha256": "04580a884ea6cea294402649ff7b5cbb167d47462d1340a4ed33e550db10a81b",
+      "bytes": 663
+    },
+    {
+      "path": "NOTICE.txt",
+      "sha256": "60182af68640ac3e60346b5a7512757500768fe44db03dc59072c93c57a9aaaa",
+      "bytes": 5423
+    }
+  ],
+  "materialFiles": [
+    {
+      "path": "GeoSpec-LICENSE.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357
+    },
+    {
+      "path": "Manifold-Rust-LICENSE.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357
+    },
+    {
+      "path": "NOTICE.txt",
+      "sha256": "60182af68640ac3e60346b5a7512757500768fe44db03dc59072c93c57a9aaaa",
+      "bytes": 5423
+    },
+    {
+      "path": "OCCT-LGPL-2.1.txt",
+      "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c",
+      "bytes": 26434
+    },
+    {
+      "path": "OCCT-LGPL-exception.txt",
+      "sha256": "04580a884ea6cea294402649ff7b5cbb167d47462d1340a4ed33e550db10a81b",
+      "bytes": 663
+    },
+    {
+      "path": "SOURCE-RELINK.json",
+      "sha256": "33cc7c8fd0dbd8e4938a596260a2d7c69c65676f06b9519b6257f6e1cc1a7aa0",
+      "bytes": 7699
+    },
+    {
+      "path": "SOURCE-RELINK.md",
+      "sha256": "9903c47439baf05fc18092e9d74e6f7623e96785c67a15ede12317eb1ba22f5c",
+      "bytes": 1117
+    },
+    {
+      "path": "THIRD-PARTY-NOTICES.txt",
+      "sha256": "3d6295d90ba943242f811c5f24311d9245160c25b3c906127ed4f8d4b6121e1d",
+      "bytes": 28835
+    },
+    {
+      "path": "cargo/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f-COPYING",
+      "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+      "bytes": 126
+    },
+    {
+      "path": "cargo/0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720-LICENSE-MIT",
+      "sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720",
+      "bytes": 1071
+    },
+    {
+      "path": "cargo/0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2-LICENSE-MIT",
+      "sha256": "0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2",
+      "bytes": 1072
+    },
+    {
+      "path": "cargo/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f-LICENSE-MIT",
+      "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+      "bytes": 1081
+    },
+    {
+      "path": "cargo/123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e-LICENSE-MIT",
+      "sha256": "123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e",
+      "bytes": 1066
+    },
+    {
+      "path": "cargo/13ce2fb7da9c6c3a5a16e86877a604e80237f076b9258115d8f0444127f6a281-NOTICE.md",
+      "sha256": "13ce2fb7da9c6c3a5a16e86877a604e80237f076b9258115d8f0444127f6a281",
+      "bytes": 1988
+    },
+    {
+      "path": "cargo/20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58-LICENSE-APACHE",
+      "sha256": "20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58",
+      "bytes": 9899
+    },
+    {
+      "path": "cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023
+    },
+    {
+      "path": "cargo/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5-LICENSE",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "bytes": 12243
+    },
+    {
+      "path": "cargo/27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac-LICENSE-MIT",
+      "sha256": "27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac",
+      "bytes": 1054
+    },
+    {
+      "path": "cargo/30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652-LICENSE-MIT",
+      "sha256": "30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652",
+      "bytes": 1022
+    },
+    {
+      "path": "cargo/3234ac55816264ee7b6c7ee27efd61cf0a1fe775806870e3d9b4c41ea73c5cb1-LICENSE",
+      "sha256": "3234ac55816264ee7b6c7ee27efd61cf0a1fe775806870e3d9b4c41ea73c5cb1",
+      "bytes": 1055
+    },
+    {
+      "path": "cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE",
+      "sha256": "32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9",
+      "bytes": 9807
+    },
+    {
+      "path": "cargo/3521672491a3479422d5fe1aca6645dd2984090f85da6e5205abfb18fb7a6897-LICENSE-MIT",
+      "sha256": "3521672491a3479422d5fe1aca6645dd2984090f85da6e5205abfb18fb7a6897",
+      "bytes": 1065
+    },
+    {
+      "path": "cargo/36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9-LICENSE-MIT",
+      "sha256": "36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9",
+      "bytes": 1046
+    },
+    {
+      "path": "cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE",
+      "sha256": "3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026",
+      "bytes": 10848
+    },
+    {
+      "path": "cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT",
+      "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+      "bytes": 1057
+    },
+    {
+      "path": "cargo/3f8a05fc8617c5ce569fa5a4f2301cd847fe00fa011bdaa8f353fd55a2691a54-LICENSE-MIT",
+      "sha256": "3f8a05fc8617c5ce569fa5a4f2301cd847fe00fa011bdaa8f353fd55a2691a54",
+      "bytes": 1072
+    },
+    {
+      "path": "cargo/42fa16951ce7f24b5a467a40e5b449a1d41e662f97ca779864f053f39e097737-LICENSE-MIT",
+      "sha256": "42fa16951ce7f24b5a467a40e5b449a1d41e662f97ca779864f053f39e097737",
+      "bytes": 1130
+    },
+    {
+      "path": "cargo/4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1-LICENSE-MIT",
+      "sha256": "4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1",
+      "bytes": 1092
+    },
+    {
+      "path": "cargo/516b24e051bf5630880ebbd55c40a25ce9552ebaf8970a53e8976eb70e522406-LICENSE-APACHE",
+      "sha256": "516b24e051bf5630880ebbd55c40a25ce9552ebaf8970a53e8976eb70e522406",
+      "bytes": 10835
+    },
+    {
+      "path": "cargo/553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583-LICENSE-APACHE",
+      "sha256": "553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583",
+      "bytes": 566
+    },
+    {
+      "path": "cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723
+    },
+    {
+      "path": "cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT",
+      "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+      "bytes": 1071
+    },
+    {
+      "path": "cargo/7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349-LICENSE-MIT",
+      "sha256": "7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349",
+      "bytes": 1049
+    },
+    {
+      "path": "cargo/7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0-LICENSE-MIT",
+      "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0",
+      "bytes": 1071
+    },
+    {
+      "path": "cargo/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c-UNLICENSE",
+      "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+      "bytes": 1211
+    },
+    {
+      "path": "cargo/95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc-LICENSE-APACHE",
+      "sha256": "95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc",
+      "bytes": 9722
+    },
+    {
+      "path": "cargo/98b52ccf20010b67d8fd3bdf151f50ecdfc01f25d6de190e015dd436d9f7ea0b-LICENSE",
+      "sha256": "98b52ccf20010b67d8fd3bdf151f50ecdfc01f25d6de190e015dd436d9f7ea0b",
+      "bytes": 10834
+    },
+    {
+      "path": "cargo/9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba-LICENSE-MIT",
+      "sha256": "9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba",
+      "bytes": 1057
+    },
+    {
+      "path": "cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847
+    },
+    {
+      "path": "cargo/a825bd853ab71619a4923d7b4311221427848070ff44d990da39b0b274c1683f-LICENSE-MIT",
+      "sha256": "a825bd853ab71619a4923d7b4311221427848070ff44d990da39b0b274c1683f",
+      "bytes": 1083
+    },
+    {
+      "path": "cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE",
+      "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+      "bytes": 10849
+    },
+    {
+      "path": "cargo/aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf-LICENSE-APACHE",
+      "sha256": "aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf",
+      "bytes": 10849
+    },
+    {
+      "path": "cargo/ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985-LICENSE-MIT",
+      "sha256": "ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985",
+      "bytes": 1082
+    },
+    {
+      "path": "cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT",
+      "sha256": "afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6",
+      "bytes": 1107
+    },
+    {
+      "path": "cargo/b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744-LICENSE",
+      "sha256": "b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744",
+      "bytes": 856
+    },
+    {
+      "path": "cargo/b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1-LICENSE-MIT",
+      "sha256": "b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1",
+      "bytes": 1138
+    },
+    {
+      "path": "cargo/b7e650f3fce5c53249d1cdc608b54df156a97edd636cf9d23498d0cfe7aec63e-LICENSE-MIT",
+      "sha256": "b7e650f3fce5c53249d1cdc608b54df156a97edd636cf9d23498d0cfe7aec63e",
+      "bytes": 1085
+    },
+    {
+      "path": "cargo/beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e-LICENSE",
+      "sha256": "beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e",
+      "bytes": 1361
+    },
+    {
+      "path": "cargo/c09aae9d3c77b531f56351a9947bc7446511d6b025b3255312d3e3442a9a7583-LICENSE",
+      "sha256": "c09aae9d3c77b531f56351a9947bc7446511d6b025b3255312d3e3442a9a7583",
+      "bytes": 1107
+    },
+    {
+      "path": "cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357
+    },
+    {
+      "path": "cargo/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566-LICENSE-BOOST",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "bytes": 1338
+    },
+    {
+      "path": "cargo/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30-LICENSE-APACHE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "path": "cargo/d1fc1bc0d155df60b2e7705b6b2ae02a05c96f948e1cec6e2fb86360b09f346b-LICENSE",
+      "sha256": "d1fc1bc0d155df60b2e7705b6b2ae02a05c96f948e1cec6e2fb86360b09f346b",
+      "bytes": 1582
+    },
+    {
+      "path": "cargo/d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef-LICENSE-MIT",
+      "sha256": "d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef",
+      "bytes": 1082
+    },
+    {
+      "path": "cargo/db11fec9946737df39ca3898d9cd8c10ec6f6c3a884a6802b0ad0b81b4e8f23a-LICENSE",
+      "sha256": "db11fec9946737df39ca3898d9cd8c10ec6f6c3a884a6802b0ad0b81b4e8f23a",
+      "bytes": 17
+    },
+    {
+      "path": "cargo/e36d55837170195cdf934aa6a48c0ad6efba1bde3f5b4a1b9259c171d5aeb647-LICENSE-APACHE",
+      "sha256": "e36d55837170195cdf934aa6a48c0ad6efba1bde3f5b4a1b9259c171d5aeb647",
+      "bytes": 10835
+    },
+    {
+      "path": "cargo/ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061-LICENSE-MIT",
+      "sha256": "ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061",
+      "bytes": 1072
+    },
+    {
+      "path": "cargo/f71fd5946d6674af304514dc7b3b4272aa9117052dd347fb3a9dc9679f33d95f-LICENSE-MIT",
+      "sha256": "f71fd5946d6674af304514dc7b3b4272aa9117052dd347fb3a9dc9679f33d95f",
+      "bytes": 1207
+    },
+    {
+      "path": "cargo/f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1-LICENSE-UNICODE",
+      "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+      "bytes": 1995
+    },
+    {
+      "path": "cargo/fe5c9498374de7953275f83f35565b289f377ceab4a28d04c7da87723e02a372-LICENSE",
+      "sha256": "fe5c9498374de7953275f83f35565b289f377ceab4a28d04c7da87723e02a372",
+      "bytes": 1058
+    },
+    {
+      "path": "cargo/ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2-LICENSE-MIT",
+      "sha256": "ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2",
+      "bytes": 1060
+    },
+    {
+      "path": "fallback/MIT.txt",
+      "sha256": "4723c0fb31de4f1373697d8bee0c747af731e7f309ec30a193685f9e46310273",
+      "bytes": 1102
+    }
+  ],
+  "sourceRelink": {
+    "schema": "geospec-native-source-relink-asset-v2",
+    "artifact": {
+      "fileName": "geospec-engine-native-source-relink.tar.gz",
+      "bytes": 57468409,
+      "sha256": "b0165cbea8106bf83e52d08ed08d514fae3535ccca57dc3f736d0e9f39b93069",
+      "format": "deterministic tar+gzip"
+    },
+    "delivery": {
+      "required": "co-deliver adjacent to each root, platform and wheel artifact",
+      "publicationStatus": "outside this local charter"
+    },
+    "sourceRevision": "35a1123169cadfeb113786e6c494a41daf99ddcc",
+    "sourceRevisionIsReferenceOnly": true,
+    "sourceTree": {
+      "files": 413,
+      "sha256": "55b48a8c67b4c14ab98f6fa6189ca812aadb7219c4f78662b490c835f5bb8af6"
+    },
+    "occtSourceArchive": {
+      "path": "archives/occt.tar.gz",
+      "bytes": 45160653,
+      "sha256": "ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3",
+      "url": "https://github.com/Open-Cascade-SAS/OCCT/archive/3d097a0328e71b826377d4814ab05ec3c3d23871.tar.gz"
+    },
+    "nativeProducerRecipe": {
+      "path": "receipts/native-producer-recipe.json",
+      "sha256": "2679d624677ad32b061eeaceda13e82d41bc6f189e5a0823399ca969c5bd5bde"
+    },
+    "mixedProducerRecipe": {
+      "path": "receipts/mixed-producer-recipe.json",
+      "sha256": "b476fd468790b0d13f09493d38fd8ef431e7b382f137172eb7ecfec0d03e6229",
+      "status": "current-mixed",
+      "target": "wasm32-unknown-emscripten",
+      "profile": "emscripten-6.0.5-js-exceptions-sjlj-st-rust-c656540-panic-abort-link-O3",
+      "sourceRevision": "35a1123169cadfeb113786e6c494a41daf99ddcc",
+      "sourceRevisionIsReferenceOnly": true,
+      "artifacts": [
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.mjs",
+          "bytes": 167425,
+          "sha256": "a3e226a24e27d0365314507bba402a6a1dbdd1a4770d22112b0bc340ad29a962",
+          "distPath": "/Users/rifont/git/tau-geospec-native/packages/geospec-engine-native/dist/bindings/mixed-wasm/geospec_engine_native.mjs"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm",
+          "bytes": 22496224,
+          "sha256": "3f7393fbcbfd0650a36cd08f69c0a3d055d82833e52dd0641ce5fb52e7feb8cc",
+          "distPath": "/Users/rifont/git/tau-geospec-native/packages/geospec-engine-native/dist/bindings/mixed-wasm/geospec_engine_native.wasm"
+        }
+      ],
+      "evidence": {
+        "receipt": {
+          "path": "/Users/rifont/git/tau-geospec-native/out/artifacts/geospec-native-engine/ci/mixed-build-receipt.json",
+          "sha256": "f004d0593eeea594d6b2d70a87f78bb8e30ffe46388b22664e27703ce9088571",
+          "bytes": 1745
+        },
+        "commands": {
+          "path": "/Users/rifont/git/tau-geospec-native/out/artifacts/geospec-native-engine/ci/mixed-commands.json",
+          "sha256": "9b910bee2c654b22d2830c2f6880c323e8c06585a8869fd70c269b3f33c49444",
+          "bytes": 9747
+        },
+        "inputs": {
+          "path": "/Users/rifont/git/tau-geospec-native/out/artifacts/geospec-native-engine/ci/mixed-inputs.json",
+          "sha256": "e529f38f14e985f216a117de4a9eb2875311db83e7a6801d24fedf92676af27c",
+          "bytes": 24100912
+        }
+      },
+      "inputCount": 67996,
+      "qualification": "Current-source compile/link only; runtime and target parity require independent checks.",
+      "prefixRecovery": {
+        "kind": "incremental-continuation-of-failed-wrapper",
+        "originalWrapperExitCode": 1,
+        "originalInnerDiagnostic": "not retained: check_output stdout discarded on failure",
+        "continuationCommand": [
+          "/opt/homebrew/Cellar/cmake/4.4.3/bin/cmake",
+          "--build",
+          "/Users/rifont/git/tau-geospec-native/node_modules/.cache/geospec-engine-native/delivery/.occt-mixed-attempt/build",
+          "--target",
+          "install",
+          "--parallel",
+          "2"
+        ],
+        "supportPayloadTiming": "before continuation, equal after continuation; original failed launch aggregate not persisted",
+        "historicalSupportEquality": "not established for objects completed before continuation",
+        "priorNinjaLogSha256": "a042943b29f13ee9e539fe60e305df37520c79247835b1db731363bd13fbd514",
+        "continuationLogSha256": "541563a1615bc8f943857fda76a0ddd22494f0d3996454390cff7bba003c357b"
+      },
+      "environmentEvidence": "Exact source-derived environment from the pinned build-mixed-wasm.mts; commands are recorded observations.",
+      "prefixProducerRecipe": {
+        "path": "receipts/mixed-prefix-selected-delivery.json",
+        "sha256": "2b55ea87d89b05671f0016afc41f94b0bb34ac425e7e38102b34000b96067b8b",
+        "prefixReceiptSha256": "55bd550ce7ce6add4ecad2626608582e0369d3caefa44a4b81cd01b69970da3d"
+      }
+    },
+    "prefixProducingSources": [
+      {
+        "role": "actual-prefix-producing-source",
+        "prefix": "native",
+        "path": "receipts/build-occt-26ef670eb8b492f97347e7f65109b0ffc36b4f88ed33bdf56d070fdc83f17b5b.sh",
+        "sha256": "26ef670eb8b492f97347e7f65109b0ffc36b4f88ed33bdf56d070fdc83f17b5b",
+        "prefixReceiptSha256": "8aee5ddcac8285eed322f4b9b35759e6400ce61ddc5999709851b2facab15db4",
+        "recovery": null,
+        "currentRebuildHelper": {
+          "path": "source/packages/geospec-engine-native/native/occt/build-occt.sh",
+          "sha256": "26ef670eb8b492f97347e7f65109b0ffc36b4f88ed33bdf56d070fdc83f17b5b"
+        }
+      },
+      {
+        "role": "actual-prefix-producing-source",
+        "prefix": "mixed",
+        "path": "receipts/build-occt-bbdb6eca5b9ab3001aff873c99a5314ae601c190b4e9155bf30789945027951d.sh",
+        "sha256": "bbdb6eca5b9ab3001aff873c99a5314ae601c190b4e9155bf30789945027951d",
+        "prefixReceiptSha256": "55bd550ce7ce6add4ecad2626608582e0369d3caefa44a4b81cd01b69970da3d",
+        "recovery": {
+          "kind": "incremental-continuation-of-failed-wrapper",
+          "originalWrapperExitCode": 1,
+          "originalInnerDiagnostic": "not retained: check_output stdout discarded on failure",
+          "continuationCommand": [
+            "/opt/homebrew/Cellar/cmake/4.4.3/bin/cmake",
+            "--build",
+            "/Users/rifont/git/tau-geospec-native/node_modules/.cache/geospec-engine-native/delivery/.occt-mixed-attempt/build",
+            "--target",
+            "install",
+            "--parallel",
+            "2"
+          ],
+          "supportPayloadTiming": "before continuation, equal after continuation; original failed launch aggregate not persisted",
+          "historicalSupportEquality": "not established for objects completed before continuation",
+          "priorNinjaLogSha256": "a042943b29f13ee9e539fe60e305df37520c79247835b1db731363bd13fbd514",
+          "continuationLogSha256": "541563a1615bc8f943857fda76a0ddd22494f0d3996454390cff7bba003c357b"
+        },
+        "currentRebuildHelper": {
+          "path": "source/packages/geospec-engine-native/native/occt/build-occt.sh",
+          "sha256": "26ef670eb8b492f97347e7f65109b0ffc36b4f88ed33bdf56d070fdc83f17b5b"
+        }
+      }
+    ],
+    "q7Budgets": {
+      "rootPlusDarwinPlatformMaxBytes": 33554432,
+      "eachWheelMaxBytes": 25165824,
+      "installedClosureMaxLogicalBytes": 134217728,
+      "installedClosureMaxAllocatedBytes": 134217728
+    },
+    "occtStaticClosure": {
+      "qualifiedPrefix": "out/research/geospec-native-engine-charter/m4-native-floor-build-a20/delivery/occt-native/install",
+      "archives": 23,
+      "archiveBytes": 110388232,
+      "headers": {
+        "files": 5641,
+        "bytes": 22588808,
+        "sha256": "7cb93ec0852ad99e1f2af464dce34d82273e701c58788b09d963e8864fa623b5"
+      },
+      "cmakeCacheSha256": "1339da4d4e80c365b23538ba917251cde3aca9380db4e5657603d15747554c86"
+    },
+    "scope": "Darwin arm64 native and current ST mixed-WASM, separately attributed",
+    "legalStatus": "technical source/relink material; not legal certification"
+  },
+  "currentMixedWasm": null
+}

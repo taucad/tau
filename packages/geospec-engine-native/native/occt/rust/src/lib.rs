@@ -40,9 +40,70 @@ use std::{
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OcctConnector;
 
+/// A caller-inclusive OCCT grant within one private library instance's pool.
+/// The connector and every document opened by it stay on one owner thread.
+pub struct ParallelOcctConnector {
+    grant_width: u32,
+    _single_threaded: std::marker::PhantomData<*mut ()>,
+}
+
+impl ParallelOcctConnector {
+    /// # Safety
+    /// The host must prove this statically linked OCCT closure is private to
+    /// GeoSpec, that no other caller initialized or uses its default pool, and
+    /// hold an exclusive caller-inclusive two-CPU permit for this connector and
+    /// every document opened by it. Construct before any STEP/OCCT operation;
+    /// keep all queries and document drops on the owning thread.
+    pub unsafe fn new() -> Result<Self, BackendError> {
+        unsafe { Self::with_grant(2, 2) }
+    }
+
+    /// Construct with an explicit per-query grant and first-init pool cap.
+    /// A grant of one deliberately runs the selected inner operations serially.
+    ///
+    /// # Safety
+    /// The host must prove private ownership of this OCCT closure before pool
+    /// first initialization, exclude every other OCCT caller, and hold an
+    /// exclusive caller-inclusive `grant_width` CPU permit until this connector
+    /// and all its documents are dropped on their owner thread. An externally
+    /// initialized pool of matching width does not prove ownership.
+    pub unsafe fn with_grant(grant_width: u32, pool_cap: u32) -> Result<Self, BackendError> {
+        if grant_width == 0 || grant_width > pool_cap {
+            return Err(invalid_input(
+                "OCCT grant must fit the caller-inclusive pool cap.",
+            ));
+        }
+        let actual = configure_thread_pool_width(pool_cap)?;
+        if actual != pool_cap {
+            return Err(unsupported(
+                "Dedicated OCCT pool cap did not match first initialization.",
+            ));
+        }
+        Ok(Self {
+            grant_width,
+            _single_threaded: std::marker::PhantomData,
+        })
+    }
+}
+
+/// Fix the OCCT library instance's pool width before opening a document.
+/// The caller counts toward `width`. Ordinary geometry calls remain serial.
+pub fn configure_thread_pool_width(width: u32) -> Result<u32, BackendError> {
+    let requested =
+        i32::try_from(width).map_err(|_| invalid_input("OCCT pool width overflows."))?;
+    let mut actual = 0;
+    let mut error = ErrorBuffer::new();
+    check(
+        unsafe { ffi::geospec_occt_thread_pool_width(requested, &mut actual, error.raw()) },
+        &error,
+    )?;
+    Ok(actual as u32)
+}
+
 /// Owns one retained XDE document. It is deliberately neither `Send` nor `Sync`.
 pub struct Document {
     raw: NonNull<ffi::Document>,
+    parallel_grant_width: Option<u32>,
     facts: OnceCell<Rc<DocumentFacts>>,
     whole_faces: OnceCell<Rc<[LocatedFace]>>,
     faces: RefCell<HashMap<u32, Rc<[LocatedFace]>>>,
@@ -65,6 +126,7 @@ impl Document {
         let raw = NonNull::new(raw).ok_or_else(|| backend_error("OCCT returned no document."))?;
         Ok(Self {
             raw,
+            parallel_grant_width: None,
             facts: OnceCell::new(),
             whole_faces: OnceCell::new(),
             faces: RefCell::new(HashMap::new()),
@@ -74,6 +136,11 @@ impl Document {
         })
     }
 
+    /// Diagnostic count of report copy+mesh generations built for this document.
+    pub fn report_generation_builds(&self) -> usize {
+        unsafe { ffi::geospec_occt_report_generation_builds(self.raw.as_ptr()) }
+    }
+
     pub fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
         if let Some(facts) = self.facts.get() {
             return Ok(Rc::clone(facts));
@@ -81,6 +148,98 @@ impl Document {
         let facts = Rc::new(unsafe { facts(self.raw.as_ptr(), false)? });
         let _ = self.facts.set(Rc::clone(&facts));
         Ok(facts)
+    }
+
+    /// Recompute validity using the dedicated module's full pool when admitted.
+    /// The normal `BrepSubject::validity` path remains serial and cached.
+    ///
+    /// # Safety
+    /// The caller must prove this OCCT closure is private to GeoSpec, initialize
+    /// its pool before any OCCT operation, and reserve the full caller-inclusive
+    /// `grant_width` exclusively until this call returns. Keep this document on
+    /// its owning thread.
+    pub unsafe fn validity_dedicated(
+        &self,
+        grant_width: u32,
+    ) -> Result<(ValidityFacts, bool), BackendError> {
+        let grant_width =
+            i32::try_from(grant_width).map_err(|_| invalid_input("OCCT grant overflows."))?;
+        if grant_width < 1 {
+            return Err(invalid_input("OCCT grant must include the caller."));
+        }
+        validity_with_control(self.raw.as_ptr(), grant_width)
+    }
+
+    /// # Safety
+    /// The caller must own this private OCCT closure, initialize a pool cap
+    /// at least `grant_width`, and reserve the caller-inclusive grant until
+    /// the query returns.
+    pub unsafe fn tessellate_dedicated(
+        &self,
+        entity: BrepEntity,
+        profile: TessellationProfile,
+        grant_width: u32,
+    ) -> Result<(Rc<TriangleMesh>, bool), BackendError> {
+        self.validate_entity(entity)?;
+        validate_profile(profile)?;
+        let (mesh, parallel) = tessellate_with_control(
+            self.raw.as_ptr(),
+            entity,
+            profile,
+            dedicated_width(grant_width)?,
+        )?;
+        Ok((Rc::new(mesh), parallel))
+    }
+
+    /// # Safety
+    /// The caller must own this private OCCT closure, initialize a pool cap
+    /// at least `grant_width`, and reserve the caller-inclusive grant until
+    /// the query returns.
+    pub unsafe fn common_volume_dedicated(
+        &self,
+        a: u32,
+        b: u32,
+        grant_width: u32,
+    ) -> Result<(CommonVolume, bool), BackendError> {
+        self.require_occurrence(a)?;
+        self.require_occurrence(b)?;
+        common_volume_with_control(self.raw.as_ptr(), a, b, dedicated_width(grant_width)?)
+    }
+
+    /// # Safety
+    /// The caller must own this private OCCT closure, initialize a pool cap
+    /// at least `grant_width`, and reserve the caller-inclusive grant until
+    /// the query returns.
+    pub unsafe fn regular_solid_containment_dedicated(
+        &self,
+        subject: BrepEntity,
+        target: BrepEntity,
+        grant_width: u32,
+    ) -> Result<(RegularSolidContainment, bool), BackendError> {
+        self.validate_entity(subject)?;
+        self.validate_entity(target)?;
+        regular_solid_containment_with_control(
+            self.raw.as_ptr(),
+            subject,
+            target,
+            dedicated_width(grant_width)?,
+        )
+    }
+
+    /// # Safety
+    /// The caller must own this private OCCT closure, initialize a pool cap
+    /// at least `grant_width`, and reserve the caller-inclusive grant until
+    /// the query returns.
+    pub unsafe fn circular_bores_dedicated(
+        &self,
+        max_candidates: usize,
+        grant_width: u32,
+    ) -> Result<(CircularBoreInventory, bool), BackendError> {
+        circular_bores_with_control(
+            self.raw.as_ptr(),
+            max_candidates,
+            dedicated_width(grant_width)?,
+        )
     }
 
     pub fn tessellate(
@@ -119,6 +278,18 @@ impl BrepConnector for OcctConnector {
 
     fn open_step(&self, bytes: &[u8]) -> Result<Box<dyn BrepSubject>, BackendError> {
         Ok(Box::new(Document::from_step(bytes)?))
+    }
+}
+
+impl BrepConnector for ParallelOcctConnector {
+    fn identity_profile(&self) -> geospec_engine_native_core::backend::brep::BrepIdentityProfile {
+        OcctConnector.identity_profile()
+    }
+
+    fn open_step(&self, bytes: &[u8]) -> Result<Box<dyn BrepSubject>, BackendError> {
+        let mut document = Document::from_step(bytes)?;
+        document.parallel_grant_width = Some(self.grant_width);
+        Ok(Box::new(document))
     }
 }
 
@@ -329,8 +500,20 @@ impl BrepSubject for Document {
         unsafe { step_subject_metadata(self.raw.as_ptr()).map(Some) }
     }
 
+    // SAFETY (granted documents): see the connector's lifetime permit contract.
     fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
-        unsafe { reported_facts_and_mesh(self.raw.as_ptr()) }
+        unsafe { reported_facts_and_mesh(self.raw.as_ptr(), self.parallel_grant_width) }
+    }
+
+    fn reported_mesh(&self) -> Result<Option<Rc<TriangleMesh>>, BackendError> {
+        unsafe {
+            reported_mesh(self.raw.as_ptr(), self.parallel_grant_width)
+                .map(|mesh| Some(Rc::new(mesh)))
+        }
+    }
+
+    fn reported_facts(&self, mesh: Rc<TriangleMesh>) -> Result<ReportedBrepBundle, BackendError> {
+        unsafe { reported_facts(self.raw.as_ptr(), mesh, self.parallel_grant_width) }
     }
 
     fn cylinder_axial_extent(&self, face: BrepEntity) -> Result<CylinderAxialExtent, BackendError> {
@@ -526,6 +709,14 @@ impl BrepSubject for Document {
     }
 
     fn circular_bores(&self, max_candidates: usize) -> Result<CircularBoreInventory, BackendError> {
+        if let Some(width) = self.parallel_grant_width {
+            // SAFETY: the unsafe connector constructor requires the exclusive
+            // private-pool permit for every document query.
+            let (facts, used_parallel) =
+                unsafe { self.circular_bores_dedicated(max_candidates, width)? };
+            require_grant_mode(width, used_parallel)?;
+            return Ok(facts);
+        }
         unsafe { circular_bores(self.raw.as_ptr(), max_candidates) }
     }
 
@@ -542,6 +733,13 @@ impl BrepSubject for Document {
         subject: BrepEntity,
         target: BrepEntity,
     ) -> Result<RegularSolidContainment, BackendError> {
+        if let Some(width) = self.parallel_grant_width {
+            // SAFETY: see the connector's lifetime permit contract.
+            let (facts, used_parallel) =
+                unsafe { self.regular_solid_containment_dedicated(subject, target, width)? };
+            require_grant_mode(width, used_parallel)?;
+            return Ok(facts);
+        }
         self.validate_entity(subject)?;
         self.validate_entity(target)?;
         unsafe { regular_solid_containment(self.raw.as_ptr(), subject, target) }
@@ -549,6 +747,18 @@ impl BrepSubject for Document {
 
     fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
         Document::facts(self)
+    }
+
+    fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        let raw = self.raw.as_ptr();
+        let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
+        Ok(unsafe { transfer_occurrences(raw, false, product_count, true)? }.into())
+    }
+
+    fn source_occurrence_structure(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        let raw = self.raw.as_ptr();
+        let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
+        Ok(unsafe { transfer_occurrences(raw, false, product_count, false)? }.into())
     }
 
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
@@ -590,7 +800,15 @@ impl BrepSubject for Document {
         if let Some(validity) = self.validity.get() {
             return Ok(Rc::clone(validity));
         }
-        let validity = Rc::new(unsafe { validity(self.raw.as_ptr())? });
+        let validity = Rc::new(match self.parallel_grant_width {
+            Some(width) => {
+                // False here is the pinned bridge's reusable admission proof;
+                // the connector constructor already checked the pool handshake.
+                // SAFETY: see the connector's lifetime permit contract.
+                unsafe { self.validity_dedicated(width)?.0 }
+            }
+            None => unsafe { validity(self.raw.as_ptr())? },
+        });
         let _ = self.validity.set(Rc::clone(&validity));
         Ok(validity)
     }
@@ -611,6 +829,12 @@ impl BrepSubject for Document {
     }
 
     fn common_volume(&self, a: u32, b: u32) -> Result<CommonVolume, BackendError> {
+        if let Some(width) = self.parallel_grant_width {
+            // SAFETY: see the connector's lifetime permit contract.
+            let (facts, used_parallel) = unsafe { self.common_volume_dedicated(a, b, width)? };
+            require_grant_mode(width, used_parallel)?;
+            return Ok(facts);
+        }
         self.require_occurrence(a)?;
         self.require_occurrence(b)?;
         unsafe { common_volume(self.raw.as_ptr(), a, b) }
@@ -646,6 +870,13 @@ impl BrepSubject for Document {
         entity: BrepEntity,
         profile: TessellationProfile,
     ) -> Result<Rc<TriangleMesh>, BackendError> {
+        if let Some(width) = self.parallel_grant_width {
+            // SAFETY: see the connector's lifetime permit contract.
+            let (mesh, used_parallel) =
+                unsafe { self.tessellate_dedicated(entity, profile, width)? };
+            require_grant_mode(width, used_parallel)?;
+            return Ok(mesh);
+        }
         self.validate_entity(entity)?;
         self.tessellate_entity(entity, profile)
     }
@@ -653,7 +884,9 @@ impl BrepSubject for Document {
 
 impl Document {
     fn require_occurrence(&self, occurrence: u32) -> Result<(), BackendError> {
-        if occurrence as usize >= self.facts()?.occurrences.len() {
+        // Count only: facts() would transfer every lazy source numeric.
+        let count = unsafe { ffi::geospec_occt_occurrence_count(self.raw.as_ptr()) };
+        if occurrence as usize >= count {
             return Err(invalid_input("Occurrence index is out of range."));
         }
         Ok(())
@@ -694,6 +927,23 @@ fn invalid_input(message: impl Into<String>) -> BackendError {
     BackendError {
         kind: BackendErrorKind::InvalidInput,
         message: message.into(),
+    }
+}
+
+fn dedicated_width(width: u32) -> Result<i32, BackendError> {
+    i32::try_from(width)
+        .ok()
+        .filter(|width| *width >= 1)
+        .ok_or_else(|| invalid_input("Dedicated OCCT grant must include the caller."))
+}
+
+fn require_grant_mode(width: u32, used_parallel: bool) -> Result<(), BackendError> {
+    if used_parallel == (width >= 2) {
+        Ok(())
+    } else {
+        Err(unsupported(
+            "Dedicated OCCT operation refused the requested grant mode.",
+        ))
     }
 }
 
@@ -921,9 +1171,93 @@ unsafe fn copied_string(
     String::from_utf8(bytes).map_err(|_| backend_error("OCCT returned non-UTF-8 text."))
 }
 
+// Validity usually returns a short fixed reason. Retain exact-size retry for
+// future arbitrary-length messages without recomputing the common case.
+unsafe fn copied_string_small(
+    mut call: impl FnMut(*mut ffi::StringBuffer, *mut ffi::StringBuffer) -> i32,
+) -> Result<String, BackendError> {
+    let mut bytes = [0u8; 64];
+    let mut output = ffi::StringBuffer {
+        data: bytes.as_mut_ptr().cast(),
+        capacity: bytes.len(),
+        length: 0,
+    };
+    let mut error = ErrorBuffer::new();
+    let status = call(&mut output, error.raw());
+    if status == ffi::BUFFER_TOO_SMALL {
+        let capacity = output
+            .length
+            .checked_add(1)
+            .ok_or_else(|| backend_error("OCCT validity reason size overflowed."))?;
+        let mut larger = vec![0u8; capacity];
+        output.data = larger.as_mut_ptr().cast();
+        output.capacity = larger.len();
+        output.length = 0;
+        check(call(&mut output, error.raw()), &error)?;
+        larger.truncate(output.length);
+        return String::from_utf8(larger)
+            .map_err(|_| backend_error("OCCT returned non-UTF-8 text."));
+    }
+    check(status, &error)?;
+    String::from_utf8(bytes[..output.length].to_vec())
+        .map_err(|_| backend_error("OCCT returned non-UTF-8 text."))
+}
+
 #[cfg(test)]
 mod copied_string_tests {
-    use super::{copied_string, ffi};
+    use super::{copied_string, copied_string_small, ffi};
+
+    #[test]
+    fn short_nonempty_validity_reason_keeps_scalar_payload_after_one_call() {
+        let expected = b"invalid-solid";
+        let mut calls = 0;
+        let mut scalar_payload = 0;
+        let text = unsafe {
+            copied_string_small(|output, _error| {
+                calls += 1;
+                scalar_payload = 4096;
+                let output = &mut *output;
+                assert!(output.capacity > expected.len());
+                output.length = expected.len();
+                std::ptr::copy_nonoverlapping(
+                    expected.as_ptr(),
+                    output.data.cast(),
+                    expected.len(),
+                );
+                ffi::OK
+            })
+        }
+        .unwrap();
+        assert_eq!(text.as_bytes(), expected);
+        assert_eq!(calls, 1);
+        assert_eq!(scalar_payload, 4096);
+    }
+
+    #[test]
+    fn long_validity_reason_retries_with_exact_capacity() {
+        let expected = vec![b'x'; 128];
+        let mut calls = 0;
+        let text = unsafe {
+            copied_string_small(|output, _error| {
+                calls += 1;
+                let output = &mut *output;
+                output.length = expected.len();
+                if output.capacity <= expected.len() {
+                    return ffi::BUFFER_TOO_SMALL;
+                }
+                assert_eq!(output.capacity, expected.len() + 1);
+                std::ptr::copy_nonoverlapping(
+                    expected.as_ptr(),
+                    output.data.cast(),
+                    expected.len(),
+                );
+                ffi::OK
+            })
+        }
+        .unwrap();
+        assert_eq!(text.as_bytes(), expected);
+        assert_eq!(calls, 2);
+    }
 
     #[test]
     fn empty_text_keeps_scalar_payload_after_one_call() {
@@ -1117,9 +1451,18 @@ fn checked_transfer_bytes(count: usize, width: usize) -> Result<usize, BackendEr
         .ok_or_else(|| backend_error("OCCT report transfer byte count exceeds addressable memory."))
 }
 
-fn validate_report_sizes(sizes: &ffi::ReportSizes) -> Result<(), BackendError> {
+fn validate_report_sizes(sizes: &ffi::ReportSizes, facets: u32) -> Result<(), BackendError> {
+    let has_facts = facets & ffi::REPORT_FACTS != 0;
+    let has_mesh = facets & ffi::REPORT_MESH != 0;
     let expected = [
-        (sizes.shape_bytes, std::mem::size_of::<ffi::ShapeFacts>()),
+        (
+            sizes.shape_bytes,
+            if has_facts {
+                std::mem::size_of::<ffi::ShapeFacts>()
+            } else {
+                0
+            },
+        ),
         (
             sizes.occurrence_bytes,
             checked_transfer_bytes(
@@ -1150,7 +1493,10 @@ fn validate_report_sizes(sizes: &ffi::ReportSizes) -> Result<(), BackendError> {
             checked_transfer_bytes(sizes.triangle_count, std::mem::size_of::<[u32; 3]>())?,
         ),
     ];
-    if expected.iter().any(|(actual, expected)| actual != expected) {
+    let absent_facet_counts = (!has_facts
+        && (sizes.occurrence_count | sizes.whole_face_count | sizes.occurrence_face_count) != 0)
+        || (!has_mesh && (sizes.position_count | sizes.triangle_count) != 0);
+    if absent_facet_counts || expected.iter().any(|(actual, expected)| actual != expected) {
         return Err(backend_error(
             "OCCT report transfer byte components do not match their declared counts.",
         ));
@@ -1162,18 +1508,68 @@ fn validate_report_sizes(sizes: &ffi::ReportSizes) -> Result<(), BackendError> {
     Ok(())
 }
 
-unsafe fn reported_facts_and_mesh(
+/// Prepares `facets` into the bridge transfer slot; the guard discards it.
+/// A granted document meshes a new report generation under its grant.
+unsafe fn prepare_report(
     raw: *const ffi::Document,
-) -> Result<ReportedBrepBundle, BackendError> {
+    facets: u32,
+    grant: Option<u32>,
+) -> Result<(ffi::ReportSizes, ReportTransfer), BackendError> {
+    let grant_width = grant.map_or(Ok(0), dedicated_width)?;
     let mut sizes = ffi::ReportSizes::default();
+    let mut used_parallel = 0;
     let mut error = ErrorBuffer::new();
     check(
-        ffi::geospec_occt_report_prepare(raw, &mut sizes, error.raw()),
+        ffi::geospec_occt_report_prepare_dedicated(
+            raw,
+            facets,
+            grant_width,
+            &mut used_parallel,
+            &mut sizes,
+            error.raw(),
+        ),
         &error,
     )?;
-    let _transfer = ReportTransfer(raw);
-    validate_report_sizes(&sizes)?;
+    let transfer = ReportTransfer(raw);
+    if let Some(width) = grant {
+        require_grant_mode(width, used_parallel != 0)?;
+    }
+    validate_report_sizes(&sizes, facets)?;
+    Ok((sizes, transfer))
+}
 
+unsafe fn reported_facts_and_mesh(
+    raw: *const ffi::Document,
+    grant: Option<u32>,
+) -> Result<ReportedBrepBundle, BackendError> {
+    let (sizes, _transfer) = prepare_report(raw, ffi::REPORT_MESH | ffi::REPORT_FACTS, grant)?;
+    transfer_report(raw, &sizes, None)
+}
+
+unsafe fn reported_mesh(
+    raw: *const ffi::Document,
+    grant: Option<u32>,
+) -> Result<TriangleMesh, BackendError> {
+    let (sizes, _transfer) = prepare_report(raw, ffi::REPORT_MESH, grant)?;
+    report_mesh(raw, &sizes)
+}
+
+/// Facts from the same retained generation that produced `mesh`.
+unsafe fn reported_facts(
+    raw: *const ffi::Document,
+    mesh: Rc<TriangleMesh>,
+    grant: Option<u32>,
+) -> Result<ReportedBrepBundle, BackendError> {
+    let (sizes, _transfer) = prepare_report(raw, ffi::REPORT_FACTS, grant)?;
+    transfer_report(raw, &sizes, Some(mesh))
+}
+
+/// Transfers prepared facts, then the prepared mesh unless one is supplied.
+unsafe fn transfer_report(
+    raw: *const ffi::Document,
+    sizes: &ffi::ReportSizes,
+    mesh: Option<Rc<TriangleMesh>>,
+) -> Result<ReportedBrepBundle, BackendError> {
     let facts = Rc::new(facts(raw, true)?);
     if facts.occurrences.len() != sizes.occurrence_count
         || facts.faces.len() != sizes.whole_face_count
@@ -1202,13 +1598,191 @@ unsafe fn reported_facts_and_mesh(
             "OCCT occurrence-face report count changed during the owned transfer.",
         ));
     }
-    let mesh = Rc::new(report_mesh(raw, &sizes)?);
+    let mesh = match mesh {
+        Some(mesh) => mesh,
+        None => Rc::new(report_mesh(raw, sizes)?),
+    };
     Ok(ReportedBrepBundle {
         facts,
         whole_faces,
         occurrence_faces: report_occurrence_faces,
         mesh,
     })
+}
+
+/// `with_bounds == false` never computes source occurrence bounds; the
+/// transferred `bounds` are then NaN and must not be read.
+unsafe fn transfer_occurrences(
+    raw: *const ffi::Document,
+    reported: bool,
+    product_count: usize,
+    with_bounds: bool,
+) -> Result<Vec<OccurrenceFacts>, BackendError> {
+    let occurrence_count = ffi::geospec_occt_occurrence_count(raw);
+    u32::try_from(occurrence_count)
+        .map_err(|_| backend_error("OCCT source occurrence count exceeds indexed range."))?;
+    u32::try_from(product_count)
+        .map_err(|_| backend_error("OCCT source product count exceeds indexed range."))?;
+    checked_transfer_bytes(occurrence_count, std::mem::size_of::<OccurrenceFacts>())?;
+    let mut occurrences = Vec::new();
+    occurrences
+        .try_reserve_exact(occurrence_count)
+        .map_err(|_| backend_error("OCCT source occurrence allocation failed."))?;
+    let occurrence = if reported {
+        ffi::geospec_occt_report_occurrence
+    } else if with_bounds {
+        ffi::geospec_occt_occurrence
+    } else {
+        ffi::geospec_occt_occurrence_structure
+    };
+    for index in 0..occurrence_count {
+        let mut output = ffi::OccurrenceFacts::default();
+        let label = copied_string(|label, error| {
+            occurrence(
+                raw,
+                index,
+                &mut output,
+                label,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                error,
+            )
+        })?;
+        let product_label = copied_string(|product, error| {
+            occurrence(
+                raw,
+                index,
+                &mut output,
+                std::ptr::null_mut(),
+                product,
+                std::ptr::null_mut(),
+                error,
+            )
+        })?;
+        let name = copied_string(|name, error| {
+            occurrence(
+                raw,
+                index,
+                &mut output,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                name,
+                error,
+            )
+        })?;
+        if !with_bounds {
+            output.bounds = ffi::Bounds {
+                min: [f64::NAN; 3],
+                max: [f64::NAN; 3],
+            };
+        }
+        if output.placement.iter().any(|value| !value.is_finite())
+            || (with_bounds
+                && (output.bounds.min.iter().any(|value| !value.is_finite())
+                    || output.bounds.max.iter().any(|value| !value.is_finite())
+                    || (0..3).any(|axis| output.bounds.min[axis] > output.bounds.max[axis])))
+        {
+            return Err(backend_error(
+                "OCCT source occurrence placement/bounds are not finite and ordered.",
+            ));
+        }
+        let parent = if output.parent < 0 {
+            if output.parent != -1 {
+                return Err(backend_error("OCCT source occurrence parent is invalid."));
+            }
+            None
+        } else {
+            let parent = usize::try_from(output.parent)
+                .map_err(|_| backend_error("OCCT source occurrence parent overflows."))?;
+            if parent >= occurrence_count {
+                return Err(backend_error(
+                    "OCCT source occurrence parent is out of range.",
+                ));
+            }
+            Some(parent as u32)
+        };
+        if output.product as usize >= product_count {
+            return Err(backend_error(
+                "OCCT source occurrence product is out of range.",
+            ));
+        }
+        if output.ordinal_count > occurrence_count {
+            return Err(backend_error(
+                "OCCT source occurrence ordinal path is too long.",
+            ));
+        }
+        checked_transfer_bytes(output.ordinal_count, std::mem::size_of::<u32>())?;
+        let mut ordinal_path = Vec::new();
+        ordinal_path
+            .try_reserve_exact(output.ordinal_count)
+            .map_err(|_| backend_error("OCCT source ordinal allocation failed."))?;
+        for ordinal_index in 0..output.ordinal_count {
+            let mut ordinal = 0;
+            let mut error = ErrorBuffer::new();
+            check(
+                ffi::geospec_occt_occurrence_ordinal(
+                    raw,
+                    index,
+                    ordinal_index,
+                    &mut ordinal,
+                    error.raw(),
+                ),
+                &error,
+            )?;
+            ordinal_path.push(ordinal);
+        }
+        occurrences.push(OccurrenceFacts {
+            label,
+            product_label,
+            name,
+            placement: output.placement,
+            bounds: output.bounds.into(),
+            path: copied_string(|path, error| {
+                ffi::geospec_occt_occurrence_identity(
+                    raw,
+                    index,
+                    path,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    error,
+                )
+            })?,
+            parent,
+            product: output.product,
+            product_name: copied_string(|product_name, error| {
+                ffi::geospec_occt_occurrence_identity(
+                    raw,
+                    index,
+                    std::ptr::null_mut(),
+                    product_name,
+                    std::ptr::null_mut(),
+                    error,
+                )
+            })?,
+            instance_name: {
+                let value = copied_string(|instance_name, error| {
+                    ffi::geospec_occt_occurrence_identity(
+                        raw,
+                        index,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        instance_name,
+                        error,
+                    )
+                })?;
+                (!value.is_empty()).then_some(value)
+            },
+            ordinal_path,
+        });
+    }
+    if ffi::geospec_occt_occurrence_count(raw) != occurrence_count
+        || ffi::geospec_occt_product_count(raw) != product_count
+    {
+        return Err(backend_error(
+            "OCCT source occurrence/product count changed during transfer.",
+        ));
+    }
+    Ok(occurrences)
 }
 
 unsafe fn facts(raw: *const ffi::Document, reported: bool) -> Result<DocumentFacts, BackendError> {
@@ -1234,139 +1808,7 @@ unsafe fn facts(raw: *const ffi::Document, reported: bool) -> Result<DocumentFac
         products.push(ProductFacts { label, name });
     }
 
-    let occurrence_count = ffi::geospec_occt_occurrence_count(raw);
-    let mut occurrences = Vec::with_capacity(occurrence_count);
-    for index in 0..occurrence_count {
-        let mut output = ffi::OccurrenceFacts::default();
-        let label = copied_string(|label, error| {
-            if reported {
-                ffi::geospec_occt_report_occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    label,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    error,
-                )
-            } else {
-                ffi::geospec_occt_occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    label,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    error,
-                )
-            }
-        })?;
-        let product_label = copied_string(|product, error| {
-            if reported {
-                ffi::geospec_occt_report_occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    std::ptr::null_mut(),
-                    product,
-                    std::ptr::null_mut(),
-                    error,
-                )
-            } else {
-                ffi::geospec_occt_occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    std::ptr::null_mut(),
-                    product,
-                    std::ptr::null_mut(),
-                    error,
-                )
-            }
-        })?;
-        let name = copied_string(|name, error| {
-            if reported {
-                ffi::geospec_occt_report_occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    name,
-                    error,
-                )
-            } else {
-                ffi::geospec_occt_occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    name,
-                    error,
-                )
-            }
-        })?;
-        occurrences.push(OccurrenceFacts {
-            label,
-            product_label,
-            name,
-            placement: output.placement,
-            bounds: output.bounds.into(),
-            path: copied_string(|path, error| {
-                ffi::geospec_occt_occurrence_identity(
-                    raw,
-                    index,
-                    path,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    error,
-                )
-            })?,
-            parent: (output.parent >= 0).then_some(output.parent as u32),
-            product: output.product,
-            product_name: copied_string(|product_name, error| {
-                ffi::geospec_occt_occurrence_identity(
-                    raw,
-                    index,
-                    std::ptr::null_mut(),
-                    product_name,
-                    std::ptr::null_mut(),
-                    error,
-                )
-            })?,
-            instance_name: {
-                let value = copied_string(|instance_name, error| {
-                    ffi::geospec_occt_occurrence_identity(
-                        raw,
-                        index,
-                        std::ptr::null_mut(),
-                        std::ptr::null_mut(),
-                        instance_name,
-                        error,
-                    )
-                })?;
-                (!value.is_empty()).then_some(value)
-            },
-            ordinal_path: (0..output.ordinal_count)
-                .map(|ordinal_index| {
-                    let mut ordinal = 0;
-                    let mut error = ErrorBuffer::new();
-                    check(
-                        ffi::geospec_occt_occurrence_ordinal(
-                            raw,
-                            index,
-                            ordinal_index,
-                            &mut ordinal,
-                            error.raw(),
-                        ),
-                        &error,
-                    )?;
-                    Ok(ordinal)
-                })
-                .collect::<Result<Vec<_>, BackendError>>()?,
-        });
-    }
+    let occurrences = transfer_occurrences(raw, reported, product_count, true)?;
 
     let face_count = ffi::geospec_occt_face_count(raw);
     let mut faces = Vec::with_capacity(face_count);
@@ -1722,24 +2164,43 @@ unsafe fn occurrence_edges(
 }
 
 unsafe fn validity(raw: *const ffi::Document) -> Result<ValidityFacts, BackendError> {
+    Ok(validity_with_control(raw, 0)?.0)
+}
+
+unsafe fn validity_with_control(
+    raw: *const ffi::Document,
+    grant_width: i32,
+) -> Result<(ValidityFacts, bool), BackendError> {
     let mut value = ffi::ValidityFacts::default();
-    let reason =
-        copied_string(|reason, error| ffi::geospec_occt_validity(raw, &mut value, reason, error))?;
-    Ok(ValidityFacts {
-        valid: value.valid != 0,
-        checks: None,
-        max_tolerance: Some(value.max_tolerance),
-        free_bounds: Some(value.free_bounds),
-        small_edges: None,
-        same_parameter: Some(value.same_parameter != 0),
-        closed_shells: Some(value.closed_shells != 0),
-        closed_solids: Some(value.closed_solids != 0),
-        solid_count: Some(value.solid_count),
-        invalid_solid_count: Some(value.invalid_solid_count),
-        open_edge_count: Some(value.open_edge_count),
-        closed_wires: Some(value.closed_wires != 0),
-        reason: (!reason.is_empty()).then_some(reason),
-    })
+    let mut used_parallel = 0;
+    let reason = copied_string_small(|reason, error| {
+        ffi::geospec_occt_validity_dedicated(
+            raw,
+            grant_width,
+            &mut used_parallel,
+            &mut value,
+            reason,
+            error,
+        )
+    })?;
+    Ok((
+        ValidityFacts {
+            valid: value.valid != 0,
+            checks: None,
+            max_tolerance: Some(value.max_tolerance),
+            free_bounds: Some(value.free_bounds),
+            small_edges: None,
+            same_parameter: Some(value.same_parameter != 0),
+            closed_shells: Some(value.closed_shells != 0),
+            closed_solids: Some(value.closed_solids != 0),
+            solid_count: Some(value.solid_count),
+            invalid_solid_count: Some(value.invalid_solid_count),
+            open_edge_count: Some(value.open_edge_count),
+            closed_wires: Some(value.closed_wires != 0),
+            reason: (!reason.is_empty()).then_some(reason),
+        },
+        used_parallel != 0,
+    ))
 }
 
 unsafe fn extrema(
@@ -1813,16 +2274,37 @@ unsafe fn common_volume(
     a: u32,
     b: u32,
 ) -> Result<CommonVolume, BackendError> {
+    Ok(common_volume_with_control(raw, a, b, 0)?.0)
+}
+
+unsafe fn common_volume_with_control(
+    raw: *const ffi::Document,
+    a: u32,
+    b: u32,
+    grant_width: i32,
+) -> Result<(CommonVolume, bool), BackendError> {
     let mut value = ffi::CommonVolume::default();
+    let mut used_parallel = 0;
     let mut error = ErrorBuffer::new();
     check(
-        ffi::geospec_occt_common_volume(raw, a, b, &mut value, error.raw()),
+        ffi::geospec_occt_common_volume_dedicated(
+            raw,
+            a,
+            b,
+            grant_width,
+            &mut used_parallel,
+            &mut value,
+            error.raw(),
+        ),
         &error,
     )?;
-    Ok(CommonVolume {
-        volume: value.volume,
-        centroid: value.centroid,
-    })
+    Ok((
+        CommonVolume {
+            volume: value.volume,
+            centroid: value.centroid,
+        },
+        used_parallel != 0,
+    ))
 }
 
 unsafe fn regular_solid_containment(
@@ -1830,26 +2312,41 @@ unsafe fn regular_solid_containment(
     subject: BrepEntity,
     target: BrepEntity,
 ) -> Result<RegularSolidContainment, BackendError> {
+    Ok(regular_solid_containment_with_control(raw, subject, target, 0)?.0)
+}
+
+unsafe fn regular_solid_containment_with_control(
+    raw: *const ffi::Document,
+    subject: BrepEntity,
+    target: BrepEntity,
+    grant_width: i32,
+) -> Result<(RegularSolidContainment, bool), BackendError> {
     let mut value = ffi::RegularSolidContainment::default();
+    let mut used_parallel = 0;
     let mut error = ErrorBuffer::new();
     check(
-        ffi::geospec_occt_regular_solid_containment(
+        ffi::geospec_occt_regular_solid_containment_dedicated(
             raw,
             subject.into(),
             target.into(),
+            grant_width,
+            &mut used_parallel,
             &mut value,
             error.raw(),
         ),
         &error,
     )?;
-    Ok(RegularSolidContainment {
-        contained: value.contained != 0,
-        residual_solid_count: value.residual_solid_count,
-        residual_volume: value.residual_volume,
-        residual_bounds: (value.has_residual_bounds != 0).then(|| value.residual_bounds.into()),
-        residual_center_of_mass: (value.has_residual_center_of_mass != 0)
-            .then_some(value.residual_center_of_mass),
-    })
+    Ok((
+        RegularSolidContainment {
+            contained: value.contained != 0,
+            residual_solid_count: value.residual_solid_count,
+            residual_volume: value.residual_volume,
+            residual_bounds: (value.has_residual_bounds != 0).then(|| value.residual_bounds.into()),
+            residual_center_of_mass: (value.has_residual_center_of_mass != 0)
+                .then_some(value.residual_center_of_mass),
+        },
+        used_parallel != 0,
+    ))
 }
 
 unsafe fn cylinder_axial_extent(
@@ -2170,15 +2667,26 @@ unsafe fn circular_bores(
     raw: *const ffi::Document,
     max_candidates: usize,
 ) -> Result<CircularBoreInventory, BackendError> {
+    Ok(circular_bores_with_control(raw, max_candidates, 0)?.0)
+}
+
+unsafe fn circular_bores_with_control(
+    raw: *const ffi::Document,
+    max_candidates: usize,
+    grant_width: i32,
+) -> Result<(CircularBoreInventory, bool), BackendError> {
     let limit = max_candidates.min(MAX_CIRCULAR_BORE_CANDIDATES);
     let mut count = 0usize;
+    let mut used_parallel = 0;
     let mut error = ErrorBuffer::new();
     check(
-        ffi::geospec_occt_circular_bores_prepare(
+        ffi::geospec_occt_circular_bores_prepare_dedicated(
             raw,
             limit,
             std::mem::size_of::<CircularBoreCandidate>(),
             std::mem::size_of::<CircularBoreInventory>(),
+            grant_width,
+            &mut used_parallel,
             &mut count,
             error.raw(),
         ),
@@ -2236,7 +2744,7 @@ unsafe fn circular_bores(
             "OCCT returned an oversized circular bore inventory.",
         ));
     }
-    Ok(inventory)
+    Ok((inventory, used_parallel != 0))
 }
 
 fn edge_treatment_reason(value: i32) -> Result<EdgeTreatmentReason, BackendError> {
@@ -2952,15 +3460,27 @@ unsafe fn tessellate(
     entity: BrepEntity,
     profile: TessellationProfile,
 ) -> Result<TriangleMesh, BackendError> {
+    Ok(tessellate_with_control(raw, entity, profile, 0)?.0)
+}
+
+unsafe fn tessellate_with_control(
+    raw: *const ffi::Document,
+    entity: BrepEntity,
+    profile: TessellationProfile,
+    grant_width: i32,
+) -> Result<(TriangleMesh, bool), BackendError> {
     let mut position_count = 0;
     let mut triangle_count = 0;
+    let mut used_parallel = 0;
     let mut error = ErrorBuffer::new();
     check(
-        ffi::geospec_occt_tessellate(
+        ffi::geospec_occt_tessellate_dedicated(
             raw,
             entity.into(),
             profile.linear_deflection_mm,
             profile.angular_deflection_rad,
+            grant_width,
+            &mut used_parallel,
             std::ptr::null_mut(),
             0,
             std::ptr::null_mut(),
@@ -2992,12 +3512,15 @@ unsafe fn tessellate(
     positions.resize(position_count, [0.0; 3]);
     triangles.resize(triangle_count, [0; 3]);
     let expected_counts = (position_count, triangle_count);
+    let parallel_during_meshing = used_parallel != 0;
     check(
-        ffi::geospec_occt_tessellate(
+        ffi::geospec_occt_tessellate_dedicated(
             raw,
             entity.into(),
             profile.linear_deflection_mm,
             profile.angular_deflection_rad,
+            grant_width,
+            &mut used_parallel,
             positions.as_mut_ptr().cast::<f64>(),
             position_count,
             triangles.as_mut_ptr().cast::<u32>(),
@@ -3013,10 +3536,13 @@ unsafe fn tessellate(
             "OCCT tessellation counts changed during the owned transfer.",
         ));
     }
-    Ok(TriangleMesh {
-        positions,
-        triangles,
-    })
+    Ok((
+        TriangleMesh {
+            positions,
+            triangles,
+        },
+        parallel_during_meshing,
+    ))
 }
 
 impl From<ffi::Bounds> for Bounds {
@@ -3201,6 +3727,8 @@ mod ffi {
     pub const NO_SHAPE: i32 = 4;
     pub const BUFFER_TOO_SMALL: i32 = 6;
     pub const UNSUPPORTED: i32 = 7;
+    pub const REPORT_MESH: u32 = 1;
+    pub const REPORT_FACTS: u32 = 2;
 
     #[repr(C)]
     pub struct Document {
@@ -3745,6 +4273,11 @@ mod ffi {
             out: *mut *mut Document,
             error: *mut StringBuffer,
         ) -> i32;
+        pub fn geospec_occt_thread_pool_width(
+            requested: i32,
+            actual: *mut i32,
+            error: *mut StringBuffer,
+        ) -> i32;
         pub fn geospec_occt_release(document: *mut Document);
         pub fn geospec_occt_document_facts(
             document: *const Document,
@@ -3767,11 +4300,15 @@ mod ffi {
             schema: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_report_prepare(
+        pub fn geospec_occt_report_prepare_dedicated(
             document: *const Document,
+            facets: u32,
+            grant_width: i32,
+            used_parallel: *mut i32,
             sizes: *mut ReportSizes,
             error: *mut StringBuffer,
         ) -> i32;
+        pub fn geospec_occt_report_generation_builds(document: *const Document) -> usize;
         pub fn geospec_occt_report_discard(document: *const Document);
         pub fn geospec_occt_report_document_facts(
             document: *const Document,
@@ -3826,6 +4363,15 @@ mod ffi {
         ) -> i32;
         pub fn geospec_occt_occurrence_count(document: *const Document) -> usize;
         pub fn geospec_occt_occurrence(
+            document: *const Document,
+            index: usize,
+            facts: *mut OccurrenceFacts,
+            label: *mut StringBuffer,
+            product: *mut StringBuffer,
+            name: *mut StringBuffer,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_occurrence_structure(
             document: *const Document,
             index: usize,
             facts: *mut OccurrenceFacts,
@@ -3963,8 +4509,10 @@ mod ffi {
             facts: *mut EdgeFacts,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_validity(
+        pub fn geospec_occt_validity_dedicated(
             document: *const Document,
+            grant_width: i32,
+            used_parallel: *mut i32,
             facts: *mut ValidityFacts,
             reason: *mut StringBuffer,
             error: *mut StringBuffer,
@@ -3982,11 +4530,13 @@ mod ffi {
             extent: *mut CylinderAxialExtent,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_circular_bores_prepare(
+        pub fn geospec_occt_circular_bores_prepare_dedicated(
             document: *const Document,
             max_candidates: usize,
             retained_candidate_size: usize,
             retained_inventory_size: usize,
+            grant_width: i32,
+            used_parallel: *mut i32,
             count: *mut usize,
             error: *mut StringBuffer,
         ) -> i32;
@@ -4061,17 +4611,21 @@ mod ffi {
             state_capacity: usize,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_common_volume(
+        pub fn geospec_occt_common_volume_dedicated(
             document: *const Document,
             occurrence_a: u32,
             occurrence_b: u32,
+            grant_width: i32,
+            used_parallel: *mut i32,
             common: *mut CommonVolume,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_regular_solid_containment(
+        pub fn geospec_occt_regular_solid_containment_dedicated(
             document: *const Document,
             subject: Entity,
             target: Entity,
+            grant_width: i32,
+            used_parallel: *mut i32,
             result: *mut RegularSolidContainment,
             error: *mut StringBuffer,
         ) -> i32;
@@ -4081,11 +4635,13 @@ mod ffi {
             wall: *mut WallResult,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_tessellate(
+        pub fn geospec_occt_tessellate_dedicated(
             document: *const Document,
             entity: Entity,
             linear: f64,
             angular: f64,
+            grant_width: i32,
+            used_parallel: *mut i32,
             positions: *mut f64,
             position_capacity: usize,
             triangles: *mut u32,

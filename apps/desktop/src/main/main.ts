@@ -7,7 +7,7 @@
  * work — kernels, disk, the agent host — lives in the utilities.
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
@@ -326,10 +326,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
   mkdirSync(homeRoot, { recursive: true });
   const authorityDirectory = join(app.getPath('userData'), 'filesystem-authority');
   mkdirSync(authorityDirectory, { recursive: true });
-  /* The machine host's journal, identity and secret custody (D9): protected
-   * state beside the filesystem authority, never under an authored root. */
-  const machinesDirectory = join(app.getPath('userData'), 'machines');
+  /* The per-user machine store every Tau host on this computer shares
+   * (`tau serve` opens it too), never under an authored root. The app's old
+   * `userData/machines` is imported from once, and only when it is another
+   * directory: on a case-insensitive volume `…/Tau` and `…/tau` are one. */
+  const tauConfigDirectory = defaultConfigDirectory();
+  const machinesDirectory = join(tauConfigDirectory, 'machines');
   mkdirSync(machinesDirectory, { recursive: true, mode: 0o700 });
+  const legacyMachinesDirectory = join(app.getPath('userData'), 'machines');
+  const legacyMachinesEnvironment: Readonly<Record<string, string>> =
+    existsSync(legacyMachinesDirectory) &&
+    realpathSync.native(legacyMachinesDirectory) !== realpathSync.native(machinesDirectory)
+      ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+        { TAU_DESKTOP_LEGACY_MACHINES_DIR: legacyMachinesDirectory }
+      : {};
 
   /* Grants outlive the session: the renderer keeps a picked folder's workspace
    * record in IndexedDB and offers it again on the next launch, so a grant main
@@ -539,7 +549,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return computeConnection(root).control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) });
   });
 
-  const tauConfigDirectory = defaultConfigDirectory();
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,
     env: utilityEnvironment(environment, {
@@ -549,6 +558,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_MACHINES_DIR: machinesDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      ...legacyMachinesEnvironment,
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
@@ -882,8 +892,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
       /* Launcher 2 is scoped to one workspace root, and the renderer names it —
        * so it passes the same registry the kernel fork resolver uses. Refusing
        * outright rather than substituting Home: an agent host working over the
-       * wrong directory is worse than no agent host. */
-      if ((concern === 'agentHost' || concern === 'machines') && !roots.isTrusted(resolved['workspaceRoot'] ?? '')) {
+       * wrong directory is worse than no agent host. Machines need no root:
+       * printers belong to the per-user store, and a print request names its
+       * own project. */
+      if (concern === 'agentHost' && !roots.isTrusted(resolved['workspaceRoot'] ?? '')) {
         log.log('error', 'services.untrusted-root', { concern, workspaceRoot: resolved['workspaceRoot'] });
         refuse('services.untrusted-root');
         return;

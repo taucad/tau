@@ -7,12 +7,29 @@ import { MessageChannel } from 'node:worker_threads';
 
 import { zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { hostMachineWorkspaceId } from '@taucad/host';
+import type * as TauHost from '@taucad/host';
+import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import { connectMachineChannel } from '@taucad/runtime/machine';
 import type { MachineArtifactReference, MachineCandidate, MachineChannelClient } from '@taucad/runtime/machine';
 
 import { createServicesHost } from '#tau/services-host.impl.js';
 import type { ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/services-host.impl.js';
+
+/* The runtime the utility builds, kept so a case can call its artifact reader
+ * directly: through a print, every read failure is the simulator's one
+ * `ARTIFACT_INVALID`. */
+const runtimeOptions = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createNodeMachineRuntime>[0]>);
+
+vi.mock('@taucad/host', async (importOriginal) => {
+  const actual = await importOriginal<typeof TauHost>();
+  return {
+    ...actual,
+    createNodeMachineRuntime: (options: Parameters<typeof TauHost.createNodeMachineRuntime>[0]) => {
+      runtimeOptions.push(options);
+      return actual.createNodeMachineRuntime(options);
+    },
+  };
+});
 
 type Completion = Parameters<NonNullable<ServicesHostOptions['machineBindingCompleted']>>;
 
@@ -48,42 +65,66 @@ const plateGcode = ['M140 S60', 'M104 S200', 'G28', 'M190 S60', 'M109 S200', ';L
   '\n',
 );
 
+const projectIdFor = (name: string): string => `proj_${name.padEnd(21, '0')}`;
+const alphaId = projectIdFor('alpha');
+const betaId = projectIdFor('beta');
+const gammaId = projectIdFor('gamma');
+
 const digestOf = (bytes: Uint8Array<ArrayBuffer>): MachineArtifactReference['digest'] =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}` as MachineArtifactReference['digest'];
 
+const artifactFor = (
+  projectId: string,
+  bytes: Uint8Array<ArrayBuffer>,
+  path = 'plate.gcode.3mf',
+): MachineArtifactReference => ({
+  projectId,
+  path,
+  digest: digestOf(bytes),
+  length: bytes.byteLength,
+  mediaType: 'application/vnd.bambulab.gcode-3mf',
+  contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+  selectedMember: 'Metadata/plate_1.gcode',
+});
+
+/** A project folder whose `tau.json` names it. */
+const writeProject = async (root: string, name: string, id: string): Promise<string> => {
+  const project = join(root, name);
+  await mkdir(project, { recursive: true });
+  await writeFile(join(project, 'tau.json'), JSON.stringify({ id }));
+  return project;
+};
+
 /**
- * A services host over a real filesystem authority and machine directory,
- * serving two sibling projects.
+ * A services host over a real filesystem authority and machine store, with
+ * two admitted roots holding one project each.
  *
  * @returns The host, its log, its ceremony answers and the seams to reach it.
  */
 const machinesHarness = async () => {
   const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-machines-')));
-  const projects = join(sandbox, 'projects');
-  const alpha = join(projects, 'alpha');
-  const beta = join(projects, 'beta');
-  await Promise.all([
-    mkdir(alpha, { recursive: true }),
-    mkdir(beta, { recursive: true }),
-    mkdir(join(sandbox, 'authority')),
-  ]);
+  const rootA = join(sandbox, 'workspace-a');
+  const rootB = join(sandbox, 'workspace-b');
+  const store = join(sandbox, 'config', 'machines');
+  await mkdir(join(sandbox, 'authority'));
+  const [alpha, beta] = await Promise.all([writeProject(rootA, 'alpha', alphaId), writeProject(rootB, 'beta', betaId)]);
   const log = vi.fn();
   const completions: Completion[] = [];
   const host = createServicesHost({
     authorityDirectory: join(sandbox, 'authority'),
-    machinesDirectory: join(sandbox, 'machines'),
+    machinesDirectory: store,
     log,
     machineBindingCompleted: (...completion) => {
       completions.push(completion);
     },
   });
-  host.handleMessage(frame({ type: 'allowRoots', roots: [projects] }));
+  host.handleMessage(frame({ type: 'allowRoots', roots: [rootA, rootB] }));
   const clients: MachineChannelClient[] = [];
 
-  /** Open one project's machines route, as a window or its agent does. */
-  const connect = (workspaceRoot: string): MachineChannelClient => {
+  /** Open a machines route as a window or its agent does: naming no project. */
+  const connect = (): MachineChannelClient => {
     const { port1, port2 } = new MessageChannel();
-    host.handleMessage(frame({ type: 'concern', concern: 'machines', context: { workspaceRoot } }, [port2]));
+    host.handleMessage(frame({ type: 'concern', concern: 'machines' }, [port2]));
     const client = connectMachineChannel(port1);
     clients.push(client);
     return client;
@@ -138,25 +179,27 @@ const machinesHarness = async () => {
     host.dispose();
     await rm(sandbox, { recursive: true, force: true });
   };
-  return { alpha, beta, bindSimulator, cleanup, completeCeremony, connect, host, log, sandbox };
+  return { alpha, beta, bindSimulator, cleanup, completeCeremony, connect, host, log, rootA, rootB, store };
 };
 
 describe('createServicesHost — machines', () => {
   beforeEach(() => {
     /* The desktop picks the keychain on macOS; no test may touch a person's keychain. */
     vi.stubEnv('TAU_SECRET_VAULT', 'file');
+    runtimeOptions.length = 0;
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it('should bind the simulator natively without keeping a code typed for it, and close on quiesce', async () => {
+  it('should serve a connection that names no project, bind the simulator without keeping its code, and close on quiesce', async () => {
     const machines = await machinesHarness();
     try {
-      const client = machines.connect(machines.alpha);
+      const client = machines.connect();
       const providers = await client.listProviders({});
       expect(providers.map((provider) => provider.id).sort()).toEqual(['bambu', 'bambu-simulator']);
+      expect(existsSync(join(machines.store, 'store.json'))).toBe(true);
 
       await expect(machines.completeCeremony('bind-unknown', 'no-such-ceremony', accessCode)).resolves.toEqual({
         error: 'MACHINE_BINDING_UNKNOWN_CEREMONY',
@@ -169,7 +212,7 @@ describe('createServicesHost — machines', () => {
       ]);
       expect(machines.log).toHaveBeenCalledWith('machines.vault', { kind: 'file' });
       /* The simulator has no network endpoint: nothing was probed and no code was saved. */
-      expect(existsSync(join(machines.sandbox, 'machines', 'secrets.json'))).toBe(false);
+      expect(existsSync(join(machines.store, 'secrets.json'))).toBe(false);
       expect(JSON.stringify(machines.log.mock.calls)).not.toContain(accessCode);
 
       await machines.host.quiesce();
@@ -179,56 +222,84 @@ describe('createServicesHost — machines', () => {
     }
   }, 30_000);
 
-  it("should show one printer to every project and read a request's file by its digest", async () => {
+  it("should read a request's file from the project its id names, refusing another project's file at that path", async () => {
     const machines = await machinesHarness();
     try {
-      const machineId = await machines.bindSimulator(machines.connect(machines.alpha));
-      const beta = machines.connect(machines.beta);
-      const directory = await beta.list({});
-      expect(directory.cursor.workspaceId).toBe(hostMachineWorkspaceId);
-      expect(directory.entries.map((entry) => entry.machineId)).toEqual([machineId]);
-
+      const client = machines.connect();
+      const machineId = await machines.bindSimulator(client);
       /* One relative path in both projects; only beta holds the sliced archive. */
       const archive = Uint8Array.from(zipSync({ 'Metadata/plate_1.gcode': encoder.encode(plateGcode) }));
       await writeFile(join(machines.beta, 'plate.gcode.3mf'), archive);
       await writeFile(join(machines.alpha, 'plate.gcode.3mf'), 'not the sliced plate');
-      /* Alpha asks last, so its decoy is read first and refused by digest. */
-      const alpha = machines.connect(machines.alpha);
-      const artifactFor = (bytes: Uint8Array<ArrayBuffer>): MachineArtifactReference => ({
-        revision: {
-          authorityId: directory.cursor.authorityId,
-          workspaceId: directory.cursor.workspaceId,
-          revisionId: 'r1' as MachineArtifactReference['revision']['revisionId'],
-          treeDigest: digestOf(bytes),
-        },
-        path: 'plate.gcode.3mf',
-        digest: digestOf(bytes),
-        length: bytes.byteLength,
-        mediaType: 'application/vnd.bambulab.gcode-3mf',
-        contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-        selectedMember: 'Metadata/plate_1.gcode',
-      });
-      const request = async (requestId: string, bytes: Uint8Array<ArrayBuffer>) => {
-        await alpha.requestPrint({
+      const request = async (requestId: string, projectId: string) => {
+        await client.requestPrint({
           requestId,
           machineId,
-          artifact: artifactFor(bytes),
+          artifact: artifactFor(projectId, archive),
           configuration,
           requestedBy: operator,
         });
-        return alpha.resolvePrintRequest({ requestId, decision: 'approve', resolvedBy: operator });
+        return client.resolvePrintRequest({ requestId, decision: 'approve', resolvedBy: operator });
       };
 
-      await expect(request('nowhere', encoder.encode('bytes no project holds'))).resolves.toMatchObject({
+      /* Alpha's file at that path is not the one the digest names, and beta's is not alpha's. */
+      await expect(request('alpha', alphaId)).resolves.toMatchObject({
         state: 'failed',
         failure: { code: 'ARTIFACT_INVALID' },
       });
-      await expect(request('plate', archive)).resolves.toMatchObject({ state: 'started' });
-      /* Request history is the host's: the other project sees both. */
-      const history = await beta.listPrintRequests({});
-      expect(history.map((entry) => entry.requestId).sort()).toEqual(['nowhere', 'plate']);
+      await expect(request('beta', betaId)).resolves.toMatchObject({ state: 'started' });
+      /* Request history is the store's: every connection sees both. */
+      const history = await machines.connect().listPrintRequests({});
+      expect(history.map((entry) => entry.requestId).sort()).toEqual(['alpha', 'beta']);
     } finally {
       await machines.cleanup();
     }
   }, 60_000);
+
+  it("should find a candidate turn's slice in its checkout, refuse a project no root holds, and find one that appears later", async () => {
+    const machines = await machinesHarness();
+    try {
+      await machines.connect().listProviders({});
+      const { readArtifact } = runtimeOptions.at(-1)!;
+      const { signal } = new AbortController();
+      const slice = encoder.encode('a candidate turn slice');
+      const slicePath = '.tau/artifacts/call-1/slice.gcode.3mf';
+      const checkout = join(machines.rootA, '.tau', 'checkouts', alphaId, 'turn-1');
+      await mkdir(join(checkout, '.tau', 'artifacts', 'call-1'), { recursive: true });
+      await writeFile(join(checkout, slicePath), slice);
+
+      await expect(readArtifact(artifactFor(alphaId, slice, slicePath), signal)).resolves.toEqual(slice);
+      await expect(readArtifact(artifactFor(betaId, slice, slicePath), signal)).rejects.toThrow(
+        'MACHINE_ARTIFACT_NOT_FOUND',
+      );
+      await expect(readArtifact(artifactFor(gammaId, slice), signal)).rejects.toThrow('MACHINE_ARTIFACT_NOT_FOUND');
+
+      /* A miss scans the roots again: projects appear, move and go. */
+      const gamma = await writeProject(machines.rootB, 'gamma', gammaId);
+      await writeFile(join(gamma, 'plate.gcode.3mf'), slice);
+      await expect(readArtifact(artifactFor(gammaId, slice), signal)).resolves.toEqual(slice);
+    } finally {
+      await machines.cleanup();
+    }
+  }, 30_000);
+
+  it('should answer MACHINE_STORE_OWNED_ELSEWHERE while another Tau app holds the store, and serve once it lets go', async () => {
+    const machines = await machinesHarness();
+    try {
+      const authorityRoot = join(machines.store, 'authority');
+      await mkdir(authorityRoot, { recursive: true, mode: 0o700 });
+      const owner = await acquireNodeAuthorityWriter({ authorityRoot });
+      try {
+        await expect(machines.connect().listProviders({})).rejects.toThrow('MACHINE_STORE_OWNED_ELSEWHERE');
+      } finally {
+        await owner.release();
+      }
+      expect(machines.log).toHaveBeenCalledWith('machines.unavailable', { reason: 'owned-elsewhere' }, 'warn');
+
+      /* The renderer dials again for its next call, and the store is free now. */
+      await expect(machines.connect().listProviders({})).resolves.toHaveLength(2);
+    } finally {
+      await machines.cleanup();
+    }
+  }, 30_000);
 });

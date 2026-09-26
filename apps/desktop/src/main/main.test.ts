@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
@@ -230,7 +230,7 @@ vi.mock('#main/navigation-policy.js', () => ({
   rendererOrigins: vi.fn(() => []),
 }));
 vi.mock('#main/services-broker.js', () => ({
-  rendererServicesConcerns: ['nodeFs', 'agentHost'],
+  rendererServicesConcerns: ['nodeFs', 'agentHost', 'machines'],
   createServicesBroker: vi.fn(() => ({
     post: vi.fn(),
     connect: state.servicesConnect,
@@ -740,6 +740,78 @@ describe('desktop main machine binding channel', () => {
         { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' },
       ]);
       expect(JSON.stringify(state.log.mock.calls)).not.toContain('12345678');
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main machine store', () => {
+  const bootMilliseconds = 30_000;
+
+  /**
+   * Boot main over fresh user data, after `before` lays out what an earlier build left there.
+   *
+   * @returns The environment main adds for the services utility.
+   */
+  const boot = async (before?: (userData: string) => Promise<void>): Promise<NodeJS.ProcessEnv> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-store-'));
+    await before?.(state.userData);
+    await import('#main/main.js');
+    await vi.waitFor(() => {
+      expect(state.ipcListeners.has(servicesPortRelayTag)).toBe(true);
+    });
+    return state.utilityEnvironmentAdditions.find((additions) => 'TAU_DESKTOP_MACHINES_DIR' in additions)!;
+  };
+
+  const relay = (senderFrame: Record<string, unknown>, requestId: string): void => {
+    for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+      listener({ senderFrame }, { requestId, concern: 'machines' });
+    }
+  };
+
+  it(
+    'should keep the machine store under the config directory and connect a machines port that names no root, for a trusted frame only',
+    async () => {
+      /* A real directory an earlier build kept its printers in: imported from once. */
+      const additions = await boot(async (userData) => {
+        await mkdir(join(userData, 'machines'));
+      });
+      const store = join(state.userData, 'config', 'machines');
+      expect(additions['TAU_DESKTOP_MACHINES_DIR']).toBe(store);
+      const { mode } = await stat(store);
+      // oxlint-disable-next-line eslint/no-bitwise -- the POSIX mode is a bit field
+      expect(mode & 0o777).toBe(0o700);
+      expect(additions['TAU_DESKTOP_LEGACY_MACHINES_DIR']).toBe(join(state.userData, 'machines'));
+
+      const postMessage = vi.fn();
+      relay({ url: 'app://tau/index.html', postMessage }, 'req-machines');
+      expect(state.servicesConnect).toHaveBeenCalledExactlyOnceWith('machines', {});
+      expect(postMessage).toHaveBeenCalledExactlyOnceWith(servicesPortRelayTag, { requestId: 'req-machines' }, [
+        { id: 'services-port' },
+      ]);
+
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      const foreign = vi.fn();
+      relay({ url: 'https://evil.example/', postMessage: foreign }, 'req-foreign');
+      expect(foreign).not.toHaveBeenCalled();
+      expect(state.servicesConnect).toHaveBeenCalledOnce();
+      expect(state.log).toHaveBeenCalledWith('error', 'ipc.untrusted-sender', { url: 'https://evil.example/' });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should not name the old machine directory when it is the store itself',
+    async () => {
+      /* How `…/Tau/machines` and `…/tau/machines` meet on a case-insensitive volume. */
+      const additions = await boot(async (userData) => {
+        await mkdir(join(userData, 'config', 'machines'), { recursive: true });
+        await symlink(join(userData, 'config', 'machines'), join(userData, 'machines'));
+      });
+      expect(additions['TAU_DESKTOP_MACHINES_DIR']).toBe(join(state.userData, 'config', 'machines'));
+      expect(additions).not.toHaveProperty('TAU_DESKTOP_LEGACY_MACHINES_DIR');
     },
     bootMilliseconds,
   );

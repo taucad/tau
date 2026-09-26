@@ -354,6 +354,14 @@ it('accepts the project Runtime mesh', async () => {
       expect(report.result).toMatchObject({ claimId: report.claimId, status: report.status });
     }
     expect(rows.slice(0, 2).map((row) => row.reports![0])).toEqual(apiReports);
+    // Equal verdicts on another subject must not pass: each report names the source bytes it measured.
+    const measuredSubjects = rows.map(
+      (row) =>
+        z.object({ evidence: z.object({ subjectContentHash: z.string() }) }).parse(row.reports![0]!.result).evidence
+          .subjectContentHash,
+    );
+    expect(measuredSubjects.slice(0, 2)).toEqual([nativeFixtureHash, nativeFixtureHash]);
+    expect(measuredSubjects[2]).not.toBe(nativeFixtureHash);
     await target.click(selectors.getByRole('button', { name: /^(?:Edited files, )?ran tests$/iu }));
     await target.expectVisible(selectors.getByText('Tested 3 requirements', { exact: true }));
     await target.expectVisible(selectors.getByText('1. rejects the impossible fixed box volume', { exact: true }));

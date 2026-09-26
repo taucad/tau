@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useLocation, useNavigate } from 'react-router';
+import { findBuiltinExample } from '@taucad/tau-examples/builtin';
 import { findTestFixture } from '@taucad/tau-examples/test-fixtures';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
@@ -30,7 +31,8 @@ const ExampleFixtureDebugRoute = (): React.JSX.Element => {
     started.current = true;
     const parameters = new URLSearchParams(search);
     const locator = parameters.get('locator');
-    const fixture = locator ? findTestFixture(locator) : undefined;
+    // Builtin model examples share the test-fixture shape, so either seeds an editor project.
+    const fixture = locator ? (findTestFixture(locator) ?? findBuiltinExample(locator)) : undefined;
     parameters.delete('locator');
 
     const seed = async (): Promise<void> => {

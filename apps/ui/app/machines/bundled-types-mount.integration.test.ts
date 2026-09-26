@@ -77,7 +77,15 @@ describe('bundled kernel types mount', () => {
       );
 
       await Promise.all(
-        ['libcascade', 'replicad', '@jscad/modeling', 'manifold-3d', 'geospec'].map(async (packageName) => {
+        [
+          'libcascade',
+          'replicad',
+          '@jscad/modeling',
+          'manifold-3d',
+          'geospec',
+          '@taucad/kinematics',
+          '@taucad/spatial',
+        ].map(async (packageName) => {
           const packageJson = await fileService.readFile(`/node_modules/${packageName}/package.json`, 'utf8');
           if (typeof packageJson !== 'string') {
             throw new TypeError(`Expected text package metadata for ${packageName}`);

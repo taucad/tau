@@ -8,6 +8,7 @@ import type { RenderFrame } from '@taucad/spatial';
 import type { ThreeCameraRig } from '@taucad/three/camera';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import type { kinematicsMachine } from '#machines/kinematics.machine.js';
 import {
   acquireViewCameraSession,
   getGraphicsCameraRegistryVersion,
@@ -26,6 +27,7 @@ import type {
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
+type KinematicsRef = ActorRefFrom<typeof kinematicsMachine>;
 
 type GraphicsContextValue = {
   graphicsRef: GraphicsActorRef;
@@ -276,4 +278,18 @@ export function useModelInteractionSelector<T>(
 ): T {
   const modelInteractionRef = useModelInteractionRef();
   return useSelector(modelInteractionRef, selector);
+}
+
+/** Returns the nearest view's kinematics actor, which owns every unit's mechanism pose and playback. */
+export function useKinematicsRef(): KinematicsRef {
+  const graphicsRef = useGraphics();
+  return useSelector(graphicsRef, (state) => state.context.kinematicsRef);
+}
+
+export function useKinematicsSelector<T>(
+  selector: (state: SnapshotFrom<typeof kinematicsMachine>) => T,
+  compare?: (left: T, right: T) => boolean,
+): T {
+  const kinematicsRef = useKinematicsRef();
+  return useSelector(kinematicsRef, selector, compare);
 }

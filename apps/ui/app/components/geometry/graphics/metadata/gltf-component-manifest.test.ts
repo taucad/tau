@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
 import {
   buildGltfComponentManifest,
@@ -579,5 +579,69 @@ describe('buildGltfComponentManifest', () => {
     expect(component).not.toHaveProperty(duplicateDurableKeyField);
     expect(component.reference).not.toHaveProperty(duplicateDurableIdField);
     expect(component.reference).not.toHaveProperty(duplicateDurableKeyField);
+  });
+  describe('mechanism', () => {
+    const hinge = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'deg' },
+      root: 'base',
+      links: { base: { components: ['component:base'] }, lid: { components: ['component:lid'] } },
+      joints: { hinge: { type: 'revolute', parent: 'base', child: 'lid', origin: [0, 0.02, 0], axis: [1, 0, 0] } },
+    };
+    const hingedGltf = (mechanism: unknown): Uint8Array<ArrayBuffer> =>
+      encodeJson({
+        nodes: [
+          { name: 'Base', mesh: 0 },
+          { name: 'Lid', mesh: 0 },
+        ],
+        meshes: [{ primitives: [{}] }],
+        extensions: {
+          [tauCadTopologyExtension]: {
+            components: [
+              { id: 'component:base', name: 'Base', kind: 'part', selector: 'node/0', nodeIndex: 0 },
+              { id: 'component:lid', name: 'Lid', kind: 'part', selector: 'node/1', nodeIndex: 1 },
+            ],
+            mechanism,
+          },
+        },
+      });
+
+    it('should attach the admitted topology mechanism to the manifest', () => {
+      const manifest = buildGltfComponentManifest(hingedGltf(hinge));
+
+      expect(manifest.nodeOrder).toEqual(['root', 'component:base', 'component:lid']);
+      expect(manifest.mechanism).toMatchObject(hinge);
+    });
+
+    it('should drop an invalid topology mechanism with a warning and keep the components', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const manifest = buildGltfComponentManifest(hingedGltf({ ...hinge, units: { length: 'cm', angle: 'deg' } }));
+
+        expect(manifest.nodeOrder).toEqual(['root', 'component:base', 'component:lid']);
+        expect(manifest.mechanism).toBeUndefined();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^Ignoring the TAU_cad_topology mechanism: \/units/),
+          expect.arrayContaining([expect.objectContaining({ code: 'INVALID_UNIT' })]),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('should drop a mechanism whose links name components the payload does not declare', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const manifest = buildGltfComponentManifest(
+          hingedGltf({ ...hinge, links: { ...hinge.links, lid: { components: ['component:missing'] } } }),
+        );
+
+        expect(manifest.nodeOrder).toEqual(['root', 'component:base', 'component:lid']);
+        expect(manifest.mechanism).toBeUndefined();
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/undeclared components component:missing$/));
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });

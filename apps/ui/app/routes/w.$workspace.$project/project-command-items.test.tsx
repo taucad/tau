@@ -204,6 +204,7 @@ describe('ProjectCommandPaletteItems', () => {
       ['open-parameters', 'parameters'],
       ['open-files', 'files'],
       ['open-model', 'model'],
+      ['open-kinematics', 'kinematics'],
       ['open-details', 'details'],
       ['revision-history', 'revisions'],
     ]);

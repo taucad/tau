@@ -9,6 +9,7 @@ export const projectWorkspaceKeyCombinations = {
   files: { key: 'f', ctrlKey: true },
   model: { key: 'a', ctrlKey: true },
   parameters: { key: 'x', ctrlKey: true },
+  kinematics: { key: 'm', ctrlKey: true },
   editor: { key: 'e', ctrlKey: true },
   details: { key: 'i', ctrlKey: true },
   export: { key: 'd', ctrlKey: true },
@@ -16,6 +17,7 @@ export const projectWorkspaceKeyCombinations = {
 
 export type WorkbenchPanelId =
   | 'parameters'
+  | 'kinematics'
   | 'files'
   | 'model'
   | 'revisions'
@@ -50,17 +52,19 @@ export type WorkspaceLanes = Readonly<{ chat: boolean; workbench: boolean }>;
 
 /**
  * Lane visibility, provided by `ChatInterfaceDesktop`, the one owner that
- * measures the width the compact rule depends on. Mobile has no lanes, so the
- * default is none visible.
+ * measures the width the compact rule depends on. Undefined outside it: mobile
+ * and shared pages have no lanes.
  */
-export const WorkspaceLanesContext = createContext<WorkspaceLanes>({ chat: false, workbench: false });
+export const WorkspaceLanesContext = createContext<WorkspaceLanes | undefined>(undefined);
+
+const noLanes: WorkspaceLanes = { chat: false, workbench: false };
 
 /**
  * Reads which desktop lanes are on screen.
  *
- * @returns Whether the chat and workbench lanes are visible.
+ * @returns Whether the chat and workbench lanes are visible; neither outside the desktop layout.
  */
-export const useWorkspaceLanes = (): WorkspaceLanes => useContext(WorkspaceLanesContext);
+export const useWorkspaceLanes = (): WorkspaceLanes => useContext(WorkspaceLanesContext) ?? noLanes;
 
 export function useProjectWorkspace(): ProjectWorkspaceContextValue;
 export function useProjectWorkspace(options: {
@@ -169,6 +173,14 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
       openPanel('parameters');
     },
     { enabled: !isMobile },
+  );
+  useKeybinding(
+    projectWorkspaceKeyCombinations.kinematics,
+    () => {
+      openPanel('kinematics');
+    },
+    // Monaco binds Ctrl+M on Windows and Linux to "Toggle Tab Key Moves Focus", its way out of the Tab trap.
+    { enabled: !isMobile, ignoreInputs: true },
   );
   useKeybinding(
     projectWorkspaceKeyCombinations.details,

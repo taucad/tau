@@ -224,7 +224,7 @@ export type GraphicsEvent =
   | { type: 'setGridSizeLocked'; payload: boolean }
   | { type: 'setGridUnit'; payload: { unit: LengthSymbol } }
   // Camera events
-  | { type: 'resetCamera' }
+  | { type: 'fitView' }
   | { type: 'cameraViewChanged'; verticalSpan: number }
   // Visibility events
   | { type: 'setSurfaceVisibility'; payload: boolean }
@@ -402,7 +402,7 @@ export type GraphicsEvent =
 // Emitted events
 export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
-  | { type: 'viewResetRequested' }
+  | { type: 'viewFitRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number };
 
 /**
@@ -950,8 +950,8 @@ export const graphicsMachine = setup({
         },
 
         // Camera events
-        resetCamera: (_, enq) => {
-          enq.emit({ type: 'viewResetRequested' });
+        fitView: (_, enq) => {
+          enq.emit({ type: 'viewFitRequested' });
           return {};
         },
         cameraViewChanged: ({ context, event, self }, enq) => {

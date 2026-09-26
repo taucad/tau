@@ -55,7 +55,7 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
  * Headlessly renders the current pane's settled geometry at its exact camera
  * angles and adds the annotated image to the active chat draft.
  *
- * Mirrors {@link ResetCameraControl} for visual + interaction parity and
+ * Mirrors {@link FitViewControl} for visual + interaction parity and
  * relies on the surrounding `<GraphicsProvider>` (per-view) and
  * `<ActiveChatProvider>` (project route) for context resolution.
  */

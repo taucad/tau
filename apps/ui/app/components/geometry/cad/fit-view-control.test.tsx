@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { ResetCameraControl } from '#components/geometry/cad/reset-camera-control.js';
+import { FitViewControl } from '#components/geometry/cad/fit-view-control.js';
 
 const mocks = vi.hoisted(() => ({ graphicsSend: vi.fn() }));
 
@@ -11,17 +11,17 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useGraphics: () => ({ send: mocks.graphicsSend }),
 }));
 
-describe('ResetCameraControl', () => {
-  it('should expose a Reset camera button that resets the camera', async () => {
+describe('FitViewControl', () => {
+  it('should expose a Fit view button that fits the view', async () => {
     const user = userEvent.setup();
     render(
       <TooltipProvider>
-        <ResetCameraControl />
+        <FitViewControl />
       </TooltipProvider>,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Reset camera' }));
+    await user.click(screen.getByRole('button', { name: 'Fit view' }));
 
-    expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'resetCamera' });
+    expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'fitView' });
   });
 });

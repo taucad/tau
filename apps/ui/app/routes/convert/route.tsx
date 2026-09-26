@@ -43,7 +43,7 @@ import { FovControl } from '#components/geometry/cad/fov-control.js';
 import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
 import { SectionViewControl } from '#components/geometry/cad/section-view-control.js';
 import { MeasureControl } from '#components/geometry/cad/measure-control.js';
-import { ResetCameraControl } from '#components/geometry/cad/reset-camera-control.js';
+import { FitViewControl } from '#components/geometry/cad/fit-view-control.js';
 import { ViewerSettings } from '#components/geometry/cad/viewer-settings.js';
 import { ChatInterfaceGraphics } from '#routes/w.$workspace.$project/chat-interface-graphics.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -365,7 +365,7 @@ function ConverterContentInner(): React.JSX.Element {
                 <GridSizeIndicator />
                 <SectionViewControl />
                 <MeasureControl />
-                <ResetCameraControl />
+                <FitViewControl />
                 <ViewerSettings />
               </div>
             </div>

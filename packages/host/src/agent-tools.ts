@@ -247,7 +247,7 @@ export const createHostNativeGeoSpecRunner = async (
   try {
     const runner = createNativeGeoSpecRunner({
       filesystem,
-      nativeAssertions: { engine, canonicalize: nativeEngineModule.canonicalize },
+      nativeAssertions: { engine },
       model: {
         projectPath: workspaceRoot,
         runtime: trackedRuntime,

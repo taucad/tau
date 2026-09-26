@@ -10,7 +10,6 @@ const native = vi.hoisted(() => {
   const close = vi.fn();
   return {
     close,
-    canonicalize: vi.fn(),
     engine: vi.fn(function () {
       return { close };
     }),
@@ -22,7 +21,6 @@ const native = vi.hoisted(() => {
 vi.mock('@taucad/geospec-engine-native/node', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the public module's constructor export.
   Engine: native.engine,
-  canonicalize: native.canonicalize,
 }));
 vi.mock('geospec/runner/native', () => ({ createNativeGeoSpecRunner: native.runner }));
 vi.mock('@taucad/geospec-engine/node-filesystem', () => ({ createNodeVmFileSystem: native.filesystem }));
@@ -69,8 +67,7 @@ describe('native host GeoSpec composition', () => {
     expect(runtime.export).toHaveBeenCalledExactlyOnceWith('glb', { source: { path: 'widget.ts' } });
     expect(runner.sourceRevisions?.()).toEqual([sourceRevision]);
     expect(options?.model?.projectPath).toBe('/projects/widget');
-    expect(options?.nativeAssertions.engine).toEqual({ close: native.close });
-    expect(options?.nativeAssertions.canonicalize).toBe(native.canonicalize);
+    expect(options?.nativeAssertions).toEqual({ engine: { close: native.close } });
     await expect(options?.model?.readSource?.('widget.step')).resolves.toBe(bytes);
     expect(read).toHaveBeenCalledExactlyOnceWith('widget.step');
 

@@ -292,6 +292,19 @@ describe('JSON Schema parameter declaration adapter', () => {
     });
   });
 
+  it('should keep pattern keys inside data values when stripping authored string patterns', () => {
+    const narrow = { pattern: 'narrow', width: 1 };
+    const wide = { pattern: 'wide', width: 1 };
+    const declaration = projectJsonSchemaToParameterDeclaration({
+      ...identity,
+      defaults: {},
+      schema: { type: 'object', pattern: '^x$', default: structuredClone(narrow), enum: [narrow, wide] },
+    });
+
+    expect(declaration.schema).toMatchObject({ default: narrow, enum: [narrow, wide] });
+    expect(declaration.schema).not.toHaveProperty('pattern');
+  });
+
   it('should reject invalid, conflicting, and unsupported Draft-7 declarations', () => {
     expect(() =>
       projectJsonSchemaToParameterDeclaration({

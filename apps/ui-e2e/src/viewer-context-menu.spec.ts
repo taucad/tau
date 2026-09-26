@@ -337,15 +337,17 @@ test.describe('Chat viewer model component context menu', () => {
         (element) => element.querySelectorAll('[data-slot="slider-track"], [data-slot="slider-thumb"]').length,
       ),
     ).toBe(0);
-    const initialFocusVisualState = await readMenuItemVisualState(focusMenuItem);
+    // A pointer opened the menu, so the menu holds focus and no row starts highlighted.
+    expect(await target.evaluate(() => document.activeElement?.getAttribute('role'))).toBe('menu');
+    const restVisualState = await readMenuItemVisualState(focusMenuItem);
     await target.hover(addToChatMenuItem);
-    await expect.poll(async () => readMenuItemVisualState(addToChatMenuItem)).toEqual(initialFocusVisualState);
     await expect
       .poll(async () => {
-        const visualState = await readMenuItemVisualState(focusMenuItem);
+        const visualState = await readMenuItemVisualState(addToChatMenuItem);
         return visualState.backgroundColor;
       })
-      .not.toBe(initialFocusVisualState.backgroundColor);
+      .not.toBe(restVisualState.backgroundColor);
+    expect(await readMenuItemVisualState(focusMenuItem)).toEqual(restVisualState);
 
     await target.keyboardPress('Escape');
     await target.click(opacityRow);

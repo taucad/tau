@@ -23,9 +23,9 @@ use crate::{
             CircularBoreInventory, CircularBoreTermination, ContinuousWallDomain,
             ContinuousWallShape, DocumentRows, EdgeTreatmentCounts, EdgeTreatmentDisposition,
             EdgeTreatmentInventory, EdgeTreatmentKind, LocatedFace, NominalCylindricalBand,
-            OccurrenceFacts, RegularSolidContainment, ReportedFaces, SelectedContinuousDomain,
-            ShapeFacts, StepSubjectMetadata, SurfaceFacts, TessellationProfile,
-            MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
+            OccurrenceFacts, OperandMemo, RegularSolidContainment, ReportedFaces,
+            SelectedContinuousDomain, ShapeFacts, StepSubjectMetadata, SurfaceFacts,
+            TessellationProfile, MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
         },
         csg_scope::CsgScope,
         BackendError, BackendErrorKind, TriangleMesh,
@@ -1292,6 +1292,8 @@ pub(crate) struct EvaluationContext<'a> {
     finite_contact_faces: Vec<Rc<crate::backend::brep::FiniteContactFace>>,
     cylindrical_band_output_bytes: u64,
     batch: Option<&'a BatchAnalysis>,
+    /// The primary BRep's claim-local operand memo (C7), made on first use.
+    operand_memo: Option<OperandMemo>,
 }
 
 impl<'a> EvaluationContext<'a> {
@@ -1317,7 +1319,12 @@ impl<'a> EvaluationContext<'a> {
             finite_contact_faces: Vec::new(),
             cylindrical_band_output_bytes: 0,
             batch: None,
+            operand_memo: None,
         }
+    }
+
+    fn operand_memo(&mut self, brep: &dyn BrepSubject) -> &mut OperandMemo {
+        self.operand_memo.get_or_insert_with(|| brep.operand_memo())
     }
 
     pub(crate) fn with_report_paid(mut self, paid: bool) -> Self {
@@ -1545,7 +1552,8 @@ impl<'a> EvaluationContext<'a> {
             self.budget
                 .charge(work)
                 .map_err(|e| Evaluation::budget_exceeded(self.capability, e))?;
-            let material = match brep.selected_interference_material(face.entity) {
+            let memo = self.operand_memo(brep);
+            let material = match brep.selected_interference_material_memoized(face.entity, memo) {
                 Ok(value) => value,
                 Err(error) if error.kind == BackendErrorKind::Unsupported => continue,
                 Err(error) => return Err(backend_refusal(error)),
@@ -1636,7 +1644,8 @@ impl<'a> EvaluationContext<'a> {
             self.budget
                 .charge(work)
                 .map_err(|e| Evaluation::budget_exceeded(self.capability, e))?;
-            let value = match brep.selected_bore_void(face.entity) {
+            let memo = self.operand_memo(brep);
+            let value = match brep.selected_bore_void_memoized(face.entity, memo) {
                 Ok(value) => value,
                 Err(error) if error.kind == BackendErrorKind::Unsupported => continue,
                 Err(error) => return Err(backend_refusal(error)),
@@ -1678,8 +1687,9 @@ impl<'a> EvaluationContext<'a> {
                 message: "Regular-solid containment requires BRep evidence.".into(),
             })
         })?;
+        let memo = self.operand_memo(brep);
         let value = brep
-            .regular_solid_containment(subject, target)
+            .regular_solid_containment_memoized(subject, target, memo)
             .map_err(backend_refusal)?;
         // Topology is authoritative. Volume and location are diagnostics, not
         // an epsilon-based emptiness test. Reject inconsistent transport facts.

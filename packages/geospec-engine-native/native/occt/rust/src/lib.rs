@@ -19,12 +19,12 @@ pub use geospec_engine_native_core::backend::brep::{
     EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
     EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, FaceFacts,
     FiniteContactCircle, FiniteContactFace, LocatedFace, NominalCylindricalBand, OccurrenceFacts,
-    PointState, RegularSolidContainment, ReportedBrepBundle, ReportedFaces, ResolvedSourceFace,
-    SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts, SourceFaceKey,
-    StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts, TessellationProfile,
-    TopologyCounts, ValidityFacts, MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
-    MAX_EDGE_TREATMENT_BOUNDARY_USES, MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS,
-    MAX_EDGE_TREATMENT_ROWS,
+    OperandMemo, PointState, RegularSolidContainment, ReportedBrepBundle, ReportedFaces,
+    ResolvedSourceFace, SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts,
+    SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
+    TessellationProfile, TopologyCounts, ValidityFacts, MAX_CIRCULAR_BORE_CANDIDATES,
+    MAX_CIRCULAR_BORE_OWNED_BYTES, MAX_EDGE_TREATMENT_BOUNDARY_USES,
+    MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS, MAX_EDGE_TREATMENT_ROWS,
 };
 use geospec_engine_native_core::backend::pmi::{PmiFaceAssociation, PmiField, PmiFieldStatus};
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
@@ -190,6 +190,7 @@ impl Document {
             self.raw.as_ptr(),
             subject,
             target,
+            std::ptr::null_mut(),
             dedicated_width(grant_width)?,
         )
     }
@@ -611,6 +612,24 @@ impl BrepSubject for Document {
         face: BrepEntity,
     ) -> Result<geospec_engine_native_core::backend::brep::SelectedInterferenceMaterial, BackendError>
     {
+        self.selected_interference_material_memoized(face, &mut no_memo())
+    }
+
+    fn operand_memo(&self) -> OperandMemo {
+        // SAFETY: the memo only compares this pointer; the context drops it
+        // before the document, and a null memo re-qualifies per query.
+        match NonNull::new(unsafe { ffi::geospec_occt_operand_memo_new(self.raw.as_ptr()) }) {
+            Some(raw) => Box::new(OcctOperandMemo(raw)),
+            None => no_memo(),
+        }
+    }
+
+    fn selected_interference_material_memoized(
+        &self,
+        face: BrepEntity,
+        memo: &mut OperandMemo,
+    ) -> Result<geospec_engine_native_core::backend::brep::SelectedInterferenceMaterial, BackendError>
+    {
         self.validate_entity(face)?;
         let BrepEntity::Face {
             occurrence,
@@ -629,6 +648,7 @@ impl BrepSubject for Document {
                 ffi::geospec_occt_selected_interference_material_query(
                     self.raw.as_ptr(),
                     face.into(),
+                    memo_raw(memo),
                     &mut band,
                     &mut kind,
                     error.raw(),
@@ -653,6 +673,14 @@ impl BrepSubject for Document {
     }
 
     fn selected_bore_void(&self, face: BrepEntity) -> Result<SelectedBoreVoid, BackendError> {
+        self.selected_bore_void_memoized(face, &mut no_memo())
+    }
+
+    fn selected_bore_void_memoized(
+        &self,
+        face: BrepEntity,
+        memo: &mut OperandMemo,
+    ) -> Result<SelectedBoreVoid, BackendError> {
         self.validate_entity(face)?;
         let BrepEntity::Face {
             occurrence,
@@ -669,6 +697,7 @@ impl BrepSubject for Document {
                 ffi::geospec_occt_selected_bore_void_query(
                     self.raw.as_ptr(),
                     face.into(),
+                    memo_raw(memo),
                     &mut band,
                     &mut clear,
                     error.raw(),
@@ -733,16 +762,36 @@ impl BrepSubject for Document {
         subject: BrepEntity,
         target: BrepEntity,
     ) -> Result<RegularSolidContainment, BackendError> {
+        self.regular_solid_containment_memoized(subject, target, &mut no_memo())
+    }
+
+    fn regular_solid_containment_memoized(
+        &self,
+        subject: BrepEntity,
+        target: BrepEntity,
+        memo: &mut OperandMemo,
+    ) -> Result<RegularSolidContainment, BackendError> {
+        self.validate_entity(subject)?;
+        self.validate_entity(target)?;
+        let raw = self.raw.as_ptr();
         if let Some(width) = self.parallel_grant_width {
             // SAFETY: see the connector's lifetime permit contract.
-            let (facts, used_parallel) =
-                unsafe { self.regular_solid_containment_dedicated(subject, target, width)? };
+            let (facts, used_parallel) = unsafe {
+                regular_solid_containment_with_control(
+                    raw,
+                    subject,
+                    target,
+                    memo_raw(memo),
+                    dedicated_width(width)?,
+                )?
+            };
             require_grant_mode(width, used_parallel)?;
             return Ok(facts);
         }
-        self.validate_entity(subject)?;
-        self.validate_entity(target)?;
-        unsafe { regular_solid_containment(self.raw.as_ptr(), subject, target) }
+        Ok(unsafe {
+            regular_solid_containment_with_control(raw, subject, target, memo_raw(memo), 0)?
+        }
+        .0)
     }
 
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
@@ -864,6 +913,25 @@ fn invalid_input(message: impl Into<String>) -> BackendError {
         kind: BackendErrorKind::InvalidInput,
         message: message.into(),
     }
+}
+
+/// The bridge's claim-local operand memo (C7), released with its context.
+struct OcctOperandMemo(NonNull<ffi::OperandMemo>);
+
+impl Drop for OcctOperandMemo {
+    fn drop(&mut self) {
+        unsafe { ffi::geospec_occt_operand_memo_release(self.0.as_ptr()) }
+    }
+}
+
+fn no_memo() -> OperandMemo {
+    Box::new(())
+}
+
+/// The bridge memo inside a claim's memo, or null to re-qualify per query.
+fn memo_raw(memo: &mut OperandMemo) -> *mut ffi::OperandMemo {
+    memo.downcast_mut::<OcctOperandMemo>()
+        .map_or(std::ptr::null_mut(), |memo| memo.0.as_ptr())
 }
 
 fn dedicated_width(width: u32) -> Result<i32, BackendError> {
@@ -2034,18 +2102,11 @@ unsafe fn classify_face_points(
     states.into_iter().map(point_state).collect()
 }
 
-unsafe fn regular_solid_containment(
-    raw: *const ffi::Document,
-    subject: BrepEntity,
-    target: BrepEntity,
-) -> Result<RegularSolidContainment, BackendError> {
-    Ok(regular_solid_containment_with_control(raw, subject, target, 0)?.0)
-}
-
 unsafe fn regular_solid_containment_with_control(
     raw: *const ffi::Document,
     subject: BrepEntity,
     target: BrepEntity,
+    memo: *mut ffi::OperandMemo,
     grant_width: i32,
 ) -> Result<(RegularSolidContainment, bool), BackendError> {
     let mut value = ffi::RegularSolidContainment::default();
@@ -2056,6 +2117,7 @@ unsafe fn regular_solid_containment_with_control(
             raw,
             subject.into(),
             target.into(),
+            memo,
             grant_width,
             &mut used_parallel,
             &mut value,
@@ -3358,6 +3420,11 @@ mod ffi {
     }
 
     #[repr(C)]
+    pub struct OperandMemo {
+        _private: [u8; 0],
+    }
+
+    #[repr(C)]
     pub struct StringBuffer {
         pub data: *mut c_char,
         pub capacity: usize,
@@ -3781,6 +3848,7 @@ mod ffi {
         pub fn geospec_occt_selected_interference_material_query(
             document: *const Document,
             face: Entity,
+            memo: *mut OperandMemo,
             band: *mut NominalCylindricalBand,
             kind: *mut u32,
             error: *mut StringBuffer,
@@ -3797,6 +3865,7 @@ mod ffi {
         pub fn geospec_occt_selected_bore_void_query(
             document: *const Document,
             face: Entity,
+            memo: *mut OperandMemo,
             band: *mut NominalCylindricalBand,
             clear: *mut CircularBoreCandidate,
             error: *mut StringBuffer,
@@ -4088,10 +4157,13 @@ mod ffi {
             state_capacity: usize,
             error: *mut StringBuffer,
         ) -> i32;
+        pub fn geospec_occt_operand_memo_new(document: *const Document) -> *mut OperandMemo;
+        pub fn geospec_occt_operand_memo_release(memo: *mut OperandMemo);
         pub fn geospec_occt_regular_solid_containment_dedicated(
             document: *const Document,
             subject: Entity,
             target: Entity,
+            memo: *mut OperandMemo,
             grant_width: i32,
             used_parallel: *mut i32,
             result: *mut RegularSolidContainment,

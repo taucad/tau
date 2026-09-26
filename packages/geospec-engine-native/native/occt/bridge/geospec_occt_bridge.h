@@ -12,6 +12,7 @@ extern "C" {
 #endif
 
 typedef struct geospec_occt_document geospec_occt_document;
+typedef struct geospec_occt_operand_memo geospec_occt_operand_memo;
 
 enum geospec_occt_status {
   GEOSPEC_OCCT_OK = 0,
@@ -711,9 +712,18 @@ int geospec_occt_regular_solid_containment(
     geospec_occt_entity target,
     geospec_occt_regular_solid_containment_result* out_result,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// C7: a claim-local memo of per-occurrence regular-solid operands and scoped
+// bore inventories for one document. The caller releases it after the claim;
+// a null memo re-qualifies per query. Occurrence operands of the queries
+// below come from `memo` when it is not null.
+geospec_occt_operand_memo* geospec_occt_operand_memo_new(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
+void geospec_occt_operand_memo_release(
+    geospec_occt_operand_memo* memo) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment_dedicated(
     const geospec_occt_document* document, geospec_occt_entity subject,
-    geospec_occt_entity target, int grant_width, int* out_used_parallel,
+    geospec_occt_entity target, geospec_occt_operand_memo* memo,
+    int grant_width, int* out_used_parallel,
     geospec_occt_regular_solid_containment_result* out_result,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_cylinder_axial_extent(
@@ -728,11 +738,13 @@ int geospec_occt_nominal_cylindrical_band_query(
 // kind 0: complete bore material in end slab; kind 1: complete capped cylinder.
 int geospec_occt_selected_interference_material_query(
     const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_operand_memo* memo,
     geospec_occt_nominal_cylindrical_band* band, uint32_t* kind,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 int geospec_occt_selected_bore_void_query(
     const geospec_occt_document* document, geospec_occt_entity face,
+    geospec_occt_operand_memo* memo,
     geospec_occt_nominal_cylindrical_band* band,
     geospec_occt_circular_bore_candidate* clear_interior,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;

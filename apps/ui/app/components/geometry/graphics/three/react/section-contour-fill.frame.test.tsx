@@ -374,4 +374,32 @@ describe('SectionContourFills frame', () => {
       request!.requestKey,
     ]);
   });
+
+  it('should request the exact result again when a plane returns after its response arrived stale', async () => {
+    mocks.hasWorker = true;
+    const fills = await mountAndSettle();
+    const [requestA] = mocks.postedRequests;
+    mocks.workerOptions!.onResponse(computeSectionCapWorkerResponse(requestA!));
+    fills.frame();
+    await fills.render({ plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -0.25) });
+    fills.frame();
+    const requestB = mocks.postedRequests[1]!;
+    await fills.render({ plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0) });
+    fills.frame();
+    // B's result lands while the plane is back on A, so it is stale.
+    mocks.workerOptions!.onResponse(computeSectionCapWorkerResponse(requestB));
+    fills.frame();
+
+    await fills.render({ plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -0.25) });
+    fills.frame();
+    expect(mocks.postedRequests.map(({ requestKey }) => requestKey)).toEqual([
+      requestA!.requestKey,
+      requestB.requestKey,
+      requestB.requestKey,
+    ]);
+    mocks.workerOptions!.onResponse(computeSectionCapWorkerResponse(mocks.postedRequests[2]!));
+    fills.frame();
+
+    expect(fills.performance().latestFrame).toMatchObject({ exactDiagnosticIsCurrent: true, pendingReason: 'none' });
+  });
 });

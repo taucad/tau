@@ -90,7 +90,7 @@ describe('parseGcode', () => {
     it('should record the source digest and parser identity', () => {
       expect(program.source).toEqual({
         digest: 'sha256:0967e63c5dab107b89d9d0ce4215de99b65b731c962bbced32b1bb8986e4ac50',
-        parser: { id: 'tau.slicer.toolpath', version: '1' },
+        parser: { id: 'tau.slicer.toolpath', version: '2' },
       });
       expect(program.version).toBe(1);
       expect(program.units).toBe('mm');
@@ -229,6 +229,19 @@ describe('parseGcode', () => {
       expect(program.layerTable.map((layer) => layer.z)).toEqual([0.2, 0.4]);
       expect(program.layerTable[0]).toMatchObject({ index: 0, firstSegment: 0 });
       expect(program.tools[program.segmentCount - 1]).toBe(0);
+    });
+
+    it('should mark the start sequence before the first ;LAYER_CHANGE as the preamble', () => {
+      const { preambleSegmentCount } = program;
+      const unknownIndex = program.kinds.indexOf(toolpathSegmentKinds.indexOf('unknown'));
+      expect(unknownIndex).toBeGreaterThanOrEqual(0);
+      expect(unknownIndex).toBeLessThan(preambleSegmentCount);
+      const printed = [...program.kinds.keys()].filter((index) =>
+        ['outer-wall', 'infill'].includes(toolpathSegmentKinds[program.kinds[index]!]!),
+      );
+      expect(Math.min(...printed)).toBeGreaterThanOrEqual(preambleSegmentCount);
+      // The first segment after the annotation is the layer's own `G1 Z0.2` approach.
+      expect(program.positions[preambleSegmentCount * 6 + 5]).toBeCloseTo(0.2, 5);
     });
 
     it('should honour the G4 dwell in the clock', () => {
@@ -402,6 +415,10 @@ describe('parseGcode', () => {
       expect(program.coverage).toEqual({ records: 0, known: 0, vendor: 0, unknown: 0, complete: true });
       expect(program.bounds).toEqual({ min: [0, 0, 0], max: [0, 0, 0] });
       expect(segmentAtTime(program, 0)).toBe(-1);
+    });
+
+    it('should mark no preamble when the source annotates no layers', () => {
+      expect(parseGcode('G28\nG1 X10 F600\n').preambleSegmentCount).toBe(0);
     });
   });
 });

@@ -82,6 +82,12 @@ export type ToolpathProgram = Readonly<{
   positions: Float32Array<ArrayBuffer>;
   /** Index into {@link toolpathSegmentKinds} per segment. */
   kinds: Uint8Array<ArrayBuffer>;
+  /**
+   * Segments before the first layer annotation: the start sequence's homing, bed levelling, nozzle
+   * wipe and purge lines. They share layer 0 with the first printed layer; zero when the source
+   * annotates no layers.
+   */
+  preambleSegmentCount: number;
   /** Layer index per segment. */
   layers: Uint32Array<ArrayBuffer>;
   /** `[start, end]` seconds per segment. */
@@ -177,7 +183,7 @@ export class ToolpathParseError extends Error {
   }
 }
 
-const parserIdentity = Object.freeze({ id: 'tau.slicer.toolpath', version: '1' });
+const parserIdentity = Object.freeze({ id: 'tau.slicer.toolpath', version: '2' });
 const defaultAcceleration = Object.freeze({ print: 10_000, travel: 20_000, extruder: 5000 });
 const defaultMaximumFeedrate = 500;
 const defaultMaximumBytes = 64 * 1024 * 1024;
@@ -411,8 +417,10 @@ export const parseGcode = (
   let wiping = false;
   let inHeader = false;
   let headerEstimate: ToolpathProgram['headerEstimate'];
+  let preambleSegmentCount: number | undefined;
 
   const startLayer = (z: number | undefined): void => {
+    preambleSegmentCount ??= segmentCount;
     const last = layerTable.at(-1);
     if (last?.implicit) {
       // Motion before the first annotated layer (start sequence, purge line) belongs to that layer.
@@ -927,6 +935,7 @@ export const parseGcode = (
     segmentCount,
     positions: columns.positions.slice(0, segmentCount * 6),
     kinds: columns.kinds.slice(0, segmentCount),
+    preambleSegmentCount: preambleSegmentCount ?? 0,
     layers: columns.layers.slice(0, segmentCount),
     times: columns.times.slice(0, segmentCount * 2),
     extrusion: columns.extrusion.slice(0, segmentCount),

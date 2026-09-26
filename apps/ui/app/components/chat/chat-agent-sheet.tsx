@@ -1042,7 +1042,11 @@ function Sheet({
       {view === 'settings' ? (
         <div
           data-slot='sheet-settings'
-          className='flex flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2'
+          /* Opening is instant; only a return from a sub-view slides. */
+          className={cn(
+            'flex flex-col',
+            hasNavigated.current && 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
+          )}
         >
           {hasChoice ? (
             <button

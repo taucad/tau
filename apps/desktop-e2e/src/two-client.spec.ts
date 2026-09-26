@@ -18,7 +18,7 @@ import {
   startGatewayFixture,
 } from '#support/gateway-fixture.js';
 import { expectCount, expectVisible, selectChatModel, sendPrompt, stopButtonOf } from '#support/scenario.js';
-import { historyRows, openBackupChooser, restoreFromHistory } from '#support/revisions-pane.js';
+import { historyRows, openBackupChooser, restoreFromHistory, revisionStrip } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   browserFileDigest,
@@ -440,10 +440,19 @@ const tauRepository = async (projectId: string): Promise<string> => {
   }
   const authorization = `http.extraHeader=Authorization: ${basicAuthorization(bearer)}`;
   const remoteUrl = `${desktopE2EApiUrl}/v1/git/${projectId}.git`;
-  const fetched = await runGit(
-    ['-c', authorization, 'fetch', '--quiet', '--force', '--prune', '--no-tags', remoteUrl, '+refs/*:refs/*'],
-    mirror,
-  );
+  const fetchMirror = async (): Promise<Awaited<ReturnType<typeof runGit>>> =>
+    runGit(
+      ['-c', authorization, 'fetch', '--quiet', '--force', '--prune', '--no-tags', remoteUrl, '+refs/*:refs/*'],
+      mirror,
+    );
+  let fetched = await fetchMirror();
+  /* The suite's reads share the devices' git budget (W13d): a 429 is a wait,
+   * not a repository that does not exist, so the mirror waits out the window
+   * rather than answering `undefined` for a revision the remote holds. */
+  for (let waited = 0; fetched.code !== 0 && /\b429\b/u.test(fetched.stderr) && waited < 60_000; waited += 5000) {
+    await delay(5000);
+    fetched = await fetchMirror();
+  }
   if (fetched.code !== 0) {
     await rm(mirror, { recursive: true, force: true });
   }
@@ -1787,8 +1796,9 @@ describe('live and automatic', () => {
       const lines = await conflictLines();
       return lines.size;
     };
+    /* The visible strip's: a mounted but hidden pane has one too (W13d). */
     const statusText = async (page: Page): Promise<string> =>
-      (await page.getByRole('status', { name: 'Revision status' }).first().textContent()) ?? '';
+      (await revisionStrip(page).getByRole('status', { name: 'Revision status' }).textContent()) ?? '';
     const cards = (page: Page): Locator => page.getByRole('list', { name: /^Files to resolve in/u });
     const desktopText = (round: number): string => `cube(${String(round)}); // desktop ${String(round)}\n`;
     const overlap = async (round: number): Promise<void> => {
@@ -1851,6 +1861,64 @@ describe('live and automatic', () => {
       await expect.poll(async () => statusText(page), { timeout: 120_000 }).not.toMatch(/Needs your decision/u);
     }
   }, 900_000);
+
+  /* D15, RV-W7 #7 (W13d): *Undo* on the desktop, whose newest operation on main is the D14 decision. */
+  const undoOnDesktop = async (): Promise<void> => {
+    const undo = revisionStrip(b().page).getByRole('button', { name: 'Undo', exact: true });
+    await expect
+      .poll(async () => undo.isEnabled().catch(() => false), {
+        message: 'D15: the desktop strip must offer Undo for its own operation',
+        timeout: 120_000,
+      })
+      .toBe(true);
+    await undo.click();
+  };
+
+  it('should refuse to undo past a decision with the merge sentence, writing nothing (D15)', async () => {
+    const before = await expectConverged('undo past a decision');
+    await openRevisionsPane(b());
+    await undoOnDesktop();
+
+    await expectVisible(
+      b().page.getByText('Your last change on this branch was a merge. Restore an earlier revision instead.'),
+      60_000,
+    );
+    expect(await gitHead(destinationRoot), 'D15: a refused Undo mints nothing').toBe(before);
+  }, 600_000);
+
+  it('should undo only its own change after the other device minted on top (D15)', async () => {
+    await writeFile(join(destinationRoot, 'undo-mine.scad'), 'cube(5); // desktop, to undo\n');
+    await saveOnDesktop();
+    await expect
+      .poll(async () => readBrowserFile(a(), sourceSlug, ['undo-mine.scad']), { timeout: 180_000 })
+      .toBe('cube(5); // desktop, to undo\n');
+    await expectConverged('undo base');
+    await writeBrowserFile(['undo-theirs.scad'], 'sphere(5); // browser, on top\n');
+    await saveRevisionInBrowser(a());
+    const onTop = await expectConverged('the other device on top');
+    expect(await remoteFile(onTop, 'undo-theirs.scad')).toBe('sphere(5); // browser, on top');
+
+    await undoOnDesktop();
+    /* Either the scoped inverse lands, or it refuses by name; never a revert of the browser's bytes. */
+    const landed = b().page.getByText(/^Undid (Rev \d+|an earlier revision)$/u);
+    const refused = b().page.getByText(/^A later revision changed the same lines, so Rev \d+ can’t be undone\./u);
+    await expect
+      .poll(async () => (await landed.first().isVisible()) || (await refused.first().isVisible()), {
+        message: 'D15: Undo must land or refuse by name',
+        timeout: 120_000,
+      })
+      .toBe(true);
+    if (await refused.first().isVisible()) {
+      expect(await gitHead(destinationRoot), 'D15: a refused Undo mints nothing').toBe(onTop);
+      return;
+    }
+    const undone = await expectConverged('undo');
+    expect(undone).not.toBe(onTop);
+    expect(await remoteFile(undone, 'undo-mine.scad'), 'D15: this device’s own change is undone').toBeUndefined();
+    expect(await remoteFile(undone, 'undo-theirs.scad'), 'D15: the other device’s bytes are untouched').toBe(
+      'sphere(5); // browser, on top',
+    );
+  }, 600_000);
 });
 
 /** Charter W13/V18 and blueprint S48(15): real close-and-continue in both directions. */

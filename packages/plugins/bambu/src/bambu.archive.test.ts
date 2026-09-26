@@ -13,12 +13,7 @@ const artifact = (
   bytes: Uint8Array<ArrayBuffer>,
   overrides: Partial<MachineArtifactReference> = {},
 ): MachineArtifactReference => ({
-  revision: {
-    authorityId: 'authority',
-    workspaceId: 'workspace',
-    revisionId: 'revision' as MachineArtifactReference['revision']['revisionId'],
-    treeDigest: digest(encoder.encode('tree')),
-  },
+  projectId: 'proj_0123456789abcdefghijK',
   path: 'known-good.gcode.3mf',
   digest: digest(bytes),
   length: bytes.byteLength,

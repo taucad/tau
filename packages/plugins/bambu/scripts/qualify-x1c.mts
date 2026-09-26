@@ -1107,12 +1107,7 @@ const loadCubeArtifact = async (): Promise<
     throw new QualificationError('X1C_CUBE_ARTIFACT_MISMATCH');
   }
   const artifact: MachineArtifactReference = Object.freeze({
-    revision: Object.freeze({
-      authorityId: 'x1c-qualification-authority',
-      workspaceId: 'x1c-qualification-workspace',
-      revisionId: 'x1c-petg-cube-v1' as MachineArtifactReference['revision']['revisionId'],
-      treeDigest: cubeArtifactDigest as MachineArtifactReference['digest'],
-    }),
+    projectId: 'proj_x1cQualification00000',
     path: cubeArtifactRelativePath,
     digest: cubeArtifactDigest as MachineArtifactReference['digest'],
     length: bytes.byteLength,
@@ -1610,7 +1605,30 @@ const waitForCurrentMachine = async (
   throw new QualificationError('X1C_PRINT_MACHINE_NOT_CURRENT');
 };
 
+/**
+ * Refuse to print when the store before `x1c-machine-store` already holds an effect for the fixed start operation.
+ * Effects are never imported into a new store, so without this a re-run would send the same start again. The old
+ * journal is only read; a missing one means nothing was sent from it. After checking the printer, bump the
+ * operation id's `-v` suffix to print again.
+ */
+const assertStartNotInOldStore = async (): Promise<void> => {
+  let journal: string;
+  try {
+    journal = await readFile(join(dirname(configurationPath), 'x1c-machine-authority', 'machine-events.jsonl'), 'utf8');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+  // Every intent, send and result of the start names its operation id as one JSON string.
+  if (journal.includes(JSON.stringify(printOperationId))) {
+    throw new QualificationError('X1C_PRINT_START_ALREADY_IN_OLD_STORE');
+  }
+};
+
 const runPrintCube = async (configuration: QualificationConfiguration): Promise<void> => {
+  await assertStartNotInOldStore();
   const activeConfiguration = await resolveCurrentConfiguration(configuration);
   const artifact = await loadCubeArtifact();
   const ftpTrust = await resolveFtpTrust(activeConfiguration);
@@ -1627,15 +1645,14 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     connection: () => createPrintConnectionRuntime(activeConfiguration, artifact),
   });
   const admission = createHostAdmissionAuthority({ hostId: 'x1c-qualification-host' });
-  await mkdir(join(dirname(configurationPath), 'x1c-machine-authority'), {
+  await mkdir(join(dirname(configurationPath), 'x1c-machine-store'), {
     recursive: true,
     mode: 0o700,
   });
   const host = await createNodeMachineHost({
-    authorityRoot: join(dirname(configurationPath), 'x1c-machine-authority'),
+    storeRoot: join(dirname(configurationPath), 'x1c-machine-store'),
     hostId: 'x1c-qualification-host',
     authorityId: 'x1c-qualification-authority',
-    generation: 'bambu-x1c-machine-authority-v1',
     admission,
     providers: [bambuMachine()],
     runtime,
@@ -1643,10 +1660,8 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       process.stderr.write(`X1C_HOST_${failureCode(error)}\n`);
     },
   });
-  const admitted = admission.issueTrustedSession({
+  const admitted = host.issueSession({
     actor: { kind: 'user', id: 'operator' },
-    authorityId: 'x1c-qualification-authority',
-    workspaceId: 'x1c-qualification-workspace',
     grants: [
       { route: 'machines', operation: 'machines.discover' },
       { route: 'machines', operation: 'machines.beginBinding' },
@@ -1662,7 +1677,6 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
   const server = host.serve({
     port: ports.port1,
     session: admitted,
-    workspaceId: 'x1c-qualification-workspace',
   });
   const client = connectMachineChannel(ports.port2);
   let phase = 'CHANNEL';
@@ -1670,7 +1684,11 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     await client.ready;
     phase = 'DIRECTORY';
     const listed = await client.list({ signal: cancellation.signal });
-    if (!listed.entries.some((entry) => entry.machineId === activeConfiguration.logicalId)) {
+    // The store names the printer: its id is the one its binding returned, found again by the printer's serial.
+    let machineId = listed.entries.find(
+      (entry) => entry.providerId === 'bambu' && entry.descriptor.id === activeConfiguration.serial,
+    )?.machineId;
+    if (machineId === undefined) {
       phase = 'DISCOVERY';
       let candidate: MachineCandidate | undefined;
       for await (const event of client.discover({
@@ -1695,21 +1713,26 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
         name: activeConfiguration.logicalId,
         signal: cancellation.signal,
       });
-      if (ceremony.status === 'operator-action-required') {
-        phase = 'BINDING';
-        await host.completeBinding({
-          ceremonyId: ceremony.ceremonyId,
-          secretRef: 'keychain:x1c-qualification',
-          serviceTrust: {
-            mqtt: pinned(trust.mqtt),
-            camera: pinned(trust.camera),
-            ftp: ftpTrust,
-          },
-        });
+      phase = 'BINDING';
+      const bound =
+        ceremony.status === 'operator-action-required'
+          ? await host.completeBinding({
+              ceremonyId: ceremony.ceremonyId,
+              secretRef: 'keychain:x1c-qualification',
+              serviceTrust: {
+                mqtt: pinned(trust.mqtt),
+                camera: pinned(trust.camera),
+                ftp: ftpTrust,
+              },
+            })
+          : ceremony;
+      if (bound.status !== 'bound') {
+        throw new QualificationError('X1C_PRINT_BINDING_INCOMPLETE');
       }
+      ({ machineId } = bound);
     }
     phase = 'SETUP';
-    const entry = await waitForCurrentMachine(client, activeConfiguration.logicalId, cancellation.signal);
+    const entry = await waitForCurrentMachine(client, machineId, cancellation.signal);
     const nozzle = entry.descriptor.tools[0]?.nozzleDiameter;
     const material = entry.snapshot.setup.materials.find((row) => row.slot === 0);
     if (
@@ -1726,7 +1749,7 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     }
     phase = 'UPLOAD';
     const prepared = await client.preparePrint({
-      machineId: activeConfiguration.logicalId,
+      machineId,
       artifact: artifact.artifact,
       configuration: {
         amsMapping: [0],
@@ -1753,7 +1776,7 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       signal: cancellation.signal,
     });
     const uploaded = await client.uploadPrint({
-      machineId: activeConfiguration.logicalId,
+      machineId,
       preparedId: prepared.preparedId,
       preparedDigest: prepared.preparedDigest,
       operationId: `${printOperationId}-upload`,
@@ -1767,7 +1790,7 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     );
     phase = 'START';
     let receipt: MachineOperationReceipt = await client.startPrint({
-      machineId: activeConfiguration.logicalId,
+      machineId,
       preparedId: prepared.preparedId,
       preparedDigest: prepared.preparedDigest,
       transferId: uploaded.evidence.transferId,
@@ -1780,7 +1803,7 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       await delay(1000, undefined, { signal: cancellation.signal });
       // oxlint-disable-next-line no-await-in-loop -- exact operation reconciliation is the only safe unknown-result path.
       const reconciled = await client.reconcileOperation({
-        machineId: activeConfiguration.logicalId,
+        machineId,
         operationId: printOperationId,
         signal: cancellation.signal,
       });
@@ -1800,7 +1823,7 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     while (Date.now() < deadline) {
       // oxlint-disable-next-line no-await-in-loop -- supervised monitoring reads one durable machine projection serially.
       const current = await client.get({
-        machineId: activeConfiguration.logicalId,
+        machineId,
         signal: cancellation.signal,
       });
       const { run } = current.snapshot;

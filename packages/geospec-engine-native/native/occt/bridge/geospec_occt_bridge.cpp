@@ -729,18 +729,6 @@ FaceFacts face_facts(const TopoDS_Face& face, uint32_t index,
 }
 
 template <typename Face>
-int exact_face_index(const std::vector<Face>& faces,
-                     const TopoDS_Shape& shape) {
-  int match = 0;
-  for (size_t index = 0; index < faces.size(); ++index) {
-    if (!faces[index].shape.IsEqual(shape)) continue;
-    if (match != 0) return 0;
-    match = static_cast<int>(index + 1);
-  }
-  return match;
-}
-
-template <typename Face>
 int exact_mapped_face_index(
     const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& map,
     const std::vector<Face>& faces, const TopoDS_Shape& shape) {
@@ -751,24 +739,79 @@ int exact_mapped_face_index(
              : 0;
 }
 
-int located_public_face_index(const TopoDS_Shape& product,
-                              const TopoDS_Shape& attached,
-                              const OccurrenceFacts& occurrence) {
-  TopoDS_Shape product_face;
-  for (TopExp_Explorer explorer(product, TopAbs_FACE); explorer.More();
-       explorer.Next()) {
-    if (!explorer.Current().IsSame(attached)) continue;
-    if (!product_face.IsNull()) return -1;
-    product_face = explorer.Current();
-  }
-  if (product_face.IsNull()) return -1;
+// A face list indexed by IsSame, with each key's ordinals in the list.
+struct IndexedFaces {
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> map;
+  std::vector<std::vector<size_t>> ordinals;
 
+  void add(const TopoDS_Shape& face, size_t ordinal) {
+    const size_t key = static_cast<size_t>(map.Add(face));
+    if (key > ordinals.size()) ordinals.resize(key);
+    ordinals[key - 1].push_back(ordinal);
+  }
+
+  // The 1-based ordinal of the unique IsEqual match in `faces`, else 0. IsEqual
+  // implies IsSame, so no match lies outside the shape's own key.
+  template <typename Face>
+  int exact(const std::vector<Face>& faces, const TopoDS_Shape& shape) const {
+    const int key = map.FindIndex(shape);
+    if (key <= 0) return 0;
+    int match = 0;
+    for (const size_t ordinal : ordinals[static_cast<size_t>(key - 1)]) {
+      if (!faces[ordinal].shape.IsEqual(shape)) continue;
+      if (match != 0) return 0;
+      match = static_cast<int>(ordinal + 1);
+    }
+    return match;
+  }
+};
+
+// Face indexes for the named-subshape and datum lookups: the whole shape's
+// public faces over its private face map, and each product's and occurrence's
+// faces indexed on their first lookup rather than scanned per lookup.
+struct FaceLookups {
+  IndexedFaces whole;
+  std::vector<std::optional<IndexedFaces>> products;
+  std::vector<std::optional<IndexedFaces>> occurrences;
+};
+
+int located_public_face_index(FaceLookups& lookups, size_t product,
+                              const TopoDS_Shape& product_shape,
+                              const TopoDS_Shape& attached,
+                              const std::vector<OccurrenceFacts>& occurrences,
+                              size_t occurrence) {
+  std::optional<IndexedFaces>& product_faces = lookups.products[product];
+  if (!product_faces) {
+    product_faces.emplace();
+    size_t ordinal = 0;
+    for (TopExp_Explorer explorer(product_shape, TopAbs_FACE); explorer.More();
+         explorer.Next()) {
+      product_faces->add(explorer.Current(), ordinal++);
+    }
+  }
+  // The one product face the explorer visits IsSame `attached`, else none.
+  const int key = product_faces->map.FindIndex(attached);
+  if (key <= 0 ||
+      product_faces->ordinals[static_cast<size_t>(key - 1)].size() != 1) {
+    return -1;
+  }
+  const TopoDS_Shape& product_face = product_faces->map(key);
+
+  const OccurrenceFacts& value = occurrences[occurrence];
   TopoDS_Shape located = product_face;
-  located.Location(occurrence.shape.Location() * product.Location().Inverted() *
+  located.Location(value.shape.Location() *
+                   product_shape.Location().Inverted() *
                    product_face.Location());
-  const int face = exact_face_index(occurrence.public_faces, located);
+  std::optional<IndexedFaces>& faces = lookups.occurrences[occurrence];
+  if (!faces) {
+    faces.emplace();
+    for (size_t ordinal = 0; ordinal < value.public_faces.size(); ++ordinal) {
+      faces->add(value.public_faces[ordinal].shape, ordinal);
+    }
+  }
+  const int face = faces->exact(value.public_faces, located);
   if (face == 0) return -1;
-  return occurrence.public_faces[static_cast<size_t>(face - 1)].query_index == 0
+  return value.public_faces[static_cast<size_t>(face - 1)].query_index == 0
              ? -1
              : face - 1;
 }
@@ -1108,6 +1151,7 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
                       std::vector<OccurrenceFacts>& occurrences,
                       std::vector<FaceFacts>& whole_query_faces,
                       const std::vector<FaceView>& whole_faces,
+                      FaceLookups& lookups,
                       std::vector<SubshapeFacts>& output) {
   std::vector<std::vector<int>> owners = index_product_owners(
       static_cast<size_t>(product_labels.Length()), occurrences);
@@ -1132,10 +1176,10 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
         if (shape.ShapeType() == TopAbs_FACE) {
           if (owner >= 0) {
             face = located_public_face_index(
-                product_shape, shape,
-                occurrences[static_cast<size_t>(owner)]);
+                lookups, static_cast<size_t>(product_index - 1), product_shape,
+                shape, occurrences, static_cast<size_t>(owner));
           } else {
-            const int matched = exact_face_index(whole_faces, shape);
+            const int matched = lookups.whole.exact(whole_faces, shape);
             if (matched > 0 &&
                 whole_faces[static_cast<size_t>(matched - 1)].query_index > 0) {
               face = matched - 1;
@@ -1173,7 +1217,8 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
               .faces[static_cast<size_t>(located.query_index - 1)]
               .shape_label = record.shape_label;
         }
-        const int whole = exact_face_index(whole_query_faces, located.shape);
+        const int whole = exact_mapped_face_index(
+            lookups.whole.map, whole_query_faces, located.shape);
         if (whole > 0) {
           whole_query_faces[static_cast<size_t>(whole - 1)].shape_label =
               record.shape_label;
@@ -1201,7 +1246,7 @@ void append_semantic_datums(
     const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
     const NCollection_Sequence<TDF_Label>& product_labels,
     const std::vector<OccurrenceFacts>& occurrences,
-    const std::vector<FaceView>& whole_faces,
+    const std::vector<FaceView>& whole_faces, FaceLookups& lookups,
     std::vector<SemanticDatumFacts>& output) {
   const auto session = reader.ChangeReader().WS();
   if (session.IsNull() || session->Model().IsNull()) return;
@@ -1314,7 +1359,7 @@ void append_semantic_datums(
   for (const auto& [letter, attached_faces] : faces_by_letter) {
     auto& whole_indices = whole_face_indices_by_letter[letter];
     for (const TopoDS_Shape& attached : attached_faces) {
-      const int face = exact_face_index(whole_faces, attached);
+      const int face = lookups.whole.exact(whole_faces, attached);
       if (face > 0 &&
           whole_faces[static_cast<size_t>(face - 1)].query_index > 0) {
         whole_indices.push_back(static_cast<uint32_t>(face - 1));
@@ -1335,8 +1380,9 @@ void append_semantic_datums(
           product_labels.Value(static_cast<int>(occurrence.product + 1)));
       std::vector<uint32_t> indices;
       for (const TopoDS_Shape& attached : attached_faces) {
-        const int face =
-            located_public_face_index(product_shape, attached, occurrence);
+        const int face = located_public_face_index(
+            lookups, occurrence.product, product_shape, attached, occurrences,
+            occurrence_index);
         if (face >= 0) {
           indices.push_back(static_cast<uint32_t>(face));
         }
@@ -6065,7 +6111,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     }
     prepare_source_associations(reader, shape_tool, result->occurrences,
                                 result->source_faces);
-    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    // The private face map also keys the named-subshape and datum lookups.
+    FaceLookups lookups;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& faces =
+        lookups.whole.map;
     TopExp::MapShapes(result->shape, TopAbs_FACE, faces);
     result->faces.reserve(static_cast<size_t>(faces.Extent()));
     for (int index = 1; index <= faces.Extent(); ++index) {
@@ -6079,14 +6128,18 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
       const TopoDS_Face face = TopoDS::Face(explorer.Current());
       const int query_index =
           exact_mapped_face_index(faces, result->faces, face);
+      lookups.whole.add(face, result->public_faces.size());
       result->public_faces.push_back(
           {query_index > 0 ? static_cast<uint32_t>(query_index) : 0, face});
     }
+    lookups.products.resize(static_cast<size_t>(products.Length()));
+    lookups.occurrences.resize(result->occurrences.size());
     append_subshapes(shape_tool, products, result->occurrences,
-                     result->faces, result->public_faces,
+                     result->faces, result->public_faces, lookups,
                      result->subshapes);
     append_semantic_datums(reader, shape_tool, products, result->occurrences,
-                           result->public_faces, result->semantic_datums);
+                           result->public_faces, lookups,
+                           result->semantic_datums);
     append_datum_placements(reader, result->occurrences,
                             result->datum_placements);
     result->occurrence_bounds.resize(result->occurrences.size());

@@ -1,0 +1,15 @@
+{
+  "name": "kinematics",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/kinematics",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "benchmark": {
+      "command": "node src/benchmark.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

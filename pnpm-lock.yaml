@@ -3584,6 +3584,15 @@ importers:
         specifier: workspace:*
         version: link:../jobs
 
+  packages/kinematics:
+    dependencies:
+      '@taucad/spatial':
+        specifier: workspace:*
+        version: link:../spatial
+      '@taucad/units':
+        specifier: workspace:*
+        version: link:../units
+
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/sdk':

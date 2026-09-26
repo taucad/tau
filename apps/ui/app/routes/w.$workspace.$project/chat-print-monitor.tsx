@@ -189,11 +189,7 @@ function StillCapture({
       </div>
       {still ? (
         <figure className='overflow-hidden rounded-lg border border-border/70 bg-muted/30'>
-          <img
-            src={still.url}
-            alt={`Latest still from ${entry.descriptor.name}`}
-            className='aspect-video w-full object-contain'
-          />
+          <img src={still.url} alt={`Latest still from ${entry.name}`} className='aspect-video w-full object-contain' />
           <figcaption className='px-2 py-1 text-xs text-muted-foreground'>
             Captured <time dateTime={still.capturedAt}>{formatAge(still.capturedAt, now)}</time>
           </figcaption>
@@ -245,7 +241,7 @@ function RunGroup({
           <p className='text-xs'>{describeRun(entry)}</p>
           {run.progress === undefined ? null : (
             <Progress
-              aria-label={`${entry.descriptor.name} print progress`}
+              aria-label={`${entry.name} print progress`}
               aria-valuenow={run.progress}
               aria-valuetext={`${String(Math.round(run.progress))} percent`}
               value={run.progress}
@@ -537,7 +533,7 @@ export function ControlsSection({
   return (
     <PrintSection title='Controls'>
       {commands.length > 0 ? (
-        <div role='group' aria-label={`Controls for ${entry.descriptor.name}`} className='flex flex-wrap gap-2'>
+        <div role='group' aria-label={`Controls for ${entry.name}`} className='flex flex-wrap gap-2'>
           {commands.map((command) => {
             const Icon = commandIcon[command];
             return (
@@ -577,7 +573,7 @@ export function ControlsSection({
           className='rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs'
         >
           <p>
-            {commandVerb[confirming]} {entry.descriptor.name}
+            {commandVerb[confirming]} {entry.name}
             ’s current run{fileName === undefined ? '' : ` (${fileName})`}?
             {confirming === 'urgent-stop'
               ? ' This is a priority stop of the current run, not a certified emergency stop.'

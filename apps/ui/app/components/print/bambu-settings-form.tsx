@@ -1,22 +1,23 @@
 /**
  * Bambu Studio's settings as a grouped form (blueprint U2, D8): process tabs
  * (Quality, Strength, Speed, Support, Others, All other settings) and filament
- * sections, each folded until opened, with a filter, a modified mark and reset
- * per setting, and a count with reset-all. Only open groups mount their rows,
- * so the ~600 settings of a resolved preset stay cheap.
+ * sections, each folded until opened, with a filter. A setting the project's
+ * print intent holds is marked and resets as a parameter does; the Prepare
+ * header resets them all. Only open groups mount their rows, so the ~600
+ * settings of a resolved preset stay cheap.
  *
  * @module
  */
 
-import { memo, useCallback, useMemo, useState } from 'react';
-import { ChevronRight, RotateCcw } from 'lucide-react';
+import { memo, useMemo, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { BambuStudioSettings } from '@taucad/slicer/bambu-studio';
-import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
 import { SearchInput } from '#components/search-input.js';
+import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 
 /** One setting as the form lists it. */
 type Leaf = Readonly<{ key: string; title: string; description: string; schema: JSONSchema7; searchText: string }>;
@@ -188,30 +189,29 @@ const SettingRow = memo(function SettingRow({
   const unit = (leaf.schema as Record<string, unknown>)['x-tau-unit'];
   return (
     <div className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-0.5 text-xs'>
-      <label htmlFor={id} title={leaf.description} className='flex min-w-0 flex-1 basis-40 items-center gap-1.5'>
-        {isModified ? <span aria-hidden className='size-1.5 shrink-0 rounded-full bg-primary' /> : null}
-        <span className='min-w-0 truncate'>{leaf.title}</span>
-        {isModified ? <span className='sr-only'>(changed)</span> : null}
-      </label>
+      <div className='flex min-w-0 flex-1 basis-40 items-center gap-1.5'>
+        <label
+          htmlFor={id}
+          title={leaf.description}
+          className={cn('min-w-0 truncate', isModified ? 'font-medium text-foreground' : 'text-muted-foreground')}
+        >
+          {leaf.title}
+        </label>
+        {isModified ? (
+          <ModifiedIndicator
+            onReset={() => {
+              onReset(leaf.key);
+            }}
+            tooltip={`Reset ${leaf.title}`}
+          />
+        ) : null}
+      </div>
       <div className='flex w-40 shrink-0 items-center gap-1'>
         <SettingControl id={id} leaf={leaf} value={value} onCommit={onCommit} />
         {typeof unit === 'string' ? (
           <span className='shrink-0 text-muted-foreground'>{unit === 'Cel' ? '°C' : unit}</span>
         ) : null}
       </div>
-      <Button
-        type='button'
-        size='icon-xs'
-        variant='ghost'
-        aria-label={`Reset ${leaf.title}`}
-        className={cn(!isModified && 'invisible')}
-        disabled={!isModified}
-        onClick={() => {
-          onReset(leaf.key);
-        }}
-      >
-        <RotateCcw aria-hidden />
-      </Button>
     </div>
   );
 });
@@ -219,7 +219,7 @@ const SettingRow = memo(function SettingRow({
 /**
  * Bambu Studio's settings for the selected presets, grouped as Bambu Studio groups them.
  *
- * @param properties - The settings, their current values, the person's overrides and the change handler.
+ * @param properties - The settings, their preset values, the print intent's overrides, and the commit and reset handlers.
  * @returns The form.
  * @public
  */
@@ -227,14 +227,16 @@ export function BambuSettingsForm({
   settings,
   defaults,
   overrides,
-  onChange,
+  onCommit,
+  onReset,
 }: {
   readonly settings: BambuStudioSettings;
   /** Bambu key → value of the selected presets. */
   readonly defaults: Readonly<Record<string, unknown>>;
-  /** Bambu key → value the person changed. */
+  /** Bambu key → value the print intent holds; each one is marked as modified. */
   readonly overrides: Readonly<Record<string, unknown>>;
-  readonly onChange: (overrides: Record<string, unknown>) => void;
+  readonly onCommit: (key: string, value: unknown) => void;
+  readonly onReset: (key: string) => void;
 }): React.JSX.Element {
   const groups = useMemo(() => collectGroups(settings), [settings]);
   const [filter, setFilter] = useState('');
@@ -249,53 +251,22 @@ export function BambuSettingsForm({
             .filter((group) => group.leaves.length > 0),
     [groups, term],
   );
-  const changedCount = Object.keys(overrides).length;
-  const commit = useCallback(
-    (key: string, value: unknown) => {
-      const { [key]: _previous, ...rest } = overrides;
-      onChange(JSON.stringify(value) === JSON.stringify(defaults[key]) ? rest : { ...rest, [key]: value });
-    },
-    [defaults, onChange, overrides],
-  );
-  const reset = useCallback(
-    (key: string) => {
-      const { [key]: _removed, ...rest } = overrides;
-      onChange(rest);
-    },
-    [onChange, overrides],
-  );
 
   return (
     <div role='group' aria-label='Bambu Studio settings' className='flex min-w-0 flex-col gap-2'>
-      <div className='flex min-w-0 items-center gap-2'>
-        <SearchInput
-          aria-label='Filter settings'
-          placeholder='Filter settings'
-          value={filter}
-          className='h-7 text-xs'
-          containerClassName='min-w-0 flex-1'
-          onChange={(event) => {
-            setFilter(event.target.value);
-          }}
-          onClear={() => {
-            setFilter('');
-          }}
-        />
-        <span role='status' className='shrink-0 text-xs text-muted-foreground tabular-nums'>
-          {changedCount === 0 ? 'Preset values' : `${String(changedCount)} changed`}
-        </span>
-        <Button
-          type='button'
-          size='xs'
-          variant='outline'
-          disabled={changedCount === 0}
-          onClick={() => {
-            onChange({});
-          }}
-        >
-          Reset all
-        </Button>
-      </div>
+      <SearchInput
+        aria-label='Filter settings'
+        placeholder='Filter settings'
+        value={filter}
+        className='h-7 text-xs'
+        containerClassName='min-w-0'
+        onChange={(event) => {
+          setFilter(event.target.value);
+        }}
+        onClear={() => {
+          setFilter('');
+        }}
+      />
       {visible.length === 0 ? (
         <p className='text-xs text-muted-foreground'>No setting matches “{filter.trim()}”.</p>
       ) : null}
@@ -311,7 +282,6 @@ export function BambuSettingsForm({
             </h4>
             {scoped.map((group) => {
               const isOpen = term !== '' || openGroups.has(group.id);
-              const changed = group.leaves.filter((leaf) => Object.hasOwn(overrides, leaf.key)).length;
               return (
                 <Collapsible
                   key={group.id}
@@ -334,12 +304,6 @@ export function BambuSettingsForm({
                       className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/settings:rotate-90 motion-reduce:transition-none'
                     />
                     <span className='min-w-0 flex-1 truncate'>{group.label}</span>
-                    {changed > 0 ? (
-                      <span className='shrink-0 text-muted-foreground tabular-nums'>
-                        <span className='sr-only'>, </span>
-                        {`${String(changed)} changed`}
-                      </span>
-                    ) : null}
                   </CollapsibleTrigger>
                   <CollapsibleContent className='flex min-w-0 flex-col pr-1 pb-1 pl-6'>
                     {group.leaves.map((leaf) => (
@@ -348,8 +312,8 @@ export function BambuSettingsForm({
                         leaf={leaf}
                         value={Object.hasOwn(overrides, leaf.key) ? overrides[leaf.key] : defaults[leaf.key]}
                         isModified={Object.hasOwn(overrides, leaf.key)}
-                        onCommit={commit}
-                        onReset={reset}
+                        onCommit={onCommit}
+                        onReset={onReset}
                       />
                     ))}
                   </CollapsibleContent>

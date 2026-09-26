@@ -173,7 +173,7 @@ export const nextAction = ({
   if (prepare.slice && !prepare.isSliceStale) {
     // A fresh slice that cannot be sent says why (a busy machine, the wrong spool), not "slice again".
     return prepare.sendBlocker === undefined
-      ? { label: `Send to ${entry.descriptor.name}`, kind: 'send' }
+      ? { label: `Send to ${entry.name}`, kind: 'send' }
       : { label: prepare.sendBlocker, kind: 'none' };
   }
   if (prepare.route === undefined) {
@@ -228,12 +228,12 @@ function MachineCard({
   };
 
   return (
-    <article aria-label={`${entry.descriptor.name}, ${presentation.label}`} className='flex min-w-0 flex-col gap-2'>
+    <article aria-label={`${entry.name}, ${presentation.label}`} className='flex min-w-0 flex-col gap-2'>
       <div className='flex min-w-0 items-start gap-2'>
         <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', presentation.iconClassName)} />
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-2'>
-            <h2 className='min-w-0 truncate text-sm font-medium'>{entry.descriptor.name}</h2>
+            <h2 className='min-w-0 truncate text-sm font-medium'>{entry.name}</h2>
             {entry.providerId.includes('simulator') ? <Badge variant='outline'>Simulated</Badge> : null}
           </div>
           <p className='truncate text-xs text-muted-foreground'>
@@ -246,7 +246,7 @@ function MachineCard({
           <p className='text-xs'>{runLine}</p>
           {run.progress === undefined ? null : (
             <Progress
-              aria-label={`${entry.descriptor.name} print progress`}
+              aria-label={`${entry.name} print progress`}
               aria-valuenow={run.progress}
               aria-valuetext={`${String(Math.round(run.progress))} percent`}
               value={run.progress}
@@ -332,14 +332,12 @@ function ConnectedPrintPanel({
 }): React.JSX.Element {
   const { projectId } = useProject();
   const { snapshot, providers, error, refresh } = useMachineDirectory(client);
-  const entries = useMemo(
-    () => snapshot?.entries.toSorted((a, b) => a.descriptor.name.localeCompare(b.descriptor.name)) ?? [],
-    [snapshot],
-  );
+  const entries = useMemo(() => snapshot?.entries.toSorted((a, b) => a.name.localeCompare(b.name)) ?? [], [snapshot]);
   const { selected, select } = useMachinesSelection(projectId, entries);
   const provider = providers.find(({ id }) => id === selected?.providerId);
   const manifest = provider?.manifest;
-  const { requests, error: requestsError } = useMachinesPrintRequests(client, selected?.machineId);
+  /* This project's requests only (blueprint D5): the host filters by the id its artifacts carry. */
+  const { requests, error: requestsError } = useMachinesPrintRequests(client, selected?.machineId, projectId);
   const openRequest = requests.find((request) => isOpenPrintRequest(request));
   const [ledger, setLedger] = useState<readonly LedgerEntry[]>([]);
   const record = useCallback((next: LedgerEntry) => {
@@ -362,7 +360,7 @@ function ConnectedPrintPanel({
     sendRef.current?.scrollIntoView({ block: 'nearest' });
     sendRef.current?.focus();
   }, []);
-  const prepare = usePrintPrepare({ client, entry: selected, provider, manifest, cursor: snapshot?.cursor });
+  const prepare = usePrintPrepare({ client, entry: selected, provider, manifest });
   const latestReceipt = ledger.find((entry) => entry.kind === 'receipt');
 
   return (
@@ -382,7 +380,7 @@ function ConnectedPrintPanel({
             >
               {entries.map((entry) => (
                 <option key={entry.machineId} value={entry.machineId}>
-                  {entry.descriptor.name}
+                  {entry.name}
                 </option>
               ))}
             </select>

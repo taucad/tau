@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { machineSliceOptions } from '@taucad/agent-tools/registry';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -8,12 +8,13 @@ import type { ParameterManifest } from '@taucad/parameters';
 import type {
   MachineArtifactReference,
   MachineClient,
-  MachineDirectoryCursor,
   MachineDirectoryEntry,
   MachineManifest,
   MachineProvider,
   MachineRequestPrintInput,
 } from '@taucad/runtime/machine';
+import { printIntentPath, printIntentSchema } from '@taucad/slicer';
+import type { PrintIntent } from '@taucad/slicer';
 import type { FileExtension } from '@taucad/types';
 import { quantityKinds } from '@taucad/units/quantity';
 import { Button } from '@taucad/ui/components/button';
@@ -26,9 +27,11 @@ import { BambuStudioPresets } from '#components/print/bambu-studio-presets.js';
 import type { BambuTray } from '#components/print/bambu-studio-presets.js';
 import { isRealBambuPrinter, useBambuStudio } from '#components/print/use-bambu-studio.js';
 import type { BambuQualityPreset, BambuStudioMode } from '#components/print/use-bambu-studio.js';
+import { usePrintIntent } from '#components/print/use-print-intent.js';
+import type { PrintIntentHandle } from '#components/print/use-print-intent.js';
+import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
-import { useRevisionClient } from '#hooks/use-revision-status.js';
 import { compileExportConfigurationManifest } from '#routes/w.$workspace.$project/chat-converter.js';
 import {
   PrintDisclosure,
@@ -65,6 +68,48 @@ export type ResolvedSchema = Readonly<{ schema: JSONSchema7; defaults: Record<st
 
 const isRecordObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const sameValue = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+
+/** The reference-slicer options a print intent may hold; the others describe the machine and stay on screen. */
+const intentOptionKeys: ReadonlySet<string> = new Set(Object.keys(printIntentSchema.shape.options.unwrap().shape));
+
+/**
+ * Apply one Advanced form change to the print intent: `preset` and the reference options it may
+ * hold, each set or removed as the form left it. Only the keys that changed are touched, so a
+ * change another writer made to a different key survives.
+ *
+ * @param intent - The intent the change applies to.
+ * @param next - The form's modified values after the change.
+ * @param keys - The intent keys whose value changed.
+ * @returns The next intent.
+ */
+const withOptionChanges = (
+  intent: PrintIntent,
+  next: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): PrintIntent => {
+  const { preset, options, ...rest } = intent;
+  const changed = Object.fromEntries(
+    keys.filter((key) => key !== 'preset').map((key): [string, unknown] => [key, next[key]]),
+  );
+  const merged = Object.fromEntries(
+    Object.entries<unknown>({ ...options, ...changed }).filter(([, value]) => value !== undefined),
+  );
+  // SAFETY: the form checks each value against the slicer's schema, and the serializer validates it again.
+  const nextPreset = (keys.includes('preset') ? next['preset'] : preset) as PrintIntent['preset'];
+  // SAFETY: as above; only the keys `intentOptionKeys` names reach this record.
+  const nextOptions = merged as PrintIntent['options'];
+  return {
+    ...rest,
+    ...(nextPreset === undefined ? {} : { preset: nextPreset }),
+    ...(Object.keys(merged).length === 0 ? {} : { options: nextOptions }),
+  };
+};
+
+/** Whether a print intent holds anything beyond its model. */
+const hasIntentChanges = (intent: PrintIntent | undefined): boolean =>
+  intent !== undefined && Object.keys(intent).some((key) => key !== 'model');
 
 const modelName = (entryPath: string): string => (entryPath.split('/').pop() ?? entryPath).replace(/\.[^.]+$/u, '');
 
@@ -238,9 +283,12 @@ export type PrintPrepare = Readonly<{
   studio: BambuStudioMode;
   /** Whether Bambu Studio slices, rather than the slicer route's own engine. */
   isBambuStudio: boolean;
+  /** The project's print settings in `.tau/machines/printer.json`. */
+  printIntent: PrintIntentHandle;
   /** Why the slice button waits, when it does. */
   sliceBlocker: string | undefined;
   optionsSchema: ResolvedSchema | undefined;
+  /** The reference slicer's changed options: the print intent's, and the machine's own kept on screen. */
   options: Record<string, unknown>;
   setOptions: (options: Record<string, unknown>) => void;
   submissionSchema: ResolvedSchema | undefined;
@@ -272,7 +320,7 @@ export type PrintPrepare = Readonly<{
  * the request it becomes. Drafts live here, apart from telemetry, so a machine
  * frame never resets them.
  *
- * @param input - The machine, its provider and the directory cursor the artifact is scoped to.
+ * @param input - The machine, its provider and its manifest.
  * @returns The prepare state and its actions.
  * @public
  */
@@ -281,17 +329,14 @@ export const usePrintPrepare = ({
   entry,
   provider,
   manifest,
-  cursor,
 }: {
   readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry | undefined;
   readonly provider: MachineProvider | undefined;
   readonly manifest: MachineManifest | undefined;
-  readonly cursor: MachineDirectoryCursor | undefined;
 }): PrintPrepare => {
-  const { geometryUnits, mainEntryPath, editorRef } = useProject();
+  const { projectId, geometryUnits, mainEntryPath, editorRef } = useProject();
   const fileManager = useFileManager();
-  const revisionClient = useRevisionClient();
   const [chosenEntryPath, setEntryPath] = useState<string>();
   const entryPath =
     chosenEntryPath !== undefined && geometryUnits.has(chosenEntryPath) ? chosenEntryPath : mainEntryPath;
@@ -321,7 +366,10 @@ export const usePrintPrepare = ({
     };
   }, [provider]);
 
-  const [options, setOptions] = useState<Record<string, unknown>>({});
+  const printIntent = usePrintIntent(manifest?.identity.model);
+  const { intent, update: updateIntent } = printIntent;
+  /* Reference options no print intent may hold (the machine's nozzle, bed and plate, the engine) stay on screen. */
+  const [screenOptions, setScreenOptions] = useState<Record<string, unknown>>({});
   const [submission, setSubmission] = useState<Record<string, unknown>>({});
   const [slice, setSlice] = useState<SlicedArtifact>();
   const [isSlicing, setIsSlicing] = useState(false);
@@ -340,19 +388,23 @@ export const usePrintPrepare = ({
     if (!provider || !entry) {
       return submission;
     }
-    const effective: Record<string, unknown> = { ...submissionDefaults(provider, entry, manifest), ...submission };
+    const effective: Record<string, unknown> = {
+      ...submissionDefaults(provider, entry, manifest),
+      ...(intent?.plate === undefined ? {} : { expectedBedType: intent.plate }),
+      ...submission,
+    };
     // The plate picked here is what the person says is installed when the machine cannot report it.
     if (entry.snapshot.setup.bedType === undefined && typeof effective['expectedBedType'] === 'string') {
       effective['operatorConfirmedBedType'] = effective['expectedBedType'];
     }
     return effective;
-  }, [entry, manifest, provider, submission]);
+  }, [entry, intent, manifest, provider, submission]);
   const plate =
     typeof effectiveSubmission['expectedBedType'] === 'string' ? effectiveSubmission['expectedBedType'] : undefined;
   const mapping = effectiveSubmission['amsMapping'];
   const slotsKey = Array.isArray(mapping) ? mapping.filter((slot) => typeof slot === 'number').join(',') : '';
   const slots = useMemo(() => (slotsKey === '' ? [] : slotsKey.split(',').map(Number)), [slotsKey]);
-  const studio = useBambuStudio({ provider, entry, manifest, plate, slots });
+  const studio = useBambuStudio({ provider, entry, manifest, plate, slots, intent, update: updateIntent });
   const isBambuStudio = studio.status === 'ready' || studio.status === 'checking';
   /* The machine's own slicer options under the person's, so the Advanced form and the slice agree. */
   const machineOptions = useMemo(
@@ -371,6 +423,29 @@ export const usePrintPrepare = ({
           }
         : undefined,
     [machineOptions, route],
+  );
+  const qualityPreset = manifest?.slicing.presets.find(({ id }) => id === intent?.preset);
+  const options = useMemo<Record<string, unknown>>(
+    () => ({
+      ...screenOptions,
+      ...(qualityPreset === undefined ? {} : applyPreset({}, qualityPreset, optionsSchema?.schema)),
+      ...intent?.options,
+    }),
+    [intent, optionsSchema, qualityPreset, screenOptions],
+  );
+  const setOptions = useCallback(
+    (next: Record<string, unknown>) => {
+      setScreenOptions(
+        Object.fromEntries(Object.entries(next).filter(([key]) => !intentOptionKeys.has(key) && key !== 'preset')),
+      );
+      const keys = [...new Set([...Object.keys(options), ...Object.keys(next)])].filter(
+        (key) => (key === 'preset' || intentOptionKeys.has(key)) && !sameValue(options[key], next[key]),
+      );
+      if (keys.length > 0) {
+        updateIntent((current) => withOptionChanges(current, next, keys));
+      }
+    },
+    [options, updateIntent],
   );
   /* Bambu Studio slices with its own presets; the reference options apply only to the slicer route's own engine. */
   const bambuExportOptions = studio.exportOptions;
@@ -421,11 +496,16 @@ export const usePrintPrepare = ({
         throw new Error('The slicer produced no file.');
       }
       const fileName = `${modelName(entryPath)}.gcode.3mf`;
-      const path = `exports/${fileName}`;
-      await fileManager.writeFiles({ [path]: { content: file.bytes } });
-      const summary = summarizeGcodeContainer(file.bytes);
+      const hex = await sha256Bytes(file.bytes);
       // SAFETY: sha256Bytes returns the lowercase hex the digest brand describes.
-      const digest = `sha256:${await sha256Bytes(file.bytes)}` as MachineArtifactReference['digest'];
+      const digest = `sha256:${hex}` as MachineArtifactReference['digest'];
+      /* Named by its bytes, as job imports are (blueprint D5), so a later slice never rewrites what a request names. */
+      const path = `.tau/artifacts/${hex}/${fileName}`;
+      const isHeld = (await fileManager.exists(path)) && (await sha256Bytes(await fileManager.readFile(path))) === hex;
+      if (!isHeld) {
+        await fileManager.writeFiles({ [path]: { content: file.bytes } });
+      }
+      const summary = summarizeGcodeContainer(file.bytes);
       setSlice({
         path,
         fileName,
@@ -451,7 +531,7 @@ export const usePrintPrepare = ({
   }, [editorRef, slice]);
 
   const sendBlocker = ((): string | undefined => {
-    if (!entry || !provider || !cursor) {
+    if (!entry || !provider) {
       return 'Choose a machine first.';
     }
     if (!slice) {
@@ -471,34 +551,20 @@ export const usePrintPrepare = ({
   })();
 
   const send = useCallback(async (): Promise<void> => {
-    if (!slice || !entry || !provider || !cursor || sendBlocker !== undefined) {
+    if (!slice || !entry || !provider || sendBlocker !== undefined) {
       return;
     }
     setIsSending(true);
     setSendError(undefined);
     try {
-      if (!revisionClient) {
-        throw new Error('Revisions are unavailable, so the artifact cannot be recorded before sending.');
-      }
-      await revisionClient.saveRevision('save');
-      const headRevisionId = revisionClient.status()?.headRevisionId;
-      if (headRevisionId === undefined) {
-        throw new Error('No revision holds this artifact yet. Save a revision, then send again.');
-      }
       const accepted =
         provider.accepts.find((container) => container.mediaType === slice.mimeType) ?? provider.accepts[0];
       if (!accepted) {
         throw new Error(`${provider.name} does not declare an accepted container.`);
       }
+      /* The host finds the project by its `tau.json` id and re-verifies the bytes by digest on every use. */
       const artifact: MachineArtifactReference = {
-        revision: {
-          authorityId: cursor.authorityId,
-          workspaceId: cursor.workspaceId,
-          // SAFETY: the revision store hands out its own branded ids as plain strings.
-          revisionId: headRevisionId as MachineArtifactReference['revision']['revisionId'],
-          // ponytail: the status projection exposes no tree digest; the artifact digest identifies the bytes the host verifies.
-          treeDigest: slice.digest,
-        },
+        projectId,
         path: slice.path,
         digest: slice.digest,
         length: slice.length,
@@ -542,7 +608,7 @@ export const usePrintPrepare = ({
     } finally {
       setIsSending(false);
     }
-  }, [client, cursor, effectiveSubmission, entry, provider, revisionClient, sendBlocker, slice]);
+  }, [client, effectiveSubmission, entry, projectId, provider, sendBlocker, slice]);
 
   const confirmSend = useCallback(() => {
     setSendError(undefined);
@@ -560,6 +626,7 @@ export const usePrintPrepare = ({
     route,
     studio,
     isBambuStudio,
+    printIntent,
     sliceBlocker,
     optionsSchema,
     options,
@@ -591,35 +658,43 @@ const chipClass = (isSelected: boolean): string =>
 function PresetChips({
   presets,
   options,
+  isModified,
   onSelect,
+  onReset,
 }: {
   readonly presets: MachineManifest['slicing']['presets'];
   readonly options: Record<string, unknown>;
+  /** Whether the print intent holds a quality preset. */
+  readonly isModified: boolean;
   readonly onSelect: (preset: MachineManifest['slicing']['presets'][number]) => void;
+  readonly onReset: () => void;
 }): React.JSX.Element {
   const active = options['preset'] ?? options['layerHeight'];
   return (
-    <div role='group' aria-label='Quality preset' className='flex flex-wrap gap-1.5'>
-      {presets.map((preset) => {
-        const isSelected = active === preset.id || active === preset.layerHeight.value;
-        return (
-          <Button
-            key={preset.id}
-            type='button'
-            size='xs'
-            variant='outline'
-            aria-pressed={isSelected}
-            className={chipClass(isSelected)}
-            onClick={() => {
-              onSelect(preset);
-            }}
-          >
-            {isSelected ? <Check aria-hidden className='size-3' /> : null}
-            {preset.label}
-            <span className='text-muted-foreground'>{formatQuantity(preset.layerHeight)}</span>
-          </Button>
-        );
-      })}
+    <div className='flex min-w-0 items-center gap-1.5'>
+      <div role='group' aria-label='Quality preset' className='flex flex-wrap gap-1.5'>
+        {presets.map((preset) => {
+          const isSelected = active === preset.id || active === preset.layerHeight.value;
+          return (
+            <Button
+              key={preset.id}
+              type='button'
+              size='xs'
+              variant='outline'
+              aria-pressed={isSelected}
+              className={chipClass(isSelected)}
+              onClick={() => {
+                onSelect(preset);
+              }}
+            >
+              {isSelected ? <Check aria-hidden className='size-3' /> : null}
+              {preset.label}
+              <span className='text-muted-foreground'>{formatQuantity(preset.layerHeight)}</span>
+            </Button>
+          );
+        })}
+      </div>
+      {isModified ? <ModifiedIndicator onReset={onReset} tooltip='Reset Quality preset' /> : null}
     </div>
   );
 }
@@ -703,7 +778,7 @@ function SliceResult({
   if (!slice) {
     return undefined;
   }
-  const machineName = entry.descriptor.name;
+  const machineName = entry.name;
   const { summary, fit } = slice;
   return (
     <div className='flex min-w-0 flex-col gap-2' aria-label='Slice result'>
@@ -831,19 +906,29 @@ function ModelSelect({
 function PlateSelect({
   plates,
   selected,
+  isModified,
   onChange,
+  onReset,
 }: {
   readonly plates: MachineManifest['bed']['plates'];
   readonly selected: unknown;
+  /** Whether the print intent holds a plate. */
+  readonly isModified: boolean;
   readonly onChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  readonly onReset: () => void;
 }): React.JSX.Element | undefined {
+  const id = useId();
   if (plates.length === 0) {
     return undefined;
   }
   return (
-    <label className='flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
-      Plate
+    <div className='flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
+      <label htmlFor={id} className={cn(isModified && 'font-medium text-foreground')}>
+        Plate
+      </label>
+      {isModified ? <ModifiedIndicator onReset={onReset} tooltip='Reset Plate' /> : null}
       <select
+        id={id}
         aria-label='Plate'
         className='h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm text-foreground'
         value={typeof selected === 'string' ? selected : ''}
@@ -855,7 +940,7 @@ function PlateSelect({
           </option>
         ))}
       </select>
-    </label>
+    </div>
   );
 }
 
@@ -940,7 +1025,8 @@ function BambuStudioSettings({ studio }: { readonly studio: BambuStudioMode }): 
         settings={studio.settings}
         defaults={studio.defaults}
         overrides={studio.overrides}
-        onChange={studio.setOverrides}
+        onCommit={studio.setSetting}
+        onReset={studio.resetSetting}
       />
     </div>
   ) : (
@@ -951,6 +1037,45 @@ function BambuStudioSettings({ studio }: { readonly studio: BambuStudioMode }): 
 }
 
 const qualityPresets: ReadonlySet<string> = new Set<BambuQualityPreset>(['fast', 'standard', 'fine']);
+
+/**
+ * Why the project's print settings file does not apply to this printer, with the one way to take
+ * it over, and why the last change to it was not saved.
+ *
+ * @param properties - The print intent, the selected printer's model and its name.
+ * @returns The notices; empty while the file applies or is absent and the last change saved.
+ */
+function PrintIntentNotice({
+  printIntent,
+  model,
+  machineName,
+}: {
+  readonly printIntent: PrintIntentHandle;
+  readonly model: string | undefined;
+  readonly machineName: string;
+}): React.JSX.Element {
+  const { file, error, reset } = printIntent;
+  const isInvalid = file.status === 'invalid';
+  const otherModel = file.status === 'current' && file.intent.model !== model ? file.intent.model : undefined;
+  const isElsewhere = model !== undefined && (isInvalid || otherModel !== undefined);
+  return (
+    <>
+      {isElsewhere ? (
+        <PrintNotice tone={isInvalid ? 'warning' : 'neutral'} role={isInvalid ? 'alert' : 'status'}>
+          <p>
+            {isInvalid
+              ? `This project's print settings file (${printIntentPath}) cannot be read, so ${machineName} uses its defaults and changes here are not saved.`
+              : `This project's print settings are for another printer model (${String(otherModel)}), so ${machineName} uses its defaults. Changing a setting here replaces them.`}
+          </p>
+          <Button type='button' size='xs' variant='outline' className='mt-2' onClick={reset}>
+            Reset print settings
+          </Button>
+        </PrintNotice>
+      ) : null}
+      {error === undefined ? null : <PrintNotice tone='warning'>{error}</PrintNotice>}
+    </>
+  );
+}
 
 function EngineStatus({
   studio,
@@ -1025,7 +1150,9 @@ export function PrepareSection({
     submission,
     setSubmission,
     effectiveSubmission,
+    printIntent,
   } = prepare;
+  const { intent, update: updateIntent, reset: resetIntent } = printIntent;
   const providerKey = route
     ? route.transcoderId === undefined
       ? String(route.kernelId)
@@ -1052,30 +1179,61 @@ export function PrepareSection({
   );
   const selectPlate = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
-      setSubmission({ ...submission, expectedBedType: event.target.value });
+      const { value } = event.target;
+      // The plate picked here replaces one set under Advanced, which would otherwise keep winning.
+      const { expectedBedType: _advanced, ...rest } = submission;
+      setSubmission(rest);
+      // SAFETY: plate ids are the manifest's; the serializer refuses one Bambu Studio does not name.
+      updateIntent((current) => ({ ...current, plate: value as PrintIntent['plate'] }));
     },
-    [setSubmission, submission],
+    [setSubmission, submission, updateIntent],
   );
+  const resetPlate = useCallback(() => {
+    updateIntent(({ plate: _plate, ...rest }) => rest);
+  }, [updateIntent]);
+  const resetPreset = useCallback(() => {
+    updateIntent(({ preset: _preset, ...rest }) => rest);
+  }, [updateIntent]);
   const plates = manifest?.bed.plates ?? [];
   const selectedPlate = effectiveSubmission['expectedBedType'];
-  const modifiedCount = Object.keys(isBambuStudio ? studio.overrides : options).length + Object.keys(submission).length;
   /* In Bambu Studio mode a chip is active when the selected process has its layer height. */
   const selectedProcess = studio.processes.find((preset) => preset.name === studio.selection?.process);
   const presetState = isBambuStudio ? { layerHeight: selectedProcess?.layerHeight } : options;
 
   return (
-    <PrintSection title='Prepare'>
+    <PrintSection
+      title='Prepare'
+      aside={
+        /* Beside the heading, never inside a trigger: a reset is a button of its own. */
+        hasIntentChanges(intent) ? (
+          <ModifiedIndicator onReset={resetIntent} tooltip='Reset print settings' />
+        ) : undefined
+      }
+    >
       <ModelSelect entryPath={entryPath} entryPaths={entryPaths} onChange={setEntryPath} />
       <EngineStatus studio={studio} provider={provider} />
+      <PrintIntentNotice printIntent={printIntent} model={manifest?.identity.model} machineName={entry.name} />
       {manifest ? (
-        <PresetChips presets={manifest.slicing.presets} options={presetState} onSelect={selectPreset} />
+        <PresetChips
+          presets={manifest.slicing.presets}
+          options={presetState}
+          isModified={intent?.preset !== undefined}
+          onSelect={selectPreset}
+          onReset={resetPreset}
+        />
       ) : null}
       <MaterialChips entry={entry} manifest={manifest} submission={effectiveSubmission} onSelect={selectMaterial} />
-      <PlateSelect plates={plates} selected={selectedPlate} onChange={selectPlate} />
+      <PlateSelect
+        plates={plates}
+        selected={selectedPlate}
+        isModified={intent?.plate !== undefined}
+        onChange={selectPlate}
+        onReset={resetPlate}
+      />
       {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
       <SliceControls prepare={prepare} />
       <SliceResult prepare={prepare} entry={entry} manifest={manifest} />
-      <PrintDisclosure title='Advanced' summary={modifiedCount > 0 ? `${String(modifiedCount)} changed` : 'Defaults'}>
+      <PrintDisclosure title='Advanced'>
         {isBambuStudio ? (
           <BambuStudioSettings studio={studio} />
         ) : optionsSchema ? (

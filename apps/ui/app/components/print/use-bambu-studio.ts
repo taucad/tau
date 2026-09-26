@@ -1,15 +1,17 @@
 /**
  * Bambu Studio mode of the Print pane (blueprint U2, D9, D12): which presets
- * Bambu Studio offers for the bound printer, the person's choices among them,
- * the settings those presets resolve to and the overrides on top, all read
- * through the desktop bridge. Slicing itself stays on the export route; this
- * hook only states the export options it would slice with.
+ * Bambu Studio offers for the bound printer, the settings they resolve to, and
+ * the project's print intent on top: the presets the person picked and the
+ * settings they changed, saved in `.tau/machines/printer.json`. Everything
+ * Bambu Studio answers is read through the desktop bridge. Slicing itself stays
+ * on the export route; this hook only states the export options it would slice with.
  *
  * @module
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MachineDirectoryEntry, MachineManifest, MachineProvider } from '@taucad/runtime/machine';
+import type { PrintIntent } from '@taucad/slicer';
 import type {
   BambuMachineHints,
   BambuPlate,
@@ -18,6 +20,7 @@ import type {
   BambuStudioSelection,
   BambuStudioSettings,
 } from '@taucad/slicer/bambu-studio';
+import type { PrintIntentEdit } from '#components/print/use-print-intent.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 
 /** Providers whose printers slice with Bambu Studio when it is installed. */
@@ -123,12 +126,16 @@ type Loaded = Readonly<{
   settings: BambuStudioSettings;
   /** Bambu key → value of the resolved presets. */
   defaults: Record<string, unknown>;
-  overrides: Record<string, unknown>;
-  /** Overrides the last preset change dropped because the new presets lack their setting. */
-  dropped: number;
 }>;
 
-type Chosen = Readonly<{ printer?: string; process?: string; filaments?: Readonly<Record<number, string>> }>;
+/** The presets the person picked; the rest are Bambu Studio's defaults. Filaments are keyed by slot. @public */
+export type BambuStudioChosen = Readonly<Pick<PrintIntent, 'printer' | 'process' | 'filaments'>>;
+
+/** One Bambu Studio setting value a print intent may hold. */
+type SettingValue = NonNullable<PrintIntent['settings']>[string];
+
+const noSettings: Readonly<Record<string, SettingValue>> = {};
+const noChoices: BambuStudioChosen = {};
 
 /** Everything the Prepare step needs from Bambu Studio. @public */
 export type BambuStudioMode = Readonly<{
@@ -147,18 +154,26 @@ export type BambuStudioMode = Readonly<{
   settings: BambuStudioSettings | undefined;
   /** Bambu key → value of the selected presets. */
   defaults: Record<string, unknown>;
-  /** Bambu key → value the person changed; only keys that differ from `defaults`. */
-  overrides: Record<string, unknown>;
-  setOverrides: (overrides: Record<string, unknown>) => void;
+  /** Bambu key → value the print intent holds; each one is a modified setting. */
+  overrides: Readonly<Record<string, unknown>>;
+  /** Save a setting; its preset value, or `undefined`, removes it from the print intent. */
+  setSetting: (key: string, value: unknown) => void;
+  resetSetting: (key: string) => void;
+  /** Settings the print intent holds that these presets lack: kept in the file, left out of the slice. */
   dropped: number;
   error: string | undefined;
   /** The used material slots, in the order `selection.filaments` follows. */
   slots: readonly number[];
+  chosen: BambuStudioChosen;
+  /** Another printer preset has its own processes and filaments, so choosing one clears those picks. */
   choosePrinter: (printer: string) => void;
   chooseProcess: (process: string) => void;
   chooseFilament: (slot: number, filament: string) => void;
   /** Fast, Standard or Fine: Bambu Studio picks the matching 0.28, 0.20 or 0.12 mm process. */
   choosePreset: (preset: BambuQualityPreset) => void;
+  /** Remove one pick from the print intent, so Bambu Studio's default applies again. */
+  resetChoice: (choice: 'printer' | 'process') => void;
+  resetFilament: (slot: number) => void;
   /** What slicing sends on the export route; undefined until the presets and settings have loaded. */
   exportOptions: Record<string, unknown> | undefined;
 }>;
@@ -213,7 +228,7 @@ const partialSelection = ({
   plate,
   resolved,
 }: Readonly<{
-  chosen: Chosen;
+  chosen: BambuStudioChosen;
   slots: readonly number[];
   plate: BambuPlate['id'] | undefined;
   /** The filaments Bambu Studio resolved last, per used slot. */
@@ -252,7 +267,8 @@ const modeStatus = (
 /**
  * Own Bambu Studio's selection surface for the selected machine.
  *
- * @param input - The machine, its provider and manifest, the confirmed plate and the used slots.
+ * @param input - The machine, its provider and manifest, the confirmed plate, the used slots, and the
+ * project's print intent for this printer with its `update`.
  * @returns The mode, its presets, settings, overrides and the export options they make.
  * @public
  */
@@ -262,12 +278,16 @@ export const useBambuStudio = ({
   manifest,
   plate,
   slots,
+  intent,
+  update,
 }: {
   readonly provider: MachineProvider | undefined;
   readonly entry: MachineDirectoryEntry | undefined;
   readonly manifest: MachineManifest | undefined;
   readonly plate: string | undefined;
   readonly slots: readonly number[];
+  readonly intent: PrintIntent | undefined;
+  readonly update: (edit: PrintIntentEdit) => void;
 }): BambuStudioMode => {
   // The shell is fixed for the page's life; `desktopBridge()` builds a new facade per call.
   const [studio] = useState(() => desktopBridge()?.slicers?.bambuStudio);
@@ -276,9 +296,9 @@ export const useBambuStudio = ({
   const [catalog, setCatalog] = useState<BambuStudioCatalog>();
   const [loaded, setLoaded] = useState<Loaded>();
   const [failure, setFailure] = useState<string>();
-  const [chosen, setChosen] = useState<Chosen>({});
-  const [preset, setPreset] = useState<BambuQualityPreset>();
   const settingsCacheRef = useRef<Readonly<{ key: string; settings: BambuStudioSettings }>>(undefined);
+  const preset = intent?.preset;
+  const chosen: BambuStudioChosen = intent ?? noChoices;
 
   const model = entry?.descriptor.model;
   const nozzleDiameter = manifest?.toolhead.nozzles[0]?.diameter.value;
@@ -362,15 +382,12 @@ export const useBambuStudio = ({
           return;
         }
         settingsCacheRef.current = { key, settings };
-        const defaults = flattenSettings(settings.values);
         setFailure(undefined);
-        setLoaded((previous) => {
-          if (previous?.settings === settings) {
-            return { ...previous, hints, request, selection };
-          }
-          const { kept, dropped } = reconcileOverrides(previous?.overrides ?? {}, defaults);
-          return { hints, request, selection, settings, defaults, overrides: kept, dropped };
-        });
+        setLoaded((previous) =>
+          previous?.settings === settings
+            ? { ...previous, hints, request, selection }
+            : { hints, request, selection, settings, defaults: flattenSettings(settings.values) },
+        );
       } catch (error) {
         if (!cancelled) {
           setFailure(errorMessage(error));
@@ -384,28 +401,73 @@ export const useBambuStudio = ({
     };
   }, [catalog, hintsKey, partialKey, studio]);
 
-  const setOverrides = useCallback((overrides: Record<string, unknown>) => {
-    setLoaded((previous) =>
-      previous === undefined
-        ? previous
-        : { ...previous, overrides: reconcileOverrides(overrides, previous.defaults).kept, dropped: 0 },
-    );
-  }, []);
-  const choosePrinter = useCallback((printer: string) => {
-    // Another printer has its own compatible processes and filaments; Bambu Studio picks them again.
-    setChosen({ printer });
-  }, []);
-  const chooseProcess = useCallback((process: string) => {
-    setChosen((current) => ({ ...current, process }));
-  }, []);
-  const chooseFilament = useCallback((slot: number, filament: string) => {
-    setChosen((current) => ({ ...current, filaments: { ...current.filaments, [slot]: filament } }));
-  }, []);
-  const choosePreset = useCallback((next: BambuQualityPreset) => {
-    setPreset(next);
-    setChosen(({ process: _process, ...rest }) => rest);
-  }, []);
+  const defaults = loaded?.defaults;
+  const setSetting = useCallback(
+    (key: string, value: unknown) => {
+      update(({ settings = noSettings, ...rest }) => {
+        const { [key]: _previous, ...others } = settings;
+        // SAFETY: the form parses each value against the setting's schema, and the serializer validates it again.
+        const next =
+          value === undefined || sameValue(value, defaults?.[key])
+            ? others
+            : { ...others, [key]: value as SettingValue };
+        return Object.keys(next).length === 0 ? rest : { ...rest, settings: next };
+      });
+    },
+    [defaults, update],
+  );
+  const resetSetting = useCallback(
+    (key: string) => {
+      setSetting(key, undefined);
+    },
+    [setSetting],
+  );
+  const choosePrinter = useCallback(
+    (printer: string) => {
+      update(({ process: _process, filaments: _filaments, ...rest }) => ({ ...rest, printer }));
+    },
+    [update],
+  );
+  const chooseProcess = useCallback(
+    (process: string) => {
+      update((current) => ({ ...current, process }));
+    },
+    [update],
+  );
+  const chooseFilament = useCallback(
+    (slot: number, filament: string) => {
+      update((current) => ({ ...current, filaments: { ...current.filaments, [slot]: filament } }));
+    },
+    [update],
+  );
+  const choosePreset = useCallback(
+    (next: BambuQualityPreset) => {
+      update(({ process: _process, ...rest }) => ({ ...rest, preset: next }));
+    },
+    [update],
+  );
+  const resetChoice = useCallback(
+    (choice: 'printer' | 'process') => {
+      update(({ [choice]: _removed, ...rest }) => rest);
+    },
+    [update],
+  );
+  const resetFilament = useCallback(
+    (slot: number) => {
+      update(({ filaments = {}, ...rest }) => {
+        const { [slot]: _removed, ...others } = filaments;
+        return Object.keys(others).length === 0 ? rest : { ...rest, filaments: others };
+      });
+    },
+    [update],
+  );
 
+  const overrides = intent?.settings ?? noSettings;
+  /* A preset without one of these settings leaves it in the file and out of the slice, until presets that have it return. */
+  const reconciled = useMemo(
+    () => (defaults === undefined ? { kept: {}, dropped: 0 } : reconcileOverrides(overrides, defaults)),
+    [defaults, overrides],
+  );
   const selection = loaded?.selection;
   const isCurrent = loaded?.request === hintsKey + partialKey && failure === undefined;
   const exportOptions = useMemo(() => {
@@ -420,11 +482,11 @@ export const useBambuStudio = ({
         process: loaded.selection.process,
         filaments: loaded.selection.filaments,
         plate: loaded.selection.plate,
-        ...(Object.keys(loaded.overrides).length === 0 ? {} : { settings: loaded.overrides }),
+        ...(Object.keys(reconciled.kept).length === 0 ? {} : { settings: reconciled.kept }),
         hints: loaded.hints,
       },
     };
-  }, [isCurrent, loaded]);
+  }, [isCurrent, loaded, reconciled]);
   const printer = selection?.printer;
   const processes = useMemo(() => compatiblePresets(catalog?.processes ?? [], printer), [catalog, printer]);
   const filaments = useMemo(() => compatiblePresets(catalog?.filaments ?? [], printer), [catalog, printer]);
@@ -437,16 +499,20 @@ export const useBambuStudio = ({
     filaments,
     selection,
     settings: loaded?.settings,
-    defaults: loaded?.defaults ?? {},
-    overrides: loaded?.overrides ?? {},
-    setOverrides,
-    dropped: loaded?.dropped ?? 0,
+    defaults: defaults ?? noSettings,
+    overrides,
+    setSetting,
+    resetSetting,
+    dropped: reconciled.dropped,
     error: failure,
     slots,
+    chosen,
     choosePrinter,
     chooseProcess,
     chooseFilament,
     choosePreset,
+    resetChoice,
+    resetFilament,
     exportOptions,
   };
 };

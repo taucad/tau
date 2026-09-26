@@ -63,16 +63,18 @@ export type PrintRequestsView = Readonly<{
  * Subscribe to the host's print request ledger for one machine.
  *
  * The list seeds the projection and every watched transition folds into it;
- * the host journal stays the only authority (blueprint D4). Unmount aborts the watch.
+ * the host's store stays the only authority (blueprint D4). Unmount aborts the watch.
  *
  * @param client - The negotiated machines facet, or nothing while none is available.
  * @param machineId - The machine whose requests to read, or nothing while none is selected.
+ * @param projectId - When set, only requests whose artifact belongs to this project (blueprint D5).
  * @returns The live requests.
  * @public
  */
 export const useMachinesPrintRequests = (
   client: MachineClient | undefined,
   machineId: string | undefined,
+  projectId?: string,
 ): PrintRequestsView => {
   const [records, setRecords] = useState<ReadonlyMap<string, PrintRequest>>(new Map());
   const [error, setError] = useState<string>();
@@ -85,7 +87,8 @@ export const useMachinesPrintRequests = (
     const observe = async (): Promise<void> => {
       try {
         setError(undefined);
-        const initial = await client.listPrintRequests({ machineId, signal: abort.signal });
+        const scope = projectId === undefined ? { machineId } : { machineId, projectId };
+        const initial = await client.listPrintRequests({ ...scope, signal: abort.signal });
         if (abort.signal.aborted) {
           return;
         }
@@ -96,7 +99,7 @@ export const useMachinesPrintRequests = (
           }
           return next;
         });
-        for await (const request of client.watchPrintRequests({ machineId, signal: abort.signal })) {
+        for await (const request of client.watchPrintRequests({ ...scope, signal: abort.signal })) {
           setRecords((current) => reducePrintRequests(current, request));
         }
       } catch (error) {
@@ -110,7 +113,7 @@ export const useMachinesPrintRequests = (
     return () => {
       abort.abort();
     };
-  }, [client, machineId]);
+  }, [client, machineId, projectId]);
 
   const requests = useMemo(
     () => [...records.values()].filter((request) => request.machineId === machineId).sort(byNewest),

@@ -1,12 +1,16 @@
 /**
  * Bambu Studio's preset pickers: printer, process and one filament per used
  * slot, as Bambu Studio offers them for the bound printer (blueprint U2, D9).
+ * A pick the project's print intent holds is marked and resets like a parameter.
  *
  * @module
  */
 
+import { useId } from 'react';
 import type { BambuPresetSummary } from '@taucad/slicer/bambu-studio';
+import { cn } from '@taucad/ui/utils/cn';
 import type { BambuStudioMode } from '#components/print/use-bambu-studio.js';
+import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 
 const selectClass = 'h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm text-foreground';
 
@@ -36,23 +40,39 @@ function PresetSelect({
   label,
   value,
   presets,
+  isModified,
   onChange,
+  onReset,
   children,
 }: {
   readonly label: string;
   readonly value: string;
   readonly presets: readonly BambuPresetSummary[];
+  /** Whether the print intent holds this pick. */
+  readonly isModified: boolean;
   readonly onChange: (name: string) => void;
+  readonly onReset: () => void;
   readonly children?: React.ReactNode;
 }): React.JSX.Element {
+  const id = useId();
   // The selected preset stays listed even when the catalog narrows past it.
   const listed = presets.some((preset) => preset.name === value)
     ? presets
     : [{ name: value, kind: 'process', source: 'system' } satisfies BambuPresetSummary, ...presets];
   return (
-    <label className='flex min-w-0 flex-col gap-1 text-xs text-muted-foreground'>
-      <span className='flex min-w-0 items-center gap-1.5'>{children ?? label}</span>
+    <div className='flex min-w-0 flex-col gap-1 text-xs text-muted-foreground'>
+      {/* The reset sits beside the label, never inside it: a label holds only the control it names. */}
+      <div className='flex min-w-0 items-center gap-1.5'>
+        <label
+          htmlFor={id}
+          className={cn('flex min-w-0 items-center gap-1.5', isModified && 'font-medium text-foreground')}
+        >
+          {children ?? label}
+        </label>
+        {isModified ? <ModifiedIndicator onReset={onReset} tooltip={`Reset ${label}`} /> : null}
+      </div>
       <select
+        id={id}
         aria-label={label}
         className={selectClass}
         value={value}
@@ -62,7 +82,7 @@ function PresetSelect({
       >
         <PresetOptions presets={listed} />
       </select>
-    </label>
+    </div>
   );
 }
 
@@ -80,7 +100,7 @@ export function BambuStudioPresets({
   readonly studio: BambuStudioMode;
   readonly trays: readonly BambuTray[];
 }): React.JSX.Element | undefined {
-  const { selection } = studio;
+  const { selection, chosen, resetChoice } = studio;
   if (!selection) {
     return undefined;
   }
@@ -90,13 +110,21 @@ export function BambuStudioPresets({
         label='Printer preset'
         value={selection.printer}
         presets={studio.printers}
+        isModified={chosen.printer !== undefined}
         onChange={studio.choosePrinter}
+        onReset={() => {
+          resetChoice('printer');
+        }}
       />
       <PresetSelect
         label='Process preset'
         value={selection.process}
         presets={studio.processes}
+        isModified={chosen.process !== undefined}
         onChange={studio.chooseProcess}
+        onReset={() => {
+          resetChoice('process');
+        }}
       />
       {selection.filaments.map((filament, index) => {
         const tray = trays[index];
@@ -109,8 +137,12 @@ export function BambuStudioPresets({
             label={`Filament preset for ${tray.label}`}
             value={filament}
             presets={studio.filaments}
+            isModified={chosen.filaments?.[tray.slot] !== undefined}
             onChange={(name) => {
               studio.chooseFilament(tray.slot, name);
+            }}
+            onReset={() => {
+              studio.resetFilament(tray.slot);
             }}
           >
             {`Filament ${tray.label}`}

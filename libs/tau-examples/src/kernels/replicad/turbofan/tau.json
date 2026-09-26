@@ -1,0 +1,20 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_CaIAcPYKNjKQ7026Sp7hD",
+  "name": "Turbofan Engine",
+  "description": "A two-spool, high-bypass turbofan at CFM56 scale: inlet, 22-blade fan, outlet guide vanes, three-stage booster, six-stage HP compressor with variable guide vanes, annular combustor with 20 fuel nozzles, two-stage HP and four-stage LP turbines, plug and nozzles, a radial drive to the accessory gearbox, and a translating-sleeve cascade thrust reverser. Its mechanism turns both spools and the radial drive, schedules the variable vanes from their unison rings, and deploys the reverser, whose blocker doors and drag links follow the exact linkage through sampled curve couplings.",
+  "tags": [
+    "assembly",
+    "kinematics",
+    "aerospace",
+    "engine",
+    "parametric",
+    "replicad"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

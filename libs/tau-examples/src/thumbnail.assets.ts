@@ -40,21 +40,25 @@ import thumbnail33 from './kernels/replicad/logo/thumbnail.webp?url';
 import thumbnail34 from './kernels/replicad/logo-keychain/thumbnail.webp?url';
 import thumbnail35 from './kernels/replicad/nanoraster-logo/thumbnail.webp?url';
 import thumbnail36 from './kernels/replicad/picovoxel-logo/thumbnail.webp?url';
-import thumbnail37 from './kernels/replicad/pot-plant/thumbnail.webp?url';
-import thumbnail38 from './kernels/replicad/projection-test/thumbnail.webp?url';
-import thumbnail39 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
-import thumbnail40 from './kernels/replicad/replicad-logo/thumbnail.webp?url';
-import thumbnail41 from './kernels/replicad/simple-tray/thumbnail.webp?url';
-import thumbnail42 from './kernels/replicad/staircase/thumbnail.webp?url';
-import thumbnail43 from './kernels/replicad/stress-test/thumbnail.webp?url';
-import thumbnail44 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
-import thumbnail45 from './kernels/replicad/table/thumbnail.webp?url';
-import thumbnail46 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
-import thumbnail47 from './kernels/replicad/tray/thumbnail.webp?url';
-import thumbnail48 from './kernels/replicad/vase/thumbnail.webp?url';
-import thumbnail49 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
-import thumbnail50 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
-import thumbnail51 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
+import thumbnail37 from './kernels/replicad/planetary-gear-system/thumbnail.webp?url';
+import thumbnail38 from './kernels/replicad/pot-plant/thumbnail.webp?url';
+import thumbnail39 from './kernels/replicad/projection-test/thumbnail.webp?url';
+import thumbnail40 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
+import thumbnail41 from './kernels/replicad/replicad-logo/thumbnail.webp?url';
+import thumbnail42 from './kernels/replicad/simple-tray/thumbnail.webp?url';
+import thumbnail43 from './kernels/replicad/six-axis-arm/thumbnail.webp?url';
+import thumbnail44 from './kernels/replicad/staircase/thumbnail.webp?url';
+import thumbnail45 from './kernels/replicad/stress-test/thumbnail.webp?url';
+import thumbnail46 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
+import thumbnail47 from './kernels/replicad/table/thumbnail.webp?url';
+import thumbnail48 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
+import thumbnail49 from './kernels/replicad/tray/thumbnail.webp?url';
+import thumbnail50 from './kernels/replicad/turbofan/thumbnail.webp?url';
+import thumbnail51 from './kernels/replicad/v8-engine/thumbnail.webp?url';
+import thumbnail52 from './kernels/replicad/vase/thumbnail.webp?url';
+import thumbnail53 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
+import thumbnail54 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail55 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
 
 /** Static thumbnail URLs keyed by `<kernel>/<example>`. @public */
 export const thumbnailAssets = {
@@ -95,21 +99,25 @@ export const thumbnailAssets = {
   'replicad/logo-keychain': thumbnail34,
   'replicad/nanoraster-logo': thumbnail35,
   'replicad/picovoxel-logo': thumbnail36,
-  'replicad/pot-plant': thumbnail37,
-  'replicad/projection-test': thumbnail38,
-  'replicad/rao-nozzle': thumbnail39,
-  'replicad/replicad-logo': thumbnail40,
-  'replicad/simple-tray': thumbnail41,
-  'replicad/staircase': thumbnail42,
-  'replicad/stress-test': thumbnail43,
-  'replicad/t-slot-rail': thumbnail44,
-  'replicad/table': thumbnail45,
-  'replicad/tau-wordmark': thumbnail46,
-  'replicad/tray': thumbnail47,
-  'replicad/vase': thumbnail48,
-  'replicad/wavy-vase': thumbnail49,
-  'replicad/wedge-door-stopper': thumbnail50,
-  'replicad/worm-gear-system': thumbnail51,
+  'replicad/planetary-gear-system': thumbnail37,
+  'replicad/pot-plant': thumbnail38,
+  'replicad/projection-test': thumbnail39,
+  'replicad/rao-nozzle': thumbnail40,
+  'replicad/replicad-logo': thumbnail41,
+  'replicad/simple-tray': thumbnail42,
+  'replicad/six-axis-arm': thumbnail43,
+  'replicad/staircase': thumbnail44,
+  'replicad/stress-test': thumbnail45,
+  'replicad/t-slot-rail': thumbnail46,
+  'replicad/table': thumbnail47,
+  'replicad/tau-wordmark': thumbnail48,
+  'replicad/tray': thumbnail49,
+  'replicad/turbofan': thumbnail50,
+  'replicad/v8-engine': thumbnail51,
+  'replicad/vase': thumbnail52,
+  'replicad/wavy-vase': thumbnail53,
+  'replicad/wedge-door-stopper': thumbnail54,
+  'replicad/worm-gear-system': thumbnail55,
 } as const;
 
 /** Key of a generated example thumbnail asset. @public */

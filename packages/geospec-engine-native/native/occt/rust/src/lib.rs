@@ -19,22 +19,16 @@ pub use geospec_engine_native_core::backend::brep::{
     EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
     EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, FaceFacts,
     FiniteContactCircle, FiniteContactFace, LocatedFace, NominalCylindricalBand, OccurrenceFacts,
-    PointState, ProductFacts, RegularSolidContainment, ReportedBrepBundle, ReportedFaces,
-    ResolvedSourceFace, SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts,
-    SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
-    TessellationProfile, TopologyCounts, ValidityFacts, MAX_CIRCULAR_BORE_CANDIDATES,
-    MAX_CIRCULAR_BORE_OWNED_BYTES, MAX_EDGE_TREATMENT_BOUNDARY_USES,
-    MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS, MAX_EDGE_TREATMENT_ROWS,
+    PointState, RegularSolidContainment, ReportedBrepBundle, ReportedFaces, ResolvedSourceFace,
+    SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts, SourceFaceKey,
+    StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts, TessellationProfile,
+    TopologyCounts, ValidityFacts, MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
+    MAX_EDGE_TREATMENT_BOUNDARY_USES, MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS,
+    MAX_EDGE_TREATMENT_ROWS,
 };
 use geospec_engine_native_core::backend::pmi::{PmiFaceAssociation, PmiField, PmiFieldStatus};
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
-use std::{
-    cell::{OnceCell, RefCell},
-    collections::HashMap,
-    ffi::c_char,
-    ptr::NonNull,
-    rc::Rc,
-};
+use std::{cell::OnceCell, ffi::c_char, ptr::NonNull, rc::Rc};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OcctConnector;
@@ -103,10 +97,7 @@ pub fn configure_thread_pool_width(width: u32) -> Result<u32, BackendError> {
 pub struct Document {
     raw: NonNull<ffi::Document>,
     parallel_grant_width: Option<u32>,
-    facts: OnceCell<Rc<DocumentFacts>>,
     whole_faces: OnceCell<Rc<[LocatedFace]>>,
-    faces: RefCell<HashMap<u32, Rc<[LocatedFace]>>>,
-    edges: RefCell<HashMap<u32, Rc<[EdgeFacts]>>>,
     validity: OnceCell<Rc<ValidityFacts>>,
     _single_threaded: std::marker::PhantomData<*mut ()>,
 }
@@ -126,10 +117,7 @@ impl Document {
         Ok(Self {
             raw,
             parallel_grant_width: None,
-            facts: OnceCell::new(),
             whole_faces: OnceCell::new(),
-            faces: RefCell::new(HashMap::new()),
-            edges: RefCell::new(HashMap::new()),
             validity: OnceCell::new(),
             _single_threaded: std::marker::PhantomData,
         })
@@ -143,15 +131,6 @@ impl Document {
     /// Diagnostic count of admitted faces that carry a triangulation; 0 for a BRep.
     pub fn triangulated_faces(&self) -> usize {
         unsafe { ffi::geospec_occt_triangulated_face_count(self.raw.as_ptr()) }
-    }
-
-    pub fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        if let Some(facts) = self.facts.get() {
-            return Ok(Rc::clone(facts));
-        }
-        let facts = Rc::new(unsafe { facts(self.raw.as_ptr())? });
-        let _ = self.facts.set(Rc::clone(&facts));
-        Ok(facts)
     }
 
     /// Validity under a dedicated grant. The bridge reuses the admission proof
@@ -495,7 +474,7 @@ impl BrepSubject for Document {
         let shape = self.reported_shape()?;
         let raw = self.raw.as_ptr();
         let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
-        let occurrences = unsafe { transfer_occurrences(raw, product_count, true, false)? };
+        let occurrences = unsafe { transfer_occurrences(raw, product_count, true)? };
         let rows = self.document_rows()?;
         let faces = self.reported_faces(true)?;
         let admission = self.admission_facts()?;
@@ -503,10 +482,8 @@ impl BrepSubject for Document {
             facts: Rc::new(DocumentFacts {
                 source_length_unit: admission.source_length_unit,
                 source_unit_to_millimeters: admission.source_unit_to_millimeters,
-                products: Vec::new(),
                 occurrences,
                 shape,
-                faces: Vec::new(),
                 subshapes: rows.subshapes,
                 datum_placements: rows.datum_placements,
                 semantic_datums: rows.semantic_datums,
@@ -768,20 +745,16 @@ impl BrepSubject for Document {
         unsafe { regular_solid_containment(self.raw.as_ptr(), subject, target) }
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Document::facts(self)
-    }
-
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
         let raw = self.raw.as_ptr();
         let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
-        Ok(unsafe { transfer_occurrences(raw, product_count, true, false)? }.into())
+        Ok(unsafe { transfer_occurrences(raw, product_count, true)? }.into())
     }
 
     fn source_occurrence_structure(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
         let raw = self.raw.as_ptr();
         let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
-        Ok(unsafe { transfer_occurrences(raw, product_count, false, false)? }.into())
+        Ok(unsafe { transfer_occurrences(raw, product_count, false)? }.into())
     }
 
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
@@ -791,32 +764,6 @@ impl BrepSubject for Document {
         let faces: Rc<[LocatedFace]> = unsafe { whole_faces(self.raw.as_ptr())? }.into();
         let _ = self.whole_faces.set(Rc::clone(&faces));
         Ok(faces)
-    }
-
-    fn occurrence_faces(&self, occurrence: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        if let Some(faces) = self.faces.borrow().get(&occurrence) {
-            return Ok(Rc::clone(faces));
-        }
-        self.require_occurrence(occurrence)?;
-        let faces: Rc<[LocatedFace]> =
-            unsafe { occurrence_faces(self.raw.as_ptr(), occurrence)? }.into();
-        self.faces
-            .borrow_mut()
-            .insert(occurrence, Rc::clone(&faces));
-        Ok(faces)
-    }
-
-    fn occurrence_edges(&self, occurrence: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        if let Some(edges) = self.edges.borrow().get(&occurrence) {
-            return Ok(Rc::clone(edges));
-        }
-        self.require_occurrence(occurrence)?;
-        let edges: Rc<[EdgeFacts]> =
-            unsafe { occurrence_edges(self.raw.as_ptr(), occurrence)? }.into();
-        self.edges
-            .borrow_mut()
-            .insert(occurrence, Rc::clone(&edges));
-        Ok(edges)
     }
 
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
@@ -1573,9 +1520,6 @@ unsafe fn reported_faces(
             facts,
             bounds,
             reversed: value.reversed != 0,
-            // F10: no edge indices or shape labels; no reader needs them.
-            edge_indices: Vec::new(),
-            shape_label: None,
         })
     };
     let mut whole_faces = Vec::new();
@@ -1638,13 +1582,12 @@ unsafe fn reported_faces(
 }
 
 /// `with_bounds == false` never computes source occurrence bounds; the
-/// transferred `bounds` are then NaN and must not be read. `with_labels ==
-/// false` leaves `label`, `product_label` and `name` empty (F10: no reader).
+/// transferred `bounds` are then NaN and must not be read. `name` is left
+/// empty (F10: no reader).
 unsafe fn transfer_occurrences(
     raw: *const ffi::Document,
     product_count: usize,
     with_bounds: bool,
-    with_labels: bool,
 ) -> Result<Vec<OccurrenceFacts>, BackendError> {
     let occurrence_count = ffi::geospec_occt_occurrence_count(raw);
     u32::try_from(occurrence_count)
@@ -1663,57 +1606,19 @@ unsafe fn transfer_occurrences(
     };
     for index in 0..occurrence_count {
         let mut output = ffi::OccurrenceFacts::default();
-        let (label, product_label, name) = if with_labels {
-            let label = copied_string(|label, error| {
-                occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    label,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    error,
-                )
-            })?;
-            let product_label = copied_string(|product, error| {
-                occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    std::ptr::null_mut(),
-                    product,
-                    std::ptr::null_mut(),
-                    error,
-                )
-            })?;
-            let name = copied_string(|name, error| {
-                occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    name,
-                    error,
-                )
-            })?;
-            (label, product_label, name)
-        } else {
-            let mut error = ErrorBuffer::new();
-            check(
-                occurrence(
-                    raw,
-                    index,
-                    &mut output,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    error.raw(),
-                ),
-                &error,
-            )?;
-            (String::new(), String::new(), String::new())
-        };
+        let mut error = ErrorBuffer::new();
+        check(
+            occurrence(
+                raw,
+                index,
+                &mut output,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                error.raw(),
+            ),
+            &error,
+        )?;
         if !with_bounds {
             output.bounds = ffi::Bounds {
                 min: [f64::NAN; 3],
@@ -1776,9 +1681,7 @@ unsafe fn transfer_occurrences(
             ordinal_path.push(ordinal);
         }
         occurrences.push(OccurrenceFacts {
-            label,
-            product_label,
-            name,
+            name: String::new(),
             placement: output.placement,
             bounds: output.bounds.into(),
             path: copied_string(|path, error| {
@@ -1827,54 +1730,6 @@ unsafe fn transfer_occurrences(
         ));
     }
     Ok(occurrences)
-}
-
-unsafe fn facts(raw: *const ffi::Document) -> Result<DocumentFacts, BackendError> {
-    let mut shape = ffi::ShapeFacts::default();
-    let mut unit_scale = 0.0;
-    let source_length_unit = copied_string(|unit, error| {
-        ffi::geospec_occt_document_facts(raw, &mut shape, &mut unit_scale, unit, error)
-    })?;
-
-    let product_count = ffi::geospec_occt_product_count(raw);
-    let mut products = Vec::with_capacity(product_count);
-    for index in 0..product_count {
-        let label = copied_string(|label, error| {
-            ffi::geospec_occt_product(raw, index, label, std::ptr::null_mut(), error)
-        })?;
-        let name = copied_string(|name, error| {
-            ffi::geospec_occt_product(raw, index, std::ptr::null_mut(), name, error)
-        })?;
-        products.push(ProductFacts { label, name });
-    }
-
-    let occurrences = transfer_occurrences(raw, product_count, true, true)?;
-
-    let face_count = ffi::geospec_occt_face_count(raw);
-    let mut faces = Vec::with_capacity(face_count);
-    for index in 0..face_count {
-        let mut output = ffi::FaceFacts::default();
-        let mut error = ErrorBuffer::new();
-        check(
-            ffi::geospec_occt_face(raw, index, &mut output, error.raw()),
-            &error,
-        )?;
-        faces.push(output.try_into()?);
-    }
-
-    let rows = document_rows(raw)?;
-
-    Ok(DocumentFacts {
-        source_length_unit,
-        source_unit_to_millimeters: unit_scale,
-        products,
-        occurrences,
-        shape: shape.into(),
-        faces,
-        subshapes: rows.subshapes,
-        datum_placements: rows.datum_placements,
-        semantic_datums: rows.semantic_datums,
-    })
 }
 
 /// Subshape names and datums, read from admission; no report and no mesh.
@@ -2035,53 +1890,6 @@ unsafe fn document_rows(raw: *const ffi::Document) -> Result<DocumentRows, Backe
     })
 }
 
-unsafe fn occurrence_faces(
-    raw: *const ffi::Document,
-    occurrence: u32,
-) -> Result<Vec<LocatedFace>, BackendError> {
-    let count = ffi::geospec_occt_occurrence_face_count(raw, occurrence);
-    let mut result = Vec::with_capacity(count);
-    for index in 0..count {
-        let mut value = ffi::LocatedFaceFacts::default();
-        let mut error = ErrorBuffer::new();
-        check(
-            ffi::geospec_occt_occurrence_face(raw, occurrence, index, &mut value, error.raw()),
-            &error,
-        )?;
-        let mut edge_indices = Vec::with_capacity(value.edge_count);
-        for edge_index in 0..value.edge_count {
-            let mut edge = 0;
-            check(
-                ffi::geospec_occt_occurrence_face_edge(
-                    raw,
-                    occurrence,
-                    index,
-                    edge_index,
-                    &mut edge,
-                    error.raw(),
-                ),
-                &error,
-            )?;
-            edge_indices.push(edge);
-        }
-        let shape_label = copied_string(|label, error| {
-            ffi::geospec_occt_occurrence_face_label(raw, occurrence, index, label, error)
-        })?;
-        result.push(LocatedFace {
-            entity: BrepEntity::Face {
-                occurrence,
-                face: qualified_query_index(value.face.query_index)?,
-            },
-            facts: value.face.try_into()?,
-            bounds: value.bounds.into(),
-            reversed: value.reversed != 0,
-            edge_indices,
-            shape_label: (!shape_label.is_empty()).then_some(shape_label),
-        });
-    }
-    Ok(result)
-}
-
 /// Source whole faces without their `AddOptimal` boxes (F6: NaN here;
 /// `face_optimal_bounds` measures the faces whose box is read).
 unsafe fn whole_faces(raw: *const ffi::Document) -> Result<Vec<LocatedFace>, BackendError> {
@@ -2105,8 +1913,6 @@ unsafe fn whole_faces(raw: *const ffi::Document) -> Result<Vec<LocatedFace>, Bac
             ),
             &error,
         )?;
-        let shape_label =
-            copied_string(|label, error| ffi::geospec_occt_face_label(raw, index, label, error))?;
         result.push(LocatedFace {
             entity: BrepEntity::WholeFace(qualified_query_index(face.query_index)?),
             facts: face.try_into()?,
@@ -2115,8 +1921,6 @@ unsafe fn whole_faces(raw: *const ffi::Document) -> Result<Vec<LocatedFace>, Bac
                 max: [f64::NAN; 3],
             },
             reversed: reversed != 0,
-            edge_indices: Vec::new(),
-            shape_label: (!shape_label.is_empty()).then_some(shape_label),
         });
     }
     Ok(result)
@@ -2163,24 +1967,6 @@ unsafe fn edge_address_count(
         &error,
     )?;
     Ok(count)
-}
-
-unsafe fn occurrence_edges(
-    raw: *const ffi::Document,
-    occurrence: u32,
-) -> Result<Vec<EdgeFacts>, BackendError> {
-    let count = edge_address_count(raw, occurrence)?;
-    let mut result = Vec::with_capacity(count);
-    for index in 0..count {
-        let mut value = ffi::EdgeFacts::default();
-        let mut error = ErrorBuffer::new();
-        check(
-            ffi::geospec_occt_occurrence_edge(raw, occurrence, index, &mut value, error.raw()),
-            &error,
-        )?;
-        result.push(value.try_into()?);
-    }
-    Ok(result)
 }
 
 unsafe fn validity(raw: *const ffi::Document) -> Result<ValidityFacts, BackendError> {
@@ -2737,7 +2523,9 @@ fn finite(values: &[f64]) -> bool {
     values.iter().all(|value| value.is_finite())
 }
 
-fn edge_treatment_surface(value: ffi::FaceFacts) -> Result<FaceFacts, BackendError> {
+/// The analytic surface and its parameter bounds, which `FaceFacts` no
+/// longer carries (F10).
+fn edge_treatment_surface(value: ffi::FaceFacts) -> Result<(SurfaceFacts, [f64; 4]), BackendError> {
     if !finite(&value.parameter_bounds)
         || !finite(&value.origin)
         || !finite(&value.direction)
@@ -2751,7 +2539,8 @@ fn edge_treatment_surface(value: ffi::FaceFacts) -> Result<FaceFacts, BackendErr
             "OCCT returned invalid analytic edge-treatment geometry.",
         ));
     }
-    value.try_into()
+    let face: FaceFacts = value.try_into()?;
+    Ok((face.surface, value.parameter_bounds))
 }
 
 fn edge_treatment_support(
@@ -2770,8 +2559,8 @@ fn edge_treatment_support(
             "OCCT returned an invalid edge-treatment support.",
         ));
     }
-    let face = edge_treatment_surface(value.surface)?;
-    if !finite(&face.parameter_bounds) {
+    let (surface, parameter_bounds) = edge_treatment_surface(value.surface)?;
+    if !finite(&parameter_bounds) {
         return Err(backend_error(
             "OCCT returned non-finite edge-treatment support bounds.",
         ));
@@ -2779,8 +2568,8 @@ fn edge_treatment_support(
     Ok(EdgeTreatmentSupport {
         public_face_ordinal: value.public_face_ordinal,
         private_query_face: value.private_query_face,
-        parameter_bounds: face.parameter_bounds,
-        surface: face.surface,
+        parameter_bounds,
+        surface,
         transferred_reversed: value.transferred_reversed != 0,
         maximum_topology_tolerance_mm: value.maximum_topology_tolerance_mm,
     })
@@ -2822,8 +2611,8 @@ unsafe fn edge_treatment_certificate(
         ));
     }
     edge_treatment_charge(std::mem::size_of::<EdgeTreatmentCertificate>(), owned_bytes)?;
-    let face = edge_treatment_surface(value.surface)?;
-    if !finite(&face.parameter_bounds) {
+    let (surface, parameter_bounds) = edge_treatment_surface(value.surface)?;
+    if !finite(&parameter_bounds) {
         return Err(backend_error(
             "OCCT returned non-finite edge-treatment parameter bounds.",
         ));
@@ -2961,8 +2750,8 @@ unsafe fn edge_treatment_certificate(
     Ok(EdgeTreatmentCertificate {
         kind,
         metric_value_mm: value.metric_value_mm,
-        surface: face.surface,
-        parameter_bounds: face.parameter_bounds,
+        surface,
+        parameter_bounds,
         supports,
         boundary_uses,
         residuals,
@@ -3399,7 +3188,6 @@ impl From<ffi::Bounds> for Bounds {
 impl From<ffi::ShapeFacts> for ShapeFacts {
     fn from(value: ffi::ShapeFacts) -> Self {
         Self {
-            valid: value.valid != 0,
             bounds: value.bounds.into(),
             volume: value.volume,
             surface_area: value.surface_area,
@@ -3542,7 +3330,6 @@ impl TryFrom<ffi::FaceFacts> for FaceFacts {
         };
         Ok(Self {
             index: value.index,
-            parameter_bounds: value.parameter_bounds,
             area: value.area,
             center_of_mass: value.center_of_mass,
             surface,
@@ -4059,13 +3846,6 @@ mod ffi {
         ) -> i32;
         pub fn geospec_occt_release(document: *mut Document);
         pub fn geospec_occt_triangulated_face_count(document: *const Document) -> usize;
-        pub fn geospec_occt_document_facts(
-            document: *const Document,
-            shape: *mut ShapeFacts,
-            unit_scale: *mut f64,
-            unit: *mut StringBuffer,
-            error: *mut StringBuffer,
-        ) -> i32;
         pub fn geospec_occt_admission_facts(
             document: *const Document,
             unit_scale: *mut f64,
@@ -4123,13 +3903,6 @@ mod ffi {
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_product_count(document: *const Document) -> usize;
-        pub fn geospec_occt_product(
-            document: *const Document,
-            index: usize,
-            label: *mut StringBuffer,
-            name: *mut StringBuffer,
-            error: *mut StringBuffer,
-        ) -> i32;
         pub fn geospec_occt_occurrence_count(document: *const Document) -> usize;
         pub fn geospec_occt_occurrence(
             document: *const Document,
@@ -4179,12 +3952,6 @@ mod ffi {
             reversed: *mut i32,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_face_label(
-            document: *const Document,
-            index: usize,
-            shape_label: *mut StringBuffer,
-            error: *mut StringBuffer,
-        ) -> i32;
         pub fn geospec_occt_subshape_count(document: *const Document) -> usize;
         pub fn geospec_occt_subshape(
             document: *const Document,
@@ -4229,39 +3996,10 @@ mod ffi {
             document: *const Document,
             occurrence: u32,
         ) -> usize;
-        pub fn geospec_occt_occurrence_face(
-            document: *const Document,
-            occurrence: u32,
-            index: usize,
-            facts: *mut LocatedFaceFacts,
-            error: *mut StringBuffer,
-        ) -> i32;
-        pub fn geospec_occt_occurrence_face_label(
-            document: *const Document,
-            occurrence: u32,
-            index: usize,
-            shape_label: *mut StringBuffer,
-            error: *mut StringBuffer,
-        ) -> i32;
-        pub fn geospec_occt_occurrence_face_edge(
-            document: *const Document,
-            occurrence: u32,
-            face_index: usize,
-            edge_index: usize,
-            edge: *mut u32,
-            error: *mut StringBuffer,
-        ) -> i32;
         pub fn geospec_occt_occurrence_edge_count(
             document: *const Document,
             occurrence: u32,
             count: *mut usize,
-            error: *mut StringBuffer,
-        ) -> i32;
-        pub fn geospec_occt_occurrence_edge(
-            document: *const Document,
-            occurrence: u32,
-            index: usize,
-            facts: *mut EdgeFacts,
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_validity_dedicated(

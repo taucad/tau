@@ -544,14 +544,9 @@ void geospec_occt_release(geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT
 size_t geospec_occt_triangulated_face_count(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 
-// Admission keeps source identity and addresses only. Source shape, occurrence
-// bounds, occurrence face/edge and whole-face numerics are computed on first
-// demand by their getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR.
-int geospec_occt_document_facts(const geospec_occt_document* document,
-                                geospec_occt_shape_facts* out_shape,
-                                double* out_source_unit_to_millimeters,
-                                geospec_occt_string* source_unit,
-                                geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Admission keeps source identity and addresses only. Occurrence bounds, edge
+// addresses and whole-face numerics are computed on first demand by their
+// getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR.
 int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* out_source_unit_to_millimeters, size_t* out_occurrence_count,
@@ -619,9 +614,6 @@ int geospec_occt_report_mesh(
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 size_t geospec_occt_product_count(const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_product(const geospec_occt_document* document, size_t index,
-                         geospec_occt_string* label, geospec_occt_string* name,
-                         geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 size_t geospec_occt_occurrence_count(const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_occurrence(const geospec_occt_document* document, size_t index,
@@ -658,9 +650,6 @@ int geospec_occt_face_location(const geospec_occt_document* document,
                                size_t index, geospec_occt_bounds* out_bounds,
                                int* out_reversed,
                                geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_face_label(const geospec_occt_document* document,
-                            size_t index, geospec_occt_string* shape_label,
-                            geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 size_t geospec_occt_subshape_count(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
@@ -700,27 +689,11 @@ int geospec_occt_resolve_source_face(
     const uint32_t* occurrence_route, size_t occurrence_route_count,
     geospec_occt_resolved_source_face* out_face,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_occurrence_face(
-    const geospec_occt_document* document, uint32_t occurrence, size_t index,
-    geospec_occt_located_face_facts* out_face,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_occurrence_face_label(
-    const geospec_occt_document* document, uint32_t occurrence, size_t index,
-    geospec_occt_string* shape_label,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_occurrence_face_edge(
-    const geospec_occt_document* document, uint32_t occurrence, size_t face_index,
-    size_t edge_index, uint32_t* out_edge,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 // Maps the occurrence's edge addresses on first demand, so it can fail.
 int geospec_occt_occurrence_edge_count(
     const geospec_occt_document* document, uint32_t occurrence,
     size_t* out_count, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-int geospec_occt_occurrence_edge(
-    const geospec_occt_document* document, uint32_t occurrence, size_t index,
-    geospec_occt_edge_facts* out_edge,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 int geospec_occt_validity(const geospec_occt_document* document,
                           geospec_occt_validity_facts* out_validity,

@@ -179,10 +179,8 @@ pub struct ReportedBrepBundle {
 pub struct DocumentFacts {
     pub source_length_unit: String,
     pub source_unit_to_millimeters: f64,
-    pub products: Vec<ProductFacts>,
     pub occurrences: Vec<OccurrenceFacts>,
     pub shape: ShapeFacts,
-    pub faces: Vec<FaceFacts>,
     pub subshapes: Vec<SubshapeFacts>,
     pub datum_placements: Vec<DatumPlacementFacts>,
     pub semantic_datums: Vec<SemanticDatumFacts>,
@@ -190,16 +188,7 @@ pub struct DocumentFacts {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProductFacts {
-    pub label: String,
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct OccurrenceFacts {
-    pub label: String,
-    pub product_label: String,
     pub name: String,
     pub placement: [f64; 12],
     pub bounds: Bounds,
@@ -231,9 +220,6 @@ pub struct DocumentRows {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShapeFacts {
-    /// Measured by source facts only; the report facts facet leaves it false.
-    /// Validity claims read `BrepSubject::validity`.
-    pub valid: bool,
     pub bounds: Bounds,
     pub volume: f64,
     pub surface_area: f64,
@@ -263,7 +249,6 @@ pub struct TopologyCounts {
 #[serde(rename_all = "camelCase")]
 pub struct FaceFacts {
     pub index: u32,
-    pub parameter_bounds: [f64; 4],
     pub area: f64,
     pub center_of_mass: [f64; 3],
     pub surface: SurfaceFacts,
@@ -382,8 +367,6 @@ pub struct LocatedFace {
     pub facts: FaceFacts,
     pub bounds: Bounds,
     pub reversed: bool,
-    pub edge_indices: Vec<u32>,
-    pub shape_label: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -955,7 +938,7 @@ pub trait BrepSubject {
         Ok(self.reported_facts_and_mesh()?.mesh.as_ref().clone())
     }
 
-    /// The report's whole-shape facts; `valid` is not measured.
+    /// The report's whole-shape facts.
     fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
         Ok(self.reported_facts_and_mesh()?.facts.shape.clone())
     }
@@ -1115,8 +1098,8 @@ pub trait BrepSubject {
     }
 
     /// Ordered source occurrence metadata without preparing a report or
-    /// transferring whole-document face/PMI inventories. Occurrence labels
-    /// (`label`, `product_label`, `name`) may be left empty.
+    /// transferring whole-document face/PMI inventories. `name` may be left
+    /// empty.
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
         Ok(self
             .reported_facts_and_mesh()?
@@ -1132,7 +1115,6 @@ pub trait BrepSubject {
         self.source_occurrences()
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError>;
     /// All uniquely forward-transferred public faces for an original source face.
     /// Empty/missing and ambiguous bindings remain typed inventory states.
     fn pmi_source_faces(
@@ -1147,8 +1129,6 @@ pub trait BrepSubject {
     /// Located faces in the whole retained shape, including flat STEP documents.
     /// `bounds` may be unmeasured (NaN); `face_optimal_bounds` measures one.
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
-    fn occurrence_faces(&self, occurrence: u32) -> Result<Rc<[LocatedFace]>, BackendError>;
-    fn occurrence_edges(&self, occurrence: u32) -> Result<Rc<[EdgeFacts]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
     /// Classify against the located trimmed face. Off-surface points are Out.
     fn classify_face_points(

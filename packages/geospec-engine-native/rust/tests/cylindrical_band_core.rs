@@ -442,7 +442,6 @@ impl BrepSubject for Control {
                 entity: address(band),
                 facts: FaceFacts {
                     index: band.public_face_ordinal,
-                    parameter_bounds: band.parameter_bounds,
                     area: 1.0,
                     center_of_mass: band.origin,
                     surface: SurfaceFacts::Cylinder {
@@ -456,8 +455,6 @@ impl BrepSubject for Control {
                     max: [40.0; 3],
                 },
                 reversed: band.transferred_reversed,
-                edge_indices: vec![1, 2, 3],
-                shape_label: Some("0:1:1:3:1".into()),
             };
             // Unselected ordinal slots are report-only scaffolding; the selected
             // slot retains the exact public ordinal/private address from C1.
@@ -474,7 +471,47 @@ impl BrepSubject for Control {
             occurrence_faces[band.occurrence as usize] = Rc::from(faces);
         }
         Ok(ReportedBrepBundle {
-            facts: self.facts()?,
+            facts: Rc::new(DocumentFacts {
+                source_length_unit: "millimetre".into(),
+                source_unit_to_millimeters: 1.0,
+                occurrences: (0..=self.reported.occurrence)
+                    .map(|index| OccurrenceFacts {
+                        name: if index == 1 { "shaft" } else { "housing" }.into(),
+                        placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                        bounds: Bounds {
+                            min: [-40.0; 3],
+                            max: [40.0; 3],
+                        },
+                        path: if index == 1 { "shaft" } else { "housing" }.into(),
+                        parent: None,
+                        product: 0,
+                        product_name: "core-product".into(),
+                        instance_name: None,
+                        ordinal_path: vec![index + 1],
+                    })
+                    .collect(),
+                subshapes: vec![],
+                datum_placements: vec![],
+                semantic_datums: vec![],
+                shape: ShapeFacts {
+                    bounds: Bounds {
+                        min: [-40.0; 3],
+                        max: [40.0; 3],
+                    },
+                    volume: 1.0,
+                    surface_area: 1.0,
+                    center_of_mass: [0.0; 3],
+                    topology: TopologyCounts {
+                        compounds: 0,
+                        solids: 1,
+                        shells: 1,
+                        faces: 3,
+                        wires: 3,
+                        edges: 3,
+                        vertices: 2,
+                    },
+                },
+            }),
             whole_faces: Rc::from([]),
             occurrence_faces,
             mesh: Rc::new(TriangleMesh {
@@ -484,63 +521,8 @@ impl BrepSubject for Control {
         })
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(Rc::new(DocumentFacts {
-            source_length_unit: "millimetre".into(),
-            source_unit_to_millimeters: 1.0,
-            products: vec![],
-            occurrences: (0..=self.reported.occurrence)
-                .map(|index| OccurrenceFacts {
-                    label: format!("occurrence-{index}"),
-                    product_label: "core-product".into(),
-                    name: if index == 1 { "shaft" } else { "housing" }.into(),
-                    placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                    bounds: Bounds {
-                        min: [-40.0; 3],
-                        max: [40.0; 3],
-                    },
-                    path: if index == 1 { "shaft" } else { "housing" }.into(),
-                    parent: None,
-                    product: 0,
-                    product_name: "core-product".into(),
-                    instance_name: None,
-                    ordinal_path: vec![index + 1],
-                })
-                .collect(),
-            faces: vec![],
-            subshapes: vec![],
-            datum_placements: vec![],
-            semantic_datums: vec![],
-            shape: ShapeFacts {
-                valid: true,
-                bounds: Bounds {
-                    min: [-40.0; 3],
-                    max: [40.0; 3],
-                },
-                volume: 1.0,
-                surface_area: 1.0,
-                center_of_mass: [0.0; 3],
-                topology: TopologyCounts {
-                    compounds: 0,
-                    solids: 1,
-                    shells: 1,
-                    faces: 3,
-                    wires: 3,
-                    edges: 3,
-                    vertices: 2,
-                },
-            },
-        }))
-    }
-
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         unreachable!("no whole-face fallback")
-    }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!("reuse retained report")
-    }
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        unreachable!("no edge query")
     }
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         unreachable!("C1 admission owns validity")

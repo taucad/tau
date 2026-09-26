@@ -35,10 +35,16 @@ fn face_boxes(document: &Document) -> Vec<Bounds> {
 fn whole_face_boxes_are_read_lazily_and_fold_to_the_shape_box() {
     // Solids without free edges or vertices: AddOptimal folds exactly these
     // per-face boxes into the source shape box.
-    for name in [
-        "ap242-radius1-height10.step",
-        "ap242-box.step",
-        "two-cube-assembly.step",
+    for (name, shape) in [
+        (
+            "ap242-radius1-height10.step",
+            ([-1.0, -1.0, 0.0], [1.0, 1.0, 10.0]),
+        ),
+        ("ap242-box.step", ([-5.0, -10.0, -15.0], [5.0, 10.0, 15.0])),
+        (
+            "two-cube-assembly.step",
+            ([-5.0, -5.0, -5.0], [35.0, 5.0, 5.0]),
+        ),
     ] {
         let document = Document::from_step(&fixture(name)).unwrap();
         assert!(
@@ -50,12 +56,7 @@ fn whole_face_boxes_are_read_lazily_and_fold_to_the_shape_box() {
                 .all(|value| value.is_nan())),
             "{name}: whole faces carry no box until one is read"
         );
-        let shape = document.facts().unwrap().shape.bounds;
-        assert_eq!(
-            union(face_boxes(&document)),
-            (shape.min, shape.max),
-            "{name}"
-        );
+        assert_eq!(union(face_boxes(&document)), shape, "{name}");
     }
 }
 
@@ -79,12 +80,11 @@ fn occurrence_and_face_boxes_are_bit_equal_in_either_demand_order() {
         let actual = format!("{:?}\n{boxes:?}", faces_first.source_occurrences().unwrap());
         assert_eq!(actual, expected, "{name}");
 
-        // Roots cover the document: their union is the source shape box.
-        let shape = occurrences_first.facts().unwrap().shape.bounds;
+        // Roots cover the document: their union is the whole-face box fold.
         let roots = occurrences.iter().filter(|row| row.parent.is_none());
         assert_eq!(
             union(roots.map(|row| row.bounds)),
-            (shape.min, shape.max),
+            union(face_boxes(&occurrences_first)),
             "{name}"
         );
     }

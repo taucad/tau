@@ -29,9 +29,6 @@ fn mesh_and_shape_facets_share_one_generation_in_either_order() {
         assert_eq!(combined.report_generation_builds(), 1, "{name}");
         // Debug renders each f64 by its shortest round trip, keeping signed zeros.
         let expected = format!("{:?}\n{:?}", report.mesh, report.facts.shape);
-        // F2: the report facts facet never analyzes its copy's validity.
-        assert!(!report.facts.shape.valid, "{name}");
-        assert!(combined.facts().unwrap().shape.valid, "{name}");
 
         for mesh_first in [true, false] {
             let document = Document::from_step(&bytes).unwrap();

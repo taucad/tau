@@ -5,7 +5,7 @@ use std::cell::Cell;
 
 use super::*;
 use crate::backend::brep::{
-    BrepIdentityProfile, DocumentFacts, EdgeFacts, PointState, ReportedBrepBundle, ReportedFaces,
+    BrepIdentityProfile, DocumentFacts, PointState, ReportedBrepBundle, ReportedFaces,
     TopologyCounts, ValidityFacts,
 };
 
@@ -68,10 +68,8 @@ fn bundle(mesh: Rc<TriangleMesh>) -> ReportedBrepBundle {
         facts: Rc::new(DocumentFacts {
             source_length_unit: "millimetre".into(),
             source_unit_to_millimeters: 1.0,
-            products: Vec::new(),
             occurrences: Vec::new(),
             shape: crate::backend::brep::ShapeFacts {
-                valid: true,
                 bounds: Bounds {
                     min: [0.0; 3],
                     max: [1.0; 3],
@@ -89,7 +87,6 @@ fn bundle(mesh: Rc<TriangleMesh>) -> ReportedBrepBundle {
                     vertices: 8,
                 },
             },
-            faces: Vec::new(),
             subshapes: Vec::new(),
             datum_placements: Vec::new(),
             semantic_datums: Vec::new(),
@@ -177,16 +174,7 @@ impl BrepSubject for FacetBrep {
         Ok(crate::backend::brep::DocumentRows::default())
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        unreachable!()
-    }
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!()
-    }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!()
-    }
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
         unreachable!()
     }
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {

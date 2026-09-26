@@ -60,35 +60,29 @@ fn surface(face: &geospec_engine_native_occt::LocatedFace) -> &'static str {
 }
 
 fn observe(source: &str, document: &Document) {
-    let facts = document.facts().unwrap();
-    if facts.occurrences.is_empty() {
+    let occurrences = document.source_occurrence_structure().unwrap();
+    if occurrences.is_empty() {
         for (source_order, face) in document.faces().unwrap().iter().enumerate() {
             eprintln!(
-                "FACE_ADDRESS source={source} occurrence=whole sourceOrder={source_order} public={} private={} surface={} reversed={} label={:?}",
+                "FACE_ADDRESS source={source} occurrence=whole sourceOrder={source_order} public={} private={} surface={} reversed={}",
                 face.facts.index,
                 private_face(face.entity),
                 surface(face),
                 face.reversed,
-                face.shape_label,
             );
         }
         return;
     }
-    for (occurrence, row) in facts.occurrences.iter().enumerate() {
-        for (source_order, face) in document
-            .occurrence_faces(occurrence as u32)
-            .unwrap()
-            .iter()
-            .enumerate()
-        {
+    let faces = document.reported_faces(false).unwrap().occurrence_faces;
+    for (row, faces) in occurrences.iter().zip(faces) {
+        for (source_order, face) in faces.iter().enumerate() {
             eprintln!(
-                "FACE_ADDRESS source={source} occurrence={} sourceOrder={source_order} public={} private={} surface={} reversed={} label={:?}",
+                "FACE_ADDRESS source={source} occurrence={} sourceOrder={source_order} public={} private={} surface={} reversed={}",
                 row.path,
                 face.facts.index,
                 private_face(face.entity),
                 surface(face),
                 face.reversed,
-                face.shape_label,
             );
         }
     }
@@ -127,23 +121,16 @@ fn report_copy_preserves_public_order_and_private_selected_domain_addresses() {
     observe("two-cube-assembly.step", &document);
 
     let whole = document.faces().unwrap();
-    let nominal = [
-        document.occurrence_faces(0).unwrap(),
-        document.occurrence_faces(1).unwrap(),
-    ];
     let report = document.reported_facts_and_mesh().unwrap();
     assert_eq!(addresses(&whole), addresses(&report.whole_faces));
-    for (occurrence, nominal_faces) in nominal.iter().enumerate() {
+    assert_eq!(report.occurrence_faces.len(), 2);
+    for (occurrence, faces) in report.occurrence_faces.iter().enumerate() {
         assert_eq!(
-            addresses(nominal_faces),
-            addresses(&report.occurrence_faces[occurrence])
-        );
-        assert_eq!(
-            nominal_faces
+            faces
                 .iter()
                 .map(|face| face.facts.index)
                 .collect::<Vec<_>>(),
-            (0..nominal_faces.len() as u32).collect::<Vec<_>>()
+            (0..faces.len() as u32).collect::<Vec<_>>()
         );
 
         let selected = document
@@ -177,16 +164,16 @@ fn named_interface_joins_the_actual_located_public_face() {
     .unwrap();
     observe("selector/second-producer-transformed/model.step", &document);
 
-    let facts = document.facts().unwrap();
-    let subshape = facts
+    let rows = document.document_rows().unwrap();
+    let subshape = rows
         .subshapes
         .iter()
         .find(|shape| shape.occurrence_path == "cubeB" && shape.name == "face.b")
         .expect("cubeB.face.b must retain its authored association");
     let occurrence = subshape.occurrence.unwrap();
     let public = subshape.face_index.unwrap();
-    let faces = document.occurrence_faces(occurrence).unwrap();
-    let face = faces
+    let faces = document.reported_faces(true).unwrap().occurrence_faces;
+    let face = faces[occurrence as usize]
         .iter()
         .find(|face| face.facts.index == public)
         .expect("authored public index must resolve to its located face");

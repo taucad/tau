@@ -8,9 +8,9 @@ use geospec_engine_native_core::{
     backend::{
         brep::{
             Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepIdentityProfile,
-            BrepSubject, ContinuousWallDomain, ContinuousWallShape, DocumentFacts, EdgeFacts,
-            LocatedFace, OccurrenceFacts, PointState, ProductFacts, ReportedBrepBundle, ShapeFacts,
-            TessellationProfile, TopologyCounts, ValidityFacts,
+            BrepSubject, ContinuousWallDomain, ContinuousWallShape, DocumentFacts, LocatedFace,
+            OccurrenceFacts, PointState, ReportedBrepBundle, ShapeFacts, TessellationProfile,
+            TopologyCounts, ValidityFacts,
         },
         csg::{
             BooleanOp, CsgConnector, FillRule, MeshExport, Section, SectionComponent, SectionOp,
@@ -91,8 +91,6 @@ fn cube(bounds: Bounds) -> TriangleMesh {
 
 fn occurrence() -> OccurrenceFacts {
     OccurrenceFacts {
-        label: "wall".into(),
-        product_label: "wall-product".into(),
         name: "wall".into(),
         placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         bounds: bounds([0.0; 3], [1.0; 3]),
@@ -109,13 +107,8 @@ fn facts() -> Rc<DocumentFacts> {
     Rc::new(DocumentFacts {
         source_length_unit: "millimetre".into(),
         source_unit_to_millimeters: 1.0,
-        products: vec![ProductFacts {
-            label: "wall-product".into(),
-            name: "wall".into(),
-        }],
         occurrences: vec![occurrence()],
         shape: ShapeFacts {
-            valid: true,
             bounds: bounds([0.0; 3], [1.0; 3]),
             volume: 1.0,
             surface_area: 6.0,
@@ -130,7 +123,6 @@ fn facts() -> Rc<DocumentFacts> {
                 vertices: 8,
             },
         },
-        faces: Vec::new(),
         subshapes: Vec::new(),
         datum_placements: Vec::new(),
         semantic_datums: Vec::new(),
@@ -318,20 +310,8 @@ impl BrepSubject for ProofBrep {
         self.continuous_wall.clone()
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(facts())
-    }
-
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         Ok(Rc::from(Vec::<LocatedFace>::new()))
-    }
-
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        Ok(Rc::from(Vec::<LocatedFace>::new()))
-    }
-
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        Err(backend_unused())
     }
 
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {

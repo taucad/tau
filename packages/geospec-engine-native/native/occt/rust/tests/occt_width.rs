@@ -101,9 +101,8 @@ fn settled_thread_times(expected: usize) -> BTreeMap<u64, u64> {
 }
 
 fn occurrence(document: &dyn BrepSubject, name: &str) -> BrepEntity {
-    let facts = document.facts().unwrap();
-    let index = facts
-        .occurrences
+    let occurrences = document.source_occurrence_structure().unwrap();
+    let index = occurrences
         .iter()
         .position(|row| {
             row.name == name

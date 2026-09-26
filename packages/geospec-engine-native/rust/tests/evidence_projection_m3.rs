@@ -4,8 +4,8 @@ use geospec_engine_native_core::{
     backend::{
         brep::{
             Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepIdentityProfile,
-            BrepSubject, DocumentFacts, EdgeFacts, LocatedFace, PointState, ReportedBrepBundle,
-            ShapeFacts, StepSubjectMetadata, TessellationProfile, TopologyCounts, ValidityFacts,
+            BrepSubject, DocumentFacts, LocatedFace, PointState, ReportedBrepBundle, ShapeFacts,
+            StepSubjectMetadata, TessellationProfile, TopologyCounts, ValidityFacts,
         },
         csg::{
             BooleanOp, CsgConnector, FillRule, MeshExport, Section, SectionOp, SolidId,
@@ -61,7 +61,32 @@ impl BrepSubject for ProjectionBrep {
         // The current report seam supplies already-declared mock facts only;
         // this test does not exercise mesh or kernel geometry.
         Ok(ReportedBrepBundle {
-            facts: self.facts()?,
+            facts: Rc::new(DocumentFacts {
+                source_length_unit: "millimetre".into(),
+                source_unit_to_millimeters: 1.0,
+                occurrences: Vec::new(),
+                shape: ShapeFacts {
+                    bounds: Bounds {
+                        min: [0.0; 3],
+                        max: [1.0; 3],
+                    },
+                    volume: 1.0,
+                    surface_area: 6.0,
+                    center_of_mass: [0.5; 3],
+                    topology: TopologyCounts {
+                        compounds: 1,
+                        solids: 1,
+                        shells: 1,
+                        faces: 6,
+                        wires: 6,
+                        edges: 12,
+                        vertices: 8,
+                    },
+                },
+                subshapes: Vec::new(),
+                datum_placements: Vec::new(),
+                semantic_datums: Vec::new(),
+            }),
             whole_faces: Rc::from(Vec::<LocatedFace>::new()),
             occurrence_faces: Vec::new(),
             mesh: Rc::new(TriangleMesh {
@@ -79,45 +104,7 @@ impl BrepSubject for ProjectionBrep {
         })
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(Rc::new(DocumentFacts {
-            source_length_unit: "millimetre".into(),
-            source_unit_to_millimeters: 1.0,
-            products: Vec::new(),
-            occurrences: Vec::new(),
-            shape: ShapeFacts {
-                valid: true,
-                bounds: Bounds {
-                    min: [0.0; 3],
-                    max: [1.0; 3],
-                },
-                volume: 1.0,
-                surface_area: 6.0,
-                center_of_mass: [0.5; 3],
-                topology: TopologyCounts {
-                    compounds: 1,
-                    solids: 1,
-                    shells: 1,
-                    faces: 6,
-                    wires: 6,
-                    edges: 12,
-                    vertices: 8,
-                },
-            },
-            faces: Vec::new(),
-            subshapes: Vec::new(),
-            datum_placements: Vec::new(),
-            semantic_datums: Vec::new(),
-        }))
-    }
-
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
-        Err(unsupported())
-    }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        Err(unsupported())
-    }
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
         Err(unsupported())
     }
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {

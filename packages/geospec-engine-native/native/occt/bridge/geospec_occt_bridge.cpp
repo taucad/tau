@@ -152,7 +152,6 @@ struct LocatedFaceFacts {
 // 1-based addresses of its edges: a document slot filled on first edge demand.
 struct OccurrenceEdgeAddresses {
   std::vector<TopoDS_Edge> edges;
-  std::vector<std::vector<uint32_t>> face_edges;
 };
 
 struct EdgeFacts {
@@ -1595,13 +1594,12 @@ struct geospec_occt_document {
   mutable std::unique_ptr<EdgeTreatmentTransferData> edge_treatments;
   // N2-LAZY source numeric slots. Admission keeps XDE identity, order,
   // placements and private/public face addresses only; occurrence edge
-  // addresses and face→edge incidence are a slot too. Each slot is computed once
+  // addresses are a slot too. Each slot is computed once
   // from this admitted source shape on first demand and stored only after it
   // succeeds. Every Boolean is non-destructive, so no query modifies inputs.
   // Const getters write these unsynchronized slots: the document is confined
   // to one thread at a time (its Rust owner is neither Send nor Sync).
-  mutable std::optional<geospec_occt_shape_facts> shape_facts;
-  // The source validity proof; source shape facts carry it.
+  // The source validity proof.
   mutable std::optional<bool> shape_valid;
   // O3-02: one AddOptimal box per located face (IsSame: TShape + Location),
   // shared by occurrence bounds (F4) and whole-face boxes (F6). Serial.
@@ -1610,11 +1608,6 @@ struct geospec_occt_document {
   mutable std::vector<std::optional<geospec_occt_bounds>> occurrence_bounds;
   mutable std::vector<std::optional<OccurrenceEdgeAddresses>>
       occurrence_edge_addresses;
-  mutable std::vector<std::optional<std::vector<geospec_occt_edge_facts>>>
-      occurrence_edges;
-  mutable std::vector<
-      std::optional<std::vector<geospec_occt_located_face_facts>>>
-      occurrence_faces;
   mutable std::vector<std::optional<FaceFacts>> query_faces;
 };
 
@@ -1626,18 +1619,6 @@ namespace {
 bool source_shape_valid(const geospec_occt_document& document) {
   if (!document.shape_valid) document.shape_valid = shape_is_valid(document.shape);
   return *document.shape_valid;
-}
-
-const geospec_occt_shape_facts& source_shape_facts(
-    const geospec_occt_document& document) {
-  // A validity demand may already have proved this unmodified shape.
-  if (!document.shape_facts) {
-    const bool valid = source_shape_valid(document);
-    geospec_occt_shape_facts facts = shape_facts(document.shape);
-    facts.valid = valid ? 1 : 0;
-    document.shape_facts = facts;
-  }
-  return *document.shape_facts;
 }
 
 const Bnd_Box& memo_face_box(const geospec_occt_document& document,
@@ -1704,61 +1685,7 @@ const OccurrenceEdgeAddresses& source_occurrence_edge_addresses(
     for (int index = 1; index <= edges.Extent(); ++index) {
       addresses.edges.push_back(TopoDS::Edge(edges(index)));
     }
-    addresses.face_edges.reserve(value.faces.size());
-    for (const LocatedFaceFacts& face : value.faces) {
-      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> face_edges(
-          size_t(1), allocator);
-      TopExp::MapShapes(face.shape, TopAbs_EDGE, face_edges);
-      std::vector<uint32_t>& incidence = addresses.face_edges.emplace_back();
-      incidence.reserve(static_cast<size_t>(face_edges.Extent()));
-      for (int edge = 1; edge <= face_edges.Extent(); ++edge) {
-        const int index = edges.FindIndex(face_edges(edge));
-        if (index > 0) incidence.push_back(static_cast<uint32_t>(index));
-      }
-    }
     slot = std::move(addresses);
-  }
-  return *slot;
-}
-
-const std::vector<geospec_occt_edge_facts>& source_occurrence_edges(
-    const geospec_occt_document& document, size_t occurrence) {
-  auto& slot = document.occurrence_edges[occurrence];
-  if (!slot) {
-    const std::vector<TopoDS_Edge>& edges =
-        source_occurrence_edge_addresses(document, occurrence).edges;
-    std::vector<geospec_occt_edge_facts> values;
-    values.reserve(edges.size());
-    for (size_t index = 0; index < edges.size(); ++index) {
-      values.push_back(
-          edge_facts(edges[index], static_cast<uint32_t>(index + 1)).facts);
-    }
-    slot = std::move(values);
-  }
-  return *slot;
-}
-
-const std::vector<geospec_occt_located_face_facts>& source_occurrence_faces(
-    const geospec_occt_document& document, size_t occurrence) {
-  auto& slot = document.occurrence_faces[occurrence];
-  if (!slot) {
-    const std::vector<LocatedFaceFacts>& faces =
-        document.occurrences[occurrence].faces;
-    const std::vector<std::vector<uint32_t>>& face_edges =
-        source_occurrence_edge_addresses(document, occurrence).face_edges;
-    std::vector<geospec_occt_located_face_facts> values;
-    values.reserve(faces.size());
-    for (size_t index = 0; index < faces.size(); ++index) {
-      const uint32_t query_index = static_cast<uint32_t>(index + 1);
-      const FaceFacts local = face_facts(faces[index].shape, query_index, query_index);
-      geospec_occt_located_face_facts located{};
-      located.face = local.facts;
-      located.bounds = local.bounds;
-      located.reversed = local.reversed;
-      located.edge_count = face_edges[index].size();
-      values.push_back(located);
-    }
-    slot = std::move(values);
   }
   return *slot;
 }
@@ -5910,8 +5837,6 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                             result->datum_placements);
     result->occurrence_bounds.resize(result->occurrences.size());
     result->occurrence_edge_addresses.resize(result->occurrences.size());
-    result->occurrence_edges.resize(result->occurrences.size());
-    result->occurrence_faces.resize(result->occurrences.size());
     result->query_faces.resize(result->faces.size());
 
     *output = result.release();
@@ -5930,21 +5855,6 @@ size_t geospec_occt_triangulated_face_count(
     if (!BRep_Tool::Triangulation(face.shape, location).IsNull()) ++count;
   }
   return count;
-}
-
-int geospec_occt_document_facts(const geospec_occt_document* document,
-                                geospec_occt_shape_facts* shape,
-                                double* unit_to_millimeters,
-                                geospec_occt_string* source_unit,
-                                geospec_occt_string* error) noexcept {
-  if (document == nullptr || shape == nullptr || unit_to_millimeters == nullptr) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Document/facts output is null.", error);
-  }
-  return guarded(error, [&]() -> int {
-    *shape = source_shape_facts(*document);
-    *unit_to_millimeters = document->source_unit_to_millimeters;
-    return write_string(document->source_length_unit, source_unit);
-  });
 }
 
 int geospec_occt_continuous_wall(
@@ -6255,16 +6165,6 @@ size_t geospec_occt_product_count(const geospec_occt_document* document) noexcep
   return document == nullptr ? 0 : document->products.size();
 }
 
-int geospec_occt_product(const geospec_occt_document* document, size_t index,
-                         geospec_occt_string* label, geospec_occt_string* name,
-                         geospec_occt_string* error) noexcept {
-  if (document == nullptr || index >= document->products.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT, "Product index is out of range.", error);
-  }
-  const ProductFacts& product = document->products[index];
-  return copy_result(write_string(product.label, label), write_string(product.name, name));
-}
-
 size_t geospec_occt_occurrence_count(const geospec_occt_document* document) noexcept {
   return document == nullptr ? 0 : document->occurrences.size();
 }
@@ -6389,23 +6289,6 @@ int geospec_occt_face_location(const geospec_occt_document* document,
     *out_reversed = source_query_face(*document, query_index).reversed;
     return GEOSPEC_OCCT_OK;
   });
-}
-
-int geospec_occt_face_label(const geospec_occt_document* document,
-                            size_t index, geospec_occt_string* shape_label,
-                            geospec_occt_string* error) noexcept {
-  if (document == nullptr || index >= document->public_faces.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                "Face-label index is invalid.", error);
-  }
-  const uint32_t query_index = document->public_faces[index].query_index;
-  if (query_index == 0) {
-    return fail(GEOSPEC_OCCT_UNSUPPORTED,
-                "Public face has no unique private query address.", error);
-  }
-  return write_string(
-      document->faces[static_cast<size_t>(query_index - 1)].shape_label,
-      shape_label);
 }
 
 int geospec_occt_pmi_source_faces(
@@ -6663,83 +6546,6 @@ int geospec_occt_resolve_source_face(
   });
 }
 
-int geospec_occt_occurrence_face(
-    const geospec_occt_document* document, uint32_t occurrence, size_t index,
-    geospec_occt_located_face_facts* face,
-    geospec_occt_string* error) noexcept {
-  if (document == nullptr || face == nullptr ||
-      occurrence >= document->occurrences.size() ||
-      index >= document->occurrences[occurrence].public_faces.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                "Occurrence face index/output is invalid.", error);
-  }
-  const OccurrenceFacts& value = document->occurrences[occurrence];
-  const uint32_t query_index = value.public_faces[index].query_index;
-  if (query_index == 0) {
-    return fail(GEOSPEC_OCCT_UNSUPPORTED,
-                "Occurrence public face has no unique private query address.",
-                error);
-  }
-  return guarded(error, [&]() -> int {
-    *face = source_occurrence_faces(*document, occurrence)
-        [static_cast<size_t>(query_index - 1)];
-    face->face.index = static_cast<uint32_t>(index);
-    face->face.query_index = query_index;
-    return GEOSPEC_OCCT_OK;
-  });
-}
-
-int geospec_occt_occurrence_face_label(
-    const geospec_occt_document* document, uint32_t occurrence, size_t index,
-    geospec_occt_string* shape_label,
-    geospec_occt_string* error) noexcept {
-  if (document == nullptr || occurrence >= document->occurrences.size() ||
-      index >= document->occurrences[occurrence].public_faces.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                "Occurrence face-label index is invalid.", error);
-  }
-  const OccurrenceFacts& value = document->occurrences[occurrence];
-  const uint32_t query_index = value.public_faces[index].query_index;
-  if (query_index == 0) {
-    return fail(GEOSPEC_OCCT_UNSUPPORTED,
-                "Occurrence public face has no unique private query address.",
-                error);
-  }
-  return write_string(
-      value.faces[static_cast<size_t>(query_index - 1)].shape_label,
-      shape_label);
-}
-
-int geospec_occt_occurrence_face_edge(
-    const geospec_occt_document* document, uint32_t occurrence,
-    size_t face_index, size_t edge_index, uint32_t* edge,
-    geospec_occt_string* error) noexcept {
-  if (document == nullptr || edge == nullptr ||
-      occurrence >= document->occurrences.size() ||
-      face_index >= document->occurrences[occurrence].public_faces.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                "Occurrence face-edge index/output is invalid.", error);
-  }
-  const OccurrenceFacts& value = document->occurrences[occurrence];
-  const uint32_t query_index = value.public_faces[face_index].query_index;
-  if (query_index == 0) {
-    return fail(GEOSPEC_OCCT_UNSUPPORTED,
-                "Occurrence public face has no unique private query address.",
-                error);
-  }
-  return guarded(error, [&]() -> int {
-    const std::vector<uint32_t>& edge_indices =
-        source_occurrence_edge_addresses(*document, occurrence)
-            .face_edges[static_cast<size_t>(query_index - 1)];
-    if (edge_index >= edge_indices.size()) {
-      return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                  "Occurrence face-edge index/output is invalid.", error);
-    }
-    *edge = edge_indices[edge_index];
-    return GEOSPEC_OCCT_OK;
-  });
-}
-
 int geospec_occt_occurrence_edge_count(const geospec_occt_document* document,
                                        uint32_t occurrence, size_t* count,
                                        geospec_occt_string* error) noexcept {
@@ -6750,25 +6556,6 @@ int geospec_occt_occurrence_edge_count(const geospec_occt_document* document,
   }
   return guarded(error, [&]() -> int {
     *count = source_occurrence_edge_addresses(*document, occurrence).edges.size();
-    return GEOSPEC_OCCT_OK;
-  });
-}
-
-int geospec_occt_occurrence_edge(
-    const geospec_occt_document* document, uint32_t occurrence, size_t index,
-    geospec_occt_edge_facts* edge, geospec_occt_string* error) noexcept {
-  if (document == nullptr || edge == nullptr ||
-      occurrence >= document->occurrences.size()) {
-    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                "Occurrence edge index/output is invalid.", error);
-  }
-  return guarded(error, [&]() -> int {
-    if (index >= source_occurrence_edge_addresses(*document, occurrence)
-                     .edges.size()) {
-      return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                  "Occurrence edge index/output is invalid.", error);
-    }
-    *edge = source_occurrence_edges(*document, occurrence)[index];
     return GEOSPEC_OCCT_OK;
   });
 }

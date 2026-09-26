@@ -761,9 +761,23 @@ pub(crate) fn build_index(
     brep: &dyn BrepSubject,
 ) -> Result<SelectorIndex, BackendError> {
     let whole = brep.faces()?;
-    let occurrences = (0..facts.occurrences.len())
-        .map(|index| brep.occurrence_faces(index as u32))
-        .collect::<Result<Vec<_>, _>>()?;
+    // Each occurrence re-addresses the probe's whole faces.
+    let occurrences = (0..facts.occurrences.len() as u32)
+        .map(|occurrence| {
+            whole
+                .iter()
+                .cloned()
+                .map(|mut face| {
+                    face.entity = BrepEntity::Face {
+                        occurrence,
+                        face: face.facts.index,
+                    };
+                    face
+                })
+                .collect::<Vec<_>>()
+                .into()
+        })
+        .collect::<Vec<_>>();
     let rows = DocumentRows {
         subshapes: facts.subshapes.clone(),
         datum_placements: facts.datum_placements.clone(),
@@ -2332,8 +2346,8 @@ mod tests {
     use super::*;
     use crate::backend::{
         brep::{
-            DocumentFacts, EdgeFacts, FaceFacts, PointState, ShapeFacts, TessellationProfile,
-            TopologyCounts, ValidityFacts,
+            DocumentFacts, FaceFacts, PointState, ShapeFacts, TessellationProfile, TopologyCounts,
+            ValidityFacts,
         },
         TriangleMesh,
     };
@@ -2610,15 +2624,11 @@ mod tests {
     }
 
     impl BrepSubject for ProbeBrep {
-        fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-            Ok(Rc::new(flat_facts()))
-        }
         fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
             Ok(Rc::from(vec![LocatedFace {
                 entity: BrepEntity::WholeFace(1),
                 facts: FaceFacts {
                     index: 1,
-                    parameter_bounds: [0.0; 4],
                     area: 4.0,
                     center_of_mass: [0.0, 0.0, 0.0],
                     surface: SurfaceFacts::Plane {
@@ -2631,27 +2641,7 @@ mod tests {
                     max: [1.0, 1.0, 0.0],
                 },
                 reversed: false,
-                edge_indices: Vec::new(),
-                shape_label: None,
             }]))
-        }
-        fn occurrence_faces(&self, occurrence: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-            Ok(self
-                .faces()?
-                .iter()
-                .cloned()
-                .map(|mut face| {
-                    face.entity = BrepEntity::Face {
-                        occurrence,
-                        face: face.facts.index,
-                    };
-                    face
-                })
-                .collect::<Vec<_>>()
-                .into())
-        }
-        fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-            Err(unused())
         }
         fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
             Err(unused())
@@ -2720,10 +2710,8 @@ mod tests {
         DocumentFacts {
             source_length_unit: "millimetre".into(),
             source_unit_to_millimeters: 1.0,
-            products: Vec::new(),
             occurrences: Vec::new(),
             shape: ShapeFacts {
-                valid: true,
                 bounds: Bounds {
                     min: [-1.0, -1.0, 0.0],
                     max: [1.0, 1.0, 0.0],
@@ -2741,7 +2729,6 @@ mod tests {
                     vertices: 4,
                 },
             },
-            faces: Vec::new(),
             subshapes: Vec::new(),
             datum_placements: Vec::new(),
             semantic_datums: Vec::new(),
@@ -3028,8 +3015,6 @@ mod tests {
         facts
             .occurrences
             .push(crate::backend::brep::OccurrenceFacts {
-                label: "occ".into(),
-                product_label: "product".into(),
                 name: "part".into(),
                 placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
                 bounds: facts.shape.bounds,

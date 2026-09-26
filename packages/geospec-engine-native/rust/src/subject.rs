@@ -480,9 +480,7 @@ impl Subject {
                 (facts.len() as u64).saturating_mul(size_of::<OccurrenceFacts>() as u64),
             )
             .saturating_add(facts.iter().fold(0_u64, |sum, occurrence| {
-                sum.saturating_add(occurrence.label.capacity() as u64)
-                    .saturating_add(occurrence.product_label.capacity() as u64)
-                    .saturating_add(occurrence.name.capacity() as u64)
+                sum.saturating_add(occurrence.name.capacity() as u64)
                     .saturating_add(occurrence.path.capacity() as u64)
                     .saturating_add(occurrence.product_name.capacity() as u64)
                     .saturating_add(
@@ -1199,22 +1197,8 @@ fn vector_bytes<T>(value: &Vec<T>) -> u64 {
     (value.capacity() as u64).saturating_mul(size_of::<T>() as u64)
 }
 
-fn text_bytes(value: &String) -> u64 {
-    value.capacity() as u64
-}
-
-fn optional_text_bytes(value: &Option<String>) -> u64 {
-    value.as_ref().map_or(0, text_bytes)
-}
-
 fn located_faces_bytes(value: &[LocatedFace]) -> u64 {
-    value.iter().fold(
-        (std::mem::size_of_val(value) + 2 * size_of::<usize>()) as u64,
-        |sum, face| {
-            sum.saturating_add(vector_bytes(&face.edge_indices))
-                .saturating_add(optional_text_bytes(&face.shape_label))
-        },
-    )
+    (std::mem::size_of_val(value) + 2 * size_of::<usize>()) as u64
 }
 
 /// Conservative logical payload accounting (including Vec/String capacity).

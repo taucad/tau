@@ -20,7 +20,6 @@ fn entity(origin: [f64; 3], direction: [f64; 3], plane: bool, reversed: bool) ->
             },
             facts: FaceFacts {
                 index: 2,
-                parameter_bounds: [0.; 4],
                 area: 1.,
                 center_of_mass: origin,
                 surface: if plane {
@@ -41,8 +40,6 @@ fn entity(origin: [f64; 3], direction: [f64; 3], plane: bool, reversed: bool) ->
                 max: [1.; 3],
             },
             reversed,
-            edge_indices: vec![],
-            shape_label: None,
         },
     )
 }
@@ -291,19 +288,7 @@ impl BrepSubject for BoxControl {
             _ => continuous::nominal_analytic_box_control(id, [9., 0., 0.], [12., 10., 10.]),
         })
     }
-    fn facts(&self) -> Result<Rc<crate::backend::brep::DocumentFacts>, BackendError> {
-        unreachable!()
-    }
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!()
-    }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!()
-    }
-    fn occurrence_edges(
-        &self,
-        _: u32,
-    ) -> Result<Rc<[crate::backend::brep::EdgeFacts]>, BackendError> {
         unreachable!()
     }
     fn validity(&self) -> Result<Rc<crate::backend::brep::ValidityFacts>, BackendError> {

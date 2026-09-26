@@ -4,8 +4,8 @@ use super::*;
 use crate::backend::{
     brep::{
         BrepEntity, CircularBoreCandidate, CircularBoreEnd, CircularBoreTopology,
-        CylinderAxialExtent, EdgeFacts, FaceFacts, LocatedFace, OccurrenceFacts, PointState,
-        ProductFacts, ShapeFacts, TessellationProfile, ValidityCheck,
+        CylinderAxialExtent, FaceFacts, LocatedFace, OccurrenceFacts, PointState, ShapeFacts,
+        TessellationProfile, ValidityCheck,
     },
     TriangleMesh,
 };
@@ -30,22 +30,17 @@ fn face(
         entity: BrepEntity::WholeFace(index),
         facts: FaceFacts {
             index: index - 1,
-            parameter_bounds: [0.0; 4],
             area: 20.0,
             center_of_mass: center,
             surface,
         },
         bounds,
         reversed,
-        edge_indices: Vec::new(),
-        shape_label: Some(format!("face-{index}")),
     }
 }
 
 fn occurrence(index: u32, path: &str) -> OccurrenceFacts {
     OccurrenceFacts {
-        label: format!("occurrence-{index}"),
-        product_label: "product-bracket".into(),
         name: path.into(),
         placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         bounds: bounds([-10.0, -10.0, 0.0], [10.0, 10.0, 10.0]),
@@ -62,13 +57,8 @@ fn retained_facts() -> DocumentFacts {
     DocumentFacts {
         source_length_unit: "millimetre".into(),
         source_unit_to_millimeters: 1.0,
-        products: vec![ProductFacts {
-            label: "product-bracket".into(),
-            name: "bracket".into(),
-        }],
         occurrences: vec![occurrence(0, "left"), occurrence(1, "right")],
         shape: ShapeFacts {
-            valid: true,
             bounds: bounds([-10.0, -10.0, 0.0], [10.0, 10.0, 10.0]),
             volume: 1_000.0,
             surface_area: 1_200.0,
@@ -83,7 +73,6 @@ fn retained_facts() -> DocumentFacts {
                 vertices: 16,
             },
         },
-        faces: Vec::new(),
         subshapes: Vec::new(),
         datum_placements: Vec::new(),
         semantic_datums: Vec::new(),
@@ -318,17 +307,8 @@ impl BrepSubject for RetainedBrep {
         })
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(self.facts.clone())
-    }
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         Ok(self.faces.clone())
-    }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        Ok(Rc::from(Vec::<LocatedFace>::new()))
-    }
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        Err(unused())
     }
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         Ok(self.validity.clone())
@@ -713,7 +693,7 @@ fn rejects_malformed_expectations_for_all_eleven_matchers() {
 #[test]
 fn retained_neutral_facts_drive_all_eleven_positive_predicates() {
     let brep = RetainedBrep::complete();
-    let facts = brep.facts().unwrap();
+    let facts = Rc::clone(&brep.facts);
 
     assert!(evaluate_units("mm", &facts).unwrap().positive);
     assert!(
@@ -1285,7 +1265,7 @@ fn analyze_brep_reports_the_source_unavailable_diagnostic() {
 #[test]
 fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
     let brep = RetainedBrep::complete();
-    let facts = brep.facts().unwrap();
+    let facts = Rc::clone(&brep.facts);
     assert!(!evaluate_units("in", &facts).unwrap().positive);
     assert!(
         !evaluate_products(
@@ -1394,7 +1374,7 @@ fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
 #[test]
 fn numeric_matcher_boundaries_are_inclusive() {
     let brep = RetainedBrep::complete();
-    let facts = brep.facts().unwrap();
+    let facts = Rc::clone(&brep.facts);
     let mut features = derive_features(&brep).unwrap();
     populate_bores(&mut features, &brep, &brep.circular_bores(4096).unwrap()).unwrap();
     assert!(

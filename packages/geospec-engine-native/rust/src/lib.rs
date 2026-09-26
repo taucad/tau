@@ -14,6 +14,7 @@ pub mod registry;
 mod result;
 mod runtime;
 mod subject;
+pub use identity::{hex, sha256_hex};
 pub use runtime::EngineConfig;
 
 pub use protocol::Engine;

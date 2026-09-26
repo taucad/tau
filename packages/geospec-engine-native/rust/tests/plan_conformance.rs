@@ -1,6 +1,5 @@
-use geospec_engine_native_core::{canonicalize, Engine, ProtocolError};
+use geospec_engine_native_core::{canonicalize, sha256_hex, Engine, ProtocolError};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
 const CORPUS: &str = include_str!("../../conformance/early-corpus.json");
 const CORPUS_SHA256: &str = "3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476";
@@ -88,8 +87,8 @@ fn compare(actual: Result<Vec<u8>, ProtocolError>, expected: &Value, id: &str) -
 
 #[test]
 fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindings() {
-    assert_eq!(format!("{:x}", Sha256::digest(CORPUS)), CORPUS_SHA256);
-    assert_eq!(format!("{:x}", Sha256::digest(CURRENT)), CURRENT_SHA256);
+    assert_eq!(sha256_hex(CORPUS), CORPUS_SHA256);
+    assert_eq!(sha256_hex(CURRENT), CURRENT_SHA256);
     let corpus: Value = serde_json::from_str(CORPUS).expect("independent frozen corpus");
     let current: Value = serde_json::from_str(CURRENT).expect("explicit successor bindings");
     assert_eq!(corpus["schemaVersion"], 1);
@@ -116,15 +115,9 @@ fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindi
             || bytes(string(record, "inputHex")),
             |s| s.as_bytes().to_vec(),
         );
-        assert_eq!(
-            format!("{:x}", Sha256::digest(&original)),
-            binding["originalInputSha256"]
-        );
+        assert_eq!(sha256_hex(&original), binding["originalInputSha256"]);
         let effective = input(binding);
-        assert_eq!(
-            format!("{:x}", Sha256::digest(&effective)),
-            binding["effectiveInputSha256"]
-        );
+        assert_eq!(sha256_hex(&effective), binding["effectiveInputSha256"]);
         if binding["preservesOriginalBytes"] == true {
             assert_eq!(effective, original, "{id}: malformed/version bytes changed");
         }
@@ -150,12 +143,9 @@ fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindi
                 .find(|m| m["id"] == *mesh_id)
                 .expect("mesh binding");
             let data = bytes(string(mesh, "meshHex"));
-            assert_eq!(format!("{:x}", Sha256::digest(&data)), mesh["contentHash"]);
+            assert_eq!(sha256_hex(&data), mesh["contentHash"]);
             let request = string(bound, "effectiveRequestUtf8").as_bytes();
-            assert_eq!(
-                format!("{:x}", Sha256::digest(request)),
-                bound["effectiveRequestSha256"]
-            );
+            assert_eq!(sha256_hex(request), bound["effectiveRequestSha256"]);
             let admission = compare(engine.ingest_mesh(request, &data), bound, id);
             if admission["passed"] != true {
                 failures.push(format!("{id}: admission {mesh_id}: {admission}"));

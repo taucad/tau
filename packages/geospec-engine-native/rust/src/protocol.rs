@@ -8,7 +8,6 @@ use crate::{
     runtime::EngineConfig,
     subject::{Subject, SubjectFormat},
 };
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{cell::RefCell, rc::Rc};
@@ -382,7 +381,7 @@ impl Engine {
         self.observations.add(WorkCounter::Parses, 1);
         let subject = Mesh::decode(mesh)?;
         self.observations.add(WorkCounter::IdentityBuilds, 1);
-        let verified_hash = format!("{:x}", Sha256::digest(mesh));
+        let verified_hash = crate::identity::sha256_hex(mesh);
         if content_hash != verified_hash {
             return invalid_request("Mesh contentHash does not match the exact supplied bytes.");
         }

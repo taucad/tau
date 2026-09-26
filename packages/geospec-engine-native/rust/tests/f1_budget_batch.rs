@@ -1,10 +1,9 @@
 //! Owner-private ordinary controls for F1 logical budgets and complete batches.
 
 use super::*;
-use crate::{canonicalize, Engine, ProtocolError};
+use crate::{canonicalize, sha256_hex, Engine, ProtocolError};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
 const CORPUS_SHA256: &str = "c46c089b0d5097e862e606ed2866dea53dd25a6df207c044c3172d6dc9e100c4";
@@ -68,10 +67,6 @@ struct PlateState {
     identity: Option<*const PlateAnalysis>,
 }
 
-fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
 fn verifier_source_hash() -> String {
     let value = std::env::var("GEOSPEC_F1_VERIFIER_SOURCE_HASH")
         .unwrap_or_else(|_| VERIFIER_SOURCE_HASH.into());
@@ -100,7 +95,7 @@ fn current_result(value: &str, plan: &str) -> String {
         &mut value
     };
     result["numericProfile"] = json!(NUMERIC_PROFILE);
-    let plan_hash = sha256(plan.as_bytes());
+    let plan_hash = sha256_hex(plan.as_bytes());
     let verifier_source_hash = verifier_source_hash();
     for row in result["results"].as_array_mut().unwrap() {
         if row["evidence"].is_object() {
@@ -119,10 +114,10 @@ fn load_corpus() -> (Corpus, String) {
     let expected_hash =
         std::env::var("GEOSPEC_F1_BUDGET_CORPUS_SHA256").unwrap_or_else(|_| CORPUS_SHA256.into());
     assert_eq!(expected_hash, CORPUS_SHA256, "stale control hash binding");
-    assert_eq!(sha256(&bytes), CORPUS_SHA256);
+    assert_eq!(sha256_hex(&bytes), CORPUS_SHA256);
     let corpus: Corpus = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(
-        sha256(corpus.primary_utf8.as_bytes()),
+        sha256_hex(corpus.primary_utf8.as_bytes()),
         corpus.primary_sha256
     );
     assert_eq!(corpus.budget_cases.len(), 16);
@@ -131,11 +126,11 @@ fn load_corpus() -> (Corpus, String) {
 }
 
 fn observe(result: Result<Vec<u8>, ProtocolError>, expected: &str) -> Value {
-    let expected_sha256 = sha256(expected.as_bytes());
+    let expected_sha256 = sha256_hex(expected.as_bytes());
     match result {
         Ok(bytes) => json!({
             "passed": bytes == expected.as_bytes(),
-            "actualSha256": sha256(&bytes),
+            "actualSha256": sha256_hex(&bytes),
             "actualUtf8": String::from_utf8(bytes).unwrap(),
             "expectedSha256": expected_sha256,
         }),
@@ -152,17 +147,17 @@ fn observe_error(result: Result<Vec<u8>, ProtocolError>, code: &str, message: &s
     match result {
         Ok(bytes) => json!({
             "passed": false,
-            "actualSha256": sha256(&bytes),
+            "actualSha256": sha256_hex(&bytes),
             "actualUtf8": String::from_utf8(bytes).unwrap(),
             "expectedCode": code,
-            "expectedMessageSha256": sha256(message.as_bytes()),
+            "expectedMessageSha256": sha256_hex(message.as_bytes()),
         }),
         Err(error) => json!({
             "passed": error.code() == code && error.to_string() == message,
             "actualErrorCode": error.code(),
             "actualErrorMessage": error.to_string(),
             "expectedCode": code,
-            "expectedMessageSha256": sha256(message.as_bytes()),
+            "expectedMessageSha256": sha256_hex(message.as_bytes()),
         }),
     }
 }

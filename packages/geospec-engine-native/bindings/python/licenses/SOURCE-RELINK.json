@@ -2,19 +2,19 @@
   "schema": "geospec-native-source-relink-asset-v2",
   "artifact": {
     "fileName": "geospec-engine-native-source-relink.tar.gz",
-    "bytes": 57468409,
-    "sha256": "b0165cbea8106bf83e52d08ed08d514fae3535ccca57dc3f736d0e9f39b93069",
+    "bytes": 56748140,
+    "sha256": "b8b6bdaa43edbb8bb4ed3b3b3cbf7910079016d3d6a735af0456da63c1d6bacb",
     "format": "deterministic tar+gzip"
   },
   "delivery": {
     "required": "co-deliver adjacent to each root, platform and wheel artifact",
     "publicationStatus": "outside this local charter"
   },
-  "sourceRevision": "35a1123169cadfeb113786e6c494a41daf99ddcc",
+  "sourceRevision": "5a17f93d55f8e8db794a9d7cde1b4509378e8418",
   "sourceRevisionIsReferenceOnly": true,
   "sourceTree": {
-    "files": 413,
-    "sha256": "55b48a8c67b4c14ab98f6fa6189ca812aadb7219c4f78662b490c835f5bb8af6"
+    "files": 447,
+    "sha256": "f04d9456724a5b750b0cd1f04bc8034d440e3fa992e47072b544ada9028f3218"
   },
   "occtSourceArchive": {
     "path": "archives/occt.tar.gz",
@@ -24,114 +24,80 @@
   },
   "nativeProducerRecipe": {
     "path": "receipts/native-producer-recipe.json",
-    "sha256": "2679d624677ad32b061eeaceda13e82d41bc6f189e5a0823399ca969c5bd5bde"
+    "sha256": "e0a11a68e9189ceade899f386c51f54603d9e616ec4476deddbd70526a739e03"
   },
   "mixedProducerRecipe": {
     "path": "receipts/mixed-producer-recipe.json",
-    "sha256": "b476fd468790b0d13f09493d38fd8ef431e7b382f137172eb7ecfec0d03e6229",
+    "sha256": "cbe69a762a8514d81476c70694892773b256fe7aa7765f70fe0ef4b674a6f2e0",
     "status": "current-mixed",
     "target": "wasm32-unknown-emscripten",
-    "profile": "emscripten-6.0.5-js-exceptions-sjlj-st-rust-c656540-panic-abort-link-O3",
-    "sourceRevision": "35a1123169cadfeb113786e6c494a41daf99ddcc",
+    "profile": "emscripten-6.0.5-wasm-legacy-exceptions-wasm-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-O3",
+    "sourceRevision": "5a17f93d55f8e8db794a9d7cde1b4509378e8418",
     "sourceRevisionIsReferenceOnly": true,
     "artifacts": [
       {
         "path": "/Users/rifont/git/tau-geospec-native/packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.mjs",
-        "bytes": 167425,
-        "sha256": "a3e226a24e27d0365314507bba402a6a1dbdd1a4770d22112b0bc340ad29a962",
+        "bytes": 69544,
+        "sha256": "b1203fc81cfe39465717adee4164961db17d36bfdbce0af8fd8e95134b3e3fba",
         "distPath": "/Users/rifont/git/tau-geospec-native/packages/geospec-engine-native/dist/bindings/mixed-wasm/geospec_engine_native.mjs"
       },
       {
         "path": "/Users/rifont/git/tau-geospec-native/packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm",
-        "bytes": 22496224,
-        "sha256": "3f7393fbcbfd0650a36cd08f69c0a3d055d82833e52dd0641ce5fb52e7feb8cc",
+        "bytes": 16848880,
+        "sha256": "4621713b8606e6a4b164060057498a7a70dfd011a5cf196bd7f729b67d430dca",
         "distPath": "/Users/rifont/git/tau-geospec-native/packages/geospec-engine-native/dist/bindings/mixed-wasm/geospec_engine_native.wasm"
       }
     ],
     "evidence": {
       "receipt": {
         "path": "/Users/rifont/git/tau-geospec-native/out/artifacts/geospec-native-engine/ci/mixed-build-receipt.json",
-        "sha256": "f004d0593eeea594d6b2d70a87f78bb8e30ffe46388b22664e27703ce9088571",
-        "bytes": 1745
+        "sha256": "2db3d149e81fb2b9611f06b7b417d96cb4eb5d35d9503057cae3363e8905cfdc",
+        "bytes": 5236
       },
       "commands": {
         "path": "/Users/rifont/git/tau-geospec-native/out/artifacts/geospec-native-engine/ci/mixed-commands.json",
-        "sha256": "9b910bee2c654b22d2830c2f6880c323e8c06585a8869fd70c269b3f33c49444",
-        "bytes": 9747
+        "sha256": "cdbf7fd9e0fa3a93af0f2ea2841b70c1eb77402451ddf753fa212c851bc82562",
+        "bytes": 10907
       },
       "inputs": {
         "path": "/Users/rifont/git/tau-geospec-native/out/artifacts/geospec-native-engine/ci/mixed-inputs.json",
-        "sha256": "e529f38f14e985f216a117de4a9eb2875311db83e7a6801d24fedf92676af27c",
-        "bytes": 24100912
+        "sha256": "5bd4151f90c471162bf5339ec2807a1a5f3aa0654cc90697ff937c21efdfb1cb",
+        "bytes": 19188796
       }
     },
-    "inputCount": 67996,
+    "inputCount": 69140,
     "qualification": "Current-source compile/link only; runtime and target parity require independent checks.",
-    "prefixRecovery": {
-      "kind": "incremental-continuation-of-failed-wrapper",
-      "originalWrapperExitCode": 1,
-      "originalInnerDiagnostic": "not retained: check_output stdout discarded on failure",
-      "continuationCommand": [
-        "/opt/homebrew/Cellar/cmake/4.4.3/bin/cmake",
-        "--build",
-        "/Users/rifont/git/tau-geospec-native/node_modules/.cache/geospec-engine-native/delivery/.occt-mixed-attempt/build",
-        "--target",
-        "install",
-        "--parallel",
-        "2"
-      ],
-      "supportPayloadTiming": "before continuation, equal after continuation; original failed launch aggregate not persisted",
-      "historicalSupportEquality": "not established for objects completed before continuation",
-      "priorNinjaLogSha256": "a042943b29f13ee9e539fe60e305df37520c79247835b1db731363bd13fbd514",
-      "continuationLogSha256": "541563a1615bc8f943857fda76a0ddd22494f0d3996454390cff7bba003c357b"
-    },
+    "prefixRecovery": null,
     "environmentEvidence": "Exact source-derived environment from the pinned build-mixed-wasm.mts; commands are recorded observations.",
     "prefixProducerRecipe": {
       "path": "receipts/mixed-prefix-selected-delivery.json",
-      "sha256": "2b55ea87d89b05671f0016afc41f94b0bb34ac425e7e38102b34000b96067b8b",
-      "prefixReceiptSha256": "55bd550ce7ce6add4ecad2626608582e0369d3caefa44a4b81cd01b69970da3d"
+      "sha256": "9c42a2b388e9dcde112fba85fc446df160e4e04eb680f4a7fe413fecc7158e91",
+      "prefixReceiptSha256": "0697e50e50b71818bb5fb6df9723782bb2d87378b9b63d084785d30b736697e6"
     }
   },
   "prefixProducingSources": [
     {
       "role": "actual-prefix-producing-source",
       "prefix": "native",
-      "path": "receipts/build-occt-26ef670eb8b492f97347e7f65109b0ffc36b4f88ed33bdf56d070fdc83f17b5b.sh",
-      "sha256": "26ef670eb8b492f97347e7f65109b0ffc36b4f88ed33bdf56d070fdc83f17b5b",
-      "prefixReceiptSha256": "8aee5ddcac8285eed322f4b9b35759e6400ce61ddc5999709851b2facab15db4",
+      "path": "receipts/build-occt-c5571e0407c46702e0740e1c71d85b9474410c1c76c2890bc82f96757fa5cdb8.sh",
+      "sha256": "c5571e0407c46702e0740e1c71d85b9474410c1c76c2890bc82f96757fa5cdb8",
+      "prefixReceiptSha256": "d889e1c747b85de8b676d57b6de2b34bee063bbcf96cefd957d06aed9b3fd99b",
       "recovery": null,
       "currentRebuildHelper": {
         "path": "source/packages/geospec-engine-native/native/occt/build-occt.sh",
-        "sha256": "26ef670eb8b492f97347e7f65109b0ffc36b4f88ed33bdf56d070fdc83f17b5b"
+        "sha256": "c5571e0407c46702e0740e1c71d85b9474410c1c76c2890bc82f96757fa5cdb8"
       }
     },
     {
       "role": "actual-prefix-producing-source",
       "prefix": "mixed",
-      "path": "receipts/build-occt-bbdb6eca5b9ab3001aff873c99a5314ae601c190b4e9155bf30789945027951d.sh",
-      "sha256": "bbdb6eca5b9ab3001aff873c99a5314ae601c190b4e9155bf30789945027951d",
-      "prefixReceiptSha256": "55bd550ce7ce6add4ecad2626608582e0369d3caefa44a4b81cd01b69970da3d",
-      "recovery": {
-        "kind": "incremental-continuation-of-failed-wrapper",
-        "originalWrapperExitCode": 1,
-        "originalInnerDiagnostic": "not retained: check_output stdout discarded on failure",
-        "continuationCommand": [
-          "/opt/homebrew/Cellar/cmake/4.4.3/bin/cmake",
-          "--build",
-          "/Users/rifont/git/tau-geospec-native/node_modules/.cache/geospec-engine-native/delivery/.occt-mixed-attempt/build",
-          "--target",
-          "install",
-          "--parallel",
-          "2"
-        ],
-        "supportPayloadTiming": "before continuation, equal after continuation; original failed launch aggregate not persisted",
-        "historicalSupportEquality": "not established for objects completed before continuation",
-        "priorNinjaLogSha256": "a042943b29f13ee9e539fe60e305df37520c79247835b1db731363bd13fbd514",
-        "continuationLogSha256": "541563a1615bc8f943857fda76a0ddd22494f0d3996454390cff7bba003c357b"
-      },
+      "path": "receipts/build-occt-c5571e0407c46702e0740e1c71d85b9474410c1c76c2890bc82f96757fa5cdb8.sh",
+      "sha256": "c5571e0407c46702e0740e1c71d85b9474410c1c76c2890bc82f96757fa5cdb8",
+      "prefixReceiptSha256": "0697e50e50b71818bb5fb6df9723782bb2d87378b9b63d084785d30b736697e6",
+      "recovery": null,
       "currentRebuildHelper": {
         "path": "source/packages/geospec-engine-native/native/occt/build-occt.sh",
-        "sha256": "26ef670eb8b492f97347e7f65109b0ffc36b4f88ed33bdf56d070fdc83f17b5b"
+        "sha256": "c5571e0407c46702e0740e1c71d85b9474410c1c76c2890bc82f96757fa5cdb8"
       }
     }
   ],
@@ -142,15 +108,15 @@
     "installedClosureMaxAllocatedBytes": 134217728
   },
   "occtStaticClosure": {
-    "qualifiedPrefix": "out/research/geospec-native-engine-charter/m4-native-floor-build-a20/delivery/occt-native/install",
+    "qualifiedPrefix": "node_modules/.cache/geospec-engine-native/delivery-n10-20260926/occt-native/install",
     "archives": 23,
-    "archiveBytes": 110388232,
+    "archiveBytes": 110411664,
     "headers": {
       "files": 5641,
-      "bytes": 22588808,
-      "sha256": "7cb93ec0852ad99e1f2af464dce34d82273e701c58788b09d963e8864fa623b5"
+      "bytes": 22589033,
+      "sha256": "4fc00dead4134ecb2b5923e14d22207a3b977c8a045fa344d88ebcbb4d77003a"
     },
-    "cmakeCacheSha256": "1339da4d4e80c365b23538ba917251cde3aca9380db4e5657603d15747554c86"
+    "cmakeCacheSha256": "d5991c806de87dc2926111aa2167f334ad46360f5e6512de9ac5669af63ca449"
   },
   "scope": "Darwin arm64 native and current ST mixed-WASM, separately attributed",
   "legalStatus": "technical source/relink material; not legal certification"

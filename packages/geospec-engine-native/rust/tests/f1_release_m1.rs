@@ -1,7 +1,6 @@
 //! Healthy public release returns the full verified F1 retention reservation.
-use crate::{canonicalize, Engine};
+use crate::{canonicalize, sha256_hex, Engine};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
 const CORPUS_SHA256: &str = "c46c089b0d5097e862e606ed2866dea53dd25a6df207c044c3172d6dc9e100c4";
 const VERIFIER_SOURCE_HASH: &str =
@@ -24,7 +23,7 @@ fn releases_verified_plate_capacity_in_healthy_sessions() {
     let expected_hash =
         std::env::var("GEOSPEC_F1_BUDGET_CORPUS_SHA256").unwrap_or_else(|_| CORPUS_SHA256.into());
     assert_eq!(expected_hash, CORPUS_SHA256, "stale control hash binding");
-    assert_eq!(format!("{:x}", Sha256::digest(&input)), CORPUS_SHA256);
+    assert_eq!(sha256_hex(&input), CORPUS_SHA256);
     let corpus: Value = serde_json::from_slice(&input).unwrap();
     let case = corpus["budgetCases"]
         .as_array()
@@ -45,7 +44,7 @@ fn releases_verified_plate_capacity_in_healthy_sessions() {
     let mut expected: Value =
         serde_json::from_str(case["neutralResultUtf8"].as_str().unwrap()).unwrap();
     expected["numericProfile"] = json!(NUMERIC_PROFILE);
-    expected["results"][0]["evidence"]["planHash"] = json!(format!("{:x}", Sha256::digest(&plan)));
+    expected["results"][0]["evidence"]["planHash"] = json!(sha256_hex(&plan));
     expected["results"][0]["evidence"]["verifierSourceHash"] = json!(verifier_source_hash());
     let expected = canonicalize(&serde_json::to_vec(&expected).unwrap()).unwrap();
     let mut engine = Engine::new();

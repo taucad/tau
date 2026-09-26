@@ -1,6 +1,5 @@
-use geospec_engine_native_core::Engine;
+use geospec_engine_native_core::{sha256_hex, Engine};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
 fn mesh(seed: u32) -> Vec<u8> {
     let mut bytes = b"GSM1".to_vec();
@@ -32,7 +31,7 @@ fn call(
 
 fn admit(engine: &mut Engine, seed: u32) -> String {
     let bytes = mesh(seed);
-    let hash = format!("{:x}", Sha256::digest(&bytes));
+    let hash = sha256_hex(&bytes);
     let request = serde_json::to_vec(&json!({
         "method": "ingestSubject",
         "requestId": format!("ingest-{seed}"),

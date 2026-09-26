@@ -2,7 +2,6 @@
 
 use super::*;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
 pub(crate) fn oracle() -> Value {
     let bytes = std::env::var_os("GEOSPEC_RELATIONSHIP_SCALAR_ORACLE").map_or_else(
@@ -13,7 +12,7 @@ pub(crate) fn oracle() -> Value {
         |path| std::fs::read(path).unwrap(),
     );
     assert_eq!(
-        format!("{:x}", Sha256::digest(&bytes)),
+        crate::identity::sha256_hex(&bytes),
         "00bafc084df907d00ce008466ab7b0eb933cd38eed5df6d6569165c738bc6dd4"
     );
     serde_json::from_slice(&bytes).unwrap()

@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, and backend evidence'
 status: active
 created: '2026-05-07'
-updated: '2026-09-16'
+updated: '2026-09-27'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -12,6 +12,7 @@ related:
   - docs/research/webgpu-gltf-edge-near-orthographic-occlusion.md
   - docs/policy/webgpu-rendering-pipeline.md
   - docs/research/threejs-shader-foundation-and-testing-blueprint.md
+  - docs/research/viewer-section-view-performance.md
 ---
 
 # Graphics Backend Policy
@@ -99,6 +100,16 @@ Send measurement and overlay pointer events to their owning XState machine. Use 
 Shader graph snapshots and source fingerprints are supplementary. Pair them with focused runtime assertions. For user-visible parity, use the backend e2e harness and remote-canvas screenshots with deterministic pixel characteristics. Where a headless adapter cannot present frames, read an offscreen render target back through the renderer so the backend still yields pixel evidence; keep presented-canvas screenshots wherever the canvas does present.
 
 Test backend construction, WebGPU initialization, reversed-depth transparent ordering, alpha/depth state, clone ownership, cross-renderer material isolation, demand-frame invalidation, cache eviction, clipping-aware picking, and gesture cancellation.
+
+### 13. Change pointer-rate scene objects in place
+
+Pointer-rate updates change existing scene objects in place. A drag, scrub or hover step writes positions, draw ranges and uniforms into the materials, textures and geometry already in the scene, and rebuilds an object only when its structure changes, such as a handle's kind or selection. It never rebuilds and disposes materials, textures or geometry per step: three r184 `WebGLPrograms.releaseProgram` deletes a program when its last material is disposed, so the next frame links it again, and new textures and geometry upload again. Building the replacement before disposing the old one does not help, because a material takes its program only at its first render. When a transparent object's geometry is written in place, park vertices past its draw range inside the drawn shape: three sorts transparent objects by their bounding-sphere centre.
+
+The one exception is a reused fat line that must grow. WebGL caps an instanced geometry's draws at the instance count its buffer held at its first draw until the geometry is disposed, so a `LineSegmentsGeometry` that must grow past its first-draw segment count is recreated. While its segments fit, it is written in place.
+
+### 14. Return early from unchanged per-frame work
+
+Per-frame work returns early when its inputs are unchanged. A `useFrame` callback or render-loop task derives a key from everything that changes its output, including a result that lands later such as a worker response, and does nothing while the key matches the last one it applied. Key a plane, matrix or other object that changes in place by its values, not its identity. A demand frame loop still renders for orbit, damping and every other `invalidate()`, so per-frame work without a key repeats on each of those frames.
 
 ## Ownership
 

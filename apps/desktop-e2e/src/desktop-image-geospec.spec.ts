@@ -17,6 +17,7 @@ import {
   failedGatewayToolResults,
   gatewayFixtureFinalText,
   gatewayFixtureModelName,
+  gatewayToolResults,
   startGatewayFixture,
 } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
@@ -272,12 +273,8 @@ it('accepts the project Runtime mesh', async () => {
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 600_000);
     const results = gatewayToolResults(fixture.gatewayRequests.slice(-1));
     expect(results).toHaveLength(3);
-    expect(results.some((result) => result.is_error === true)).toBe(false);
-    const outputs = results.flatMap(({ content }) => {
-      const wire = z
-        .union([z.string(), z.array(z.object({ type: z.literal('text'), text: z.string() }))])
-        .parse(content);
-      const text = typeof wire === 'string' ? wire : wire.map((part) => part.text).join('');
+    expect(results.some((result) => result.isError)).toBe(false);
+    const outputs = results.flatMap(({ text }) => {
       const parsed = testModelOutputSchema.safeParse(JSON.parse(text));
       return parsed.success ? [parsed.data] : [];
     });
@@ -330,6 +327,14 @@ it('accepts the project Runtime mesh', async () => {
       expect(report.result).toMatchObject({ claimId: report.claimId, status: report.status });
     }
     expect(rows.slice(0, 2).map((row) => row.reports![0])).toEqual(apiReports);
+    // Equal verdicts on another subject must not pass: each report names the source bytes it measured.
+    const measuredSubjects = rows.map(
+      (row) =>
+        z.object({ evidence: z.object({ subjectContentHash: z.string() }) }).parse(row.reports![0]!.result).evidence
+          .subjectContentHash,
+    );
+    expect(measuredSubjects.slice(0, 2)).toEqual([nativeFixtureHash, nativeFixtureHash]);
+    expect(measuredSubjects[2]).not.toBe(nativeFixtureHash);
     await page.getByRole('button', { name: /^(?:Edited files, )?ran tests$/iu }).click();
     await expectVisible(page.getByText('Tested 3 requirements', { exact: true }));
     await expectVisible(page.getByText('1. rejects the impossible fixed box volume', { exact: true }));

@@ -386,7 +386,7 @@ fn component_tolerances_are_separate_and_cold_warm_charges_are_identical() {
 }
 
 #[test]
-fn scalar_bounds_and_center_use_brep_facts_before_mesh_facets() {
+fn scalar_bounds_and_center_use_the_report_shape_before_mesh_facets() {
     let subjects = [subject_with_brep(box_record(3.0))];
     let rows = [
         (

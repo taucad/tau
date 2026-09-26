@@ -7,7 +7,7 @@ use crate::{
         MeshQuality, NonFiniteVertex, PrimitiveRecord, Watertight, WatertightPrimitiveBreakdown,
     },
     backend::{
-        brep::{DocumentFacts, OccurrenceFacts, SubshapeType},
+        brep::{DocumentRows, OccurrenceFacts, SubshapeType},
         BackendError, BackendErrorKind,
     },
     codec::Json,
@@ -1202,15 +1202,24 @@ pub(crate) fn analyze_mesh(context: &mut EvaluationContext<'_>) -> Evaluation {
         Ok(value) => value,
         Err(result) => return result,
     };
+    // F8: occurrences with bounds and the document rows; no report facts.
     let facts = if context.subject().format == SubjectFormat::Step {
-        match context.brep_facts() {
+        let occurrences = match context.source_occurrences() {
             Ok(value) => value,
             Err(result) => return result,
-        }
+        };
+        let rows = match context.document_rows() {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+        occurrences.zip(rows)
     } else {
         None
     };
-    let subject = match analysis_subject_json(context.subject(), &analysis, facts.as_deref()) {
+    let facts = facts
+        .as_ref()
+        .map(|(occurrences, rows)| (occurrences.as_ref(), rows));
+    let subject = match analysis_subject_json(context.subject(), &analysis, facts) {
         Ok(value) => value,
         Err(error) => return backend_refusal(error),
     };
@@ -1229,7 +1238,7 @@ pub(crate) fn analyze_mesh(context: &mut EvaluationContext<'_>) -> Evaluation {
 fn analysis_subject_json(
     subject: &Subject,
     analysis: &MeshAnalysis,
-    facts: Option<&DocumentFacts>,
+    facts: Option<(&[OccurrenceFacts], &DocumentRows)>,
 ) -> Result<Json, BackendError> {
     let format = match subject.format {
         SubjectFormat::MeshBufferV1 | SubjectFormat::Step => "mesh-buffer",
@@ -1255,13 +1264,11 @@ fn analysis_subject_json(
                 message: "The STEP connector did not establish native stream ingestion.".into(),
             });
         }
-        Some(step_subject_json(
-            metadata,
-            facts.ok_or_else(|| BackendError {
-                kind: BackendErrorKind::Unsupported,
-                message: "The STEP subject has no source-backed report metadata.".into(),
-            })?,
-        ))
+        let (occurrences, rows) = facts.ok_or_else(|| BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "The STEP subject has no source-backed report metadata.".into(),
+        })?;
+        Some(step_subject_json(metadata, occurrences, rows))
     } else {
         None
     };
@@ -1355,7 +1362,8 @@ fn capability_json(kind: &str, feature: &str) -> Json {
 
 fn step_subject_json(
     metadata: &crate::backend::brep::StepSubjectMetadata,
-    facts: &DocumentFacts,
+    occurrences: &[OccurrenceFacts],
+    rows: &DocumentRows,
 ) -> Json {
     let mut fields = Vec::new();
     if let Some(schema) = &metadata.schema {
@@ -1368,8 +1376,7 @@ fn step_subject_json(
         (
             "productStructure".into(),
             Json::Array(
-                facts
-                    .occurrences
+                occurrences
                     .iter()
                     .map(|occurrence| {
                         Json::object([
@@ -1395,7 +1402,7 @@ fn step_subject_json(
             ]),
         ),
         ("capabilities".into(), step_capabilities()),
-        ("xde".into(), xde_json(metadata, facts)),
+        ("xde".into(), xde_json(metadata, occurrences, rows)),
     ]);
     Json::Object(fields)
 }
@@ -1425,17 +1432,20 @@ fn step_capabilities() -> Json {
     ])
 }
 
-fn xde_json(metadata: &crate::backend::brep::StepSubjectMetadata, facts: &DocumentFacts) -> Json {
+fn xde_json(
+    metadata: &crate::backend::brep::StepSubjectMetadata,
+    occurrences: &[OccurrenceFacts],
+    rows: &DocumentRows,
+) -> Json {
     Json::object([
         (
             "occurrences",
-            Json::Array(facts.occurrences.iter().map(occurrence_json).collect()),
+            Json::Array(occurrences.iter().map(occurrence_json).collect()),
         ),
         (
             "subshapeNames",
             Json::Array(
-                facts
-                    .subshapes
+                rows.subshapes
                     .iter()
                     .map(|row| {
                         Json::object([
@@ -1462,8 +1472,7 @@ fn xde_json(metadata: &crate::backend::brep::StepSubjectMetadata, facts: &Docume
         (
             "datumPlacements",
             Json::Array(
-                facts
-                    .datum_placements
+                rows.datum_placements
                     .iter()
                     .map(|row| {
                         Json::object([
@@ -1480,8 +1489,7 @@ fn xde_json(metadata: &crate::backend::brep::StepSubjectMetadata, facts: &Docume
         (
             "semanticDatums",
             Json::Array(
-                facts
-                    .semantic_datums
+                rows.semantic_datums
                     .iter()
                     .map(|row| {
                         let mut fields = vec![

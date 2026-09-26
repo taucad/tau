@@ -105,7 +105,7 @@ describe('foldChatLedger', () => {
   });
 
   // CL-A6, T4, I10
-  it('should reopen only a settled attempt that failed resumably', () => {
+  it('should reopen only an attempt that failed resumably', () => {
     const resumable = foldChatLedger(
       emptyChatLedger,
       term([life('admitted'), life('running'), failed('RATE_LIMITED'), settled('first'), life('running')]),
@@ -121,8 +121,9 @@ describe('foldChatLedger', () => {
     );
 
     expect(resumable.runs['run-1']).toMatchObject({ attempt: 2, lifecycle: 'running', appendState: 'open' });
-    // An attempt that has not settled continues: its `running` row opens nothing.
-    expect(unsettled.runs['run-1']).toMatchObject({ attempt: 1, lifecycle: 'running' });
+    // W7.r1 finding 1 (ChatRunSlot.tla:327, Att(T)+1): a resume without placement opens attempt 2 as well, so a stale
+    // driver of attempt 1 can never pass for the resumed one.
+    expect(unsettled.runs['run-1']).toMatchObject({ attempt: 2, lifecycle: 'running' });
     // S5 D2: the gate refuses the reopening row of a fatal failure, and a second settlement of attempt 1.
     const reopen = stampRows({
       ledger: fatal,
@@ -258,7 +259,7 @@ describe('foldChatLedger', () => {
       ]),
     );
 
-    expect(ledger.runs['run-1']).toMatchObject({ attempt: 2, placement: { checkoutId: 'first' } });
+    expect(ledger.runs['run-1']).toMatchObject({ attempt: 3, placement: { checkoutId: 'first' } });
   });
 
   it('should read a settlement without attempt as the attempt its position implies', () => {

@@ -3,7 +3,7 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import type { AssistantMessage, Context, Models, UserMessage } from '@earendil-works/pi-ai';
-import { installCompaction } from '#harness/compaction.js';
+import { compactionFoldOf, installCompaction } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { createAgentSession } from '#harness/session.js';
 import { createMemoryEventLogFile, stubModel } from '#harness/harness.fixture.js';
@@ -13,7 +13,7 @@ import {
   piMessageToProvider,
   providerMessageToPi,
 } from '#harness/session-record.js';
-import type { SessionRecord } from '#harness/session-record.js';
+import type { SessionLogEvent, SessionRecord } from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type { AgentLogEvent, AssistantProviderMessage, UserProviderMessage } from '#log/event-types.js';
 import type { ModelStreamEvent, ModelStreamRequest, ModelTransport, ToolRegistry } from '#waist/ports.js';
@@ -70,7 +70,17 @@ const recordFor = (
     identities.set(message, `message-${index}`);
   }
   const history = messages.map((message) => piMessageToProvider(message, identities));
-  return { messages: identities, append, events: async () => [], history: async () => history };
+  /* The rows this record journaled, as the log would read them back: compaction folds its strikes from them. */
+  const journaled: SessionLogEvent[] = [];
+  return {
+    messages: identities,
+    append: async (event) => {
+      await append(event);
+      journaled.push(event);
+    },
+    events: async () => journaled as unknown as readonly AgentLogEvent[],
+    history: async () => history,
+  };
 };
 
 const evictableHistory = (count: number): UserMessage[] =>
@@ -614,6 +624,140 @@ describe('Compaction', () => {
     expect(JSON.stringify(failures.map((failure) => failure.diagnostics))).not.toContain('SUMMARY_REQUIRED');
   });
 
+  /* L2a D15 (RA-S10): the strikes are a fold over the durable log, so three admissions — three sessions, three
+   * compaction installs — count as one chat, and the third over-budget summary opens the breaker. */
+  it('should open the breaker on the third over-budget summary across three admissions', async () => {
+    const messages = evictableHistory(8);
+    const durable: SessionLogEvent[] = [];
+    const failures: AssistantMessage[] = [];
+
+    for (let admission = 0; admission < 3; admission++) {
+      const agent = new Agent({ streamFn: dispatchedStream, initialState: { model: stubModel, messages } });
+      const compaction = installCompaction({
+        agent,
+        record: {
+          ...recordFor(messages, async (event) => {
+            durable.push(event);
+          }),
+          events: async () => durable as unknown as readonly AgentLogEvent[],
+        },
+        projectHistory: async () => messages,
+        contextWindow: 8192,
+        summarize: async () => 'summary-too-large-'.repeat(3000),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each admission reads what the one before it journaled.
+      await compaction.prepareTurn();
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, { messages });
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      failures.push(await stream.result());
+    }
+
+    expect(failures.map((failure) => failure.errorMessage)).toEqual([
+      undefined,
+      undefined,
+      'Repeated compaction could not restore provider headroom; start a new thread.',
+    ]);
+    expect(durable.filter((event) => event.type === 'history.compacted')).toHaveLength(2);
+  });
+
+  /* RA-S10 (L2a D15): the overhead a summary measured is the chat's, not the session's. A later admission reloads a
+   * summary newer than the retained assistant's usage; without the fold it estimates messages alone and sends a request
+   * the provider rejects. */
+  it('should keep the measured overhead across admissions until a later usage-bearing assistant', async () => {
+    const assistant = answeredTurn(7000, 6);
+    const first: AgentMessage[] = [
+      ...evictableHistory(6),
+      assistant,
+      { role: 'user', content: 'mirror it', timestamp: 7 },
+    ];
+    const durable: SessionLogEvent[] = [];
+    const firstCompaction = installCompaction({
+      agent: new Agent({ streamFn: dispatchedStream, initialState: { model: stubModel, messages: first } }),
+      record: {
+        ...recordFor(first, async (event) => {
+          durable.push(event);
+        }),
+        events: async () => durable as unknown as readonly AgentLogEvent[],
+      },
+      projectHistory: async () => first,
+      contextWindow: 8192,
+      summarize: async () => 'Earlier work.',
+    });
+    const compacted = await firstCompaction.prepareTurn();
+    const carried = compactionFoldOf(durable as unknown as readonly AgentLogEvent[]).anchor;
+    expect(carried).toMatchObject({ messageId: 'message-6', tokens: expect.any(Number) as unknown });
+
+    /* The next admission: a new session over the compacted history and a large new request. */
+    const second: AgentMessage[] = [...compacted, { role: 'user', content: 'y'.repeat(8000), timestamp: 8 }];
+    const identities = new MessageIdentities(() => 'unused');
+    for (const [index, message] of second.entries()) {
+      identities.set(message, message === assistant ? 'message-6' : `second-${String(index)}`);
+    }
+    const summarize = vi.fn(async () => 'Earlier work, again.');
+    const secondCompaction = installCompaction({
+      agent: new Agent({ streamFn: dispatchedStream, initialState: { model: stubModel, messages: second } }),
+      record: {
+        messages: identities,
+        append: async () => undefined,
+        events: async () => durable as unknown as readonly AgentLogEvent[],
+        history: async () => second.map((message) => piMessageToProvider(message, identities)),
+      },
+      projectHistory: async () => second,
+      contextWindow: 8192,
+      summarize,
+    });
+
+    await secondCompaction.prepareTurn();
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    /* A later usage-bearing assistant re-measures the overhead itself. */
+    expect(
+      compactionFoldOf([
+        ...(durable as unknown as readonly AgentLogEvent[]),
+        {
+          type: 'message.appended',
+          message: { id: 'assistant-late', role: 'assistant', content: [], metadata: { usage: assistant.usage } },
+        } as unknown as AgentLogEvent,
+      ]).anchor,
+    ).toBeUndefined();
+  });
+
+  it('should fold strikes from the log and reset them on a healthy summary, a clearing or a refusal', () => {
+    const summary = (overBudget: boolean, kind: 'generated' | 'placeholder' = 'generated') =>
+      ({
+        type: 'history.compacted',
+        evictedMessageIds: [],
+        summary: { id: 's', role: 'user', content: 'summary' },
+        details: {
+          lane: 'start_of_turn',
+          tier: 'summarization',
+          tokensBefore: 1,
+          tokensAfter: 1,
+          cleared: 0,
+          evicted: 1,
+          summarizerAttempts: 1,
+          summarizerUsage: null,
+          summary: kind,
+          ...(overBudget ? { overBudget: true } : {}),
+        },
+      }) as const satisfies SessionLogEvent;
+    const refused = {
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'NO_EVICTABLE_HISTORY', message: 'Nothing to evict.' },
+    } as const satisfies SessionLogEvent;
+
+    expect(compactionFoldOf([summary(true), summary(true)]).strikes).toBe(2);
+    expect(compactionFoldOf([summary(true), summary(false), summary(true)]).strikes).toBe(1);
+    expect(compactionFoldOf([summary(true), summary(true, 'placeholder')]).strikes).toBe(0);
+    expect(compactionFoldOf([summary(true), refused]).strikes).toBe(0);
+    expect(
+      compactionFoldOf([summary(true), { ...refused, detail: { code: 'CIRCUIT_BREAKER_OPEN', message: 'Open.' } }])
+        .strikes,
+    ).toBe(1);
+  });
+
   it('should not count placeholder summaries as circuit-breaker strikes', async () => {
     const messages: AgentMessage[] = [
       ...evictableHistory(8),
@@ -773,6 +917,7 @@ describe('Compaction', () => {
       systemPrompt: 'system',
       model: { id: 'stub', contextWindow: 8192 },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream(): AsyncGenerator<ModelStreamEvent> {
           yield { type: 'text-delta', text: 'after compaction' };
           yield { type: 'completed', stopReason: 'stop' };
@@ -823,6 +968,7 @@ describe('Compaction', () => {
 
     const requests: ModelStreamRequest[] = [];
     const secondTransport: ModelTransport = {
+      funding: { type: 'unfunded' },
       async *stream(request): AsyncGenerator<ModelStreamEvent> {
         requests.push(request);
         yield { type: 'completed', stopReason: 'stop' };
@@ -939,6 +1085,7 @@ describe('Compaction', () => {
       systemPrompt: 'system',
       model: { id: 'stub', contextWindow: 8192 },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream(request): AsyncGenerator<ModelStreamEvent> {
           dispatched.push(request);
           yield { type: 'completed', stopReason: 'stop' };

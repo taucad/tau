@@ -52,6 +52,7 @@ const compactionTraceSchema = z.looseObject({
   summary: z.enum(['generated', 'placeholder']).optional(),
   overBudget: z.boolean().optional(),
   discardedOverflowError: z.string().optional(),
+  anchor: z.object({ messageId: z.string(), tokens: z.number().nonnegative() }).optional(),
 });
 const metadataSchema = z
   .object({
@@ -333,6 +334,7 @@ const knownLogEventSchema = z.union([
     attemptId: opaqueInvocationId,
     purpose: z.enum(['generation', 'compaction']),
     modelId: z.string().min(1).max(256),
+    principal: z.string().min(1).max(256).optional(),
   }),
   z.looseObject({
     ...eventBase,

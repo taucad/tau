@@ -66,8 +66,6 @@ export const refusals = {
   RUN_UNREADABLE: { owner: 'host', retry: 'never' },
   /** The gateway has not finished the step's last attempt; Tau waits and continues by itself (EQ1). */
   MODEL_ATTEMPT_PENDING: { owner: 'host', retry: 'wait' },
-  /** Interim W0.16/W0.19 code, deleted when W7 lands: under EQ1 a charged lost reply is recorded and retried (SC-G2). */
-  MODEL_ATTEMPT_IN_DOUBT: { owner: 'host', retry: 'never' },
   /** The attempt belongs to another account; sign in as it, then resume (W11 GI-Q6). */
   MODEL_ATTEMPT_OTHER_ACCOUNT: { owner: 'host', retry: 'reauth' },
   /** The model stream went silent past its stall bound (T9 E9). */

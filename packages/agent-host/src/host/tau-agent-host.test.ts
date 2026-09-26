@@ -1,14 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createEventLogAppender } from '#log/event-log-appender.js';
-import { withLength } from '#log/event-log-storage.fixture.js';
-import type { BareEventLogStorage } from '#log/event-log-storage.fixture.js';
-import type {
-  InterruptApprovalPort,
-  ModelStreamEvent,
-  ModelStreamRequest,
-  ModelTransport,
-  ToolRegistry,
-} from '#waist/ports.js';
+import type { InvocationFunding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
 import { chatRunState, emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import { isResumableRunFailure } from '#log/resumable.js';
@@ -21,139 +12,17 @@ import { GatewayModelTransportError } from '#transport/gateway-model-transport.j
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
 import type { HostCompactionError } from '#harness/compaction.js';
 
-const tauInternal = (message: ProviderMessage | undefined): JsonObject | undefined => message?.metadata?.tauInternal;
-
-const createMemoryLogFile = () => {
-  let bytes = new Uint8Array(new ArrayBuffer(0));
-  return {
-    open: async () => {
-      const storage: BareEventLogStorage = {
-        read: async () => bytes,
-        append: async (next) => {
-          const combined = new Uint8Array(bytes.byteLength + next.byteLength);
-          combined.set(bytes);
-          combined.set(next, bytes.byteLength);
-          bytes = combined;
-        },
-        truncate: async (size) => {
-          bytes = bytes.slice(0, size);
-        },
-        close: async () => undefined,
-      };
-      return createEventLogAppender(withLength(storage));
-    },
-  };
-};
-
-const createIds = (prefix: string) => {
-  let next = 0;
-  return () => `${prefix}-${next++}`;
-};
-
-/** One scripted durable record, with the log's own base fields left to {@link seedLog}. */
-type SeededLogEvent = AgentLogEvent extends infer Event
-  ? Event extends AgentLogEvent
-    ? Omit<Event, 'version' | 'leaderEpoch' | 'sequence' | 'recordedAt'>
-    : never
-  : never;
-
-/**
- * Write a scripted log before any host opens it.
- *
- * Lets a row state the log's exact shape — including shapes a fixed host will
- * no longer write, such as a settlement recorded under a run that was never
- * admitted — instead of driving a sequence of turns to approximate one.
- */
-const seedLog = async (file: ReturnType<typeof createMemoryLogFile>, events: readonly SeededLogEvent[]) => {
-  const appender = await file.open();
-  let sequence = 0;
-  for (const event of events) {
-    // oxlint-disable-next-line no-await-in-loop -- the log's sequence discipline is serial by construction.
-    await appender.append({
-      ...event,
-      version: 1,
-      leaderEpoch: 'epoch-seed',
-      sequence,
-      recordedAt: new Date(Date.UTC(2026, 8, 1)).toISOString(),
-    } as AgentLogEvent);
-    sequence++;
-  }
-  await appender.close();
-};
-
-/** Every record a log holds, read through a fresh appender. */
-const readLog = async (file: ReturnType<typeof createMemoryLogFile>) => {
-  const appender = await file.open();
-  return appender.read();
-};
-
-/** A completed first turn, as a chat's log holds it. */
-const completedFirstTurn: readonly SeededLogEvent[] = [
-  { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
-  { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
-  { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
-  {
-    type: 'message.appended',
-    runId: 'run-1',
-    message: { id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
-  },
-  { type: 'run.lifecycle', runId: 'run-1', state: 'completed' },
-];
-
-/** The abandoned second turn's settlement, written under a run nothing admitted. */
-const settlementOnlySecondRun: SeededLogEvent = {
-  type: 'turn.failed',
-  runId: 'run-2',
-  chatId: 'chat-settlement-only',
-  turnId: 'turn-2',
-  reason: 'The turn ended before it recorded a revision.',
-};
-
-const resolvedInterruptPort = () =>
-  ({
-    pause: async (request) => ({ interruptId: request.interruptId, outcome: 'approved' }),
-    pending: async () => [],
-    resume: async () => undefined,
-  }) satisfies InterruptApprovalPort;
-
-const toolDefinition = {
-  name: 'read_file',
-  description: 'Read one workspace file.',
-  inputSchema: {
-    type: 'object',
-    properties: { targetFile: { type: 'string' } },
-    required: ['targetFile'],
-    additionalProperties: false,
-  },
-} as const;
-
-const tools = (invoke: ToolRegistry['invoke']): ToolRegistry => ({
-  list: () => [toolDefinition],
-  invoke,
-});
-
-const hostOptions = (input: {
-  readonly openEventLog: () => ReturnType<ReturnType<typeof createMemoryLogFile>['open']>;
-  readonly transport: ModelTransport;
-  readonly toolRegistry: ToolRegistry;
-  readonly interruptPort?: InterruptApprovalPort | undefined;
-  readonly idPrefix?: string | undefined;
-}) => {
-  const ids = createIds(input.idPrefix ?? 'message');
-  const epochs = createIds(`epoch-${input.idPrefix ?? 'host'}`);
-  let tick = 0;
-  return {
-    systemPrompt: 'You are the deterministic G2 host fixture.',
-    model: { id: 'scripted-g2-model', contextWindow: 200_000 },
-    modelTransport: input.transport,
-    toolRegistry: input.toolRegistry,
-    openEventLog: async () => input.openEventLog(),
-    interruptPort: input.interruptPort ?? resolvedInterruptPort(),
-    createId: ids,
-    createLeaderEpoch: epochs,
-    now: () => new Date(Date.UTC(2026, 8, 1, 0, 0, tick++)),
-  };
-};
+import {
+  tauInternal,
+  createMemoryLogFile,
+  seedLog,
+  readLog,
+  completedFirstTurn,
+  settlementOnlySecondRun,
+  tools,
+  hostOptions,
+} from '#host/tau-agent-host.fixture.js';
+import type { SeededLogEvent } from '#host/tau-agent-host.fixture.js';
 
 describe('createTauAgentHost', () => {
   it('publishes live deltas before their durable assistant completion', async () => {
@@ -177,6 +46,7 @@ describe('createTauAgentHost', () => {
           close: opened.close,
         }),
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'text-delta', text: 'hello' };
             yield { type: 'thinking-delta', text: 'because' };
@@ -218,6 +88,7 @@ describe('createTauAgentHost', () => {
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(request): AsyncGenerator<ModelStreamEvent> {
             requests.push(request);
             yield { type: 'text-delta', text: 'configured' };
@@ -281,6 +152,7 @@ describe('createTauAgentHost', () => {
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -336,6 +208,7 @@ describe('createTauAgentHost', () => {
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           stream: () => ({
             [Symbol.asyncIterator]: () => ({
               next: async (): Promise<IteratorResult<ModelStreamEvent>> => {
@@ -373,6 +246,7 @@ describe('createTauAgentHost', () => {
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           stream: () => ({
             [Symbol.asyncIterator]: () => ({
               next: async (): Promise<IteratorResult<ModelStreamEvent>> => {
@@ -429,6 +303,7 @@ describe('createTauAgentHost', () => {
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(request): AsyncGenerator<ModelStreamEvent> {
             requests.push(request);
             call++;
@@ -511,6 +386,98 @@ describe('createTauAgentHost', () => {
     await host.close();
   });
 
+  it('should keep the user message when start-of-turn compaction fails', async () => {
+    const file = createMemoryLogFile();
+    let failCompaction = false;
+    let call = 0;
+    const requests: ModelStreamRequest[] = [];
+    const usage = (input: number): ModelStreamEvent => ({
+      type: 'usage',
+      usage: {
+        input,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: input,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    });
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: async () => {
+          const opened = await file.open();
+          return {
+            ...opened,
+            append: async (event) => {
+              if (event.type === 'history.compacted' && failCompaction) {
+                failCompaction = false;
+                throw new Error('durable compaction append rejected');
+              }
+              return opened.append(event);
+            },
+          };
+        },
+        transport: {
+          funding: { type: 'unfunded' },
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            call++;
+            if (call <= 2) {
+              yield {
+                type: 'tool-input',
+                toolCallId: `read-${call}`,
+                toolName: 'read_file',
+                input: { targetFile: 'a.ts' },
+              };
+              yield usage(call === 1 ? 1000 : 3000);
+              yield { type: 'completed', stopReason: 'toolUse' };
+              return;
+            }
+            yield { type: 'text-delta', text: `answer ${call}` };
+            yield usage(call === 3 ? 7000 : 100);
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: 'x'.repeat(9000), isError: false })),
+        idPrefix: 'summary-fails',
+      }),
+      model: { id: 'scripted-g2-model', contextWindow: 8192 },
+      summarize: async () => 'Earlier work.',
+    });
+    await host.admit({
+      chatId: 'chat-summary-fails',
+      runId: 'run-1',
+      trigger: 'submit',
+      message: { id: 'turn-1', role: 'user', content: 'Read a.ts.' },
+    });
+    failCompaction = true;
+
+    await host.admit({
+      chatId: 'chat-summary-fails',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Now continue.' },
+    });
+
+    // D5: the payload is durable in the intent row before the turn's compaction, so the failure loses nothing.
+    const failed = await host.snapshot('chat-summary-fails');
+    expect(failed).toMatchObject({ runId: 'run-2', state: 'failed', failure: { code: 'SESSION_LOG_INTEGRITY' } });
+    const events = await readLog(file);
+    const intent = events.findIndex(
+      (event) =>
+        event.type === 'run.lifecycle' &&
+        event.runId === 'run-2' &&
+        event.state === 'admitted' &&
+        JSON.stringify(event).includes('Now continue.'),
+    );
+    expect(intent).toBeGreaterThanOrEqual(0);
+
+    await host.resume('chat-summary-fails');
+    expect(requests.at(-1)?.messages.filter((message) => message.id === 'turn-2')).toHaveLength(1);
+    expect(await host.snapshot('chat-summary-fails')).toMatchObject({ runId: 'run-2', state: 'completed' });
+    await host.close();
+  });
+
   it('should clear a compaction failure marker and re-enter start-of-turn compaction on resume', async () => {
     const file = createMemoryLogFile();
     const requests: ModelStreamRequest[] = [];
@@ -532,6 +499,7 @@ describe('createTauAgentHost', () => {
           };
         },
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(request): AsyncGenerator<ModelStreamEvent> {
             requests.push(request);
             call++;
@@ -641,6 +609,7 @@ describe('createTauAgentHost', () => {
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(request): AsyncGenerator<ModelStreamEvent> {
             requests.push(request);
             call++;
@@ -744,10 +713,16 @@ describe('createTauAgentHost', () => {
       SESSION_LOG_INTEGRITY: true,
       CIRCUIT_BREAKER_OPEN: true,
       LEADERSHIP_LOST: false,
-      // An attempt the lookup cannot resolve is never sent again: retry class `never` until W7 (EQ1, D21).
-      MODEL_ATTEMPT_IN_DOUBT: false,
+      // EQ1: an attempt the gateway still owns is waited out, never resumed into a second charge.
+      MODEL_ATTEMPT_PENDING: false,
+      // Another principal funded the attempt: signing in as that account resumes it.
+      MODEL_ATTEMPT_OTHER_ACCOUNT: true,
     } as const satisfies Record<
-      GatewayModelErrorCode | HostCompactionError['code'] | 'LEADERSHIP_LOST' | 'MODEL_ATTEMPT_IN_DOUBT',
+      | GatewayModelErrorCode
+      | HostCompactionError['code']
+      | 'LEADERSHIP_LOST'
+      | 'MODEL_ATTEMPT_PENDING'
+      | 'MODEL_ATTEMPT_OTHER_ACCOUNT',
       boolean
     >;
     /* eslint-enable @typescript-eslint/naming-convention -- ends the wire-code key exception. */
@@ -847,14 +822,12 @@ describe('createTauAgentHost', () => {
         idPrefix: 'resumed',
       }),
     );
-    await expect(
-      resumedHost.admit({
-        chatId: 'chat-recovery',
-        runId: 'replacement-run',
-        trigger: 'submit',
-        message: { id: 'replacement-turn', role: 'user', content: 'Do not bypass recovery.' },
-      }),
-    ).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE', runId: 'run-recovery', state: 'running' });
+    /* Opening the chat abandons the orphan as the new term's claim (RA-R9); the person's Resume continues it. */
+    await expect(resumedHost.markAbandoned('chat-recovery')).resolves.toMatchObject({
+      runId: 'run-recovery',
+      state: 'failed',
+      failure: { code: 'RUN_ABANDONED' },
+    });
     const final = await resumedHost.resume('chat-recovery');
 
     expect(resumedInvoke).not.toHaveBeenCalled();
@@ -948,27 +921,12 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
-  it('routes active interruption and resolution through W5 before resuming', async () => {
+  it('routes active interruption and resolution through durable rows before resuming', async () => {
     const file = createMemoryLogFile();
     const modelStarted = Promise.withResolvers<void>();
-    const releaseResolution = Promise.withResolvers<void>();
-    let pauseCalls = 0;
-    let pendingInterrupt: Parameters<InterruptApprovalPort['pause']>[0] | undefined;
-    const interruptPort: InterruptApprovalPort = {
-      pause: async (request) => {
-        pauseCalls++;
-        pendingInterrupt = request;
-        await releaseResolution.promise;
-        pendingInterrupt = undefined;
-        return { interruptId: request.interruptId, outcome: 'approved' };
-      },
-      pending: async ({ runId }) => (pendingInterrupt?.runId === runId ? [pendingInterrupt] : []),
-      resume: async () => {
-        releaseResolution.resolve();
-      },
-    };
     let calls = 0;
     const transport: ModelTransport = {
+      funding: { type: 'unfunded' },
       async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
         calls++;
         if (calls === 1) {
@@ -994,7 +952,6 @@ the cancelled tools left the system unchanged.
         openEventLog: file.open,
         transport,
         toolRegistry: tools(async () => ({ content: null, isError: false })),
-        interruptPort,
         idPrefix: 'interrupt',
       }),
     );
@@ -1012,8 +969,8 @@ the cancelled tools left the system unchanged.
       prompt: 'Continue this run?',
     });
     await admission;
-    await vi.waitFor(() => {
-      expect(pauseCalls).toBe(1);
+    await vi.waitFor(async () => {
+      await expect(host.pendingInterrupts('run-interrupt')).resolves.toHaveLength(1);
     });
     await expect(
       host.resolveInterrupt({ runId: 'wrong-run', interruptId: 'interrupt-1', outcome: 'approved' }),
@@ -1042,6 +999,7 @@ the cancelled tools left the system unchanged.
     const release = Promise.withResolvers<void>();
     let calls = 0;
     const transport: ModelTransport = {
+      funding: { type: 'unfunded' },
       async *stream(request): AsyncGenerator<ModelStreamEvent> {
         calls++;
         if (!request.signal.aborted) {
@@ -1099,6 +1057,7 @@ the cancelled tools left the system unchanged.
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             await release.promise;
             yield { type: 'text-delta', text: 'finished after admission' };
@@ -1116,9 +1075,10 @@ the cancelled tools left the system unchanged.
       message: { id: 'turn-admission-ack', role: 'user', content: 'Wait after admitting.' },
     });
 
+    /* Answered once the intent row is durable (I18): the admission, not the model call. */
     await expect(host.waitForAdmission('chat-admission-ack')).resolves.toMatchObject({
       runId: 'run-admission-ack',
-      state: 'running',
+      state: 'admitted',
     });
     await expect(
       Promise.race([
@@ -1144,6 +1104,7 @@ the cancelled tools left the system unchanged.
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(request): AsyncGenerator<ModelStreamEvent> {
             started.resolve();
             yield { type: 'message-metadata', metadata: { providerTrace: { id: 'trace-cancel' } } };
@@ -1191,6 +1152,7 @@ the cancelled tools left the system unchanged.
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(request): AsyncGenerator<ModelStreamEvent> {
             calls++;
             if (calls === 1) {
@@ -1265,6 +1227,12 @@ the cancelled tools left the system unchanged.
     const log = await file.open();
     const events = await log.read();
     expect(events).toContainEqual(expect.objectContaining({ type: 'history.rewound', trigger: 'edit' }));
+    // RA-R3 (RowsNeedRun): the attempt's intent row precedes its rewind.
+    const admittedAt = events.findIndex(
+      (event) => event.type === 'run.lifecycle' && event.runId === 'run-retry' && event.state === 'admitted',
+    );
+    expect(admittedAt).toBeGreaterThanOrEqual(0);
+    expect(admittedAt).toBeLessThan(events.findIndex((event) => event.type === 'history.rewound'));
     expect(
       reduceEventLog(events)
         .filter((message) => message.role === 'user')
@@ -1457,6 +1425,7 @@ the cancelled tools left the system unchanged.
       ...hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           stream: () => {
             throw new Error('An external turn must never reach the Tau model.');
           },
@@ -1542,6 +1511,7 @@ the cancelled tools left the system unchanged.
       ...hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           stream: () => {
             throw new Error('An external turn must never reach the Tau model.');
           },
@@ -1614,6 +1584,7 @@ the cancelled tools left the system unchanged.
       ...hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           stream: () => {
             throw new Error('An external turn must never reach the Tau model.');
           },
@@ -1708,6 +1679,7 @@ the cancelled tools left the system unchanged.
       ...hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           stream: () => {
             throw new Error('An external turn must never reach the Tau model.');
           },
@@ -1744,6 +1716,7 @@ the cancelled tools left the system unchanged.
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -1779,6 +1752,7 @@ the cancelled tools left the system unchanged.
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -1806,6 +1780,7 @@ the cancelled tools left the system unchanged.
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -1834,6 +1809,7 @@ the cancelled tools left the system unchanged.
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -1876,6 +1852,7 @@ describe('the host run ledger', () => {
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -1952,6 +1929,7 @@ describe('the host run ledger', () => {
           };
         },
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -1997,6 +1975,7 @@ describe('the host run ledger', () => {
           };
         },
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -2039,6 +2018,7 @@ describe('the host run ledger', () => {
           return file.open();
         },
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -2155,6 +2135,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
       hostOptions({
         openEventLog: file.open,
         transport: stream ?? {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'text-delta', text: 'ok' };
             yield { type: 'completed', stopReason: 'stop' };
@@ -2244,6 +2225,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
       ...hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           stream: () => {
             throw new Error('An external turn must never reach the Tau model.');
           },
@@ -2290,6 +2272,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
       ...hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           stream: () => {
             throw new Error('An external turn must never reach the Tau model.');
           },
@@ -2323,6 +2306,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     await seedLog(file, completedFirstTurn);
     const settled: unknown[] = [];
     const host: TauAgentHost = silentHost(file, 'concurrent', {
+      funding: { type: 'unfunded' },
       async *stream(): AsyncGenerator<ModelStreamEvent> {
         yield { type: 'text-delta', text: 'still going' };
         /* The collision the two writers made: this lands at the sequence the
@@ -2386,6 +2370,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
       ...hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             yield { type: 'completed', stopReason: 'stop' };
           },
@@ -2427,7 +2412,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     await host.close();
   });
 
-  it('refuses a live chat with one code, in memory and durably alike', async () => {
+  it("refuses a live chat with one code, and abandons a dead host's run at opening instead", async () => {
     const durableFile = createMemoryLogFile();
     await seedLog(durableFile, [
       { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
@@ -2435,17 +2420,19 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     ]);
     const durableHost = silentHost(durableFile, 'live-durable');
 
-    /* The branch a reload-then-send reaches: a fresh worker's host has no run
-     * in memory, so only the ledger knows. It carried no code at all, and the
-     * page's recovery could not recognise it. */
-    await expect(
-      durableHost.admit({
-        chatId: 'chat-live-durable',
-        runId: 'run-2',
-        trigger: 'submit',
-        message: { id: 'turn-2', role: 'user', content: 'Second.' },
-      }),
-    ).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE', runId: 'run-1', state: 'running' });
+    /* The branch a reload-then-send reaches: a fresh host has no slot for run-1, so its driver died with the last
+     * incarnation. Opening abandons it as the new term's claim (RA-R9, I13), and the send is admitted. */
+    await durableHost.admit({
+      chatId: 'chat-live-durable',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+    });
+    const abandonedLog = await readLog(durableFile);
+    const abandoned = abandonedLog.find(
+      (event) => event.runId === 'run-1' && event.type === 'run.lifecycle' && event.state === 'failed',
+    );
+    expect(abandoned).toMatchObject({ detail: { code: 'RUN_ABANDONED' } });
 
     // And the same run id, refused as taken rather than as a live run.
     await expect(
@@ -2455,12 +2442,13 @@ describe('the attempt ledger and its refusal taxonomy', () => {
         trigger: 'submit',
         message: { id: 'turn-3', role: 'user', content: 'Third.' },
       }),
-    ).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
+    ).rejects.toMatchObject({ code: 'RUN_ID_TAKEN', runId: 'run-1' });
     await durableHost.close();
 
     const memoryFile = createMemoryLogFile();
     const release = Promise.withResolvers<void>();
     const memoryHost = silentHost(memoryFile, 'live-memory', {
+      funding: { type: 'unfunded' },
       async *stream(): AsyncGenerator<ModelStreamEvent> {
         await release.promise;
         yield { type: 'completed', stopReason: 'stop' };
@@ -2506,6 +2494,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     const file = createMemoryLogFile();
     const release = Promise.withResolvers<void>();
     const host = silentHost(file, 'ack', {
+      funding: { type: 'unfunded' },
       async *stream(): AsyncGenerator<ModelStreamEvent> {
         await release.promise;
         yield { type: 'completed', stopReason: 'stop' };
@@ -2536,6 +2525,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     ]);
     const requests: ModelStreamRequest[] = [];
     const host = silentHost(file, 'abandoned', {
+      funding: { type: 'unfunded' },
       async *stream(request): AsyncGenerator<ModelStreamEvent> {
         requests.push(request);
         yield { type: 'completed', stopReason: 'stop' };
@@ -2664,6 +2654,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     );
     const requests: ModelStreamRequest[] = [];
     const host = silentHost(file, 'abandoned-tail', {
+      funding: { type: 'unfunded' },
       async *stream(request): AsyncGenerator<ModelStreamEvent> {
         requests.push(request);
         yield { type: 'completed', stopReason: 'stop' };
@@ -2702,6 +2693,7 @@ describe('the attempt ledger and its refusal taxonomy', () => {
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(request): AsyncGenerator<ModelStreamEvent> {
             requests.push(request);
             yield { type: 'text-delta', text: 'Recovered.' };
@@ -2782,18 +2774,23 @@ describe('the attempt ledger and its refusal taxonomy', () => {
       },
     ]);
     const closedHost = silentHost(closedFile, 'closed');
-    const before = await readLog(closedFile);
 
-    /* A settled attempt that cannot reopen: `resume` re-ran it and its second,
-     * differing settlement was then refused with no way forward. */
+    /* A settled attempt whose driver is gone: opening abandons it (RA-R9), and Resume then opens attempt 2 through
+     * the one reopen predicate, with a settlement slot of its own, never re-running attempt 1 under its settlement. */
     await closedHost.resume('chat-closed');
-    expect(await readLog(closedFile)).toHaveLength(before.length);
+    const rowsLog = await readLog(closedFile);
+    const rows = rowsLog.filter((event) => event.type === 'run.lifecycle').slice(2);
+    expect(rows.slice(0, 2)).toMatchObject([
+      { state: 'failed', attempt: 1, detail: { code: 'RUN_ABANDONED' } },
+      { state: 'running', attempt: 2 },
+    ]);
     await closedHost.close();
   });
 });
 
 describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
   const okTransport: ModelTransport = {
+    funding: { type: 'unfunded' },
     async *stream(): AsyncGenerator<ModelStreamEvent> {
       yield { type: 'text-delta', text: 'ok' };
       yield { type: 'completed', stopReason: 'stop' };
@@ -2818,7 +2815,16 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
       messageId: 'missing-message',
       replacement: { id: 'missing-message', role: 'user', content: 'replacement' },
     };
-    return { ...log, read: async () => [invalid, ...(await log.read())] };
+    /* The history reads through `messages()` (RA-S10), which reads tolerantly; the open's verdict breaks once the
+     * admission is durable, so driver construction is what refuses it. */
+    return {
+      ...log,
+      read: async () => [invalid, ...(await log.read())],
+      historyIntact: async () => {
+        const rows = await log.read();
+        return rows.length === 0;
+      },
+    };
   };
 
   /** Settle a command to `'admitted'` or the error it was refused with. */
@@ -2846,14 +2852,56 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
       }),
     );
 
+  const leakHost = (file: ReturnType<typeof createMemoryLogFile>, code: string, command: string): TauAgentHost => {
+    let clientContextCalls = 0;
+    const base = hostOptions({
+      openEventLog: code === 'HISTORY_INVALID' ? invalidHistoryLog(file) : file.open,
+      transport: okTransport,
+      toolRegistry: tools(async () => ({ content: null, isError: false })),
+      idPrefix: `leak-${code}-${command}`,
+    });
+    return createTauAgentHost({
+      ...base,
+      model: code === 'HOST_MODEL_UNAVAILABLE' ? undefined : base.model,
+      clientContext: async () => {
+        clientContextCalls++;
+        if (code === 'CLIENT_CONTEXT_FAILED' && clientContextCalls === 1) {
+          throw Object.assign(new Error('The client context is unavailable.'), { code });
+        }
+        return {};
+      },
+    });
+  };
+
+  it.each(['HOST_MODEL_UNAVAILABLE', 'CLIENT_CONTEXT_FAILED'] as const)(
+    'should refuse a start %s before any row and leave the chat admittable (RA-R4)',
+    async (code) => {
+      const file = createMemoryLogFile();
+      const chatId = `chat-${code}-start`;
+      const host = leakHost(file, code, 'start');
+
+      await expect(
+        host.admit({
+          chatId,
+          runId: 'run-1',
+          trigger: 'submit',
+          message: { id: 'turn-1', role: 'user', content: 'First.' },
+        }),
+      ).rejects.toMatchObject({ code });
+
+      expect(await readLog(file)).toEqual([]);
+      const second = await secondAdmission(host, chatId);
+      expect((second as { readonly code?: unknown } | undefined)?.code).not.toBe('CHAT_RUN_LIVE');
+      await host.close();
+    },
+  );
+
   it.each([
-    ['HOST_MODEL_UNAVAILABLE', 'start'],
-    ['CLIENT_CONTEXT_FAILED', 'start'],
     ['HISTORY_INVALID', 'start'],
     ['HOST_MODEL_UNAVAILABLE', 'resume'],
     ['CLIENT_CONTEXT_FAILED', 'resume'],
   ] as const)(
-    'should leave the chat admittable with a coded last row when %s fails session construction on %s',
+    'should end the attempt with a coded last row when %s fails driver construction on %s',
     async (code, command) => {
       const file = createMemoryLogFile();
       const chatId = `chat-${code}-${command}`;
@@ -2864,47 +2912,53 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
           { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
         ]);
       }
-      let clientContextCalls = 0;
-      const base = hostOptions({
-        openEventLog: code === 'HISTORY_INVALID' ? invalidHistoryLog(file) : file.open,
-        transport: okTransport,
-        toolRegistry: tools(async () => ({ content: null, isError: false })),
-        idPrefix: `leak-${code}-${command}`,
-      });
-      const host = createTauAgentHost({
-        ...base,
-        model: code === 'HOST_MODEL_UNAVAILABLE' ? undefined : base.model,
-        clientContext: async () => {
-          clientContextCalls++;
-          if (code === 'CLIENT_CONTEXT_FAILED' && clientContextCalls === 1) {
-            throw Object.assign(new Error('The client context is unavailable.'), { code });
-          }
-          return {};
-        },
-      });
+      const host = leakHost(file, code, command);
 
-      const failing =
-        command === 'start'
-          ? host.admit({
-              chatId,
-              runId: 'run-1',
-              trigger: 'submit',
-              message: { id: 'turn-1', role: 'user', content: 'First.' },
-            })
-          : host.resume(chatId);
-      await expect(failing).rejects.toMatchObject({ code });
+      await (command === 'start'
+        ? host.admit({
+            chatId,
+            runId: 'run-1',
+            trigger: 'submit',
+            message: { id: 'turn-1', role: 'user', content: 'First.' },
+          })
+        : host.resume(chatId));
 
-      expect(await lastLifecycle(file)).toMatchObject({
-        type: 'run.lifecycle',
-        runId: 'run-1',
-        state: 'failed',
-        detail: { code },
+      await vi.waitFor(async () => {
+        expect(await lastLifecycle(file)).toMatchObject({
+          type: 'run.lifecycle',
+          runId: 'run-1',
+          state: 'failed',
+          detail: { code },
+        });
       });
       const second = await secondAdmission(host, chatId);
       expect((second as { readonly code?: unknown } | undefined)?.code).not.toBe('CHAT_RUN_LIVE');
       await host.close();
     },
   );
+
+  it('should write a construction failure under its incarnation term', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+    ]);
+    const host = leakHost(file, 'CLIENT_CONTEXT_FAILED', 'term');
+
+    await host.resume('chat-term');
+    await vi.waitFor(async () => {
+      expect(await lastLifecycle(file)).toMatchObject({ state: 'failed', detail: { code: 'CLIENT_CONTEXT_FAILED' } });
+    });
+
+    // L2a D12: every row this incarnation wrote, the failure included, carries the term its first append claimed.
+    const writtenLog = await readLog(file);
+    const written = writtenLog.slice(3);
+    expect(written.length).toBeGreaterThan(1);
+    expect(new Set(written.map((event) => event.leaderEpoch)).size).toBe(1);
+    expect(written[0]?.leaderEpoch).not.toBe('epoch-seed');
+    await host.close();
+  });
 
   it('should release the reservation when leadership is lost before the session is built', async () => {
     const file = createMemoryLogFile();
@@ -2991,6 +3045,7 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
             };
           },
           transport: {
+            funding: { type: 'unfunded' },
             async *stream(): AsyncGenerator<ModelStreamEvent> {
               await release.promise;
               yield { type: 'text-delta', text: 'ok' };
@@ -3043,7 +3098,7 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
     },
   );
 
-  it('should log a double append failure of an external run and not reject unhandled', async () => {
+  it('should fence the incarnation, not reject unhandled, when an external run cannot write its ending', async () => {
     const file = createMemoryLogFile();
     let failAppends = false;
     const unhandled: unknown[] = [];
@@ -3051,7 +3106,6 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
       unhandled.push(reason);
     };
     process.on('unhandledRejection', onUnhandled);
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const externalPort: ExternalAgentPort = {
       list: () => ['stub-agent'],
       run: async () => {
@@ -3093,11 +3147,10 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
         setTimeout(resolve, 0);
       });
 
+      /* M1 owns the ending row: a refused append fences the incarnation (RA-A9); nothing escapes as a rejection. */
       expect(unhandled).toEqual([]);
-      expect(errors).toHaveBeenCalledWith(expect.stringContaining('run-1'), expect.any(Error));
     } finally {
       process.off('unhandledRejection', onUnhandled);
-      errors.mockRestore();
     }
   });
 });
@@ -3111,6 +3164,7 @@ describe('early-started tools on cancel (W0.15)', () => {
       hostOptions({
         openEventLog: file.open,
         transport: {
+          funding: { type: 'unfunded' },
           async *stream(request): AsyncGenerator<ModelStreamEvent> {
             yield {
               type: 'tool-input',
@@ -3157,36 +3211,83 @@ describe('early-started tools on cancel (W0.15)', () => {
   });
 });
 
-describe('attempts in doubt (W0.16, W0.19)', () => {
-  type Lookup = NonNullable<ModelTransport['lookupAttempt']>;
-
+describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
   /**
-   * A funded transport whose first call binds, streams its reply, and then either
-   * drops (the supplier finished; the relay did not) or never returns (the host dies).
+   * The gateway's ledger, simulated at the seam: one row per attempt key. A call is admitted, then charged when the
+   * supplier finishes; a lookup of a key it never admitted voids it (GI-R3), and a late request for a voided key is
+   * refused (GI-A10).
    */
-  const fundedTransport = (input: { readonly first: 'drop' | 'hang'; readonly lookup: Lookup }) => {
+  const gateway = (script: ReadonlyArray<'complete' | 'drop' | 'hang' | 'oversized'>, principal = 'account-a') => {
+    const keys = new Map<string, 'admitted' | 'charged' | 'voided'>();
     const attempts: string[] = [];
-    const lookupAttempt = vi.fn(input.lookup);
-    const transport: ModelTransport = {
+    const lookups: string[] = [];
+    let charges = 0;
+    const funding: InvocationFunding = {
+      type: 'funded',
       usesBillingAttempt: () => true,
-      lookupAttempt,
+      principal: async () => principal,
+      resolveInvocation: async ({ attemptId }) => {
+        lookups.push(attemptId);
+        const state = keys.get(attemptId);
+        if (state === undefined || state === 'voided') {
+          keys.set(attemptId, 'voided');
+          return { status: 'voided' };
+        }
+        return state === 'admitted'
+          ? { status: 'pending' }
+          : { status: 'terminal', operationId: `operation-${attemptId}`, outcome: 'settled', chargedCreditAtoms: '10' };
+      },
+    };
+    const transport: ModelTransport = {
+      funding,
       async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        const step = script[attempts.length] ?? 'complete';
         attempts.push(request.attemptId);
-        await request.onInvocationBound?.({ operationId: `operation-${request.attemptId}`, status: 'pending' });
-        if (attempts.length === 1) {
-          yield { type: 'text-delta', text: 'The whole reply, charged.' };
-          if (input.first === 'hang') {
-            await new Promise<never>(() => {
-              /* The host dies mid-call: this call never returns. */
-            });
-          }
+        if (keys.get(request.attemptId) === 'voided') {
+          throw new GatewayModelTransportError({ code: 'INVALID_REQUEST', message: 'This attempt was voided.' });
+        }
+        keys.set(request.attemptId, 'admitted');
+        await request.onInvocationBound?.({ operationId: `operation-${request.attemptId}` });
+        if (step === 'hang') {
+          await new Promise<never>(() => {
+            /* The host dies mid-call: this call never returns. */
+          });
+        }
+        keys.set(request.attemptId, 'charged');
+        charges++;
+        yield { type: 'text-delta', text: `Reply to ${request.attemptId}.` };
+        if (step === 'oversized') {
+          /* The reply's input exceeds the capped window: charged, and the step's reply (RV5-F1). */
+          const input = 250_000;
+          yield {
+            type: 'usage',
+            usage: {
+              input,
+              output: 10,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: input + 10,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          };
+        }
+        if (step === 'drop') {
+          /* The supplier finished and the gateway charged; the relay dropped the reply. */
           throw new GatewayModelTransportError({ code: 'NETWORK_ERROR', status: 200, message: 'fixture drop' });
         }
-        yield { type: 'text-delta', text: 'Continued under a new key.' };
         yield { type: 'completed', stopReason: 'stop' };
       },
     };
-    return { attempts, lookupAttempt, transport };
+    /** A request for `attemptId` that reaches the gateway after the host gave it up. */
+    const late = (attemptId: string): 'refused' | 'charged' => {
+      if (keys.get(attemptId) === 'voided') {
+        return 'refused';
+      }
+      keys.set(attemptId, 'charged');
+      charges++;
+      return 'charged';
+    };
+    return { attempts, lookups, transport, late, charges: () => charges, keys };
   };
 
   const hostOn = (file: ReturnType<typeof createMemoryLogFile>, transport: ModelTransport, idPrefix: string) =>
@@ -3207,86 +3308,393 @@ describe('attempts in doubt (W0.16, W0.19)', () => {
       message: { id: 'turn-1', role: 'user', content: 'Answer.' },
     });
 
-  it.each([
-    ['pending', { operationId: 'operation-a', status: 'pending' }],
-    ['unavailable', { operationId: 'operation-a', status: 'unavailable' }],
-  ] as const)(
-    'should end Resume with MODEL_ATTEMPT_IN_DOUBT when the lookup answers %s for an attempt whose only record is a failure message',
-    async (_state, receipt) => {
-      const file = createMemoryLogFile();
-      const funded = fundedTransport({ first: 'drop', lookup: async () => receipt });
-      const host = hostOn(file, funded.transport, 'doubt-failure');
-      await start(host, 'chat-doubt');
-      expect(await host.snapshot('chat-doubt')).toMatchObject({ state: 'failed', failure: { code: 'NETWORK_ERROR' } });
+  const invocationRows = (events: readonly AgentLogEvent[]) =>
+    events.flatMap((event) =>
+      event.type === 'model.invocation-prepared'
+        ? [`prepared ${event.attemptId}`]
+        : event.type === 'model.invocation-settled'
+          ? [`settled ${event.attemptId} ${event.outcome}`]
+          : [],
+    );
 
-      await host.resume('chat-doubt');
-
-      // No second attempt before the lookup answers terminal (W11 Current System 8).
-      expect(funded.lookupAttempt).toHaveBeenCalledWith(funded.attempts[0], expect.any(AbortSignal));
-      expect(funded.attempts).toHaveLength(1);
-      const failed = await host.snapshot('chat-doubt');
-      expect(failed).toMatchObject({ state: 'failed', failure: { code: 'MODEL_ATTEMPT_IN_DOUBT' } });
-      expect(isResumableRunFailure(failed.failure)).toBe(false);
-      await host.close();
-    },
-  );
-
-  it('should continue the step under a new key once the lookup answers terminal for a failure-message attempt', async () => {
+  it('should record the charge before re-preparing when the connection drops after the supplier finished', async () => {
     const file = createMemoryLogFile();
-    const funded = fundedTransport({
-      first: 'drop',
-      lookup: async (attemptId) => ({ operationId: `operation-${attemptId}`, status: 'terminal' }),
-    });
-    const host = hostOn(file, funded.transport, 'doubt-terminal');
-    await start(host, 'chat-terminal');
+    const sim = gateway(['drop', 'complete']);
+    const host = hostOn(file, sim.transport, 'gi-a9');
 
-    await host.resume('chat-terminal');
+    await start(host, 'chat-drop');
 
-    expect(funded.lookupAttempt).toHaveBeenCalledTimes(1);
-    expect(funded.lookupAttempt).toHaveBeenCalledWith(funded.attempts[0], expect.any(AbortSignal));
-    expect(funded.attempts).toHaveLength(2);
-    expect(funded.attempts[1]).not.toBe(funded.attempts[0]);
-    expect(await host.snapshot('chat-terminal')).toMatchObject({ state: 'completed' });
+    // GI-A9: the first charge is recorded before the next prepared row; the step continues under a new key.
+    expect(invocationRows(await readLog(file))).toEqual([
+      'prepared run-1:1:0',
+      'settled run-1:1:0 settled',
+      'prepared run-1:1:1',
+    ]);
+    expect(sim.charges()).toBe(2);
+    // No card: the run completed, with no refusal for the charged loss.
+    expect(await host.snapshot('chat-drop')).toMatchObject({ state: 'completed' });
+    const dropped = await host.snapshot('chat-drop');
+    expect(dropped.failure).toBeUndefined();
+    await host.close();
+  });
+
+  it('should append the settled row before the next prepared row', async () => {
+    const file = createMemoryLogFile();
+    const sim = gateway(['drop', 'drop', 'complete']);
+    const host = hostOn(file, sim.transport, 'ordered');
+
+    await start(host, 'chat-ordered');
+    await host.resume('chat-ordered');
+
+    const rows = invocationRows(await readLog(file));
+    // Every prepared row after the first follows the settlement of each attempt before it (ChargeAfterRecordedLoss).
+    for (const [index, row] of rows.entries()) {
+      if (row.startsWith('prepared') && index > 0) {
+        const earlier = rows.slice(0, index).filter((prior) => prior.startsWith('prepared'));
+        for (const prior of earlier) {
+          expect(rows.slice(0, index)).toContain(prior.replace('prepared', 'settled') + ' settled');
+        }
+      }
+    }
+    expect(rows.filter((row) => row.startsWith('prepared'))).toHaveLength(3);
+    await host.close();
+  });
+
+  it('should not charge twice when a completed reply exceeds the capped context window', async () => {
+    const file = createMemoryLogFile();
+    const sim = gateway(['oversized']);
+    const host = hostOn(file, sim.transport, 'oversized');
+
+    await start(host, 'chat-oversized');
+
+    expect(sim.attempts).toEqual(['run-1:1:0']);
+    expect(sim.charges()).toBe(1);
+    expect(await host.snapshot('chat-oversized')).toMatchObject({ state: 'completed' });
+    await host.close();
+  });
+
+  it('should re-prepare once after a charged loss and end the run on the second', async () => {
+    const file = createMemoryLogFile();
+    const sim = gateway(['drop', 'drop', 'complete']);
+    const host = hostOn(file, sim.transport, 'lost-twice');
+
+    await start(host, 'chat-twice');
+
+    expect(sim.attempts).toEqual(['run-1:1:0', 'run-1:1:1']);
+    const ended = await host.snapshot('chat-twice');
+    expect(ended).toMatchObject({ state: 'failed', failure: { code: 'NETWORK_ERROR' } });
+    expect(isResumableRunFailure(ended.failure)).toBe(true);
+
+    // Resume proceeds the same way: the second charge is recorded, then the step continues under a new key.
+    await host.resume('chat-twice');
+    expect(invocationRows(await readLog(file))).toEqual([
+      'prepared run-1:1:0',
+      'settled run-1:1:0 settled',
+      'prepared run-1:1:1',
+      'settled run-1:1:1 settled',
+      // The resume opened attempt 2, so its key is new by construction.
+      'prepared run-1:2:0',
+    ]);
+    expect(await host.snapshot('chat-twice')).toMatchObject({ state: 'completed' });
     await host.close();
   });
 
   /** Drive a first host into a bound call it never finishes, then hand the log to a second host. */
-  const diedMidCall = async (lookup: Lookup, chatId: string) => {
+  const diedMidCall = async (sim: ReturnType<typeof gateway>, chatId: string) => {
     const file = createMemoryLogFile();
-    const dying = fundedTransport({ first: 'hang', lookup });
-    const dead = hostOn(file, dying.transport, 'dead');
+    const dead = hostOn(file, sim.transport, 'dead');
     // async-iife: the host dies mid-call, so its admission never settles.
     void start(dead, chatId);
     await vi.waitFor(async () => {
       const logged = await readLog(file);
       expect(logged.some((event) => event.type === 'model.invocation-bound')).toBe(true);
     });
-    return { file, dying };
+    return file;
   };
 
-  it('should resume a run that died mid-call to MODEL_ATTEMPT_IN_DOUBT while its attempt is pending', async () => {
-    const { file, dying } = await diedMidCall(
-      async () => ({ operationId: 'operation-a', status: 'pending' }),
-      'chat-died',
-    );
-    const survivor = hostOn(file, dying.transport, 'survivor');
-    await survivor.markAbandoned('chat-died');
+  it('should record the charge and resume under a new key after a death mid-call', async () => {
+    const sim = gateway(['hang', 'complete']);
+    const file = await diedMidCall(sim, 'chat-died');
+    // The supplier finished after the host died.
+    sim.keys.set('run-1:1:0', 'charged');
+    const survivor = hostOn(file, sim.transport, 'survivor');
 
+    // Opening records the answered attempt and abandons the orphan (RA-R9, GI-R10).
+    await survivor.markAbandoned('chat-died');
     await survivor.resume('chat-died');
 
-    expect(dying.attempts).toHaveLength(1);
-    expect(await survivor.snapshot('chat-died')).toMatchObject({
-      state: 'failed',
-      failure: { code: 'MODEL_ATTEMPT_IN_DOUBT' },
-    });
+    expect(invocationRows(await readLog(file))).toEqual([
+      'prepared run-1:1:0',
+      'settled run-1:1:0 settled',
+      'prepared run-1:2:0',
+    ]);
+    expect(sim.attempts).toEqual(['run-1:1:0', 'run-1:2:0']);
+    expect(await survivor.snapshot('chat-died')).toMatchObject({ state: 'completed' });
     await survivor.close();
   });
 
-  it('should resume a crash between a billed summary and history.compacted to MODEL_ATTEMPT_IN_DOUBT', async () => {
-    const { file: died } = await diedMidCall(
-      async () => ({ operationId: 'operation-a', status: 'pending' }),
-      'chat-summary',
+  // W7.r1 finding 4 (ChatRunSlot.tla resume: `running` first, recovery rows without its command id).
+  it('should write the reopening row first and reopen once when a resume is sent again after a crash', async () => {
+    const sim = gateway(['hang', 'hang']);
+    const file = await diedMidCall(sim, 'chat-order');
+    const survivor = hostOn(file, sim.transport, 'survivor-order');
+    await survivor.markAbandoned('chat-order');
+    // The supplier finished after the opening asked: only the resume records the charge.
+    sim.keys.set('run-1:1:0', 'charged');
+    const resume = {
+      type: 'resume',
+      commandId: 'resume-order',
+      payload: { chatId: 'chat-order', runId: 'run-1' },
+    } as const;
+
+    await expect(survivor.command(resume)).resolves.toMatchObject({ status: 'applied' });
+    const logged = await readLog(file);
+    const batch = logged.filter((event) => event.leaderEpoch === logged.at(-1)?.leaderEpoch);
+    const reopening = batch.findIndex((event) => event.type === 'run.lifecycle' && event.state === 'running');
+    const settled = batch.findIndex((event) => event.type === 'model.invocation-settled');
+    expect(reopening).toBeGreaterThanOrEqual(0);
+    expect(settled).toBeGreaterThan(reopening);
+    expect(batch[settled]).not.toHaveProperty('commandId');
+
+    // The host dies before anyone sees the answer; the page sends the resume again to the next host.
+    const next = hostOn(file, sim.transport, 'next-order');
+    await next.markAbandoned('chat-order');
+    await expect(next.command(resume)).resolves.toMatchObject({ status: 'replayed' });
+    const after = await readLog(file);
+    const reopened = after.filter(
+      (event) => event.type === 'run.lifecycle' && event.state === 'running' && event.commandId === 'resume-order',
     );
+    expect(reopened).toMatchObject([{ attempt: 2 }]);
+    await next.close();
+  });
+
+  // W7.r1 finding 5: a cancel that lands while the retry reads the failed step dispatches nothing more.
+  /* W7.r1 finding 5 and round 2 N3: the stop is read after each await of the retry, the clearance write and the build. */
+  it.each(['the failure-marker clearance', 'the next session build'] as const)(
+    'should dispatch no funded call after a cancel that lands during %s of a lost-reply retry',
+    async (during) => {
+      const sim = gateway(['drop', 'complete']);
+      const file = createMemoryLogFile();
+      let dropped = false;
+      let cleared = false;
+      let hold: (() => void) | undefined;
+      const holding = new Promise<void>((resolve) => {
+        hold = resolve;
+      });
+      let reached: (() => void) | undefined;
+      const retrying = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const transport: ModelTransport = {
+        funding: sim.transport.funding,
+        async *stream(request): AsyncGenerator<ModelStreamEvent> {
+          try {
+            yield* sim.transport.stream(request);
+          } catch (error) {
+            dropped = true;
+            throw error;
+          }
+        },
+      };
+      const wait = async (): Promise<void> => {
+        reached?.();
+        await holding;
+      };
+      /* The retry clears the lost reply's failure marker, then builds the next session, whose record first reads the
+       * log: the chosen step waits here. */
+      const open = async (): Promise<Awaited<ReturnType<typeof file.open>>> => {
+        const appender = await file.open();
+        return {
+          ...appender,
+          append: async (event) => {
+            if (dropped && (event.type === 'history.rewound' || event.type === 'message.envelope-replaced')) {
+              dropped = false;
+              if (during === 'the failure-marker clearance') {
+                await wait();
+              } else {
+                cleared = true;
+              }
+            }
+            return appender.append(event);
+          },
+          read: async () => {
+            if (cleared) {
+              cleared = false;
+              await wait();
+            }
+            return appender.read();
+          },
+        };
+      };
+      const host = createTauAgentHost(
+        hostOptions({
+          openEventLog: open,
+          transport,
+          toolRegistry: tools(async () => ({ content: null, isError: false })),
+          idPrefix: 'cancel-retry',
+        }),
+      );
+      const started = start(host, 'chat-cancel-retry');
+      await retrying;
+
+      const cancelled = host.command({
+        type: 'cancel',
+        commandId: 'cancel-retry',
+        payload: { chatId: 'chat-cancel-retry', runId: 'run-1' },
+      });
+      await vi.waitFor(async () => {
+        expect(await host.describeRun('chat-cancel-retry')).toMatchObject({ state: 'running' });
+      });
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      hold?.();
+      await started;
+
+      await expect(cancelled).resolves.toMatchObject({ status: 'applied' });
+      expect(sim.attempts).toEqual(['run-1:1:0']);
+      expect(await host.snapshot('chat-cancel-retry')).toMatchObject({ state: 'cancelled' });
+      await host.close();
+    },
+  );
+
+  it('should answer MODEL_ATTEMPT_PENDING while the gateway owns the attempt', async () => {
+    const sim = gateway(['hang']);
+    const file = await diedMidCall(sim, 'chat-pending');
+    const survivor = hostOn(file, sim.transport, 'survivor-pending');
+    await survivor.markAbandoned('chat-pending');
+    const before = await readLog(file);
+
+    const answer = await survivor.command({
+      type: 'resume',
+      commandId: 'resume-pending',
+      payload: { chatId: 'chat-pending', runId: 'run-1' },
+    });
+
+    expect(answer).toMatchObject({
+      status: 'refused',
+      code: 'MODEL_ATTEMPT_PENDING',
+      details: { attemptId: 'run-1:1:0' },
+    });
+    // Nothing is written and nothing is sent again while the gateway owns the attempt.
+    expect(await readLog(file)).toEqual(before);
+    expect(sim.attempts).toEqual(['run-1:1:0']);
+    await survivor.close();
+  });
+
+  it('should refuse the late request of an attempt the host abandoned', async () => {
+    const sim = gateway(['hang', 'complete']);
+    const file = await diedMidCall(sim, 'chat-late');
+    // Crash before admission: the gateway never admitted the key the dead host sent.
+    sim.keys.delete('run-1:1:0');
+    const survivor = hostOn(file, sim.transport, 'survivor-late');
+
+    await survivor.markAbandoned('chat-late');
+    await survivor.resume('chat-late');
+
+    // GI-A10: the old key is voided, the late request is refused, one charge in total.
+    expect(invocationRows(await readLog(file))).toEqual([
+      'prepared run-1:1:0',
+      'settled run-1:1:0 voided',
+      'prepared run-1:2:0',
+    ]);
+    expect(sim.late('run-1:1:0')).toBe('refused');
+    expect(sim.charges()).toBe(1);
+    expect(await survivor.snapshot('chat-late')).toMatchObject({ state: 'completed' });
+    await survivor.close();
+  });
+
+  it('should refuse MODEL_ATTEMPT_OTHER_ACCOUNT and neither void nor record an attempt another principal funded', async () => {
+    const sim = gateway(['hang']);
+    const file = await diedMidCall(sim, 'chat-other');
+    // RV5-F2: the prepared row names the account that funded it.
+    const died = await readLog(file);
+    expect(died.find((event) => event.type === 'model.invocation-prepared')).toMatchObject({
+      principal: 'account-a',
+    });
+    const signedInAsB = gateway(['complete'], 'account-b');
+    const unfunded: ModelTransport = {
+      funding: { type: 'unfunded' },
+      async *stream(): AsyncGenerator<ModelStreamEvent> {
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    };
+
+    for (const [index, transport] of [signedInAsB.transport, unfunded].entries()) {
+      const other = hostOn(file, transport, `other-account-${String(index)}`);
+      // oxlint-disable-next-line no-await-in-loop -- one host at a time on the chat.
+      await other.markAbandoned('chat-other');
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      const before = await readLog(file);
+
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      const answer = await other.command({
+        type: 'resume',
+        commandId: `resume-other-${String(index)}`,
+        payload: { chatId: 'chat-other', runId: 'run-1' },
+      });
+
+      expect(answer).toMatchObject({ status: 'refused', code: 'MODEL_ATTEMPT_OTHER_ACCOUNT' });
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      expect(await readLog(file)).toEqual(before);
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      await other.close();
+    }
+    // Neither the opening nor the resume asked the gateway about account A's attempt: nothing voided it.
+    expect([...sim.lookups, ...signedInAsB.lookups]).toEqual([]);
+    expect(invocationRows(await readLog(file))).toEqual(['prepared run-1:1:0']);
+  });
+
+  const withPrincipal = (transport: ModelTransport, principal: () => Promise<string>): ModelTransport => {
+    const { funding } = transport;
+    return funding.type === 'funded' ? { ...transport, funding: { ...funding, principal } } : transport;
+  };
+
+  // W7 round 2 N1: an account the host cannot read blocks only what needs it, not every command on the chat.
+  it('should open a chat with nothing to resolve without asking for the funding account', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const sim = gateway(['complete']);
+    const principal = vi.fn(async (): Promise<string> => {
+      throw new Error('The session expired.');
+    });
+    const host = hostOn(file, withPrincipal(sim.transport, principal), 'no-account');
+
+    const answer = await host.command({
+      type: 'cancel',
+      commandId: 'cancel-no-account',
+      payload: { chatId: 'chat-no-account', runId: 'run-1' },
+    });
+
+    expect(answer).toMatchObject({ status: 'applied', effect: 'not-applied' });
+    expect(principal).not.toHaveBeenCalled();
+    await host.close();
+  });
+
+  it('should open a chat whose account it cannot read, resolving nothing, and refuse its resume UNAUTHENTICATED', async () => {
+    const sim = gateway(['hang']);
+    const file = await diedMidCall(sim, 'chat-unread');
+    sim.keys.set('run-1:1:0', 'charged');
+    const principal = async (): Promise<string> => {
+      throw new Error('The session expired.');
+    };
+    const host = hostOn(file, withPrincipal(sim.transport, principal), 'unread');
+
+    await host.markAbandoned('chat-unread');
+    const resumed = await host.command({
+      type: 'resume',
+      commandId: 'resume-unread',
+      payload: { chatId: 'chat-unread', runId: 'run-1' },
+    });
+
+    expect(resumed).toMatchObject({ status: 'refused', code: 'UNAUTHENTICATED' });
+    expect(invocationRows(await readLog(file))).toEqual(['prepared run-1:1:0']);
+    await host.close();
+  });
+
+  it('should answer MODEL_ATTEMPT_PENDING for a crash between a billed summary and history.compacted', async () => {
+    const sim = gateway(['hang']);
+    const died = await diedMidCall(sim, 'chat-summary');
     const events = await readLog(died);
     const cut = events.findIndex((event) => event.type === 'model.invocation-prepared');
     const file = createMemoryLogFile();
@@ -3318,21 +3726,13 @@ describe('attempts in doubt (W0.16, W0.19)', () => {
         status: 'pending',
       },
     ]);
-    const funded = fundedTransport({
-      first: 'drop',
-      lookup: async () => ({ operationId: 'operation-summary', status: 'pending' }),
-    });
-    const host = hostOn(file, funded.transport, 'summary');
+    sim.keys.set('attempt-summary', 'admitted');
+    const host = hostOn(file, sim.transport, 'summary');
     await host.markAbandoned('chat-summary');
 
-    await host.resume('chat-summary');
-
-    expect(funded.lookupAttempt).toHaveBeenCalledWith('attempt-summary', expect.any(AbortSignal));
-    expect(funded.attempts).toEqual([]);
-    expect(await host.snapshot('chat-summary')).toMatchObject({
-      state: 'failed',
-      failure: { code: 'MODEL_ATTEMPT_IN_DOUBT' },
-    });
+    await expect(host.resume('chat-summary')).rejects.toMatchObject({ code: 'MODEL_ATTEMPT_PENDING' });
+    expect(sim.lookups).toContain('attempt-summary');
+    expect(sim.attempts).toEqual(['run-1:1:0']);
     await host.close();
   });
 });

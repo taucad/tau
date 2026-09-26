@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import type { RefusalCode } from '#wire/refusals.js';
 
 /**
@@ -34,3 +36,48 @@ export const gatewayErrorCodes = [
 
 /** One {@link gatewayErrorCodes} value. @public */
 export type GatewayErrorCode = (typeof gatewayErrorCodes)[number];
+
+/**
+ * The host's reader-side projection of the gateway's attempt lookup, `GET v1/billing/attempts/:surface/:attemptKey`.
+ * `z.looseObject` keeps fields this build does not read (D16) without reshaping them, so the receipt can grow.
+ * `voided: true` on `not_found` means the gateway voided the key before answering (GI-R3); a bare `not_found` comes
+ * from an image older than that.
+ *
+ * @public
+ */
+export const attemptReceiptSchema = z.discriminatedUnion('state', [
+  z.looseObject({ state: z.literal('pending'), operationId: z.string().min(1) }),
+  z.looseObject({
+    state: z.literal('terminal'),
+    operationId: z.string().min(1),
+    receipt: z.looseObject({
+      customerState: z.enum(['settled', 'released', 'absorbed']),
+      chargedCreditAtoms: z.string().regex(/^(?:0|[1-9]\d*)$/u),
+    }),
+  }),
+  z.looseObject({ state: z.literal('unavailable') }),
+  z.looseObject({ state: z.literal('not_found'), voided: z.literal(true).optional() }),
+]);
+
+/**
+ * The gateway's answer for one prepared attempt. No variant carries consent: under EQ1 the host acts on the answer
+ * alone.
+ *
+ * - `pending`: the gateway still owns the attempt. Wait (`MODEL_ATTEMPT_PENDING`).
+ * - `unavailable`: no answer now (network, 5xx, timeout, or an image older than the void). Wait.
+ * - `terminal`: the row left `pending`. Record it (`model.invocation-settled`), then proceed under a new key.
+ * - `voided`: never admitted, and never will be. Record it, then proceed under a new key.
+ *
+ * @public
+ */
+export type InvocationResolution =
+  | { readonly status: 'pending' }
+  | { readonly status: 'unavailable' }
+  | {
+      readonly status: 'terminal';
+      readonly operationId: string;
+      readonly outcome: 'settled' | 'released' | 'absorbed';
+      /** Integer string of credit atoms; `'0'` unless `outcome` is `'settled'`. */
+      readonly chargedCreditAtoms: string;
+    }
+  | { readonly status: 'voided' };

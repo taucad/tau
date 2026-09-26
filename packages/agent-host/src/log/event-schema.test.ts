@@ -135,6 +135,7 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
       systemPrompt: 'opaque',
       model: { id: 'opaque-model', contextWindow: 1000 },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream() {
           yield* [];
         },
@@ -159,6 +160,7 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
       systemPrompt: 'history',
       model: { id: 'history-model', contextWindow: 1000 },
       modelTransport: {
+        funding: { type: 'unfunded' },
         async *stream() {
           yield { type: 'completed', stopReason: 'stop' } as const;
         },

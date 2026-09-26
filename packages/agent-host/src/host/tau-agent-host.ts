@@ -1,31 +1,61 @@
-import { util as zodUtility } from 'zod';
-import { createAgentSession } from '#harness/session.js';
-import { createPortableId, transportFailureDiagnosticType, transportFailureOfRun } from '#harness/session-record.js';
-import { reduceEventLog } from '#log/reducer.js';
+/**
+ * The portable Tau host (W7): one M1 incarnation per chat serves every command, and this module provides its
+ * services — the chat logs and their one append chain, admission and resume preparation, and the drivers (the pi
+ * session and the external runners). The legacy verbs are thin adapters over `command`, kept until W6 RH-S7.
+ */
+
+import { waitFor } from 'xstate';
+
+import { createTurnContextSnapshot } from '#harness/cad-middleware.js';
+import type { ClientContext } from '#harness/cad-middleware.js';
+import { codedFailureDetail } from '#harness/coded-failure.js';
+import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { createAgentSession, fundingPrincipal, settledRowOf } from '#harness/session.js';
+import type {
+  AgentRunOutcome,
+  AgentSession,
+  AgentSessionModel,
+  HostClock,
+  CreateAgentSessionOptions,
+} from '#harness/session.js';
+import { createPortableId, transportFailureOfRun } from '#harness/session-record.js';
+import type { ChatRunServices, DriverHandle, DriverReport } from '#host/chat-run-effects.js';
+import type { ChatRunKind, ChatRunOutcomeEvent, ChatRunRow } from '#host/chat-run-events.js';
+import { createChatRunRegistry } from '#host/chat-run-registry.js';
+import { startExternalTurn } from '#host/external-turn.driver.js';
+import {
+  externalMarker,
+  externalSessionOf,
+  externalTurnKind,
+  externalTurnOf,
+  failureMarkerClearance,
+  isInterruptPayload,
+  latestTurnId,
+  pendingToolCalls,
+} from '#host/run-history.js';
 import {
   chatRunState,
   emptyChatLedger,
-  executionRefusal,
   foldChatLedger,
   gateRows,
+  isForeignInvocation,
   isRepeatSettlement,
-  reopens,
-  runOperationCode,
   stampRows,
+  unresolvedInvocations,
 } from '#log/chat-ledger.js';
-import type { ChatLedger, ChatRunState, LogRowBody } from '#log/chat-ledger.js';
-import { isResumableRunFailure } from '#log/resumable.js';
+import type { ChatLedger, LogRowBody } from '#log/chat-ledger.js';
+import { v1Batch } from '#log/event-log-appender.js';
+import type { EventLogBatch } from '#log/event-log-appender.js';
+import { reduceEventLog } from '#log/reducer.js';
 import type {
-  AgentToolChoice,
   AgentLogEvent,
-  InterruptRecordedEvent,
+  AgentToolChoice,
   JsonObject,
   JsonValue,
-  LogEventBase,
   ProviderMessage,
-  RunFailureDetail,
   RunTrigger,
-  RunLifecycleState,
+  TurnContextSnapshot,
+  TurnModelConfig,
   UserProviderMessage,
 } from '#log/event-types.js';
 import type {
@@ -38,14 +68,14 @@ import type {
   InterruptResolution,
   ModelTransport,
   ToolRegistry,
+  TurnAttemptKey,
+  TurnPlacementPort,
 } from '#waist/ports.js';
-import { v1Batch } from '#log/event-log-appender.js';
-import type { EventLogBatch } from '#log/event-log-appender.js';
-import type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
-import type { ClientContext } from '#harness/cad-middleware.js';
-import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
-import type { RefusalCode } from '#wire/refusals.js';
+import type { AgentChannelAdmissionConfig } from '#wire/admission.schema.js';
+import type { CommandAnswer, CommandPayload, HostCommand } from '#wire/commands.schema.js';
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
+import { refusalOf } from '#wire/refusals.js';
+import type { RefusalCode } from '#wire/refusals.js';
 
 type SessionEvent = LogRowBody;
 
@@ -111,6 +141,11 @@ export type ExternalAgentTurn = {
   readonly agent: ExternalRunKind;
   readonly chatId: string;
   readonly runId: string;
+  /**
+   * The run's attempt, from 1; a resumed turn has the next one (W10 EA-S8). The host always sets it; optional only
+   * while runners built before it still construct turns without one.
+   */
+  readonly attempt?: number | undefined;
   /** The new user turn; absent when resuming one a restart left unanswered. */
   readonly message?: UserProviderMessage | undefined;
   /**
@@ -169,92 +204,6 @@ export type ExternalTurnOutcome = {
   /** Why the agent stopped, in its own protocol's vocabulary (ACP's `max_tokens`, …). */
   readonly stopReason?: string | undefined;
 };
-
-/**
- * Terminal lifecycle state for one external stop reason.
- *
- * Only `end_turn` is a completed turn. An agent that hit its output ceiling,
- * refused, or exhausted its own request budget stopped with work outstanding,
- * and recording that as `completed` tells every later reader — the transcript,
- * a resume, the user — that the turn finished (V6). A reason this host has
- * never heard of resolves to `completed`: D14 keeps an older reader able to read
- * a newer writer, and the reason itself is recorded verbatim either way.
- */
-const externalStopStates = new Map<string, RunLifecycleState>([
-  ['end_turn', 'completed'],
-  ['cancelled', 'cancelled'],
-  ['max_tokens', 'failed'],
-  ['refusal', 'failed'],
-  ['max_turn_requests', 'failed'],
-]);
-
-/** User-safe reason for a stop that ended the turn short. */
-const externalStopDetail = new Map<string, string>([
-  ['max_tokens', 'The agent reached its own output limit before finishing this turn.'],
-  ['refusal', 'The agent declined to answer this turn.'],
-  ['max_turn_requests', 'The agent used its whole request budget for this turn.'],
-]);
-
-/**
- * The durable terminal record for a throw that escaped the session.
- *
- * A coded refusal (`GatewayModelTransportError`, an external runner's error)
- * reaches here only when it was raised outside the model stream — the stream's
- * own wrapper turns a refusal into an assistant diagnostic the session reads
- * back. Record whatever code, status and structured `details` the throw carries
- * so this record is never poorer than that one.
- *
- * @param error - Whatever ended the run.
- * @returns The failure detail to persist.
- */
-const codedFailureDetail = (error: unknown): RunFailureDetail => {
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- reading optional own properties off a thrown value.
-  const fields = error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : undefined;
-  const status = typeof fields?.['status'] === 'number' ? fields['status'] : undefined;
-  const details = zodUtility.isObject(fields?.['details']) ? fields['details'] : undefined;
-  return {
-    message: error instanceof Error ? error.message : String(error),
-    ...(typeof fields?.['code'] === 'string' ? { code: fields['code'] } : {}),
-    ...(status === undefined ? {} : { status }),
-    ...(details === undefined ? {} : { details }),
-  };
-};
-
-/**
- * The login record one thrown refusal carries, if it carries one.
- *
- * A runner refuses with a coded error (`EXTERNAL_AGENT_AUTH_REQUIRED`,
- * `EXTERNAL_AGENT_MODEL_UNAVAILABLE`, …) and may hang the facts a surface needs
- * on it — the login methods, a verification URL and code. The host is
- * deliberately incurious about the payload's shape: it records what it was
- * given, and the surfaces that render it own its schema (`agent-wire.ts`). The
- * code itself, and any stop `details`, ride {@link codedFailureDetail}.
- *
- * @param error - Whatever the external runner threw.
- * @returns The login record to append before the failure.
- */
-const externalRefusalOf = (
-  error: unknown,
-): {
-  readonly login: Omit<SessionEvent & { readonly type: 'interrupt.recorded' }, 'interruptId'> | undefined;
-} => {
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- reading one optional own property off a thrown value.
-  const fields = error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : undefined;
-  const payload = fields?.['login'];
-  return {
-    login:
-      typeof payload === 'object' && payload !== null && !Array.isArray(payload)
-        ? {
-            type: 'interrupt.recorded',
-            phase: 'requested',
-            reason: error instanceof Error ? error.message : 'This agent needs you to sign in.',
-            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a refusal payload is JSON by construction of its wire schema.
-            payload: payload as JsonValue,
-          }
-        : undefined,
-  };
-};
-
 /** Runs external agents of one kind. @public */
 export type ExternalAgentPort = {
   /**
@@ -316,103 +265,6 @@ export type ExternalSessionState = {
   readonly cwd?: string | undefined;
 };
 
-/** Marker distinguishing an externally executed turn in the durable log. */
-const externalTurnKind = 'external-agent';
-
-/**
- * The external-agent marker on the turn's own user message.
- *
- * Deliberately *not* a new event type: the vocabulary already carries
- * per-message provider metadata, and `tauInternal` is where Tau's own
- * non-provider facts live. A reader that knows nothing about external agents
- * still replays the log byte-for-byte.
- *
- * @param message - Message to inspect.
- * @returns The marker, when this message admitted an external turn.
- */
-const externalMarker = (
-  message: ProviderMessage,
-): (JsonObject & { readonly agentId: string; readonly runKind: string }) | undefined => {
-  const marker = message.metadata?.tauInternal;
-  if (
-    marker === undefined ||
-    typeof marker !== 'object' ||
-    Array.isArray(marker) ||
-    marker['kind'] !== externalTurnKind ||
-    typeof marker['agentId'] !== 'string'
-  ) {
-    return undefined;
-  }
-  /* `runKind` is absent on markers written before the registry existed; those
-   * were all ACP, which is what the node launcher registers under that key. */
-  const runKind = typeof marker['runKind'] === 'string' ? marker['runKind'] : 'acp';
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the discriminating fields are checked above.
-  return { ...marker, runKind } as JsonObject & { readonly agentId: string; readonly runKind: string };
-};
-
-/**
- * The external turn a log's last run admitted, if it was one.
- *
- * @param events - The chat's durable events.
- * @returns The marker and the message carrying it, or `undefined` for a Tau run.
- */
-const externalTurnOf = (
-  events: readonly AgentLogEvent[],
-):
-  | { readonly marker: JsonObject & { readonly agentId: string; readonly runKind: string }; readonly messageId: string }
-  | undefined => {
-  const runId = events.at(-1)?.runId;
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index]!;
-    if (event.runId !== runId) {
-      break;
-    }
-    if (event.type === 'message.appended' && event.message.role === 'user') {
-      const marker = externalMarker(event.message);
-      return marker ? { marker, messageId: event.message.id } : undefined;
-    }
-  }
-  return undefined;
-};
-
-/**
- * The session one agent last held in this chat, across every run in its log.
- *
- * Deliberately *not* {@link externalTurnOf}: that one answers "is the last run
- * external and unfinished?" and stops at the run boundary, which is why every
- * turn used to start a fresh vendor session. This one answers "what has this
- * chat already opened with this agent?", so turn two continues turn one.
- *
- * @param events - The chat's durable events.
- * @param agentId - Agent this turn selected; a different agent gets its own session.
- * @returns The record the runner resumes from, or `undefined` for a first turn.
- */
-const externalSessionOf = (
-  events: readonly AgentLogEvent[],
-  agentId: string,
-): (JsonObject & ExternalSessionState) | undefined => {
-  /* Reduced, not raw: `remember` records the session id by *replacing* the
-   * user message's envelope, so only the reducer's view carries it. */
-  const messages = reduceEventLog(events);
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]!;
-    if (message.role !== 'user') {
-      continue;
-    }
-    const marker = externalMarker(message);
-    /* The most recent marker that actually *names* a session: only the turn
-     * that opened one records it, and every later turn of the same session
-     * carries a bare marker. */
-    if (!marker || marker.agentId !== agentId || typeof marker['acpSessionId'] !== 'string') {
-      continue;
-    }
-    const { kind: _kind, runKind: _runKind, ...state } = marker;
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `agentId` is checked above and every other field is optional.
-    return state as JsonObject & ExternalSessionState;
-  }
-  return undefined;
-};
-
 /** Exact per-admission model, prompt, tool, and client context. @public */
 export type TauAgentAdmissionConfig = {
   readonly systemPrompt: string;
@@ -453,7 +305,11 @@ export type CreateTauAgentHostOptions = {
   readonly toolRegistry: ToolRegistry;
   /** Opens the project-root `.tau/chats/<chatId>/events.jsonl` appender. */
   readonly openEventLog: (chatId: string) => Promise<DurableEventLog>;
-  readonly interruptPort: InterruptApprovalPort;
+  /**
+   * Legacy: M1 records every pause as rows and resolves it through `resolve-interrupt`; the host never calls this
+   * port. W6 RH-S7 removes the last caller.
+   */
+  readonly interruptPort?: InterruptApprovalPort | undefined;
   readonly createId?: (() => string) | undefined;
   readonly createLeaderEpoch?: (() => string) | undefined;
   readonly now?: (() => Date) | undefined;
@@ -479,13 +335,34 @@ export type CreateTauAgentHostOptions = {
    * refused at admission, never silently downgraded to a Tau turn.
    */
   readonly externalRunners?: Readonly<Record<string, ExternalAgentPort>> | undefined;
+  /** W8's placement port: when wired, every attempt is placed, settled and acknowledged (RA-R12). */
+  readonly placement?: TurnPlacementPort | undefined;
+  /**
+   * How many times one live run re-prepares a funded call whose reply was lost in transit (EQ1: a bound on repeated
+   * charges, not a consent). Default 1; a further loss ends the run with the transport's resumable code.
+   */
+  readonly lostReplyRetries?: number | undefined;
+  /**
+   * The host's timers, in milliseconds: M1's idle eviction, driver stop bound and cut retry, and the model-stream stall
+   * bound (E9, 300 s).
+   */
+  readonly delays?:
+    | Readonly<{ idleEviction?: number; driverStopBound?: number; cutRetry?: number; streamStall?: number }>
+    | undefined;
+  /** The clock every incarnation and its stream stall bound run on; the process's timers when absent. */
+  readonly clock?: HostClock | undefined;
 };
 
 /** Complete browser-safe lifecycle surface assembled over the W1-W5 ports. @public */
 export type TauAgentHost = {
-  /** Commit and execute one new user turn. */
+  /**
+   * Answer one keyed command (SC-R4–SC-R9). Never rejects: every refusal is a coded answer. Applied answers are given
+   * only once the command's rows are durable (I18).
+   */
+  command(input: HostCommand): Promise<CommandAnswer>;
+  /** Commit and execute one new user turn; resolves once the run ended. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
   admit(request: TauAgentTurnRequest): Promise<readonly ProviderMessage[]>;
-  /** Rebuild one chat from its event log and continue a non-terminal run. */
+  /** Rebuild one chat from its event log and continue a non-terminal run. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
   resume(chatId: string, key?: CommandKey): Promise<readonly ProviderMessage[]>;
   /**
    * Wait until a concurrently started admission is durable and return its projection.
@@ -499,6 +376,7 @@ export type TauAgentHost = {
    *
    * @param chatId - The chat being asked about.
    * @param runId - The run whose admission to wait for, when the caller has one.
+   * Legacy: `command` answers a start once its admission is durable; W6 RH-S7 removes the last caller.
    */
   waitForAdmission(chatId: string, runId?: string): Promise<HostRunSnapshot | undefined>;
   /**
@@ -516,17 +394,18 @@ export type TauAgentHost = {
    *
    * @param chatId - The chat whose current run may be abandoned.
    * @returns The chat's run projection after the record, or `undefined` when it has no run.
+   * Legacy: Opening a chat's M1 incarnation abandons an orphan (RA-R9); W6's claim replaces this.
    */
   markAbandoned(chatId: string): Promise<HostRunSnapshot | undefined>;
-  /** Abort an active run, durably pause it, and wait through the W5 port. */
+  /** Abort an active run, durably pause it, and wait through the W5 port. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
   interrupt(request: InterruptRequest & CommandKey): Promise<InterruptResolution>;
-  /** Resolve a W5 request from an external presenter; settles once the resolution row is durable (SC-R9). */
+  /** Resolve a W5 request from an external presenter; settles once the resolution row is durable (SC-R9). A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
   resolveInterrupt(resolution: InterruptResolution & { readonly runId: string } & CommandKey): Promise<void>;
   /** Return unresolved W5 requests for one run. */
   pendingInterrupts(runId: string): Promise<readonly InterruptRequest[]>;
-  /** Queue steering on an active run. */
+  /** Queue steering on an active run. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
   steer(input: { readonly runId: string; readonly message: string }): Promise<void>;
-  /** Cancel an active run without creating an approval request, then wait out its settlement. */
+  /** Cancel an active run without creating an approval request, then wait out its settlement. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
   cancel(input: { readonly runId: string } & CommandKey): Promise<void>;
   /** Rebuild the current run projection from W1, refusing `NO_RUN_ADMITTED` when there is none. */
   snapshot(chatId: string): Promise<HostRunSnapshot>;
@@ -554,7 +433,7 @@ export type TauAgentHost = {
     readonly event: HostSettlementEvent;
   }): Promise<void>;
   /** Bind one chat to the generation token minted by its current Web Lock lease. */
-  assumeLeadership(chatId: string, generation: string): void;
+  assumeLeadership(chatId: string, generation: string | number): void;
   /** Abort one chat and close its cached appender after leadership loss. */
   relinquish(chatId: string): Promise<void>;
   /**
@@ -567,272 +446,141 @@ export type TauAgentHost = {
   close(): Promise<void>;
 };
 
-/** One admitted external turn, and the detached promise that settles it. */
-type ExternalRun = {
-  readonly chatId: string;
-  readonly controller: AbortController;
-  completion?: Promise<void> | undefined;
+/** A chat's log, its ledger, its one append chain, and the attempts whose drivers may still write (RA-R6). */
+type ChatStore = {
+  log?: Promise<DurableEventLog> | undefined;
+  ledger?: ChatLedger | undefined;
+  /** Every write and every open/close of this chat, in order: one sequence counter, one fold (I2). */
+  chain: Promise<unknown>;
+  /** `${runId}:${attempt}` of each attempt whose driver's gate is open. */
+  live: Set<string>;
+  /** The live incarnation's outcome channel: a driver's rows advance its ledger (RA-R7). */
+  deliver?: ((event: ChatRunOutcomeEvent) => void) | undefined;
+  readers: Set<() => void>;
+  /** The run kind whose runner may hold a session open for this chat (V2). */
+  externalKind?: string | undefined;
+  /** The ledger the host's close left: a read after close answers from it and opens nothing (L2a D14). */
+  final?: ChatLedger | undefined;
 };
 
-type ActiveRun = {
-  readonly chatId: string;
-  readonly runId: string;
-  readonly session: AgentSession;
-  completion?: Promise<void> | undefined;
+type AdmissionRecord = Readonly<{
+  kind: ChatRunKind;
+  trigger: RunTrigger;
+  turnId: string;
+  message: UserProviderMessage;
+  selection?: TurnModelConfig;
+  context?: TurnContextSnapshot;
+  rewind?: Readonly<{ trigger: Exclude<RunTrigger, 'submit'>; retainedMessageIds: readonly string[] }>;
+  agent?: ExternalRunKind;
+  config?: TauAgentAdmissionConfig;
+  state?: JsonObject;
+  checkoutId?: string;
+}>;
+
+const attemptKeyOf = (key: TurnAttemptKey): string => `${key.runId}:${String(key.attempt)}`;
+
+/** A reply lost in transit: the transport's own failure, or a stalled stream. Not a refusal the gateway decided. */
+const isLostReply = (ended: AgentRunOutcome): boolean => {
+  const code = ended.outcome === 'failed' ? ended.failure?.code : undefined;
+  return code !== undefined && (refusalOf(code).owner === 'transport' || code === 'MODEL_STREAM_STALLED');
 };
 
-type AdmissionReservation = {
-  readonly chatId: string;
-  runId?: string | undefined;
-  readonly ready: Promise<ActiveRun | undefined>;
-  readonly resolveReady: (active: ActiveRun | undefined) => void;
-  readonly admitted: Promise<ActiveRun | undefined>;
-  readonly resolveAdmitted: (active: ActiveRun | undefined) => void;
-};
+const coded = (code: string, message: string, fields: Readonly<Record<string, unknown>> = {}): Error =>
+  Object.assign(new Error(message), { code, ...fields });
 
-type InterruptPayload = {
-  readonly kind: InterruptRequest['kind'];
-  readonly prompt: string;
-  readonly context?: JsonValue | undefined;
-};
+/** The durable subset of a session model row. */
+const turnModelOf = (model: AgentSessionModel): TurnModelConfig => ({
+  id: model.id,
+  contextWindow: model.contextWindow,
+  ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
+  ...(model.providerKind === undefined ? {} : { providerKind: model.providerKind }),
+  ...(model.cost === undefined ? {} : { cost: model.cost }),
+  ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+});
 
-const isJsonObject = (value: JsonValue | undefined): value is JsonObject =>
-  value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
-
-const isInterruptPayload = (value: JsonValue | undefined): value is InterruptPayload => {
-  if (!isJsonObject(value)) {
-    return false;
-  }
-  return (
-    (value['kind'] === 'approval' || value['kind'] === 'operator' || value['kind'] === 'safeguard') &&
-    typeof value['prompt'] === 'string'
-  );
-};
-
-/**
- * What one chat's run is doing, as the host decides legality by: `none`, the memory-only `reserved` before a session
- * exists (D3), the durable `admitted`, `running` and `paused`, and `terminal` once its last run ended.
- *
- * @internal
- */
-export type HostRunState = ChatRunState;
-
-/**
- * The refusal a chat that already holds a run answers an admission with.
- *
- * One builder for both readings of the same fact — the in-memory reservation or
- * active session, and the durable ledger — because a recovery that can only
- * recognise one of them hangs on the other.
- *
- * @param input - The chat, the live run's id when one is bound to it, and its state.
- * @returns The coded error the caller throws.
- */
-const chatRunLiveRefusal = (input: {
-  readonly chatId: string;
-  readonly runId: string | undefined;
-  readonly state: HostRunState;
-}): Error =>
-  Object.assign(new Error(`Chat ${input.chatId} has a ${input.state} run; admit the next turn after it ends.`), {
-    code: 'CHAT_RUN_LIVE' satisfies RefusalCode,
-    state: input.state,
-    ...(input.runId === undefined ? {} : { runId: input.runId }),
-  });
-
-/**
- * The refusal a run id that is already spoken for answers with.
- *
- * Distinct from {@link chatRunLiveRefusal} because the recovery is the
- * opposite: a taken run id is the idempotency key (V9), so the caller attaches
- * or answers with the run's settlement rather than waiting and retrying.
- *
- * @param input - The run id, and what already holds it.
- * @returns The coded error the caller throws.
- */
-const runIdTakenRefusal = (input: { readonly runId: string; readonly held: string }): Error =>
-  Object.assign(new Error(`Run ${input.runId} ${input.held}.`), {
-    code: 'RUN_ID_TAKEN' satisfies RefusalCode,
-    runId: input.runId,
-  });
-
-/**
- * Refuse to execute a chat this build cannot interpret: read tolerantly, execute strictly (D16, CL-R2).
- *
- * @param chatId - The chat about to be admitted or resumed.
- * @param ledger - Its ledger.
- */
-const assertExecutable = (chatId: string, ledger: ChatLedger): void => {
-  const code = executionRefusal(ledger);
-  if (code === 'RUN_UNREADABLE') {
-    throw Object.assign(new Error(`A newer version of Tau wrote part of chat ${chatId}. Update Tau to continue it.`), {
-      code,
-    });
-  }
-  if (code === 'HISTORY_INVALID') {
-    throw Object.assign(new Error(`Chat ${chatId}'s history cannot be replayed; start a new chat.`), { code });
-  }
-};
-
-/**
- * The refusal an illegal settlement append answers with.
- *
- * @param input - The chat, the run and the append state the settlement met.
- * @returns The coded error the writer throws.
- */
-const settlementRefusal = (input: {
-  readonly chatId: string;
-  readonly runId: string;
-  readonly code: 'SETTLEMENT_CONFLICT' | 'SETTLEMENT_WITHOUT_RUN';
-}): Error =>
-  input.code === 'SETTLEMENT_CONFLICT'
-    ? Object.assign(new Error(`Run ${input.runId} in chat ${input.chatId} is already settled differently.`), {
-        code: 'SETTLEMENT_CONFLICT',
-      })
-    : Object.assign(
-        new Error(`Run ${input.runId} was never admitted in chat ${input.chatId}; its settlement cannot be recorded.`),
-        { code: 'SETTLEMENT_WITHOUT_RUN' },
-      );
-
-const internalKind = (message: ProviderMessage): string | undefined => {
-  const metadata = message.metadata?.tauInternal;
-  // oxlint-disable-next-line typescript/dot-notation -- JsonObject keys are index-signature properties under noPropertyAccessFromIndexSignature.
-  const kind = metadata?.['kind'];
-  return isJsonObject(metadata) && typeof kind === 'string' ? kind : undefined;
-};
-
-const latestTurnId = (messages: readonly ProviderMessage[], fallback: string): string =>
-  messages.findLast((message) => message.role === 'user' && internalKind(message) !== 'interrupt-recovery')?.id ??
-  fallback;
-
-/**
- * Every call this history left without a result, however it was recorded.
- *
- * A dispatched call is durable twice — the `toolCall` block the model wrote and
- * the `tool-input` row the dispatch adds — and a host that died between the two
- * leaves only the block. A provider refuses an unanswered call, so a resume has
- * to answer each pending id once, whichever row still carries it.
- *
- * @param messages - The reduced history the resume starts from.
- * @returns One entry per unanswered call, in the order the history holds them.
- */
-const pendingToolCalls = (messages: readonly ProviderMessage[]) => {
-  const outputs = new Set(messages.flatMap((message) => (message.role === 'tool-output' ? [message.toolCallId] : [])));
-  const pending = new Map<string, { readonly toolCallId: string; readonly toolName: string }>();
-  const callsOf = (message: ProviderMessage) => {
-    if (message.role === 'tool-input') {
-      return [{ toolCallId: message.toolCallId, toolName: message.toolName }];
-    }
-    const blocks: readonly JsonValue[] =
-      message.role === 'assistant' && Array.isArray(message.content) ? message.content : [];
-    return blocks.flatMap((block) =>
-      isJsonObject(block) &&
-      block['type'] === 'toolCall' &&
-      typeof block['id'] === 'string' &&
-      typeof block['name'] === 'string'
-        ? [{ toolCallId: block['id'], toolName: block['name'] }]
-        : [],
-    );
-  };
-  for (const message of messages) {
-    for (const call of callsOf(message)) {
-      if (!outputs.has(call.toolCallId)) {
-        pending.set(call.toolCallId, call);
+/** The wire's admission onto the host's: host defaults fill what the client omitted. */
+const admissionConfigOf = (
+  config: AgentChannelAdmissionConfig | undefined,
+  fallback: Readonly<{ systemPrompt: string }>,
+): TauAgentAdmissionConfig => ({
+  systemPrompt: config?.systemPrompt ?? fallback.systemPrompt,
+  ...(config?.systemPromptBlocks ? { systemPromptBlocks: config.systemPromptBlocks } : {}),
+  ...(config?.model ? { model: config.model } : {}),
+  toolChoice: config?.toolChoice ?? 'auto',
+  ...(config?.allowedTools ? { allowedTools: config.allowedTools } : {}),
+  ...(config?.snapshot === undefined ? {} : { snapshot: config.snapshot }),
+  ...(config?.contextPayload ? { clientContext: config.contextPayload } : {}),
+  ...(config?.contextMessages ? { contextMessages: config.contextMessages } : {}),
+  ...(config?.agent
+    ? {
+        agent: {
+          kind: config.agent.kind,
+          id: config.agent.id,
+          ...(config.agent.model ? { model: config.agent.model } : {}),
+          ...(config.agent.config ? { config: config.agent.config } : {}),
+        },
       }
-    }
+    : {}),
+});
+
+/** Settles when `promise` does, never rejecting: a queue link one failure does not wedge. */
+const absorbed = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch {
+    /* The caller of the link observes the failure; the queue does not. */
   }
-  return [...pending.values()];
 };
 
-/**
- * The failed call's marker, rewritten as the tool-use turn it actually was.
- *
- * A stream that fails *after* it completed a tool call leaves the marker mid
- * history — the tool's own rows follow it — so there is no prefix to rewind to.
- * Left as it stands, its transport-failure diagnostic is what every later
- * `snapshot()` reports as this chat's failure, and the re-issued call tells the
- * model its own last turn errored. Rewriting it keeps the work that settled and
- * drops the failure: the message the stream would have written had it simply
- * ended after that call.
- *
- * @param marker - The last assistant message of the failed run.
- * @param messages - The reduced history the resume starts from.
- * @returns The replacement envelope, or `undefined` when no tool call settled.
- */
-const settledMarkerEnvelope = (
-  marker: ProviderMessage,
-  messages: readonly ProviderMessage[],
-): ProviderMessage | undefined => {
-  const settled = new Set(messages.flatMap((message) => (message.role === 'tool-output' ? [message.toolCallId] : [])));
-  const isCall = (block: JsonValue): boolean => isJsonObject(block) && block['type'] === 'toolCall';
-  /* A call with no durable result is one the stream never finished writing. It
-   * has no `tool-input` row either, and a provider refuses an unanswered call,
-   * so it leaves with the failure. */
-  const blocks: readonly JsonValue[] = Array.isArray(marker.content) ? marker.content : [];
-  const content = blocks.filter(
-    (block) => !isCall(block) || (isJsonObject(block) && typeof block['id'] === 'string' && settled.has(block['id'])),
-  );
-  if (!content.some((block) => isCall(block))) {
-    return undefined;
-  }
-  const { errorMessage: _failed, diagnostics, ...metadata } = marker.metadata ?? {};
-  const kept = diagnostics?.filter(
-    (diagnostic) => !isJsonObject(diagnostic) || diagnostic['type'] !== transportFailureDiagnosticType,
-  );
+/** A driver built asynchronously: M1 may abort or decide before it exists, and the calls wait for it. */
+const deferredDriver = (build: Promise<DriverHandle>, report: (report: DriverReport) => void): DriverHandle => {
+  let handle: DriverHandle | undefined;
+  let aborted = false;
+  const queued: Array<(ready: DriverHandle) => void> = [];
+  const settle = async (): Promise<void> => {
+    let ready: DriverHandle;
+    try {
+      ready = await build;
+    } catch (error) {
+      report({ type: 'agentEnded', outcome: aborted ? 'aborted' : 'failed', failure: codedFailureDetail(error) });
+      return;
+    }
+    handle = ready;
+    for (const call of queued.splice(0)) {
+      call(ready);
+    }
+  };
+  void settle();
+  const via = (call: (ready: DriverHandle) => void): void => {
+    if (handle === undefined) {
+      queued.push(call);
+    } else {
+      call(handle);
+    }
+  };
   return {
-    ...marker,
-    content,
-    metadata: { ...metadata, stopReason: 'toolUse', ...(kept?.length ? { diagnostics: kept } : {}) },
+    steer: (commandId, message) => {
+      via((ready) => {
+        ready.steer(commandId, message);
+      });
+    },
+    abort: (reason) => {
+      aborted = true;
+      via((ready) => {
+        ready.abort(reason);
+      });
+    },
+    decide: (resolution) => {
+      via((ready) => {
+        ready.decide(resolution);
+      });
+    },
   };
 };
 
 /**
- * The record that clears a resumable failure's marker before its call is re-issued.
- *
- * The stream wrapper records a failed call as an assistant message carrying the
- * transport-failure diagnostic. Left in place, pi refuses to continue from an
- * assistant tail and the recovery reminder tells the model a network drop
- * cancelled tools that in fact settled. The marker takes one of two shapes:
- * nothing ran after it, and retracting it restores the exact context the failed
- * call was built from; or a tool it had already started settled behind it, and
- * only its envelope can change ({@link settledMarkerEnvelope}) because a rewind
- * retains a prefix and the marker is no longer the tail.
- *
- * @param messages - The reduced history of the failed run.
- * @returns The event to append, or `undefined` when there is nothing to clear.
- */
-const failureMarkerClearance = (messages: readonly ProviderMessage[]): SessionEvent | undefined => {
-  const marker = messages.findLast((message) => message.role === 'assistant');
-  if (!marker) {
-    return undefined;
-  }
-  /* Only a message that is provably the failure marker may be retracted or
-   * rewritten: an assistant turn without the diagnostic is somebody's real
-   * output, wherever it sits. A resumable failure is no longer only a gateway
-   * refusal — `RUN_ABANDONED` is one too, and its tail is the agent's committed
-   * work, so retracting it loses that work and asks the provider again from the
-   * user turn. */
-  const isMarker = marker.metadata?.diagnostics?.some(
-    (diagnostic) => isJsonObject(diagnostic) && diagnostic['type'] === transportFailureDiagnosticType,
-  );
-  if (!isMarker) {
-    return undefined;
-  }
-  if (messages.at(-1) === marker) {
-    return {
-      type: 'history.rewound',
-      trigger: 'retry',
-      retainedMessageIds: messages.slice(0, -1).map((message) => message.id),
-    };
-  }
-  const replacement = settledMarkerEnvelope(marker, messages);
-  return replacement === undefined
-    ? undefined
-    : { type: 'message.envelope-replaced', messageId: marker.id, replacement };
-};
-
-const terminalStates = new Set<RunLifecycleState>(['completed', 'failed', 'cancelled']);
-
-/**
- * Assemble Tau's portable run lifecycle over the pi adapter and W1-W5 ports.
+ * Assemble Tau's portable host: one M1 incarnation per chat (W7), over the chat logs, the pi session driver and the
+ * external runners.
  *
  * @param options - Browser-safe host dependencies.
  * @returns One reusable host bound to the injected ports.
@@ -840,960 +588,806 @@ const terminalStates = new Set<RunLifecycleState>(['completed', 'failed', 'cance
  */
 export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgentHost => {
   const createId = options.createId ?? createPortableId;
-  const createLeaderEpoch = options.createLeaderEpoch ?? createPortableId;
   const now = options.now ?? (() => new Date());
-  const logs = new Map<string, Promise<DurableEventLog>>();
-  const leaderEpochs = new Map<string, string>();
-  const activeByChat = new Map<string, ActiveRun>();
-  const activeByRun = new Map<string, ActiveRun>();
-  const reservationsByChat = new Map<string, AdmissionReservation>();
-  const reservationsByRun = new Map<string, AdmissionReservation>();
-  const fencedChats = new Set<string>();
+  const stores = new Map<string, ChatStore>();
+  /** Every run id this host has seen → its chat, for the verbs that name only a run. */
+  const runChats = new Map<string, string>();
+  /** Each chat's start or resume in flight, for {@link TauAgentHost.waitForAdmission}. */
+  const admissions = new Map<string, Readonly<{ runId?: string; answer: Promise<CommandAnswer> }>>();
+  /** Host-shaped admissions the legacy `admit` hands `prepareAdmission` beside its command. */
+  const legacyConfigs = new Map<string, TauAgentAdmissionConfig>();
+  /** The term a settlement is written under when no incarnation is live. */
+  const settlementTerms = new Map<string, string>();
   let closed = false;
+
+  const storeOf = (chatId: string): ChatStore => {
+    let store = stores.get(chatId);
+    if (store === undefined) {
+      store = { chain: Promise.resolve(), live: new Set(), readers: new Set() };
+      stores.set(chatId, store);
+    }
+    return store;
+  };
 
   const assertOpen = (): void => {
     if (closed) {
-      throw Object.assign(new Error('The Tau agent host is closed.'), { code: 'HOST_CLOSED' satisfies RefusalCode });
+      throw coded('HOST_CLOSED' satisfies RefusalCode, 'The Tau agent host is closed.');
     }
   };
 
-  /** One ledger per chat opened for write, folded once at open and advanced by every durable append (CL-S4). */
-  // Weak: a log closed and dropped takes its ledger with it.
-  const ledgers = new WeakMap<DurableEventLog, ChatLedger>();
-
-  const dropLog = async (chatId: string): Promise<void> => {
-    const log = logs.get(chatId);
-    logs.delete(chatId);
-    if (log) {
-      const opened = await log.catch(() => undefined);
-      await opened?.close();
-    }
+  /** Run `work` after everything already queued on the chat; a failure does not wedge the queue. */
+  const serial = async <Result>(chatId: string, work: () => Promise<Result>): Promise<Result> => {
+    const store = storeOf(chatId);
+    const previous = store.chain;
+    const run = async (): Promise<Result> => {
+      await previous;
+      return work();
+    };
+    const result = run();
+    store.chain = absorbed(result);
+    return result;
   };
 
-  const logFor = async (chatId: string): Promise<DurableEventLog> => {
-    const current = logs.get(chatId);
-    if (current) {
-      return current;
+  const logOf = async (chatId: string): Promise<DurableEventLog> => {
+    const store = storeOf(chatId);
+    if (store.log === undefined) {
+      const opened = options.openEventLog(chatId);
+      store.log = opened;
+      const forget = async (): Promise<void> => {
+        try {
+          await opened;
+        } catch {
+          if (store.log === opened) {
+            store.log = undefined;
+          }
+        }
+      };
+      void forget();
     }
-    const opened = options.openEventLog(chatId);
-    logs.set(chatId, opened);
-    try {
-      return await opened;
-    } catch (error) {
-      // A failed open must not poison the cache: the next attempt should retry,
-      // and close() must not re-raise a rejection that its caller already saw.
-      if (logs.get(chatId) === opened) {
-        logs.delete(chatId);
-      }
-      throw error;
-    }
+    return store.log;
   };
 
-  /**
-   * The chat's ledger for this log handle: the log is read and folded once, then kept current by {@link append}.
-   *
-   * @param log - The chat's open log.
-   * @returns The ledger of everything the log holds.
-   */
-  const ledgerOf = async (log: DurableEventLog): Promise<ChatLedger> => {
-    const cached = ledgers.get(log);
-    if (cached) {
-      return cached;
+  const readRows = async (chatId: string): Promise<readonly AgentLogEvent[]> => {
+    const log = await logOf(chatId);
+    return log.read();
+  };
+
+  const messagesOf = async (chatId: string): ReturnType<DurableEventLog['messages']> => {
+    const log = await logOf(chatId);
+    return log.messages();
+  };
+
+  const readBatchOf = async (
+    chatId: string,
+    request: Parameters<DurableEventLog['readBatch']>[0],
+  ): ReturnType<DurableEventLog['readBatch']> => {
+    const log = await logOf(chatId);
+    return log.readBatch(request);
+  };
+
+  const ledgerOf = async (chatId: string): Promise<ChatLedger> => {
+    const store = storeOf(chatId);
+    if (store.ledger !== undefined) {
+      return store.ledger;
     }
+    const log = await logOf(chatId);
     const read = foldChatLedger(emptyChatLedger, await log.read());
     // `read` returns rows only; a quarantined line the ledger never saw still breaks the history (CL-S2).
     const folded = (await log.historyIntact()) ? read : { ...read, historyIntact: false };
-    ledgers.set(log, folded);
+    store.ledger = folded;
+    for (const runId of Object.keys(folded.runs)) {
+      runChats.set(runId, chatId);
+    }
     return folded;
   };
 
-  const leaderEpochFor = (chatId: string): string => {
-    if (fencedChats.has(chatId)) {
-      throw Object.assign(new Error(`Leadership for chat ${chatId} was lost.`), { code: 'LEADERSHIP_LOST' });
+  const dropLog = async (chatId: string): Promise<void> => {
+    const store = storeOf(chatId);
+    const { log } = store;
+    if (closed) {
+      store.final = store.ledger ?? store.final;
     }
-    const current = leaderEpochs.get(chatId);
-    if (current) {
-      return current;
-    }
-    const created = createLeaderEpoch();
-    leaderEpochs.set(chatId, created);
-    return created;
+    store.log = undefined;
+    store.ledger = undefined;
+    const opened = await log?.catch(() => undefined);
+    await opened?.close();
   };
 
-  const assertGeneration = (chatId: string, generation: string): void => {
-    if (fencedChats.has(chatId) || leaderEpochs.get(chatId) !== generation) {
-      throw Object.assign(new Error(`Generation ${generation} no longer leads chat ${chatId}.`), {
-        code: 'LEADERSHIP_LOST',
-      });
+  const wake = (store: ChatStore): void => {
+    for (const reader of new Set(store.readers)) {
+      reader();
     }
   };
 
-  const fencedLog = (chatId: string, generation: string, log: DurableEventLog): DurableEventLog => ({
-    append: async (event) => {
-      assertGeneration(chatId, generation);
-      if (event.leaderEpoch !== generation) {
-        throw Object.assign(new Error(`Append generation does not match the leader for chat ${chatId}.`), {
-          code: 'LEADERSHIP_LOST',
-        });
-      }
-      return log.append(event);
-    },
-    read: async () => log.read(),
-    readBatch: async (input) => log.readBatch(input),
-    messages: async () => log.messages(),
-    historyIntact: async () => log.historyIntact(),
-    anomalies: async () => log.anomalies(),
-    close: async () => log.close(),
-  });
-
-  /**
-   * What this chat's run is doing in memory, in the ledger's vocabulary.
-   *
-   * @param chatId - The chat being asked about.
-   * @returns `running` while a session is live, `reserved` while one is being
-   * composed or an external runner holds the chat, and `none` otherwise.
-   */
-  const memoryRunStateOf = (chatId: string): HostRunState => {
-    if (activeByChat.has(chatId)) {
-      return 'running';
-    }
-    return reservationsByChat.has(chatId) || externalByChat.has(chatId) ? 'reserved' : 'none';
-  };
-
-  /** Serializes every writer on one chat's log; see {@link append}. */
-  const chatAppends = new Map<string, Promise<void>>();
-
-  /**
-   * Keyed commands waiting for their decision row (D15). The first append of `runId` holding a row `takes` accepts is
-   * stamped with `commandId`, so W3's fold records it in `applied`; `landed` settles with that append.
-   */
-  type Claim = Readonly<{
-    /** The run the row belongs to; a `resume` names its chat instead, since the ledger picks the run. */
-    runId?: string;
-    chatId?: string;
-    commandId: string | undefined;
-    takes: (body: SessionEvent) => boolean;
-    /** Settles with `undefined` once the claimed append is durable, or with the error that refused it. */
-    landed: PromiseWithResolvers<Error | undefined>;
-  }>;
-  const claims = new Set<Claim>();
-
-  /**
-   * Run `work` with a claim on its decision row; the claim ends with the work whether or not the row landed.
-   *
-   * @param claim - The run, the key and the decision row.
-   * @param work - The verb, handed the promise that settles with the claimed append.
-   * @returns What the work returns.
-   */
-  const claimed = async <Result>(
-    claim: Omit<Claim, 'landed'>,
-    work: (landed: Promise<Error | undefined>) => Promise<Result>,
-  ): Promise<Result> => {
-    const entry: Claim = { ...claim, landed: Promise.withResolvers<Error | undefined>() };
-    claims.add(entry);
-    try {
-      return await work(entry.landed.promise);
-    } finally {
-      claims.delete(entry);
-    }
-  };
-
-  /** Readers parked at a chat's end, woken by its next durable row (SC-R14). */
-  const readers = new Map<string, Set<() => void>>();
-  const lifecycleRow =
-    (state: RunLifecycleState) =>
-    (body: SessionEvent): boolean =>
-      body.type === 'run.lifecycle' && body.state === state;
-  const interruptRow =
-    (interruptId: string, phase: 'requested' | 'resolved') =>
-    (body: SessionEvent): boolean =>
-      body.type === 'interrupt.recorded' && body.interruptId === interruptId && body.phase === phase;
-
-  const wakeReaders = (chatId: string): void => {
-    const parked = readers.get(chatId);
-    readers.delete(chatId);
-    for (const wake of parked ?? []) {
-      wake();
-    }
-  };
-
-  const reserve = (chatId: string, runId?: string): AdmissionReservation => {
-    const state = memoryRunStateOf(chatId);
-    if (runOperationCode(state, 'admit') !== 'ok') {
-      /* The *live* run's id, not the refused one: the caller's recovery waits
-       * for the run that is in the way. A reservation that has not bound a run
-       * id yet has none to name, and the caller falls back to its own bound. */
-      throw chatRunLiveRefusal({
-        chatId,
-        runId:
-          activeByChat.get(chatId)?.runId ?? reservationsByChat.get(chatId)?.runId ?? externalByChat.get(chatId)?.runId,
-        state,
-      });
-    }
-    if (runId && (reservationsByRun.has(runId) || activeByRun.has(runId))) {
-      throw runIdTakenRefusal({ runId, held: 'is already admitted' });
-    }
-    const ready = Promise.withResolvers<ActiveRun | undefined>();
-    const admitted = Promise.withResolvers<ActiveRun | undefined>();
-    const reservation: AdmissionReservation = {
-      chatId,
-      ...(runId ? { runId } : {}),
-      ready: ready.promise,
-      resolveReady: ready.resolve,
-      admitted: admitted.promise,
-      resolveAdmitted: admitted.resolve,
-    };
-    reservationsByChat.set(chatId, reservation);
-    if (runId) {
-      reservationsByRun.set(runId, reservation);
-    }
-    return reservation;
-  };
-
-  const releaseReservation = (reservation: AdmissionReservation): void => {
-    if (reservationsByChat.get(reservation.chatId) === reservation) {
-      reservationsByChat.delete(reservation.chatId);
-    }
-    if (reservation.runId && reservationsByRun.get(reservation.runId) === reservation) {
-      reservationsByRun.delete(reservation.runId);
-    }
-  };
-
-  /**
-   * Write one batch through the ledger's gate (I1, CL-S4): no re-read and no re-fold per append.
-   *
-   * Runs inside {@link append}'s per-chat queue. The bodies are stamped against the chat's ledger (the term's epoch,
-   * next sequences and attempts), checked by the pure gate, and appended one at a time; the ledger advances with each
-   * durable row. An identical repeat of an attempt's settlement is dropped: at-least-once delivery from the page makes
-   * it a no-op, never a refusal (V10).
-   *
-   * @param input - Chat, run, log handle, the bodies, and the epoch to write under.
-   */
-  const appendRecords = async (input: {
-    readonly chatId: string;
-    readonly log: DurableEventLog;
-    readonly runId: string;
-    readonly events: readonly SessionEvent[];
-    readonly leaderEpoch?: string | undefined;
-  }): Promise<void> => {
-    /* A caller that already bound itself to an epoch writes under *that* one:
-     * a session whose leadership was replaced mid-run must be fenced off, not
-     * quietly re-stamped with whoever leads now. */
-    const leaderEpoch = input.leaderEpoch ?? leaderEpochFor(input.chatId);
-    const ledger = await ledgerOf(input.log);
-    const claim = [...claims].find(
-      (entry) =>
-        (entry.runId ?? input.runId) === input.runId &&
-        (entry.chatId ?? input.chatId) === input.chatId &&
-        input.events.some(entry.takes),
-    );
-    if (claim) {
-      claims.delete(claim);
-    }
-    const stamped = stampRows({
-      ledger,
-      leaderEpoch,
-      runId: input.runId,
-      recordedAt: now().toISOString(),
-      ...(claim?.commandId === undefined ? {} : { commandId: claim.commandId }),
-      bodies: input.events,
+  /** Resolves on the chat's next durable row, the host closing, or `signal`. */
+  const nextRow = async (chatId: string, signal?: AbortSignal): Promise<void> =>
+    new Promise<void>((resolve) => {
+      const store = storeOf(chatId);
+      const woken = (): void => {
+        store.readers.delete(woken);
+        signal?.removeEventListener('abort', woken);
+        resolve();
+      };
+      store.readers.add(woken);
+      signal?.addEventListener('abort', woken, { once: true });
     });
-    try {
-      await appendStamped({ ...input, leaderEpoch, ledger, stamped });
-      claim?.landed.resolve(undefined);
-    } catch (error) {
-      claim?.landed.resolve(error instanceof Error ? error : new Error(String(error)));
-      throw error;
-    }
-  };
 
-  const appendStamped = async (input: {
-    readonly chatId: string;
-    readonly log: DurableEventLog;
-    readonly runId: string;
-    readonly leaderEpoch: string;
-    readonly ledger: ChatLedger;
-    readonly stamped: readonly AgentLogEvent[];
-  }): Promise<void> => {
-    const { leaderEpoch, stamped } = input;
-    let { ledger } = input;
-    /* ponytail: the invocation rule (PrepareOnlyWhenResolved) waits for its writer, the settled row (W7 GI-S6);
-     * enforced before then, a charged lost reply could never continue (EQ1). */
-    const gated = gateRows(ledger, stamped, { invocations: false });
+  /**
+   * Write one batch under `leaderEpoch`, inside the chat's chain: stamped against the ledger, checked by the pure gate
+   * (RA-R6), and appended one row at a time. A keyed steer's message row carries its command id (RA-R10).
+   */
+  const write = async (
+    chatId: string,
+    leaderEpoch: string,
+    rows: readonly ChatRunRow[],
+  ): Promise<Readonly<{ ledger: ChatLedger; messageIds: readonly string[] }>> => {
+    const log = await logOf(chatId);
+    let ledger = await ledgerOf(chatId);
+    const recordedAt = now().toISOString();
+    let scratch = ledger;
+    const stamped = rows.map((row) => {
+      const steer =
+        row.body.type === 'message.appended' && row.body.message.id.startsWith('steer:')
+          ? row.body.message.id.slice('steer:'.length)
+          : undefined;
+      const commandId = row.commandId ?? steer;
+      const [event] = stampRows({
+        ledger: scratch,
+        leaderEpoch,
+        runId: row.runId,
+        recordedAt,
+        ...(commandId === undefined ? {} : { commandId }),
+        bodies: [row.body],
+      });
+      scratch = foldChatLedger(scratch, [event]);
+      return event!;
+    });
+    /* PrepareOnlyWhenResolved is on: every writer records a resolved attempt before the next is prepared (RA-S11). */
+    const gated = gateRows(ledger, stamped);
     if (!gated.ok) {
-      const refused = stamped[gated.row]!;
-      throw gated.code === 'CHAT_RUN_LIVE'
-        ? chatRunLiveRefusal({
-            chatId: input.chatId,
-            runId: ledger.currentRunId,
-            state: chatRunState(ledger),
-          })
-        : gated.code === 'SETTLEMENT_CONFLICT' || gated.code === 'SETTLEMENT_WITHOUT_RUN'
-          ? settlementRefusal({ chatId: input.chatId, runId: input.runId, code: gated.code })
-          : runIdTakenRefusal({
-              runId: input.runId,
-              held:
-                refused.type === 'run.lifecycle' && refused.state === 'admitted'
-                  ? 'has already been admitted'
-                  : `cannot record "${refused.type === 'run.lifecycle' ? refused.state : refused.type}" (${gated.code}); only a resumable or paused run reopens`,
-            });
+      const row = stamped[gated.row]!;
+      throw coded(
+        gated.code,
+        gated.code === 'CHAT_RUN_LIVE'
+          ? `Chat ${chatId} has a ${chatRunState(ledger)} run; send the command again after it ends.`
+          : `Run ${row.runId} cannot record ${row.type === 'run.lifecycle' ? `"${row.state}"` : row.type} (${gated.code}).`,
+        { effect: 'not-applied', ...(gated.code === 'RUN_ID_TAKEN' ? { runId: row.runId } : {}) },
+      );
     }
-    const fenced = fencedLog(input.chatId, leaderEpoch, input.log);
+    const store = storeOf(chatId);
+    const messageIds: string[] = [];
+    let landed = 0;
     for (const row of stamped) {
       if (isRepeatSettlement(ledger, row)) {
         continue;
       }
-      // oxlint-disable-next-line no-await-in-loop -- W1 event ordering requires sequential durable appends.
-      const outcome = await fenced.append(row).catch((error: unknown) => {
-        if ((error as { readonly code?: unknown }).code === 'LOG_FENCED') {
-          // The log moved under this writer: the next use reopens and refolds it (D5).
-          ledgers.delete(input.log);
+      let outcome: Awaited<ReturnType<DurableEventLog['append']>>;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- W1 event ordering requires sequential durable appends.
+        outcome = await log.append(row);
+      } catch (error) {
+        if (codedFailureDetail(error).code === 'LOG_FENCED') {
+          // The log moved under this writer: the next incarnation rereads it (RA-A9).
+          store.ledger = undefined;
         }
-        throw error;
-      });
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+          effect: landed === 0 ? 'not-applied' : 'unknown',
+        });
+      }
       if (outcome.appended) {
         ledger = foldChatLedger(ledger, [row]);
-        ledgers.set(input.log, ledger);
-        wakeReaders(input.chatId);
+        store.ledger = ledger;
+        landed += 1;
+        runChats.set(row.runId, chatId);
+        if (row.type === 'message.appended') {
+          messageIds.push(row.message.id);
+        }
+        wake(store);
       }
     }
+    return { ledger, messageIds };
   };
 
-  /**
-   * The single choke point every durable record passes through (I2, V12).
-   *
-   * Serialized per chat, and that is load-bearing rather than defensive: the
-   * next sequence number is derived from the log's own tail, so two concurrent
-   * writers read the same tail and the second is rejected `EVENT_MUTATED`. The
-   * run's own `AgentSession` used to be one of those writers, with a private
-   * sequence counter of its own, so a settlement recorded for one run of a chat
-   * could kill another run of the same chat mid-stream — and half the records
-   * in the log never met the legality fold at all.
-   *
-   * @param input - Chat, run, log handle, the bodies, and the epoch to write under.
-   */
-  const append = async (input: {
-    readonly chatId: string;
-    readonly log: DurableEventLog;
-    readonly runId: string;
-    readonly events: readonly SessionEvent[];
-    readonly leaderEpoch?: string | undefined;
-  }): Promise<void> => {
-    const prior = chatAppends.get(input.chatId) ?? Promise.resolve();
-    let outcome: { readonly error: unknown } | undefined;
-    /* The *chain* absorbs a failure so one refused append does not wedge the
-     * chat's whole queue; the caller still sees it, re-thrown below. */
-    const chained = (async (): Promise<void> => {
-      await prior;
-      try {
-        await appendRecords(input);
-      } catch (error) {
-        outcome = { error };
+  /** A driver's rows: refused once M1 closed its attempt's gate, then handed to M1's ledger (RA-R6, RA-R7). */
+  const driverAppender =
+    ({
+      chatId,
+      key,
+      leaderEpoch,
+      gated = true,
+    }: Readonly<{ chatId: string; key: TurnAttemptKey; leaderEpoch: string; gated?: boolean }>) =>
+    async (bodies: readonly LogRowBody[]): Promise<void> => {
+      const store = storeOf(chatId);
+      /* L2a D14: no row reaches a chat whose host closed or whose incarnation ended; nothing reopens its log. */
+      assertOpen();
+      const { deliver } = store;
+      if (deliver === undefined || (gated && !store.live.has(attemptKeyOf(key)))) {
+        throw coded(
+          'RUN_NOT_LIVE' satisfies RefusalCode,
+          `Run ${key.runId}'s attempt ${String(key.attempt)} has ended.`,
+        );
       }
-    })();
-    chatAppends.set(input.chatId, chained);
-    await chained;
-    if (outcome) {
-      throw outcome.error;
-    }
-  };
+      const committed = await serial(chatId, async () =>
+        write(
+          chatId,
+          leaderEpoch,
+          bodies.map((body) => ({ runId: key.runId, body })),
+        ),
+      );
+      /* The incarnation's own channel: it drops the outcome if the incarnation stopped meanwhile (RV4). */
+      deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
+    };
 
-  /**
-   * The model row the run's committed turn context recorded, if any turn got that far.
-   *
-   * @param log - The chat's durable log.
-   * @param runId - The run being resumed.
-   * @returns The committed model row, or `undefined` before the first commit.
-   */
-  const committedModelOf = async (log: DurableEventLog, runId: string): Promise<AgentSessionModel | undefined> => {
-    const events = await log.read();
-    const committed = events.findLast(
-      (event) => event.runId === runId && event.type === 'turn.history-projection-committed',
-    );
-    return committed?.type === 'turn.history-projection-committed' ? committed.context.model : undefined;
-  };
-
-  const sessionFor = async (input: {
-    readonly chatId: string;
-    readonly runId: string;
-    readonly leaderEpoch: string;
-    readonly log: DurableEventLog;
-    readonly config?: TauAgentAdmissionConfig | undefined;
-  }): Promise<AgentSession> => {
-    const clientContext =
-      input.config?.clientContext ??
-      (typeof options.clientContext === 'function' ? await options.clientContext() : options.clientContext);
-    /* A resume names no admission: the model it ran on is the one its first
-     * turn committed to the log, which a host with no default row must honour. */
-    const model = input.config?.model ?? options.model ?? (await committedModelOf(input.log, input.runId));
-    if (!model) {
-      throw Object.assign(new Error('This Tau host configures no model; the admission must name one.'), {
-        code: 'HOST_MODEL_UNAVAILABLE',
-      });
-    }
-    return createAgentSession({
-      chatId: input.chatId,
-      runId: input.runId,
-      leaderEpoch: input.leaderEpoch,
-      systemPrompt: input.config?.systemPrompt ?? options.systemPrompt,
-      systemPromptBlocks: input.config?.systemPromptBlocks ?? options.systemPromptBlocks,
-      model,
-      modelTransport: options.modelTransport,
-      toolRegistry: options.toolRegistry,
-      toolChoice: input.config?.toolChoice,
-      allowedTools: input.config?.allowedTools,
-      snapshot: input.config?.snapshot,
-      contextMessages: input.config?.contextMessages,
-      eventLog: fencedLog(input.chatId, input.leaderEpoch, input.log),
-      /* I2: the session's own rows go through the host's one serialized writer,
-       * so there is one sequence counter and one legality fold for every record
-       * in the log rather than one of each per writer. */
-      appendEvent: async (event) =>
-        append({
-          chatId: input.chatId,
-          log: input.log,
-          runId: input.runId,
-          leaderEpoch: input.leaderEpoch,
-          events: [event],
-        }),
-      clientContext,
-      recentSkills: options.recentSkills,
-      substituteToolResult: options.substituteToolResult,
-      summarize: options.summarize,
-      safeguardThresholds: options.safeguardThresholds,
-      onSafeguardOutcome: options.onSafeguardOutcome,
-      allowImageBlocks: options.allowImageBlocks,
-      attachments: options.attachments,
-      createId,
-      now,
-      onCompaction: options.onCompaction,
-      onLiveEvent: options.onLiveEvent,
-    });
-  };
-
-  const bindReservationRun = (reservation: AdmissionReservation, runId: string): void => {
-    const existing = reservationsByRun.get(runId);
-    if (existing && existing !== reservation) {
-      throw runIdTakenRefusal({ runId, held: 'is already admitted' });
-    }
-    reservation.runId = runId;
-    reservationsByRun.set(runId, reservation);
-  };
-
-  const execute = async (input: {
-    readonly chatId: string;
-    readonly runId: string;
-    readonly log: DurableEventLog;
-    readonly message?: UserProviderMessage | undefined;
-    readonly reservation: AdmissionReservation;
-    readonly config?: TauAgentAdmissionConfig | undefined;
-  }): Promise<readonly ProviderMessage[]> => {
-    let active: ActiveRun;
-    try {
-      active = {
-        chatId: input.chatId,
-        runId: input.runId,
-        session: await sessionFor({ ...input, leaderEpoch: leaderEpochFor(input.chatId) }),
-      };
-    } catch (error) {
-      input.reservation.resolveReady(undefined);
-      input.reservation.resolveAdmitted(undefined);
-      /* `admit` and `resume` handed this reservation over, so it is released
-       * here or never, and `resume` has already written its reopening rows: the
-       * coded row lands first, then the chat is admittable (L2a D1). A fenced
-       * generation's append is refused, and it writes nothing. A start that failed before its session wrote
-       * `admitted` records the admission with the failure: a lifecycle row for an unadmitted run is refused
-       * `NO_RUN_ADMITTED` (R2). */
-      const { runs } = await ledgerOf(input.log);
-      const admitted = runs[input.runId]?.lifecycle !== undefined;
-      await append({
-        chatId: input.chatId,
-        log: input.log,
-        runId: input.runId,
-        events: [
-          ...(admitted ? [] : [{ type: 'run.lifecycle', state: 'admitted' } as const]),
-          { type: 'run.lifecycle', state: 'failed', detail: codedFailureDetail(error) },
-        ],
-      }).catch(() => undefined);
-      releaseReservation(input.reservation);
-      throw error;
-    }
-    activeByChat.set(input.chatId, active);
-    activeByRun.set(input.runId, active);
-    input.reservation.resolveReady(active);
-    try {
-      active.completion = input.message
-        ? active.session.prompt(input.message, () => {
-            input.reservation.resolveAdmitted(active);
-          })
-        : active.session.agent.continue();
-      if (!input.message) {
-        input.reservation.resolveAdmitted(active);
-      }
-      await active.completion;
-      input.reservation.resolveAdmitted(active);
-      const completed = await active.session.snapshot();
-      return completed.messages;
-    } catch (error) {
-      input.reservation.resolveReady(undefined);
-      input.reservation.resolveAdmitted(undefined);
-      await append({
-        chatId: input.chatId,
-        log: input.log,
-        runId: input.runId,
-        events: [
-          {
-            type: 'run.lifecycle',
-            state: 'failed',
-            detail: codedFailureDetail(error),
-          },
-        ],
-      });
-      throw error;
-    } finally {
-      activeByChat.delete(input.chatId);
-      activeByRun.delete(input.runId);
-      releaseReservation(input.reservation);
-    }
-  };
-
-  const externalByChat = new Map<string, { readonly runId: string; readonly controller: AbortController }>();
-  /** `completion` is assigned as soon as the turn is detached; see {@link runExternal}. */
-  const externalByRun = new Map<string, ExternalRun>();
-  /**
-   * Chats whose runner may still hold a live session, by run kind.
-   *
-   * A live ACP session outlives its run (V2), so the host has to remember which
-   * runner to tell when the chat itself is done with.
-   */
-  const externalChats = new Map<string, string>();
-  const detached = new Set<Promise<void>>();
-
-  /**
-   * Tell this chat's runner to end whatever it holds open for it.
-   *
-   * @param chatId - Chat being relinquished, rewound, or closed.
-   */
   const closeExternalChat = async (chatId: string): Promise<void> => {
-    const kind = externalChats.get(chatId);
+    const store = storeOf(chatId);
+    const kind = store.externalKind;
     if (kind === undefined) {
       return;
     }
-    externalChats.delete(chatId);
+    store.externalKind = undefined;
     await options.externalRunners?.[kind]?.closeChat?.(chatId);
   };
 
+  const admittedRowOf = (
+    events: readonly AgentLogEvent[],
+    runId: string,
+  ): (AgentLogEvent & { readonly admission?: AdmissionRecord }) | undefined =>
+    events.find((event) => event.runId === runId && event.type === 'run.lifecycle' && event.state === 'admitted') as
+      | (AgentLogEvent & { readonly admission?: AdmissionRecord })
+      | undefined;
+
   /**
-   * Cancel every interrupt a run still holds open.
-   *
-   * `pause` settles on a resolution and on nothing else — it never rejects and
-   * never observes an abort — so an outstanding `session/request_permission` is
-   * settled here or never: the record is durable, and every consumer of
-   * `approval-requested` (banner, activity, unread badge, pending list) would
-   * otherwise wait on a run that is already over (5-review S1). It is also what
-   * lets a cancel reach a terminal state at all, since the runner's own turn is
-   * blocked inside `approve` until the request it asked for is answered (V8).
-   *
-   * The resolution is recorded by `approve`, the one writer of that record.
-   *
-   * @param runId - The run being ended.
+   * Resolve every unresolved model attempt in the chat before a Resume prepares anything (RA-S11, EQ1): each terminal
+   * or voided answer becomes a settled row; a pending one refuses `MODEL_ATTEMPT_PENDING`; an attempt another account
+   * funded (or any, on an unfunded transport) refuses `MODEL_ATTEMPT_OTHER_ACCOUNT` before any lookup, and is neither
+   * voided nor recorded (RV5-F2).
    */
-  const cancelPendingInterrupts = async (runId: string): Promise<void> => {
-    const pending = await options.interruptPort.pending({ runId });
-    /* `allSettled`: one port that refuses a resolution must not cost the run its
-     * terminal record, which is the caller this runs inside. */
-    await Promise.allSettled(
-      pending.map(async ({ interruptId }) => options.interruptPort.resume({ interruptId, outcome: 'cancelled' })),
-    );
+  const resolveInvocations = async (ledger: ChatLedger): Promise<LogRowBody[]> => {
+    const open = unresolvedInvocations(ledger);
+    if (open.length === 0) {
+      return [];
+    }
+    const { funding } = options.modelTransport;
+    if (funding.type !== 'funded') {
+      throw coded(
+        'MODEL_ATTEMPT_OTHER_ACCOUNT' satisfies RefusalCode,
+        "A Tau account funded this chat's last model request; sign in to that account to continue it.",
+        { details: { attemptId: open[0]! } },
+      );
+    }
+    const principal = await fundingPrincipal(funding);
+    const foreign = open.find((attemptId) => isForeignInvocation(ledger.invocations[attemptId]!, principal));
+    if (foreign !== undefined) {
+      throw coded(
+        'MODEL_ATTEMPT_OTHER_ACCOUNT' satisfies RefusalCode,
+        "Another Tau account funded this chat's last model request; sign in to that account to continue it.",
+        { details: { attemptId: foreign } },
+      );
+    }
+    const rows: LogRowBody[] = [];
+    for (const attemptId of open) {
+      // oxlint-disable-next-line no-await-in-loop -- one lookup at a time, in preparation order.
+      const resolution = await funding.resolveInvocation({ attemptId, signal: new AbortController().signal });
+      if (resolution.status === 'pending' || resolution.status === 'unavailable') {
+        throw coded(
+          'MODEL_ATTEMPT_PENDING' satisfies RefusalCode,
+          "The gateway has not finished this chat's last model request; resume once it has.",
+          { details: { attemptId } },
+        );
+      }
+      rows.push(settledRowOf(attemptId, resolution) as LogRowBody);
+    }
+    return rows;
   };
 
-  /**
-   * Execute one external turn, and answer as soon as its admission is durable.
-   *
-   * @param input - Chat, run, selected agent, and the user message when new.
-   */
-  const runExternal = async (input: {
-    readonly chatId: string;
-    readonly runId: string;
-    readonly agent: ExternalRunKind;
-    readonly message?: UserProviderMessage | undefined;
-    readonly state?: JsonObject | undefined;
-    readonly config?: TauAgentAdmissionConfig | undefined;
-  }): Promise<void> => {
-    const port = options.externalRunners?.[input.agent.kind];
-    if (!port) {
-      throw Object.assign(new Error(`This Tau host runs no ${input.agent.kind} agents.`), {
-        code: 'EXTERNAL_AGENT_UNAVAILABLE',
-      });
-    }
-    const inventory = port.list?.();
-    if (inventory && !inventory.includes(input.agent.id)) {
-      throw Object.assign(new Error(`This Tau host cannot start the ${input.agent.id} agent.`), {
-        code: 'EXTERNAL_AGENT_UNAVAILABLE',
-      });
-    }
-    if (externalByChat.has(input.chatId)) {
-      throw chatRunLiveRefusal({
-        chatId: input.chatId,
-        runId: externalByChat.get(input.chatId)?.runId,
-        state: memoryRunStateOf(input.chatId),
-      });
-    }
-    const log = await logFor(input.chatId);
-    const controller = new AbortController();
-    const appendEvents = async (events: readonly ExternalAgentLogEvent[]): Promise<void> =>
-      append({ chatId: input.chatId, runId: input.runId, log, events });
+  // ── M1's services (RA-R7) ────────────────────────────────────────────────────────────────────────
 
-    /* The admission is the durable boundary the caller waits on: the marker on
-     * the user message is what a later attach reads to know this run needs an
-     * external resume rather than the Tau host's. */
-    let messageId = input.message?.id;
-    await appendEvents([
-      ...(input.message
-        ? ([
-            {
-              type: 'message.appended',
-              message: {
-                ...input.message,
-                metadata: {
-                  ...input.message.metadata,
-                  tauInternal: {
-                    ...input.agent,
-                    kind: externalTurnKind,
-                    runKind: input.agent.kind,
-                    agentId: input.agent.id,
+  const services: ChatRunServices = {
+    openLog: async ({ chatId, deliver }) =>
+      serial(chatId, async () => {
+        const store = storeOf(chatId);
+        /* Every incarnation refolds (MC-R5): a stale writer may have appended since the last one read. */
+        store.ledger = undefined;
+        const ledger = await ledgerOf(chatId);
+        store.deliver = deliver;
+        const runId = ledger.currentRunId;
+        const repair: ChatRunRow[] = [];
+        if (runId !== undefined) {
+          const opened = await logOf(chatId);
+          const events = await opened.read();
+          const admitted = admittedRowOf(events, runId);
+          const rewind = admitted?.admission?.rewind;
+          if (
+            rewind !== undefined &&
+            !events.some((event) => event.runId === runId && event.type === 'history.rewound')
+          ) {
+            /* Split admission (L2a D7): the intent landed without its rewind; the journaled rewind finishes it. */
+            repair.push({ runId, body: { type: 'history.rewound', ...rewind } });
+          }
+        }
+        /* Model attempts (GI-R10): each answered attempt is recorded now; a pending one waits for the next claim or
+         * Resume, and an attempt another account funded is never asked about (Resume refuses it, RV5-F2). */
+        const { funding } = options.modelTransport;
+        const unresolved = unresolvedInvocations(ledger);
+        if (funding.type === 'funded' && unresolved.length > 0) {
+          /* The account is asked only when there is something to resolve; an account it cannot read resolves
+           * nothing now, as a pending lookup does (Resume refuses it UNAUTHENTICATED). */
+          const principal = await fundingPrincipal(funding).catch(() => null);
+          const own =
+            principal === null
+              ? []
+              : unresolved.filter((attemptId) => !isForeignInvocation(ledger.invocations[attemptId]!, principal));
+          for (const attemptId of own) {
+            // oxlint-disable-next-line no-await-in-loop -- one lookup at a time, in preparation order.
+            const resolution = await funding
+              .resolveInvocation({ attemptId, signal: new AbortController().signal })
+              .catch(() => undefined);
+            if (resolution?.status === 'terminal' || resolution?.status === 'voided') {
+              repair.push({
+                runId: ledger.invocations[attemptId]!.runId,
+                body: settledRowOf(attemptId, resolution) as LogRowBody,
+              });
+            }
+          }
+        }
+        return { ledger, repair };
+      }),
+    append: async ({ chatId, leaderEpoch, rows, ends }) => {
+      const store = storeOf(chatId);
+      if (ends !== undefined) {
+        /* The gate closes before the ending batch is queued: a driver row queued after it is refused (RA-R6). */
+        store.live.delete(attemptKeyOf(ends));
+      }
+      return serial(chatId, async () => write(chatId, leaderEpoch, rows));
+    },
+    prepareAdmission: async ({ chatId, commandId, payload }) => {
+      const start = payload as unknown as CommandPayload<'start'>;
+      const config =
+        legacyConfigs.get(commandId) ?? admissionConfigOf(start.config, { systemPrompt: options.systemPrompt });
+      legacyConfigs.delete(commandId);
+      const log = await logOf(chatId);
+      const events = await log.read();
+      const { agent } = config;
+      if (agent !== undefined) {
+        const port = options.externalRunners?.[agent.kind];
+        if (port === undefined) {
+          throw coded(
+            'EXTERNAL_AGENT_UNAVAILABLE' satisfies RefusalCode,
+            `This Tau host runs no ${agent.kind} agents.`,
+          );
+        }
+        const inventory = port.list?.();
+        if (inventory && !inventory.includes(agent.id)) {
+          throw coded(
+            'EXTERNAL_AGENT_UNAVAILABLE' satisfies RefusalCode,
+            `This Tau host cannot start the ${agent.id} agent.`,
+          );
+        }
+      }
+      /* A history with nothing in it has nothing to rewind, so a rewinding trigger is a first turn. */
+      let rewind: AdmissionRecord['rewind'];
+      if (start.trigger !== 'submit') {
+        const messages = await log.messages();
+        if (messages.length > 0) {
+          /* The rewind point is the turn the caller names; the prefix it keeps is this log's own (F2). */
+          const rewindTo = messages.findIndex((message) => message.id === start.message.id);
+          const retained = start.retainedMessageIds ?? [];
+          if (
+            rewindTo === -1 &&
+            (retained.length > messages.length || retained.some((id, index) => messages[index]?.id !== id))
+          ) {
+            throw coded(
+              'HISTORY_PREFIX_INVALID',
+              'Retry/edit/regenerate must retain an unchanged strict history prefix.',
+            );
+          }
+          rewind = {
+            trigger: start.trigger,
+            retainedMessageIds: rewindTo === -1 ? retained : messages.slice(0, rewindTo).map((message) => message.id),
+          };
+        }
+      }
+      const base = {
+        trigger: start.trigger,
+        turnId: start.message.id,
+        message: start.message,
+        ...(rewind === undefined ? {} : { rewind }),
+        ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
+      };
+      const intent = (admission: AdmissionRecord): LogRowBody[] => [
+        { type: 'run.lifecycle', state: 'admitted', admission } as unknown as LogRowBody,
+        ...(rewind === undefined ? [] : [{ type: 'history.rewound', ...rewind } satisfies LogRowBody]),
+      ];
+      if (agent !== undefined) {
+        /* The chat's own session (VSC3). A rewind keeps the selection and drops the vendor session, which holds a
+         * turn Tau has just retracted. */
+        const remembered = externalSessionOf(events, agent.id);
+        let state: JsonObject | undefined = remembered;
+        if (rewind !== undefined) {
+          await closeExternalChat(chatId);
+          if (remembered) {
+            const { acpSessionId: _retired, ...carried } = remembered;
+            state = carried;
+          }
+        }
+        const marked: UserProviderMessage = {
+          ...start.message,
+          metadata: {
+            ...start.message.metadata,
+            tauInternal: { ...agent, kind: externalTurnKind, runKind: agent.kind, agentId: agent.id },
+          },
+        };
+        return {
+          kind: 'external',
+          turnId: start.message.id,
+          intent: intent({
+            kind: 'external',
+            ...base,
+            agent,
+            config,
+            ...(state === undefined ? {} : { state }),
+          } as AdmissionRecord),
+          start: [{ type: 'message.appended', message: marked }],
+          ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
+        };
+      }
+      const model = config.model ?? options.model;
+      if (model === undefined) {
+        throw coded('HOST_MODEL_UNAVAILABLE', 'This Tau host configures no model; the admission must name one.');
+      }
+      const clientContext =
+        config.clientContext ??
+        (typeof options.clientContext === 'function' ? await options.clientContext() : options.clientContext);
+      /* Journaled (RA-R3): a restart before the turn commits replays exactly this admission. */
+      const context = await createTurnContextSnapshot({
+        chatId,
+        systemPrompt: config.systemPrompt,
+        systemPromptBlocks: config.systemPromptBlocks ?? options.systemPromptBlocks,
+        model: turnModelOf(model),
+        toolChoice: config.toolChoice,
+        allowedTools: config.allowedTools,
+        snapshot: config.snapshot,
+        contextMessages: config.contextMessages,
+        clientContext,
+        recentSkills: options.recentSkills,
+      });
+      return {
+        kind: 'tau',
+        turnId: start.message.id,
+        intent: intent({ kind: 'tau', ...base, selection: turnModelOf(model), context }),
+        start: [],
+        ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
+      };
+    },
+    prepareResume: async ({ chatId, runId, payload }) => {
+      const resume = payload as unknown as CommandPayload<'resume'>;
+      const log = await logOf(chatId);
+      const ledger = await ledgerOf(chatId);
+      const entry = ledger.runs[runId];
+      const events = await log.read();
+      const settled = await resolveInvocations(ledger);
+      const selection = resume.selection === undefined ? {} : { selection: resume.selection };
+      const running = { type: 'run.lifecycle', state: 'running', ...selection } as unknown as LogRowBody;
+      if (entry?.kind === 'external' || externalTurnOf(events) !== undefined) {
+        return { kind: 'external', turnId: entry?.turnId ?? runId, mode: 'continue', intent: [running, ...settled] };
+      }
+      if (entry?.committed !== true && admittedRowOf(events, runId)?.admission !== undefined) {
+        /* The turn never committed: the journaled admission is replayed (RA-R3). */
+        return { kind: 'tau', turnId: entry?.turnId ?? runId, mode: 'start', intent: [running, ...settled] };
+      }
+      const recovery: LogRowBody[] = [...settled];
+      let history = await log.messages();
+      if (entry?.lifecycle === 'failed') {
+        const cleared = failureMarkerClearance(history);
+        if (cleared?.type === 'history.rewound') {
+          const retained = new Set(cleared.retainedMessageIds);
+          history = history.filter((message) => retained.has(message.id));
+        } else if (cleared?.type === 'message.envelope-replaced') {
+          history = history.map((message) => (message.id === cleared.messageId ? cleared.replacement : message));
+        }
+        if (cleared) {
+          recovery.push(cleared);
+        }
+      }
+      const missing = pendingToolCalls(history);
+      const disconnected = missing.map(
+        (call): ProviderMessage => ({
+          id: createId(),
+          role: 'tool-output',
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          content: {
+            errorCode: 'CLIENT_DISCONNECTED',
+            message: 'The prior host stopped before this tool returned. Verify state before retrying.',
+          },
+          isError: true,
+          metadata: { timestamp: now().getTime() },
+        }),
+      );
+      recovery.push(...disconnected.map((message): LogRowBody => ({ type: 'message.appended', message })));
+      const reminder = await createInterruptRecoveryMessage({
+        messages: [...history, ...disconnected],
+        timestamp: now().getTime(),
+      });
+      if (missing.length > 0 && !reminder) {
+        throw coded('HISTORY_INVALID', 'Interrupted tool history could not produce a recovery reminder.');
+      }
+      if (reminder) {
+        recovery.push({ type: 'message.appended', message: reminder });
+      }
+      return {
+        kind: 'tau',
+        turnId: entry?.turnId ?? latestTurnId(history, runId),
+        /* The tail already answers the turn: the attempt ends with no call. */
+        mode: !reminder && history.at(-1)?.role === 'assistant' ? 'complete' : 'continue',
+        /* `running` first, so the command's cursor is the reopening row (ChatRunSlot.tla resume; W7.r1). */
+        intent: [running, ...recovery],
+      };
+    },
+    startDriver: ({ key, kind, mode, leaderEpoch, report, grant }) => {
+      const { chatId, runId } = key;
+      const store = storeOf(chatId);
+      store.live.add(attemptKeyOf(key));
+      const append = driverAppender({ chatId, key, leaderEpoch });
+      if (kind === 'external') {
+        return deferredDriver(
+          (async () => {
+            const log = await logOf(chatId);
+            const events = await log.read();
+            const admission = admittedRowOf(events, runId)?.admission;
+            const marker = externalTurnOf(events)?.marker;
+            const agentId = admission?.agent?.id ?? marker?.agentId;
+            const runKind = admission?.agent?.kind ?? marker?.runKind ?? 'acp';
+            const port = options.externalRunners?.[runKind];
+            if (agentId === undefined || port === undefined) {
+              throw coded(
+                'EXTERNAL_AGENT_UNAVAILABLE' satisfies RefusalCode,
+                `This Tau host runs no ${runKind} agents.`,
+              );
+            }
+            store.externalKind = runKind;
+            const agent: ExternalRunKind = admission?.agent ?? { kind: runKind, id: agentId };
+            /* The session this chat reached, not the one its admission asked for: `remember` replaces the user
+             * message's envelope, which only the reducer's view carries. */
+            const state =
+              mode === 'start' ? admission?.state : (externalSessionOf(events, agentId) ?? admission?.state);
+            const remember = async (remembered: JsonObject): Promise<void> => {
+              const current = externalTurnOf(await log.read());
+              const message =
+                current && reduceEventLog(await log.read()).findLast((entry) => entry.id === current.messageId);
+              if (!message) {
+                return;
+              }
+              await append([
+                {
+                  type: 'message.envelope-replaced',
+                  messageId: message.id,
+                  replacement: {
+                    ...message,
+                    metadata: {
+                      ...message.metadata,
+                      tauInternal: {
+                        ...externalMarker(message),
+                        kind: externalTurnKind,
+                        runKind,
+                        agentId,
+                        ...remembered,
+                      },
+                    },
                   },
                 },
-              },
-            },
-          ] as const)
-        : []),
-      /* Only a turn that carries a message is an *admission*; a resumed
-       * external run continues the run it already has, and a second `admitted`
-       * row for one run id is what the ledger refuses (I1). */
-      ...(input.message ? ([{ type: 'run.lifecycle', state: 'admitted' }] as const) : []),
-      { type: 'run.lifecycle', state: 'running' },
-    ]);
-    messageId ??= externalTurnOf(await log.read())?.messageId;
-    externalByChat.set(input.chatId, { runId: input.runId, controller });
-    externalChats.set(input.chatId, input.agent.kind);
-    const tracked: ExternalRun = { chatId: input.chatId, controller };
-    externalByRun.set(input.runId, tracked);
-
-    const remember = async (state: JsonObject): Promise<void> => {
-      /* Reduced, not raw: a `remember` merges into what the *last* one wrote,
-       * and the last one wrote a `message.envelope-replaced`. Reading the
-       * original `message.appended` instead made every call after the first
-       * silently drop its predecessor's fields — the session id among them, so
-       * a chat whose turn also recorded its model could never be resumed. */
-      const current = reduceEventLog(await log.read()).findLast((message) => message.id === messageId);
-      if (!current) {
-        return;
-      }
-      await appendEvents([
-        {
-          type: 'message.envelope-replaced',
-          messageId: current.id,
-          replacement: {
-            ...current,
-            metadata: {
-              ...current.metadata,
-              tauInternal: {
-                ...externalMarker(current),
-                kind: externalTurnKind,
-                runKind: input.agent.kind,
-                agentId: input.agent.id,
-                ...state,
-              },
-            },
-          },
-        },
-      ]);
-    };
-
-    const approve = async (request: {
-      readonly prompt: string;
-      readonly payload?: JsonValue | undefined;
-    }): Promise<InterruptResolution> => {
-      const interruptId = createId();
-      await appendEvents([
-        {
-          type: 'interrupt.recorded',
-          interruptId,
-          phase: 'requested',
-          reason: request.prompt,
-          payload: {
-            kind: 'approval',
-            prompt: request.prompt,
-            /* Attribution is durable truth (V6): the banner has to be able to
-             * name who is asking from the record itself. The live selection has
-             * already moved on by the time a restart re-renders this, and it was
-             * never the same fact — a chat can hold one agent's paused run while
-             * the composer shows another. */
-            agentId: input.agent.id,
-            ...(request.payload === undefined ? {} : { context: request.payload }),
-          },
-        },
-        { type: 'run.lifecycle', state: 'paused' },
-      ]);
-      const resolution = await options.interruptPort.pause({
-        interruptId,
-        runId: input.runId,
-        kind: 'approval',
-        prompt: request.prompt,
-        ...(request.payload === undefined ? {} : { payload: request.payload }),
-      });
-      await appendEvents([
-        {
-          type: 'interrupt.recorded',
-          interruptId,
-          phase: 'resolved',
-          reason: resolution.outcome,
-          payload: {
-            outcome: resolution.outcome,
-            ...(resolution.optionId === undefined ? {} : { optionId: resolution.optionId }),
-            ...(resolution.payload === undefined ? {} : { response: resolution.payload }),
-          },
-        },
-        ...(resolution.outcome === 'approved' ? ([{ type: 'run.lifecycle', state: 'running' }] as const) : []),
-      ]);
-      return resolution;
-    };
-
-    const completion = (async (): Promise<void> => {
-      try {
-        const outcome = await port.run({
-          agentId: input.agent.id,
-          agent: input.agent,
-          chatId: input.chatId,
-          runId: input.runId,
-          ...(input.message ? { message: input.message } : {}),
-          ...(input.state ? { state: input.state } : {}),
-          ...(input.config ? { config: input.config } : {}),
-          history: await log.read(),
-          append: appendEvents,
-          appendSession: appendEvents,
-          publishLive: async (event) => {
-            await options.onLiveEvent?.({ ...event, chatId: input.chatId, runId: input.runId });
-          },
-          remember,
-          approve,
-          signal: controller.signal,
-        });
-        const { stopReason } = outcome ?? {};
-        const state = controller.signal.aborted
-          ? 'cancelled'
-          : ((stopReason === undefined ? undefined : externalStopStates.get(stopReason)) ?? 'completed');
-        const detail = stopReason === undefined ? undefined : externalStopDetail.get(stopReason);
-        await appendEvents([
-          {
-            type: 'run.lifecycle',
-            state,
-            ...(stopReason === undefined ? {} : { stopReason }),
-            ...(state === 'completed' || detail === undefined ? {} : { detail: { message: detail } }),
-          },
-        ]);
-      } catch (error) {
-        /* A refusal is a fact the user can act on, so the code the runner threw
-         * is recorded and the affordance it carried — a login's URL, code or
-         * command — is recorded *first*, as an interrupt every surface already
-         * renders (V11/VSC4). Without both, a logged-out agent reaches the user
-         * as one opaque sentence with a stderr tail (r4 §2). */
-        const refusal = externalRefusalOf(error);
-        /* Before the terminal record, so the appends `approve` issues when it
-         * wakes are already queued on this chat's chain ahead of it. */
-        await cancelPendingInterrupts(input.runId);
-        /* Settled in the same breath it is requested: nothing ever answers a
-         * login — there is no completion event and the affordance is
-         * deliberately buttonless — so an unresolved record would leave every
-         * consumer of `approval-requested` (banner, activity, unread badge)
-         * stuck on a run that is already over. The payload rides the requested
-         * record, so the surfaces still have the login to render. */
-        const loginInterruptId = createId();
-        await appendEvents([
-          ...(refusal.login
-            ? ([
-                { ...refusal.login, interruptId: loginInterruptId },
-                {
-                  type: 'interrupt.recorded',
-                  interruptId: loginInterruptId,
-                  phase: 'resolved',
-                  reason: 'cancelled',
-                  payload: { outcome: 'cancelled' },
+              ]);
+            };
+            return startExternalTurn({
+              port,
+              turn: {
+                agentId,
+                agent,
+                chatId,
+                runId,
+                attempt: key.attempt,
+                ...(mode === 'start' && admission?.message ? { message: admission.message } : {}),
+                ...(mode === 'start' && admission?.config ? { config: admission.config } : {}),
+                ...(state === undefined ? {} : { state }),
+                history: events,
+                append,
+                /* Session state the agent reports between prompts outlives the attempt: not gated by it (VSC3). */
+                appendSession: driverAppender({ chatId, key, leaderEpoch, gated: false }),
+                publishLive: async (event) => {
+                  await options.onLiveEvent?.({ ...event, chatId, runId });
                 },
-              ] as const)
-            : []),
-          controller.signal.aborted
-            ? { type: 'run.lifecycle', state: 'cancelled' }
-            : { type: 'run.lifecycle', state: 'failed', detail: codedFailureDetail(error) },
-        ]);
-      } finally {
-        if (externalByChat.get(input.chatId)?.runId === input.runId) {
-          externalByChat.delete(input.chatId);
-        }
-        externalByRun.delete(input.runId);
+                remember,
+              },
+              createInterruptId: createId,
+              append,
+              report,
+            });
+          })(),
+          report,
+        );
       }
-    })();
-    tracked.completion = completion;
-    detached.add(completion);
-    const untrack = async (): Promise<void> => {
-      try {
-        await completion;
-      } catch (error) {
-        /* Both the terminal and the failure append failed. Nothing awaits a
-         * detached run, and a re-throw here is an unhandled rejection that
-         * exits a Node host (L2a D13). */
-        console.error(`External run ${input.runId} of chat ${input.chatId} ended without a terminal record.`, error);
-      } finally {
-        detached.delete(completion);
-      }
-    };
-    // async-iife: an external run outlives this call by design; `close()` drains `detached`.
-    void untrack();
+      return deferredDriver(
+        (async () => {
+          const log = await logOf(chatId);
+          const events = await log.read();
+          const admission = admittedRowOf(events, runId)?.admission;
+          const resumed = events.findLast(
+            (event) => event.runId === runId && event.type === 'run.lifecycle' && event.state === 'running',
+          ) as (AgentLogEvent & { readonly selection?: TurnModelConfig }) | undefined;
+          const selection = mode === 'start' ? undefined : resumed?.selection;
+          const committed = events.findLast(
+            (event) => event.runId === runId && event.type === 'turn.history-projection-committed',
+          );
+          const model =
+            selection ??
+            (mode === 'start' ? admission?.selection : undefined) ??
+            (committed?.type === 'turn.history-projection-committed' ? committed.context.model : undefined) ??
+            options.model ??
+            admission?.selection;
+          if (model === undefined) {
+            throw coded('HOST_MODEL_UNAVAILABLE', 'This Tau host configures no model; the admission must name one.');
+          }
+          const clientContext =
+            typeof options.clientContext === 'function' ? await options.clientContext() : options.clientContext;
+          const build = async (first: boolean): Promise<AgentSession> =>
+            createAgentSession({
+              chatId,
+              runId,
+              leaderEpoch,
+              systemPrompt: admission?.context?.systemPrompt ?? options.systemPrompt,
+              systemPromptBlocks: options.systemPromptBlocks,
+              model,
+              modelTransport: options.modelTransport,
+              /* The attempt's tools, as W8 granted them over its checkout (RA-R12); the host's without placement. */
+              toolRegistry: grant?.tools ?? options.toolRegistry,
+              eventLog: log,
+              /* I2: the session's rows go through the chat's one chain, gated by its attempt (RA-R6). */
+              appendEvent: async (event) => append([event as LogRowBody]),
+              ...(first && mode === 'start' && admission?.context !== undefined ? { context: admission.context } : {}),
+              ...(selection === undefined ? {} : { selection }),
+              clientContext,
+              recentSkills: options.recentSkills,
+              substituteToolResult: options.substituteToolResult,
+              summarize: options.summarize,
+              safeguardThresholds: options.safeguardThresholds,
+              onSafeguardOutcome: options.onSafeguardOutcome,
+              allowImageBlocks: options.allowImageBlocks,
+              attachments: options.attachments,
+              createId,
+              now,
+              onCompaction: options.onCompaction,
+              onLiveEvent: options.onLiveEvent,
+              clock: options.clock,
+              streamStall: options.delays?.streamStall,
+            });
+          let session = await build(true);
+          let stopped = false;
+          /* Read through a call: `abort` lands between the loop's awaits, which narrowing cannot see. */
+          const isStopped = (): boolean => stopped;
+          const { funding } = options.modelTransport;
+          const funded = funding.type === 'funded' && funding.usesBillingAttempt(model.providerKind);
+          /* EQ1, charge and proceed: a funded reply lost in transit is retried in this live run, at most
+           * `lostReplyRetries` times. The next attempt's prepare resolves and records the lost one first
+           * (ChargeAfterRecordedLoss); a further loss ends the run with the transport's resumable code. */
+          const drive = async (): Promise<AgentRunOutcome> => {
+            const message = admission?.message;
+            let ended =
+              mode === 'start' && message !== undefined ? await session.prompt(message) : await session.continue();
+            if (!funded) {
+              return ended;
+            }
+            for (let retries = options.lostReplyRetries ?? 1; retries > 0; retries--) {
+              if (stopped || !isLostReply(ended)) {
+                break;
+              }
+              /* A stop can land at any await below: no funded call leaves after it (W7.r1 finding 5). */
+              // oxlint-disable-next-line no-await-in-loop -- the failure marker is cleared before the step continues.
+              const cleared = failureMarkerClearance(await log.messages());
+              if (cleared && !isStopped()) {
+                // oxlint-disable-next-line no-await-in-loop -- as above.
+                await append([cleared]);
+              }
+              if (isStopped()) {
+                break;
+              }
+              // oxlint-disable-next-line no-await-in-loop -- one session per try.
+              session = await build(false);
+              if (isStopped()) {
+                session.abort();
+                break;
+              }
+              // oxlint-disable-next-line no-await-in-loop -- as above.
+              ended = await session.continue();
+            }
+            return ended;
+          };
+          const reportEnding = async (): Promise<void> => {
+            let ended: AgentRunOutcome;
+            try {
+              ended = await drive();
+            } catch (error) {
+              report({
+                type: 'agentEnded',
+                outcome: stopped ? 'aborted' : 'failed',
+                failure: codedFailureDetail(error),
+              });
+              return;
+            }
+            report({
+              type: 'agentEnded',
+              outcome: ended.outcome,
+              ...(ended.failure === undefined ? {} : { failure: ended.failure }),
+            });
+          };
+          void reportEnding();
+          return {
+            steer: (commandId: string, text: string) => {
+              session.steer(text, `steer:${commandId}`);
+            },
+            abort: () => {
+              stopped = true;
+              session.abort();
+            },
+            decide: () => undefined,
+          };
+        })(),
+        report,
+      );
+    },
+    closeLog: async (chatId) => {
+      const store = storeOf(chatId);
+      store.deliver = undefined;
+      store.live.clear();
+      await closeExternalChat(chatId).catch(() => undefined);
+      await serial(chatId, async () => dropLog(chatId));
+    },
+    ...(options.placement === undefined ? {} : { placement: options.placement }),
   };
 
-  /**
-   * Continue an external run a restart left unanswered.
-   *
-   * The state the previous attempt remembered (its protocol session id, its
-   * cursor, the branch it worked in) rides the same log, so the runner
-   * reconnects to the agent's own session rather than starting the turn again.
-   *
-   * @param chatId - Chat to recover.
-   * @returns `true` when this chat's last run was external and was restarted.
-   */
-  const resumeExternal = async (chatId: string): Promise<boolean> => {
-    const log = await logFor(chatId);
-    const ledger = await ledgerOf(log);
-    const events = await log.read();
-    const runId = ledger.currentRunId;
-    const external = externalTurnOf(events);
-    /* A terminal run has nothing to continue — unless the agent stopped it and
-     * said a retry can help, which is the same continuation one attempt later
-     * (R9/S11). */
-    if (
-      runId === undefined ||
-      !external ||
-      (chatRunState(ledger) === 'terminal' && !isResumableRunFailure(ledger.runs[runId]?.failure))
-    ) {
-      return false;
+  const registry = createChatRunRegistry({
+    services,
+    createTerm: options.createLeaderEpoch ?? createPortableId,
+    ...(options.delays === undefined ? {} : { delays: options.delays }),
+    ...(options.clock === undefined ? {} : { actorOptions: { clock: options.clock } }),
+  });
+
+  /** Wait until the chat's incarnation holds no slot: its attempt ended, was recorded and settled. */
+  const slotReleased = async (chatId: string): Promise<void> => {
+    const actor = registry.actorOf(chatId);
+    if (actor !== undefined) {
+      await waitFor(actor, (snapshot) => snapshot.status !== 'active' || !snapshot.hasTag('slotHeld')).catch(
+        () => undefined,
+      );
     }
-    const { agentId, kind: _kind, runKind, ...state } = external.marker;
-    await runExternal({
-      chatId,
-      runId,
-      agent: { kind: runKind, id: agentId },
-      /* The session this chat *reached*, not the one its admission asked for:
-       * `remember` records the vendor session id by replacing the user
-       * message's envelope, which only the reducer's view carries. Resuming
-       * from the raw marker opened a second vendor session and replayed the
-       * turn on the person's own quota. */
-      state: externalSessionOf(events, agentId) ?? state,
-    });
-    return true;
   };
 
-  const recordResolution = async (input: {
-    readonly chatId: string;
-    readonly log: DurableEventLog;
-    readonly runId: string;
-    readonly resolution: InterruptResolution;
-  }): Promise<void> =>
-    append({
-      chatId: input.chatId,
-      log: input.log,
-      runId: input.runId,
-      events: [
-        {
-          type: 'interrupt.recorded',
-          interruptId: input.resolution.interruptId,
-          phase: 'resolved',
-          reason: input.resolution.outcome,
-          payload: {
-            outcome: input.resolution.outcome,
-            ...(input.resolution.optionId === undefined ? {} : { optionId: input.resolution.optionId }),
-            ...(input.resolution.payload === undefined ? {} : { response: input.resolution.payload }),
-          },
-        },
-        ...(input.resolution.outcome === 'approved' ? [] : ([{ type: 'run.lifecycle', state: 'cancelled' }] as const)),
-      ],
-    });
+  const refusal = (answer: CommandAnswer): Error | undefined =>
+    answer.status === 'refused'
+      ? coded(answer.code, answer.message, {
+          ...answer.details,
+          ...(answer.effect === 'unknown' ? { effect: 'unknown' } : {}),
+        })
+      : undefined;
 
-  const waitForDurableResolution = async (input: {
-    readonly chatId: string;
-    readonly log: DurableEventLog;
-    readonly request: InterruptRequest;
-  }): Promise<InterruptResolution> => {
-    const resolution = await options.interruptPort.pause(input.request);
-    await recordResolution({
-      chatId: input.chatId,
-      log: input.log,
-      runId: input.request.runId,
-      resolution,
-    });
-    return resolution;
-  };
-
-  const activeRunFor = async (runId: string): Promise<ActiveRun | undefined> => {
-    const active = activeByRun.get(runId);
-    if (active) {
-      return active;
-    }
-    return reservationsByRun.get(runId)?.ready;
-  };
-
-  /**
-   * The chat's run as its log describes it, or `undefined` when it has none.
-   *
-   * Non-throwing, because most readers can live without a run and need the
-   * transcript regardless: `attach` is how a chat is opened at all, and every
-   * command epilogue answers with the projection it just changed. A thrown
-   * `NO_RUN_ADMITTED` from there made a chat whose live run could not be
-   * resumed impossible to open ever again — the permanent wedge, re-armed from
-   * the other side. {@link TauAgentHost.snapshot} still refuses for the callers
-   * that genuinely require a run.
-   *
-   * @param chatId - The chat being described.
-   * @returns Its current run projection, or `undefined` when nothing was admitted.
-   */
   const describeRun = async (chatId: string): Promise<HostRunSnapshot | undefined> => {
     assertOpen();
-    const log = await logFor(chatId);
-    const ledger = await ledgerOf(log);
+    const ledger = await ledgerOf(chatId);
+    const runId = ledger.currentRunId;
+    /* R2 (D19): a run with no lifecycle record is not a run; nothing is inferred as `admitted`. */
+    if (runId === undefined) {
+      return undefined;
+    }
+    const log = await logOf(chatId);
     const events = await log.read();
-    const last = events.at(-1);
-    if (!last) {
-      return undefined;
-    }
-    /* The incremental, tolerant history: reading never fails a chat, even one whose history the host refuses to
-     * run (D16). */
+    /* The incremental, tolerant history: reading never fails a chat, even one it refuses to run (D16). */
     const messages = await log.messages();
-    /* A log with no lifecycle record at all admits no run, and the tail is the
-     * only identity there is to answer with. Every log a host writes opens with
-     * one, so this is the shape of a log written by nothing that ran. */
-    const { currentRunId } = ledger;
-    if (currentRunId === undefined && memoryRunStateOf(chatId) === 'none') {
-      /* R2: a run with no lifecycle record is not a run. Answering `admitted`
-       * for one is the same default that made an abandoned lease's settlement
-       * look like a live turn. The only honest reading left is the instant
-       * between an admission's first record and its `admitted` row, and the
-       * reservation above still holds that. */
-      return undefined;
-    }
-    const runId = currentRunId ?? last.runId;
     const entry = ledger.runs[runId];
-    /* This run's own assistant diagnostic first, because it carries the
-     * transport's `status` and refusal payload where the terminal row may hold
-     * only a message; the lifecycle record when that run wrote no marker, which
-     * is every failure that never was a model call — an external agent's stop
-     * writes no assistant message at all. Without the fallback a surface read
-     * no failure for those runs and could only rewind the turn (F1). Both
-     * sources are keyed on `runId`: a chat's history outlives its runs. */
+    /* This run's own assistant diagnostic first, then its lifecycle record (F1). */
     const failure = transportFailureOfRun({ events, messages, runId }) ?? entry?.failure;
     return {
       chatId,
       runId,
-      turnId: latestTurnId(messages, runId),
+      turnId: entry?.turnId ?? latestTurnId(messages, runId),
       state: entry?.lifecycle ?? 'admitted',
       messages,
       ...(failure ? { failure } : {}),
@@ -1803,473 +1397,287 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const snapshot = async (chatId: string): Promise<HostRunSnapshot> => {
     const described = await describeRun(chatId);
     if (!described) {
-      throw Object.assign(new Error(`Chat ${chatId} has no admitted run to describe.`), {
-        code: 'NO_RUN_ADMITTED' satisfies RefusalCode,
-      });
+      throw coded('NO_RUN_ADMITTED' satisfies RefusalCode, `Chat ${chatId} has no admitted run to describe.`);
     }
     return described;
   };
 
+  const chatOfRun = (runId: string): string => {
+    const chatId = runChats.get(runId);
+    if (chatId === undefined) {
+      throw coded('RUN_NOT_LIVE' satisfies RefusalCode, `Run ${runId} is not active.`);
+    }
+    return chatId;
+  };
+
+  const execute = async (command: HostCommand): Promise<CommandAnswer> => {
+    if (command.type === 'attach') {
+      const { chatId } = command.payload;
+      const claim = await registry.claim(chatId);
+      if ('refused' in claim) {
+        return { ...claim.refused, commandId: command.commandId };
+      }
+      const ledger = await ledgerOf(chatId);
+      const run = await describeRun(chatId);
+      return {
+        commandId: command.commandId,
+        generation: ledger.maxEpoch,
+        status: 'applied',
+        effect: 'not-applied',
+        details: {
+          ...(run === undefined ? {} : { snapshot: run as unknown as JsonValue }),
+          takeover: claim.takeover,
+          endCursor: ledger.position.cursor,
+        },
+      };
+    }
+    if (command.type === 'start') {
+      /* Known before any row, so a legacy cancel of a reserving run finds its chat. */
+      runChats.set(command.payload.runId, command.payload.chatId);
+    }
+    const answer = registry.execute(command);
+    if (command.type === 'start' || command.type === 'resume') {
+      const entry = { runId: command.payload.runId, answer };
+      admissions.set(command.payload.chatId, entry);
+      const release = async (): Promise<void> => {
+        await absorbed(answer);
+        if (admissions.get(command.payload.chatId) === entry) {
+          admissions.delete(command.payload.chatId);
+        }
+      };
+      void release();
+    }
+    return answer;
+  };
+
+  const pendingInterrupts = async (runId: string): Promise<readonly InterruptRequest[]> => {
+    const chatId = runChats.get(runId);
+    if (chatId === undefined) {
+      return [];
+    }
+    const ledger = await ledgerOf(chatId);
+    const pending = ledger.runs[runId]?.pendingInterrupts ?? {};
+    if (Object.keys(pending).length === 0) {
+      return [];
+    }
+    const events = await readRows(chatId);
+    return events.flatMap((event): InterruptRequest[] =>
+      event.runId === runId &&
+      event.type === 'interrupt.recorded' &&
+      event.phase === 'requested' &&
+      pending[event.interruptId] !== undefined &&
+      isInterruptPayload(event.payload)
+        ? [
+            {
+              interruptId: event.interruptId,
+              runId,
+              kind: event.payload.kind,
+              prompt: event.payload.prompt,
+              ...(event.payload.context === undefined ? {} : { payload: event.payload.context }),
+            },
+          ]
+        : [],
+    );
+  };
+
   return {
-    admit: async (request) =>
-      claimed({ runId: request.runId, commandId: request.commandId, takes: lifecycleRow('admitted') }, async () => {
-        assertOpen();
-        const reservation = reserve(request.chatId, request.runId);
-        let executing = false;
-        try {
-          const log = await logFor(request.chatId);
-          const events = await log.read();
-          const ledger = await ledgerOf(log);
-          assertExecutable(request.chatId, ledger);
-          if (runOperationCode(chatRunState(ledger), 'admit') !== 'ok') {
-            /* The same refusal the in-memory check raises, from the same builder:
-             * a fresh worker's host has no run in memory, so this is the only
-             * branch a reload-then-send ever reaches, and a recovery that could
-             * not recognise it waited on nothing. */
-            throw chatRunLiveRefusal({
-              chatId: request.chatId,
-              runId: ledger.currentRunId,
-              state: chatRunState(ledger),
-            });
-          }
-          /* A *lifecycle* record is what makes this run id taken. Refusing on any
-           * record at all refused every turn whose id a settlement had already
-           * been written under, which is how one abandoned lease made a chat
-           * single-turn for the rest of its life. */
-          if (ledger.runs[request.runId]?.lifecycle !== undefined) {
-            throw runIdTakenRefusal({ runId: request.runId, held: 'has already been admitted' });
-          }
-          // A history with nothing in it has nothing to rewind, so a rewinding
-          // trigger *is* a first turn and runs as one. Gating on the log's
-          // *records* instead wedged the chat whose first turn was stopped inside
-          // the admission window: the log holds `admitted, cancelled`, the
-          // projection is empty, and `0 >= 0` refused every later retry and edit
-          // with `HISTORY_PREFIX_INVALID` forever.
-          const projection = request.trigger === 'submit' ? [] : reduceEventLog(events);
-          if (request.trigger !== 'submit' && projection.length > 0) {
-            const messages = projection;
-            /* The rewind point is the turn the caller names, and the prefix it
-             * keeps is this log's own.
-             *
-             * A caller's transcript ids are not these: one run is one assistant
-             * message on a page and any number of provider messages here, so a
-             * caller can only ever name the *user* message its turn belongs to —
-             * that id it minted and this log stored verbatim. Matching its
-             * `retainedMessageIds` against this projection refused every rewind
-             * whose retained prefix contained an assistant message, which is
-             * every turn after the first (F2).
-             *
-             * ponytail: `retainedMessageIds` stays on the start input for the
-             * caller that rewinds to a turn this log has never seen — the branch
-             * below. The cleanup is to drop it from the waist entirely and make
-             * the rewound turn the only thing a rewinding trigger carries. */
-            const rewindTo = messages.findIndex((message) => message.id === request.message.id);
-            if (
-              rewindTo === -1 &&
-              (request.retainedMessageIds.length > messages.length ||
-                request.retainedMessageIds.some((id, index) => messages[index]?.id !== id))
-            ) {
-              throw Object.assign(new Error('Retry/edit/regenerate must retain an unchanged strict history prefix.'), {
-                code: 'HISTORY_PREFIX_INVALID',
-              });
-            }
-            await append({
-              chatId: request.chatId,
-              log,
-              runId: request.runId,
-              events: [
-                {
-                  type: 'history.rewound',
-                  trigger: request.trigger,
-                  retainedMessageIds:
-                    rewindTo === -1
-                      ? request.retainedMessageIds
-                      : messages.slice(0, rewindTo).map((message) => message.id),
-                },
-              ],
-            });
-          }
-          const external = request.config?.agent;
-          if (external) {
-            /* Routed before `execute`, so an external turn never composes a Tau
-             * admission: it carries no Tau model, prompt or tool grant. */
-            /* The reservation is held until `runExternal` registers the run, and
-             * `finally` releases it: releasing it first let a second start be
-             * admitted before this one's `admitted` row landed (L2a D2).
-             *
-             * The chat's own session (VSC3), read on every trigger. A rewind keeps
-             * the selection and drops the session: the vendor thread holds a turn
-             * Tau has just retracted, so it is closed and a new one is opened. */
-            const remembered = externalSessionOf(events, external.id);
-            let state = remembered;
-            if (request.trigger !== 'submit') {
-              await closeExternalChat(request.chatId);
-              if (remembered) {
-                const { acpSessionId: _retired, ...carried } = remembered;
-                state = carried;
-              }
-            }
-            await runExternal({
-              chatId: request.chatId,
-              runId: request.runId,
-              agent: external,
-              message: request.message,
-              ...(state ? { state } : {}),
-              /* Defined by construction: `external` was read off it. */
-              config: request.config,
-            });
-            return reduceEventLog(await log.read());
-          }
-          executing = true;
-          return await execute({
-            chatId: request.chatId,
-            runId: request.runId,
-            log,
-            message: request.message,
-            reservation,
-            config: request.config,
-          });
-        } finally {
-          if (!executing) {
-            reservation.resolveReady(undefined);
-            reservation.resolveAdmitted(undefined);
-            releaseReservation(reservation);
-          }
+    command: execute,
+    admit: async (request) => {
+      assertOpen();
+      const commandId = request.commandId ?? `start:${request.runId}`;
+      if (request.config !== undefined) {
+        legacyConfigs.set(commandId, request.config);
+      }
+      const answer = await execute({
+        type: 'start',
+        commandId,
+        payload: {
+          chatId: request.chatId,
+          runId: request.runId,
+          message: request.message,
+          trigger: request.trigger,
+          ...(request.trigger === 'submit' ? {} : { retainedMessageIds: [...request.retainedMessageIds] }),
+        },
+      });
+      legacyConfigs.delete(commandId);
+      const refused = refusal(answer);
+      if (refused) {
+        throw refused;
+      }
+      const actor = registry.actorOf(request.chatId);
+      if (request.config?.agent === undefined) {
+        await slotReleased(request.chatId);
+      } else if (actor !== undefined) {
+        /* An external admission answers once its turn is running: the runner owns it from there. */
+        await waitFor(actor, (snapshot) => snapshot.status !== 'active' || !snapshot.matches('reserving')).catch(
+          () => undefined,
+        );
+      }
+      if (registry.isFenced(request.chatId)) {
+        throw coded('LEADERSHIP_LOST' satisfies RefusalCode, `This host no longer leads chat ${request.chatId}.`);
+      }
+      return messagesOf(request.chatId);
+    },
+    resume: async (chatId, key) => {
+      assertOpen();
+      const ledger = await ledgerOf(chatId);
+      const runId = ledger.currentRunId;
+      if (runId === undefined) {
+        if (ledger.position.cursor === 0) {
+          throw coded('NO_RUN_ADMITTED' satisfies RefusalCode, `Chat ${chatId} has no durable session log.`);
         }
-      }),
-    resume: async (chatId, key) =>
-      claimed({ chatId, commandId: key?.commandId, takes: lifecycleRow('running') }, async () => {
-        assertOpen();
-        const reservation = reserve(chatId);
-        let executing = false;
-        try {
-          const log = await logFor(chatId);
-          let events = await log.read();
-          if (events.length === 0) {
-            throw Object.assign(new Error(`Chat ${chatId} has no durable session log.`), {
-              code: 'NO_RUN_ADMITTED' satisfies RefusalCode,
-            });
-          }
-          const ledger = await ledgerOf(log);
-          assertExecutable(chatId, ledger);
-          const runId = ledger.currentRunId;
-          if (runId === undefined || runOperationCode(chatRunState(ledger), 'resume') !== 'ok') {
-            /* The ledger's `resume` row is every state but `none`, and `none` is
-             * exactly a chat whose log admitted no run. Nothing to continue: the
-             * caller gets the history as it stands rather than a fabricated
-             * lifecycle for a run that never ran. */
-            return reduceEventLog(events);
-          }
-          const entry = ledger.runs[runId];
-          const state = entry?.lifecycle;
-          if (entry === undefined || state === undefined) {
-            return reduceEventLog(events);
-          }
-          /* A settled attempt is closed (I1): it reopens only through the one predicate the fold and the gate use
-           * (I10), for a run the gateway refused resumably. A native pause waiting on a person continues once its
-           * request resolves. Without this the host re-ran a settled run and the page's second, differing settlement
-           * was refused `SETTLEMENT_CONFLICT` with no way forward. */
-          if (entry.appendState === 'settled' && state !== 'paused' && !reopens(entry, { state: 'running' })) {
-            return reduceEventLog(events);
-          }
-          if (terminalStates.has(state)) {
-            if (entry.appendState !== 'settled' && !isResumableRunFailure(entry.failure)) {
-              return reduceEventLog(events);
-            }
-            /* An external stop clears nothing: its trailing assistant message is
-             * the agent's own work, and the vendor session still holds the turn
-             * this resume continues. */
-            const cleared = externalTurnOf(events) ? undefined : failureMarkerClearance(reduceEventLog(events));
-            if (cleared) {
-              await append({ chatId, log, runId, events: [cleared] });
-              events = await log.read();
-            }
-          }
-          if (externalTurnOf(events)) {
-            /* An external run has no `AgentSession` to continue — its runner
-             * reconnects to the agent's own session from the remembered state.
-             * The reservation is held until that run registers (L2a D2). */
-            if (!externalByChat.has(chatId)) {
-              await resumeExternal(chatId);
-            }
-            return reduceEventLog(await log.read());
-          }
-          bindReservationRun(reservation, runId);
-
-          if (state === 'paused') {
-            const pendingKey = Object.values(entry.pendingInterrupts).at(-1);
-            const pending = events.find(
-              (event): event is InterruptRecordedEvent =>
-                event.type === 'interrupt.recorded' &&
-                event.leaderEpoch === pendingKey?.leaderEpoch &&
-                event.sequence === pendingKey.sequence,
-            );
-            let resolution: InterruptResolution | undefined = entry.lastResolution;
-            if (pending) {
-              if (!isInterruptPayload(pending.payload)) {
-                throw new Error(`Interrupt ${pending.interruptId} has no durable W5 request payload.`);
-              }
-              resolution = await waitForDurableResolution({
-                chatId,
-                log,
-                request: {
-                  interruptId: pending.interruptId,
-                  runId,
-                  kind: pending.payload.kind,
-                  prompt: pending.payload.prompt,
-                  payload: pending.payload.context,
-                },
-              });
-              events = await log.read();
-            }
-            if (resolution?.outcome !== 'approved') {
-              return reduceEventLog(events);
-            }
-          }
-
-          const history = reduceEventLog(events);
-          const missingOutputs = pendingToolCalls(history);
-          const disconnectedOutputs = missingOutputs.map(
-            (call): ProviderMessage => ({
-              id: createId(),
-              role: 'tool-output',
-              toolCallId: call.toolCallId,
-              toolName: call.toolName,
-              content: {
-                errorCode: 'CLIENT_DISCONNECTED',
-                message: 'The prior host stopped before this tool returned. Verify state before retrying.',
-              },
-              isError: true,
-              metadata: { timestamp: now().getTime() },
-            }),
-          );
-          const recoveryEvents: SessionEvent[] = [
-            { type: 'run.lifecycle', state: 'running' },
-            ...disconnectedOutputs.map((message): SessionEvent => ({ type: 'message.appended', message })),
-          ];
-          const tail = history.at(-1);
-          const reminder = await createInterruptRecoveryMessage({
-            messages: [...history, ...disconnectedOutputs],
-            timestamp: now().getTime(),
-          });
-          if (missingOutputs.length > 0 && !reminder) {
-            throw new Error('Interrupted tool history could not produce a recovery reminder.');
-          }
-          if (reminder) {
-            recoveryEvents.push({
-              type: 'message.appended',
-              message: reminder,
-            });
-          } else if (tail?.role === 'assistant') {
-            await append({ chatId, log, runId, events: [{ type: 'run.lifecycle', state: 'completed' }] });
-            return reduceEventLog(await log.read());
-          }
-          await append({ chatId, log, runId, events: recoveryEvents });
-          executing = true;
-          return await execute({ chatId, runId, log, reservation });
-        } finally {
-          if (!executing) {
-            reservation.resolveReady(undefined);
-            reservation.resolveAdmitted(undefined);
-            releaseReservation(reservation);
-          }
-        }
-      }),
+        return messagesOf(chatId);
+      }
+      const answer = await execute({
+        type: 'resume',
+        commandId: key?.commandId ?? createId(),
+        payload: { chatId, runId },
+      });
+      const refused = refusal(answer);
+      if (refused && answer.status === 'refused' && answer.code !== 'RESUME_UNAVAILABLE') {
+        throw refused;
+      }
+      if (answer.status === 'applied' && answer.effect === 'durable' && ledger.runs[runId]?.kind !== 'external') {
+        await slotReleased(chatId);
+      }
+      return messagesOf(chatId);
+    },
     waitForAdmission: async (chatId, runId) => {
       assertOpen();
-      /* An external run holds no reservation and no `AgentSession` — its
-       * admission is already durable by the time `runExternal` returns — but it
-       * is every bit as admitted, and a caller asking "is a run already under
-       * way here?" must not be told no and start a second one. */
-      const external = externalByChat.get(chatId);
-      if (external) {
-        return runId !== undefined && external.runId !== runId ? undefined : snapshot(chatId);
+      const pending = admissions.get(chatId);
+      if (pending !== undefined && (runId === undefined || pending.runId === runId)) {
+        const answer = await pending.answer;
+        return answer.status === 'refused' ? undefined : describeRun(chatId);
       }
-      /* Keyed by run when the caller named one: the chat-keyed reservation is
-       * "whatever this chat is admitting", which answered one command with
-       * another run's snapshot — the very run-id mismatch this wait exists to
-       * prevent — while the refused command's own rejection went unobserved. */
-      const reservation = runId === undefined ? reservationsByChat.get(chatId) : reservationsByRun.get(runId);
-      if (!reservation || reservation.chatId !== chatId) {
+      const actor = registry.actorOf(chatId);
+      const live = actor?.getSnapshot().hasTag('slotHeld') === true;
+      if (!live) {
         return undefined;
       }
-      const active = await reservation.admitted;
-      return active?.session.snapshot();
+      const described = await describeRun(chatId);
+      return runId === undefined || described?.runId === runId ? described : undefined;
     },
     markAbandoned: async (chatId) => {
       assertOpen();
-      const log = await logFor(chatId);
-      const ledger = await ledgerOf(log);
-      const runId = ledger.currentRunId;
-      const state = chatRunState(ledger);
-      if (
-        runId === undefined ||
-        state === 'none' ||
-        state === 'terminal' ||
-        /* Waiting on a person, not on a host: republish its interrupt. */
-        state === 'paused' ||
-        /* Ours: a takeover speaks only for a run whose driver is gone. */
-        activeByRun.has(runId) ||
-        reservationsByRun.has(runId) ||
-        externalByRun.has(runId)
-      ) {
-        return describeRun(chatId);
+      /* Opening the chat's incarnation abandons an orphan as its term's claim (RA-R9). */
+      const claim = await registry.claim(chatId);
+      if ('refused' in claim) {
+        throw refusal(claim.refused) ?? coded('HOST_FAULT', 'The chat could not be claimed.');
       }
-      await append({
-        chatId,
-        log,
-        runId,
-        events: [
-          {
-            type: 'run.lifecycle',
-            state: 'failed',
-            detail: {
-              code: 'RUN_ABANDONED' satisfies RefusalCode,
-              message: 'The host executing this run is gone. Resume the turn to continue it.',
-            },
-          },
-        ],
-      });
       return describeRun(chatId);
     },
-    interrupt: async ({ commandId, ...request }) =>
-      claimed({ runId: request.runId, commandId, takes: interruptRow(request.interruptId, 'requested') }, async () => {
-        assertOpen();
-        const active = await activeRunFor(request.runId);
-        if (!active) {
-          throw Object.assign(new Error(`Run ${request.runId} is not active.`), {
-            code: 'RUN_NOT_LIVE' satisfies RefusalCode,
-          });
-        }
-        active.session.abort();
-        await (active.completion ?? active.session.agent.waitForIdle());
-        const log = await logFor(active.chatId);
-        await append({
-          chatId: active.chatId,
-          log,
+    interrupt: async ({ commandId, ...request }) => {
+      assertOpen();
+      const chatId = chatOfRun(request.runId);
+      const answer = await execute({
+        type: 'interrupt',
+        commandId: commandId ?? createId(),
+        payload: {
+          chatId,
           runId: request.runId,
-          events: [
-            {
-              type: 'interrupt.recorded',
-              interruptId: request.interruptId,
-              phase: 'requested',
-              reason: request.prompt,
-              payload: {
-                kind: request.kind,
-                prompt: request.prompt,
-                ...(request.payload === undefined ? {} : { context: request.payload }),
-              },
-            },
-            { type: 'run.lifecycle', state: 'paused' },
-          ],
-        });
-        return waitForDurableResolution({ chatId: active.chatId, log, request });
-      }),
+          interruptId: request.interruptId,
+          kind: request.kind,
+          prompt: request.prompt,
+          ...(request.payload === undefined ? {} : { payload: request.payload }),
+        },
+      });
+      const refused = refusal(answer);
+      if (refused) {
+        throw refused;
+      }
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- waits row by row for the person's decision.
+        const ledger = await ledgerOf(chatId);
+        const resolution = ledger.runs[request.runId]?.lastResolution;
+        if (resolution?.interruptId === request.interruptId) {
+          return resolution;
+        }
+        if (closed) {
+          throw coded('HOST_CLOSED' satisfies RefusalCode, 'The Tau agent host is closed.');
+        }
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        await nextRow(chatId);
+      }
+    },
     resolveInterrupt: async ({ runId, commandId, ...resolution }) => {
-      const pending = await options.interruptPort.pending({ runId });
-      if (!pending.some((request) => request.interruptId === resolution.interruptId)) {
-        throw Object.assign(
-          new Error(
-            `Interrupt ${resolution.interruptId} is not pending on run ${runId}: it was already resolved, cancelled with the run, or never issued.`,
-          ),
-          { code: 'INTERRUPT_NOT_PENDING' satisfies RefusalCode },
+      assertOpen();
+      const chatId = runChats.get(runId);
+      if (chatId === undefined) {
+        throw coded(
+          'INTERRUPT_NOT_PENDING' satisfies RefusalCode,
+          `Interrupt ${resolution.interruptId} is not pending on run ${runId}: it was already resolved, cancelled with the run, or never issued.`,
         );
       }
-      await claimed({ runId, commandId, takes: interruptRow(resolution.interruptId, 'resolved') }, async (landed) => {
-        await options.interruptPort.resume(resolution);
-        // The pause's own path records the resolution; answer once it is durable (SC-R9).
-        const refused = await landed;
-        if (refused !== undefined) {
-          throw refused;
-        }
+      const answer = await execute({
+        type: 'resolve-interrupt',
+        commandId: commandId ?? createId(),
+        payload: {
+          chatId,
+          runId,
+          interruptId: resolution.interruptId,
+          outcome: resolution.outcome,
+          ...(resolution.optionId === undefined ? {} : { optionId: resolution.optionId }),
+          ...(resolution.payload === undefined ? {} : { payload: resolution.payload }),
+        },
       });
+      const refused = refusal(answer);
+      if (refused) {
+        throw refused;
+      }
     },
-    pendingInterrupts: async (runId) => options.interruptPort.pending({ runId }),
+    pendingInterrupts,
     steer: async ({ runId, message }) => {
       assertOpen();
-      if (externalByRun.has(runId)) {
-        /* No external protocol Tau speaks has a steering frame: a mid-turn
-         * nudge would have to become a second prompt, which is a different
-         * turn, not this one. A typed refusal beats a silent no-op. */
-        throw Object.assign(new Error('An external agent cannot be steered mid-turn.'), {
-          code: 'EXTERNAL_AGENT_UNSUPPORTED',
-        });
+      const answer = await execute({
+        type: 'steer',
+        commandId: createId(),
+        payload: { chatId: chatOfRun(runId), runId, message },
+      });
+      const refused = refusal(answer);
+      if (refused) {
+        throw refused;
       }
-      const active = await activeRunFor(runId);
-      if (!active) {
-        throw Object.assign(new Error(`Run ${runId} is not active.`), { code: 'RUN_NOT_LIVE' satisfies RefusalCode });
-      }
-      active.session.steer(message);
     },
-    cancel: async ({ runId, commandId }) =>
-      claimed({ runId, commandId, takes: lifecycleRow('cancelled') }, async () => {
-        assertOpen();
-        const external = externalByRun.get(runId);
-        if (external) {
-          external.controller.abort();
-          /* An outstanding approval outlives the abort: the runner's turn is
-           * suspended inside `approve`, and a protocol that asked the *client* for
-           * a decision cannot finish until the client gives one. Cancelling it is
-           * that answer — without it the wait below never returns (V8). */
-          await cancelPendingInterrupts(runId);
-          /* D12 keeps the four meanings apart: requesting cancellation is not
-           * observing settlement. A caller that reads the snapshot next must see
-           * the runner's terminal `cancelled`, exactly as the Tau branch below
-           * waits out its session. Detaching a client never comes through here. */
-          await external.completion;
-          return;
-        }
-        const active = await activeRunFor(runId);
-        if (!active) {
-          return;
-        }
-        active.session.abort();
-        /* No drain here, unlike the external branch: a Tau run is ended by
-         * `interrupt` *before* its durable pause begins, so an active Tau run never
-         * holds a pending interrupt — a paused chat is answered by
-         * `resolveInterrupt`, not by cancel (6-review F2, falsified). */
-        await (active.completion ?? active.session.agent.waitForIdle());
-      }),
+    cancel: async ({ runId, commandId }) => {
+      assertOpen();
+      const chatId = runChats.get(runId);
+      if (chatId === undefined) {
+        return;
+      }
+      const answer = await execute({ type: 'cancel', commandId: commandId ?? createId(), payload: { chatId, runId } });
+      if (answer.status === 'refused' && (answer.code === 'HOST_CLOSED' || answer.code === 'LEADERSHIP_LOST')) {
+        throw refusal(answer) ?? coded('HOST_FAULT', 'The cancel was refused.');
+      }
+    },
     snapshot,
     describeRun,
-    ledger: async (chatId) => ledgerOf(await logFor(chatId)),
+    ledger: async (chatId) => {
+      if (!closed) {
+        return ledgerOf(chatId);
+      }
+      /* A closed host still answers a final read from the ledger its close left, so its caller settles what the
+       * close drained; it never reopens the log (L2a D14). */
+      const final = stores.get(chatId)?.final;
+      if (final === undefined) {
+        assertOpen();
+      }
+      return final!;
+    },
     read: async ({ signal, ...request }) => {
+      assertOpen();
       const { chatId } = request;
       for (;;) {
-        if (fencedChats.has(chatId)) {
+        if (registry.isFenced(chatId)) {
           return { status: 'refused', chatId, reason: 'owner-fenced' };
         }
-        /* SC-R14: register the wake before reading, so a row appended while the read is in flight wakes it
-         * instead of being missed until the next append (W4.r1). */
-        const parked = readers.get(chatId) ?? new Set<() => void>();
-        readers.set(chatId, parked);
-        const woken = Promise.withResolvers<void>();
-        const wake = (): void => {
-          parked.delete(wake);
-          if (parked.size === 0 && readers.get(chatId) === parked) {
-            readers.delete(chatId);
-          }
-          signal?.removeEventListener('abort', wake);
-          woken.resolve();
-        };
-        parked.add(wake);
-        signal?.addEventListener('abort', wake, { once: true });
-        let answer: Awaited<ReturnType<DurableEventLog['readBatch']>>;
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- a long poll re-reads after each wake.
-          const log = await logFor(chatId);
-          // oxlint-disable-next-line no-await-in-loop -- the same re-read.
-          answer = await log.readBatch(request);
-        } catch (error) {
-          wake();
-          throw error;
-        }
+        /* SC-R14: register the wake before reading, so a row appended while the read is in flight is not missed. */
+        const woken = nextRow(chatId, signal);
+        // oxlint-disable-next-line no-await-in-loop -- a long poll re-reads after each wake.
+        const answer = await readBatchOf(chatId, request);
         if (answer.status === 'refused') {
-          wake();
           return { status: 'refused', chatId, reason: answer.reason, expected: answer.expected };
         }
         if (answer.events.length > 0 || closed || signal?.aborted) {
-          wake();
           return {
             status: 'batch',
             chatId,
@@ -2279,86 +1687,56 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             events: [...answer.events],
           };
         }
-        // Park until the next durable row, the reader's own abort, or the host closing.
         // oxlint-disable-next-line no-await-in-loop -- one park per empty read.
-        await woken.promise;
+        await woken;
       }
     },
     readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
-      const log = await logFor(chatId);
       // The version-1 wire's read: a cursor past the end is clamped here, and only here (CL-R7).
-      return v1Batch(await log.readBatch({ cursor, limit, maxBytes }));
+      return v1Batch(await readBatchOf(chatId, { cursor, limit, maxBytes }));
     },
     recordSettlement: async ({ chatId, runId, event }) => {
       assertOpen();
-      await append({ chatId, runId, log: await logFor(chatId), events: [event] });
+      if (registry.isFenced(chatId)) {
+        throw coded('LEADERSHIP_LOST' satisfies RefusalCode, `This host no longer leads chat ${chatId}.`);
+      }
+      /* A settlement is a fact about an ended attempt, not a command: it opens no incarnation, so it abandons
+       * nothing. Written under the live term, else the assumed one, else this host's own. */
+      let leaderEpoch = registry.termOf(chatId) ?? settlementTerms.get(chatId);
+      if (leaderEpoch === undefined) {
+        leaderEpoch = (options.createLeaderEpoch ?? createPortableId)();
+        settlementTerms.set(chatId, leaderEpoch);
+      }
+      const term = leaderEpoch;
+      const committed = await serial(chatId, async () => write(chatId, term, [{ runId, body: event }]));
+      storeOf(chatId).deliver?.({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: [] });
     },
     assumeLeadership: (chatId, generation) => {
       assertOpen();
-      const current = leaderEpochs.get(chatId);
-      if (current && current !== generation && (reservationsByChat.has(chatId) || activeByChat.has(chatId))) {
-        throw new Error(`Cannot replace the leader generation while chat ${chatId} is active.`);
-      }
-      fencedChats.delete(chatId);
-      leaderEpochs.set(chatId, generation);
+      registry.assume(chatId, String(generation));
     },
     relinquish: async (chatId) => {
-      fencedChats.add(chatId);
-      wakeReaders(chatId);
-      leaderEpochs.delete(chatId);
-      const active = activeByChat.get(chatId);
-      active?.session.abort();
-      if (active?.completion) {
-        await Promise.allSettled([active.completion]);
-      }
-      /* An external run is aborted exactly as a Tau run is: giving up leadership
-       * of a chat cannot leave an agent still writing into its tree. */
-      const external = externalByChat.get(chatId);
-      if (external) {
-        external.controller.abort();
-        await Promise.allSettled([externalByRun.get(external.runId)?.completion]);
-      }
-      await closeExternalChat(chatId);
-      await dropLog(chatId);
+      await registry.relinquish(chatId);
+      wake(storeOf(chatId));
+      await closeExternalChat(chatId).catch(() => undefined);
+      await serial(chatId, async () => dropLog(chatId));
     },
     evictChat: async (chatId) => {
       assertOpen();
-      const live = activeByChat.get(chatId) ?? externalByChat.get(chatId) ?? reservationsByChat.get(chatId);
-      if (live) {
-        throw chatRunLiveRefusal({ chatId, runId: live.runId, state: 'running' });
-      }
-      await dropLog(chatId);
+      await registry.evict(chatId);
+      await serial(chatId, async () => dropLog(chatId));
     },
     close: async () => {
       if (closed) {
         return;
       }
       closed = true;
-      for (const chatId of readers.keys()) {
-        wakeReaders(chatId);
+      await registry.close();
+      for (const store of stores.values()) {
+        wake(store);
       }
-      for (const reservation of reservationsByChat.values()) {
-        reservation.resolveReady(undefined);
-        reservation.resolveAdmitted(undefined);
-      }
-      reservationsByChat.clear();
-      reservationsByRun.clear();
-      const active = [...activeByRun.values()];
-      for (const { controller } of externalByRun.values()) {
-        controller.abort();
-      }
-      await Promise.allSettled(detached);
-      await Promise.allSettled([...externalChats.keys()].map(async (chatId) => closeExternalChat(chatId)));
-      for (const run of active) {
-        run.session.abort();
-      }
-      await Promise.allSettled(active.flatMap((run) => (run.completion ? [run.completion] : [])));
-      await Promise.all(
-        [...logs.values()].map(async (logPromise) => {
-          const log = await logPromise.catch(() => undefined);
-          await log?.close();
-        }),
-      );
+      await Promise.allSettled([...stores.keys()].map(async (chatId) => closeExternalChat(chatId)));
+      await Promise.allSettled([...stores.keys()].map(async (chatId) => serial(chatId, async () => dropLog(chatId))));
     },
   };
 };

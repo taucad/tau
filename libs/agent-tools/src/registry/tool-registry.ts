@@ -37,9 +37,13 @@ type ToolClientKey = 'kernelClient' | 'graphics' | 'images' | 'geospec' | 'skill
 
 /**
  * Every servable tool, its RPC, and the client that must be present for it.
- * Tools with no `needs` require only the filesystem, which is mandatory.
+ * Tools with no `needs` require only the filesystem, which is mandatory. A
+ * tool whose one call writes more than one path, or state outside the
+ * workspace, is `sequential`: its batch runs in call order (EQ6).
  */
-const rpcForTool: Readonly<Record<string, { readonly rpc: RpcName; readonly needs?: ToolClientKey }>> = {
+const rpcForTool: Readonly<
+  Record<string, { readonly rpc: RpcName; readonly needs?: ToolClientKey; readonly sequential?: true }>
+> = {
   [toolName.readFile]: { rpc: rpcName.readFile },
   [toolName.editFile]: { rpc: rpcName.editFile },
   [toolName.listDirectory]: { rpc: rpcName.listDirectory },
@@ -51,15 +55,18 @@ const rpcForTool: Readonly<Record<string, { readonly rpc: RpcName; readonly need
     rpc: rpcName.getKernelResult,
     needs: 'kernelClient',
   },
-  [toolName.exportGeometry]: { rpc: rpcName.exportGeometry, needs: 'graphics' },
+  /* Writes the export and its artifact record outside the workspace. */
+  [toolName.exportGeometry]: { rpc: rpcName.exportGeometry, needs: 'graphics', sequential: true },
   [toolName.screenshot]: { rpc: rpcName.captureImages, needs: 'images' },
   [toolName.testModel]: { rpc: rpcName.runGeoSpecTests, needs: 'geospec' },
   [toolName.useSkill]: { rpc: rpcName.resolveSkill, needs: 'skillResolver' },
   [toolName.revisions]: { rpc: rpcName.readRevisions, needs: 'revisions' },
   [toolName.getParameters]: { rpc: rpcName.getParameters, needs: 'parameters' },
+  /* Rewrites the source and its parameter record together. */
   [toolName.applyParameterOperation]: {
     rpc: rpcName.applyParameterOperation,
     needs: 'parameters',
+    sequential: true,
   },
 };
 
@@ -210,6 +217,7 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     description: toolDescriptions[entry.toolName as keyof typeof toolDescriptions],
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- draft-7 JSON Schema is JSON by construction.
     inputSchema: toProviderToolJsonSchema(entry.schema) as JsonObject,
+    ...(rpcForTool[entry.toolName]?.sequential === true ? { executionMode: 'sequential' } : {}),
   }));
 
   /* The digest this registry last wrote per rooted path, for the life of the

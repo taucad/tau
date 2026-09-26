@@ -212,6 +212,11 @@ export type CompactionTrace = {
   readonly summary?: 'generated' | 'placeholder' | undefined;
   readonly overBudget?: boolean | undefined;
   readonly discardedOverflowError?: string | undefined;
+  /**
+   * The fixed per-call overhead the pass measured from its anchor (the last retained usage-bearing assistant): later
+   * admissions carry it past the summary until a newer assistant re-measures it (RA-S10).
+   */
+  readonly anchor?: { readonly messageId: string; readonly tokens: number } | undefined;
 };
 
 /** Replaces one durable provider envelope without moving its message. @public */
@@ -428,6 +433,8 @@ export type ModelInvocationPreparedEvent = LogEventBase & {
   readonly attemptId: string;
   readonly purpose: 'generation' | 'compaction';
   readonly modelId: string;
+  /** The opaque account that funded the call; only that account may resolve it (RV5-F2). */
+  readonly principal?: string | undefined;
 };
 
 /** Binds a prepared gateway attempt to the API-owned financial operation. @public */

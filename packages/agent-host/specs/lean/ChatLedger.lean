@@ -435,10 +435,10 @@ def rests (en : Entry) : Bool :=
 
 def reopenable (en : Entry) : Bool := attemptEnded en && rests en
 
-/-- `reopens(entry, row)`: THE reopen predicate (I10, CL-R9); `attempt` 0 is a legacy row's absent attempt. -/
+/-- `reopens(entry, row)`: THE reopen predicate (I10, CL-R9); `attempt` 0 is a legacy row's absent attempt. Settled or
+not: every reopening row opens the next attempt (`ChatRunSlot.tla`'s `Att(T)+1`; W7.r1 finding 1). -/
 def reopens (en : Entry) (state : Life) (attempt : Nat) : Bool :=
-  decide (state = .running) && (decide (attempt = 0) || decide (attempt = en.attempt + 1)) &&
-    decide (en.append = .settled) && reopenable en
+  decide (state = .running) && (decide (attempt = 0) || decide (attempt = en.attempt + 1)) && reopenable en
 
 def settledFor (en : Entry) (a : Nat) : Bool := en.settlements.any (fun s => decide (s.attempt = a))
 

@@ -820,21 +820,38 @@ theorem t3_host (F : File) (run c : Nat) (p : Settlement)
 /-! ## T4: one reopen predicate for the fold, the gate and the stamp -/
 
 theorem reopens_def (en : Entry) (s : Life) (x : Nat) :
-    reopens en s x = true ↔ s = .running ∧ (x = 0 ∨ x = en.attempt + 1) ∧ en.append = .settled ∧ reopenable en = true := by
+    reopens en s x = true ↔ s = .running ∧ (x = 0 ∨ x = en.attempt + 1) ∧ reopenable en = true := by
   unfold reopens; simp [and_assoc]
 
-/-- **T4** (the gate reopens by the predicate): the lifecycle condition is `reopenable` exactly when a `running` row
-reopens the run — the S5 D2 gap (a `running` row reopening a run the table held `settled`) is closed. -/
-theorem t4_reopen_iff_legal (en : Entry) : condition en = .reopenable ↔ reopens en .running 0 = true := by
+/-- **T4** (the gate reopens by the predicate): a run the table holds `reopenable` reopens on `running` — the S5 D2
+gap (a `running` row reopening a run the table held `settled`) is closed. -/
+theorem t4_reopenable_reopens (en : Entry) (h : condition en = .reopenable) : reopens en .running 0 = true := by
   rw [reopens_def]
-  unfold condition reopenable
-  cases hl : en.life with
-  | none => simp [attemptEnded, hl]
-  | some l =>
-    by_cases hs : en.append = .settled
-    · simp only [hs, Option.isNone_some, Bool.false_eq_true, ite_false, ne_eq, not_true_eq_false]
-      cases ha : attemptEnded en <;> cases hr : rests en <;> simp
-    · simp [hs]; split <;> simp
+  refine ⟨rfl, Or.inl rfl, ?_⟩
+  unfold condition at h
+  by_cases h1 : en.life.isNone = true
+  · simp [h1] at h
+  · by_cases h2 : en.append = .settled
+    · by_cases h3 : attemptEnded en = true
+      · by_cases h4 : reopenable en = true
+        · exact h4
+        · simp [h1, h2, h3, h4] at h
+      · simp [h1, h2, h3] at h
+    · cases ha : attemptEnded en <;> simp [h1, h2, ha] at h
+
+/-- **T4** (the gate admits every reopening row): whenever a `running` row reopens the run, the table admits it. -/
+theorem t4_reopens_legal (en : Entry) (h : reopens en .running 0 = true) :
+    lifecycleTable (condition en) .running = .ok := by
+  rw [reopens_def] at h
+  have hr : reopenable en = true := h.2.2
+  have he : attemptEnded en = true := by
+    unfold reopenable at hr; simp only [Bool.and_eq_true] at hr; exact hr.1
+  have h1 : en.life.isNone = false := by
+    unfold attemptEnded at he; cases hl : en.life <;> simp_all
+  unfold condition
+  by_cases h2 : en.append = .settled
+  · simp [h1, h2, he, hr, lifecycleTable]
+  · simp [h1, h2, he, lifecycleTable]
 
 /-- The table admits `running` on a run exactly when it is not `settled` or it reopens. -/
 theorem t4_running_legal (en : Entry) :
@@ -867,8 +884,8 @@ theorem reopens_stamped (en : Entry) (s : Life) :
     · rw [reopens_def] at h2
       have : ¬ (reopens en s 0 = true) := by simp [h]
       rw [reopens_def] at this
-      rcases h2 with ⟨h2a, h2b | h2b, h2c, h2d⟩
-      · exact absurd ⟨h2a, Or.inl rfl, h2c, h2d⟩ this
+      rcases h2 with ⟨h2a, h2b | h2b, h2c⟩
+      · exact absurd ⟨h2a, Or.inl rfl, h2c⟩ this
       · omega
   · simp only [ite_true]
     rw [reopens_def] at h ⊢
@@ -889,23 +906,23 @@ theorem t4_stamp_fold_agree (L : Ledger) (term run arg ms : Nat) (ha : lifeOf ar
   rw [hr, hg, hat, reopens_stamped] at this
   rw [this, hat]
 
-/-- **T4** (a paused attempt continues): on a native pause not yet settled, `running` is legal and does not reopen,
-so the paused attempt continues. -/
-theorem t4_paused_continues (en : Entry) (hp : en.life = some .paused) (hs : en.append ≠ .settled) :
-    lifecycleTable (condition en) .running = .ok ∧ reopens en .running 0 = false := by
-  constructor
-  · simp [condition, hp, hs, attemptEnded, lifecycleTable]
-  · cases h : reopens en .running 0
-    · rfl
-    · rw [reopens_def] at h; exact absurd h.2.2.1 hs
+/-- **T4** (a pause awaiting a person continues): on a native pause with a pending request, `running` does not
+reopen, so the paused attempt continues. -/
+theorem t4_paused_continues (en : Entry) (hp : en.life = some .paused) (hq : en.pending ≠ []) :
+    reopens en .running 0 = false := by
+  cases h : reopens en .running 0
+  · rfl
+  · rw [reopens_def] at h
+    have := h.2.2
+    simp [reopenable, rests, hp, hq] at this
 
-/-- **T4** (a settled pause reopens): a settled native pause with no pending request is `reopenable`: `running` is
-legal and opens the next attempt (the paused disjunct is live, unlike S5's `reopenable_paused_is_dead`). -/
-theorem t4_paused_reopens (en : Entry) (hp : en.life = some .paused) (hs : en.append = .settled)
-    (hq : en.pending = []) : lifecycleTable (condition en) .running = .ok ∧ reopens en .running 0 = true := by
+/-- **T4** (a resolved pause reopens): a native pause with no pending request reopens on `running`, settled or not,
+and the table admits the row (the paused disjunct is live, unlike S5's `reopenable_paused_is_dead`). -/
+theorem t4_paused_reopens (en : Entry) (hp : en.life = some .paused) (hq : en.pending = []) :
+    lifecycleTable (condition en) .running = .ok ∧ reopens en .running 0 = true := by
   have : reopens en .running 0 = true := by
-    rw [reopens_def]; simp [hs, reopenable, attemptEnded, rests, hp, hq]
-  exact ⟨by rw [(t4_reopen_iff_legal en).2 this]; rfl, this⟩
+    rw [reopens_def]; simp [reopenable, attemptEnded, rests, hp, hq]
+  exact ⟨t4_reopens_legal en this, this⟩
 
 /-! ## T5: a reader detects every clamp, refusal and stale batch (foldReadAnswer) -/
 

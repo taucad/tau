@@ -241,6 +241,7 @@ export const createAgentTools = (options: CreateAgentToolsOptions): HostAgentToo
     label: definition.name,
     description: definition.description,
     parameters: definition.inputSchema,
+    ...(definition.executionMode === undefined ? {} : { executionMode: definition.executionMode }),
     prepareArguments: (input) => normalizeToolInput(definition.name, input),
     // eslint-disable-next-line max-params -- Pi's AgentTool contract supplies these four invocation values.
     execute: async (toolCallId, input, signal, onUpdate): Promise<AgentToolResult<HostToolExecutionDetails>> => {

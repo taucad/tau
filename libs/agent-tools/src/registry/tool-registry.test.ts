@@ -153,6 +153,22 @@ describe('createChatToolRegistry listing', () => {
     );
   });
 
+  /* EQ6 (W7 RA-S9): a call that writes more than one path, or outside the
+   * workspace, runs its batch in call order; every other tool stays parallel. */
+  it('should declare sequential execution only where one call spans more than one path', () => {
+    const registry = build({
+      graphics: { exportGeometry: vi.fn() },
+      parameters: { getParameters: vi.fn(), applyParameterOperation: vi.fn() },
+    });
+
+    const sequential = registry
+      .list()
+      .filter((tool) => tool.executionMode === 'sequential')
+      .map((tool) => tool.name);
+
+    expect(sequential.toSorted()).toStrictEqual(['apply_parameter_operation', 'export_geometry']);
+  });
+
   /* Review a1 R15: the read-only history tool is listed exactly where a client
    * for it is attached — a disk host today, the browser when W11 wires its
    * worker — and silently absent elsewhere, which is the right degradation and

@@ -127,10 +127,18 @@ globalThis.addEventListener('message', async () => {
     let recoveryLookups = 0;
     let providerFetches = 0;
     const transport: ModelTransport = {
-      usesBillingAttempt: () => true,
-      lookupAttempt: async () => {
-        recoveryLookups++;
-        return { operationId: 'browser-recovery-operation', status: 'terminal' };
+      funding: {
+        type: 'funded',
+        usesBillingAttempt: () => true,
+        resolveInvocation: async () => {
+          recoveryLookups++;
+          return {
+            status: 'terminal',
+            operationId: 'browser-recovery-operation',
+            outcome: 'settled',
+            chargedCreditAtoms: '1',
+          };
+        },
       },
       async *stream() {
         providerFetches++;

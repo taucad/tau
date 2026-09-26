@@ -74,7 +74,8 @@ import ChatLedgerProofs
 #print axioms ChatLedger.attemptOf_self
 #print axioms ChatLedger.t3_host
 #print axioms ChatLedger.reopens_def
-#print axioms ChatLedger.t4_reopen_iff_legal
+#print axioms ChatLedger.t4_reopenable_reopens
+#print axioms ChatLedger.t4_reopens_legal
 #print axioms ChatLedger.t4_running_legal
 #print axioms ChatLedger.t4_fold_attempt
 #print axioms ChatLedger.reopens_stamped

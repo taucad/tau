@@ -54,6 +54,7 @@ export const scriptedParityResponses: readonly ScriptedParityResponse[] = [
 
 /** Deterministic W3 transport used by package, API-parity, and worker tests. */
 export class ScriptedParityModelTransport implements ModelTransport {
+  public readonly funding = { type: 'unfunded' } as const;
   public readonly requests: ModelStreamRequest[] = [];
   readonly #responses: readonly ScriptedParityResponse[];
   #cursor = 0;

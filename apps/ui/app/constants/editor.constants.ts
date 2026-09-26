@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { createCameraView } from '@taucad/camera';
 import type { CameraView } from '@taucad/camera';
+import { maxSectionCuts, sectionAxisIndices, sectionPlaneAxes } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionCutValues, SectionVector } from '#components/geometry/graphics/section-cuts.js';
 
 // ============================================================================
 // Panel Constants
@@ -91,10 +93,8 @@ export type GraphicsViewSettings = {
   cameraFovAngle: number;
   /** Canonical user-authored camera view; derived viewport, bounds, and clipping are intentionally omitted. */
   cameraView?: PersistedCameraView;
-  /** Durable cut through this entry's geometry. Absent means no cut. Added in schema v11. */
+  /** Durable cuts through this entry's geometry. Absent means none. Added in schema v11, a cut list since v12. */
   sectionView?: PersistedSectionView;
-  /** Durable preferences for how any cut is shown. Added in schema v11. */
-  sectionDisplay?: PersistedSectionDisplay;
   /** Persisted pinned measurements -- optional so legacy data deserializes cleanly */
   pinnedMeasurements?: PinnedMeasurement[];
   /**
@@ -115,27 +115,20 @@ export type GraphicsViewSettings = {
    * `9` = adds perspective magnification to the canonical camera view.
    * `10` = names the physical frame of cameras and measurements.
    * `11` = moves `renderTimeout` to `EditorState.unitSettings` (per file) and adds the section view.
+   * `12` = replaces the one section plane with a list of cuts and drops the section display preferences.
    */
-  schemaVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  schemaVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 };
 
-/** Entry-scoped cut: cleared on file switch, not inherited by a new pane. */
+/** Entry-scoped cuts: cleared on file switch, not inherited by a new pane. `active` holds only with a cut. */
 export type PersistedSectionView = {
   active: boolean;
-  plane?: 'xy' | 'xz' | 'yz';
-  /** Metres, in the `tau:root` frame. */
-  pivot: [number, number, number];
-  /** Radians. */
-  rotation: [number, number, number];
-  direction: 1 | -1;
+  /** In order; at most `maxSectionCuts`. Cut ids are not persisted: they are made anew at every load. */
+  cuts: PersistedSectionCut[];
 };
 
-/** Pane-scoped preferences about how any cut is shown: kept on file switch and inherited. */
-export type PersistedSectionDisplay = {
-  clipLines: boolean;
-  clipMesh: boolean;
-  planeName: 'cartesian' | 'face';
-};
+/** One cut: the model's cut without its id, in metres in the `tau:root` frame. */
+export type PersistedSectionCut = SectionCutValues;
 
 /** Durable settings of one entry path, keyed by that path in `EditorState.unitSettings`. */
 export type PersistedUnitSettings = {
@@ -160,7 +153,6 @@ export type GraphicsOwnedSettings = Pick<
   | 'graphicsBackend'
   | 'pinnedMeasurements'
   | 'sectionView'
-  | 'sectionDisplay'
 >;
 
 /** Durable keys whose live owner is the view's camera actor, held by its `ViewCameraSession`. */
@@ -204,7 +196,21 @@ export const componentDisplayStateSchema = z.object({
   unitsById: z.record(z.string(), componentDisplayUnitSchema),
 });
 
-const sectionViewSchema = z.object({
+const sectionCutSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('plane'), plane: z.enum(['xy', 'xz', 'yz']), offset: z.number(), isFlipped: z.boolean() }),
+  z.object({
+    kind: z.literal('revolution'),
+    axis: z.enum(['x', 'y', 'z']),
+    origin: vector3Schema,
+    start: z.number(),
+    sweep: z.number(),
+  }),
+]);
+
+const sectionViewSchema = z.object({ active: z.boolean(), cuts: z.array(sectionCutSchema).max(maxSectionCuts) });
+
+/** The schema v11 single cut, read only to migrate it. */
+const legacySectionViewSchema = z.object({
   active: z.boolean(),
   plane: z.enum(['xy', 'xz', 'yz']).optional(),
   pivot: vector3Schema,
@@ -212,11 +218,7 @@ const sectionViewSchema = z.object({
   direction: z.union([z.literal(1), z.literal(-1)]),
 });
 
-const sectionDisplaySchema = z.object({
-  clipLines: z.boolean(),
-  clipMesh: z.boolean(),
-  planeName: z.enum(['cartesian', 'face']),
-});
+const persistedSectionViewSchema = z.union([sectionViewSchema, legacySectionViewSchema]);
 
 export const graphicsViewSettingsSchema = z.object({
   enableSurfaces: z.boolean(),
@@ -230,8 +232,8 @@ export const graphicsViewSettingsSchema = z.object({
   cameraFovAngle: z.number(),
   /** Milliseconds. Records at v10 and earlier carried it here; v11 hoists it into `unitSettings`. */
   renderTimeout: z.number().optional(),
-  sectionView: sectionViewSchema.optional(),
-  sectionDisplay: sectionDisplaySchema.optional(),
+  // Parsed on its own, like the camera: one bad cut drops the section view, not the whole record.
+  sectionView: z.unknown().optional(),
   pinnedMeasurements: z.array(pinnedMeasurementSchema).optional(),
   graphicsBackend: z.enum(['auto', 'webgl', 'webgpu']).optional(),
   componentDisplay: componentDisplayStateSchema.optional(),
@@ -249,6 +251,7 @@ export const graphicsViewSettingsSchema = z.object({
    * `9` = adds perspective magnification to the canonical camera view.
    * `10` = names physical frames.
    * `11` = per-file render timeout and durable section view.
+   * `12` = section cut list.
    */
   schemaVersion: z
     .union([
@@ -263,9 +266,54 @@ export const graphicsViewSettingsSchema = z.object({
       z.literal(9),
       z.literal(10),
       z.literal(11),
+      z.literal(12),
     ])
     .optional(),
 });
+
+/** `vector` turned about X, then Y, then Z by `rotation` (radians): how v11 turned a plane's normal. */
+const rotateLegacyNormal = ([x, y, z]: SectionVector, [rx, ry, rz]: SectionVector): SectionVector => {
+  const y1 = y * Math.cos(rx) - z * Math.sin(rx);
+  const z1 = y * Math.sin(rx) + z * Math.cos(rx);
+  const x2 = x * Math.cos(ry) + z1 * Math.sin(ry);
+  const z2 = -x * Math.sin(ry) + z1 * Math.cos(ry);
+  return [x2 * Math.cos(rz) - y1 * Math.sin(rz), x2 * Math.sin(rz) + y1 * Math.cos(rz), z2];
+};
+
+/**
+ * The section view at v12, or `undefined` when it is absent or invalid.
+ *
+ * A v11 plane becomes one plane cut through its pivot that removes the side v11 removed: the side its rotated +axis
+ * normal, times `direction`, points to. The rotation itself is dropped, so the cut is flipped when that normal has a
+ * negative component along the plane's axis. A v11 view with no plane has no cut and is inactive.
+ */
+const parseSectionView = (raw: unknown): PersistedSectionView | undefined => {
+  const result = persistedSectionViewSchema.safeParse(raw);
+  if (!result.success) {
+    return undefined;
+  }
+  if ('cuts' in result.data) {
+    return result.data;
+  }
+  const { active, plane, pivot, rotation, direction } = result.data;
+  if (plane === undefined) {
+    return { active: false, cuts: [] };
+  }
+  const axisIndex = sectionAxisIndices[sectionPlaneAxes[plane]];
+  const normal: [number, number, number] = [0, 0, 0];
+  normal[axisIndex] = 1;
+  return {
+    active,
+    cuts: [
+      {
+        kind: 'plane',
+        plane,
+        offset: pivot[axisIndex],
+        isFlipped: direction * rotateLegacyNormal(normal, rotation)[axisIndex] < 0,
+      },
+    ],
+  };
+};
 
 const parsePersistedCameraView = (
   raw: unknown,
@@ -352,7 +400,7 @@ export function parseLegacyModelComponentDisplay(raw: unknown): PersistedModelCo
  *
  * Backward-compat migration: persisted settings without a schema version are
  * interpreted as v1 (seconds) and multiplied by 1000. Every valid version is
- * returned as v10. Versions before v8 stored world-space lengths in millimetres.
+ * returned as v12. Versions before v8 stored world-space lengths in millimetres.
  */
 export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   const result = graphicsViewSettingsSchema.safeParse(raw);
@@ -367,7 +415,12 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     lengthScale,
     schemaVersion: parsed.schemaVersion,
   });
-  const { componentDisplay: _legacyComponentDisplay, renderTimeout: _hoistedRenderTimeout, ...settings } = parsed;
+  const {
+    componentDisplay: _legacyComponentDisplay,
+    renderTimeout: _hoistedRenderTimeout,
+    sectionView: _persistedSectionView,
+    ...settings
+  } = parsed;
   const pinnedMeasurements = parsed.pinnedMeasurements?.map((measurement) => ({
     ...measurement,
     frameId: measurement.frameId ?? 'tau:root',
@@ -375,13 +428,15 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     endPoint: measurement.endPoint.map((coordinate) => coordinate * lengthScale) as [number, number, number],
     distance: measurement.distance * lengthScale,
   }));
+  const sectionView = parseSectionView(parsed.sectionView);
 
   return {
     ...settings,
     cameraView,
+    ...(sectionView === undefined ? {} : { sectionView }),
     pinnedMeasurements,
     graphicsBackend: 'webgl',
-    schemaVersion: 11,
+    schemaVersion: 12,
   };
 }
 
@@ -415,7 +470,7 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   upDirection: 'z',
   cameraFovAngle: 60,
   graphicsBackend: 'webgl',
-  schemaVersion: 11,
+  schemaVersion: 12,
 };
 
 // ============================================================================

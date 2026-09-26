@@ -222,8 +222,7 @@ describe('projectMachine', () => {
         settings: {
           ...defaultGraphicsSettings,
           enableGrid: false,
-          sectionView: { active: true, plane: 'xz', pivot: [1, 2, 3], rotation: [0, 0.5, 0], direction: 1 },
-          sectionDisplay: { clipLines: false, clipMesh: false, planeName: 'cartesian' },
+          sectionView: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: true }] },
         },
       });
 
@@ -232,14 +231,11 @@ describe('projectMachine', () => {
       expect(graphics!.getSnapshot().context).toMatchObject({
         enableGrid: false,
         isSectionViewActive: true,
-        selectedSectionViewId: 'xz',
-        sectionViewPivot: [1, 2, 3],
-        sectionViewRotation: [0, 0.5, 0],
-        sectionViewDirection: 1,
-        enableClippingLines: false,
-        enableClippingMesh: false,
-        planeName: 'cartesian',
+        sectionCuts: [
+          { id: expect.stringMatching(/^cut_/u) as unknown, kind: 'plane', plane: 'xz', offset: 2, isFlipped: true },
+        ],
       });
+      expect(graphics!.getSnapshot().matches({ operational: { section: 'on' } })).toBe(true);
       actor.stop();
     });
 

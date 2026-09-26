@@ -15,21 +15,18 @@ type ChatInterfaceGraphicsProps = {
  */
 type OperationalMode = 'ready' | 'section-view' | 'measure' | 'unknown';
 
+/* Section and Measure can run together; the panel shows the tool Escape closes first. */
 function useOperationalMode(): OperationalMode {
   return useGraphicsSelector((state) => {
-    if (state.matches({ operational: 'ready' })) {
-      return 'ready';
-    }
-
-    if (state.matches({ operational: 'section-view' })) {
-      return 'section-view';
-    }
-
-    if (state.matches({ operational: 'measure' })) {
+    if (state.context.isMeasureActive) {
       return 'measure';
     }
 
-    return 'unknown';
+    if (state.context.isSectionViewActive) {
+      return 'section-view';
+    }
+
+    return 'ready';
   });
 }
 

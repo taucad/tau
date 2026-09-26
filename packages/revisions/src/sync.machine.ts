@@ -531,18 +531,32 @@ const owedPushes = (context: SyncMachineContext): readonly SyncQueueEntry[] =>
   );
 
 /**
- * The record refs a retry narrows its offer to, or `undefined` for "both sets".
- * A queued history ref is the synthetic marker for a thrown full-set push,
- * which may have failed before it reached any records, so it cannot narrow.
+ * Whether a ref is in the history set rather than the record set (policy rule 10).
+ *
+ * @param ref - A fully-qualified ref name.
+ * @returns `true` for `refs/heads/*` and `refs/tags/*`.
+ */
+const isHistoryRef = (ref: string): boolean => ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/');
+
+/**
+ * The refs a retry narrows its offer to, or `undefined` for "both sets".
+ *
+ * Only an owed history ref other than this branch narrows — a conflict line
+ * travels alone, because the diverged branch it decides would sink the atomic
+ * set. An owed *record* ref never narrows: offering it alone left every new
+ * revision of this branch unpushed for as long as the remote refused it, and a
+ * record's refusal never blocks history (rule 10, W13c). A queued history ref
+ * is the synthetic marker for a thrown full-set push, so it cannot narrow.
  *
  * @param context - Current context.
- * @returns The narrowed ref list, or `undefined` when nothing is owed.
+ * @returns The narrowed ref list, or `undefined` when both sets are offered.
  */
 const narrowedOffer = (context: SyncMachineContext): readonly string[] | undefined => {
   const owed = owedPushes(context);
-  return owed.length > 0 &&
+  const history = owed.filter((entry) => isHistoryRef(entry.ref));
+  return history.length > 0 &&
     context.failure !== 'none' &&
-    owed.every((entry) => entry.ref !== historyRefOf(context.branch))
+    history.every((entry) => entry.ref !== historyRefOf(context.branch))
     ? owed.map((entry) => entry.ref)
     : undefined;
 };
@@ -553,7 +567,9 @@ const narrowedOffer = (context: SyncMachineContext): readonly string[] | undefin
  * A transport failure reports no refs at all (W11b R5), so the queue entry has
  * to be synthesised — and synthesising `refs/heads/<branch>` for a retry that
  * only offered one chat ref would record a branch nobody offered as
- * unacknowledged (review 2 R9).
+ * unacknowledged (review 2 R9). A full offer records the branch even when the
+ * remote holds its head: records have no entry of their own until a push
+ * reports them, so that entry is what makes the retry happen at all.
  *
  * @param context - Current context.
  * @returns Every ref this push put on the wire.

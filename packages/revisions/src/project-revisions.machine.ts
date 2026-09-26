@@ -1000,6 +1000,10 @@ const projectRevisionsMachineDefinition = setup({
              so the scheduler is addressed as any actor. */
           const scheduler: AnyActorRef | undefined = children.sync;
           enq.sendTo(scheduler, event);
+          /* A mint on the selection is a new operation *Undo* could reverse (D15). */
+          if (event.checkoutId === context.selectedCheckoutId) {
+            enq.sendTo('restore', { type: 'lineMinted' });
+          }
           enq.emit(event);
           return {};
         },
@@ -1635,6 +1639,7 @@ const selectRestoreFacet = (
       dirty: false,
       revisionNumber: undefined,
       undoable: false,
+      canUndo: false,
     };
   }
   const undoTarget = restore.context.restoredRevisionId;
@@ -1648,6 +1653,7 @@ const selectRestoreFacet = (
      * head: a reload, another device's restore and a save on top all read
      * false, so no surface offers an Undo the machine would refuse (M1). */
     undoable: undoTarget !== undefined && undoTarget === headRevisionId,
+    canUndo: restore.context.canUndo,
   };
 };
 

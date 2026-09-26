@@ -69,7 +69,9 @@ type Harness = Readonly<{
   clock: ManualClock;
 }>;
 
-const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWindow?: number }>): Harness => {
+const start = (
+  options?: Readonly<{ headTreeId?: string; branch?: string; idleWindow?: number; unborn?: boolean }>,
+): Harness => {
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
   const parent = createFakeParent();
@@ -90,8 +92,8 @@ const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWi
       input: {
         checkoutId: 'checkout-1',
         branch: options?.branch ?? 'main',
-        headRevisionId: 'rev-1',
-        headTreeId: options?.headTreeId ?? headTreeId,
+        headRevisionId: options?.unborn === true ? undefined : 'rev-1',
+        headTreeId: options?.unborn === true ? undefined : (options?.headTreeId ?? headTreeId),
         ...(options?.idleWindow === undefined ? {} : { idleWindow: options.idleWindow }),
         parentRef: parent.ref,
       },
@@ -211,6 +213,32 @@ describe('checkoutMachine', () => {
     expect(types(emitted)).toContain('nothingToSave');
     expect(types(parent.events)).toContain('nothingToSave');
     expect(actor.getSnapshot().matches('clean')).toBe(true);
+
+    actor.stop();
+  });
+
+  /*
+   * W13c: an unborn line's cut before the open pull lands — offline at open, or
+   * a close while the pull runs — minted Tau's scaffold as a root revision, and
+   * the pull then merged the remote in as unrelated history. The host answers
+   * that its files hold no work, and the machine mints nothing.
+   */
+  it('mints nothing on an unborn line whose cut holds no work of its own', async () => {
+    const harness = start({ unborn: true });
+    const { actor, promises, emitted } = harness;
+
+    actor.send({ type: 'changed', paths: ['tau.json'], generation: 1 });
+    actor.send({ type: 'cut', trigger: 'close', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-1', nothingToSave: true } });
+    await flush();
+
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
+    expect(emitted.filter((event) => event.type === 'nothingToSave')).toEqual([
+      { type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'close' },
+    ]);
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    expect(actor.getSnapshot().context.headRevisionId).toBeUndefined();
 
     actor.stop();
   });

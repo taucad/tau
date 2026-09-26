@@ -29,6 +29,12 @@ import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
  * 11  answers addressed to a turn, another trigger, another checkout or an earlier cut are not
  *     this verb's (N2)
  * 12  a restore applies to whatever checkout the root selected (F10)
+ * 13  `undoOperation` pre-cuts, plans the log's inverse passing over its own pre-cut, never
+ *     asks, mints a cut that is not a restore row and says *Undid Rev N* (D15)
+ * 14  an *Undo* the plan refuses — nothing left, or an overlapping later revision — names its
+ *     code and applies nothing (D15, I12)
+ * 15  `canUndo` is the log's answer: read at idle, again after a mint on the line and after
+ *     every verb, and false when the read fails (D15)
  * --  start and stop, serializable snapshot, one exported machine value
  */
 
@@ -489,5 +495,99 @@ describe('restoreMachine', () => {
       typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([restoreMachine]);
+  });
+});
+
+describe('restoreMachine — Undo (D15)', () => {
+  const startWithLog = (...answers: readonly boolean[]): Harness => {
+    const promises = createFakePromiseActors();
+    promises.script('readUndoable', ...answers.map((output) => ({ output })));
+    const parent = createFakeParent();
+    const clock = createManualClock();
+    const actor = createActor(
+      restoreMachine.provide({
+        actors: {
+          computePlan: promises.actor('computePlan'),
+          applyPlan: promises.actor('applyPlan'),
+          readUndoable: promises.actor('readUndoable'),
+        },
+      }),
+      { clock, input: { projectId: 'project-1', checkoutId: 'checkout-1', parentRef: parent.ref } },
+    );
+    const emitted = recordEmitted(actor);
+    actor.start();
+    actor.send({ type: 'selectCheckout', checkoutId: 'checkout-1', branch: 'main' });
+    return { actor, promises, parent, emitted, clock };
+  };
+
+  it('plans the inverse past its own pre-cut, never asks, and mints an undo row rather than a restore row', async () => {
+    const harness = startWithLog(true, true, false);
+    const { actor, promises, parent, emitted } = harness;
+
+    actor.send({ type: 'undoOperation' });
+    mintBefore(harness, 'revisionMinted');
+
+    expect(promises.inputsFor('computePlan')).toEqual([{ checkoutId: 'checkout-1', undo: true, skip: 'rev-5' }]);
+    promises.settle('computePlan', { output: { ...plan, revisionNumber: 4, removedPathCount: 2 } });
+    await flush();
+    expect(actor.getSnapshot().matches('applying')).toBe(true);
+    promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-2' } });
+    await flush();
+
+    const cut = cutsAsked(parent).at(-1);
+    expect(cut).toMatchObject({ type: 'cut', trigger: 'restore', checkoutId: 'checkout-1' });
+    expect(cut).not.toHaveProperty('restoredFrom');
+    actor.send({ type: 'revisionMinted', ...ours(harness), revisionId: 'rev-7' });
+    await flush();
+
+    expect(emitted.find((event) => event.type === 'toast.undone')).toEqual({ type: 'toast.undone', revisionNumber: 4 });
+    expect(types(emitted)).not.toContain('toast.restored');
+    /* An undo row is not a restore D2 could undo. */
+    expect(actor.getSnapshot().context.restoredRevisionId).toBeUndefined();
+    expect(actor.getSnapshot().context.canUndo).toBe(false);
+
+    actor.stop();
+  });
+
+  it.each([
+    ['NOTHING_TO_UNDO', 'Nothing you did on this branch is left to undo.', {}],
+    [
+      'UNDO_CONFLICT',
+      'A later revision changed the same lines, so Rev 4 can’t be undone. Restore an earlier revision instead.',
+      { revisionNumber: 4 },
+    ],
+    ['UNDO_PAST_MERGE', 'Your last change on this branch was a merge. Restore an earlier revision instead.', {}],
+  ] as const)('names a %s refusal and applies nothing', async (code, message, named) => {
+    const harness = startWithLog(true, true);
+    const { actor, promises, emitted } = harness;
+
+    actor.send({ type: 'undoOperation' });
+    mintBefore(harness);
+    promises.settle('computePlan', { error: Object.assign(new Error(message), { code, ...named }) });
+    await flush();
+
+    expect(emitted.at(-1)).toEqual({ type: 'toast.error', message, code, ...named });
+    expect(promises.inputsFor('applyPlan')).toEqual([]);
+    expect(actor.getSnapshot().matches('idle')).toBe(true);
+
+    actor.stop();
+  });
+
+  it('answers canUndo from the log, reads again when the line mints, and reads false when the log cannot be read', async () => {
+    const harness = startWithLog(false, false, true);
+    const { actor, promises } = harness;
+    await flush();
+
+    expect(actor.getSnapshot().context.canUndo).toBe(false);
+    actor.send({ type: 'lineMinted' });
+    await flush();
+    expect(actor.getSnapshot().context.canUndo).toBe(true);
+
+    promises.script('readUndoable', { error: new Error('unreadable') });
+    actor.send({ type: 'lineMinted' });
+    await flush();
+    expect(actor.getSnapshot().context.canUndo).toBe(false);
+
+    actor.stop();
   });
 });

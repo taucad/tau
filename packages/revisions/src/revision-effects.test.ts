@@ -25,15 +25,17 @@ import { classify, unlistedPathClassification } from '@taucad/filesystem/path-re
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
+import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { ConflictRecord, RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+import { createOpsLog, opsRefName } from '#ops-ref.js';
 import { selectRevisionStatus } from '#project-revisions.machine.js';
 import {
-  createProjectRevisionsActor,
-  createRevisionActors,
+  createProjectRevisionsActor as createProjectRevisionsActorUntracked,
+  createRevisionActors as createRevisionActorsUntracked,
   describeTurnRelease,
   revisionTreeId,
   admissionMilliseconds,
@@ -48,9 +50,25 @@ import { turnCutSettlementMilliseconds } from '#turn.machine.js';
 
 const roots: string[] = [];
 
+/* A fixture's effects may still be committing the operation log (B1): wait, then remove. */
+const settles: Array<() => Promise<void>> = [];
+
 afterEach(async () => {
+  await Promise.all(settles.splice(0).map(async (settle) => settle()));
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
+
+const createRevisionActors: typeof createRevisionActorsUntracked = (options) => {
+  const actors = createRevisionActorsUntracked(options);
+  settles.push(actors.settled);
+  return actors;
+};
+
+const createProjectRevisionsActor: typeof createProjectRevisionsActorUntracked = (options) => {
+  const created = createProjectRevisionsActorUntracked(options);
+  settles.push(created.settled);
+  return created;
+};
 
 type Fixture = {
   readonly root: string;
@@ -141,6 +159,20 @@ const fixture = async (
     ...extra,
   });
   return { root, filesystem, port, actors };
+};
+
+/** The record device (R1) the conflict-line fixtures record as. */
+const recorderDevice = '00000000-0000-4000-8000-00000000000a';
+
+/**
+ * Name the record device a host's `host` form records under, before any effect
+ * reads `.git/ops-devices.json`.
+ *
+ * @param filesystem - The records filesystem `.git/` lives in.
+ * @param device - The record device id.
+ */
+const ownRecordDevice = async (filesystem: RootedFileSystem, device: string): Promise<void> => {
+  await filesystem.writeFile('.git/ops-devices.json', JSON.stringify({ version: 1, devices: { host: device } }));
 };
 
 /** Run one injected promise actor the way its machine would. */
@@ -1182,6 +1214,49 @@ for (const actorSet of actorSets) {
       expect(await edited.filesystem.readFile('tau.json', 'utf8')).toBe('{"id":"project-1","name":"mine"}\n');
     }, 30_000);
 
+    /* W13c: the same rule for a cut taken before that pull lands (a close, a hidden tab). */
+    it('cuts nothing to save on an unborn checkout that holds only what its open brings', async () => {
+      const unbornCut = async (files: Readonly<Record<string, string>>, fetched = true) => {
+        const context = await fixture(files, (filesystem) => filesystem, { actorSet: actorSet.name });
+        await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+        await context.port.setHead('main');
+        await context.port.setRemote({ name: 'tau', url: 'https://tau.test/v1/git/project-1.git' });
+        const remoteReceipt = await context.port.writeRevision({
+          parents: [],
+          tree: new ImmutableRevisionTree([
+            ['tau.json', '{"id":"project-1"}\n'],
+            ['main.scad', 'cube(1);\n'],
+          ]),
+          provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 8, 13) },
+          summary: { generated: 'Remote' },
+        });
+        if (fetched) {
+          await context.port.updateRef({
+            name: 'refs/remotes/tau/main',
+            expectedHead: undefined,
+            head: revisionId(remoteReceipt.commitId),
+          });
+        }
+        return run<{ treeId: string; cutId: string; nothingToSave?: boolean }>(context.actors.checkout.cut, {
+          checkoutId: 'live',
+          trigger: 'close',
+        });
+      };
+
+      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n' })).resolves.toMatchObject({ nothingToSave: true });
+      /* Work the remote does not hold is still work: the cut is an ordinary one. */
+      await expect(unbornCut({ 'tau.json': '{"id":"project-1","name":"mine"}\n' })).resolves.not.toHaveProperty(
+        'nothingToSave',
+      );
+      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n', 'notes.md': 'mine\n' })).resolves.not.toHaveProperty(
+        'nothingToSave',
+      );
+      /* No fetched head, no pull to merge a root into: an unborn line's first cut is an ordinary one. */
+      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n' }, false)).resolves.not.toHaveProperty(
+        'nothingToSave',
+      );
+    }, 30_000);
+
     it('preserves dirty and leased files, and rejects protected target paths before writing', async () => {
       const context = await synchronized();
       await context.filesystem.writeFile('main.ts', 'unsaved\n');
@@ -1703,6 +1778,174 @@ describe('independent sync record failures', () => {
     expect(result.refs).toContainEqual(expect.objectContaining({ name: 'refs/tau/chats/chat-two', status: 'updated' }));
   }, 30_000);
 
+  /** A project on `main` holding two chats, and actors over a port whose `push` the row answers. */
+  const twoChatProject = async (
+    answer: (input: Parameters<RevisionPort['push']>[0]) => Promise<Awaited<ReturnType<RevisionPort['push']>>>,
+    wrap: (port: RevisionPort) => Partial<RevisionPort> = () => ({}),
+    chatIds: readonly string[] = ['chat-one', 'chat-two'],
+  ) => {
+    const context = await fixture({
+      'main.ts': 'base\n',
+      ...Object.fromEntries(
+        chatIds.flatMap((id) => [
+          [`.tau/chats/${id}/chat.json`, `{"name":"${id}"}`],
+          [`.tau/chats/${id}/events.jsonl`, `${id}\n`],
+        ]),
+      ),
+    });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const tree = await captureRevisionTree(context.filesystem, { exclude: (path) => !classify(path).versioned });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree,
+      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      summary: { generated: 'Main' },
+    });
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+    await context.port.setHead('main');
+    const pushes: Array<Readonly<{ refs: readonly string[]; atomic: boolean }>> = [];
+    const port: RevisionPort = {
+      ...context.port,
+      push: async (input) => {
+        pushes.push({ refs: input.refs.map((ref) => ref.name), atomic: input.atomic === true });
+        return answer(input);
+      },
+      ...wrap(context.port),
+    };
+    const actors = createRevisionActors({
+      port,
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => context.filesystem,
+      deviceId: () => 'device-one',
+    });
+    return { ...context, pushes, actors };
+  };
+
+  /* W13c: N chats were N pushes, each its own advertisement; the record set is one non-atomic push now. */
+  it('offers every record ref in one non-atomic push beside the atomic history push', async () => {
+    const { pushes, actors, port } = await twoChatProject(async (input) => ({
+      refs: await Promise.all(
+        input.refs.map(
+          async (ref) => ({ name: ref.name, status: 'updated', head: await port.readRef(ref.name) }) as const,
+        ),
+      ),
+    }));
+
+    const result = await run<{ refs: ReadonlyArray<{ name: string; status: string }> }>(actors.sync.push, {
+      remote: 'tau',
+      branch: 'main',
+      leases: {},
+    });
+    expect(pushes).toEqual([
+      { refs: ['refs/heads/main'], atomic: true },
+      { refs: ['refs/tau/chats/chat-one', 'refs/tau/chats/chat-two'], atomic: false },
+    ]);
+    expect(result.refs.map((entry) => [entry.name, entry.status])).toEqual([
+      ['refs/heads/main', 'updated'],
+      ['refs/tau/chats/chat-one', 'updated'],
+      ['refs/tau/chats/chat-two', 'updated'],
+    ]);
+  }, 30_000);
+
+  /* The Tau Hosted Remote's `pre-receive` refuses a push whole: one refused chat must fail only itself. */
+  it('re-offers each record alone when the record push was refused whole', async () => {
+    const refusal = 'Tau: refused refs/tau/chats/chat-one — it rewrites events/x.jsonl';
+    const { pushes, actors, port } = await twoChatProject(
+      async (input) => ({
+        refs: await Promise.all(
+          input.refs.map(async (ref) =>
+            input.refs.length > 1 && ref.name.startsWith('refs/tau/')
+              ? ({ name: ref.name, status: 'rejected', head: undefined, reason: 'pre-receive hook declined' } as const)
+              : ref.name === 'refs/tau/chats/chat-one'
+                ? ({ name: ref.name, status: 'rejected', head: undefined, reason: refusal } as const)
+                : ({ name: ref.name, status: 'updated', head: await port.readRef(ref.name) } as const),
+          ),
+        ),
+      }),
+      () => ({ listRemoteRefs: async () => [] }),
+    );
+
+    const result = await run<{ refs: ReadonlyArray<{ name: string; status: string; reason?: string }> }>(
+      actors.sync.push,
+      { remote: 'tau', branch: 'main', leases: {} },
+    );
+    expect(pushes.map((push) => push.refs)).toEqual([
+      ['refs/heads/main'],
+      ['refs/tau/chats/chat-one', 'refs/tau/chats/chat-two'],
+      ['refs/tau/chats/chat-one'],
+      ['refs/tau/chats/chat-two'],
+    ]);
+    expect(result.refs).toContainEqual(
+      expect.objectContaining({ name: 'refs/tau/chats/chat-one', status: 'rejected', reason: refusal }),
+    );
+    expect(result.refs).toContainEqual(expect.objectContaining({ name: 'refs/tau/chats/chat-two', status: 'updated' }));
+  }, 30_000);
+
+  /*
+   * W13c chat-ref C (b): a replay that finds nothing new offered the unchanged
+   * local chain again, and the remote refused it on every sync. The remote
+   * already holds every byte, so this device takes its head and pushes nothing.
+   */
+  it('pushes nothing after a replay that has nothing new, and follows the fetched head', async () => {
+    const chatRef = 'refs/tau/chats/chat-one';
+    const tracking = 'refs/remotes/tau/tau/chats/chat-one';
+    const remote: { head?: RevisionId } = {};
+    const { pushes, actors, port, filesystem } = await twoChatProject(
+      async (input) => ({
+        refs: await Promise.all(
+          input.refs.map(async (ref) =>
+            ref.name === chatRef
+              ? ({
+                  name: ref.name,
+                  status: 'rejected',
+                  head: undefined,
+                  reason: 'Tau: refused — it does not fast-forward',
+                } as const)
+              : ({ name: ref.name, status: 'updated', head: await port.readRef(ref.name) } as const),
+          ),
+        ),
+      }),
+      (inner) => ({
+        listRemoteRefs: async () => [{ name: chatRef, head: remote.head! }],
+        fetch: async () => {
+          await inner.updateRef({ name: tracking, expectedHead: undefined, head: remote.head! });
+          return { refs: [{ name: tracking, head: remote.head! }] };
+        },
+      }),
+      ['chat-one'],
+    );
+    /* The same bytes on a chain the remote holds and this device never wrote,
+     * under the record device this host names its segment by (EQ10(a)). */
+    await ownRecordDevice(filesystem, recorderDevice);
+    const own = await writeChatRef({
+      port,
+      filesystem,
+      deviceId: recorderDevice,
+      chatId: 'chat-one',
+      syncChats: true,
+      actorId: 'ada',
+      now: 1,
+    });
+    const remoteReceipt = await port.writeRevision({
+      parents: [],
+      tree: (await port.readTree(own.head!))!,
+      largeObjects: false,
+      provenance: { source: 'user', actorId: 'grace', createdAt: 2 },
+      summary: { generated: 'Chat chat-one' },
+    });
+    remote.head = revisionId(remoteReceipt.commitId);
+    const remoteHead = remote.head;
+
+    const result = await run<{ refs: ReadonlyArray<{ name: string; status: string; head?: string }> }>(
+      actors.sync.push,
+      { remote: 'tau', branch: 'main', leases: { [chatRef]: remoteHead } },
+    );
+    expect(pushes.filter((push) => push.refs.includes(chatRef))).toHaveLength(1);
+    expect(result.refs).toContainEqual({ name: chatRef, status: 'upToDate', head: remoteHead });
+    expect(await port.readRef(chatRef)).toBe(remoteHead);
+  }, 30_000);
+
   /* Lane E2's two-client row 3 found this on the wire: every refusal class
    * rendered *Sync now*, because a whole-push throw was flattened here into
    * per-ref `rejected` outcomes, and the scheduler read those as a ref refusal.
@@ -1845,6 +2088,122 @@ describe('independent sync record failures', () => {
     );
   }, 30_000);
 
+  /* RV-W7 #11: two hosts sharing a record device (a copied `.git`) would each owe the other's refusal forever. */
+  it('moves a log the remote refuses as a rewrite to a new record device, and offers it there', async () => {
+    const { pushes, actors, port, filesystem } = await twoChatProject(
+      async (input) => ({
+        refs: await Promise.all(
+          input.refs.map(async (ref) =>
+            ref.name === refused
+              ? ({
+                  name: ref.name,
+                  status: 'rejected',
+                  head: undefined,
+                  reason: `Tau: refused ${ref.name} — it does not fast-forward 1234; fetch and merge first.`,
+                } as const)
+              : ({ name: ref.name, status: 'updated', head: await port.readRef(ref.name) } as const),
+          ),
+        ),
+      }),
+      () => ({}),
+      [],
+    );
+    /* This host's log for its unattributed form, written before the push. */
+    const log = createOpsLog({ port, recordsFileSystem: async () => filesystem, now: () => 1, actorId: 'tau-host' });
+    await log.append(undefined, { v: 1, ref: 'refs/heads/main', to: 'r1', kind: 'save', actor: 'tau-host', at: 1 });
+    const refused = opsRefName(await log.deviceFor(undefined));
+
+    const result = await run<{ refs: ReadonlyArray<{ name: string; status: string }> }>(actors.sync.push, {
+      remote: 'tau',
+      branch: 'main',
+      leases: {},
+    });
+
+    const stored = JSON.parse(await filesystem.readFile('.git/ops-devices.json', 'utf8')) as {
+      devices: Record<string, string>;
+      retired: string[];
+    };
+    const successor = opsRefName(stored.devices['host'] ?? '');
+    expect(successor).not.toBe(refused);
+    expect(stored.retired).toEqual([refused.slice('refs/tau/ops/'.length)]);
+    expect(pushes.at(-1)).toEqual({ refs: [successor], atomic: false });
+    expect(result.refs).toContainEqual(expect.objectContaining({ name: successor, status: 'updated' }));
+    expect(result.refs.map((entry) => entry.name)).not.toContain(refused);
+  }, 30_000);
+
+  /* RV-W7 #5: a record conflict still wrote the other device's log, and the page has to hear of it. */
+  it('announces a chat whose record conflicted, because its segments were still written', async () => {
+    const context = await fixture({ '.tau/chats/talk/chat.json': '{"name":"Local name"}' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['chat.json', '{"name":"Remote name"}'],
+        ['events/device-a.jsonl', '{"sequence":0}\n'],
+      ]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Chat talk' },
+    });
+    const fetchedRef = { name: 'refs/remotes/tau/tau/chats/talk', head: revisionId(receipt.commitId) };
+    await context.port.updateRef({ name: fetchedRef.name, expectedHead: undefined, head: fetchedRef.head });
+    const projected: string[][] = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/tau/chats/talk', head: fetchedRef.head }],
+        fetch: async () => ({ refs: [fetchedRef] }),
+      },
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => context.filesystem,
+      deviceId: () => 'device-b',
+      onChatsProjected: (chatIds) => projected.push([...chatIds]),
+    });
+
+    const result = await run<Readonly<{ records?: ReadonlyArray<Readonly<{ name: string; status: string }>> }>>(
+      actors.sync.fetch,
+      { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 },
+    );
+
+    expect(result.records).toContainEqual(expect.objectContaining({ name: 'refs/tau/chats/talk', status: 'rejected' }));
+    expect(await context.filesystem.readFile('.tau/chats/talk/events/device-a.jsonl', 'utf8')).toBe('{"sequence":0}\n');
+    expect(projected).toEqual([['talk']]);
+  }, 30_000);
+
+  /* RV-W7 #1: operation logs are pushed, never pulled. */
+  it('never asks the remote for another device’s operation log', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [
+          { name: 'refs/heads/main', head },
+          { name: 'refs/tau/ops/0f0e0d0c-0b0a-4908-8706-050403020100', head },
+        ],
+        fetch: async (input) => {
+          requested.push(input.refs);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+
+    expect(requested).toEqual([['refs/heads/main']]);
+  }, 30_000);
+
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {
     const context = await fixture({
       'tau.json': '{"syncLargeExports":true}\n',
@@ -1933,6 +2292,7 @@ for (const actorSet of actorSets) {
       const { port, filesystem } = context;
       await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
       await port.setHead('main');
+      await ownRecordDevice(filesystem, recorderDevice);
       /* The store generates its own ignore file, and it is versioned like any
        other authored path — so every hand-written tree here carries it, or the
        live checkout reads as dirty against its own head. */
@@ -1971,8 +2331,8 @@ for (const actorSet of actorSets) {
       return { ...context, base, ours, theirs, write };
     };
 
-    /** This device's conflict line for `main` (D14). */
-    const line = 'conflicts/main/device-a';
+    /** This device's conflict line for `main` (D14), named by its record device (R1). */
+    const line = `conflicts/main/${recorderDevice}`;
 
     const listed = async (context: Fixture): Promise<readonly ConflictRecord[]> => {
       const { conflicts } = await run<{ conflicts: readonly ConflictRecord[] }>(
@@ -2256,6 +2616,18 @@ for (const actorSet of actorSets) {
         expect(await listed(context)).toStrictEqual([]);
       }, 30_000);
 
+      /* RV-W7 #7: a decision made here is a merge, and Undo never reaches past it. */
+      it('refuses to undo past the decision this host just landed, by name', async () => {
+        const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
+        const revision = await conflicted(context);
+        await keep(context, { revisionId: revision, path: 'a.txt', side: 'mine' });
+        await run(context.actors.resolution.finishMerge, { projectId: 'project-1', revisionId: revision });
+
+        await expect(run(context.actors.restore.computePlan, { checkoutId: 'live', undo: true })).rejects.toMatchObject(
+          { code: 'UNDO_PAST_MERGE' },
+        );
+      }, 30_000);
+
       it('refuses an edited choice whose sides moved since, and a decision whose line is gone (RV-W6 F9, F11)', async () => {
         const context = await twoLines({ ours: 'mine\n', theirs: 'theirs\n' });
         const revision = await conflicted(context);
@@ -2308,6 +2680,7 @@ for (const actorSet of actorSets) {
         });
         const revision = await conflicted(context);
         /* Another device over the same store: the line is foreign to it, and its `main` is the recorder's. */
+        await ownRecordDevice(context.filesystem, '00000000-0000-4000-8000-00000000000b');
         const second = createRevisionActors({
           port: context.port,
           projectId: 'project-1',

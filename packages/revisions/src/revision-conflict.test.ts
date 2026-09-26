@@ -12,30 +12,27 @@ const validRef = (name: string): boolean => {
   }
 };
 
-describe('conflict lines (D14, RV-W6 F7)', () => {
-  it('keeps a plain id readable and parses its own line back', () => {
-    expect(conflictLineOf('main', 'device-a')).toBe('conflicts/main/device-a');
-    expect(conflictLineOf('main', 'host:user')).toBe('conflicts/main/host_3auser');
-    expect(parseConflictLine('refs/heads/conflicts/main/host_3auser', 'host:user')).toStrictEqual({
+describe('conflict lines (D14, RV-W6 F7, R1)', () => {
+  const recorder = '8c2f4a1e-3b5d-4e6f-9a7b-0c1d2e3f4a5b';
+
+  it('names the line by its record device and parses its own line back', () => {
+    expect(conflictLineOf('main', recorder)).toBe(`conflicts/main/${recorder}`);
+    expect(parseConflictLine(`refs/heads/conflicts/main/${recorder}`, new Set([recorder]))).toStrictEqual({
       into: 'main',
       foreign: false,
     });
-    expect(parseConflictLine('conflicts/main/host_3auser', 'other:user')?.foreign).toBe(true);
+    expect(parseConflictLine(`conflicts/feature/x/${recorder}`, new Set([recorder]))?.into).toBe('feature/x');
   });
 
-  it('gives ids that differ only in punctuation or case different lines', () => {
-    expect(conflictLineOf('main', 'a-b:c')).not.toBe(conflictLineOf('main', 'a:b-c'));
-    expect(conflictLineOf('main', 'a_3ab')).not.toBe(conflictLineOf('main', 'a:b'));
-    expect(conflictLineOf('main', 'Laptop')).not.toBe(conflictLineOf('main', 'laptop'));
-    expect(conflictLineOf('main', 'Laptop').toLowerCase()).toBe(conflictLineOf('main', 'Laptop'));
+  it('reads a line as foreign unless one of this host’s record devices recorded it', () => {
+    expect(parseConflictLine(`conflicts/main/${recorder}`, new Set(['another']))?.foreign).toBe(true);
+    expect(parseConflictLine(`conflicts/main/${recorder}`, undefined)?.foreign).toBe(true);
+    expect(parseConflictLine('feature', new Set([recorder]))).toBeUndefined();
   });
 
-  it.each(['..', 'a..b', 'x.lock', '.hidden', 'trailing.', 'space here', 'a/b', 'ü', ''])(
-    'always yields a valid ref for %j',
-    (deviceId) => {
-      expect(validRef(conflictLineOf('main', deviceId))).toBe(true);
-    },
-  );
+  it('yields a valid ref for a record device', () => {
+    expect(validRef(conflictLineOf('main', recorder))).toBe(true);
+  });
 
   it('reserves conflicts and everything under it', () => {
     expect(isReservedBranchName('conflicts')).toBe(true);

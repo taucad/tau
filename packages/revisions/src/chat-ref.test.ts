@@ -376,6 +376,163 @@ describe.each([
     expect(await readChatFile(target, 'chat.json', id)).toBe('{"name":"Local edit"}');
   });
 
+  /* CH1: two devices that each only sent a turn diverge in `updatedAt` and
+   * `recencyAt`, which must merge, and must never withhold the other log. */
+  const twoSidedRecord = async (
+    id: string,
+    records: Readonly<Record<'base' | 'incoming' | 'local', Record<string, unknown>>>,
+  ): Promise<Readonly<{ target: FileSystemProvider; project: () => ReturnType<typeof projectChats> }>> => {
+    const base = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['chat.json', JSON.stringify(records.base)]]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Base record' },
+    });
+    const incoming = await harness.port.writeRevision({
+      parents: [revisionId(base.commitId)],
+      tree: new ImmutableRevisionTree([
+        ['chat.json', JSON.stringify(records.incoming)],
+        ['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n'],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      summary: { generated: 'Incoming record' },
+    });
+    const target = await createMemoryProvider();
+    await target.writeFile(`${chatRecordsPath(id)}/chat.json`, JSON.stringify(records.local));
+    return {
+      target,
+      project: async () =>
+        projectChats({
+          port: harness.port,
+          filesystem: target,
+          deviceId: 'device-b',
+          refs: [{ name: chatRefName(id), head: revisionId(incoming.commitId) }],
+        }),
+    };
+  };
+
+  it.runIf(enabled)('merges timestamps both devices moved and writes the other device’s log (CH1 a)', async () => {
+    const id = `timestamps_${_engine}`;
+    const { target, project } = await twoSidedRecord(id, {
+      base: { id, name: 'Chat', createdAt: 1, updatedAt: 10, recencyAt: 10 },
+      incoming: { id, name: 'Chat', createdAt: 1, updatedAt: 20, recencyAt: 15 },
+      local: { id, name: 'Chat', createdAt: 1, updatedAt: 12, recencyAt: 18 },
+    });
+
+    await expect(project()).resolves.toEqual([id]);
+
+    expect(await readChatFile(target, 'events/device-a.jsonl', id)).toBe('{"leaderEpoch":"a","sequence":0}\n');
+    expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toStrictEqual({
+      id,
+      name: 'Chat',
+      createdAt: 1,
+      updatedAt: 20,
+      recencyAt: 18,
+    });
+  });
+
+  it.runIf(enabled)(
+    'writes the other device’s log even when both renamed the chat, and reports the rename (CH1 b)',
+    async () => {
+      const id = `renamed_${_engine}`;
+      const { target, project } = await twoSidedRecord(id, {
+        base: { id, name: 'Chat', updatedAt: 10 },
+        incoming: { id, name: 'Remote name', updatedAt: 20 },
+        local: { id, name: 'Local name', updatedAt: 12 },
+      });
+
+      await expect(project()).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+
+      expect(await readChatFile(target, 'events/device-a.jsonl', id)).toBe('{"leaderEpoch":"a","sequence":0}\n');
+      expect(await readChatFile(target, 'chat.json', id)).toBe(
+        JSON.stringify({ id, name: 'Local name', updatedAt: 12 }),
+      );
+    },
+  );
+
+  /* RV-W7 #3: `checkoutId` and `error` are this device's alone. */
+  it.runIf(enabled)('keeps this device’s checkoutId when only the other side changed it', async () => {
+    const id = `checkout_${_engine}`;
+    const { target, project } = await twoSidedRecord(id, {
+      base: { id, name: 'Chat', checkoutId: 'mine' },
+      incoming: { id, name: 'Chat', checkoutId: 'theirs', error: 'their failure' },
+      local: { id, name: 'Chat', checkoutId: 'mine' },
+    });
+
+    await project();
+
+    expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toStrictEqual({
+      id,
+      name: 'Chat',
+      checkoutId: 'mine',
+    });
+  });
+
+  it.runIf(enabled)('never records checkoutId or error into the chat ref', async () => {
+    const id = `untravelled_${_engine}`;
+    await writeChatFiles(
+      harness.checkout,
+      { 'chat.json': JSON.stringify({ id, name: 'Chat', checkoutId: 'mine', error: 'failed here' }) },
+      id,
+    );
+
+    const written = await writeChatRef({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      chatId: id,
+      syncChats: true,
+      actorId,
+      now,
+    });
+
+    const tree = await harness.port.readTree(written.head!);
+    expect(JSON.parse(decoder.decode(tree?.get('chat.json')))).toStrictEqual({ id, name: 'Chat' });
+  });
+
+  /* RV-W7 #4: whichever device merges, the record it writes is the same bytes. */
+  it.runIf(enabled)('writes the same merged record whichever device merges', async () => {
+    const base = { id: 'x', name: 'Chat', createdAt: 1, updatedAt: 10, recencyAt: 10, activeKernel: { b: 1, a: 2 } };
+    const a = { ...base, updatedAt: 20, recencyAt: 12, activeKernel: { a: 2, b: 1 }, zeta: true };
+    const b = { ...base, updatedAt: 15, recencyAt: 18, pinned: true };
+    const merged = async (id: string, local: Record<string, unknown>, incoming: Record<string, unknown>) => {
+      const { target, project } = await twoSidedRecord(id, {
+        base: { ...base, id },
+        incoming: { ...incoming, id },
+        local: { ...local, id },
+      });
+      await project();
+      return readChatFile(target, 'chat.json', id);
+    };
+
+    const ab = await merged(`symmetric_${_engine}`, a, b);
+    const ba = await merged(`symmetric_${_engine}`, b, a);
+
+    expect(ab).toBeDefined();
+    expect(ab).toBe(ba);
+    expect(JSON.parse(ab ?? '{}')).toMatchObject({ updatedAt: 20, recencyAt: 18, zeta: true, pinned: true });
+  });
+
+  /* EQ10 ruling: a chat continued across a sign-in holds the same lines under
+   * both forms' segments — accepted, since the person continued the same chat. */
+  it.runIf(enabled)('keeps the earlier form’s segment beside the new one after a sign-in', async () => {
+    const id = `signin_${_engine}`;
+    await writeChatFiles(harness.checkout, { 'chat.json': '{"name":"Chat"}', 'events.jsonl': 'A0\n' }, id);
+    const signedOut = { port: harness.port, filesystem: harness.checkout, chatId: id, syncChats: true, actorId, now };
+    await writeChatRef({ ...signedOut, deviceId: 'form-pseudonym' });
+    await writeChatFiles(harness.checkout, { 'events.jsonl': 'A0\nA1\n' }, id);
+
+    const signedIn = await writeChatRef({
+      ...signedOut,
+      deviceId: 'form-account',
+      ownDevices: new Set(['form-pseudonym', 'form-account']),
+    });
+
+    const tree = await harness.port.readTree(signedIn.head!);
+    expect(decoder.decode(tree?.get(chatSegmentPath('form-pseudonym')))).toBe('A0\n');
+    expect(decoder.decode(tree?.get(chatSegmentPath('form-account')))).toBe('A0\nA1\n');
+  });
+
   it.runIf(enabled)('keeps a local metadata edit when the fetch brings back this device’s own ref (D40)', async () => {
     const id = `echo_${_engine}`;
     await writeChatFiles(harness.checkout, { 'chat.json': '{"name":"Pushed"}' }, id);
@@ -414,6 +571,24 @@ describe.each([
     });
 
     expect(await readChatFile(target, 'events.jsonl')).toBe('live and growing\n');
+    expect(await readChatFile(target, chatSegmentPath('device-a'))).toBeUndefined();
+  });
+
+  /* EQ10(a): a sign-in changes which record device names this host's segment;
+   * the segment it wrote under the earlier form is still its own. */
+  it.runIf(enabled)('never projects a segment this host wrote under another actor form', async () => {
+    const head = await harness.port.readRef(chatRefName(chatId));
+    const target = await createMemoryProvider();
+    await target.writeFile(`${chatRecordsPath(chatId)}/events.jsonl`, 'live and growing\n');
+
+    await projectChats({
+      port: harness.port,
+      filesystem: target,
+      deviceId: 'device-a-signed-in',
+      ownDevices: new Set(['device-a', 'device-a-signed-in']),
+      refs: [{ name: chatRefName(chatId), head: head! }],
+    });
+
     expect(await readChatFile(target, chatSegmentPath('device-a'))).toBeUndefined();
   });
 
@@ -780,6 +955,83 @@ describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => 
     });
     expect(await readChatFile(deviceA.checkout, chatSegmentPath('device-b'), sharedChatId)).toBe('B0\n');
     expect(await readChatFile(deviceA.checkout, 'events.jsonl', sharedChatId)).toBe('A0\n');
+  }, 180_000);
+
+  /*
+   * W13c chat-ref C (a): the fetch writes only the remote-tracking ref, so a
+   * device that received a chat and then wrote it built on nothing — a root
+   * chain the remote refuses as not a fast-forward. A write builds on the
+   * fetched head whenever the local chain does not already hold it.
+   */
+  it('builds on the fetched head, never a root chain, for a chat this device received', async () => {
+    const receivedId = 'chat_received';
+    const writeReceived = async (harness: Harness, deviceId: string): ReturnType<typeof writeChatRef> =>
+      writeChatRef({
+        port: harness.port,
+        filesystem: harness.checkout,
+        deviceId,
+        chatId: receivedId,
+        syncChats: true,
+        actorId,
+        now,
+        remote: 'origin',
+      });
+    const parentsOf = async (
+      harness: Harness,
+      head: RevisionId | undefined,
+    ): Promise<readonly string[] | undefined> => {
+      const revision = await harness.port.readRevision(head!);
+      return revision?.parents;
+    };
+    const receive = async (harness: Harness, deviceId: string): Promise<RevisionId> => {
+      const fetched = await harness.port.fetch({ remote: 'origin', refs: [chatRefName(receivedId)] });
+      await projectChats({ port: harness.port, filesystem: harness.checkout, deviceId, refs: fetched.refs });
+      return fetched.refs[0]!.head;
+    };
+
+    await writeChatFiles(
+      deviceA.checkout,
+      { 'chat.json': '{"id":"chat_received"}', 'events.jsonl': 'A0\n' },
+      receivedId,
+    );
+    const fromA = await writeReceived(deviceA, 'device-a');
+    await deviceA.port.push({ remote: 'origin', refs: [{ name: chatRefName(receivedId) }] });
+
+    /* B only received it: nothing of B's to add, and B's ref follows the remote. */
+    const fetchedByB = await receive(deviceB, 'device-b');
+    const received = await writeReceived(deviceB, 'device-b');
+    expect(received).toMatchObject({ status: 'upToDate', head: fromA.head });
+    expect(await deviceB.port.readRef(chatRefName(receivedId))).toBe(fetchedByB);
+
+    /* B continues the chat: its segment parents on A's head, so the push fast-forwards. */
+    await writeChatFiles(deviceB.checkout, { 'events.jsonl': 'B0\n' }, receivedId);
+    const continued = await writeReceived(deviceB, 'device-b');
+    expect(continued.status).toBe('updated');
+    expect(await parentsOf(deviceB, continued.head)).toEqual([fromA.head]);
+    const pushedB = await deviceB.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(receivedId), expected: fromA.head }],
+    });
+    expect(pushedB.refs[0]?.status).toBe('updated');
+
+    /* A's chain is behind the remote now: A's next write builds on B's head, not its own. */
+    await receive(deviceA, 'device-a');
+    await writeChatFiles(deviceA.checkout, { 'events.jsonl': 'A0\nA1\n' }, receivedId);
+    const answered = await writeReceived(deviceA, 'device-a');
+    expect(await parentsOf(deviceA, answered.head)).toEqual([continued.head]);
+    const pushedA = await deviceA.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(receivedId), expected: continued.head }],
+    });
+    expect(pushedA.refs[0]?.status).toBe('updated');
+    const union = await deviceA.port.readTree(answered.head!);
+    expect(decoder.decode(union?.get(chatSegmentPath('device-a')))).toBe('A0\nA1\n');
+    expect(decoder.decode(union?.get(chatSegmentPath('device-b')))).toBe('B0\n');
+
+    /* A chain that already holds the fetched head stays its own (a native push moves no tracking ref). */
+    await writeChatFiles(deviceA.checkout, { 'events.jsonl': 'A0\nA1\nA2\n' }, receivedId);
+    const ahead = await writeReceived(deviceA, 'device-a');
+    expect(await parentsOf(deviceA, ahead.head)).toEqual([answered.head]);
   }, 180_000);
 
   /* An image and a PDF beside the log: one entry each in the ref's tree, exact

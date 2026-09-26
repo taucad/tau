@@ -62,6 +62,12 @@ export type RevisionStatusProjection = Readonly<{
      * written before it never offers an undo the machine would refuse.
      */
     undoable?: boolean;
+    /**
+     * Whether *Undo* has an operation of this device's to reverse on the
+     * selected line (D15), as the operation log last answered. Absent reads as
+     * false, like `undoable`.
+     */
+    canUndo?: boolean;
   }>;
   /** Which remote this project has, and what it costs (S26 *Sync*, S35). */
   remote: RemoteFacet;

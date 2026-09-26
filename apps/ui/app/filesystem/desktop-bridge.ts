@@ -221,14 +221,14 @@ export type DesktopBridge = {
   readonly machines: {
     /**
      * Ask main to broker a fresh `MessageChannelMain` to the node machine host
-     * in the services utility for `workspaceRoot`, and hand back this side.
+     * in the services utility, and hand back this side.
      *
      * The far end is `NodeMachineHost.serve` over that port, so the page
      * drives it with `connectMachineChannel` from `@taucad/runtime/machine` —
-     * the same wire the daemon serves over a WebSocket. Main refuses a root
-     * the user never granted.
+     * the same wire the daemon serves over a WebSocket. Printers belong to
+     * this computer, not a project, so no root is named (blueprint D6).
      */
-    connect(workspaceRoot: string): Promise<MessagePort>;
+    connect(): Promise<MessagePort>;
     /**
      * Complete a ceremony `beginBinding` answered with `operator-action-required`.
      *
@@ -352,7 +352,7 @@ export const desktopBridge = (): DesktopBridge | undefined => {
         shell.agentHost.release(workspaceRoot, projectId, attachmentId),
     },
     machines: {
-      connect: async (workspaceRoot: string) => connectServices('machines', { workspaceRoot }),
+      connect: async () => connectServices('machines'),
       completeBinding: async (input) => {
         if (!shell.machines) {
           throw new Error('This desktop build has no machine binding ceremony.');

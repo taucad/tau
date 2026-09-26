@@ -36,6 +36,8 @@ describe('selectPrinterLive', () => {
 
     expect(live?.isActive).toBe(true);
     expect(live?.manifest).toBe(manifest);
+    // The name the person gave the printer, not the one the device reports (blueprint D3).
+    expect(live?.machineName).toBe('Workshop X1C');
   });
 
   it('leaves the manifest unset until the providers load, or when the provider published none', () => {

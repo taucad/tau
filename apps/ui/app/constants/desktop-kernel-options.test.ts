@@ -43,9 +43,8 @@ const installRuntimeBridge = (): void => {
 const requestServicesPort = vi.fn();
 
 /**
- * The preload shell, optionally answering the services relay the way main does
- * so the machines port is brokered; without `services` every services connect
- * fails, which is the refusal the kernel preset must survive.
+ * The preload shell, optionally answering the services relay the way main does;
+ * without `services` every services connect fails. A kernel must ask for none.
  */
 const installDesktopBridge = (options: { services?: boolean } = {}): void => {
   vi.stubEnv('TAU_TARGET', 'desktop');
@@ -129,7 +128,7 @@ describe('desktopKernelOptions', () => {
   );
 
   it(
-    'should negotiate an available machines facet from the shell machines port, and none when the shell refuses',
+    'should open no machines connection for a kernel, since the app holds the one machines facet (D6)',
     async () => {
       installDesktopBridge({ services: true });
       installRuntimeBridge();
@@ -141,17 +140,10 @@ describe('desktopKernelOptions', () => {
         },
       };
 
-      const offered = (await desktop.desktopKernelOptions(projectId, undefined, 'off')())(fileSystem);
+      const options = (await desktop.desktopKernelOptions(projectId, undefined, 'off')())(fileSystem);
 
-      /* The port is brokered for this project's root before the kernel forks. */
-      expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'machines', {
-        workspaceRoot: `${homeRoot}/widget`,
-      });
-      expect(offered.transport.materialize().machines?.available).toBe(true);
-
-      installDesktopBridge({ services: false });
-      const refused = (await desktop.desktopKernelOptions(projectId, undefined, 'off')())(fileSystem);
-      expect(refused.transport.materialize().machines).toEqual({ available: false, reason: 'unsupported' });
+      expect(requestServicesPort).not.toHaveBeenCalled();
+      expect(options.transport.materialize().machines).toEqual({ available: false, reason: 'unsupported' });
     },
     moduleGraphTimeout,
   );

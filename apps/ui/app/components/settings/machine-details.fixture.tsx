@@ -340,7 +340,7 @@ export const simulatorProvider: MachineProvider = parseMachineProvider({
 /**
  * One bound machine as the directory lists it.
  *
- * @param input - The logical id, the provider and what the machine reports about itself.
+ * @param input - The machine id, the provider, the name the person gave it and what it reports about itself.
  * @returns A directory entry.
  */
 export const boundEntry = ({
@@ -350,11 +350,13 @@ export const boundEntry = ({
   firmware,
 }: Readonly<{ machineId: string; providerId: string; name: string; firmware: string }>): MachineDirectoryEntry => ({
   machineId,
+  name,
   providerId,
   freshness: 'current',
   descriptor: {
     id: `serial-${machineId}`,
-    name,
+    /* What the printer reports about itself; the list shows the name the person gave it (blueprint D3). */
+    name: `X1C-${machineId}`,
     vendor: 'Bambu Lab',
     model: 'X1C',
     technology: 'additive.fff',

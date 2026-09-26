@@ -1,12 +1,12 @@
 /**
  * Machines settings card (D10).
  *
- * Printers belong to this computer, not a project: the host behind any open
- * project's machines facet owns every binding, so a printer set up here is
- * available in every project. The card discovers through that facet, begins a
- * binding through it, and completes the ceremony through the desktop shell, so
- * a typed access code goes to the host, which keeps it in the OS keychain, and
- * never into page state. A printer whose code is already saved binds without
+ * Printers belong to this computer, not a project: the host behind the app's
+ * machines facet owns every binding, so a printer set up here is available in
+ * every project, and the card works with no project open. It discovers through
+ * that facet, begins a binding through it, and completes the ceremony through
+ * the desktop shell, so a typed access code goes to the host, which keeps it in
+ * the OS keychain, and never into page state. A printer whose code is already saved binds without
  * one. The simulated X1C binds without an address or a code; it is the dry-run
  * device, and its demo settings come from its own binding declaration. Each
  * bound machine opens to its provider's manifest (`MachineDetails`); the row
@@ -16,7 +16,6 @@
 import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { flushSync } from 'react-dom';
-import { useSelector } from '@xstate/react';
 import { ChevronDown, CircleAlert, LoaderCircle, Trash2 } from 'lucide-react';
 import type {
   MachineBindingOutcome,
@@ -35,12 +34,12 @@ import { PasswordInput } from '@taucad/ui/components/password-input';
 import { ConfigurationFields, MachineDetails, isSimulatedProvider } from '#components/settings/machine-details.js';
 import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
-import { useMachineDirectory } from '#hooks/use-machines.js';
-import { useProject } from '#hooks/use-project.js';
+import { printersInUseElsewhere, useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 
 const simulatorProviderId = 'bambu-simulator';
 const bambuProviderId = 'bambu';
-const simulatorName = 'simulated-x1c';
+/* The display name; the host slugs it to the id `simulated-x1c` (blueprint D3), which names its folder. */
+const simulatorName = 'Simulated X1C';
 
 type BindInput = {
   readonly providerId: string;
@@ -70,6 +69,9 @@ const refusals: ReadonlyMap<string, string | undefined> = new Map([
   ['MACHINE_BINDING_BUSY', "Resolve this printer's pending print requests first."],
   ['MACHINE_CREDENTIAL_SAVE_FAILED', 'Tau could not save the access code to your Keychain.'],
   ['SECRET_VAULT_UNAVAILABLE', 'Tau could not reach your Keychain.'],
+  /* The ceremony's second half goes through the desktop shell, not the facet that words these for every other call. */
+  ['MACHINE_STORE_OWNED_ELSEWHERE', printersInUseElsewhere],
+  ['AUTHORITY_ALREADY_OWNED', printersInUseElsewhere],
   /* Removing a printer that is already gone: the list was behind, and re-reading it is the whole answer. */
   ['MACHINE_DIRECTORY_UNKNOWN_MACHINE', undefined],
 ]);
@@ -107,7 +109,7 @@ const describeRefusal = (error: unknown): string | undefined => {
  * that printer, and when nothing is saved either, the person is asked for the
  * code before any ceremony begins.
  *
- * @param client - Any open project's machines facet, onto this computer's host.
+ * @param client - This computer's machines facet.
  * @param input - What the person typed.
  * @returns The host's own outcome.
  */
@@ -158,7 +160,7 @@ const bind = async (client: MachineClient, input: BindInput): Promise<MachineBin
  * Listen for the printers advertising on this LAN; the host bounds the pass (Bambu: 11 s on UDP 2021,
  * two advertisement periods). Nothing is sent to a printer: discovery only hears broadcasts.
  *
- * @param client - Any open project's machines facet, onto this computer's host.
+ * @param client - This computer's machines facet.
  * @param onHeard - Every distinct candidate so far, each time a new one is heard.
  * @returns Every distinct candidate heard, latest advertisement winning.
  */
@@ -211,7 +213,7 @@ const BoundMachine = memo(function BoundMachine({
   const removeButton = useRef<HTMLButtonElement>(null);
   const questionId = useId();
   const consequenceId = useId();
-  const { name } = entry.descriptor;
+  const { name } = entry;
 
   const toggleConfirming = useCallback(() => {
     setIsConfirming((current) => !current);
@@ -351,7 +353,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     async (entry: MachineDirectoryEntry): Promise<string | undefined> => {
       try {
         await client.removeBinding({ machineId: entry.machineId });
-        setStatus(`${entry.descriptor.name} is removed.`);
+        setStatus(`${entry.name} is removed.`);
         return undefined;
       } catch (error) {
         return describeRefusal(error);
@@ -455,9 +457,11 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         Printers set up here are available in every project on this computer. Their access codes are kept in your
         Keychain.
       </p>
-      {entries.length === 0 ? (
+      {/* Without a snapshot the list is unknown (loading, or the store is held elsewhere), not empty. */}
+      {directory.snapshot !== undefined && entries.length === 0 ? (
         <p className='text-sm text-muted-foreground'>No printers yet.</p>
-      ) : (
+      ) : undefined}
+      {entries.length === 0 ? undefined : (
         <ul aria-label='Bound machines' className='flex flex-col gap-2'>
           {entries.map((entry) => (
             <BoundMachine
@@ -498,7 +502,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             variant='outline'
             disabled={busy || simulator === undefined}
             onClick={async () =>
-              run('Simulated X1C', { providerId: simulatorProviderId, name: simulatorName, fields: simulatorFields })
+              run(simulatorName, { providerId: simulatorProviderId, name: simulatorName, fields: simulatorFields })
             }
           >
             Add simulated X1C
@@ -584,25 +588,17 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
 }
 
 export function MachinesSettings(): React.JSX.Element {
-  const project = useProject({ enableNoContext: true });
-  const facet = useSelector(
-    project?.geometryUnits.get(project.mainEntryPath),
-    (state) => state?.context.kernelClient?.machines,
-  );
+  const facet = useMachinesFacet();
   return (
     <SettingsSectionCard aria-labelledby='machines-title'>
       <CardHeader>
         <CardTitle id='machines-title'>Printers</CardTitle>
       </CardHeader>
       <CardContent className='flex flex-col gap-4'>
-        {project === undefined ? (
-          <p className='text-sm text-muted-foreground'>Open any project to manage this computer&apos;s printers.</p>
-        ) : facet?.available ? (
+        {facet.available ? (
           <MachinesPanel client={facet} />
         ) : (
-          <p className='text-sm text-muted-foreground'>
-            Machines are unavailable in this runtime{facet ? ` (${facet.reason})` : ''}.
-          </p>
+          <p className='text-sm text-muted-foreground'>Machines are unavailable in this runtime ({facet.reason}).</p>
         )}
       </CardContent>
     </SettingsSectionCard>

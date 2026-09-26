@@ -1,9 +1,8 @@
 /**
  * The machine directory as the printer viewer sees it.
  *
- * Reads the negotiated machines facet the way the Print pane does (main
- * geometry unit → kernel client → `machines`), follows the directory, and
- * reduces it to the one entry the scene follows: an active run when there is
+ * Reads this computer's machines facet, as the Print pane does, follows the
+ * directory, and reduces it to the one entry the scene follows: an active run when there is
  * one, otherwise the first connected machine for its light and filament. Live
  * mode follows the run only from the file it prints, which the print request
  * ledger names by digest.
@@ -12,19 +11,17 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { useSelector } from '@xstate/react';
 import type {
   MachineClient,
   MachineDirectoryEntry,
-  MachineDirectoryFrame,
   MachineDirectorySnapshot,
   MachineManifest,
   PrintRequest,
 } from '@taucad/runtime/machine';
 import { convert } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
+import { projectMachineDirectoryFrame, useMachinesFacet } from '#hooks/use-machines.js';
 import { startedRunIdOf, useMachinesPrintRequests } from '#hooks/use-machines-print-requests.js';
-import { useProject } from '#hooks/use-project.js';
 import type { LiveRunPosition } from '#components/printer/printer-playback.js';
 
 /** What the viewer follows on a machine. */
@@ -91,7 +88,7 @@ export const selectPrinterLive = (
       : false;
   return {
     machineId: entry.machineId,
-    machineName: entry.descriptor.name,
+    machineName: entry.name,
     runState: run?.state,
     isActive,
     printsThisFile,
@@ -101,33 +98,6 @@ export const selectPrinterLive = (
     bedTarget: celsius(temperatures?.bedTarget),
     filamentColor: setup.materials.find((material) => material.state === 'loaded' && material.color)?.color,
     manifest: manifests?.get(entry.providerId),
-  };
-};
-
-// ponytail: the same frame reduction the Print pane applies; fold into its shared machines hook once that lands.
-const applyFrame = (current: MachineDirectorySnapshot, frame: MachineDirectoryFrame): MachineDirectorySnapshot => {
-  if (frame.type === 'snapshot' || frame.type === 'resync-required') {
-    return frame.snapshot;
-  }
-  const { event } = frame;
-  if (event.type === 'machine-directory-stale') {
-    return {
-      ...current,
-      cursor: frame.cursor,
-      entries: current.entries.map((entry) => ({ ...entry, freshness: 'stale' })),
-    };
-  }
-  if (event.type === 'machine-directory-removed') {
-    return {
-      ...current,
-      cursor: frame.cursor,
-      entries: current.entries.filter(({ machineId }) => machineId !== event.machineId),
-    };
-  }
-  return {
-    ...current,
-    cursor: frame.cursor,
-    entries: [event.entry, ...current.entries.filter(({ machineId }) => machineId !== event.entry.machineId)],
   };
 };
 
@@ -152,7 +122,7 @@ export const useMachineDirectoryEntries = (
         for await (const frame of client.watch({ cursor: initial.cursor, signal: abort.signal })) {
           setState((current) => ({
             client,
-            snapshot: applyFrame(current?.client === client ? current.snapshot : initial, frame),
+            snapshot: projectMachineDirectoryFrame(current?.client === client ? current.snapshot : initial, frame),
           }));
         }
       } catch {
@@ -205,16 +175,14 @@ export const useProviderManifests = (
 };
 
 /**
- * The machine the printer viewer follows, or `undefined` outside a project or without machines.
+ * The machine the printer viewer follows, or `undefined` without machines.
  *
  * @param digest - The `sha256:` digest of the file the viewer shows, once it is read.
  * @returns The followed machine's live facts.
  */
 export const usePrinterLive = (digest: string | undefined): PrinterLiveState | undefined => {
-  const project = useProject({ enableNoContext: true });
-  const unit = project?.geometryUnits.get(project.mainEntryPath);
-  const machines = useSelector(unit, (state) => state?.context.kernelClient?.machines);
-  const client = machines?.available ? machines : undefined;
+  const machines = useMachinesFacet();
+  const client = machines.available ? machines : undefined;
   const entries = useMachineDirectoryEntries(client);
   const manifests = useProviderManifests(client);
   const followed = useMemo(() => selectPrinterLive(entries, manifests), [entries, manifests]);

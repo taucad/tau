@@ -377,8 +377,13 @@ export const connectBambuMachine = async (
         maximumWriteBytes: 256 * 1024,
         signal: input.signal,
       });
-    } catch {
-      throw new Error('BAMBU_MQTT_TRANSPORT_FAILED');
+    } catch (error) {
+      // A certificate that no longer matches its pin needs a new binding, so the host stops retrying it.
+      throw new Error(
+        error instanceof Error && error.message === 'MACHINE_TLS_PIN_MISMATCH'
+          ? 'BAMBU_CERTIFICATE_CHANGED'
+          : 'BAMBU_MQTT_TRANSPORT_FAILED',
+      );
     }
     let client: MqttClientConstructor;
     try {

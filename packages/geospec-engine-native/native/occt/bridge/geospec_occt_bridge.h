@@ -764,6 +764,10 @@ int geospec_occt_circular_bore(
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_circular_bores_discard(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
+// Diagnostic count of bore interiors the separation certificate cleared
+// without a Common in this document's inventories.
+size_t geospec_occt_certified_clear_bores(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_edge_treatment_counts_get(
     const geospec_occt_document* document,
     geospec_occt_edge_treatment_counts* out_counts,

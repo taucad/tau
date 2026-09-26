@@ -101,6 +101,14 @@
       "sha256": "167ca6eb9879f554be357e23d1fe5c4bd1fea790d9ac8e64f2b201fdc5d89096",
       "bytes": 67054,
       "description": "Beam on posts above the plate with a pin r = 1 hanging into the bore to z = 10, its surface 1e-4 mm from the bore wall (a true obstruction)."
+    },
+    {
+      "file": "f-tilted-far-pin.step",
+      "sha256": "bfb58f39b32e633202e7df8d8ab688bdb5e2cac0321a1de347d66977b15772ab",
+      "bytes": 64409,
+      "description": "Bar on two pillars above the plate with a pin r = 0.25 hanging through the bore 4 mm off its axis (0.75 mm clear of the wall, a true obstruction); the pin axis is tilted 9e-7 rad and its CYLINDRICAL_SURFACE Location lies 1.4e6 mm down that axis.",
+      "generator": "docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-implementation/lanes/w1-fix-csg-a1/evidence/tilt-generator/gen_tilt_pin.cpp (review W1 R3; arguments 9e-7 1.4e6 0.25 -4.0; same pinned OCCT prefix)",
+      "provenance": "Review W1 R3 finding 1 (docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-implementation/lanes/review-w1-r3-a1/report.md), file adv.step; the exact Common decides OBSTRUCTED_INTERIOR."
     }
   ]
 }

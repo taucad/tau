@@ -6694,6 +6694,180 @@ int geospec_occt_validity_dedicated(
   });
 }
 
+// M2 narrow phase: the bodies of exact connected components and their
+// distance verdicts. Face boxes come from the per-located-face memo, so the
+// body boxes fold exactly as bounds() does.
+struct geospec_occt_component_bodies {
+  struct Body {
+    TopoDS_Shape shape;
+    std::vector<TopoDS_Face> faces;
+    std::vector<geospec_occt_bounds> boxes;
+    geospec_occt_component_body facts{};
+  };
+  const geospec_occt_document* document = nullptr;
+  std::vector<Body> bodies;
+  size_t face_count = 0;
+};
+
+int geospec_occt_component_bodies_new(
+    const geospec_occt_document* document, const uint32_t* occurrences,
+    size_t occurrence_count, geospec_occt_component_bodies** out_bodies,
+    size_t* out_body_count, size_t* out_face_count,
+    geospec_occt_string* error) noexcept {
+  if (document == nullptr || out_bodies == nullptr || out_body_count == nullptr ||
+      out_face_count == nullptr || (occurrence_count != 0 && occurrences == nullptr)) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Component-body request is invalid.", error);
+  }
+  *out_bodies = nullptr;
+  *out_body_count = 0;
+  *out_face_count = 0;
+  for (size_t index = 0; index < occurrence_count; ++index) {
+    if (occurrences[index] >= document->occurrences.size()) {
+      return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                  "Component occurrence is out of range.", error);
+    }
+  }
+  return guarded(error, [&]() -> int {
+    auto result = std::make_unique<geospec_occt_component_bodies>();
+    result->document = document;
+    auto add = [&](const TopoDS_Shape& shape, uint32_t occurrence, bool solid) {
+      geospec_occt_component_bodies::Body body;
+      Bnd_Box box;
+      for (TopExp_Explorer face(shape, TopAbs_FACE); face.More(); face.Next()) {
+        const Bnd_Box& local = memo_face_box(*document, face.Current());
+        if (local.IsVoid()) continue;
+        geospec_occt_bounds bounds{};
+        local.Get(bounds.min[0], bounds.min[1], bounds.min[2], bounds.max[0],
+                  bounds.max[1], bounds.max[2]);
+        box.Update(bounds.min[0], bounds.min[1], bounds.min[2], bounds.max[0],
+                   bounds.max[1], bounds.max[2]);
+        body.faces.push_back(TopoDS::Face(face.Current()));
+        body.boxes.push_back(bounds);
+      }
+      if (body.faces.empty()) return;
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> vertices;
+      TopExp::MapShapes(shape, TopAbs_VERTEX, vertices);
+      body.shape = shape;
+      body.facts.occurrence = occurrence;
+      body.facts.solid = solid ? 1 : 0;
+      body.facts.vertex_count = static_cast<uint32_t>(vertices.Extent());
+      body.facts.face_count = static_cast<uint32_t>(body.faces.size());
+      box.Get(body.facts.bounds.min[0], body.facts.bounds.min[1],
+              body.facts.bounds.min[2], body.facts.bounds.max[0],
+              body.facts.bounds.max[1], body.facts.bounds.max[2]);
+      result->face_count += body.faces.size();
+      result->bodies.push_back(std::move(body));
+    };
+    auto explode = [&](const TopoDS_Shape& shape, uint32_t occurrence) {
+      for (TopExp_Explorer solid(shape, TopAbs_SOLID); solid.More(); solid.Next()) {
+        add(solid.Current(), occurrence, true);
+      }
+      for (TopExp_Explorer shell(shape, TopAbs_SHELL, TopAbs_SOLID); shell.More();
+           shell.Next()) {
+        add(shell.Current(), occurrence, false);
+      }
+      for (TopExp_Explorer face(shape, TopAbs_FACE, TopAbs_SHELL); face.More();
+           face.Next()) {
+        add(face.Current(), occurrence, false);
+      }
+    };
+    if (occurrence_count == 0) explode(document->shape, UINT32_MAX);
+    for (size_t index = 0; index < occurrence_count; ++index) {
+      explode(document->occurrences[occurrences[index]].shape, occurrences[index]);
+    }
+    *out_body_count = result->bodies.size();
+    *out_face_count = result->face_count;
+    *out_bodies = result.release();
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+void geospec_occt_component_bodies_release(
+    geospec_occt_component_bodies* bodies) noexcept {
+  delete bodies;
+}
+
+int geospec_occt_component_bodies_facts(
+    const geospec_occt_component_bodies* bodies,
+    geospec_occt_component_body* out_bodies, size_t body_capacity,
+    geospec_occt_bounds* out_face_bounds, size_t face_capacity,
+    geospec_occt_string* error) noexcept {
+  if (bodies == nullptr || (body_capacity != 0 && out_bodies == nullptr) ||
+      (face_capacity != 0 && out_face_bounds == nullptr)) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Component-body facts output is invalid.", error);
+  }
+  if (body_capacity < bodies->bodies.size() || face_capacity < bodies->face_count) {
+    return fail(GEOSPEC_OCCT_BUFFER_TOO_SMALL,
+                "Component-body facts output is too small.", error);
+  }
+  size_t face = 0;
+  for (size_t index = 0; index < bodies->bodies.size(); ++index) {
+    const geospec_occt_component_bodies::Body& body = bodies->bodies[index];
+    out_bodies[index] = body.facts;
+    for (const geospec_occt_bounds& bounds : body.boxes) out_face_bounds[face++] = bounds;
+  }
+  return GEOSPEC_OCCT_OK;
+}
+
+int geospec_occt_component_faces_within(
+    const geospec_occt_component_bodies* bodies, size_t left,
+    uint32_t left_face, size_t right, uint32_t right_face, double tolerance,
+    int* out_within, geospec_occt_string* error) noexcept {
+  if (bodies == nullptr || out_within == nullptr || left >= bodies->bodies.size() ||
+      right >= bodies->bodies.size() ||
+      left_face >= bodies->bodies[left].faces.size() ||
+      right_face >= bodies->bodies[right].faces.size() || !(tolerance >= 0.0)) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Component face pair is invalid.", error);
+  }
+  return guarded(error, [&]() -> int {
+    BRepExtrema_DistShapeShape distance;
+    distance.SetMultiThread(false);
+    distance.LoadS1(bodies->bodies[left].faces[left_face]);
+    distance.LoadS2(bodies->bodies[right].faces[right_face]);
+    distance.Perform();
+    if (!distance.IsDone()) {
+      return fail(GEOSPEC_OCCT_NATIVE_ERROR,
+                  "OCCT extrema computation did not converge.", error);
+    }
+    *out_within = distance.Value() <= tolerance ? 1 : 0;
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+int geospec_occt_component_bodies_within_dedicated(
+    const geospec_occt_component_bodies* bodies, size_t left, size_t right,
+    double tolerance, int grant_width, int* out_used_parallel, int* out_within,
+    geospec_occt_string* error) noexcept {
+  if (bodies == nullptr || out_within == nullptr || out_used_parallel == nullptr ||
+      left >= bodies->bodies.size() || right >= bodies->bodies.size() ||
+      !(tolerance >= 0.0) || grant_width < 0) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Component body pair is invalid.", error);
+  }
+  return guarded(error, [&]() -> int {
+    std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
+    const int scope_status = dedicated_pool_scope(
+        grant_width, out_used_parallel, reservation, error);
+    if (scope_status != GEOSPEC_OCCT_OK) return scope_status;
+    BRepExtrema_DistShapeShape distance;
+    // O3-07: Value() is bit-identical under OSD_Parallel; solutions are not,
+    // so only this verdict reads the parallel result.
+    distance.SetMultiThread(*out_used_parallel != 0);
+    distance.LoadS1(bodies->bodies[left].shape);
+    distance.LoadS2(bodies->bodies[right].shape);
+    distance.Perform();
+    if (!distance.IsDone()) {
+      return fail(GEOSPEC_OCCT_NATIVE_ERROR,
+                  "OCCT extrema computation did not converge.", error);
+    }
+    *out_within = distance.Value() <= tolerance ? 1 : 0;
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
 int geospec_occt_regular_solid_containment(
     const geospec_occt_document* document, geospec_occt_entity subject_entity,
     geospec_occt_entity target_entity,

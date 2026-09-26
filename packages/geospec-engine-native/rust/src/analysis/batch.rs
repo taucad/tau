@@ -58,9 +58,10 @@ impl BatchAnalysis {
         tolerance: f64,
         analysis: &MeshAnalysis,
     ) -> Result<Rc<ConnectedComponents>, BackendError> {
+        let bits = tolerance_bits(tolerance);
         let cell = self
             .components
-            .get(&(subject.to_owned(), tolerance_bits(tolerance)))
+            .get(&(subject.to_owned(), bits))
             .ok_or_else(|| BackendError {
                 kind: BackendErrorKind::ComputationFailed,
                 message: "Connected-component demand was not declared by the prepared batch."
@@ -72,24 +73,33 @@ impl BatchAnalysis {
             }
             return Ok(Rc::clone(value));
         }
-        if let Some(observations) = &self.observations {
-            observations.add(WorkCounter::ComponentBuilds, 1);
-        }
-        let clusters = analysis.component_clusters(tolerance);
-        // The floor implies the refusal below, before C(C-1)/2 gaps exist.
-        let floor = retained_component_bytes_floor(&clusters);
-        if self.retained_bytes.get().saturating_add(floor) > self.byte_limit {
-            return Err(retention_refusal());
-        }
-        let value = ConnectedComponents::from_clusters(clusters);
+        // A result an earlier plan accepted skips the build; the exact check
+        // below implies the floor, so this plan's accounting is unchanged.
+        let value = if let Some(value) = analysis.retained_components(bits) {
+            if let Some(observations) = &self.observations {
+                observations.add(WorkCounter::DerivedHits, 1);
+            }
+            value
+        } else {
+            if let Some(observations) = &self.observations {
+                observations.add(WorkCounter::ComponentBuilds, 1);
+            }
+            let clusters = analysis.component_clusters(tolerance);
+            // The floor implies the refusal below, before C(C-1)/2 gaps exist.
+            let floor = retained_component_bytes_floor(&clusters);
+            if self.retained_bytes.get().saturating_add(floor) > self.byte_limit {
+                return Err(retention_refusal());
+            }
+            Rc::new(ConnectedComponents::from_clusters(clusters))
+        };
         let bytes = retained_component_bytes(&value.clusters, &value.gaps);
         let total = self.retained_bytes.get().saturating_add(bytes);
         if total > self.byte_limit {
             return Err(retention_refusal());
         }
-        let value = Rc::new(value);
         let _ = cell.set(Rc::clone(&value));
         self.retained_bytes.set(total);
+        analysis.retain_components(bits, &value);
         Ok(value)
     }
 }

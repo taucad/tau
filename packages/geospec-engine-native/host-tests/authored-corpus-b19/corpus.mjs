@@ -32,7 +32,7 @@ import { Engine, ProtocolError, canonicalize } from '@taucad/geospec-engine-nati
  * @typedef {ReturnType<typeof reportRecord>} RecordedReport
  * @typedef {ReturnType<typeof compareOutcome>} Comparison
  * @typedef {{id: string, route: string, routeState?: string, admission: ReturnType<typeof admitSubject> | null, authoring: AuthoredRow['authoring']['javascript'], argumentsProtocolJson: JsonValue[], error?: ErrorRecord | null, report: RecordedReport | null, comparison?: Comparison}} Outcome
- * @typedef {{operation: string, input: ByteRecord, output?: ByteRecord, error?: ErrorRecord}} RecordedCall
+ * @typedef {{operation: string, input: ByteRecord, output?: ByteRecord, plan?: ByteRecord, error?: ErrorRecord}} RecordedCall
  */
 
 /** @type {(name: string) => string} */
@@ -466,7 +466,6 @@ export const runStandaloneRow = async (row) => {
       createGeoSpecAssertionClient
     )({
       engine,
-      canonicalize,
       claimId: () => row.claimId,
       subjectSlot: row.subjectSlot,
       workUnitLimit: row.workUnitBudget,
@@ -513,14 +512,20 @@ export const runStandaloneRow = async (row) => {
 export const createForwardingRecorder = (engine) => {
   /** @type {RecordedCall[]} */
   const calls = [];
-  /** @type {(operation: string, input: HostBytes, invoke: () => HostBytes) => HostBytes} */
+  /** @type {<Output extends HostBytes | import('../../../geospec/src/engine/client.js').GeoSpecNativeClaimEvaluation>(operation: string, input: HostBytes, invoke: () => Output) => Output} */
   const forward = (operation, input, invoke) => {
     /** @type {RecordedCall} */
     const call = { operation, input: utf8Record(input) };
     calls.push(call);
     try {
       const output = invoke();
-      call.output = utf8Record(output);
+      if (output instanceof Uint8Array) {
+        call.output = utf8Record(output);
+      } else {
+        // An evaluateClaim call records its canonical result as `output` and its canonical plan beside it.
+        call.output = utf8Record(output.canonicalResult);
+        call.plan = utf8Record(output.canonicalPlan);
+      }
       return output;
     } catch (error) {
       call.error = errorRecord(error);
@@ -531,8 +536,7 @@ export const createForwardingRecorder = (engine) => {
     calls,
     engine: /** @satisfies {import('../../../geospec/src/engine/client.js').GeoSpecNativeEngine} */ ({
       processRequest: (request) => forward('processRequest', request, () => engine.processRequest(request)),
-      canonicalPlan: (request) => forward('canonicalPlan', request, () => engine.canonicalPlan(request)),
-      evaluatePlan: (plan) => forward('evaluatePlan', plan, () => engine.evaluatePlan(plan)),
+      evaluateClaim: (request) => forward('evaluateClaim', request, () => engine.evaluateClaim(request)),
     }),
   };
 };

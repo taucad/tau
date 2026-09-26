@@ -60,7 +60,6 @@ export type PerformanceLabEngineModule = {
   Engine: new (
     execution?: PerformanceLabWasmExecution,
   ) => HostEngine & HostSubjectLifecycle & Partial<Pick<HostCacheLifecycle, 'cacheProducerIdentity'>>;
-  canonicalize: (bytes: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
   initialize?: (input?: undefined, execution?: PerformanceLabWasmExecution) => Promise<void>;
 };
 
@@ -397,7 +396,6 @@ const runNative = async (
       for (const current of input.cases) {
         const client = createGeoSpecAssertionClient({
           engine,
-          canonicalize: module.canonicalize,
           subjectSlot: current.subjectSlot,
           ...(current.workUnitBudget === undefined ? {} : { workUnitLimit: current.workUnitBudget }),
           ...(current.claimId === undefined ? {} : { claimId: () => current.claimId! }),

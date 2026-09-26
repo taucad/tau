@@ -1196,10 +1196,19 @@ export type ProductEngine = {
   subjectHandle: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
   canonicalPlan: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
   evaluatePlan: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+  /** One-call claim evaluation; products before it evaluate through canonicalPlan and evaluatePlan. */
+  evaluateClaim?: (input: Uint8Array<ArrayBuffer>) => ProductClaimEvaluation;
   releaseSubject: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
   close?: () => void;
   flushCache?: () => Uint8Array<ArrayBuffer>;
   cacheProducerIdentity?: () => Uint8Array<ArrayBuffer>;
+};
+
+/** Canonical plan, claim and result bytes of one `evaluateClaim` call. @internal */
+export type ProductClaimEvaluation = {
+  canonicalPlan: Uint8Array<ArrayBuffer>;
+  canonicalClaim: Uint8Array<ArrayBuffer>;
+  canonicalResult: Uint8Array<ArrayBuffer>;
 };
 
 /** Installed binding module surface, without a build-time native import. @internal */
@@ -1223,7 +1232,7 @@ export type PublicAssertionClient = {
 /** Installed assertion factory without importing a native artifact at build time. @internal */
 export type AssertionClientModule = {
   createGeoSpecAssertionClient: (options: {
-    engine: Pick<ProductEngine, 'processRequest' | 'canonicalPlan' | 'evaluatePlan'>;
+    engine: Pick<ProductEngine, 'processRequest' | 'canonicalPlan' | 'evaluatePlan' | 'evaluateClaim'>;
     canonicalize: ProductBinding['canonicalize'];
     claimId: () => string;
     subjectSlot: string;

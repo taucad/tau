@@ -34,24 +34,21 @@ const utf8Record = (bytes) => {
  * @type {(row: import('./corpus.mjs').AuthoredRow, calls: import('./corpus.mjs').RecordedCall[]) => import('./corpus.mjs').RecordedReport | null}
  */
 const reportFromRecorder = (row, calls) => {
-  const planCall = calls.find((call) => call.operation === 'canonicalPlan' && call.output);
-  const resultCall = calls.find((call) => call.operation === 'evaluatePlan' && call.output);
-  if (!planCall || !resultCall) {
+  const evaluation = calls.find((call) => call.operation === 'evaluateClaim' && call.output);
+  if (!evaluation?.plan || !evaluation.output) {
     return null;
   }
-  const plan = /** @type {import('./corpus.mjs').PlanEnvelope} */ (
-    JSON.parse(/** @type {!import('./corpus.mjs').ByteRecord} */ (planCall.output).utf8)
-  );
+  const plan = /** @type {import('./corpus.mjs').PlanEnvelope} */ (JSON.parse(evaluation.plan.utf8));
   const resultEnvelope =
     /** @type {{results: [import('./corpus.mjs').NativeReport['result'] & {claimId: string, status: string, diagnostics: import('./corpus.mjs').JsonValue[]}]}} */ (
-      JSON.parse(/** @type {!import('./corpus.mjs').ByteRecord} */ (resultCall.output).utf8)
+      JSON.parse(evaluation.output.utf8)
     );
   const claim = plan.plan.claims[0];
   const result = resultEnvelope.results[0];
   return {
     canonicalClaim: utf8Record(canonicalize(Buffer.from(JSON.stringify(claim)))),
-    canonicalPlan: /** @type {!import('./corpus.mjs').ByteRecord} */ (planCall.output),
-    canonicalResult: /** @type {!import('./corpus.mjs').ByteRecord} */ (resultCall.output),
+    canonicalPlan: evaluation.plan,
+    canonicalResult: evaluation.output,
     claim,
     claimId: result.claimId,
     diagnostics: result.diagnostics,
@@ -112,7 +109,6 @@ it('should invoke every approved matcher row through the installed Vitest adapte
           createGeoSpecAssertionClient
         )({
           engine: recorder.engine,
-          canonicalize,
           claimId: () => row.claimId,
           subjectSlot: row.subjectSlot,
           workUnitLimit: row.workUnitBudget,

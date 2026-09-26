@@ -219,7 +219,7 @@ const productKeys: Record<Family, readonly string[]> = {
   wasm: ['binary', 'glue', 'receipt', 'permits'],
 };
 const admissionMethods = new Set(['ingestSubject', 'ingestMesh', 'subjectHandle']);
-const evaluationMethods = new Set(['canonicalPlan', 'evaluatePlan', 'processRequest', 'submitClaims']);
+const evaluationMethods = new Set(['canonicalPlan', 'evaluateClaim', 'evaluatePlan', 'processRequest', 'submitClaims']);
 const cleanupMethods = new Set(['releaseSubject', 'close']);
 const help = `Private performance-lab focus diagnostic (not Q7 qualification).
   --product=engine=legacy[,module=/abs/index.mjs][,label=name]

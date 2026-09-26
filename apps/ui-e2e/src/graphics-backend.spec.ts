@@ -124,6 +124,13 @@ type CanvasFrameDifference = Readonly<{
   totalSampled: number;
 }>;
 
+/** Displayed overlay brightness: the grid's darkest line pixel and each axis's summed ink. */
+type OverlayBrightness = Readonly<{
+  gridMinimumLuminance: number;
+  gridLineMeanLuminance: number;
+  axisInk: Readonly<Record<'x' | 'y' | 'z', number>>;
+}>;
+
 type GridFadeRowProfile = Readonly<{
   peakDetail: number;
   maximumAbsoluteNormalizedStep: number;
@@ -438,6 +445,63 @@ async function sampleGridFadeRows(pngBase64: string): Promise<GridFadeRowProfile
       fallRows,
       riseRows,
       rowDetail,
+    };
+  }, pngBase64);
+}
+
+/**
+ * Measure the overlays as displayed: grid lines in a band left of the model, and each axis's ink
+ * (hue excess, summed) over the pixels whose dominant channel is that axis's hue.
+ */
+async function sampleOverlayBrightness(pngBase64: string): Promise<OverlayBrightness> {
+  return target.evaluate(async (png) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${png}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      throw new Error('2d context unavailable');
+    }
+    context.drawImage(image, 0, 0);
+    const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+    const luminanceAt = (index: number): number =>
+      data[index]! * 0.2126 + data[index + 1]! * 0.7152 + data[index + 2]! * 0.0722;
+
+    let gridMinimumLuminance = 255;
+    let lineTotal = 0;
+    let lineSamples = 0;
+    for (let y = Math.floor(height * 0.45); y < Math.floor(height * 0.55); y += 1) {
+      for (let x = Math.floor(width * 0.02); x < Math.floor(width * 0.25); x += 1) {
+        const luminance = luminanceAt((y * width + x) * 4);
+        gridMinimumLuminance = Math.min(gridMinimumLuminance, luminance);
+        if (luminance < 252) {
+          lineTotal += luminance;
+          lineSamples += 1;
+        }
+      }
+    }
+
+    // Hue excess (the dominant channel over the mean of the others) is linear in coverage over a
+    // neutral background, and neutral grid and model pixels add nothing. A darkness sum over
+    // pixels past a hue threshold instead flickers with where each backend puts its fringe.
+    const axisInk = { x: 0, y: 0, z: 0 };
+    for (let index = 0; index < data.length; index += 4) {
+      const channels = [data[index]!, data[index + 1]!, data[index + 2]!];
+      const dominant = Math.max(...channels);
+      const excess = dominant - (channels[0]! + channels[1]! + channels[2]! - dominant) / 2;
+      if (excess < 3) {
+        continue;
+      }
+      axisInk[(['x', 'y', 'z'] as const)[channels.indexOf(dominant)]!] += excess;
+    }
+
+    return {
+      gridMinimumLuminance,
+      gridLineMeanLuminance: lineSamples > 0 ? lineTotal / lineSamples : 255,
+      axisInk,
     };
   }, pngBase64);
 }
@@ -1262,6 +1326,52 @@ test.describe('Graphics backend regression guard', () => {
 
     const failures = await webGpuValidationFailures(messageStart);
     expect(failures, `WebGPU validation errors leaked to the console:\n${failures.join('\n')}`).toEqual([]);
+  });
+
+  test('grid and axes display at the same brightness on WebGL and WebGPU, with and without post-processing', async () => {
+    const samples: Record<string, OverlayBrightness> = {};
+    /* oxlint-disable no-await-in-loop -- each capture must observe the backend and post-processing state set before it. */
+    for (const backend of ['webgl', 'webgpu'] as const satisfies readonly GraphicsBackend[]) {
+      await target.navigate(`${birdhouseFixturePath}?graphicsBackend=${backend}`);
+      await waitForGraphicsViewer();
+      await waitForGraphicsTestBridge();
+      for (const postProcessing of [false, true]) {
+        await target.evaluate((enabled) => {
+          const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+          bridge.setPostProcessingEnabled(enabled);
+          bridge.setCamera({
+            position: [0.12857841861747968, -0.12857841861747965, 0.15198383757294057],
+            target: [0, 0, 0.047],
+            fov: 60,
+          });
+        }, postProcessing);
+        await target.delay(750);
+        const label = `${backend}${postProcessing ? '-post' : ''}`;
+        const canvas = selectors.getByCss(previewCanvasSelector).first();
+        samples[label] = await sampleOverlayBrightness(
+          await target.screenshot(canvas, `overlay-brightness-${label}.png`),
+        );
+      }
+      await target.evaluate(() => {
+        (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.setPostProcessingEnabled(false);
+      });
+    }
+    /* oxlint-enable no-await-in-loop -- sequential captures end. */
+
+    const reference = samples['webgl']!;
+    // The 0.3-opacity grey grid over white bottoms out at 213 when blended in sRGB space; a
+    // straight-alpha canvas drew it at 189 and WebGPU's linear blend with AO at 164.
+    expect(reference.gridMinimumLuminance, JSON.stringify(samples)).toBeGreaterThanOrEqual(208);
+    for (const [label, sample] of Object.entries(samples)) {
+      expect(Math.abs(sample.gridMinimumLuminance - reference.gridMinimumLuminance), label).toBeLessThanOrEqual(3);
+      expect(Math.abs(sample.gridLineMeanLuminance - reference.gridLineMeanLuminance), label).toBeLessThanOrEqual(3);
+      for (const axis of ['x', 'y', 'z'] as const) {
+        // WebGPU once drew the axes at half their WebGL ink, and near black before that. The sum
+        // covers the whole canvas, so it includes the gizmo cube's axis lines in their sub-viewport.
+        expect(sample.axisInk[axis] / reference.axisInk[axis], `${label} ${axis} axis ink`).toBeGreaterThan(0.85);
+        expect(sample.axisInk[axis] / reference.axisInk[axis], `${label} ${axis} axis ink`).toBeLessThan(1.15);
+      }
+    }
   });
 
   test('canvas pixel histogram detects "render went invisible" regressions', async () => {

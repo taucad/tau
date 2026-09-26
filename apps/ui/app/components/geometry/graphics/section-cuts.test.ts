@@ -13,6 +13,7 @@ import {
   resolveSectionFaces,
   resolveSectionFootprint,
   resolveSectionPieces,
+  resolveSectionPlaneFlip,
   sectionCutKey,
   sectionPiecesKey,
   toRenderSectionPieces,
@@ -318,6 +319,37 @@ describe('section cut defaults', () => {
     ];
 
     expect(removes([cut], eye)).toBe(true);
+  });
+
+  it.each([
+    ['xy', 2],
+    ['xz', 1],
+    ['yz', 0],
+  ] as const)('should flip a new %s plane exactly when the camera looks from its −axis side', (name, axisIndex) => {
+    /** A view direction whose component along the plane's axis is `component`. */
+    const along = (component: number): SectionVector => {
+      const direction: [number, number, number] = [0.3, 0.3, 0.3];
+      direction[axisIndex] = component;
+      return direction;
+    };
+
+    expect([-1, 1, 0].map((component) => resolveSectionPlaneFlip(name, along(component)))).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    expect(resolveSectionPlaneFlip(name, undefined)).toBe(false);
+    // Either way, the side facing the camera is the side removed.
+    for (const viewDirection of [along(-1), along(1)]) {
+      const cut: SectionCut = {
+        id: 'a',
+        kind: 'plane',
+        plane: name,
+        offset: 0,
+        isFlipped: resolveSectionPlaneFlip(name, viewDirection),
+      };
+      expect(removes([cut], viewDirection)).toBe(true);
+    }
   });
 
   it('should open a new cutaway toward the camera around the up axis, through the bounds centre', () => {

@@ -26,8 +26,9 @@ describe('viewportRenderTiers', () => {
   it('should keep section-view render paths off unsafe topmost arithmetic', () => {
     const files = [
       join(currentDirectory, '..', 'react', 'section-contour-fill.tsx'),
-      join(currentDirectory, '..', 'react', 'section-view-controls.tsx'),
-      join(currentDirectory, '..', 'controls', 'transform-controls.ts'),
+      join(currentDirectory, '..', 'react', 'section-handles.tsx'),
+      join(currentDirectory, '..', 'controls', 'section-handles.ts'),
+      join(currentDirectory, '..', 'controls', 'section-plane-picker.ts'),
     ];
 
     for (const file of files) {

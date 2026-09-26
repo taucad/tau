@@ -947,6 +947,13 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       }),
     });
   });
+  /* D15: *Undo* landed; the number is the revision it undid. */
+  restoreChild?.on('toast.undone', (toast) => {
+    emitChannel({
+      kind: 'toast',
+      value: revisionJson({ type: 'undone', revisionNumber: toast.revisionNumber }),
+    });
+  });
   /* Whole, like the branch child's below: the code is what phrases the refusal
    * on the page, so a relay that kept only the sentence showed desktop clients
    * the generic restore copy. */
@@ -1567,6 +1574,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         });
         break;
       case 'undo':
+      case 'undoOperation':
       case 'confirm':
       case 'cancel':
         actor.getSnapshot().children.restore?.send({ type: request.command });

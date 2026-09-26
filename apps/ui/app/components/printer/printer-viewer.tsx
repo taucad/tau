@@ -32,6 +32,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useTheme } from '#hooks/use-theme.js';
 import { digestBytes } from '#utils/crypto.utils.js';
 import { PaneButton } from '#components/ui/pane-button.js';
+import { MaterialSwatch } from '#components/geometry/cad/model-component-action-menu.js';
 import { printerAccent } from '#components/printer/printer-colors.constants.js';
 import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { derivePrinterGeometry } from '#components/printer/printer-geometry.js';
@@ -50,9 +51,11 @@ import { defaultPrinterPlate, printerPlateById, x1cPlates } from '#components/pr
 import type { PrinterPlateId, PrinterPlateModel } from '#components/printer/printer-plates.js';
 import { PrinterScene } from '#components/printer/printer-scene.js';
 import {
+  createToolpathPalette,
   defaultHiddenToolpathGroups,
   groupToolpath,
   toolpathGroupLabels,
+  toolpathGroupSwatchKind,
   toolpathGroups,
 } from '#components/printer/printer-toolpath.js';
 import type { ToolpathGroup } from '#components/printer/printer-toolpath.js';
@@ -245,6 +248,17 @@ const usePrinterGeometry = (live: PrinterLiveState | undefined) => {
  * @param program - The loaded toolpath.
  * @returns The grouping, the hidden set (a new set per change) and its toggle.
  */
+/** The filament the scene tints with, and each filter group's colour as the scene draws it. */
+const useToolpathColors = (liveFilament: string | undefined, theme: 'light' | 'dark') => {
+  const filamentColor = liveFilament ?? printerAccent;
+  // The legend swatches read the scene's own palette, so they match the drawn toolpath.
+  const groupColors = useMemo(() => {
+    const palette = createToolpathPalette(filamentColor, theme);
+    return toolpathGroups.map((group) => `#${palette[toolpathGroupSwatchKind[group]].getHexString()}`);
+  }, [filamentColor, theme]);
+  return { filamentColor, groupColors };
+};
+
 const useToolpathFilter = (program: ToolpathProgram) => {
   const grouping = useMemo(() => groupToolpath(program), [program]);
   const [hiddenGroups, setHiddenGroups] = useState(defaultHiddenToolpathGroups);
@@ -283,11 +297,13 @@ function PrinterSimulation({
   const hintId = useId();
   const [sceneError, setSceneError] = useState<string>();
   const { manifest, geometry } = usePrinterGeometry(live);
-  // One cursor per loaded program; the parent remounts this tree when the file changes.
-  const [store] = useState(() => createPlaybackStore(program, { isPlaying: !getMotion() }));
+  // One cursor per loaded program; the parent remounts this tree when the file changes. It opens on
+  // the finished print; the sliders and Play review how it got there.
+  const [store] = useState(() => createPlaybackStore(program, { time: program.duration }));
   const prefix = useMemo(() => createExtrusionPrefix(program), [program]);
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const { grouping, hiddenGroups, handleGroupShown } = useToolpathFilter(program);
+  const { filamentColor, groupColors } = useToolpathColors(live?.filamentColor, theme);
   const position = live?.position;
   const isLiveAvailable = live?.printsThisFile === true;
 
@@ -382,7 +398,7 @@ function PrinterSimulation({
               geometry={geometry}
               store={store}
               theme={theme}
-              filamentColor={live?.filamentColor ?? printerAccent}
+              filamentColor={filamentColor}
               chamberLight={live?.chamberLight ?? 'unknown'}
               isReducedMotion={isReducedMotion}
               liveNozzleTarget={live?.nozzleTarget}
@@ -436,7 +452,12 @@ function PrinterSimulation({
             <p className='mt-1 text-muted-foreground'>Preview shows known motion only</p>
           )}
         </section>
-        <ToolpathFilter counts={grouping.counts} hiddenGroups={hiddenGroups} onGroupShown={handleGroupShown} />
+        <ToolpathFilter
+          counts={grouping.counts}
+          colors={groupColors}
+          hiddenGroups={hiddenGroups}
+          onGroupShown={handleGroupShown}
+        />
       </div>
       <div
         role='group'
@@ -549,10 +570,13 @@ function PrinterSimulation({
  */
 function ToolpathFilter({
   counts,
+  colors,
   hiddenGroups,
   onGroupShown,
 }: Readonly<{
   counts: readonly number[];
+  /** CSS colour per {@link toolpathGroups} entry, as the scene tints the group. */
+  colors: readonly string[];
   hiddenGroups: ReadonlySet<ToolpathGroup>;
   onGroupShown: (group: ToolpathGroup, isShown: boolean) => void;
 }>): React.JSX.Element {
@@ -589,6 +613,7 @@ function ToolpathFilter({
                       onGroupShown(group, checked === true);
                     }}
                   />
+                  <MaterialSwatch materials={[{ color: colors[index], roughness: 1, metalness: 0, isUnlit: true }]} />
                   {toolpathGroupLabels[group]}
                 </label>
               </li>

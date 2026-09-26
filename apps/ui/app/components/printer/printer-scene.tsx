@@ -85,7 +85,45 @@ const plateRoughness: Readonly<Record<PrinterPlateModel['finish'], number>> = {
   matte: 0.65,
   textured: 0.9,
 };
+/**
+ * How far the print surface lifts toward white. The plates' true surfaces are near black, so the
+ * first layers and the empty build area vanish against them; the viewer draws them lighter.
+ */
+const plateSurfaceLift = 0.3;
+const plateSurfaceLiftTarget = new THREE.Color(printerBody.plateSurfaceLift);
 const gltfLoader = new GLTFLoader();
+
+/** The print surface's colour as the viewer draws it; `color` is changed in place. */
+const liftPlateSurface = (color: THREE.Color): THREE.Color => color.lerp(plateSurfaceLiftTarget, plateSurfaceLift);
+/** The plate's opacity seen from below the print surface: a shade over the print, as Bambu Studio draws it. */
+const plateUndersideOpacity = 0.2;
+/** The mesh that is the print surface, in the plate GLBs and the flat stand-in alike. */
+const plateSurfaceName = 'surface';
+
+/**
+ * Draw the plate whole and opaque, or as the underside shade: only the print surface, see-through,
+ * since the steel and markings under it would stack their shades into an opaque plate again.
+ */
+const setPlateSeeThrough = (object: THREE.Object3D, isSeeThrough: boolean): void => {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) {
+      return;
+    }
+    const isSurface = child.name === plateSurfaceName;
+    child.visible = isSurface || !isSeeThrough;
+    if (!isSurface) {
+      return;
+    }
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+      if (material instanceof THREE.Material && material.transparent !== isSeeThrough) {
+        material.transparent = isSeeThrough;
+        material.opacity = isSeeThrough ? plateUndersideOpacity : 1;
+        material.depthWrite = !isSeeThrough;
+        material.needsUpdate = true;
+      }
+    }
+  });
+};
 
 const boxMesh = (box: PrinterBox, material: THREE.Material): THREE.Mesh => {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(...box.size), material);
@@ -371,11 +409,12 @@ const createFlatPlate = (
     .quadraticCurveTo(left, front, left + radius, front);
   const slab = new THREE.ExtrudeGeometry(outline, { depth: thickness, bevelEnabled: false, curveSegments: 6 });
   const material = new THREE.MeshStandardMaterial({
-    color: plate.color,
+    color: liftPlateSurface(new THREE.Color(plate.color)),
     roughness: plateRoughness[plate.finish],
     metalness: plate.finish === 'textured' ? 0.35 : 0.1,
   });
   const mesh = new THREE.Mesh(slab, material);
+  mesh.name = plateSurfaceName;
   mesh.position.z = -thickness;
   return {
     object: mesh,
@@ -502,6 +541,11 @@ function PrinterPlateSurface({
       }
       // The one transform from glTF's Y-up metres into the plate frame.
       scene.applyMatrix4(plateModelMatrix);
+      // Lifting the surface's material also lifts markings printed in the surface colour.
+      const surfaceMesh = scene.getObjectByName(plateSurfaceName);
+      if (surfaceMesh instanceof THREE.Mesh && surfaceMesh.material instanceof THREE.MeshStandardMaterial) {
+        liftPlateSurface(surfaceMesh.material.color);
+      }
       if (isActive) {
         setLoaded({ plate, scene });
       } else {
@@ -518,13 +562,25 @@ function PrinterPlateSurface({
     };
   }, [plate]);
   const surface = loaded?.plate === plate ? loaded.scene : flat.object;
+  const isSeeThrough = useRef(false);
   useEffect(() => {
     parent.add(surface);
+    setPlateSeeThrough(surface, false);
+    isSeeThrough.current = false;
     invalidate();
     return () => {
       parent.remove(surface);
     };
   }, [invalidate, parent, surface]);
+  const eye = useMemo(() => new THREE.Vector3(), []);
+  // From below the print surface the plate would hide the print; like Bambu Studio, it turns to a shade.
+  useFrame(({ camera }) => {
+    const isBelow = parent.worldToLocal(eye.copy(camera.position)).z < 0;
+    if (isBelow !== isSeeThrough.current) {
+      isSeeThrough.current = isBelow;
+      setPlateSeeThrough(surface, isBelow);
+    }
+  });
   return undefined;
 }
 

@@ -78,7 +78,7 @@ describe('usePanzoomReset', () => {
 
       expect(mockOn).toHaveBeenCalledTimes(1);
       expect(mockOn).toHaveBeenCalledWith(
-        'viewResetRequested',
+        'viewFitRequested',
         // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.any() returns AsymmetricMatcher typed as any
         expect.any(Function),
       );

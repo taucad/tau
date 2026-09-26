@@ -4,7 +4,7 @@ import { Box3, Vector3 } from 'three';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
 
 const send = vi.fn();
-let resetListener: (() => void) | undefined;
+let fitListener: (() => void) | undefined;
 const size = { width: 800, height: 600 };
 const rig = {
   actorRef: {
@@ -25,7 +25,7 @@ const unsubscribe = vi.fn();
 let framing = { identity: 'file-a' as string | undefined, pendingView: undefined as unknown, initialized: false };
 const graphicsActor = {
   on: vi.fn((_type: string, listener: () => void) => {
-    resetListener = listener;
+    fitListener = listener;
     return { unsubscribe };
   }),
 };
@@ -43,12 +43,12 @@ describe('useCameraFraming portable camera events', () => {
     unsubscribe.mockClear();
     graphicsActor.on.mockClear();
     framing = { identity: 'file-a', pendingView: undefined, initialized: false };
-    resetListener = undefined;
+    fitListener = undefined;
     size.width = 800;
     size.height = 600;
   });
 
-  it('frames the first real bounds, resolves a valid camera up, and saves home', () => {
+  it('frames the first real bounds and resolves a valid camera up', () => {
     const bounds = new Box3(new Vector3(-10, -5, -2), new Vector3(10, 5, 2));
     renderHook(() =>
       useCameraFraming({
@@ -61,11 +61,10 @@ describe('useCameraFraming portable camera events', () => {
     const setView = send.mock.calls[0]?.[0] as { direction: [number, number, number]; up: [number, number, number] };
     expect(new Vector3(...setView.direction).cross(new Vector3(...setView.up)).lengthSq()).toBeGreaterThan(1e-8);
     expect(send).toHaveBeenCalledWith({ type: 'setBounds', bounds: { min: [-10, -5, -2], max: [10, 5, 2] } });
-    expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
-    expect(send).toHaveBeenLastCalledWith({ type: 'saveHome' });
+    expect(send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
   });
 
-  it('restores the saved canonical view after capturing the configured home', () => {
+  it('restores the saved canonical view after the configured framing', () => {
     const cameraView = {
       target: [8, 9, 10],
       direction: [1, 0, 0],
@@ -77,12 +76,12 @@ describe('useCameraFraming portable camera events', () => {
 
     renderHook(() => useCameraFraming({ geometryRadius: 4, geometryBounds: bounds }));
 
-    const saveHomeIndex = send.mock.calls.findIndex(([event]) => event.type === 'saveHome');
+    const frameIndex = send.mock.calls.findIndex(([event]) => event.type === 'frame');
     const restoreIndex = send.mock.calls.findIndex(
       ([event]) => event.type === 'setView' && event.target === cameraView.target,
     );
-    expect(saveHomeIndex).toBeGreaterThan(-1);
-    expect(restoreIndex).toBeGreaterThan(saveHomeIndex);
+    expect(frameIndex).toBeGreaterThan(-1);
+    expect(restoreIndex).toBeGreaterThan(frameIndex);
     expect(send.mock.calls[restoreIndex]?.[0]).toEqual({ type: 'setView', ...cameraView });
   });
 
@@ -97,7 +96,6 @@ describe('useCameraFraming portable camera events', () => {
 
     expect(send).toHaveBeenCalledWith({ type: 'setBounds', bounds: { min: [-2, -2, -2], max: [2, 2, 2] } });
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'frame' }));
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'saveHome' }));
   });
 
   /* A file switch re-latches the session's framing record, so the next geometry is framed with the
@@ -124,7 +122,7 @@ describe('useCameraFraming portable camera events', () => {
     framing.initialized = false;
     hook.rerender({ radius: 4.5 });
 
-    expect(send).toHaveBeenCalledWith({ type: 'saveHome' });
+    expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
     expect(send).toHaveBeenLastCalledWith({ type: 'setView', ...cameraView });
     expect(framing.initialized).toBe(true);
 
@@ -133,10 +131,9 @@ describe('useCameraFraming portable camera events', () => {
 
     expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setView', target: cameraView.target }));
-    expect(send).not.toHaveBeenCalledWith({ type: 'saveHome' });
   });
 
-  it('preserves orientation on aspect-only reframing and routes reset to the camera actor', () => {
+  it('preserves orientation on aspect-only reframing and on Fit view', () => {
     const bounds = new Box3(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
     const hook = renderHook(() => useCameraFraming({ geometryRadius: 2, geometryBounds: bounds }));
     send.mockClear();
@@ -146,8 +143,13 @@ describe('useCameraFraming portable camera events', () => {
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setView' }));
     expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
 
-    act(() => resetListener?.());
-    expect(send).toHaveBeenLastCalledWith({ type: 'reset' });
+    expect(graphicsActor.on).toHaveBeenCalledWith('viewFitRequested', expect.any(Function));
+    send.mockClear();
+    act(() => fitListener?.());
+    // Fit view reframes the current bounds without a setView, so the direction and up are kept.
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setView' }));
+    expect(send).not.toHaveBeenCalledWith({ type: 'reset' });
+    expect(send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
     hook.unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
   });

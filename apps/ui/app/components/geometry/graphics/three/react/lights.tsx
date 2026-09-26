@@ -85,6 +85,7 @@ export function Lights({
         headlampConfig: defaultHeadlampConfig,
         themeIntensityScale,
         themeAmbientBoost,
+        webGpuPmrem: isViewportWebGpu(gl),
       },
     });
   });

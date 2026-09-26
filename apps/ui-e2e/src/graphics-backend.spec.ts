@@ -506,6 +506,51 @@ async function sampleOverlayBrightness(pngBase64: string): Promise<OverlayBright
   }, pngBase64);
 }
 
+/**
+ * Compare two captures' central half at full resolution: mean luminance difference and the share
+ * of pixels differing by more than 12 levels. A downsampled comparison aliases thin edge lines.
+ */
+async function compareCentreLuminance(
+  firstPngBase64: string,
+  secondPngBase64: string,
+): Promise<Readonly<{ meanLuminanceDifference: number; differingPixelRatio: number }>> {
+  return target.evaluate(
+    async ({ first, second }) => {
+      const read = async (png: string): Promise<ImageData> => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${png}`;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          throw new Error('2d context unavailable');
+        }
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, canvas.width, canvas.height);
+      };
+      const [a, b] = await Promise.all([read(first), read(second)]);
+      const luminanceAt = ({ data }: ImageData, index: number): number =>
+        data[index]! * 0.2126 + data[index + 1]! * 0.7152 + data[index + 2]! * 0.0722;
+      let total = 0;
+      let differing = 0;
+      let samples = 0;
+      for (let y = Math.floor(a.height * 0.25); y < Math.floor(a.height * 0.75); y += 1) {
+        for (let x = Math.floor(a.width * 0.25); x < Math.floor(a.width * 0.75); x += 1) {
+          const index = (y * a.width + x) * 4;
+          const difference = Math.abs(luminanceAt(a, index) - luminanceAt(b, index));
+          total += difference;
+          differing += difference > 12 ? 1 : 0;
+          samples += 1;
+        }
+      }
+      return { meanLuminanceDifference: total / samples, differingPixelRatio: differing / samples };
+    },
+    { first: firstPngBase64, second: secondPngBase64 },
+  );
+}
+
 async function driveEdgeOcclusionCamera({
   distance,
   fov,
@@ -1328,8 +1373,9 @@ test.describe('Graphics backend regression guard', () => {
     expect(failures, `WebGPU validation errors leaked to the console:\n${failures.join('\n')}`).toEqual([]);
   });
 
-  test('grid and axes display at the same brightness on WebGL and WebGPU, with and without post-processing', async () => {
+  test('grid, axes and model shading display the same on WebGL and WebGPU, with and without post-processing', async () => {
     const samples: Record<string, OverlayBrightness> = {};
+    const screenshots: Record<string, string> = {};
     /* oxlint-disable no-await-in-loop -- each capture must observe the backend and post-processing state set before it. */
     for (const backend of ['webgl', 'webgpu'] as const satisfies readonly GraphicsBackend[]) {
       await target.navigate(`${birdhouseFixturePath}?graphicsBackend=${backend}`);
@@ -1348,15 +1394,22 @@ test.describe('Graphics backend regression guard', () => {
         await target.delay(750);
         const label = `${backend}${postProcessing ? '-post' : ''}`;
         const canvas = selectors.getByCss(previewCanvasSelector).first();
-        samples[label] = await sampleOverlayBrightness(
-          await target.screenshot(canvas, `overlay-brightness-${label}.png`),
-        );
+        screenshots[label] = await target.screenshot(canvas, `overlay-brightness-${label}.png`);
+        samples[label] = await sampleOverlayBrightness(screenshots[label]);
       }
       await target.evaluate(() => {
         (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.setPostProcessingEnabled(false);
       });
     }
     /* oxlint-enable no-await-in-loop -- sequential captures end. */
+
+    // The model's shading matches too. WebGPU once sampled the camera-rotated environment through
+    // a flipped PMREM lookup and lit faces from the wrong side (mean 22.8, 42% differing); matched,
+    // edge anti-aliasing leaves about 3.7 and 4%. With post-processing on, the backends run
+    // different AO, so only the plain render is compared.
+    const modelDifference = await compareCentreLuminance(screenshots['webgl']!, screenshots['webgpu']!);
+    expect(modelDifference.meanLuminanceDifference, JSON.stringify(modelDifference)).toBeLessThan(8);
+    expect(modelDifference.differingPixelRatio, JSON.stringify(modelDifference)).toBeLessThan(0.15);
 
     const reference = samples['webgl']!;
     // The 0.3-opacity grey grid over white bottoms out at 213 when blended in sRGB space; a

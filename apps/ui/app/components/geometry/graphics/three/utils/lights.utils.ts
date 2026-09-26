@@ -93,6 +93,8 @@ export type LightingConfig = {
   themeIntensityScale?: number;
   /** Theme-based ambient floor boost to prevent crushed shadows (1.0 for light, ~1.15 for dark). */
   themeAmbientBoost?: number;
+  /** The renderer samples PMREM environments through three's WebGPU `PMREMNode`. */
+  webGpuPmrem?: boolean;
 };
 
 // ── Pure functions ─────────────────────────────────────────────────────────
@@ -196,6 +198,14 @@ export function applyLightingForCamera({ scene, camera, headlamp, ambient, confi
 
   // Camera-locked environment rotation
   camera.getWorldQuaternion(scratchCameraWorldQuaternionForLighting);
+  if (config.webGpuPmrem) {
+    // ponytail: three r184–r186 `PMREMNode` flips y before the rotation (R·F·d where WebGL's
+    // layout needs F·R·d), so any rotation not about y lights the model from the wrong side.
+    // Conjugating by that flip (F·R·F: negate x and z) cancels it. Drop this once three's
+    // PMREMNode rotates first (upstream dev after #34585; not in 0.186.1).
+    const q = scratchCameraWorldQuaternionForLighting;
+    q.set(-q.x, q.y, -q.z, q.w);
+  }
   const rotation = computeEnvironmentRotation(scratchCameraWorldQuaternionForLighting, config.upDirection);
   scene.environmentRotation.copy(rotation);
 

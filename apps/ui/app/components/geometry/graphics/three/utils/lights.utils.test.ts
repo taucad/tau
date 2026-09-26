@@ -277,6 +277,40 @@ describe('applyLightingForCamera', () => {
       // The Euler order should match z-up
       expect(euler.order).toBe('ZXY');
     });
+
+    it('samples the WebGPU PMREM in the direction WebGL samples, through its y flip', () => {
+      // Three r184 samples a PMREM at rotᵀ·d on WebGL and at rotᵀ·F·d on WebGPU, whose layout
+      // needs F·(rotᵀ·d). A camera tilted off the y axis exposes the difference.
+      const camera = new THREE.PerspectiveCamera();
+      camera.up.set(0, 0, 1);
+      camera.position.set(1, -1, 0.7);
+      camera.lookAt(0, 0, 0);
+      camera.updateMatrixWorld(true);
+      /** The lookup direction each backend's sampler forms from the rotation Tau sets. */
+      const sampleDirection = (
+        backend: 'webgl' | 'webgpu',
+        webGpuPmrem: boolean,
+        direction: THREE.Vector3,
+      ): THREE.Vector3 => {
+        const scene = createTestScene();
+        const config = createDefaultLightingConfig({ webGpuPmrem });
+        applyLightingForCamera({ scene, camera, headlamp: undefined, ambient: undefined, config });
+        const rotation = new THREE.Matrix4().makeRotationFromEuler(scene.environmentRotation).transpose();
+        return (backend === 'webgpu' ? flipY(direction) : direction.clone()).applyMatrix4(rotation);
+      };
+      const flipY = (vector: THREE.Vector3): THREE.Vector3 => vector.clone().setY(-vector.y);
+
+      for (const direction of [
+        new THREE.Vector3(1, 0, 0),
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(0.3, -0.5, 0.8),
+      ]) {
+        const webGl = flipY(sampleDirection('webgl', false, direction));
+        expect(sampleDirection('webgpu', true, direction).distanceTo(webGl)).toBeLessThan(1e-9);
+        // Uncompensated, the WebGPU lookup points elsewhere.
+        expect(sampleDirection('webgpu', false, direction).distanceTo(webGl)).toBeGreaterThan(0.1);
+      }
+    });
   });
 
   describe('environment intensity', () => {

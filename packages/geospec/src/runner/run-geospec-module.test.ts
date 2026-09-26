@@ -11,6 +11,9 @@ import type { GeoSpecRunnerEvent } from '#runner/worker/index.js';
 import { createSerialGeoSpecRunner } from '#runner/worker/serial-runner.js';
 
 class MemoryFileSystem implements VmFileSystem {
+  /** Runs after a read takes its content and before the reader sees it: a save landing right after the read. */
+  public afterRead: ((path: string) => void) | undefined;
+
   private readonly files = new Map<string, string>();
 
   public setText(path: string, content: string): void {
@@ -28,6 +31,7 @@ class MemoryFileSystem implements VmFileSystem {
     if (content === undefined) {
       throw new Error(`ENOENT: ${path}`);
     }
+    this.afterRead?.(path);
     return encoding === 'utf8' ? content : new TextEncoder().encode(content);
   }
 
@@ -175,6 +179,21 @@ describe('runGeoSpecModule', () => {
     }
     expect(changed.bundle).not.toBe(collected.bundle);
     expect(changed.tests.map(({ name }) => name)).toStrictEqual(['changed']);
+  });
+
+  it('should rebundle a file saved after the bundler read it', async () => {
+    const filesystem = filesystemWith([['spec.geospec.ts', `import { it } from 'geospec'; it('v1', () => {});`]]);
+    filesystem.afterRead = (path) => {
+      filesystem.afterRead = undefined;
+      filesystem.setText(path, `import { it } from 'geospec'; it('v2', () => {});`);
+    };
+    const bundleCache = new Map();
+
+    const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+    const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+
+    expect(first.success && first.tests.map(({ name }) => name)).toStrictEqual(['v1']);
+    expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['v2']);
   });
 
   it('should expose the injected model and step loaders to authored modules', async () => {

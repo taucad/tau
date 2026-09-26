@@ -16,7 +16,7 @@ export {
   gatewayProviderKinds,
 } from '#wire/admission.schema.js';
 export type { AgentChannelAdmissionConfig, AgentChannelModel } from '#wire/admission.schema.js';
-export { commandAnswerSchema, commandPayloads } from '#wire/commands.schema.js';
+export { chatIdSchema, commandAnswerSchema, commandPayloads } from '#wire/commands.schema.js';
 export type {
   CommandAnswer,
   CommandFrame,

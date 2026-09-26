@@ -10,12 +10,19 @@ import type { UserProviderMessage } from '#log/event-types.js';
 import { agentChannelAdmissionConfigSchema, agentChannelModelSchema } from '#wire/admission.schema.js';
 
 const id = z.string().min(1);
+/**
+ * A chat id is one storage path segment: its log lives in a directory of that name, so the wire refuses one a launcher
+ * could not store (`STORAGE_PATH_INVALID` there) before anything counts it (W6.r1 round 5).
+ *
+ * @public
+ */
+export const chatIdSchema = z.string().regex(/^(?!\.\.?$)[^/\\]+$/u, 'chatId must be one storage path segment.');
 /** 1 to 94 printable ASCII characters, so W7's attempt key `${runId}:${attempt}:${position}` fits the gateway's 128. */
 const runId = z.string().regex(/^[!-~]{1,94}$/u);
 
 /** The start payload's fields, before its one cross-field rule. */
 const startPayloadSchema = z.strictObject({
-  chatId: id,
+  chatId: chatIdSchema,
   runId,
   message: userProviderMessageSchema,
   trigger: z.enum(['submit', 'edit', 'regenerate', 'retry']),
@@ -38,18 +45,18 @@ export const commandPayloads = {
     (payload) => (payload.trigger === 'submit') === (payload.retainedMessageIds === undefined),
     { path: ['retainedMessageIds'], message: 'present exactly when the trigger rewinds' },
   ),
-  steer: z.strictObject({ chatId: id, runId, message: z.string() }),
+  steer: z.strictObject({ chatId: chatIdSchema, runId, message: z.string() }),
   /** D17's "request cancellation". Aborting a wait and detaching are client-local. */
-  cancel: z.strictObject({ chatId: id, runId }),
+  cancel: z.strictObject({ chatId: chatIdSchema, runId }),
   /** EQ1: no consent field. A charged lost reply is recorded and retried by the host without a gesture. */
   resume: z.strictObject({
-    chatId: id,
+    chatId: chatIdSchema,
     runId,
     /** The model row, with its reasoning effort, chosen at Resume (D21): the row `start.config.model` carries (SC-G4). */
     selection: agentChannelModelSchema.optional(),
   }),
   interrupt: z.strictObject({
-    chatId: id,
+    chatId: chatIdSchema,
     runId,
     interruptId: id,
     kind: z.enum(['approval', 'operator', 'safeguard']),
@@ -57,7 +64,7 @@ export const commandPayloads = {
     payload: jsonValueSchema.optional(),
   }),
   'resolve-interrupt': z.strictObject({
-    chatId: id,
+    chatId: chatIdSchema,
     runId,
     interruptId: id,
     outcome: z.enum(['approved', 'denied', 'cancelled']),
@@ -66,7 +73,7 @@ export const commandPayloads = {
     payload: jsonValueSchema.optional(),
   }),
   /** A read: writes nothing and carries no row (W6 RH-R1). Its answer's `details` is the host's snapshot at open. */
-  attach: z.strictObject({ chatId: id }),
+  attach: z.strictObject({ chatId: chatIdSchema }),
 } as const;
 
 /** One command verb. @public */

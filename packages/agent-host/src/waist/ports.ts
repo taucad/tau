@@ -318,21 +318,6 @@ export type InterruptResolution = {
   readonly payload?: JsonValue | undefined;
 };
 
-/**
- * W5: the presentation side of the durable pending set. The run actor keeps the set in the chat log
- * (`interrupt.recorded` rows), so a host no longer supplies this port.
- *
- * @public
- */
-export type InterruptApprovalPort = {
-  /** Legacy: M1 records every pause as rows; the host never calls it. W6 RH-S7 removes the last caller. */
-  pause?(request: InterruptRequest): Promise<InterruptResolution>;
-  /** List unresolved requests for presentation. */
-  pending(input: { readonly runId: string }): Promise<readonly InterruptRequest[]>;
-  /** Legacy: `resolve-interrupt` records the resolution; the host never calls it. W6 RH-S7 removes the last caller. */
-  resume?(resolution: InterruptResolution): Promise<void>;
-};
-
 /** Immutable identity and current state of one admitted run. @public */
 export type HostRun = {
   /** Conversation identity whose workspace log owns the run. */

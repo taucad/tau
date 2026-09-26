@@ -19,7 +19,28 @@
     "AttachGeneration.fixed.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "W0.11"
+      "ref": "W0.11; W6 RH-S1, RH-A8: FixMain and FixUtil, ConnectServed, and W6.r1 finding 14's ReleasedHostCloses (1,882 states with `act`)"
+    },
+    "AttachGeneration.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6.f1 graph export (graphs.AttachGeneration): projectHost replay and walk"
+    },
+    "AttachGeneration.main-only-NoReuseOfClosingLauncher.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoReuseOfClosingLauncher"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1, RH-A8: FixMain alone leaves L6 N2 (9-state trace)"
+    },
+    "AttachGeneration.util-only-NoStaleReleaseDeletesNewEpoch.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoStaleReleaseDeletesNewEpoch"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1, RH-A8: FixUtil alone leaves L6 N3 (14-state trace)"
     },
     "AcpSessions.target.cfg": {
       "tier": "pr",
@@ -96,6 +117,10 @@
     }
   },
   "graphs": {
+    "AttachGeneration": {
+      "config": "AttachGeneration.export.cfg",
+      "phase": "lstate"
+    },
     "AcpSessions": {
       "config": "AcpSessions.export.cfg",
       "phase": "ent"

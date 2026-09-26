@@ -2,7 +2,8 @@ import { expect, it, vi } from 'vitest';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { FsLike } from '@taucad/runtime/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { handleAgentHostWorkerCall } from '#workers/agent-host.impl.js';
+import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
+import type { BrowserProjectHost } from '#workers/agent-host.impl.js';
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import type * as GeoSpecClientModule from '#workers/geospec-runner.client.js';
 
@@ -11,7 +12,7 @@ import type * as GeoSpecClientModule from '#workers/geospec-runner.client.js';
  *
  * Its own file, not `agent-host.browser.test.ts`: the two observation mocks below
  * reach the realms this page's real `Worker` instances load, and the launcher
- * rows over there boot one. Nothing here starts a worker — `initialize` builds
+ * rows over there boot one. Nothing here starts a worker — `openBrowserProjectHost` builds
  * the kernel runtime and the GeoSpec client on the calling thread, which is
  * exactly the wiring under test.
  */
@@ -59,16 +60,17 @@ it('should hand both executors of project code the agent view of the workspace',
   const workspace = new MemoryProvider();
   const { createFileSystemBridgePort, createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
   const projectId = `agent-host-executor-${crypto.randomUUID()}`;
-  const sessionId = `session-${crypto.randomUUID()}`;
+  let host: BrowserProjectHost | undefined;
   executorSeams.kernelFileSystems.length = 0;
   executorSeams.geoSpecBridges.length = 0;
   await workspace.writeFile('.git/HEAD', 'ref: refs/heads/main\n');
   await workspace.writeFile('main.ts', 'export const main = 1;\n');
 
   try {
-    await handleAgentHostWorkerCall(
-      'initialize',
+    host = await openBrowserProjectHost(
       {
+        projectId,
+        hostId: `host-${crypto.randomUUID()}`,
         fileSystemPort: createFileSystemBridgePort(workspace).port,
         projectRootPort: createFileSystemBridgePort(workspace).port,
         projectStorage: { projectId, backend: 'memory', storageRootKey: `memory:${projectId}`, providerBasePath: '' },
@@ -82,7 +84,7 @@ it('should hand both executors of project code the agent view of the workspace',
         model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
         runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
       },
-      { sessionId },
+      { tabId: `tab-${crypto.randomUUID()}`, visibility: { visible: () => true, subscribe: () => () => undefined } },
     );
 
     const kernelFileSystem = executorSeams.kernelFileSystems.at(-1);
@@ -113,7 +115,7 @@ it('should hand both executors of project code the agent view of the workspace',
       geoSpec.dispose();
     }
   } finally {
-    await handleAgentHostWorkerCall('close', undefined, { sessionId });
+    await host?.close();
     workspace.dispose();
   }
 });

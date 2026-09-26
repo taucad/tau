@@ -438,7 +438,14 @@ const orphanRows = (ledger: ChatLedger): readonly ChatRunRow[] => {
   ];
 };
 
-const isOrphaned = (ledger: ChatLedger): boolean => {
+/**
+ * An open run no driver holds: what a new incarnation abandons at opening (D10). The launcher asks for a claim on it.
+ *
+ * @param ledger - The chat's ledger.
+ * @returns Whether the current run is orphaned.
+ * @internal
+ */
+export const isOrphaned = (ledger: ChatLedger): boolean => {
   const entry = currentEntry(ledger);
   /* Read tolerantly, execute strictly (D16): a run this build cannot interpret is not written to, not even abandoned. */
   if (executionRefusal(ledger) === 'RUN_UNREADABLE') {

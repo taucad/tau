@@ -31,8 +31,8 @@ import type { WebSocket } from 'ws';
 
 import { packageVersion } from '@taucad/runtime/metadata';
 import { isOriginAllowed } from '@taucad/runtime/transport/websocket-host';
-import { serveAgentChannel } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher, ServeAgentChannelOptions } from '@taucad/agent-host/node-launcher';
+import { serveAgentChannel } from '@taucad/agent-host/launcher';
+import type { AgentLauncher, ServeAgentChannelOptions } from '@taucad/agent-host/launcher';
 
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import type { ComputeStoreControl } from '@taucad/runtime/types';
@@ -85,7 +85,7 @@ const cookieOf = (cookieHeader: string | undefined, name: string): string => {
 /** Options for {@link startAgentServer}. @public */
 export type AgentServerOptions = {
   /** The always-on host answering the T0 vocabulary. */
-  readonly launcher: NodeAgentLauncher;
+  readonly launcher: AgentLauncher;
   /** The launcher workspace's single revision root. */
   readonly revisions?: ServeAgentChannelOptions['revisions'];
   /**
@@ -167,9 +167,9 @@ const routeOfPath = (pathname: string, pathPrefix: string): string | undefined =
  * ```typescript
  * import { randomBytes } from 'node:crypto';
  * import { startAgentServer } from '@taucad/host';
- * import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+ * import type { AgentLauncher } from '@taucad/agent-host/launcher';
  *
- * declare const launcher: NodeAgentLauncher;
+ * declare const launcher: AgentLauncher;
  * const server = startAgentServer({
  *   launcher,
  *   token: randomBytes(32).toString('base64url'),

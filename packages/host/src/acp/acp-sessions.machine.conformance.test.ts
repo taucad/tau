@@ -38,6 +38,9 @@ const suite = JSON.parse(readFileSync(path.join(specs, 'AcpSessions/suite.json')
 const behaviours = suiteBehaviours(graph, suite);
 /* Nightly: `formal nightly` writes TLC-simulated behaviours from a fresh seed here (host `formal:nightly`). */
 const simulated = process.env['FORMAL_SIMULATED'];
+/* A suite replay settles each of its behaviours in turn: about 9 ms each on an idle host (163 in 1.4 s), so 250 ms each
+ * holds on a loaded one. It grows with the suite, and the global default stays. */
+const replayTimeout = behaviours.length * 250;
 
 type Step = WalkPath['steps'][number];
 
@@ -90,10 +93,14 @@ const implementationPaths = (): WalkPath[] => {
 };
 
 describe('acpSessionsMachine conforms to AcpSessions.tla', () => {
-  it('replays the TLC covering suite through the adapter', async () => {
-    expect(behaviours).toHaveLength(suite.behaviours.length);
-    expect(await replaySuite(behaviours, acpSessionsAdapter, (state) => [state['act'], state])).toEqual([]);
-  });
+  it(
+    'replays the TLC covering suite through the adapter',
+    async () => {
+      expect(behaviours).toHaveLength(suite.behaviours.length);
+      expect(await replaySuite(behaviours, acpSessionsAdapter, (state) => [state['act'], state])).toEqual([]);
+    },
+    replayTimeout,
+  );
 
   it.runIf(simulated !== undefined)(
     'replays the simulated behaviours through the adapter',
@@ -111,20 +118,24 @@ describe('acpSessionsMachine conforms to AcpSessions.tla', () => {
     300_000,
   );
 
-  it('replays recorded transitions equally', async () => {
-    const divergences = [];
-    for (const behaviour of behaviours) {
-      const harness = acpSessionsAdapter.start();
-      for (const state of behaviour.slice(1)) {
-        // oxlint-disable-next-line no-await-in-loop -- each step settles before the next.
-        await acpSessionsAdapter.apply(harness, [state['act'], state]);
+  it(
+    'replays recorded transitions equally',
+    async () => {
+      const divergences = [];
+      for (const behaviour of behaviours) {
+        const harness = acpSessionsAdapter.start();
+        for (const state of behaviour.slice(1)) {
+          // oxlint-disable-next-line no-await-in-loop -- each step settles before the next.
+          await acpSessionsAdapter.apply(harness, [state['act'], state]);
+        }
+        const records = harness.records().filter((record) => record.machineId === 'acpSessions');
+        divergences.push(...replayEquality(acpSessionsMachine, acpSessionsInput, records));
+        acpSessionsAdapter.stop?.(harness);
       }
-      const records = harness.records().filter((record) => record.machineId === 'acpSessions');
-      divergences.push(...replayEquality(acpSessionsMachine, acpSessionsInput, records));
-      acpSessionsAdapter.stop?.(harness);
-    }
-    expect(divergences).toEqual([]);
-  });
+      expect(divergences).toEqual([]);
+    },
+    replayTimeout,
+  );
 
   it('walks every implementation path through the spec graph without rejection', () => {
     const paths = implementationPaths();
@@ -133,9 +144,10 @@ describe('acpSessionsMachine conforms to AcpSessions.tla', () => {
     const reached = new Set(paths.map((path) => canonicalJson(path.steps.at(-1)!.view)));
 
     expect(walkPaths(graph, paths).slice(0, 3)).toEqual([]);
-    /* And the other way: with `Init`, the parent reaches all 915 states of the spec's projection. */
+    /* And the other way: with `Init`, the parent reaches all 1,059 states of the spec's projection: 915 before
+     * W6.r1's `bound` flag, which splits a lent run into before and after its prompt is sent. */
     expect(reached.size + 1).toBe(specStates.size);
-    expect(specStates.size).toBe(915);
+    expect(specStates.size).toBe(1059);
   }, 120_000);
 
   it('matches the committed drift manifest', () => {
@@ -161,9 +173,11 @@ describe('acpSessionsMachine conforms to AcpSessions.tla', () => {
           'Acquire',
           'Opened',
           'Dequeued',
+          'Bound',
           'PromptAnswered',
           'TurnEnded',
           'Cancel',
+          'CancelBinding',
           'CancelSettled',
           'CancelTimedOut',
           'Tick',

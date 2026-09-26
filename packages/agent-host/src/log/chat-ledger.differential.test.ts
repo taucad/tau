@@ -283,11 +283,6 @@ const hostSettle = async (
     },
     toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
     openEventLog: async () => copy,
-    interruptPort: {
-      pause: async (request) => ({ interruptId: request.interruptId, outcome: 'approved' }),
-      pending: async () => [],
-      resume: async () => undefined,
-    },
     createLeaderEpoch: () => 'e99',
     now: () => new Date(base + 999_999),
   });

@@ -50,11 +50,6 @@ globalThis.addEventListener('message', async () => {
       modelTransport: new ScriptedParityModelTransport(scriptedParityResponses.slice(0, 2)),
       toolRegistry: readTool,
       openEventLog: async () => createOpfsEventLog({ fileHandle, access: 'write' }),
-      interruptPort: {
-        pause: async (request) => ({ interruptId: request.interruptId, outcome: 'approved' }),
-        pending: async () => [],
-        resume: async () => undefined,
-      },
       createId: () => `worker-message-${id++}`,
       createLeaderEpoch: () => `worker-epoch-${epoch++}`,
       now: () => new Date('2026-09-01T00:00:00.000Z'),

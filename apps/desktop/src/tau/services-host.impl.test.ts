@@ -6,11 +6,15 @@ import { dirname, join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { TurnPlacementPort } from '@taucad/agent-host';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { AgentChannelClient, AgentChannelEndpoint } from '@taucad/agent-host/channel-client';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
-import { acquireNodeAuthorityWriter, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { acquireNodeAuthorityWriter, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import type * as AgentHost from '@taucad/agent-host';
+import type * as AgentLauncher from '@taucad/agent-host/launcher';
 import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
 import type * as RuntimeClient from '@taucad/runtime/client';
@@ -19,16 +23,22 @@ import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-hos
 import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/services-host.impl.js';
 
 /**
- * Every `createAcpExternalAgentPort` call the utility makes, in order.
+ * Every `createProjectHostActor` call the utility makes, and every project host
+ * it served a connection on, in order.
  *
- * The MCP wiring is invisible from the channel — it only shows up in what the
- * external-agent port was handed — so the real factory is wrapped rather than
+ * The MCP wiring is invisible from the channel — it only shows up in the host's
+ * options and its endpoint — so the real factory is wrapped rather than
  * replaced: every other assertion in this file still exercises the genuine
- * port, including its "cannot start the codex agent" refusal.
+ * host, including its "cannot start the codex agent" refusal.
  */
-const acpPortCalls = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createAcpExternalAgentPort>[0]>);
+const projectHostCalls = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createProjectHostActor>[0]>);
+const servedHosts = vi.hoisted(() => [] as TauHost.ProjectHost[]);
 const toolRegistryCalls = vi.hoisted(() => [] as Array<Parameters<typeof AgentTools.createHostToolRegistry>[0]>);
 const runtimeClientCalls = vi.hoisted(() => [] as Array<ReturnType<typeof RuntimeClient.createRuntimeClient>>);
+/** The options of every model transport the utility built (this test build is self-host, `tauCloudBuildEnabled`). */
+const transportCalls = vi.hoisted(
+  () => [] as Array<Parameters<typeof AgentHost.createTauCloudGatewayModelTransport>[0]>,
+);
 /** One-shot hold on the next launcher close, so a test can act while that close is in flight. */
 const launcherCloseGate = vi.hoisted(() => ({
   next: undefined as undefined | Readonly<{ entered: () => void; hold: Promise<void> }>,
@@ -38,28 +48,47 @@ vi.mock('@taucad/host', async (importOriginal) => {
   const actual = await importOriginal<typeof TauHost>();
   return {
     ...actual,
-    createAcpExternalAgentPort: (options: Parameters<typeof TauHost.createAcpExternalAgentPort>[0]) => {
-      acpPortCalls.push(options);
-      return actual.createAcpExternalAgentPort(options);
+    createProjectHostActor: (options: Parameters<typeof TauHost.createProjectHostActor>[0]) => {
+      projectHostCalls.push(options);
+      return actual.createProjectHostActor({
+        ...options,
+        serve: (connectionId, host) => {
+          servedHosts.push(host);
+          options.serve(connectionId, host);
+        },
+      });
     },
-    createProjectRevisions: (options: Parameters<typeof TauHost.createProjectRevisions>[0]) => {
-      const revisions = actual.createProjectRevisions(options);
-      const { record } = revisions;
-      return Object.assign(revisions, {
-        record: (launcher: Parameters<typeof record>[0]) => {
-          const recorded = record(launcher);
-          const { close } = recorded;
-          return Object.assign(recorded, {
-            close: async () => {
-              const gate = launcherCloseGate.next;
-              launcherCloseGate.next = undefined;
-              if (gate !== undefined) {
-                gate.entered();
-                await gate.hold;
-              }
-              return close();
-            },
-          });
+  };
+});
+
+vi.mock('@taucad/agent-host', async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentHost>();
+  return {
+    ...actual,
+    createGatewayModelTransport: (options: Parameters<typeof actual.createTauCloudGatewayModelTransport>[0]) => {
+      transportCalls.push(options);
+      return actual.createGatewayModelTransport(options);
+    },
+  };
+});
+
+/* The project host's launcher, with its close held when a test arms the gate. */
+vi.mock('@taucad/agent-host/launcher', async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentLauncher>();
+  return {
+    ...actual,
+    createAgentLauncher: (options: Parameters<typeof AgentLauncher.createAgentLauncher>[0]) => {
+      const launcher = actual.createAgentLauncher(options);
+      const { close } = launcher;
+      return Object.assign(launcher, {
+        close: async () => {
+          const gate = launcherCloseGate.next;
+          launcherCloseGate.next = undefined;
+          if (gate !== undefined) {
+            gate.entered();
+            await gate.hold;
+          }
+          return close();
         },
       });
     },
@@ -751,7 +780,8 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     for (const host of hosts.splice(0)) {
       host.dispose();
     }
-    acpPortCalls.length = 0;
+    projectHostCalls.length = 0;
+    servedHosts.length = 0;
     toolRegistryCalls.length = 0;
     runtimeClientCalls.length = 0;
     /* `dispose` closes each launcher without waiting, and a revision store that
@@ -786,7 +816,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   ) => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
     workspaces.push(workspaceRoot);
-    const harness = hostHarness(hostOverrides);
+    /* The agent host reads through the utility's one authority, as it does in production. */
+    const authorityDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-authority-'));
+    workspaces.push(authorityDirectory);
+    const harness = hostHarness({ authorityDirectory, serve: serveNodeFsProvider, ...hostOverrides });
     hosts.push(harness.host);
     harness.host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
     harness.host.handleMessage(frame({ type: 'agentHost', config: { ...config, ...overrides } }));
@@ -1005,7 +1038,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     ]);
   });
 
-  it('should terminate a client that was still connecting when its last run settled', async () => {
+  it('should terminate a client that was still connecting when its last run settled, and connect its caller afresh', async () => {
     type RuntimeLease = Awaited<ReturnType<NonNullable<ServicesHostOptions['requestRuntimePort']>>>;
     const leases: Array<ReturnType<typeof Promise.withResolvers<RuntimeLease>>> = [];
     const requestRuntimePort = vi.fn(async () => {
@@ -1026,18 +1059,18 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
     checkouts.delete('run-1');
     leases[0]!.resolve({ port: fakeRuntimePort(), release: vi.fn() });
-    await connecting;
 
     await vi.waitFor(() => {
       expect(runtimeClientCalls[0]!.terminate).toHaveBeenCalledOnce();
     });
-    checkouts.set('run-2', candidateCheckout(cwd));
-    const reconnected = registry.runtimeClient!(cwd);
+    /* W6.r1 finding 15: the caller still connecting is never handed the client being closed; it gets a fresh one. */
     await vi.waitFor(() => {
       expect(requestRuntimePort).toHaveBeenCalledTimes(2);
     });
     leases[1]!.resolve({ port: fakeRuntimePort(), release: vi.fn() });
-    expect(await reconnected).toBe(runtimeClientCalls[1]);
+    expect(await connecting).toBe(runtimeClientCalls[1]);
+    checkouts.set('run-2', candidateCheckout(cwd));
+    expect(await registry.runtimeClient!(cwd)).toBe(runtimeClientCalls[1]);
   });
 
   it('should never serve a terminated client from the cache', async () => {
@@ -1122,7 +1155,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
    * flight. A remount whose connect arrived while the launcher was closing
    * adopted it, the release finished closing it, and every later command
    * answered LAUNCHER_CLOSED until the next release. */
-  it('serves a remount that arrives mid-release from a fresh launcher, never the closing one', async () => {
+  it('should serve a remount that arrives during release on a fresh launcher', async () => {
     const released = vi.fn();
     const { host, log, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
     const connectAt = (attachmentGeneration: string): AgentChannelClient => {
@@ -1219,6 +1252,77 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     ]);
   });
 
+  /* W8 D13 (RH-S11): the desktop places a turn the way the daemon does, so its project host takes the same factory. */
+  it("should build each project host's placement port from the factory it was given", async () => {
+    const reconcile = vi.fn<TurnPlacementPort['reconcile']>(async ({ requestId }) => ({
+      requestId,
+      status: 'applied',
+      held: [],
+    }));
+    const unused = async (): Promise<never> => {
+      throw new Error('Not placed in this test.');
+    };
+    const turnPlacement = vi.fn<NonNullable<ServicesHostOptions['turnPlacement']>>(() => ({
+      admit: unused,
+      complete: unused,
+      abandon: unused,
+      acknowledge: unused,
+      reconcile,
+      settlements: () => ({
+        [Symbol.asyncIterator]: async function* nothing(): AsyncGenerator<never> {
+          yield* [];
+        },
+      }),
+    }));
+    const { host, workspaceRoot } = await configuredHost({}, { turnPlacement });
+    connect(host, workspaceRoot);
+
+    await vi.waitFor(
+      () => {
+        expect(reconcile).toHaveBeenCalledOnce();
+      },
+      { timeout: 10_000 },
+    );
+    expect(turnPlacement).toHaveBeenCalledOnce();
+    expect(turnPlacement.mock.calls[0]![0].revisions).toBe(servedHosts.at(-1)?.revisions);
+  }, 15_000);
+
+  /* W6.r1 finding 16 (GI-Q6): the session credential names the signed-in account, so a resume refuses another's attempt. */
+  it("should forward the signed-in session's user id as the credential's principal", async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    host.handleMessage(frame({ type: 'authToken', token: 'bearer-1', principal: 'user_1' }));
+    connect(host, workspaceRoot);
+    await vi.waitFor(() => {
+      expect(projectHostCalls).toHaveLength(1);
+    });
+    const options = projectHostCalls[0]!.host();
+
+    expect(options.credential()).toEqual({ mode: 'session', principal: 'user_1' });
+    /* Read per admission: a sign-out drops it, and the next account's id replaces it. */
+    host.handleMessage(frame({ type: 'authToken', token: undefined }));
+    expect(options.credential()).toEqual({ mode: 'session' });
+    host.handleMessage(frame({ type: 'authToken', token: 'bearer-2', principal: 'user_2' }));
+    expect(options.credential()).toEqual({ mode: 'session', principal: 'user_2' });
+  });
+
+  /* W6.r1 round 3: the funded transport names the same account, read per invocation. */
+  it("should give the funded transport the signed-in session's user id as its principal", async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    host.handleMessage(frame({ type: 'authToken', token: 'bearer-1', principal: 'user_1' }));
+    connect(host, workspaceRoot);
+    await vi.waitFor(() => {
+      expect(transportCalls).not.toHaveLength(0);
+    });
+    const { funding } = createTauCloudGatewayModelTransport(transportCalls.at(-1)!);
+    if (funding.type !== 'funded') {
+      throw new TypeError('The Tau Cloud gateway transport is always funded.');
+    }
+
+    await expect(funding.principal()).resolves.toBe('user_1');
+    host.handleMessage(frame({ type: 'authToken', token: undefined }));
+    await expect(funding.principal()).resolves.toBeUndefined();
+  });
+
   it('starts no external agents when main discovered none', async () => {
     /* The honest empty list, not a refusal: a machine without the pinned
      * adapters — or without their CLIs — is simply a Tau-runs-only host. */
@@ -1270,28 +1374,33 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     });
     connect(host, workspaceRoot);
 
-    const [wired] = acpPortCalls;
-    expect(wired).toBeDefined();
+    const wired = projectHostCalls[0]?.host();
+    expect(wired?.externalAgents?.agents.map(({ id }) => id)).toEqual(['codex']);
     /* The socket binds a tick after the connection is served, exactly as the
      * daemon's own URL resolves per run rather than at wiring time. */
-    await expect.poll(() => wired!.mcp?.url ?? '').toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\//u);
+    await expect.poll(() => wired?.externalAgents?.mcpUrl() ?? '').toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\//u);
+    const mcpUrl = wired!.externalAgents!.mcpUrl();
     const [skillBundle] = wired!.systemSkillBundles ?? [];
     expect(typeof skillBundle?.slug).toBe('string');
     expect(skillBundle?.files.some(({ path }) => path === 'SKILL.md')).toBe(true);
-    expect(wired!.mcp?.activate).toEqual(expect.any(Function));
+    await vi.waitFor(() => {
+      expect(servedHosts[0]?.mcp).toBeDefined();
+    });
+    const endpoint = servedHosts[0]!.mcp!;
+    expect(endpoint.activate).toEqual(expect.any(Function));
     /* A capability, not the channel token (VI4): a distinct prefix, a distinct
      * secret, and a grant of the four CAD tools. */
-    expect(wired!.mcp?.mint({ runId: 'run-1', chatId: 'chat-1' }).token).toMatch(/^tau-mcp-host-v1\./u);
+    expect(endpoint.mint({ runId: 'run-1', chatId: 'chat-1' }).token).toMatch(/^tau-mcp-host-v1\./u);
 
     /* The listener is real and the route reaches the endpoint: an unadmitted
      * request is refused by the capability check, not by a missing route. */
-    const refused = await fetch(wired!.mcp!.url, {
+    const refused = await fetch(mcpUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     });
     expect(refused.status).toBe(401);
-    const unrouted = await fetch(new URL('/mcp/elsewhere', wired!.mcp!.url));
+    const unrouted = await fetch(new URL('/mcp/elsewhere', mcpUrl));
     expect(unrouted.status).toBe(404);
   });
 
@@ -1503,8 +1612,9 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
        boots beside it and asks for this port first. Refusing the early request
        closed the renderer's channel, and the page read that as a dead host. */
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
-    workspaces.push(workspaceRoot);
-    const harness = hostHarness();
+    const authorityDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-authority-'));
+    workspaces.push(workspaceRoot, authorityDirectory);
+    const harness = hostHarness({ authorityDirectory, serve: serveNodeFsProvider });
     hosts.push(harness.host);
     harness.host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
     const client = connect(harness.host, workspaceRoot);

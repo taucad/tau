@@ -72,9 +72,9 @@ export type RunReporter = {
  * @example <caption>Report a daemon's runs</caption>
  * ```typescript
  * import { startRunReporter } from '@taucad/host';
- * import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+ * import type { AgentLauncher } from '@taucad/agent-host/launcher';
  *
- * declare const launcher: NodeAgentLauncher;
+ * declare const launcher: AgentLauncher;
  * declare const send: (frame: unknown) => void;
  * const reporter = startRunReporter({ read: launcher.read, send });
  * reporter.watch('chat-1');

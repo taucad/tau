@@ -109,7 +109,6 @@ export type {
   HostToolDefinition,
   HostToolInvocation,
   HostToolResult,
-  InterruptApprovalPort,
   InterruptRequest,
   InterruptResolution,
   MaterializedDocument,

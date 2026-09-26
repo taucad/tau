@@ -14,8 +14,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { WebSocketServer } from 'ws';
 
 import type { AgentChannelClient, AgentLogEvent } from '@taucad/agent-host';
-import { serveAgentChannel } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import { serveAgentChannel } from '@taucad/agent-host/launcher';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
 
 import { agentCommand } from '#commands/agent.js';
@@ -225,7 +225,7 @@ describe('replayChat', () => {
           }
           return { commandId: command.commandId, generation: 0, status: 'applied', effect: 'durable', cursor: 4 };
         },
-      } as unknown as NodeAgentLauncher;
+      } as unknown as AgentLauncher;
       serveAgentChannel(socket, launcher, { build: 'test' });
     });
     const address = server.address() as AddressInfo;

@@ -71,7 +71,7 @@ import type {
   Usage as AcpUsage,
 } from '@agentclientprotocol/sdk';
 
-import type { ExternalAgentTurn } from '@taucad/agent-host/node-launcher';
+import type { ExternalAgentTurn } from '@taucad/agent-host/launcher';
 import type { ExternalAgentLogin, ExternalAgentStop } from '@taucad/agent-host/wire';
 import type {
   ExternalAgentLogEvent,

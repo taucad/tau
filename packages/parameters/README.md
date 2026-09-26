@@ -6,7 +6,7 @@ Portable parameter declarations, unit inference, record projection and checked c
 
 - `@taucad/parameters`: pure manifest admission, English inference, value projection, explicit snapshots and operation planning.
 - `@taucad/parameters/authority`: stateless snapshot loading, checked commit and record refresh using caller-supplied byte authority.
-- `@taucad/parameters/set-machine`: native XState workflow and a per-command subscription helper.
+- `@taucad/parameters/set-machine`: native XState workflow, a per-command subscription helper, and `createParameterSetActor`, which every host calls to start a target's actor over its `ParameterFiles` and a manifest `resolve`.
 - `@taucad/parameters/schema`: existing JSON Schema admission helpers.
 - `@taucad/parameters/json`: bounded JSON admission.
 

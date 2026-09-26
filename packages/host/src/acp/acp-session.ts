@@ -11,7 +11,7 @@ import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 
 import type { ExternalAgentLogEvent, ProviderMessage } from '@taucad/agent-host';
-import type { ExternalAgentTurn } from '@taucad/agent-host/node-launcher';
+import type { ExternalAgentTurn } from '@taucad/agent-host/launcher';
 
 import { acpSessionMachine, failureError, failureOfError } from '#acp/acp-session.machine.js';
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
@@ -186,8 +186,9 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
     };
     const logins = new Set<string>();
 
-    /* The machine waits in `busy.binding` for `lentReady` or `lentFailed`. */
-    track(background, async () => {
+    /* The machine waits in `busy.binding` for `lentReady` or `lentFailed`. `flush` awaits it too: a cancel while
+     * binding must not let the final record overtake the opening one it would replace (W10-F1). */
+    const binding = (async () => {
       try {
         release = effects.bind?.(input.requestId, input.capabilityToken);
         projection.sessionState(input.presentation);
@@ -213,7 +214,9 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
       } catch (error) {
         send({ type: 'lentFailed', failure: failureOfError(error, agent) });
       }
-    });
+    })();
+    background.add(binding);
+    void forget(background, binding);
 
     /* One vendor request of this turn; its answer arrives as `vendorAnswered`. */
     const serveRequest = (command: Extract<AcpLentTurnCommand, { readonly type: 'serve' }>): void => {
@@ -336,7 +339,7 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
         case 'flush': {
           const { report } = command;
           track(background, async () => {
-            await Promise.allSettled(draining);
+            await Promise.allSettled([binding, ...draining]);
             if (report) {
               projection.report(report);
             }

@@ -18,10 +18,10 @@ const lifecycleScan = /\.(?:findLast|filter|findIndex|find|some)\([^\n]*'run\.li
 
 /**
  * Consumers that read a log and now fold it through the export. The node launcher left the list with W4: it keeps no
- * fold, and answers from the host's ledger through the command owner (SC-R7).
+ * fold, and answers from the host's ledger through the command owner (SC-R7). The browser worker left with W6 RH-S8:
+ * it serves `createAgentLauncher` and reads no log itself.
  */
 const folding = [
-  'apps/ui/app/workers/agent-host.impl.ts',
   'apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts',
   'apps/ui/app/db/chat-file-storage.ts',
   'packages/host/src/revisions.ts',

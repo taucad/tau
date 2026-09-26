@@ -20,11 +20,11 @@ import { ChannelClosedError, createChannelServer, wrapMessagePort } from '@tauca
 import type { ChannelServer, CloseInfo, MessagePortLike } from '@taucad/rpc';
 
 import { createAgentChannelClient } from '#channel/agent-channel-client.js';
-import { serveAgentChannel } from '#launchers/node/agent-channel.js';
-import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
+import { serveAgentChannel } from '#launchers/agent-channel.js';
+import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 
-type RecordingLauncher = NodeAgentLauncher & {
+type RecordingLauncher = AgentLauncher & {
   readonly seen: HostCommand[];
   /** Set to hold `execute` open so a socket can die mid-call. */
   hold?: Promise<void> | undefined;
@@ -88,7 +88,7 @@ const whatwgOnly = (port: MessagePortLike): MessagePortLike => ({
 type ServedSocket = { readonly origin: string; kill: () => void };
 
 /** `tau serve`'s own accept path: one WebSocket per client on `/agent`. */
-const serveOverWebSocket = async (launcher: NodeAgentLauncher): Promise<ServedSocket> => {
+const serveOverWebSocket = async (launcher: AgentLauncher): Promise<ServedSocket> => {
   const httpServer: HttpServer = createServer();
   const sockets = new WebSocketServer({ noServer: true });
   let accepted: WebSocket | undefined;

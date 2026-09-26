@@ -142,11 +142,6 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
       },
       toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
       openEventLog: async () => log,
-      interruptPort: {
-        pause: async (request) => ({ interruptId: request.interruptId, outcome: 'approved' }),
-        pending: async () => [],
-        resume: async () => undefined,
-      },
     });
 
     await expect(host.resume('chat-1')).rejects.toMatchObject({ code: 'RUN_UNREADABLE' });
@@ -167,11 +162,6 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
       },
       toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
       openEventLog: async () => log,
-      interruptPort: {
-        pause: async (request) => ({ interruptId: request.interruptId, outcome: 'approved' }),
-        pending: async () => [],
-        resume: async () => undefined,
-      },
     });
   const brokenHistoryLines = (middle: (sequence: number) => string, counted: boolean): string[] => {
     const at = (offset: number) => (counted ? offset + 1 : offset);

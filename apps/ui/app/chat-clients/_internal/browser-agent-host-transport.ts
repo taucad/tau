@@ -1072,11 +1072,12 @@ const createHostStream = <Message extends UIMessage>(input: {
       if (batch.snapshot) {
         recordAttachedRun(input.chatId, batch.snapshot);
       }
-      /* This attach took the chat over from a driver that is gone, so the run
-       * it found has no owner and this page is about to settle it (I7). That
-       * settlement needs a durable writer, and only this stream's client is
-       * one — a read-only reattach otherwise closes it the moment the replay
-       * ends, and the reconciled `turn.failed` reaches nobody. */
+      /* This attach found a run with no driver in its host and asked for the
+       * chat's claim (RH-R1); the claim's outcome arrives as rows, which this
+       * page may settle (I7). That settlement needs a durable writer, and only
+       * this stream's client is one — a read-only reattach otherwise closes it
+       * the moment the replay ends, and the reconciled `turn.failed` reaches
+       * nobody. */
       holdWriterForSettlement ||= batch.takeover === true;
       // The log's own snapshot names the run this chat ends on — the only source
       // for a reattach whose in-memory binding a reload dropped. The host answers

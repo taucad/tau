@@ -95,7 +95,7 @@ export const sweepRepository = async (args: {
   committed: Manifest;
   at: Date;
   faults?: FaultInjector;
-}): Promise<readonly string[]> => {
+}): Promise<SweepOutcome> => {
   const { store, locator } = args;
   const now = args.at.getTime();
   const live = new Set(args.committed.packs.map((pack) => pack.key));
@@ -103,6 +103,7 @@ export const sweepRepository = async (args: {
   const expired = (pack: string): boolean => now - (newest.get(pack) ?? now) > retentionWindowMilliseconds;
 
   const doomed: string[] = [];
+  let retainedBytes = 0;
   for await (const object of store.listObjects(locator, 'packs/')) {
     const pack = object.key.endsWith('.idx') ? `${object.key.slice(0, -'.idx'.length)}.pack` : object.key;
     if (live.has(pack)) {
@@ -113,15 +114,23 @@ export const sweepRepository = async (args: {
       : object.modifiedAt !== undefined && now - object.modifiedAt.getTime() > orphanThresholdMilliseconds;
     if (due) {
       doomed.push(object.key);
+    } else {
+      retainedBytes += object.bytes;
     }
   }
   doomed.push(...markers.filter((marker) => now - marker.at > retentionWindowMilliseconds).map((marker) => marker.key));
 
-  if (doomed.length === 0) {
-    return [];
+  if (doomed.length > 0) {
+    await args.faults?.('mid-sweep');
+    await store.deleteObjects(locator, doomed);
   }
-
-  await args.faults?.('mid-sweep');
-  await store.deleteObjects(locator, doomed);
-  return doomed;
+  return { deleted: doomed, retainedBytes };
 };
+
+/**
+ * What one sweep did: the keys it deleted, and the bytes of packs (and their
+ * indexes) the committed manifest no longer lists that it kept (D18, L6-F5) —
+ * retired packs inside the retention window, and uploads too young to call
+ * orphans. Real storage the plan does not charge.
+ */
+export type SweepOutcome = { readonly deleted: readonly string[]; readonly retainedBytes: number };

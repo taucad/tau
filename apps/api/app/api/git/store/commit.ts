@@ -17,6 +17,7 @@ import {
   retentionWindowMilliseconds,
 } from '#api/git/store/limits.js';
 import { markRetired, sweepRepository } from '#api/git/store/sweep.js';
+import type { SweepOutcome } from '#api/git/store/sweep.js';
 import {
   ManifestError,
   assertGenerationSucceeds,
@@ -68,10 +69,11 @@ export type CommitResult =
        * The compacting holder's housekeeping (NI4), for the caller to run once
        * its reply no longer waits on it (W13b): the sweep lists `packs/` and
        * `retired/`, which grow with every push inside the retention window.
-       * Resolves to the keys it deleted, none when this commit did not
-       * compact, and never rejects.
+       * Resolves to the keys it deleted and the retired bytes it kept, or
+       * `undefined` when this commit did not compact or the sweep failed, and
+       * never rejects.
        */
-      readonly sweep: () => Promise<readonly string[]>;
+      readonly sweep: () => Promise<SweepOutcome | undefined>;
       /** The ref-map difference this commit recorded. */
       readonly moved: readonly MovedRef[];
     };
@@ -322,7 +324,7 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
             at,
             ...(args.faults === undefined ? {} : { faults: args.faults }),
           })
-        : [],
+        : undefined,
     moved: movedReferences(lease.manifest?.refs ?? {}, references),
   };
 };
@@ -333,7 +335,7 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
  * or the worker dies inside it, the keys it would have removed wait for the
  * next compacting committer. So it logs and never rejects.
  */
-const sweepQuietly = async (args: Parameters<typeof sweepRepository>[0]): Promise<readonly string[]> => {
+const sweepQuietly = async (args: Parameters<typeof sweepRepository>[0]): Promise<SweepOutcome | undefined> => {
   try {
     return await sweepRepository(args);
   } catch (error) {
@@ -341,7 +343,7 @@ const sweepQuietly = async (args: Parameters<typeof sweepRepository>[0]): Promis
       `sweep after generation ${String(args.committed.generation)} of ${args.locator.projectId} failed; ` +
         `expired and orphaned keys remain for the next compacting committer: ${String(error)}`,
     );
-    return [];
+    return undefined;
   }
 };
 

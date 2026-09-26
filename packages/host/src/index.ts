@@ -55,6 +55,7 @@ export type {
   RevisionDiscardOutcome,
   RevisionOpenOutcome,
   RevisionPublishOutcome,
+  RevisionSaveOutcome,
   RevisionSwitchOutcome,
   TurnCheckout,
   TurnConflictedEvent,

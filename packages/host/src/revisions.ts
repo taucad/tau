@@ -20,7 +20,7 @@ import type { SnapshotFrom } from 'xstate';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, watch as watchDirectory, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { z } from 'zod';
@@ -83,6 +83,7 @@ import type {
   RevisionRow,
   RevisionStatusProjection,
   RevisionTag,
+  SyncPushOutcome,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
 import type {
@@ -96,6 +97,7 @@ import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
+import { hostRevisionActor } from '#revision-actor.js';
 
 /**
  * How this host reads and writes `.tau/parameters/**` for the per-key merge (D12).
@@ -812,7 +814,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
               { kind: 'bearer', authorization: credential.authorization },
               {
                 id,
-                name: await readProjectName(options.workspaceRoot),
+                name: readManifestField(options.workspaceRoot, 'name'),
               },
             );
           },
@@ -1974,17 +1976,19 @@ export type RevisionDiscardOutcome =
   | Readonly<{ status: 'refused'; branch: string; reason: string }>;
 
 /**
- * Read the exact project name a disk host registers with Tau Cloud.
+ * Read one string field of the project's `tau.json`: the id the stream watch and the connect URL use, or the name a disk host registers with Tau Cloud.
  *
  * @param workspaceRoot - Project directory containing `tau.json`.
- * @returns The trimmed manifest name, or `undefined` when none is usable.
+ * @param field - `id` or `name`.
+ * @returns The trimmed value, or `undefined` when none is usable.
  */
-const readProjectName = async (workspaceRoot: string): Promise<string | undefined> => {
+const readManifestField = (workspaceRoot: string, field: 'id' | 'name'): string | undefined => {
   try {
-    const manifest = JSON.parse(await readFile(join(workspaceRoot, 'tau.json'), 'utf8')) as {
-      readonly name?: unknown;
-    };
-    return typeof manifest.name === 'string' && manifest.name.trim() !== '' ? manifest.name.trim() : undefined;
+    const manifest = JSON.parse(readFileSync(join(workspaceRoot, 'tau.json'), 'utf8')) as Readonly<
+      Record<string, unknown>
+    >;
+    const value = manifest[field];
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
   } catch {
     return undefined;
   }
@@ -1998,6 +2002,22 @@ export type RevisionPublishOutcome =
       publicationId: string;
       url: string;
     }>
+  | Readonly<{ status: 'refused'; reason: string }>;
+
+/** What a `save` did, or why it did not (C16, W15). @public */
+export type RevisionSaveOutcome =
+  | Readonly<{
+      status: 'saved';
+      revisionId: string;
+      /** Where the files are now, in the pane's words: `main · Rev 3`. */
+      line: string;
+      /** How the push that followed ended; `noRemote` when this project backs up nowhere. */
+      backup: SyncPushOutcome | 'noRemote';
+      /** The scheduler's own sentence, when `backup` is neither `backedUp` nor `noRemote`. */
+      reason?: string;
+    }>
+  /** The files already are the head's revision, or a turn is recording them. */
+  | Readonly<{ status: 'unchanged'; line: string }>
   | Readonly<{ status: 'refused'; reason: string }>;
 
 /** What an `openFromRemote` did, or why it did not (W18 DEF-2). @public */
@@ -2027,6 +2047,14 @@ export type ProjectRevisionVerbs = {
   tag(input: Omit<CreateRevisionTagInput, 'revisionId'> & { readonly revisionId: string }): Promise<RevisionTag>;
   /** Remove one revision name. */
   deleteTag(name: string): Promise<void>;
+  /**
+   * Record the live files as a revision and back it up: the pane's *Save* (C16).
+   *
+   * One `cut` on the live checkout, answered by the checkout machine's own
+   * outcomes, then an immediate push rather than D28's debounce, because a
+   * terminal verb does not outlive the window.
+   */
+  save(): Promise<RevisionSaveOutcome>;
   /** Name this branch's head and publish it: one gesture, the dialog's machine. */
   publish(draft: PublishDraft): Promise<RevisionPublishOutcome>;
   /**
@@ -2102,7 +2130,10 @@ export const openProjectRevisions = (
     publishPublication?: ((input: PublishPublicationActorInput) => Promise<PublishPublicationActorOutput>) | undefined;
   }>,
 ): ProjectRevisionVerbs => {
-  const projectId = options.projectId ?? basename(options.workspaceRoot);
+  /* The manifest's id before the directory's name (W15 F2): a checkout named
+   * anything else still watches and connects as the project it is. */
+  const projectId =
+    options.projectId ?? readManifestField(options.workspaceRoot, 'id') ?? basename(options.workspaceRoot);
   const { apiBaseUrl, apiToken } = options;
   const remoteUrl =
     options.remoteUrl ?? (apiBaseUrl === undefined ? undefined : (id: string) => tauRemoteUrl(apiBaseUrl, id));
@@ -2122,7 +2153,7 @@ export const openProjectRevisions = (
             { kind: 'bearer', authorization: `Bearer ${apiToken}` },
             {
               id,
-              name: await readProjectName(options.workspaceRoot),
+              name: readManifestField(options.workspaceRoot, 'name'),
             },
           );
         };
@@ -2158,6 +2189,9 @@ export const openProjectRevisions = (
         authorityEpoch: projectAuthorityEpoch(options.workspaceRoot, options.authorityEpoch ?? processAuthorityEpoch),
         filesystem: (checkout) => new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
         parameters: parameterCodec,
+        /* The person this process runs for, as both other Node hosts record
+         * (AC15): without it a terminal's save is authored by `tau-host`. */
+        actor: hostRevisionActor(),
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
         ...(registerRemoteProject === undefined ? {} : { registerRemoteProject }),
@@ -2331,6 +2365,103 @@ export const openProjectRevisions = (
   };
 
   /*
+   * `tau revisions save` is the pane's *Save* (C16), reached from a terminal.
+   *
+   * The cut carries its own request id, so the answer is this save's and not an
+   * ambient one; the four answers are the checkout machine's (minted, nothing to
+   * save, failed, or lost to another writer's compare-and-swap, D3). A mint is
+   * pushed through the scheduler's correlated `syncNow`, the same request the
+   * Publish dialog makes, so D28's queue still records what cannot be pushed.
+   */
+  const save = async (): Promise<RevisionSaveOutcome> => {
+    const { actor } = await started();
+    const checkoutId = actor.getSnapshot().context.liveCheckoutId;
+    const scheduler = actor.getSnapshot().children.sync;
+    if (checkoutId === undefined || scheduler === undefined) {
+      return Object.freeze({ status: 'refused', reason: 'This project has no files Tau can record yet.' });
+    }
+    const requestId = randomUUID();
+    const cut = await answered<
+      | Readonly<{ status: 'minted'; revisionId: string }>
+      | Readonly<{ status: 'unchanged' }>
+      | Readonly<{ status: 'refused'; reason: string }>
+    >(
+      (resolve) => {
+        const subscriptions = [
+          actor.on('revisionMinted', (event) => {
+            if (event.requestId === requestId) {
+              resolve(Object.freeze({ status: 'minted', revisionId: event.revisionId }));
+            }
+          }),
+          actor.on('nothingToSave', (event) => {
+            if (event.requestId === requestId) {
+              resolve(Object.freeze({ status: 'unchanged' }));
+            }
+          }),
+          actor.on('cutFailed', (event) => {
+            if (event.requestId === requestId) {
+              resolve(Object.freeze({ status: 'refused', reason: event.reason }));
+            }
+          }),
+          /* The checkout re-reads and rests dirty: the bytes are still on disk. */
+          actor.on('casLost', (event) => {
+            if (event.requestId === requestId) {
+              resolve(
+                Object.freeze({ status: 'refused', reason: 'Something else changed this project first. Try again.' }),
+              );
+            }
+          }),
+        ];
+        actor.send({ type: 'cut', trigger: 'save', checkoutId, leaseIds: [], requestId });
+        return () => {
+          for (const subscription of subscriptions) {
+            subscription.unsubscribe();
+          }
+        };
+      },
+      Object.freeze({ status: 'refused', reason: 'This project did not answer in time.' }),
+    );
+    if (cut.status === 'refused') {
+      return cut;
+    }
+    if (cut.status === 'unchanged') {
+      const { line } = await readRevisionPlace(port);
+      return Object.freeze({ status: 'unchanged', line });
+    }
+    /* A push already running when this asks was built before the mint, so the
+     * scheduler answers with the next one (sync.machine row 65). */
+    const pushId = randomUUID();
+    const pushed = await answered<SyncPushOutcome>(
+      (resolve) => {
+        const settled = scheduler.on('pushSettled', (event) => {
+          if (event.pushId === pushId) {
+            resolve(event.outcome);
+          }
+        });
+        actor.send({ type: 'syncNow', pushId });
+        return () => {
+          settled.unsubscribe();
+        };
+      },
+      'failed',
+      publishVerbMilliseconds,
+    );
+    const { sync } = selectRevisionStatus(actor.getSnapshot());
+    /* `noRemote` answers a correlated push with `failed`; nothing failed. */
+    const backup = sync.state === 'noRemote' ? 'noRemote' : pushed;
+    const { line } = await readRevisionPlace(port);
+    return Object.freeze({
+      status: 'saved',
+      revisionId: cut.revisionId,
+      line,
+      backup,
+      ...(backup === 'backedUp' || backup === 'noRemote'
+        ? {}
+        : { reason: sync.error ?? 'This revision is saved here and was not backed up yet.' }),
+    });
+  };
+
+  /*
    * `tau publish` is the dialog's machine, driven by events (S42). The two sends
    * are the dialog's own one gesture: `publish` opens on the name, and `confirm`
    * is held in `choosingVersion.reading` until the names have been read, so
@@ -2472,6 +2603,7 @@ export const openProjectRevisions = (
     discard,
     tag: async (input) => port.tag({ ...input, revisionId: revisionId(input.revisionId) }),
     deleteTag: async (name) => port.deleteTag(name),
+    save,
     publish,
     openFromRemote,
     close: async () => {

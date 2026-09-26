@@ -34,6 +34,7 @@ export const bambuContainerMembers = [
 ] as const;
 
 const thumbnailMember = 'Metadata/plate_1.png';
+const plateMetadataMember = 'Metadata/plate_1.json';
 const maximumArchiveBytes = 256 * 1024 * 1024;
 const maximumEntries = 512;
 const maximumExpandedBytes = 512 * 1024 * 1024;
@@ -69,6 +70,12 @@ export type BambuContainer = Readonly<{
   recordedMd5: string | undefined;
   /** Whether the recorded MD5 matches the plate bytes. */
   md5Verified: boolean;
+  /**
+   * The `bed_type` recorded in `Metadata/plate_1.json`: a Tau plate id such as `'textured-pei'`
+   * from the reference engine, or Bambu Studio's own (`'hot_plate'`, `'textured_plate'`, …).
+   * Absent when the member is missing, unreadable or names no plate.
+   */
+  bedType: string | undefined;
   /** Every member with its inflated length and SHA-256 digest, in archive order. */
   members: ReadonlyArray<Readonly<{ name: string; length: number; digest: `sha256:${string}` }>>;
 }>;
@@ -140,6 +147,18 @@ const modelSettings = (name: string): string =>
   ' </plate>\n' +
   '</config>\n';
 
+const readBedType = (metadata: string | undefined): string | undefined => {
+  if (metadata === undefined) {
+    return undefined;
+  }
+  try {
+    const { bed_type: bedType } = JSON.parse(metadata) as { bed_type?: unknown };
+    return typeof bedType === 'string' && bedType !== '' && bedType.length <= 64 ? bedType : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 // Views from fflate may sit over any buffer kind; copying pins them to a plain ArrayBuffer.
 const copyBytes = (bytes: ArrayLike<number>): Uint8Array<ArrayBuffer> => Uint8Array.from(bytes);
 
@@ -171,7 +190,7 @@ export const writeBambuContainer = (input: WriteBambuContainerInput): Uint8Array
     '3D/3dmodel.model': strToU8(model(name)),
     [bambuPlateMember]: gcode,
     'Metadata/plate_1.gcode.md5': strToU8(md5Hex(gcode)),
-    'Metadata/plate_1.json': strToU8(plate),
+    [plateMetadataMember]: strToU8(plate),
     'Metadata/slice_info.config': strToU8(sliceInfo(name)),
     'Metadata/model_settings.config': strToU8(modelSettings(name)),
     ...(input.thumbnail === undefined ? {} : { [thumbnailMember]: [input.thumbnail, { level: 0 }] as const }),
@@ -254,10 +273,12 @@ export const readBambuContainer = (bytes: Uint8Array<ArrayBuffer>): BambuContain
     throw new TypeError('SLICER_CONTAINER_PLATE_MISSING');
   }
   const recorded = extracted['Metadata/plate_1.gcode.md5'];
+  const metadata = extracted[plateMetadataMember];
   const recordedMd5 = recorded === undefined ? undefined : new TextDecoder().decode(recorded).trim().toLowerCase();
   return {
     gcode: copyBytes(plate),
     recordedMd5,
+    bedType: readBedType(metadata === undefined ? undefined : new TextDecoder().decode(metadata)),
     md5Verified: recordedMd5 !== undefined && recordedMd5 === md5Hex(copyBytes(plate)),
     members: names.map((name) => {
       const member = extracted[name]!;

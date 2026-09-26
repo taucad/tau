@@ -160,6 +160,22 @@ describe('readBambuContainer', () => {
     expect(plate).toEqual({ name: bambuPlateMember, length: gcode.length, digest: digest(encoder.encode(gcode)) });
   });
 
+  it('should read the bed type the plate was sliced for, from the reference engine and from Bambu Studio', () => {
+    expect(readBambuContainer(writeBambuContainer({ gcode, modelName: 'cube', plate: 'textured-pei' })).bedType).toBe(
+      'textured-pei',
+    );
+    const studio = (json: string): Uint8Array<ArrayBuffer> =>
+      Uint8Array.from(
+        zipSync({ [bambuPlateMember]: encoder.encode(gcode), 'Metadata/plate_1.json': encoder.encode(json) }),
+      );
+    expect(readBambuContainer(studio('{"bed_type":"hot_plate","version":2}')).bedType).toBe('hot_plate');
+    expect(readBambuContainer(studio('not json')).bedType).toBeUndefined();
+    expect(readBambuContainer(studio('null')).bedType).toBeUndefined();
+    expect(readBambuContainer(Uint8Array.from(zipSync({ [bambuPlateMember]: encoder.encode(gcode) }))).bedType).toBe(
+      undefined,
+    );
+  });
+
   it('should report an unverified MD5 when the recorded value disagrees', () => {
     const bytes = zipSync({
       [bambuPlateMember]: encoder.encode(gcode),

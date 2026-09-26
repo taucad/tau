@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
 
@@ -13,29 +13,77 @@ type GraphicsState = {
   };
 };
 
+const mocks = vi.hoisted(() => ({
+  graphicsSend: vi.fn(),
+  smallSize: 0.05,
+  isGridSizeLocked: false,
+}));
+
 vi.mock('#hooks/use-graphics.js', () => ({
-  useGraphics: () => ({ send: vi.fn() }),
+  useGraphics: () => ({ send: mocks.graphicsSend }),
   useGraphicsSelector: <T,>(selector: (state: GraphicsState) => T): T =>
     selector({
       context: {
-        gridSizes: { smallSize: 0.05 },
-        isGridSizeLocked: false,
+        gridSizes: { smallSize: mocks.smallSize },
+        isGridSizeLocked: mocks.isGridSizeLocked,
         displayUnits: { length: { metersPerUnit: 0.001, symbol: 'mm' } },
       },
     }),
 }));
 
-describe('GridSizeIndicator', () => {
-  it('should name the trigger by grid size and open the unit settings', async () => {
-    const user = userEvent.setup();
-    render(
-      <TooltipProvider>
-        <GridSizeIndicator />
-      </TooltipProvider>,
-    );
+const renderGridSizeIndicator = (): void => {
+  render(
+    <TooltipProvider>
+      <GridSizeIndicator />
+    </TooltipProvider>,
+  );
+};
 
-    await user.click(screen.getByRole('button', { name: 'Grid 50 mm, unit settings' }));
+describe('GridSizeIndicator', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.smallSize = 0.05;
+    mocks.isGridSizeLocked = false;
+  });
+
+  it('should read the grid size on one line of 12 px mono figures', () => {
+    renderGridSizeIndicator();
+
+    const trigger = screen.getByRole('button', { name: 'Grid 50 mm, units and grid' });
+    expect(trigger).toHaveTextContent(/^50 mm$/);
+    expect(trigger).toHaveClass('h-7', 'font-mono', 'text-xs', 'tabular-nums');
+    expect(trigger.className).not.toMatch(/text-\[/);
+    expect(trigger.querySelector('.lucide-lock')).toBeNull();
+  });
+
+  it('should show the lock glyph when the grid size is locked', () => {
+    mocks.isGridSizeLocked = true;
+    renderGridSizeIndicator();
+
+    const trigger = screen.getByRole('button', { name: 'Grid 50 mm, units and grid' });
+    expect(trigger.querySelector('.lucide-lock')).toBeInTheDocument();
+  });
+
+  it('should open the unit and grid lock settings and keep them open while choosing a unit', async () => {
+    const user = userEvent.setup();
+    renderGridSizeIndicator();
+
+    await user.click(screen.getByRole('button', { name: 'Grid 50 mm, units and grid' }));
 
     expect(await screen.findByRole('menu')).toBeVisible();
+    expect(screen.getByRole('menuitemradio', { name: /^Millimeter/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitem', { name: 'Lock Grid Size (50 mm)' })).toBeVisible();
+
+    await user.click(screen.getByRole('menuitemradio', { name: /^Centimeter/ }));
+
+    expect(mocks.graphicsSend).toHaveBeenLastCalledWith({ type: 'setGridUnit', payload: { unit: 'cm' } });
+    expect(screen.getByRole('menu')).toBeVisible();
+  });
+
+  it('should render nothing before the grid has a size', () => {
+    mocks.smallSize = 0;
+    renderGridSizeIndicator();
+
+    expect(screen.queryByRole('button', { name: /^Grid/ })).not.toBeInTheDocument();
   });
 });

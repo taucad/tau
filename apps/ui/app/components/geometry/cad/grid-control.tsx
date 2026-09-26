@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
-import { Info, Lock, LockIcon, LockOpen } from 'lucide-react';
+import { Grid3X3, Info, Lock, LockOpen } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -25,22 +25,9 @@ type GridSizeIndicatorProps = {
   readonly className?: ClassValue;
 };
 
-const getTextSizeClass = (sizeText: string) => {
-  const { length } = sizeText;
-
-  if (length > 5) {
-    return 'text-[calc(var(--spacing)*1.8)] font-semibold';
-  }
-
-  if (length > 3) {
-    return 'text-[calc(var(--spacing)*2.2)] font-semibold';
-  }
-
-  return 'text-[calc(var(--spacing)*3)]';
-};
-
 /**
- * Component that displays the current grid size from the per-view GraphicsMachine via GraphicsProvider
+ * A one-line readout of the grid size from the per-view GraphicsMachine via GraphicsProvider, which opens the
+ * units and grid menu.
  */
 export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.ReactNode {
   const graphicsRef = useGraphics();
@@ -79,6 +66,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
     () => formatNumberEngineeringNotation(displaySize, maxGridDigits),
     [displaySize],
   );
+  const gridLabel = `${localizedSmallGridSize} ${unit}`;
 
   // If there's no valid grid size, don't render
   if (!gridSizes.smallSize) {
@@ -91,23 +79,14 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button
-              variant='overlay'
-              size='icon'
-              aria-label={`Grid ${localizedSmallGridSize} ${unit}, unit settings`}
-              className={cn('relative font-mono [&>span]:leading-none', className)}
+              variant='ghost'
+              size='sm'
+              aria-label={`Grid ${gridLabel}, units and grid`}
+              className={cn('h-7 gap-1 px-2 font-mono text-xs tabular-nums', className)}
             >
-              <span
-                className={cn(
-                  getTextSizeClass(localizedSmallGridSize),
-                  'absolute top-2.75 flex -translate-y-1/2 items-center justify-center',
-                )}
-              >
-                <span>{localizedSmallGridSize}</span>
-              </span>
-              <span className='absolute bottom-2.25 flex translate-y-1/2 items-center justify-center gap-0.25 text-xs tracking-wide'>
-                {unit}
-                {isGridSizeLocked ? <LockIcon className='size-2' strokeWidth={4} /> : null}
-              </span>
+              <Grid3X3 className='size-3.5 text-muted-foreground' />
+              {gridLabel}
+              {isGridSizeLocked ? <Lock className='size-3 text-muted-foreground' /> : null}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

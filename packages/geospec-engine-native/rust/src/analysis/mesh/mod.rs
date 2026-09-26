@@ -14,7 +14,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::backend::{BackendError, BackendErrorKind};
+use crate::backend::BackendError;
 use crate::codec::compare_utf16;
 
 const SPATIAL_EPSILON: f64 = 1e-5;
@@ -1237,11 +1237,11 @@ pub(crate) fn analyze_indexed(
     Ok(analysis)
 }
 
+/// Every caller passes a record validated at decode (GLB/glTF) or built valid
+/// by the engine (GSM1, STEP report soup, interference components), so the
+/// check is not repeated here.
 pub fn analyze(record: &Rc<MeshAnalysisRecord>) -> Result<MeshAnalysis, BackendError> {
-    record.validate().map_err(|message| BackendError {
-        kind: BackendErrorKind::InvalidInput,
-        message: format!("Invalid retained mesh analysis record: {message}."),
-    })?;
+    debug_assert_eq!(record.validate(), Ok(()));
     Ok(MeshAnalysis {
         vertex_count: record.positions.len() as u32,
         mesh_count: record.primitives.len() as u32,

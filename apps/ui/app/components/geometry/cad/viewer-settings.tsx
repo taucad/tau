@@ -149,7 +149,9 @@ function FieldOfViewRow(): React.JSX.Element {
       <TooltipContent side='right' sideOffset={12}>
         Drag for field of view · 0° is orthographic
         <br />
-        <span className='text-xs opacity-70'>Click to type · ↑↓ step 1° · Shift 5° · P toggles orthographic</span>
+        <span className='text-xs opacity-70'>
+          Click or Enter to type · ←→ step 1° · Shift 5° · P toggles orthographic
+        </span>
       </TooltipContent>
     </Tooltip>
   );

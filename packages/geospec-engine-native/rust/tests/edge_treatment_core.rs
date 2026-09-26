@@ -123,6 +123,11 @@ impl BrepSubject for EdgeTreatmentBrep {
         })
     }
 
+    // The source route; the report is demanded only for the face tables.
+    fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        Ok(self.facts.occurrences.clone().into())
+    }
+
     fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
         Ok(Rc::clone(&self.facts))
     }

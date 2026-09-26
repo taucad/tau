@@ -6,8 +6,8 @@ use super::node24_hypot3;
 use crate::{
     backend::{
         brep::{
-            Bounds, BrepEntity, BrepSubject, DocumentFacts, LocatedFace, PointState, SubshapeType,
-            SurfaceFacts,
+            Bounds, BrepEntity, BrepSubject, DocumentRows, LocatedFace, OccurrenceFacts,
+            PointState, SubshapeType, SurfaceFacts,
         },
         BackendError, BackendErrorKind,
     },
@@ -750,29 +750,44 @@ pub(crate) struct SelectorIndex {
 
 #[cfg(test)]
 pub(crate) fn build_index(
-    facts: &DocumentFacts,
+    facts: &crate::backend::brep::DocumentFacts,
     brep: &dyn BrepSubject,
 ) -> Result<SelectorIndex, BackendError> {
     let whole = brep.faces()?;
     let occurrences = (0..facts.occurrences.len())
         .map(|index| brep.occurrence_faces(index as u32))
         .collect::<Result<Vec<_>, _>>()?;
-    build_report_index(facts, &whole, &occurrences)
+    let rows = DocumentRows {
+        subshapes: facts.subshapes.clone(),
+        datum_placements: facts.datum_placements.clone(),
+        semantic_datums: facts.semantic_datums.clone(),
+    };
+    build_report_index(
+        &facts.occurrences,
+        Some(facts.shape.bounds),
+        &rows,
+        &whole,
+        &occurrences,
+    )
 }
 
+/// The selector index from the facts facets (F8): source occurrences with
+/// bounds, report face tables with measures, document rows and, for an
+/// occurrence-free document only, the whole-shape report bounds.
 pub(crate) fn build_report_index(
-    facts: &DocumentFacts,
+    source_occurrences: &[OccurrenceFacts],
+    whole_bounds: Option<Bounds>,
+    rows: &DocumentRows,
     whole_faces: &[LocatedFace],
     occurrence_faces: &[std::rc::Rc<[LocatedFace]>],
 ) -> Result<SelectorIndex, BackendError> {
-    if occurrence_faces.len() != facts.occurrences.len() {
+    if occurrence_faces.len() != source_occurrences.len() {
         return Err(BackendError {
             kind: BackendErrorKind::ComputationFailed,
             message: "Report occurrence face mapping is incomplete.".into(),
         });
     }
-    let occurrences: Vec<_> = facts
-        .occurrences
+    let occurrences: Vec<_> = source_occurrences
         .iter()
         .enumerate()
         .map(|(occurrence, row)| OccurrenceRow {
@@ -811,7 +826,7 @@ pub(crate) fn build_report_index(
             facts: EntityFacts {
                 area: Some(area),
                 centroid,
-                bounds: Some(facts.shape.bounds),
+                bounds: whole_bounds,
                 ..EntityFacts::default()
             },
             topology_ref: None,
@@ -859,7 +874,7 @@ pub(crate) fn build_report_index(
 
     let mut diagnostics = Vec::new();
     let mut interfaces = Vec::new();
-    for row in &facts.subshapes {
+    for row in &rows.subshapes {
         if row.shape_type != SubshapeType::Face {
             diagnostics.push(informational_diagnostic(
                 "GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE",
@@ -921,7 +936,7 @@ pub(crate) fn build_report_index(
     }
 
     let mut datums = Vec::new();
-    for row in &facts.datum_placements {
+    for row in &rows.datum_placements {
         let full_name = compose_name(&row.occurrence_path, &row.name);
         datums.push(named_datum(
             full_name,
@@ -933,7 +948,7 @@ pub(crate) fn build_report_index(
             row.z_axis,
         ));
     }
-    for row in &facts.semantic_datums {
+    for row in &rows.semantic_datums {
         let full_name = compose_name(&row.occurrence_path, &row.label);
         let face = row.face_indices.first().and_then(|index| {
             faces.iter().find(|entity| {
@@ -2303,7 +2318,7 @@ mod tests {
     use super::*;
     use crate::backend::{
         brep::{
-            CommonVolume, EdgeFacts, Extrema, FaceFacts, PointState, ShapeFacts,
+            CommonVolume, DocumentFacts, EdgeFacts, Extrema, FaceFacts, PointState, ShapeFacts,
             TessellationProfile, TopologyCounts, ValidityFacts, WallOptions, WallThicknessOutcome,
         },
         TriangleMesh,

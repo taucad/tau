@@ -853,7 +853,7 @@ fn evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit() {
     };
     let source_evidence = brep_evidence(
         &retained,
-        &retained.facts,
+        &retained.facts.shape,
         &retained.circular_bores(4096).unwrap(),
         &empty_edge_treatments,
     )
@@ -1868,4 +1868,93 @@ fn analyze_brep_exposes_partial_bore_inventory_without_fabricated_pattern() {
         ),
         Some(&Json::Bool(false))
     );
+}
+
+#[test]
+fn gate_claims_read_the_source_without_any_report_facet() {
+    // F3: validity and feature claims charge the BRep unit and read the
+    // source; a failing report cannot refuse them, and none is built.
+    let mut subject = retained_subject();
+    let mut connector = RetainedBrep::complete();
+    connector.fail_report = true;
+    let calls = Rc::clone(&connector.report_calls);
+    subject.brep = Some(Box::new(connector));
+    let subjects = [Rc::new(subject)];
+    for (capability, expected) in valid_expectations().into_iter().filter(|(capability, _)| {
+        matches!(
+            capability,
+            Capability::ToBeValidBrep
+                | Capability::ToHavePlanarFace
+                | Capability::ToHaveCylindricalFace
+        )
+    }) {
+        let prepared = prepared(capability, expected);
+        let normalized = prepared.normalized_payload();
+        let budget = Budget::new(1);
+        let mut context =
+            EvaluationContext::new(&subjects, capability, "gate", &normalized, &budget, None);
+        assert!(
+            matches!(
+                evaluate(&prepared, &mut context),
+                Evaluation::Geometric {
+                    positive_satisfied: true,
+                    ..
+                }
+            ),
+            "{} did not read the source",
+            capability.name()
+        );
+        drop(context);
+        assert_eq!(budget.used(), 1, "{}", capability.name());
+    }
+    assert_eq!(calls.get(), 0);
+    assert!(subjects[0].mesh_record().is_none());
+}
+
+#[test]
+fn analyze_brep_meets_the_edge_treatment_face_limit_before_report_facts_and_bores() {
+    // F12: 4,097 whole faces of an occurrence-free document exceed the
+    // edge-treatment rows; the same refusal now comes before any other work.
+    let mut connector = RetainedBrep::complete();
+    let template = connector.faces[0].clone();
+    connector.faces = (1..=4097)
+        .map(|index| {
+            let mut face = template.clone();
+            face.entity = BrepEntity::WholeFace(index);
+            face.facts.index = index - 1;
+            face
+        })
+        .collect::<Vec<_>>()
+        .into();
+    connector.facts = Rc::new(DocumentFacts {
+        occurrences: Vec::new(),
+        ..retained_facts()
+    });
+    let queries = Rc::clone(&connector.bore_queries);
+    let mut subject = retained_subject();
+    subject.brep = Some(Box::new(connector));
+    let subjects = [Rc::new(subject)];
+    let normalized = Json::Null;
+    let budget = Budget::new(8);
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::AnalyzeBrep,
+        "analyze",
+        &normalized,
+        &budget,
+        None,
+    );
+    let Evaluation::Refused { diagnostics } = evaluate_brep(&mut context) else {
+        panic!("an oversized edge-treatment scope must refuse")
+    };
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "GEOSPEC_UNSUPPORTED_EVIDENCE");
+    assert_eq!(
+        diagnostics[0].message,
+        "The report bundle exceeds the declared binary or retained derived-data limits."
+    );
+    drop(context);
+    assert_eq!(budget.used(), 1);
+    assert_eq!(queries.get(), 0);
+    assert!(subjects[0].mesh_record().is_none());
 }

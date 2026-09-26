@@ -12,7 +12,13 @@ import type { InvocationFunding, InvocationResolutionRequest, ModelTransport } f
 import { attemptReceiptSchema } from '#wire/gateway.js';
 import type { InvocationResolution } from '#wire/gateway.js';
 
-type CloudOptions = Omit<GatewayModelTransportOptions, 'fundedOperations'>;
+type CloudOptions = Omit<GatewayModelTransportOptions, 'fundedOperations'> & {
+  /**
+   * The account the gateway charges, read from the host's credential port on every prepare (W6 RH-S6; W11 GI-Q6).
+   * Absent or `undefined`, the host cannot check an attempt's account.
+   */
+  readonly principal?: (() => string | undefined | Promise<string | undefined>) | undefined;
+};
 
 const validIdentity = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 128 && /^[!-~]+$/u.test(value);
@@ -179,13 +185,16 @@ const fundedOperations: GatewayFundedOperationProtocol = {
  */
 export const createTauCloudGatewayModelTransport = (
   options: CloudOptions,
-): ModelTransport & { readonly funding: InvocationFunding } => ({
-  ...createGatewayModelTransport({ ...options, fundedOperations }),
-  funding: {
-    type: 'funded',
-    usesBillingAttempt: isGatewayProviderKind,
-    resolveInvocation: async (request) => resolveInvocation(options, request),
-    // ponytail: the transport holds a bearer or a cookie, never the account id; W6's credential port supplies it.
-    principal: async () => undefined,
-  },
-});
+): ModelTransport & { readonly funding: InvocationFunding } => {
+  const { principal, ...gateway } = options;
+  return {
+    ...createGatewayModelTransport({ ...gateway, fundedOperations }),
+    funding: {
+      type: 'funded',
+      usesBillingAttempt: isGatewayProviderKind,
+      resolveInvocation: async (request) => resolveInvocation(gateway, request),
+      // The transport holds a bearer or a cookie, never the account id: the host's credential port supplies it.
+      principal: async () => principal?.(),
+    },
+  };
+};

@@ -1,7 +1,8 @@
 /**
  * The portable Tau host (W7): one M1 incarnation per chat serves every command, and this module provides its
  * services — the chat logs and their one append chain, admission and resume preparation, and the drivers (the pi
- * session and the external runners). The legacy verbs are thin adapters over `command`, kept until W6 RH-S7.
+ * session and the external runners). The legacy verbs are thin adapters over `command`, kept only for their
+ * remaining callers.
  */
 
 import { waitFor } from 'xstate';
@@ -63,7 +64,6 @@ import type {
   AgentLiveEventPayload,
   DurableEventLog,
   HostRunSnapshot,
-  InterruptApprovalPort,
   InterruptRequest,
   InterruptResolution,
   ModelTransport,
@@ -302,11 +302,6 @@ export type CreateTauAgentHostOptions = {
   readonly toolRegistry: ToolRegistry;
   /** Opens the project-root `.tau/chats/<chatId>/events.jsonl` appender. */
   readonly openEventLog: (chatId: string) => Promise<DurableEventLog>;
-  /**
-   * Legacy: M1 records every pause as rows and resolves it through `resolve-interrupt`; the host never calls this
-   * port. W6 RH-S7 removes the last caller.
-   */
-  readonly interruptPort?: InterruptApprovalPort | undefined;
   readonly createId?: (() => string) | undefined;
   readonly createLeaderEpoch?: (() => string) | undefined;
   readonly now?: (() => Date) | undefined;
@@ -348,6 +343,12 @@ export type CreateTauAgentHostOptions = {
     | undefined;
   /** The clock every incarnation and its stream stall bound run on; the process's timers when absent. */
   readonly clock?: HostClock | undefined;
+  /**
+   * Told each time a chat's incarnation becomes quiescent: no run executing, no command in flight and no settlement
+   * awaiting `acknowledge` (`true`), and each time it stops being so (`false`). The launcher's leadership releases the
+   * chat's lock once it is quiescent and nothing is in flight (W6 RH-R8).
+   */
+  readonly onChatQuiescent?: ((chatId: string, quiescent: boolean) => void) | undefined;
 };
 
 /** Complete browser-safe lifecycle surface assembled over the W1-W5 ports. @public */
@@ -357,9 +358,9 @@ export type TauAgentHost = {
    * only once the command's rows are durable (I18).
    */
   command(input: HostCommand): Promise<CommandAnswer>;
-  /** Commit and execute one new user turn; resolves once the run ended. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
+  /** Commit and execute one new user turn; resolves once the run ended. A legacy verb over {@link TauAgentHost.command}, kept for W7's host tests; it goes with them. */
   admit(request: TauAgentTurnRequest): Promise<readonly ProviderMessage[]>;
-  /** Rebuild one chat from its event log and continue a non-terminal run. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
+  /** Rebuild one chat from its event log and continue a non-terminal run. A legacy verb over {@link TauAgentHost.command}, kept for W7's host tests; it goes with them. */
   resume(chatId: string, key?: CommandKey): Promise<readonly ProviderMessage[]>;
   /**
    * Wait until a concurrently started admission is durable and return its projection.
@@ -371,9 +372,11 @@ export type TauAgentHost = {
    * question "is an admission under way here at all?", which is what a takeover
    * gate needs.
    *
+   * Legacy: `command` answers a start once its admission is durable. Its last product caller is the v1 wire session
+   * (`agent-wire-v1-session.ts`); it goes with that session.
+   *
    * @param chatId - The chat being asked about.
    * @param runId - The run whose admission to wait for, when the caller has one.
-   * Legacy: `command` answers a start once its admission is durable; W6 RH-S7 removes the last caller.
    */
   waitForAdmission(chatId: string, runId?: string): Promise<HostRunSnapshot | undefined>;
   /**
@@ -389,20 +392,22 @@ export type TauAgentHost = {
    * its pending interrupt is what should be republished. A run this host is
    * itself driving is not marked either.
    *
+   * Legacy: a claim opens the chat's M1 incarnation, which abandons an orphan (RA-R9, RH-R9); only W7's host tests
+   * still call this.
+   *
    * @param chatId - The chat whose current run may be abandoned.
    * @returns The chat's run projection after the record, or `undefined` when it has no run.
-   * Legacy: Opening a chat's M1 incarnation abandons an orphan (RA-R9); W6's claim replaces this.
    */
   markAbandoned(chatId: string): Promise<HostRunSnapshot | undefined>;
-  /** Abort an active run, durably pause it, and wait through the W5 port. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
+  /** Abort an active run, durably pause it, and wait through the W5 port. A legacy verb over {@link TauAgentHost.command}, kept for W7's host tests; it goes with them. */
   interrupt(request: InterruptRequest & CommandKey): Promise<InterruptResolution>;
-  /** Resolve a W5 request from an external presenter; settles once the resolution row is durable (SC-R9). A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
+  /** Resolve a W5 request from an external presenter; settles once the resolution row is durable (SC-R9). A legacy verb over {@link TauAgentHost.command}, kept for W7's host tests; it goes with them. */
   resolveInterrupt(resolution: InterruptResolution & { readonly runId: string } & CommandKey): Promise<void>;
   /** Return unresolved W5 requests for one run. */
   pendingInterrupts(runId: string): Promise<readonly InterruptRequest[]>;
-  /** Queue steering on an active run. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
+  /** Queue steering on an active run. A legacy verb over {@link TauAgentHost.command}; nothing calls it any more. */
   steer(input: { readonly runId: string; readonly message: string }): Promise<void>;
-  /** Cancel an active run without creating an approval request, then wait out its settlement. A legacy verb over {@link TauAgentHost.command}; W6 RH-S7 removes the last caller. */
+  /** Cancel an active run without creating an approval request, then wait out its settlement. A legacy verb over {@link TauAgentHost.command}, kept for W7's host tests; it goes with them. */
   cancel(input: { readonly runId: string } & CommandKey): Promise<void>;
   /** Rebuild the current run projection from W1, refusing `NO_RUN_ADMITTED` when there is none. */
   snapshot(chatId: string): Promise<HostRunSnapshot>;
@@ -429,8 +434,16 @@ export type TauAgentHost = {
     readonly runId: string;
     readonly event: HostSettlementEvent;
   }): Promise<void>;
-  /** Bind one chat to the generation token minted by its current Web Lock lease. */
-  assumeLeadership(chatId: string, generation: string | number): void;
+  /**
+   * Lead one chat at `epoch`, the log's highest epoch plus one as the leader read it (D5, W6 RH-S3). Clears a
+   * relinquished chat's fence; the next incarnation's first append claims the term, conditional on that read.
+   */
+  assumeLeadership(chatId: string, epoch: number): void;
+  /**
+   * Open the chat's incarnation and wait until it serves: its opening abandons a run no driver holds and reconciles
+   * before any command (W6 RH-R9, W7 RA-R9). The claim, never a read, writes those rows.
+   */
+  claim(chatId: string): Promise<Readonly<{ takeover: boolean }> | Readonly<{ refused: CommandAnswer }>>;
   /** Abort one chat and close its cached appender after leadership loss. */
   relinquish(chatId: string): Promise<void>;
   /**
@@ -596,6 +609,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   /** The term a settlement is written under when no incarnation is live. */
   const settlementTerms = new Map<string, string>();
   let closed = false;
+  let closing: Promise<void> | undefined;
 
   const storeOf = (chatId: string): ChatStore => {
     let store = stores.get(chatId);
@@ -1346,6 +1360,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     createTerm: options.createLeaderEpoch ?? createPortableId,
     ...(options.delays === undefined ? {} : { delays: options.delays }),
     ...(options.clock === undefined ? {} : { actorOptions: { clock: options.clock } }),
+    ...(options.onChatQuiescent === undefined ? {} : { onQuiescent: options.onChatQuiescent }),
   });
 
   /** Wait until the chat's incarnation holds no slot: its attempt ended, was recorded and settled. */
@@ -1708,9 +1723,25 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const committed = await serial(chatId, async () => write(chatId, term, [{ runId, body: event }]));
       storeOf(chatId).deliver?.({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: [] });
     },
-    assumeLeadership: (chatId, generation) => {
+    assumeLeadership: (chatId, epoch) => {
       assertOpen();
-      registry.assume(chatId, String(generation));
+      /* The term id stays unique per incarnation; its integer epoch is the ledger's, stamped at the claim (W3). */
+      registry.assume(chatId, `${String(epoch)}:${createId()}`);
+    },
+    claim: async (chatId) => {
+      if (closed) {
+        return {
+          refused: {
+            commandId: 'claim',
+            generation: 0,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'HOST_CLOSED',
+            message: 'The Tau agent host is closed.',
+          },
+        };
+      }
+      return registry.claim(chatId);
     },
     relinquish: async (chatId) => {
       await registry.relinquish(chatId);
@@ -1723,17 +1754,27 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       await registry.evict(chatId);
       await serial(chatId, async () => dropLog(chatId));
     },
+    /* One close: a concurrent second call awaits the first rather than resolving early. A close that failed is let
+     * go, so the next call tries again (W6.r1 round 4). */
     close: async () => {
-      if (closed) {
-        return;
+      closing ??= (async () => {
+        closed = true;
+        await registry.close();
+        for (const store of stores.values()) {
+          wake(store);
+        }
+        await Promise.allSettled([...stores.keys()].map(async (chatId) => closeExternalChat(chatId)));
+        await Promise.allSettled([...stores.keys()].map(async (chatId) => serial(chatId, async () => dropLog(chatId))));
+      })();
+      const attempt = closing;
+      try {
+        await attempt;
+      } catch (error) {
+        if (closing === attempt) {
+          closing = undefined;
+        }
+        throw error;
       }
-      closed = true;
-      await registry.close();
-      for (const store of stores.values()) {
-        wake(store);
-      }
-      await Promise.allSettled([...stores.keys()].map(async (chatId) => closeExternalChat(chatId)));
-      await Promise.allSettled([...stores.keys()].map(async (chatId) => serial(chatId, async () => dropLog(chatId))));
     },
   };
 };

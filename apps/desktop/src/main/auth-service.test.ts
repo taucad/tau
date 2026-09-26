@@ -212,6 +212,32 @@ describe('createAuthService — refresh and sign-out', () => {
     refreshed.dispose();
   });
 
+  /* W6.r1 finding 16: main forwards the session's user id to the agent host as the credential's principal. */
+  it("learns the signed-in user's id from get-session, notifies once, and forgets it on sign-out", async () => {
+    const options = baseOptions();
+    const service = await signedInService(options);
+    service.dispose();
+
+    const identified = createAuthService({
+      ...options,
+      fetch: (async () =>
+        Response.json({ session: { id: 'session_1' }, user: { id: 'user_1' } })) as unknown as typeof globalThis.fetch,
+    });
+    await identified.restore();
+    expect(identified.principal()).toBeUndefined();
+    const notified = vi.fn();
+    identified.onChange(notified);
+
+    await identified.refresh();
+    await identified.refresh();
+
+    expect(identified.principal()).toBe('user_1');
+    expect(notified).toHaveBeenCalledOnce();
+    await identified.signOut();
+    expect(identified.principal()).toBeUndefined();
+    identified.dispose();
+  });
+
   it('drops the credential on 401 and surfaces signed-out', async () => {
     const options = baseOptions();
     const service = await signedInService(options);

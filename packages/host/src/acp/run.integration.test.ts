@@ -24,8 +24,7 @@ import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 import { ClientSideConnection } from '@agentclientprotocol/sdk';
 import type { Client, SessionConfigOption, SessionUpdate, StopReason } from '@agentclientprotocol/sdk';
 
-import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { AgentChannelAdmissionConfig } from '@taucad/agent-host/wire';
 import type { AgentLogEvent, ExternalAgentTurn, JsonValue, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
 import { reduceEventLog } from '@taucad/agent-host';
@@ -47,6 +46,7 @@ import type { AgentServerHandle } from '#agent-server.js';
 import { createHostMcpEndpoint, hostMcpCapabilityLifetime } from '#mcp-server.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { HostSystemSkillBundle } from '#agent-tools.js';
+import { createNodeLauncher } from '#node-launcher.fixture.js';
 
 /* The model is not decoration: the `codex` pin carries one (`registry.ts`), an
  * adapter override spreads the whole pin, and a fixture that offered no
@@ -121,14 +121,14 @@ const startStubApi = async (): Promise<{ readonly port: number; readonly request
 };
 
 /** A launcher reference the server may hold before the launcher exists. */
-const launcherStandIn = (reference: { current?: NodeAgentLauncher }): NodeAgentLauncher =>
-  new Proxy({} as NodeAgentLauncher, {
+const launcherStandIn = (reference: { current?: AgentLauncher }): AgentLauncher =>
+  new Proxy({} as AgentLauncher, {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a forwarding proxy is opaque to the checker by construction.
     get: (_target, property): unknown => Reflect.get(reference.current ?? {}, property),
   });
 
 type Harness = {
-  readonly launcher: NodeAgentLauncher;
+  readonly launcher: AgentLauncher;
   readonly workspaceRoot: string;
   readonly api: Awaited<ReturnType<typeof startStubApi>>;
   /** Every ACP frame both ways, so the *protocol* is the assertion (V2). */
@@ -165,7 +165,7 @@ const startHarness = async (
   });
   closers.push(async () => mcp.close());
 
-  const launcherRef: { current?: NodeAgentLauncher } = {};
+  const launcherRef: { current?: AgentLauncher } = {};
   const server: AgentServerHandle = startAgentServer({
     /* The channel is never dialled here; only the MCP route is. The stand-in
      * exists so the server can be listening — and so name its own `/mcp` url —
@@ -183,7 +183,7 @@ const startHarness = async (
    * read by the port when it opens the session (V19). */
   const checkouts = new Map<string, TurnCheckout>();
   const settlements: TurnFinalizedEvent[] = [];
-  const plain = createNodeAgentLauncher({
+  const plain = createNodeLauncher({
     workspaceRoot,
     gatewayBaseUrl: `http://127.0.0.1:${String(api.port)}/`,
     model: { id: 'unused-by-external-runs', contextWindow: 1000 },
@@ -287,6 +287,12 @@ const readLog = async (workspaceRoot: string, chatId: string): Promise<readonly 
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log this test just wrote is the vocabulary by construction.
       .map((line) => JSON.parse(line) as AgentLogEvent)
   );
+};
+
+/** Whether the chat's log records an abandoned run. */
+const abandonedIn = async (workspaceRoot: string, chatId: string): Promise<boolean> => {
+  const events = await readLog(workspaceRoot, chatId);
+  return events.some((event) => 'detail' in event && event.detail?.code === 'RUN_ABANDONED');
 };
 
 const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[] =>
@@ -867,11 +873,8 @@ describe('the external agent run kind', () => {
         config: { agent: { kind: 'acp', id: 'codex' }, systemPrompt: '', toolChoice: 'auto' },
       },
     });
-    await until(
-      async () => messagesOf(await readLog(workspaceRoot, chatId)).some((message) => message.role === 'assistant'),
-      'the first assistant chunk',
-      { dump: async () => readLog(workspaceRoot, chatId) },
-    );
+    /* W10-F1: the session record is an assistant message written before the prompt, so wait on the prompt itself. */
+    await until(async () => sent(frames, 'session/prompt') === 1, 'the first prompt');
     await launcher.execute({ type: 'cancel', commandId: 'cmd-2', payload: { chatId, runId } });
 
     await until(
@@ -884,9 +887,14 @@ describe('the external agent run kind', () => {
      * vendor session all stay up, so the next turn continues the same thread —
      * which is what a user who cancelled and rephrased expects. */
     expect(sent(frames, 'session/close')).toBe(0);
+    expect(sent(frames, 'session/cancel')).toBe(1);
     await runTurn(harness, { chatId, runId: 'run-external-rephrased', text: 'second noask' });
     expect(sent(frames, 'session/new')).toBe(1);
     expect(sent(frames, 'session/prompt')).toBe(2);
+    /* The cancel belonged to the first prompt; the rephrased turn completes. */
+    expect(stopOf(await readLog(workspaceRoot, chatId), 'run-external-rephrased')).toMatchObject({
+      state: 'completed',
+    });
   }, 90_000);
 
   it('settles a cancel while the adapter never answers its handshake', async () => {
@@ -955,8 +963,10 @@ describe('the external agent run kind', () => {
     const attached = await launcher.execute({ type: 'attach', commandId: 'cmd-1', payload: { chatId } });
 
     expect(attached).toMatchObject({ status: 'applied', details: { takeover: true } });
-    const abandoned = await readLog(workspaceRoot, chatId);
-    expect(abandoned.at(-1)).toMatchObject({ detail: { code: 'RUN_ABANDONED' } });
+    /* RH-R1: attach answers as a read; the claim it asked for abandons the run just after. */
+    await until(async () => abandonedIn(workspaceRoot, chatId), 'the abandoned run', {
+      dump: async () => readLog(workspaceRoot, chatId),
+    });
     expect(sent(frames, 'initialize')).toBe(0);
 
     await launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } });
@@ -1248,8 +1258,10 @@ describe('the external agent run kind', () => {
     );
 
     await launcher.execute({ type: 'attach', commandId: 'cmd-1', payload: { chatId } });
-    const abandoned = await readLog(workspaceRoot, chatId);
-    expect(abandoned.at(-1)).toMatchObject({ detail: { code: 'RUN_ABANDONED' } });
+    /* RH-R1: attach answers as a read; the claim it asked for abandons the run just after. */
+    await until(async () => abandonedIn(workspaceRoot, chatId), 'the abandoned run', {
+      dump: async () => readLog(workspaceRoot, chatId),
+    });
     await launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } });
     await until(
       async () => lifecycleOf(await readLog(workspaceRoot, chatId)).at(-1) === 'failed',
@@ -2518,6 +2530,42 @@ describe('authentication, initialize and prompt content', () => {
     expect(prompt).toContain('tau://agent-guidance');
     expect(prompt).toContain('tau://memory');
     expect(prompt).toContain('Prefer symmetric parts.');
+  }, 30_000);
+
+  /* W8 TS-S4 (RH-S11): a placed attempt runs where its grant rooted it, not where the host's own checkout map says. */
+  it('should open the agent session in the root the placement granted', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-workspace-'));
+    const placedRoot = await mkdtemp(join(tmpdir(), 'tau-acp-placed-'));
+    roots.push(workspaceRoot, placedRoot);
+    const frames: AcpWireFrame[] = [];
+    const port = createAcpExternalAgentPort({
+      agents: [fakeAgent],
+      workspaceRoot,
+      onFrame: (frame) => frames.push(frame),
+    });
+    const turn: ExternalAgentTurn & { readonly root: string } = {
+      agentId: fakeAgent.id,
+      agent: { kind: 'acp', id: fakeAgent.id },
+      chatId: 'chat-placed',
+      runId: 'run-placed',
+      attempt: 1,
+      root: placedRoot,
+      message: { id: 'user-placed', role: 'user', content: 'noask' },
+      history: [],
+      signal: new AbortController().signal,
+      append: async () => undefined,
+      remember: async () => undefined,
+      approve: async () => ({ interruptId: 'stub', outcome: 'approved' }),
+    };
+
+    await port.run(turn);
+    await port.closeChat?.('chat-placed');
+
+    const opened = frames.find(
+      (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
+    );
+    expect(opened?.frame).toContain(JSON.stringify(placedRoot));
+    expect(opened?.frame).not.toContain(JSON.stringify(workspaceRoot));
   }, 30_000);
 
   it('delivers a resource-only user prompt instead of treating it as an empty reattach', async () => {

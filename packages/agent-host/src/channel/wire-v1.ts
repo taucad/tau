@@ -7,17 +7,17 @@
  *
  * Removed once the oldest supported desktop build ships wire 2. From then on a v2 client refuses a hello naming
  * another wire with `WIRE_VERSION_UNSUPPORTED`. Removal checklist:
- * - this file and `launchers/node/agent-wire-v1-session.ts`;
+ * - this file and `launchers/agent-wire-v1-session.ts`;
  * - in `channel/agent-channel-client.ts`: the `v1Tail`, `v1Execute` and `v1Read` helpers, every `wire === 1` branch,
  *   and `helloWire`'s v1 answer (a hello with no `wire` becomes unsupported);
- * - in `launchers/node/agent-channel.ts`: the `request` call, the `events` listen, `liveEvents` with no chat, the v1
+ * - in `launchers/agent-channel.ts`: the `request` call, the `events` listen, `liveEvents` with no chat, the v1
  *   session, and `AgentWireCompatProtocol` / `agentWireCompatSchemas` in favour of `AgentWireProtocol` /
  *   `agentWireProtocolSchemas`;
  * - the public `replayedStartOutcome` export (`src/index.ts`), whose only product caller is the v1 session;
  * - the compatibility sentence in `.nx/version-plans/agent-host-seam-contract.md`'s successor, and the mixed-builds
  *   cases in `test/seam/seam.daemon.test.ts`.
  *
- * Browser-safe: zod and zod-only schemas. The daemon's half lives in `launchers/node/agent-wire-v1-session.ts`.
+ * Browser-safe: zod and zod-only schemas. The daemon's half lives in `launchers/agent-wire-v1-session.ts`.
  */
 
 import { z } from 'zod';

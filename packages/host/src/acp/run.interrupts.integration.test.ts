@@ -18,8 +18,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 
-import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
+
+import { createNodeLauncher } from '#node-launcher.fixture.js';
 import type { AgentLogEvent, ToolRegistry } from '@taucad/agent-host';
 
 import { createAcpExternalAgentPort } from '#acp/run.js';
@@ -60,13 +61,13 @@ afterEach(async () => {
  */
 const startHarness = async (
   from?: string,
-): Promise<{ readonly launcher: NodeAgentLauncher; readonly workspaceRoot: string }> => {
+): Promise<{ readonly launcher: AgentLauncher; readonly workspaceRoot: string }> => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-interrupts-'));
   roots.push(workspaceRoot);
   await (from === undefined
     ? writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8')
     : cp(from, workspaceRoot, { recursive: true }));
-  const launcher = createNodeAgentLauncher({
+  const launcher = createNodeLauncher({
     workspaceRoot,
     /* Never dialled: an external turn never reaches the gateway. */
     gatewayBaseUrl: 'http://127.0.0.1:1/',
@@ -231,7 +232,16 @@ describe('an approval nobody answers', () => {
     );
     /* The crash: the durable state at the pause, under a host that never saw the run. */
     const restarted = await startHarness(first.workspaceRoot);
-    await restarted.launcher.execute({ type: 'attach', commandId: 'cmd-2', payload: { chatId } });
+    /* `attach` is a read (RH-R1), but a paused external run with no driver is an orphan (M1's `isOrphaned`): the
+     * attach asks leadership to claim, and the claim's rehydration settles it (W7 RA-S14, RH-R9). */
+    await expect(
+      restarted.launcher.execute({ type: 'attach', commandId: 'cmd-2', payload: { chatId } }),
+    ).resolves.toMatchObject({ details: { takeover: true } });
+    await until(
+      async () => lifecycleOf(await readLog(restarted.workspaceRoot, chatId)).includes('failed'),
+      'the claim settling the orphan',
+      async () => readLog(restarted.workspaceRoot, chatId),
+    );
     const events = await readLog(restarted.workspaceRoot, chatId);
     const requested = interruptsOf(events).find((event) => event.phase === 'requested');
     return { ...restarted, chatId, runId, events, interruptId: requested?.interruptId };

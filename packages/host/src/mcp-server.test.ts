@@ -16,7 +16,7 @@ import type { AddressInfo } from 'node:net';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
 
 import { startAgentServer } from '#agent-server.js';
@@ -32,7 +32,7 @@ import { connectMcpOverFetch } from '#acp/fixtures/mcp-fetch-client.js';
 const token = 'agent-server-token-with-at-least-32-characters';
 const secret = randomBytes(32).toString('base64url');
 
-const stubLauncher = (): NodeAgentLauncher =>
+const stubLauncher = (): AgentLauncher =>
   ({
     execute: async () => ({ commandId: 'cmd-1', generation: 0, status: 'applied', effect: 'not-applied', details: {} }),
     read: async () => ({ status: 'batch', chatId: 'chat-1', cursor: 0, nextCursor: 0, endCursor: 0, events: [] }),
@@ -40,7 +40,7 @@ const stubLauncher = (): NodeAgentLauncher =>
     pendingInterrupts: async () => [],
     host: undefined,
     close: async () => undefined,
-  }) as unknown as NodeAgentLauncher;
+  }) as unknown as AgentLauncher;
 
 const invocations: HostToolInvocation[] = [];
 const registry: ToolRegistry = {

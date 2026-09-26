@@ -85,12 +85,14 @@ export const acpCancelSettleTimeout = 2000;
 export type AcpSessionsAction =
   | 'Acquire'
   | 'Opened'
+  | 'Bound'
   | 'PromptAnswered'
   | 'TurnEnded'
   | 'IdleExpired'
   | 'CloseChat'
   | 'AdapterExited'
   | 'Cancel'
+  | 'CancelBinding'
   | 'CancelSettled'
   | 'CancelTimedOut'
   | 'Dequeued'
@@ -1270,7 +1272,8 @@ export const acpSessionMachine = machineDefinition.createMachine({
         /* The binding is activated and, after an open, the record and its notice are written. */
         binding: {
           on: {
-            lentReady: refines('Stutter', ({ context }, enq) => configureOrPrompt(context, enq, { fresh: false })),
+            /* Bound: the binding is live, so the prompt goes out and a cancel from here is `session/cancel`. */
+            lentReady: refines('Bound', ({ context }, enq) => configureOrPrompt(context, enq, { fresh: false })),
             lentFailed: refines('Unmodelled', ({ context, event }, enq) =>
               flush(context, enq, { outcome: failed(event.failure) }),
             ),
@@ -1279,7 +1282,8 @@ export const acpSessionMachine = machineDefinition.createMachine({
               ladder(enq);
               return flush(context, enq, { outcome: failed(cancelled), closeAfter: true });
             }),
-            cancel: refines('Cancel', ({ context }, enq) => flush(context, enq, { outcome: failed(cancelled) })),
+            /* Before any prompt: no `session/cancel`, the turn ends resting (W10-F1). */
+            cancel: refines('CancelBinding', ({ context }, enq) => flush(context, enq, { outcome: failed(cancelled) })),
             vendorRequest: refines('Stutter', ({ context, event }, enq) => {
               if (event.request.method.startsWith('fs/') && sessionOf(event.request) === context.acpSessionId) {
                 enq.sendTo('lentTurn', { type: 'serve', id: event.id, ...event.request });

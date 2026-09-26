@@ -14,9 +14,8 @@ import {
   agentChannelSystemPromptBlockSchema,
   agentChannelToolChoiceSchema,
   agentWireHelloSchema,
-  agentWireProtocolSchemas,
 } from '@taucad/agent-host/wire';
-import type { AgentWireHello, AgentWireProtocol } from '@taucad/agent-host/wire';
+import type { AgentWireHello } from '@taucad/agent-host/wire';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { z } from 'zod';
@@ -86,11 +85,22 @@ export type AgentHostAdmissionConfig = Omit<
   readonly contextPayload?: ClientContext | undefined;
 };
 
-export type AgentHostWorkerInitializeRequest = {
+/**
+ * One project host's ports and defaults, which the page provides to the resident worker (RH-S8). `hostId` names this
+ * incarnation: a later `provide` for the project replaces it, and the page disposes only the replaced host's bridges
+ * (RH-R4, I31).
+ */
+export type AgentHostProjectProvide = {
+  readonly projectId: string;
+  readonly hostId: string;
   readonly fileSystemPort: MessagePort;
   readonly projectRootPort: MessagePort;
   readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
   readonly computeStorePort?: MessagePort | undefined;
+  /** A port into the file-manager worker's revision root for this project; the `revisions` tool is offered with it. */
+  readonly revisionsPort?: MessagePort | undefined;
+  /** The project's placement session in the file-manager worker (W8 TS-S5); absent, turns run unplaced. */
+  readonly placementPort?: MessagePort | undefined;
   readonly projectStorage: ProjectFileSystemConfig;
   readonly authority: { readonly projectId: string; readonly workspaceId: string };
   readonly gatewayBaseUrl: string;
@@ -106,6 +116,20 @@ export type AgentHostWorkerInitializeRequest = {
   readonly model: AgentHostModel;
   readonly runtimeConfig: UiRuntimeConfigInput;
   readonly testingEnabled?: boolean | undefined;
+  /** The signed-in account the session cookie funds, which the host checks an attempt against (W11 GI-Q6). */
+  readonly principal?: string | undefined;
+};
+
+/**
+ * Fresh bridges for a project host that stays open (RV1-F1), as after a file-manager restart: the host named by
+ * `hostId` swaps them in and keeps its launcher and runs; the page then disposes the ones it replaced.
+ */
+export type AgentHostProjectRebridge = {
+  readonly projectId: string;
+  readonly hostId: string;
+  readonly fileSystemPort: MessagePort;
+  readonly projectRootPort: MessagePort;
+  readonly computeStorePort?: MessagePort | undefined;
 };
 
 /**
@@ -154,37 +178,71 @@ type AgentHostWorkerSettlement =
 /** One revision settlement the page records in the chat's log. ponytail: worker-only until W8 deletes it (drift 7). */
 export type AgentHostWorkerSettlementRecord = { readonly chatId: string; readonly event: AgentHostWorkerSettlement };
 
+/** One project in the worker: the host incarnation that serves it, if any, and the worker's capability (LT14). */
+export type AgentHostProjectStatus = {
+  readonly hostId?: string | undefined;
+  readonly capability: AgentHostCapabilityReport;
+};
+
 /**
- * The page↔worker protocol: the agent wire's verbs and `read` (`@taucad/agent-host/wire`), the live deltas, and the
- * worker-only calls. ponytail: `capabilities`, `initialize` and `close` stay until W6 makes them the hello, and
- * `record-settlement` until W8 deletes it.
+ * The page↔resident-worker control channel (RH-S8). One worker per document serves every project and chat of the
+ * tab: `provide` opens a project host, `connect` hands it one `MessagePort` per stream, served with the agent wire
+ * (`serveAgentChannel`), `rebridge` gives it fresh bridges and `release` closes it once the project's last client
+ * closed. Closing a stream only detaches it (D17). ponytail: `record-settlement` stays until W8 deletes
+ * it (RH-S11).
  */
 export type AgentHostWorkerProtocol = {
   readonly hello: AgentWireHello;
-  readonly calls: Omit<AgentWireProtocol['calls'], 'revision'> & {
+  readonly calls: {
+    /** This tab's identity among the origin's tabs (RH-R5); sent once per worker incarnation. */
+    readonly init: {
+      readonly args: { readonly tabId: string };
+      readonly result: undefined;
+      readonly wireResult: unknown;
+    };
     readonly capabilities: {
       readonly args: { readonly durability: StorageDurabilityClass };
       readonly result: AgentHostCapabilityReport;
     };
-    readonly initialize: {
-      readonly args: AgentHostWorkerInitializeRequest;
+    /** Open a project host; answers the incarnation it replaced, whose bridges the page disposes. */
+    readonly provide: {
+      readonly args: AgentHostProjectProvide;
+      readonly result: { readonly replaced?: string | undefined };
+    };
+    /** Swap fresh bridges into an open host; `needs` when no open host has that id, and the worker closes the ports. */
+    readonly rebridge: {
+      readonly args: AgentHostProjectRebridge;
+      readonly result: { readonly status: 'rebridged' | 'needs' };
+    };
+    /** The project's last client closed: close its host if it is still the one named (RH-R4, I31). */
+    readonly release: {
+      readonly args: { readonly projectId: string; readonly hostId: string };
       readonly result: undefined;
       readonly wireResult: unknown;
     };
-    readonly close: {
-      readonly args: undefined;
-      readonly wireArgs: unknown;
+    /** Serve one stream on a project host; `needs` when this worker has no host with that id (a new incarnation). */
+    readonly connect: {
+      readonly args: { readonly projectId: string; readonly hostId: string; readonly port: MessagePort };
+      readonly result: { readonly status: 'connected' | 'needs' };
+    };
+    readonly status: {
+      readonly args: { readonly projectId: string };
+      readonly result: AgentHostProjectStatus;
+    };
+    /** The page's visibility: a hidden page never queues for a chat's lock (RH-R16). */
+    readonly visibility: {
+      readonly args: { readonly visible: boolean };
       readonly result: undefined;
       readonly wireResult: unknown;
     };
     readonly 'record-settlement': {
-      readonly args: AgentHostWorkerSettlementRecord;
+      readonly args: AgentHostWorkerSettlementRecord & { readonly projectId: string };
       readonly result: undefined;
       readonly wireResult: unknown;
     };
   };
   readonly notifies: Record<never, never>;
-  readonly listens: Pick<AgentWireProtocol['listens'], 'liveEvents'>;
+  readonly listens: Record<never, never>;
 };
 
 export type AgentHostWorkerConnect = {
@@ -336,11 +394,15 @@ const capabilityReportSchema = z.union([
     checks: capabilityChecksSchema,
   }),
 ]);
-const initializeRequestSchema = z.strictObject({
+const provideSchema = z.strictObject({
+  projectId: nonEmptyString,
+  hostId: nonEmptyString,
   fileSystemPort: messagePortSchema,
   projectRootPort: messagePortSchema,
   computeMode: z.enum(['off', 'memory', 'durable']).optional(),
   computeStorePort: messagePortSchema.optional(),
+  revisionsPort: messagePortSchema.optional(),
+  placementPort: messagePortSchema.optional(),
   projectStorage: projectStorageSchema,
   authority: z.strictObject({ projectId: nonEmptyString, workspaceId: nonEmptyString }),
   gatewayBaseUrl: z.url(),
@@ -356,23 +418,44 @@ const initializeRequestSchema = z.strictObject({
   model: agentChannelModelSchema,
   runtimeConfig: z.strictObject({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() }),
   testingEnabled: z.boolean().optional(),
+  principal: nonEmptyString.optional(),
 });
 const durabilitySchema = z.enum(['exclusive-append', 'stream-append', 'transactional-rewrite', 'ephemeral']);
-const { revision: _revision, ...wireCalls } = agentWireProtocolSchemas.calls;
 
-/** Wire validators for {@link AgentHostWorkerProtocol}: the agent wire's own, plus the worker-only calls (drift 12, 13). */
+/** Wire validators for {@link AgentHostWorkerProtocol}. The rpc carries an absent argument or result as `null`. */
 export const agentHostWorkerProtocolSchemas = {
   hello: agentWireHelloSchema,
   calls: {
-    ...wireCalls,
+    init: { args: z.strictObject({ tabId: nonEmptyString }), result: z.unknown() },
     capabilities: { args: z.strictObject({ durability: durabilitySchema }), result: capabilityReportSchema },
-    // The rpc carries an absent argument as `null`; an empty result is not read.
-    initialize: { args: initializeRequestSchema, result: z.unknown() },
-    close: { args: z.null(), result: z.unknown() },
-    'record-settlement': { args: agentHostSettlementRecordSchema, result: z.unknown() },
+    provide: { args: provideSchema, result: z.strictObject({ replaced: nonEmptyString.optional() }) },
+    rebridge: {
+      args: z.strictObject({
+        projectId: nonEmptyString,
+        hostId: nonEmptyString,
+        fileSystemPort: messagePortSchema,
+        projectRootPort: messagePortSchema,
+        computeStorePort: messagePortSchema.optional(),
+      }),
+      result: z.strictObject({ status: z.enum(['rebridged', 'needs']) }),
+    },
+    release: { args: z.strictObject({ projectId: nonEmptyString, hostId: nonEmptyString }), result: z.unknown() },
+    connect: {
+      args: z.strictObject({ projectId: nonEmptyString, hostId: nonEmptyString, port: messagePortSchema }),
+      result: z.strictObject({ status: z.enum(['connected', 'needs']) }),
+    },
+    status: {
+      args: z.strictObject({ projectId: nonEmptyString }),
+      result: z.strictObject({ hostId: nonEmptyString.optional(), capability: capabilityReportSchema }),
+    },
+    visibility: { args: z.strictObject({ visible: z.boolean() }), result: z.unknown() },
+    'record-settlement': {
+      args: agentHostSettlementRecordSchema.extend({ projectId: nonEmptyString }),
+      result: z.unknown(),
+    },
   },
   notifies: {},
-  listens: { liveEvents: agentWireProtocolSchemas.listens.liveEvents },
+  listens: {},
 } satisfies WireProtocolSchemas<AgentHostWorkerProtocol>;
 
 const agentHostWorkerConnectSchema = z.strictObject({

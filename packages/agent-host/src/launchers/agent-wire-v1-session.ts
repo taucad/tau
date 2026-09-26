@@ -7,12 +7,12 @@
  * clients (the page and `tau agent`) attach or command a chat before they watch it. Deleted with the window.
  */
 
-import { randomUUID } from 'node:crypto';
-
+import { createPortableId } from '#harness/session-record.js';
 import { replayedStartOutcome } from '#log/chat-ledger.js';
 import type { AgentLiveEvent, HostRunSnapshot } from '#waist/ports.js';
 import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
-import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
+import { iterateStream } from '#launchers/agent-launcher.js';
+import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 import type { ReadAnswer } from '#wire/frames.schema.js';
 import type { V1Addressed, V1Batch, V1Request, V1Response } from '#channel/wire-v1.js';
@@ -41,24 +41,26 @@ const createStreams = <Frame>() => {
       }
     },
     listen: (signal: AbortSignal): AsyncIterable<Frame> =>
-      new ReadableStream<Frame>({
-        start(controller) {
-          const end = (): void => {
-            open.delete(controller);
-            try {
-              controller.close();
-            } catch {
-              // Already closed by the connection's end.
+      iterateStream(
+        new ReadableStream<Frame>({
+          start(controller) {
+            const end = (): void => {
+              open.delete(controller);
+              try {
+                controller.close();
+              } catch {
+                // Already closed by the connection's end.
+              }
+            };
+            open.add(controller);
+            if (signal.aborted) {
+              end();
+            } else {
+              signal.addEventListener('abort', end, { once: true });
             }
-          };
-          open.add(controller);
-          if (signal.aborted) {
-            end();
-          } else {
-            signal.addEventListener('abort', end, { once: true });
-          }
-        },
-      }),
+          },
+        }),
+      ),
   };
 };
 
@@ -79,7 +81,7 @@ const refusal = (answer: CommandAnswer): Error | undefined =>
  * @internal
  */
 export const createV1Session = (
-  launcher: NodeAgentLauncher,
+  launcher: AgentLauncher,
   revisions:
     | Readonly<{ request(input: JsonValue): Promise<Readonly<{ result: JsonValue; status: JsonValue }>> }>
     | undefined,
@@ -161,7 +163,7 @@ export const createV1Session = (
     }
     return answer;
   };
-  const key = (): string => `v1-${randomUUID()}`;
+  const key = (): string => `v1-${createPortableId()}`;
 
   const request = async (input: V1Request): Promise<V1Response> => {
     if (input.type === 'revision') {

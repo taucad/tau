@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useState } from 'react';
+import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { OctagonAlert, RefreshCw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
@@ -37,6 +37,7 @@ import type { FileContentService } from '@taucad/fs-client/file-content-service'
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { FileManagerNotReadyError } from '#filesystem/workspace-errors.js';
+import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 
@@ -789,6 +790,29 @@ export function FileManagerProvider({
    * a new one, so this identity is what makes the rooted connections below
    * rotate with it instead of holding ports onto a worker that is gone. */
   const bridgeOpener = useSelector(fileManagerRef, (state) => state.context.openFileSystemBridge);
+
+  /* RV1-F1: when the root mount's worker is replaced, each open agent project host swaps in fresh bridges and keeps
+   * its runs. Only a change from an earlier opener counts: a provider's first worker (the share page's mount among
+   * them) has no host whose bridges it replaced. */
+  const lastBridgeOpener = useRef(bridgeOpener);
+  useEffect(() => {
+    if (bridgeOpener === undefined || parentWorker !== undefined) {
+      return;
+    }
+    const previous = lastBridgeOpener.current;
+    lastBridgeOpener.current = bridgeOpener;
+    if (previous === undefined || previous === bridgeOpener) {
+      return;
+    }
+    // async-iife: bootstrap -- an effect cannot await; a failed re-broker is reported and the host's liveness recovers.
+    void (async (): Promise<void> => {
+      try {
+        await reprovideAgentHostProjects();
+      } catch (error) {
+        console.error('[FileManager] the agent host could not take the new file service', error);
+      }
+    })();
+  }, [bridgeOpener, parentWorker]);
 
   const openRootedFileSystemBridge = useCallback(
     (root: string, consumer: RootedBridgeConsumer) => {

@@ -90,6 +90,12 @@ export const acpCapabilityRenewalMargin = 60 * 60 * 1000;
  */
 export const acpLiveSessionLimit = 4;
 
+/**
+ * An external turn with its placed root: W8 TS-S4 adds `root` to `ExternalAgentTurn`, the checkout a placed attempt's
+ * grant rooted it at. Typed here until then; the intersection stays compatible once the field lands.
+ */
+type PlacedExternalAgentTurn = ExternalAgentTurn & Readonly<{ root?: string | undefined }>;
+
 /** Options for {@link createAcpExternalAgentPort}. @public */
 export type AcpExternalAgentPortOptions = {
   /** Adapters this daemon resolved and probed. */
@@ -505,7 +511,7 @@ const committedSessionMessageId = (turn: ExternalAgentTurn): string | undefined 
  * Build the external-agent port over a set of resolved ACP adapters.
  *
  * @param options - Adapters, workspace root, and the optional MCP endpoint.
- * @returns The port `createNodeAgentLauncher` routes external starts to.
+ * @returns The port `createAgentLauncher` routes external starts to.
  * @public
  *
  * @example <caption>Wire ACP agents into a launcher</caption>
@@ -655,7 +661,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         closes.delete(requestId);
       }
     },
-    run: async (turn) => {
+    run: async (turn: PlacedExternalAgentTurn) => {
       const adapter = options.agents.find((candidate) => candidate.id === turn.agentId);
       if (!adapter) {
         throw Object.assign(new Error(`This Tau Host cannot start the ${turn.agentId} agent.`), {
@@ -671,7 +677,9 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
        * host materialized for *this* run. The mode is read off the host's own
        * record of the prepared turn, never off what the agent claims. */
       const checkout = options.checkouts?.get(turn.runId);
-      const cwd = checkout?.cwd ?? options.workspaceRoot;
+      /* W8 TS-S4: a placed attempt runs where its grant rooted it (`turn.root`); hosts without placement fall back to
+       * the run's checkout, then the workspace. */
+      const cwd = turn.root ?? checkout?.cwd ?? options.workspaceRoot;
       /* A record naming a directory this turn does not run in — a pre-V2 per-run
        * copy, or the previous turn's candidate checkout — names a vendor session
        * about files this one cannot see; it starts fresh instead (r1 risk 7). */

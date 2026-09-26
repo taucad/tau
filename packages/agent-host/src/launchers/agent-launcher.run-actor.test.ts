@@ -9,8 +9,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createNodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
-import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
+import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
+import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 import type { ToolRegistry } from '#waist/ports.js';
@@ -80,7 +80,7 @@ const gateway = (stall: boolean): Gateway => {
 };
 
 const roots: string[] = [];
-const launchers: NodeAgentLauncher[] = [];
+const launchers: AgentLauncher[] = [];
 
 const makeRoot = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-run-actor-'));
@@ -88,8 +88,8 @@ const makeRoot = async (): Promise<string> => {
   return root;
 };
 
-const makeLauncher = (workspaceRoot: string, fetch: typeof globalThis.fetch): NodeAgentLauncher => {
-  const launcher = createNodeAgentLauncher({
+const makeLauncher = (workspaceRoot: string, fetch: typeof globalThis.fetch): AgentLauncher => {
+  const launcher = createNodeLauncher({
     workspaceRoot,
     gatewayBaseUrl: 'https://gateway.example',
     model,
@@ -139,10 +139,10 @@ const nextKey = (): string => {
   return `key-${String(keys)}`;
 };
 
-const execute = async (launcher: NodeAgentLauncher, command: Omit<HostCommand, 'commandId'> & { commandId?: string }) =>
+const execute = async (launcher: AgentLauncher, command: Omit<HostCommand, 'commandId'> & { commandId?: string }) =>
   launcher.execute({ commandId: nextKey(), ...command } as HostCommand);
 
-const startRun = async (launcher: NodeAgentLauncher, chatId: string, runId: string): Promise<CommandAnswer> =>
+const startRun = async (launcher: AgentLauncher, chatId: string, runId: string): Promise<CommandAnswer> =>
   execute(launcher, {
     type: 'start',
     payload: { chatId, runId, trigger: 'submit', message: { id: `user-${runId}`, role: 'user', content: 'hello' } },

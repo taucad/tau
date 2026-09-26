@@ -153,6 +153,8 @@ type FileManagerContext = {
   activeWorkspaceName: string | undefined;
   projectId: string | undefined;
   sharedWorker: Worker | undefined;
+  /** Whether this mount restarted its worker within the last liveness bound; a second death then shows the error. */
+  restarted: boolean;
   onExternalPollTelemetry: ((aggregate: ExternalPollTelemetry) => void) | undefined;
   onRootSkipped: ((skip: WorkspaceRootSkip) => void) | undefined;
 };
@@ -781,6 +783,10 @@ export const fileManagerMachine = setup({
     input: types<FileManagerInput>(),
   },
   actors: fileManagerActors,
+  delays: {
+    /** A worker that dies again within this bound of its restart is shown as failed (RV1-F1, T9 E4). Milliseconds. */
+    restartWindow: 3500,
+  },
 }).createMachine({
   id: 'fileManager',
   entry: ({ context, self }, enq) => {
@@ -811,6 +817,7 @@ export const fileManagerMachine = setup({
     activeWorkspaceName: undefined,
     projectId: input.projectId,
     sharedWorker: input.sharedWorker,
+    restarted: false,
     onExternalPollTelemetry: input.onExternalPollTelemetry,
     onRootSkipped: input.onRootSkipped,
   }),
@@ -925,13 +932,24 @@ export const fileManagerMachine = setup({
       exit: ({ context }, enq) => {
         stopPolling(context, enq);
       },
+      after: {
+        restartWindow: () => ({ context: { restarted: false } }),
+      },
       invoke: {
         src: 'watchProxyClosedActor',
         input: ({ context }) => ({ proxy: context.proxy }),
-        onError: ({ context, event }, enq) => ({
-          target: 'error',
-          context: { ...setError(event.error, enq), ...destroyWorkerAndServices(context, enq) },
-        }),
+        /* RV1-F1: the root mount restarts its own dead worker once without a click; a nested mount's worker is its
+         * parent's to restart, and a second death within the bound shows the error with "Try again". */
+        onError: ({ context, event }, enq) =>
+          context.sharedWorker === undefined && !context.restarted
+            ? {
+                target: 'connectingWorker',
+                context: { ...destroyWorkerAndServices(context, enq), restarted: true },
+              }
+            : {
+                target: 'error',
+                context: { ...setError(event.error, enq), ...destroyWorkerAndServices(context, enq) },
+              },
       },
       on: {
         setRoot: changeRoot({ whenChanged: true, stopPolling: true }),

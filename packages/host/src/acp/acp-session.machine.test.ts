@@ -251,6 +251,36 @@ describe('acpSession', () => {
     ]);
   });
 
+  /* W10-F1: a cancel before the lent turn is bound (`busy.binding`) refines CancelBinding, not CancelPrompting. */
+  it('answers a cancel while the lend is binding without prompting or cancelling the vendor, then rests', async () => {
+    const harness = start();
+    const { actor, fakes, parent, commands } = harness;
+    await flush();
+    harness.answer({ protocolVersion, agentCapabilities: {} });
+    harness.answer({ sessionId: 'acp-1' });
+    expect(actor.getSnapshot().matches({ busy: 'binding' })).toBe(true);
+    const sentMethod = (method: string): number =>
+      commands('connection').filter((event) => event['method'] === method).length;
+
+    actor.send({ type: 'cancel' });
+    fakes.sendBack('lentTurn', { type: 'flushed', title: undefined, failure: undefined });
+    fakes.sendBack('lentTurn', { type: 'recorded', failure: undefined });
+    await flush();
+
+    expect(sentMethod('session/prompt')).toBe(0);
+    expect(sentMethod('session/cancel')).toBe(0);
+    expect(actor.getSnapshot().matches({ idle: 'resting' })).toBe(true);
+    expect(parent.events.filter((event) => event.type === 'turnEnded')).toMatchObject([
+      { requestId: 'run-1:0', resting: true, outcome: { ok: false, failure: { code: 'EXTERNAL_AGENT_CANCELLED' } } },
+    ]);
+
+    /* The session stayed up: the next lend binds and prompts. */
+    actor.send({ type: 'lend', lend: { ...lent, requestId: 'run-1:1' } });
+    await flush();
+    fakes.sendBack('lentTurn', { type: 'lentReady' });
+    expect(sentMethod('session/prompt')).toBe(1);
+  });
+
   it('moves down the restore ladder on a recoverable loss and says the context was lost', async () => {
     const { actor, answer, lastCall } = start({
       opening: { ...input().opening, acpSessionId: 'acp-old' },

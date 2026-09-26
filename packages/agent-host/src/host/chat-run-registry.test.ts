@@ -19,7 +19,7 @@ import {
   tools,
 } from '#host/tau-agent-host.fixture.js';
 import type { SeededLogEvent } from '#host/tau-agent-host.fixture.js';
-import { createNodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
+import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
 import type {
   ModelStreamEvent,
   ModelTransport,
@@ -131,6 +131,45 @@ describe('the chat-run registry (RA-S3)', () => {
     await host.close();
   });
 
+  /* W6 RH-R8: a new incarnation reports its own quiescence at open, so leadership never acts on a stale `true`. */
+  it('should report a new incarnation as not quiescent until it rests', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const onChatQuiescent = vi.fn<(chatId: string, quiescent: boolean) => void>();
+    const host = createTauAgentHost({
+      ...hostOptions({ openEventLog: file.open, transport: heldTransport().transport, toolRegistry: idle }),
+      onChatQuiescent,
+    });
+
+    await host.claim('chat-quiet');
+
+    expect(onChatQuiescent.mock.calls).toEqual([
+      ['chat-quiet', false],
+      ['chat-quiet', true],
+    ]);
+    await host.close();
+  });
+
+  it('should settle a second concurrent close only after the first finishes', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = createTauAgentHost(
+      hostOptions({ openEventLog: file.open, transport: heldTransport().transport, toolRegistry: idle }),
+    );
+    await host.claim('chat-closing');
+    let firstDone = false;
+    const closeFirst = async (): Promise<void> => {
+      await host.close();
+      firstDone = true;
+    };
+    const first = closeFirst();
+
+    await host.close();
+
+    expect(firstDone).toBe(true);
+    await first;
+  });
+
   it('should refuse commands with HOST_CLOSED and open no log after close', async () => {
     const file = createMemoryLogFile();
     const opened = vi.fn(file.open);
@@ -238,7 +277,7 @@ describe('the chat-run registry (RA-S3)', () => {
       orphanedRun.map((row, sequence) => JSON.stringify({ ...base, sequence, ...row })).join('\n') + '\n',
       'utf8',
     );
-    const daemon = createNodeAgentLauncher({
+    const daemon = createNodeLauncher({
       workspaceRoot: root,
       gatewayBaseUrl: 'https://gateway.example',
       model: { id: 'fixture-model', contextWindow: 200_000, maxTokens: 4096 },
@@ -249,12 +288,31 @@ describe('the chat-run registry (RA-S3)', () => {
     });
 
     const attach = { type: 'attach', payload: { chatId: 'chat-orphan' } } as const;
-    const answers = [
-      [await browser.command({ ...attach, commandId: key() }), await browser.command({ ...attach, commandId: key() })],
-      [await daemon.execute({ ...attach, commandId: key() }), await daemon.execute({ ...attach, commandId: key() })],
-    ].map(([first, second]) => [attachDetails(first!), attachDetails(second!)]);
+    /* The host's own claim (the legacy attach verb) abandons at once. */
+    const hostAnswers = [
+      attachDetails(await browser.command({ ...attach, commandId: key() })),
+      attachDetails(await browser.command({ ...attach, commandId: key() })),
+    ];
+    /* The launcher's attach is a read (W6 RH-R1): it reports the driverless run and asks leadership to claim, and
+     * the claim writes the abandonment on the same rule, M1's opening. */
+    const found = attachDetails(await daemon.execute({ ...attach, commandId: key() }));
+    expect(found).toMatchObject({ takeover: true, snapshot: { state: 'running' } });
+    let settled = attachDetails(await daemon.execute({ ...attach, commandId: key() }));
+    for (
+      let attempt = 0;
+      attempt < 100 && (settled.snapshot as { state?: string } | undefined)?.state !== 'failed';
+      attempt++
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the claim's durable row.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each poll reads the log again.
+      settled = attachDetails(await daemon.execute({ ...attach, commandId: key() }));
+    }
+    const answers = [hostAnswers, [{ ...found, snapshot: settled.snapshot }, settled]];
 
-    // L2b F2: one rule, M1's opening; the first claim takes over, a second attach is a read.
+    // L2b F2: one rule, M1's opening; the first claim takes over, a later attach is a read.
     for (const [first, second] of answers) {
       expect(first).toMatchObject({
         takeover: true,

@@ -1012,6 +1012,8 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       return;
     }
     case 'session/prompt': {
+      /* A cancel belongs to the prompt in flight; a later prompt starts uncancelled (W10-F1). */
+      cancelled.delete(asString(params['sessionId']));
       const promptSession = sessions.get(asString(params['sessionId']));
       /* A real agent errors here; a stop reason would make "the session is
        * gone" indistinguishable from "the model refused" (review 1-review S5). */

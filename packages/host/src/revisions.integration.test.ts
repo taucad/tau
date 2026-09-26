@@ -16,8 +16,9 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
+
+import { createNodeLauncher } from '#node-launcher.fixture.js';
 import type { ToolRegistry } from '@taucad/agent-host';
 import type { CommandAnswer } from '@taucad/agent-host/wire';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
@@ -77,7 +78,7 @@ const scriptedTurn = (request: number, callsTool: boolean): readonly string[] =>
     : ['data: {"choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":"stop"}]}\n\n', 'data: [DONE]\n\n'];
 
 const roots: string[] = [];
-const launchers: NodeAgentLauncher[] = [];
+const launchers: AgentLauncher[] = [];
 
 afterEach(async () => {
   await Promise.all(launchers.splice(0).map(async (launcher) => launcher.close()));
@@ -94,7 +95,7 @@ const hasGit = ((): boolean => {
 })();
 
 type Harness = {
-  readonly launcher: NodeAgentLauncher;
+  readonly launcher: AgentLauncher;
   readonly workspaceRoot: string;
   /** Where each admitted run works, exactly as an external agent port reads it. */
   readonly checkouts: Map<string, TurnCheckout>;
@@ -176,7 +177,7 @@ const harness = async (
     },
   });
   const launcher = revisions.record(
-    createNodeAgentLauncher({
+    createNodeLauncher({
       workspaceRoot,
       gatewayBaseUrl: 'https://gateway.example',
       model,
@@ -231,7 +232,7 @@ const harness = async (
  * @param turn - The chat and the client's idempotency key for the run.
  */
 const startTurn = async (
-  launcher: NodeAgentLauncher,
+  launcher: AgentLauncher,
   turn: { readonly chatId: string; readonly runId: string },
 ): Promise<CommandAnswer> =>
   launcher.execute({
@@ -818,7 +819,7 @@ for (const row of ports) {
         port: broken,
       });
       const launcher = revisions.record(
-        createNodeAgentLauncher({
+        createNodeLauncher({
           workspaceRoot,
           gatewayBaseUrl: 'https://gateway.example',
           model,
@@ -866,7 +867,7 @@ for (const row of ports) {
         port: unwritable,
       });
       const launcher = revisions.record(
-        createNodeAgentLauncher({
+        createNodeLauncher({
           workspaceRoot,
           gatewayBaseUrl: 'https://gateway.example',
           model,

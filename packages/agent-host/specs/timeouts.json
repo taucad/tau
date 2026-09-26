@@ -9,13 +9,14 @@
     "apps/desktop/src/main/services-broker.ts",
     "apps/desktop/src/tau",
     "apps/ui/app/workers/agent-host.impl.ts",
-    "apps/ui/app/workers/agent-host-leader.ts",
     "apps/ui/app/workers/agent-host.worker.ts",
     "apps/ui/app/services",
     "apps/ui/app/lib/agent-host-placement.ts",
     "apps/ui/app/chat-clients",
     "apps/ui/app/hooks/use-revision-status.ts",
-    "apps/ui/app/machines/file-manager.worker.revisions.ts"
+    "apps/ui/app/machines/file-manager.worker.revisions.ts",
+    "apps/ui/app/machines/file-manager.machine.ts",
+    "apps/ui/app/workers/agent-host-projects.ts"
   ],
   "rows": [
     {
@@ -206,53 +207,59 @@
     },
     {
       "id": "C1",
-      "bound": "Leader heartbeat",
-      "site": "apps/ui/app/workers/agent-host.impl.ts",
-      "token": "leaderHeartbeatInterval",
+      "bound": "Leader heartbeat (M2 leading)",
+      "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
+      "token": "heartbeatInterval: refines",
       "class": "Liveness",
       "owner": "W6"
     },
     {
       "id": "C2",
-      "bound": "Follower liveness",
-      "site": "apps/ui/app/workers/agent-host-leader.ts",
-      "token": "expire('heartbeat'",
+      "bound": "Follower liveness: an unheard holder (M2 following.unheard)",
+      "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
+      "token": "heartbeatTimeout: refines('TimeOut'",
       "class": "Liveness",
       "owner": "W6"
     },
     {
-      "id": "C3",
-      "bound": "Tail answer",
-      "site": "apps/ui/app/workers/agent-host-leader.ts",
-      "token": "expire('tail'",
-      "class": "Peer",
-      "owner": "W6",
-      "fixedBy": "W6"
+      "id": "C4",
+      "bound": "Forwarded command, re-armed per addressed epoch and once for frozen time (M2 following.alive)",
+      "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
+      "token": "heartbeatTimeout: refines('Unmodelled'",
+      "class": "Liveness",
+      "owner": "W6"
     },
     {
-      "id": "C4",
-      "bound": "Forwarded command, re-armed per addressed generation",
-      "site": "apps/ui/app/workers/agent-host-leader.ts",
-      "token": "check, options.heartbeatTimeout",
+      "id": "C9",
+      "bound": "A claim's reread of the log (M2 claiming): pending writes answered PEER_UNRESPONSIVE",
+      "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
+      "token": "claimBound: refines",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "C10",
+      "bound": "A write queued behind a silent or frozen holder (M2 following.silent): WRITER_LOCKED on OPFS, else PEER_UNRESPONSIVE",
+      "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
+      "token": "queuedWriteBound: refines",
       "class": "Liveness",
       "owner": "W6"
     },
     {
       "id": "C5",
-      "bound": "Follower recovery retry",
-      "site": "apps/ui/app/workers/agent-host.impl.ts",
-      "token": "followerRetryIds.delete(chatId)",
+      "bound": "WRITER_LOCKED backoff before queuing again (M2 idle.backoff)",
+      "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
+      "token": "recoveryDelay: refines",
       "class": "Backoff",
       "owner": "W6"
     },
     {
-      "id": "D1",
-      "bound": "Capability probe",
-      "site": "apps/ui/app/services/agent-host-client.ts",
-      "token": "capabilityProbeTimeout",
-      "class": "Peer",
-      "owner": "W6",
-      "fixedBy": "W6"
+      "id": "C8",
+      "bound": "Forwarded read window served for another tab",
+      "site": "packages/agent-host/src/browser/leadership.ts",
+      "token": "forwardedReadBound",
+      "class": "Liveness",
+      "owner": "W6"
     },
     {
       "id": "D3",
@@ -262,22 +269,6 @@
       "class": "Peer",
       "owner": "W7",
       "fixedBy": "W7"
-    },
-    {
-      "id": "D4",
-      "bound": "Worker close",
-      "site": "apps/ui/app/services/agent-host-client.ts",
-      "token": "options.closeTimeout",
-      "class": "Liveness",
-      "owner": "W6"
-    },
-    {
-      "id": "D5",
-      "bound": "Worker initialization",
-      "site": "apps/ui/app/services/agent-host-client.ts",
-      "token": "initializationTimeout",
-      "class": "Liveness",
-      "owner": "W6"
     },
     {
       "id": "D6",
@@ -368,7 +359,7 @@
     {
       "id": "E3c",
       "bound": "rpc keepalive, daemon owner (2 s)",
-      "site": "packages/agent-host/src/launchers/node/agent-channel.ts",
+      "site": "packages/agent-host/src/launchers/agent-channel.ts",
       "token": "defaultKeepaliveInterval",
       "class": "Liveness",
       "owner": "W4"
@@ -404,6 +395,30 @@
       "token": "livenessTimeout",
       "class": "Liveness",
       "owner": "W4"
+    },
+    {
+      "id": "E3d",
+      "bound": "rpc keepalive, each agent-wire stream of a browser project host (1 s)",
+      "site": "apps/ui/app/workers/agent-host.impl.ts",
+      "token": "keepaliveInterval",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "E4e",
+      "bound": "rpc liveness, page to each agent-wire stream of the resident worker (3.5 s, the control channel's bound)",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "livenessTimeout: workerLivenessTimeout,\n    sessionKey: `agent-host:${projectId}`",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "E4f",
+      "bound": "File-manager worker restart window (3.5 s): a root mount restarts a dead worker once; a second death within it shows the error (RV1-F1)",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "restartWindow",
+      "class": "Liveness",
+      "owner": "W6"
     },
     {
       "id": "E5",
@@ -622,6 +637,78 @@
       "token": "stallTimer",
       "class": "External edge",
       "owner": "W7"
+    },
+    {
+      "id": "B16",
+      "bound": "Project-host drain before the close begins (15 min; the close stops what is left and records its terminal rows)",
+      "site": "packages/host/src/project-host.ts",
+      "token": "projectHostDrainBound",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "D12",
+      "bound": "Browser project-host drain before the close begins (15 min, as B16; the close still records what is left)",
+      "site": "apps/ui/app/workers/agent-host-projects.ts",
+      "token": "drainBound",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "B17",
+      "bound": "Remote open deadline on the HTTP leg (found by the AbortSignal.timeout match)",
+      "site": "packages/revisions/src/revision-effects.ts",
+      "token": "input.deadlineMilliseconds",
+      "class": "External edge",
+      "owner": "W8"
+    },
+    {
+      "id": "B18",
+      "bound": "Hatchet worker-affinity and job-runtime requests, 10 s each (found by the AbortSignal.timeout match)",
+      "site": "packages/host/src/solver-job-worker.ts",
+      "token": "AbortSignal.timeout(10_000)",
+      "class": "External edge",
+      "owner": "runtime"
+    },
+    {
+      "id": "D13",
+      "bound": "Chat name generation request, 10 s (found by the AbortSignal.timeout match)",
+      "site": "apps/ui/app/chat-clients/_internal/name-generator-client.ts",
+      "token": "AbortSignal.timeout(10_000)",
+      "class": "External edge",
+      "owner": "runtime"
+    },
+    {
+      "id": "C11",
+      "bound": "A forwarded start or resume a draining leader refused HOST_CLOSED waits for its release or a successor (10 s), then is answered",
+      "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
+      "token": "delay: context.closedHostBound",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "D14",
+      "bound": "A project filesystem bridge's hello (15 s), so a hung provide or rebridge cannot hold its project's order",
+      "site": "apps/ui/app/workers/agent-host.impl.ts",
+      "token": "bridgeReadyBound",
+      "class": "Liveness",
+      "owner": "W6"
+    },
+    {
+      "id": "D15",
+      "bound": "A parameter actor's last write when its project host closes (10 s)",
+      "site": "apps/ui/app/workers/agent-host.impl.ts",
+      "token": "parameterCloseBound",
+      "class": "External edge",
+      "owner": "W6"
+    },
+    {
+      "id": "D16",
+      "bound": "A parameter actor's last write when its desktop or daemon project host closes (10 s)",
+      "site": "packages/host/src/project-host.ts",
+      "token": "parameterCloseBound",
+      "class": "External edge",
+      "owner": "W6"
     }
   ]
 }

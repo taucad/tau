@@ -12,6 +12,9 @@ import { parseEventLogBytes } from '#log/serialization.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
+import { createChatStore, requireChatPathSegment } from '#launchers/chat-store.js';
+import type { ChatStore } from '#launchers/chat-store.js';
+import { createNodeLeadership } from '#launchers/node/node-leadership.js';
 
 /**
  * Read chat attachments from a workspace on the Node filesystem (D15).
@@ -318,3 +321,38 @@ export async function createNodeEventLog(options: NodeEventLogOptions): Promise<
     },
   };
 }
+
+/** Options for {@link createNodeChatStore}. @public */
+export type NodeChatStoreOptions = Readonly<{
+  /** Absolute workspace root; each chat's log lives at `.tau/chats/<chatId>/events.jsonl` under it. */
+  workspaceRoot: string;
+}>;
+
+/**
+ * The Node half of a launcher (W6 RH-S2): chat logs under a workspace directory, written under the chat's kernel lock,
+ * with one process leading every chat it opens. A read never creates the chat's directory, file or lock (RH-R1).
+ *
+ * @param options - The workspace root.
+ * @returns The opaque store `createAgentLauncher` takes.
+ * @public
+ *
+ * @example <caption>One launcher over a workspace</caption>
+ * ```typescript
+ * import { createNodeChatStore } from '@taucad/agent-host/node';
+ *
+ * const chats = createNodeChatStore({ workspaceRoot: process.cwd() });
+ * ```
+ */
+export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore => {
+  const filePath = (chatId: string): string =>
+    join(options.workspaceRoot, '.tau', 'chats', requireChatPathSegment(chatId), 'events.jsonl');
+  return createChatStore({
+    platform: 'node',
+    /* `appendFile` then `sync()` per append, and the directory synced once at creation (W3 §11). */
+    durability: 'exclusive-append',
+    attachments: createNodeAttachmentReader(options.workspaceRoot),
+    readBytes: async (chatId) => readIfPresent(filePath(chatId)),
+    openWriter: async (chatId) => createNodeEventLog({ filePath: filePath(chatId), access: 'write' }),
+    leadership: createNodeLeadership,
+  });
+};

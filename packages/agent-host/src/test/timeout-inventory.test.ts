@@ -43,9 +43,35 @@ const scanned = (): Record<string, string> => {
   return files;
 };
 
+/**
+ * Timer sites `checkTimerInventory` does not match: a bound handed to `AbortSignal.timeout(` is a timer too (W6.r1
+ * round 3). A row's token within the call's line and the three after it covers it, as there; doc examples are no site.
+ */
+const abortTimeoutSites = (files: Readonly<Record<string, string>>): string[] => {
+  const problems: string[] = [];
+  for (const [site, text] of Object.entries(files)) {
+    const rows = table.rows.filter((row) => row.site === site);
+    const lines = text.split('\n');
+    for (const [index, line] of lines.entries()) {
+      if (!/\bAbortSignal\.timeout\s*\(/.test(line) || /^\s*(?:\*|\/\/)/.test(line)) {
+        continue;
+      }
+      const window = lines.slice(index, index + 4).join('\n');
+      if (!rows.some((row) => window.includes(row.token))) {
+        problems.push(`${site}:${String(index + 1)}: AbortSignal.timeout with no timeout-table row`);
+      }
+    }
+  }
+  return problems;
+};
+
 describe('timeouts.json', () => {
   it('should have a row for every substrate timer, and a deleting work package for every Peer wait', () => {
     expect(checkTimerInventory(scanned(), table.rows)).toEqual([]);
+  });
+
+  it('should have a row for every AbortSignal.timeout bound', () => {
+    expect(abortTimeoutSites(scanned())).toEqual([]);
   });
 
   it('should scan every site a row names', () => {

@@ -411,6 +411,14 @@
       "ref": "EQ3; S5 D5 at protocol level: a segment read twice undoes holdFileOrder; MergeFixed = FALSE is the knob for today's merge, and W3's TypeScript merge (mergeLogSegments, CL-R14) implements FixedView",
       "fixedBy": "W3"
     },
+    "LogLeadership.abandon-unconditional-AbandonAfterFence.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AbandonAfterFence"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1, RH-A7 (I13): per-run scope with unconditional appends (lazynocas); a thawed holder admits and the stealer abandons in the same epoch (11-state trace)"
+    },
     "LogLeadership.fence-handle-liveness.cfg": {
       "tier": "nightly",
       "expect": "pass",
@@ -451,6 +459,50 @@
       },
       "kind": "witness",
       "ref": "W3 CL-S13: an eager claim row without the conditional append; a stale claim appends a lower epoch (2 sends)"
+    },
+    "LogLeadership.scope-life-Served.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "Served"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1, RH-A7 (EQ4): the lock held for life with two builds; an idle holder of the other build wedges a writer (O3; 12-state lasso)"
+    },
+    "LogLeadership.scope-notice.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-S1 (RV7-F4): rereads on belief, Read split so Notice cancels it, a notice queued while frozen runs first (RH-Q10); safety, NoZombieAbandon and Served"
+    },
+    "LogLeadership.scope-opfs.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-S1 (RV7-F3, RH-R12, RH-R17): OPFS handle without a steal, frozen tabs thaw; safety, NoAbandonWithoutCrash and Served"
+    },
+    "LogLeadership.scope-queue.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-S1 (RV7-F2, RH-R16, RH-R12): queued reconcile requests kept only while visible, the heard rule with a heartbeat in the grant callback; safety and Served"
+    },
+    "LogLeadership.scope-run.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-S1, RH-A7 (EQ4, RH-R8): the lock held per run with two builds, steal only from a silent holder; safety, FenceRefined and Served"
+    },
+    "LogLeadership.scope-timer-NoAbandonWithoutFault.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoAbandonWithoutFault"
+      },
+      "kind": "limit",
+      "ref": "W6 RH-S1 (RV7-F1): a steal guarded by the follower's heartbeat timer abandons a healthy run; bounded by W4 T9's frozen-time rule (9-state trace)"
+    },
+    "LogLeadership.scope-zombie-NoZombieAbandon.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoZombieAbandon"
+      },
+      "kind": "witness",
+      "ref": "W6 RH-S1 (RV7-F4): NoticeFirst = FALSE; a thawed ex-holder reads and abandons the stealer's live run before its notice (13-state trace)"
     },
     "LogLeadership.steal-first-append-AtMostOnceEffect.cfg": {
       "tier": "pr",
@@ -540,6 +592,27 @@
       "tier": "pr",
       "expect": "pass",
       "ref": "S4 3.5 (today)"
+    },
+    "PageBridgeRelease.aligned.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6 RH-A26 (RV3-F1), aligned by W6.f1 to the implemented protocol: page-minted hostId, synchronous replaced, release and rebridge by incarnation, serial worker calls; NoLiveHostHoldsDeadBridge, ReleaseClosesOnlyItsHost, NoOrphanHost and NoLeak hold (76,412 states)"
+    },
+    "PageBridgeRelease.unchecked-ReleaseClosesOnlyItsHost.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ReleaseClosesOnlyItsHost"
+      },
+      "kind": "witness",
+      "ref": "W6.r1 finding 4 (CheckHost = FALSE): the page forgets h1, a new client's provide of h2 overtakes release{h1}, and the release closes h2 (9-state trace)"
+    },
+    "PageBridgeRelease.no-restore-NoOrphanHost.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoOrphanHost"
+      },
+      "kind": "witness",
+      "ref": "W6.r1 finding 8 (Restore = FALSE): a failed open unregisters the previous host, which stays open with nothing to close it (6-state trace)"
     },
     "SeamDelivery.clamp-ProjectionIsPrefix.cfg": {
       "tier": "pr",
@@ -877,6 +950,11 @@
       "tier": "pr",
       "expect": "pass",
       "ref": "W7 RA-S15 graph export (graphs.ChatRunSlotGraph): M1's native run with cancel and steer"
+    },
+    "LogLeadershipGraph.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W6.r1 finding 13 graph export (graphs.LogLeadershipGraph): M2 on two tabs of one build, the lock per run, one run, one queued reconciliation and one freeze, no steal or crash (191 states)"
     }
   },
   "apalache": [
@@ -1211,6 +1289,10 @@
     "ChatRunSlotGraph": {
       "config": "ChatRunSlotGraph.export.cfg",
       "phase": "pc"
+    },
+    "LogLeadershipGraph": {
+      "config": "LogLeadershipGraph.export.cfg",
+      "phase": "m2"
     }
   }
 }

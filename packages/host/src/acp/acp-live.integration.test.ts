@@ -21,8 +21,9 @@ import { promisify } from 'node:util';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
+
+import { createNodeLauncher } from '#node-launcher.fixture.js';
 import { reduceEventLog } from '@taucad/agent-host';
 import type { AgentLiveEvent, AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
@@ -115,7 +116,7 @@ afterAll(async () => {
  * @returns The launcher and the workspace root its log is written under.
  */
 const startHarness = async (): Promise<{
-  readonly launcher: NodeAgentLauncher;
+  readonly launcher: AgentLauncher;
   readonly workspaceRoot: string;
   readonly frames: AcpWireFrame[];
 }> => {
@@ -124,7 +125,7 @@ const startHarness = async (): Promise<{
   /* The agent works in this directory itself (V2), so it is a real workspace. */
   await writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8');
   const frames: AcpWireFrame[] = [];
-  const launcher = createNodeAgentLauncher({
+  const launcher = createNodeLauncher({
     workspaceRoot,
     gatewayBaseUrl: 'http://127.0.0.1:1/',
     model: { id: 'unused-by-external-runs', contextWindow: 1000 },

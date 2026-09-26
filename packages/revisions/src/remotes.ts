@@ -56,8 +56,9 @@ export const remoteKindOf = (name: string): RemoteKind => (name === tauRemoteNam
  * same URL is what a stock `git clone` is given.
  *
  * @param apiBaseUrl - Origin the Tau API is reachable at, with or without a trailing slash.
- * @param projectId - Identifies the project whose repository this is.
+ * @param projectId - Identifies the project whose repository this is: word characters and `-` only.
  * @returns The smart-HTTP URL a client clones and pushes.
+ * @throws RevisionPortError `INVALID_TRANSPORT` for an id that could leave the `/v1/git/` path (`../x`).
  * @public
  *
  * @example <caption>Where Tau Cloud keeps one project</caption>
@@ -67,8 +68,12 @@ export const remoteKindOf = (name: string): RemoteKind => (name === tauRemoteNam
  * tauRemoteUrl('https://api.tau.new/', 'p1'); // 'https://api.tau.new/v1/git/p1.git'
  * ```
  */
-export const tauRemoteUrl = (apiBaseUrl: string, projectId: string): string =>
-  `${apiBaseUrl.replace(/\/+$/u, '')}/v1/git/${projectId}.git`;
+export const tauRemoteUrl = (apiBaseUrl: string, projectId: string): string => {
+  if (!/^[\w-]+$/u.test(projectId)) {
+    throw new RevisionPortError('INVALID_TRANSPORT', `"${projectId}" is not a Tau project id.`);
+  }
+  return `${apiBaseUrl.replace(/\/+$/u, '')}/v1/git/${projectId}.git`;
+};
 
 /**
  * One remote record from a name and a URL.

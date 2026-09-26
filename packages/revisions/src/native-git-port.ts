@@ -952,15 +952,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * the whole point of the two push sets (A39).
    *
    * @param stdout - The command's `--porcelain` output.
-   * @param offered - The local refs, in the order they were offered.
+   * @param offered - The local refs, in the order they were offered, each with
+   *   the commit it named before `git push` was spawned.
    * @param said - The server's own sideband sentence, when it sent one.
    * @returns One result per offered ref.
    */
-  const parsePushPorcelain = async (
+  const parsePushPorcelain = (
     stdout: string,
-    offered: readonly string[],
+    offered: ReadonlyArray<Readonly<{ name: string; head: string | undefined }>>,
     said?: string,
-  ): Promise<readonly RevisionPushRefResult[]> => {
+  ): readonly RevisionPushRefResult[] => {
     const rows = new Map<string, Readonly<{ flag: string; summary: string }>>();
     for (const line of stdout.split('\n')) {
       const parts = line.split('\t');
@@ -971,28 +972,25 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       rows.set(from, Object.freeze({ flag: parts[0], summary: parts[2] ?? '' }));
     }
     return Object.freeze(
-      await Promise.all(
-        offered.map(async (name): Promise<RevisionPushRefResult> => {
-          const row = rows.get(name);
-          if (row === undefined || row.flag === '!') {
-            return Object.freeze({
-              name,
-              status: 'rejected',
-              head: undefined,
-              reason:
-                row === undefined
-                  ? 'The remote did not report this ref.'
-                  : remoteRefusalSaid(refusalReason(row.summary), said === undefined ? [] : [said]),
-            });
-          }
-          const local = await resolve(name);
+      offered.map(({ name, head }): RevisionPushRefResult => {
+        const row = rows.get(name);
+        if (row === undefined || row.flag === '!') {
           return Object.freeze({
             name,
-            status: row.flag === '=' ? 'upToDate' : 'updated',
-            head: local === undefined ? undefined : revisionId(local),
+            status: 'rejected',
+            head: undefined,
+            reason:
+              row === undefined
+                ? 'The remote did not report this ref.'
+                : remoteRefusalSaid(refusalReason(row.summary), said === undefined ? [] : [said]),
           });
-        }),
-      ),
+        }
+        return Object.freeze({
+          name,
+          status: row.flag === '=' ? 'upToDate' : 'updated',
+          head: head === undefined ? undefined : revisionId(head),
+        });
+      }),
     );
   };
 
@@ -1530,6 +1528,19 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const leases = input.refs
         .filter((ref) => 'expected' in ref)
         .map((ref) => `--force-with-lease=${ref.remoteName ?? ref.name}:${ref.expected ?? ''}`);
+      /* What each ref names *before* the push is spawned (RV-W15): a mint that
+       * lands during or after it must not be reported as pushed, nor tracked
+       * as held by a remote that never received it. At worst the ref moved
+       * just before git read it, and the lease and tracking ref lag the remote,
+       * which the next fetch corrects; never the reverse. `oid` is unpeeled,
+       * as `fetch` would track it; `head` is peeled from that oid, not re-read. */
+      const offered = await Promise.all(
+        input.refs.map(async (ref) => {
+          const found = await run(['rev-parse', '--verify', '--quiet', ref.name]);
+          const oid = found.exitCode === 0 ? textDecoder.decode(found.stdout).trim() : undefined;
+          return Object.freeze({ name: ref.name, oid, head: oid === undefined ? undefined : await resolve(oid) });
+        }),
+      );
       const result = await run(
         [
           'push',
@@ -1558,9 +1569,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           )
         );
       }
-      const results = await parsePushPorcelain(
+      const results = parsePushPorcelain(
         stdout,
-        input.refs.map((ref) => ref.name),
+        offered,
         /* The server's sideband sentence, which is where a `pre-receive`
          * refusal says *why* — the per-ref table only says a hook declined. */
         refused?.code === 'REMOTE_REJECTED' ? refused.message : undefined,
@@ -1568,18 +1579,17 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       /* Where `fetch` would have put every accepted ref, as the browser leg does:
        * `git push` itself tracks only `refs/heads/*`, so a pushed chat ref or tag
        * kept a stale tracking ref and the next fetch could not tell it was
-       * already there (W13e). The local ref, unpeeled, is what was pushed. */
-      const accepted = input.refs.filter((_, index) => results[index]?.status !== 'rejected');
-      if (accepted.length > 0) {
-        await output(['update-ref', '--stdin'], {
-          input: [
-            textEncoder.encode(
-              accepted
-                .map((ref) => `update ${remoteTrackingRef(input.remote, ref.remoteName ?? ref.name)} ${ref.name}\n`)
-                .join(''),
-            ),
-          ],
-        });
+       * already there (W13e). Branches stay git's own; the rest get the oid
+       * resolved before the push, never the local ref as it is now. */
+      const tracked = input.refs.flatMap((ref, index) => {
+        const destination = ref.remoteName ?? ref.name;
+        const oid = offered[index]?.oid;
+        return results[index]?.status === 'rejected' || oid === undefined || destination.startsWith('refs/heads/')
+          ? []
+          : [`update ${remoteTrackingRef(input.remote, destination)} ${oid}\n`];
+      });
+      if (tracked.length > 0) {
+        await output(['update-ref', '--stdin'], { input: [textEncoder.encode(tracked.join(''))] });
       }
       return Object.freeze({ refs: results });
     },

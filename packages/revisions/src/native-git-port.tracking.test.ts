@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -48,5 +48,55 @@ describe.runIf(gitToolchainOnPath)('native push tracking refs', () => {
 
     expect(pushed.refs).toEqual([{ name: 'refs/tau/chats/c1', status: 'updated', head }]);
     expect(await port.readRef('refs/remotes/origin/tau/chats/c1')).toBe(head);
+  });
+
+  it('reports and tracks what was pushed when the local ref moves as the push settles (RV-W15)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-tracking-race-'));
+    roots.push(root);
+    const bare = join(root, 'remote.git');
+    execFileSync('git', ['init', '--quiet', '--bare', bare]);
+    const repositoryPath = join(root, 'project');
+    await mkdir(repositoryPath);
+    const setup = createNativeGitRevisionPort({ repositoryPath });
+    await setup.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    await setup.setRemote({ name: 'origin', url: bare });
+    const revision = async (parents: readonly string[], body: string) => {
+      const receipt = await setup.writeRevision({
+        parents: parents.map((parent) => revisionId(parent)),
+        tree: new ImmutableRevisionTree([['chat.json', body]]),
+        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 26) },
+        summary: { generated: 'Chat record' },
+        largeObjects: false,
+      });
+      return revisionId(receipt.commitId);
+    };
+    const pushedHead = await revision([], '{}\n');
+    const mintedDuringPush = await revision([pushedHead], '{"turn":1}\n');
+    await setup.updateRef({ name: 'refs/tau/chats/c1', expectedHead: undefined, head: pushedHead });
+    /* A mint that lands the moment `git push` returns, before the port reads anything back. */
+    const gitExecutable = join(root, 'git-racing-mint');
+    await writeFile(
+      gitExecutable,
+      [
+        '#!/bin/sh',
+        'git "$@"; status=$?',
+        'for argument in "$@"; do',
+        `  if [ "$argument" = push ]; then git update-ref refs/tau/chats/c1 ${mintedDuringPush}; break; fi`,
+        'done',
+        'exit $status',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const port = createNativeGitRevisionPort({ repositoryPath, gitExecutable });
+
+    const pushed = await port.push({ remote: 'origin', refs: [{ name: 'refs/tau/chats/c1' }] });
+
+    expect(
+      execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/tau/chats/c1'], { encoding: 'utf8' }).trim(),
+    ).toBe(pushedHead);
+    expect(pushed.refs).toEqual([{ name: 'refs/tau/chats/c1', status: 'updated', head: pushedHead }]);
+    expect(await port.readRef('refs/remotes/origin/tau/chats/c1')).toBe(pushedHead);
+    expect(await port.readRef('refs/tau/chats/c1')).toBe(mintedDuringPush);
   });
 });

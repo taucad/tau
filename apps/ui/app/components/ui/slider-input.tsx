@@ -170,6 +170,10 @@ export const SliderInput = ({
 
       const rawValue = activePointer.startValue + deltaX * (range / event.currentTarget.offsetWidth);
       const nextValue = clamp(snapToStep(rawValue, step, stepBase), min, max);
+      // Moves within one snapped step, or past a clamp, report the same value; consumers would redo their work.
+      if (nextValue === lastScrubValueRef.current) {
+        return;
+      }
       lastScrubValueRef.current = nextValue;
       onScrubChange?.(nextValue);
     },

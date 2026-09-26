@@ -310,6 +310,44 @@ describe('SliderInput', () => {
     expect(onScrubChange.mock.calls.every(([value]) => Number.isFinite(value))).toBe(true);
   });
 
+  it('should report a scrubbed value only when it differs from the last one reported', () => {
+    const onScrubChange = vi.fn<(value: number) => void>();
+    const onScrubCommit = vi.fn();
+    const { container } = renderSlider({ onScrubChange, onScrubCommit });
+    const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+    setSliderWidth(root);
+
+    fireSliderPointerEvent(root, 'pointerdown', { clientX: 0, pointerId: 1 });
+    fireSliderPointerEvent(root, 'pointermove', { clientX: 10, pointerId: 1 });
+    // Still within the step that 60 snaps to.
+    fireSliderPointerEvent(root, 'pointermove', { clientX: 10.4, pointerId: 1 });
+    fireSliderPointerEvent(root, 'pointermove', { clientX: 11, pointerId: 1 });
+    fireSliderPointerEvent(root, 'pointermove', { clientX: 10, pointerId: 1 });
+    // Past the maximum, twice: both clamp to 100.
+    fireSliderPointerEvent(root, 'pointermove', { clientX: 80, pointerId: 1 });
+    fireSliderPointerEvent(root, 'pointermove', { clientX: 90, pointerId: 1 });
+    fireSliderPointerEvent(root, 'pointerup', { clientX: 90, pointerId: 1 });
+
+    expect(onScrubChange.mock.calls.map(([value]) => value)).toEqual([60, 61, 60, 100]);
+    expect(onScrubCommit).toHaveBeenCalledExactlyOnceWith(100);
+  });
+
+  it('should report nothing while a scrub stays on its starting value, and still commit it', () => {
+    const onScrubChange = vi.fn();
+    const onScrubCommit = vi.fn();
+    const { container } = renderSlider({ step: 10, onScrubChange, onScrubCommit });
+    const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+    setSliderWidth(root);
+
+    fireSliderPointerEvent(root, 'pointerdown', { clientX: 20, pointerId: 1 });
+    // Past the drag threshold, but 54 snaps back to the starting 50.
+    fireSliderPointerEvent(root, 'pointermove', { clientX: 24, pointerId: 1 });
+    fireSliderPointerEvent(root, 'pointerup', { clientX: 24, pointerId: 1 });
+
+    expect(onScrubChange).not.toHaveBeenCalled();
+    expect(onScrubCommit).toHaveBeenCalledExactlyOnceWith(50);
+  });
+
   it('ignores non-initiating pointers', () => {
     const onScrubChange = vi.fn();
     const onScrubCommit = vi.fn();

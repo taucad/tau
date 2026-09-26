@@ -24,12 +24,7 @@ const digest = (bytes: Uint8Array<ArrayBuffer>): MachineArtifactReference['diges
 const prepare = async (bytes: Uint8Array<ArrayBuffer>) =>
   prepareBambuArtifact({
     artifact: {
-      revision: {
-        authorityId: 'authority',
-        workspaceId: 'workspace',
-        revisionId: 'revision' as MachineArtifactReference['revision']['revisionId'],
-        treeDigest: digest(encoder.encode('tree')),
-      },
+      projectId: 'proj_000000000000000000001',
       path: 'cube.gcode.3mf',
       digest: digest(bytes),
       length: bytes.byteLength,

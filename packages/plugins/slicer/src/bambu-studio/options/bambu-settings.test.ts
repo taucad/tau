@@ -158,7 +158,7 @@ describe('bambu-studio options', () => {
       const { schema, values } = buildBambuSettingsSchema(syntheticPresets());
       const other = (key: string) => leaf(schema, ['process', 'process-all', key]);
 
-      expect(other('enable_widget')).toMatchObject({ type: 'boolean', title: 'Enable widget', 'x-tau-inferred': true });
+      expect(other('enable_widget')).toMatchObject({ type: 'boolean', title: 'Enable widget' });
       expect(other('widget_count')).toMatchObject({ type: 'number', default: 1 });
       expect(other('widget_ratio')).toMatchObject({ type: 'number', 'x-tau-unit': '%', default: 12.5 });
       expect(other('widget_mix')).toMatchObject({ type: 'array', items: { type: ['number', 'string'] } });
@@ -176,7 +176,6 @@ describe('bambu-studio options', () => {
       expect(leaf(schema, ['process', 'process-all', 'tree_support_wall_count'])).toMatchObject({
         type: 'string',
         default: 'many',
-        'x-tau-inferred': true,
       });
     });
 

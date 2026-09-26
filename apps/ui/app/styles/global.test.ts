@@ -264,6 +264,33 @@ describe('global focus ring token', () => {
   });
 });
 
+describe('running viewer tool glyph token', () => {
+  it.each([
+    ['light', lightTokens],
+    ['dark', darkTokens],
+    ['black', blackTokens],
+    ['high contrast', highContrastTokens],
+    ['preferred light', contrastLightTokens],
+    ['preferred dark', contrastDarkTokens],
+    ['preferred black', contrastBlackTokens],
+  ])('should keep the glyph at 3:1 on its surfaces for every hue in %s mode', (_mode, tokens) => {
+    for (let hue = 0; hue < 360; hue += 5) {
+      const hueTokens = { ...tokens, '--hue-primary': `${hue.toString()}deg` };
+
+      for (const surface of ['--accent', '--sidebar-background'] as const) {
+        expect(
+          wcagContrast(parseToken('--viewer-tool-active', hueTokens), parseToken(surface, hueTokens)),
+          `${hue.toString()}deg on ${surface}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('should map the glyph token into Tailwind', () => {
+    expect(appStyles).toContain('--color-viewer-tool-active: var(--viewer-tool-active);');
+  });
+});
+
 describe('action cursor contract', () => {
   it('defaults actions to the platform cursor and exposes one opt-in utility', () => {
     expect(lightTokens).toMatchObject({ '--cursor-action': 'default' });

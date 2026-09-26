@@ -321,13 +321,57 @@ fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
         }),
         Box::new(UnusedCsg),
     );
-    uncached
-        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+    let request = step_request(bytes, None);
+    let unretained = uncached
+        .ingest_subject(&request, bytes.to_vec(), vec![])
         .unwrap();
-    uncached
-        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
-        .unwrap();
+    // Ruling 15: digest, length and descriptor reuse a subject whose source was not retained.
+    assert_eq!(
+        unretained,
+        uncached
+            .ingest_subject(&request, bytes.to_vec(), vec![])
+            .unwrap()
+    );
+    assert_eq!(opens.get(), 5);
+    release_admitted(&mut uncached, &unretained);
+    assert_eq!(
+        unretained,
+        uncached
+            .ingest_subject(&request, bytes.to_vec(), vec![])
+            .unwrap()
+    );
     assert_eq!(opens.get(), 6);
+}
+
+fn release_admitted(engine: &mut Engine, admission: &[u8]) {
+    let admission: Value = serde_json::from_slice(admission).unwrap();
+    let handle: Value = serde_json::from_slice(
+        &engine
+            .subject_handle(
+                &serde_json::to_vec(&json!({
+                    "method": "subjectHandle", "requestId": "handle", "protocolVersion": 3,
+                    "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1",
+                    "subjectHash": admission["result"]["subject"]["subjectHash"]
+                }))
+                .unwrap(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let released: Value = serde_json::from_slice(
+        &engine
+            .release_subject(
+                &serde_json::to_vec(&json!({
+                    "method": "releaseSubject", "requestId": "release", "protocolVersion": 3,
+                    "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1",
+                    "subjectHandle": handle["result"]["subjectHandle"]
+                }))
+                .unwrap(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(released["result"]["released"], true);
 }
 
 #[test]

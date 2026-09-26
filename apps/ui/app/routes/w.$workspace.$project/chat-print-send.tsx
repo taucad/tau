@@ -32,22 +32,37 @@ import {
 export const bambuStudioRequired =
   'This printer only accepts files sliced by Bambu Studio. Install Bambu Studio (or set TAU_BAMBU_STUDIO_PATH) and use the Tau desktop app.';
 
+/**
+ * What to do when the printer refuses an unsigned command, in the person's words.
+ * @public
+ */
+export const developerModeRequired =
+  'The printer refused an unsigned command. On the printer, turn on LAN Only mode and Developer Mode, then send again.';
+
 const unqualifiedCode = 'ARTIFACT_UNQUALIFIED';
+
+/** The X1C's reason when it refuses a command it cannot verify; Developer Mode being off is the likely cause. */
+const unsignedCommandReason = 'mqtt message verify failed';
 
 /**
  * A refusal as the pane shows it: the host's message, except that a file the
- * printer refuses for its producer says how to slice one it accepts.
+ * printer refuses for its producer says how to slice one it accepts, and an
+ * unsigned-command refusal keeps the printer's reason and adds how to allow it.
  *
  * @param code - The refusal code, when there is one.
  * @param message - The host's message.
  * @returns Plain copy.
  * @public
  */
-export const describePrintFailure = (code: string | undefined, message: string): string =>
-  code === unqualifiedCode ? bambuStudioRequired : message;
+export const describePrintFailure = (code: string | undefined, message: string): string => {
+  if (code === unqualifiedCode) {
+    return bambuStudioRequired;
+  }
+  return message.trim().toLowerCase() === unsignedCommandReason ? `${message}. ${developerModeRequired}` : message;
+};
 
 /**
- * A thrown request failure as the pane shows it, mapping `ARTIFACT_UNQUALIFIED` like {@link describePrintFailure}.
+ * A thrown request failure as the pane shows it, mapped like {@link describePrintFailure}.
  *
  * @param error - What a machine client call rejected with.
  * @returns Plain copy.

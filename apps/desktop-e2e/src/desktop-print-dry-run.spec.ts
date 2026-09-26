@@ -292,7 +292,7 @@ test('slices, previews and starts a person-initiated print on the simulated X1C'
     const result = prepare.getByLabel('Slice result');
     await expectVisible(result, 120_000);
     const part =
-      /^Filemain\.gcode\.3mfLayers\d+Time.+Filament.+Part([\d.]+) × ([\d.]+) × ([\d.]+) mmToolpath[\d .×]+ mm · every nozzle moveThe toolpath fits the plate/u.exec(
+      /^Filemain\.gcode\.3mfLayers\d+Time.+Filament.+Part([\d.]+) × ([\d.]+) × ([\d.]+) mmToolpath[\d .×]+ mm · every nozzle move, including the printer's start routineThe part fits the plate/u.exec(
         (await result.textContent()) ?? '',
       );
     /* The seed model is a 20 mm cube: the Part row is the part, not the purge line and lifts around it. */

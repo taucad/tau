@@ -44,7 +44,7 @@ import {
   startBlocker,
 } from '#routes/w.$workspace.$project/chat-print-send.js';
 import {
-  fitsBuildVolume,
+  fitsPlate,
   formatDuration,
   formatFilament,
   formatProducer,
@@ -53,7 +53,7 @@ import {
   materialSlotLabel,
   summarizeGcodeContainer,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
-import type { BuildVolumeFit, SliceSummary } from '#routes/w.$workspace.$project/chat-print-summary.js';
+import type { PlateFit, SliceSummary } from '#routes/w.$workspace.$project/chat-print-summary.js';
 import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
 
 /** The export target every print goes through (blueprint D3). */
@@ -80,7 +80,7 @@ export type SlicedArtifact = Readonly<{
   /** The rendered geometry it was sliced from, compared by identity: a new render makes the slice stale. */
   geometry: unknown;
   summary: SliceSummary;
-  fit: BuildVolumeFit | undefined;
+  fit: PlateFit | undefined;
 }>;
 
 const schemaConstant = (schema: JSONSchema7 | boolean | undefined): unknown => {
@@ -435,7 +435,7 @@ export const usePrintPrepare = ({
         geometry,
         optionsKey,
         summary,
-        fit: manifest ? fitsBuildVolume(summary.bounds, manifest.geometry.buildVolume) : undefined,
+        fit: manifest ? fitsPlate(summary, manifest.geometry.buildVolume) : undefined,
       });
     } catch (error) {
       setFailedSlice({ message: error instanceof Error ? error.message : String(error), geometry });
@@ -461,7 +461,7 @@ export const usePrintPrepare = ({
       return `The ${changed} changed since this slice. Slice again before sending.`;
     }
     if (slice.fit && !slice.fit.fits) {
-      return `The toolpath does not fit the plate: ${slice.fit.reason}.`;
+      return slice.fit.message;
     }
     // The real printer refuses anything Bambu Studio did not slice (blueprint P3); the simulator takes both.
     if (isRealBambuPrinter(provider) && slice.summary.producer?.name !== 'Bambu Studio') {
@@ -736,16 +736,17 @@ function SliceResult({
         </dd>
         <dt className='text-muted-foreground'>Toolpath</dt>
         <dd className='tabular-nums'>
-          {formatSize(summary.bounds)} <span className='text-muted-foreground'>· every nozzle move</span>
+          {formatSize(summary.bounds)}{' '}
+          <span className='text-muted-foreground'>· every nozzle move, including the printer&apos;s start routine</span>
         </dd>
       </dl>
       {fit === undefined ? null : fit.fits ? (
         <p className='flex items-center gap-1.5 text-xs'>
           <Check aria-hidden className='size-3.5 text-success' />
-          The toolpath fits the plate
+          {fit.message}
         </p>
       ) : (
-        <PrintNotice tone='warning'>The toolpath does not fit the plate: {fit.reason}.</PrintNotice>
+        <PrintNotice tone='warning'>{fit.message}</PrintNotice>
       )}
       {staleReason === undefined ? null : (
         <PrintNotice tone='neutral' role='status'>
@@ -843,6 +844,7 @@ function PlateSelect({
     <label className='flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
       Plate
       <select
+        aria-label='Plate'
         className='h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm text-foreground'
         value={typeof selected === 'string' ? selected : ''}
         onChange={onChange}

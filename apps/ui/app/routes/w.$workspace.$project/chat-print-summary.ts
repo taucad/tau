@@ -22,9 +22,15 @@ export type SliceSummary = Readonly<{
   producer: BambuContainerProducer | undefined;
   /** Millimetres of filament. */
   filamentLength: number;
-  /** Every move the nozzle makes, from home through the purge line to the end lift; the plate-fit check reads these. */
+  /**
+   * Every move the nozzle makes, from home through the printer's start routine to the end lift; the plate-fit
+   * check reads these only when the G-code labels no part.
+   */
   bounds: SliceBounds;
-  /** The part alone: wall, infill and support extrusions standing on the plate; absent when the G-code labels none. */
+  /**
+   * The part alone: wall, infill and support extrusions standing on the plate; absent when the G-code labels none.
+   * The plate-fit check reads these.
+   */
   partBounds: SliceBounds | undefined;
   /** False when the parser met motion it could not time; the numbers are then a floor. */
   coverageComplete: boolean;
@@ -60,9 +66,9 @@ export type BuildVolumeFit =
   | Readonly<{ fits: false; axis: 'X' | 'Y' | 'Z'; reason: string }>;
 
 /**
- * Compare toolpath bounds with the machine's build volume.
+ * Compare bounds with the machine's build volume.
  *
- * @param bounds - Toolpath bounds in millimetres from the plate origin.
+ * @param bounds - Bounds in millimetres from the plate origin.
  * @param buildVolume - The manifest's build volume in millimetres.
  * @returns Whether every axis stays inside the volume, naming the first one that does not.
  * @public
@@ -88,6 +94,33 @@ export const fitsBuildVolume = (
     }
   }
   return { fits: true };
+};
+
+/** A plate-fit verdict and the sentence the pane shows for it. @public */
+export type PlateFit = BuildVolumeFit & Readonly<{ message: string }>;
+
+/**
+ * Whether a slice fits the plate. The part decides, not every nozzle move: a
+ * printer's own start routine may travel and purge past the plate edge (the
+ * X1C's goes to Y −3 and purges at Y 265). G-code that labels no part is
+ * checked on every nozzle move instead.
+ *
+ * @param summary - The slice's toolpath and part bounds.
+ * @param buildVolume - The manifest's build volume in millimetres.
+ * @returns The verdict, with a sentence naming what was measured.
+ * @public
+ */
+export const fitsPlate = (
+  summary: Pick<SliceSummary, 'bounds' | 'partBounds'>,
+  buildVolume: MachineManifest['geometry']['buildVolume'],
+): PlateFit => {
+  // ponytail: skirts and brims are not part extrusions, so a brim past the plate edge passes; add their kinds if a
+  // slicer ever places one there.
+  const measured = summary.partBounds === undefined ? 'toolpath' : 'part';
+  const fit = fitsBuildVolume(summary.partBounds ?? summary.bounds, buildVolume);
+  return fit.fits
+    ? { ...fit, message: `The ${measured} fits the plate` }
+    : { ...fit, message: `The ${measured} does not fit the plate: ${fit.reason}.` };
 };
 
 /**

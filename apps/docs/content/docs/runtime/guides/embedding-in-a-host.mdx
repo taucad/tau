@@ -73,19 +73,18 @@ await client.connect();
 
 Electron runs one utility process per materialized runtime client. The bundled helpers exchange an opaque host lease internally so normal close and hard timeout recovery terminate exactly that process.
 
-Register the utility entry in the main process:
+Register the utility entry in the main process. Built as a `runtime.utility` [main input](./bundling#electron), it lands beside main's bundle:
 
-```typescript @ts-nocheck
+```typescript
 // main.ts
-// @ts-nocheck: the docs resolver cannot resolve electron-vite's `?modulePath` virtual specifier.
+import { join } from 'node:path';
 import { app } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
-import utilityEntry from './runtime.utility?modulePath';
 
 await app.whenReady();
 installElectronRuntimeHeaders();
 const runtimeMain = registerElectronRuntimeMain({
-  utilityEntry,
+  utilityEntry: join(import.meta.dirname, 'runtime.utility.js'),
 });
 
 app.once('before-quit', () => runtimeMain.dispose());
@@ -126,7 +125,7 @@ const provideClientOptions = createElectronClientOptions({ renderTimeout: 60_000
 export const createElectronRuntimeClient = async () => createRuntimeClient(await provideClientOptions());
 ```
 
-Renderer code never handles the host ID or releases the lease itself; the transport releases it through the preload bridge on `terminate()` and on hard timeout recovery. The identical config and `?modulePath` import cover electron-vite 5/Vite 7 and electron-vite 6 beta/Vite 8. See [Bundling](./bundling) for electron-vite configuration and [Configure Render Timeouts](./render-timeouts) for the typed restart flow.
+Renderer code never handles the host ID or releases the lease itself; the transport releases it through the preload bridge on `terminate()` and on hard timeout recovery. The same helpers cover electron-vite 5/Vite 7 and electron-vite 6 beta/Vite 8. See [Bundling](./bundling#electron) for electron-vite configuration and [Configure Render Timeouts](./render-timeouts) for the typed restart flow.
 
 ## Lifecycle
 

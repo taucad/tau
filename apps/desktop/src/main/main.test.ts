@@ -8,6 +8,7 @@ import type * as WorkerThreads from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   computeControlChannels,
+  machinesChannels,
   quitChannels,
   servicesPortRelayTag,
   slicersChannels,
@@ -37,6 +38,10 @@ const state = vi.hoisted(() => ({
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
   shutdownOrder: [] as string[],
   servicesConnect: vi.fn(() => ({ id: 'services-port' })),
+  servicesCompleteBinding: vi.fn(async (_input: Readonly<Record<string, string>>, _boundMilliseconds: number) => ({
+    status: 'bound',
+    machineId: 'workshop-x1c',
+  })),
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
@@ -229,6 +234,7 @@ vi.mock('#main/services-broker.js', () => ({
   createServicesBroker: vi.fn(() => ({
     post: vi.fn(),
     connect: state.servicesConnect,
+    completeMachineBinding: state.servicesCompleteBinding,
     quiesce: state.servicesQuiesce,
     dispose: state.servicesDispose,
     computeProjectRoot: (root: string) =>
@@ -700,6 +706,40 @@ describe('desktop main Bambu Studio channels', () => {
       for (const channel of Object.values(slicersChannels.bambuStudio)) {
         expect(state.handlers.has(channel)).toBe(true);
       }
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main machine binding channel', () => {
+  const bootMilliseconds = 30_000;
+
+  it(
+    'should forward an access code only when one was typed, and refuse one over 256 characters',
+    async () => {
+      vi.stubGlobal('tauCloudBuildEnabled', false);
+      state.userData = await mkdtemp(join(tmpdir(), 'tau-main-machines-'));
+      await import('#main/main.js');
+      await vi.waitFor(() => {
+        expect(state.handlers.has(machinesChannels.completeBinding)).toBe(true);
+      });
+      const complete = state.handlers.get(machinesChannels.completeBinding)!;
+
+      /* No code: the utility reuses the printer's saved one. */
+      await expect(complete({ senderFrame: {} }, { ceremonyId: 'ceremony-1' })).resolves.toEqual({
+        status: 'bound',
+        machineId: 'workshop-x1c',
+      });
+      await complete({ senderFrame: {} }, { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' });
+      await expect(
+        complete({ senderFrame: {} }, { ceremonyId: 'ceremony-3', accessCode: 'x'.repeat(257) }),
+      ).rejects.toThrow('Desktop shell refused invalid machine binding completion.');
+
+      expect(state.servicesCompleteBinding.mock.calls.map(([input]) => input)).toEqual([
+        { ceremonyId: 'ceremony-1' },
+        { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' },
+      ]);
+      expect(JSON.stringify(state.log.mock.calls)).not.toContain('12345678');
     },
     bootMilliseconds,
   );

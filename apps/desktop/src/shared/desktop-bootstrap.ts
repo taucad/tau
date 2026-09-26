@@ -52,7 +52,8 @@ export const externalAgentsChannel = 'tau:external-agents';
  * `beginBinding` travels over the brokered `machines` port and answers with a
  * ceremony id; the secret that completes it never rides that channel. The
  * renderer posts it here, main forwards it to the services utility, and the
- * utility keeps it in its own protected store under an opaque reference.
+ * utility saves it in the host's vault, keyed by the printer, once the
+ * printer accepts it. An omitted code reuses the saved one.
  */
 export const machinesChannels = {
   completeBinding: 'tau:machines:complete-binding',

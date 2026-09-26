@@ -587,9 +587,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
     await services.releaseAgentHost(agentHostSessionInput(event, payload), quitQuiesceMilliseconds);
   });
   /* The secret half of the binding ceremony (D10). The renderer never keeps
-   * the access code: it rides this one invoke into the utility's store. A real
-   * X1C answers its MQTT hello in seconds, but a wrong code or a sleeping
-   * printer is only known at the provider's own timeout, hence the bound. */
+   * the access code: it rides this one invoke to the utility, which saves it
+   * only once the printer accepts it. Without one the utility reuses the
+   * printer's saved code while its certificate still matches. A real X1C
+   * answers its MQTT hello in seconds, but a wrong code or a sleeping printer
+   * is only known at the provider's own timeout, hence the bound. */
   ipcMain.handle(machinesChannels.completeBinding, async (event, payload) => {
     const { ceremonyId, address, accessCode } = (payload ?? {}) as Record<string, unknown>;
     const optionalString = (value: unknown): value is string | undefined =>

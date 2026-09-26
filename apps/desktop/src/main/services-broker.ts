@@ -34,8 +34,10 @@ export const rendererServicesConcerns: readonly ServicesConcern[] = ['nodeFs', '
 /**
  * The native completion of one binding ceremony (D10).
  *
- * `address` lets the utility pin the printer's service certificates on first
- * use; `accessCode` is the LAN secret. Both are absent for the simulator.
+ * `accessCode` is the LAN secret the person typed; absent, the utility reuses
+ * the printer's saved code while its certificate still matches. The utility
+ * pins the endpoint the provider connects to, so `address` is carried for
+ * older renderers and ignored.
  */
 export type MachineBindingCompletion = Readonly<{ ceremonyId: string; address?: string; accessCode?: string }>;
 

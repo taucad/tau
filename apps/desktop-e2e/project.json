@@ -134,12 +134,16 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "External-agent tier (W4-ACP): the desktop's ACP rows, and one real turn through the operator's own Codex login. Kept off test:e2e because it spends their quota and needs the Codex CLI; the spec skips when the adapter or the CLI is absent."
+        "description": "External-agent tier (W4-ACP): the desktop's ACP rows, and one real turn through the operator's own Codex login. Kept off test:e2e because it spends their quota and needs the Codex CLI; the spec skips when the adapter or the CLI is absent. It selects the Build123d kernel, so it prepares `resources/python`, which `desktop:build` no longer does."
       },
       "dependsOn": [
         {
           "projects": ["desktop"],
           "target": "build"
+        },
+        {
+          "projects": ["desktop"],
+          "target": "prepare-build123d-python"
         },
         {
           "projects": ["api"],

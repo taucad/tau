@@ -13,6 +13,7 @@ import {
   Info,
   Plus,
   Printer,
+  Rotate3d,
   Share2,
   SlidersHorizontal,
   Terminal,
@@ -71,6 +72,7 @@ import { useFeature } from '#flags/use-feature.js';
 import { fileViewerRouter } from '#routes/w.$workspace.$project/file-viewers/built-in-viewers.js';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
 import { ParametersPanelBody } from '#routes/w.$workspace.$project/chat-parameters.js';
+import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
@@ -253,6 +255,10 @@ function ParametersWorkbenchPanel(): React.JSX.Element {
   return <ParametersPanelBody />;
 }
 
+function KinematicsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
+  return <KinematicsPanelBody panelApi={api} />;
+}
+
 function ModelWorkbenchPanel(): React.JSX.Element {
   return <ModelPanelBody />;
 }
@@ -334,6 +340,13 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
         label: 'Print',
         icon: Printer,
         panel: { id: 'workbench:print', component: 'print', title: 'Print' },
+      },
+      {
+        id: 'kinematics',
+        label: 'Kinematics',
+        icon: Rotate3d,
+        shortcut: projectWorkspaceKeyCombinations.kinematics,
+        panel: { id: 'workbench:kinematics', component: 'kinematics', title: 'Kinematics' },
       },
     ],
   },
@@ -422,7 +435,14 @@ export const workbenchSurfaces: readonly WorkbenchSurface[] = workbenchSurfaceGr
 const getWorkbenchSurface = (id: WorkbenchPanelId): WorkbenchSurface =>
   workbenchSurfaces.find((surface) => surface.id === id)!;
 
-const sharedWorkbenchSurfaceIds = new Set<WorkbenchPanelId>(['parameters', 'model', 'files', 'export', 'details']);
+const sharedWorkbenchSurfaceIds = new Set<WorkbenchPanelId>([
+  'parameters',
+  'model',
+  'kinematics',
+  'files',
+  'export',
+  'details',
+]);
 
 export const isWorkbenchSurfaceAllowed = (id: WorkbenchPanelId, profile: WorkbenchProfile): boolean =>
   profile === 'editor' || sharedWorkbenchSurfaceIds.has(id);
@@ -730,6 +750,7 @@ const components = {
   newTab: WorkbenchPlaceholderPanel,
   parameters: ParametersWorkbenchPanel,
   model: ModelWorkbenchPanel,
+  kinematics: KinematicsWorkbenchPanel,
   revisions: RevisionsWorkbenchPanel,
   agents: AgentsWorkbenchPanel,
   jobs: JobsWorkbenchPanel,
@@ -746,6 +767,7 @@ const components = {
 export const workbenchPanels = {
   parameters: getWorkbenchSurface('parameters').panel!,
   model: getWorkbenchSurface('model').panel!,
+  kinematics: getWorkbenchSurface('kinematics').panel!,
   revisions: getWorkbenchSurface('revisions').panel!,
   agents: getWorkbenchSurface('agents').panel!,
   jobs: getWorkbenchSurface('jobs').panel!,

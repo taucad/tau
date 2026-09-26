@@ -1,12 +1,12 @@
 import { describe, it, expectGeo } from 'geospec';
 import { loadModel } from 'geospec/model';
 
-const part = (component: string, parameters = {}) =>
+const part = async (component: string, parameters = {}) =>
   loadModel({
     file: 'main.ts',
     parameters: { component, ...parameters },
   });
-const exact = (component: string) =>
+const exact = async (component: string) =>
   loadModel({
     file: 'main.ts',
     format: 'step',
@@ -55,7 +55,7 @@ describe('30:1 generated worm drive', () => {
     expectGeo(model).toBeWatertight();
     expectGeo(model).toHaveBoundingBox({
       size: { x: 66, y: 24, z: 66 },
-      center: [0, 0, 49],
+      center: { x: 0, y: 0, z: 49 },
       tolerance: 0.35,
     });
     const brep = await exact('wheel');
@@ -81,7 +81,7 @@ describe('30:1 generated worm drive', () => {
     expectGeo(model).toHaveConnectedComponents({ count: 1 });
     expectGeo(model).toHaveBoundingBox({
       size: { x: 132, y: 24, z: 24 },
-      center: [0, 0, 89],
+      center: { x: 0, y: 0, z: 89 },
       tolerance: 0.25,
     });
     expectGeo(await exact('worm')).toBeValidBrep();
@@ -94,7 +94,7 @@ describe('30:1 generated worm drive', () => {
       size: { x: 150, y: 100, z: 8 },
       tolerance: 0.05,
     });
-    for (const x of [-64, 64])
+    for (const x of [-64, 64]) {
       for (const y of [-39, 39]) {
         // The exact feature matcher reports counterbore segments as blind;
         // check both diameters and prove the complete passage separately.
@@ -120,7 +120,8 @@ describe('30:1 generated worm drive', () => {
           minCrossSection: 30,
         });
       }
-    for (const x of [-48, 48, -23, 23])
+    }
+    for (const x of [-48, 48, -23, 23]) {
       for (const y of [-27, 27]) {
         expectGeo(model).toHaveCircularHole({
           diameter: 4.8,
@@ -130,6 +131,7 @@ describe('30:1 generated worm drive', () => {
           tolerance: 0.05,
         });
       }
+    }
   });
 
   it('has four closed bearing supports with orthogonal bearing seats', async () => {
@@ -166,7 +168,7 @@ describe('30:1 generated worm drive', () => {
     expectGeo(model).toBeValidBrep();
     expectGeo(model).toHaveBoundingBox({
       size: { x: 12, y: 94, z: 12 },
-      center: [0, 0, 49],
+      center: { x: 0, y: 0, z: 49 },
       tolerance: 0.1,
     });
     expectGeo(model).toHaveCylindricalFace({
@@ -199,7 +201,7 @@ describe('30:1 generated worm drive', () => {
     expectGeo(model).toHaveConnectedComponents({ count: 1 });
     expectGeo(model).toHaveBoundingBox({
       size: { x: 70, y: 24, z: 70 },
-      center: [0, 0, 51],
+      center: { x: 0, y: 0, z: 51 },
       tolerance: 0.35,
     });
   });

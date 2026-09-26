@@ -1938,9 +1938,11 @@ describe('ChatSessionStore', () => {
         const fake = harness.created.findLast((entry) => entry.id === chatId)!;
         fake.status = 'submitted';
         fake.emitStatusChange();
-        fake.error = new Error('host unreachable');
+        /* The AI SDK's `setStatus` order: `status` (and its callbacks) first, `error` after. */
         fake.status = 'error';
         fake.emitStatusChange();
+        fake.error = new Error('host unreachable');
+        fake.emitErrorChange();
 
         expect(heard).toContain('runSettled');
         expect(actor.getSnapshot().matches({ run: 'failed' })).toBe(true);

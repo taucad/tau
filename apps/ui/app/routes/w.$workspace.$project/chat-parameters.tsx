@@ -59,11 +59,13 @@ import {
   PaneviewHeader,
   PaneviewHeaderAction,
   PaneviewHeaderActionGroup,
-  PaneviewHeaderControls,
   PaneviewHeaderContentActions,
+  PaneviewHeaderControls,
+  paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
 } from '#components/panes/paneview-header.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject, useMainGraphics, useParameterSetActor } from '#hooks/use-project.js';
@@ -691,16 +693,22 @@ function GeometryUnitParameters({
 
   if (parameterManifest !== undefined && parameterActor !== undefined && authorityFailure !== undefined) {
     return (
-      <ParameterAuthorityFailure
-        entryPath={entryPath}
-        manifest={parameterManifest}
-        actor={parameterActor}
-        failure={authorityFailure}
-      />
+      <div className={paneviewAttachedBodyClassName}>
+        <ParameterAuthorityFailure
+          entryPath={entryPath}
+          manifest={parameterManifest}
+          actor={parameterActor}
+          failure={authorityFailure}
+        />
+      </div>
     );
   }
   if (parameterManifest === undefined || parameterEdit === undefined) {
-    return <div className='p-3 text-sm text-muted-foreground'>Loading parameter metadata…</div>;
+    return (
+      <div className={cn(paneviewAttachedBodyClassName, 'p-3 text-sm text-muted-foreground')}>
+        Loading parameter metadata…
+      </div>
+    );
   }
 
   return (
@@ -712,7 +720,10 @@ function GeometryUnitParameters({
       parameterGroup={parameterGroup}
       parameterEdit={parameterEdit}
       units={units}
-      className='overflow-hidden rounded-b-xl border border-border bg-card [&_[data-slot=parameter-catalog]]:m-0 [&_[data-slot=parameter-catalog]]:rounded-none [&_[data-slot=parameter-catalog]]:border-0 [&_[data-slot=parameter-catalog]]:bg-transparent [&_[data-slot=parameter-catalog]]:p-2'
+      className={cn(
+        paneviewAttachedBodyClassName,
+        '[&_[data-slot=parameter-catalog]]:m-0 [&_[data-slot=parameter-catalog]]:rounded-none [&_[data-slot=parameter-catalog]]:border-0 [&_[data-slot=parameter-catalog]]:bg-transparent [&_[data-slot=parameter-catalog]]:p-2',
+      )}
       enableSearch={false}
       filterTerm={filterTerm}
       isAllExpanded={isAllExpanded}

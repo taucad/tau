@@ -2,8 +2,9 @@ import { join } from 'node:path';
 
 import { app, BrowserWindow } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
-import utilityEntry from './kernel-host?modulePath';
 
+/* Emitted beside `index.js` by the `kernel-host` input in `electron.vite.config.ts`. */
+const utilityEntry = join(import.meta.dirname, 'kernel-host.js');
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 const runtimeEnvironment = { ...process.env };
 runtimeEnvironment['TAU_PROJECT_ROOT'] = process.env['TAU_PROJECT_ROOT'] ?? join(process.cwd(), 'workspace');

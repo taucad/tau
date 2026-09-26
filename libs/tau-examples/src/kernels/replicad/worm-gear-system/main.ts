@@ -18,6 +18,7 @@ import {
   measureDistanceBetween,
   type Shape3D,
   type ShapeConfig,
+  type Sketch,
 } from 'replicad';
 import {
   gearDimensions,
@@ -25,6 +26,7 @@ import {
   envelopePoint,
   type Point3,
 } from './tooth-profile.js';
+import type { MechanismSource } from '@taucad/kinematics';
 
 export const defaultParams = {
   module: 2,
@@ -36,11 +38,36 @@ export const defaultParams = {
   component: 'assembly',
 };
 
-export default function main(
-  params: Partial<typeof defaultParams> & {
-    verifyProfiles?: boolean;
-  } = defaultParams,
-): ShapeConfig[] {
+type Params = Partial<typeof defaultParams> & { verifyProfiles?: boolean };
+
+const shows = (component: string, group: string) =>
+  component === 'assembly' ||
+  component === group ||
+  (component === 'gears' && ['worm', 'wheel'].includes(group));
+
+// Bolt names carry their position as words: the canonical component id slugs the name, and
+// signed coordinates ("-48 -27" vs "48 -27") would collapse to the same slug.
+const inputBoltX = [-48, 48];
+const outputBoltX = [-23, 23];
+const boltY = [-27, 27];
+const boltName = (kind: 'Input' | 'Output', x: number, y: number) =>
+  `${kind} support bolt ${x < 0 ? 'left' : 'right'} ${y < 0 ? 'front' : 'rear'}`;
+
+const layout = (p: typeof defaultParams) => {
+  const dimensions = gearDimensions(
+    p.module,
+    p.wheelTeeth,
+    p.axialPressureAngle,
+    p.backlash,
+  );
+  const pitchRadius = dimensions.wheelRadius;
+  const wheelZ = pitchRadius + 19;
+  const wormRadius = 5 * p.module;
+  const wormZ = wheelZ + pitchRadius + wormRadius;
+  return { dimensions, pitchRadius, wheelZ, wormRadius, wormZ };
+};
+
+export default function main(params: Params = defaultParams): ShapeConfig[] {
   const p = { ...defaultParams, ...params };
   if (
     !Number.isFinite(p.module) ||
@@ -76,26 +103,15 @@ export default function main(
     'shaft',
     'hardware',
   ];
-  if (!groups.includes(p.component))
+  if (!groups.includes(p.component)) {
     throw new Error(`Component must be one of: ${groups.join(', ')}`);
+  }
   const parts: ShapeConfig[] = [];
   const add = (name: string, shape: Shape3D, color: string, metalness = 0.7) =>
     parts.push({ name, shape, color, metalness, roughness: 0.32 });
-  const show = (group: string) =>
-    p.component === 'assembly' ||
-    p.component === group ||
-    (p.component === 'gears' && ['worm', 'wheel'].includes(group));
+  const show = (group: string) => shows(p.component, group);
   const m = p.module;
-  const dimensions = gearDimensions(
-    m,
-    p.wheelTeeth,
-    p.axialPressureAngle,
-    p.backlash,
-  );
-  const pitchRadius = dimensions.wheelRadius;
-  const wheelZ = pitchRadius + 19;
-  const wormRadius = 5 * m;
-  const wormZ = wheelZ + pitchRadius + wormRadius;
+  const { dimensions, pitchRadius, wheelZ, wormRadius, wormZ } = layout(p);
   const lead = Math.PI * m;
   const steel = '#B7C6D5';
   const bronze = '#CD942F';
@@ -119,15 +135,17 @@ export default function main(
 
   if (show('base')) {
     const holes: Shape3D[] = [];
-    for (const x of [-64, 64])
+    for (const x of [-64, 64]) {
       for (const y of [-39, 39]) {
         holes.push(makeCylinder(3.5, 10, [x, y, -1]));
         holes.push(makeCylinder(6, 2.5, [x, y, 5.5]));
       }
-    for (const x of [-48, 48, -23, 23])
+    }
+    for (const x of [-48, 48, -23, 23]) {
       for (const y of [-27, 27]) {
         holes.push(makeCylinder(2.4, 10, [x, y, -1]));
       }
+    }
     const base = drawRoundedRectangle(150, 100, 8)
       .sketchOnPlane('XY')
       .extrude(8)
@@ -138,7 +156,7 @@ export default function main(
   if (show('worm') || p.component === 'worm-cutter') {
     const root = wormRadius - 1.25 * m;
     const crest = wormRadius + m;
-    const alpha = dimensions.alpha;
+    const { alpha } = dimensions;
     const halfGap = (r: number) =>
       lead / 4 + (r - wormRadius) * Math.tan(alpha);
     const f = 0.15 * m;
@@ -172,9 +190,12 @@ export default function main(
       .close()
       .sketchOnPlane('XZ');
     const spine = makeHelix(lead, 9 * lead, (root + crest) / 2, [0, 0, start]);
-    const cutter = genericSweep(profile.wire, spine, { frenet: true });
-    if (p.component === 'worm-cutter')
+    const cutter = genericSweep((profile as Sketch).wire, spine, {
+      frenet: true,
+    });
+    if (p.component === 'worm-cutter') {
       return [{ name: 'ZA threading tool sweep', shape: cutter, color: steel }];
+    }
     const runout = draw([0, -25])
       .lineTo([root, -25])
       .lineTo([crest, -23.5])
@@ -192,10 +213,10 @@ export default function main(
     }
     if (params.verifyProfiles) {
       const samples: Point3[] = [];
-      for (let i = 0; i < 17; i++)
-        for (const r of [8, 9, 10, 11, 11.7])
+      for (let index = 0; index < 17; index++) {
+        for (const r of [8, 9, 10, 11, 11.7]) {
           for (const side of [-1, 1]) {
-            const angle = -Math.PI + ((i + 0.37) * 2 * Math.PI) / 17;
+            const angle = -Math.PI + ((index + 0.37) * 2 * Math.PI) / 17;
             samples.push([
               r * Math.cos(angle),
               r * Math.sin(angle),
@@ -203,6 +224,8 @@ export default function main(
                 side * (lead / 4 - (r - wormRadius) * Math.tan(alpha)),
             ]);
           }
+        }
+      }
       auditSurface(threadedBody, samples, 'Worm');
     }
     const worm = makeCylinder(5, 132, [0, 0, -66])
@@ -235,8 +258,8 @@ export default function main(
       .close()
       .sketchOnPlane('XZ')
       .revolve([0, 0, 1]);
-    const sections = Array.from({ length: 29 }, (_, i) => {
-      const z = -p.wheelWidth / 2 - 0.02 + ((p.wheelWidth + 0.04) * i) / 28;
+    const sections = Array.from({ length: 29 }, (_, index) => {
+      const z = -p.wheelWidth / 2 - 0.02 + ((p.wheelWidth + 0.04) * index) / 28;
       const left = gapFlank(dimensions, z, -1, outside + 1);
       const right = gapFlank(dimensions, z, 1, outside + 1);
       const rootR =
@@ -247,7 +270,7 @@ export default function main(
         rootR * Math.cos(rootAngle),
         z,
       ];
-      const spline = (points: [number, number, number][]) =>
+      const spline = (points: Array<[number, number, number]>) =>
         makeBSplineApproximation(points, { tolerance: 0.00001, degMax: 6 });
       return assembleWire([
         spline(left.fillet),
@@ -255,27 +278,29 @@ export default function main(
         makeLine(left.flank.at(-1)!, right.flank.at(-1)!),
         spline([...right.flank].reverse()),
         spline([...right.fillet].reverse()),
-        makeThreePointArc(right.fillet[0], rootMid, left.fillet[0]),
+        makeThreePointArc(right.fillet[0]!, rootMid, left.fillet[0]!),
       ]);
     });
     const gap = loft(sections, { ruled: false });
     if (params.verifyProfiles) {
       const samples: Point3[] = [];
-      for (let i = 0; i < 17; i++)
-        for (const r of [9, 10, 11, 12, 12.3, 12.45, 12.49])
+      for (let index = 0; index < 17; index++) {
+        for (const r of [9, 10, 11, 12, 12.3, 12.45, 12.49]) {
           for (const side of [-1, 1]) {
-            const z = -p.wheelWidth / 2 + ((i + 0.5) * p.wheelWidth) / 17;
+            const z = -p.wheelWidth / 2 + ((index + 0.5) * p.wheelWidth) / 17;
             samples.push(envelopePoint(dimensions, r, z, side).point);
           }
+        }
+      }
       auditSurface(gap, samples, 'Wheel generating envelope');
     }
-    const gaps = Array.from({ length: p.wheelTeeth }, (_, i) =>
-      gap.clone().rotate((i * 360) / p.wheelTeeth),
+    const gaps = Array.from({ length: p.wheelTeeth }, (_, index) =>
+      gap.clone().rotate((index * 360) / p.wheelTeeth),
     );
     const wheel = blank.cutAll(gaps);
     const holes = [makeCylinder(6.15, 26, [0, 0, -13])];
-    for (let i = 0; i < 6; i++) {
-      const a = (i * Math.PI) / 3;
+    for (let index = 0; index < 6; index++) {
+      const a = (index * Math.PI) / 3;
       holes.push(
         makeCylinder(4, p.wheelWidth + 2, [
           pitchRadius * 0.65 * Math.cos(a),
@@ -378,22 +403,16 @@ export default function main(
       .sketchOnPlane('XY', 12)
       .extrude(3)
       .fuse(makeCylinder(2.2, 11.5, [0, 0, 1]));
-    for (const x of [-48, 48])
-      for (const y of [-27, 27]) {
-        add(
-          `Input support bolt ${x} ${y}`,
-          head.clone().translate([x, y, 0]),
-          steel,
-        );
+    for (const x of inputBoltX) {
+      for (const y of boltY) {
+        add(boltName('Input', x, y), head.clone().translate([x, y, 0]), steel);
       }
-    for (const x of [-23, 23])
-      for (const y of [-27, 27]) {
-        add(
-          `Output support bolt ${x} ${y}`,
-          head.clone().translate([x, y, 0]),
-          steel,
-        );
+    }
+    for (const x of outputBoltX) {
+      for (const y of boltY) {
+        add(boltName('Output', x, y), head.clone().translate([x, y, 0]), steel);
       }
+    }
     const coupling = drawCircle(9)
       .cut(drawCircle(5.15))
       .sketchOnPlane('YZ', [58, 0, wormZ])
@@ -402,4 +421,102 @@ export default function main(
     add('Input coupling', coupling, dark);
   }
   return parts;
+}
+
+// Mechanism: origins and axes are in the as-built model frame (mm, deg); `inputAngle`
+// stays the as-built reference and kinematic coordinates are deltas on top of it.
+// - base: root link (mounting base, supports, bushes and bolts).
+// - worm: `main` builds the worm along +Z, turns it by inputAngle about +Z, then rotates
+//   it +90 deg about +Y (+Z -> +X) and lifts it to wormZ, so the worm joint turns about
+//   world +X through [0, 0, wormZ]; the input coupling is keyed to the worm shaft.
+// - wheel: `main` builds the wheel about +Z, turns it by inputAngle / wheelTeeth about +Z,
+//   then rotates it +90 deg about +X (+Z -> -Y) and lifts it to wheelZ, so the wheel joint
+//   turns about world +Y through [0, 0, wheelZ]; output shaft and collars ride with it.
+// Ratio and sign: the worm is a right-hand single-start thread (makeHelix default) with lead
+// L = pi * m. Turning a right-hand screw by +phi about its axis with no axial motion moves
+// its thread flanks by -L * phi / 360 along that axis (world -X here), carrying the wheel
+// teeth meshed at the top of the wheel (+Z side of its axis) toward -X. A rotation by +beta
+// about +Y moves that top point toward +X, so beta = -(L * phi / 360) / (pi * m * N / 360)
+// = -phi / N. `main` agrees: +inputAngle / N about -Y is -inputAngle / N about +Y.
+// Components are filtered with the same `component` groups `main` renders; the standalone
+// threading-tool view is a static construction body on the base.
+export function mechanism(params: Params = defaultParams) {
+  const p = { ...defaultParams, ...params };
+  const { wheelZ, wormZ } = layout(p);
+  const names = (group: string, list: string[]) =>
+    shows(p.component, group) ? list : [];
+  const bolts = [
+    ...inputBoltX.flatMap((x) => boltY.map((y) => boltName('Input', x, y))),
+    ...outputBoltX.flatMap((x) => boltY.map((y) => boltName('Output', x, y))),
+  ];
+  return {
+    schemaVersion: 1,
+    units: { length: 'mm', angle: 'deg' },
+    root: 'base',
+    links: {
+      base: {
+        shapes: [
+          ...names('base', ['Mounting base']),
+          ...names('supports', [
+            'Worm support right',
+            'Worm support left',
+            'Output support front',
+            'Output support rear',
+          ]),
+          ...names('bearings', [
+            'Input bush right',
+            'Input bush left',
+            'Output bush front',
+            'Output bush rear',
+          ]),
+          ...names('hardware', bolts),
+          ...(p.component === 'worm-cutter' ? ['ZA threading tool sweep'] : []),
+        ],
+      },
+      worm: {
+        shapes: [
+          ...names('worm', ['Single-start worm']),
+          ...names('hardware', ['Input coupling']),
+        ],
+      },
+      wheel: {
+        shapes: [
+          ...names('wheel', [`Bronze wheel - ${p.wheelTeeth} teeth`]),
+          ...names('shaft', ['Output shaft']),
+          ...names('bearings', ['Shaft collar front', 'Shaft collar rear']),
+        ],
+      },
+    },
+    joints: {
+      worm: {
+        type: 'revolute',
+        parent: 'base',
+        child: 'worm',
+        origin: [0, 0, wormZ],
+        axis: [1, 0, 0],
+      },
+      wheel: {
+        type: 'revolute',
+        parent: 'base',
+        child: 'wheel',
+        origin: [0, 0, wheelZ],
+        axis: [0, 1, 0],
+      },
+    },
+    couplings: [
+      { driver: 'worm', follower: 'wheel', ratio: -1 / p.wheelTeeth },
+    ],
+    animations: [
+      {
+        id: 'one-wheel-turn',
+        name: 'One wheel turn',
+        duration: 12,
+        loop: 'repeat',
+        keyframes: [
+          { time: 0, coordinates: { worm: 0 } },
+          { time: 12, coordinates: { worm: 360 * p.wheelTeeth } },
+        ],
+      },
+    ],
+  } satisfies MechanismSource;
 }

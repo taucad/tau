@@ -47,7 +47,7 @@ const withWasmInlineInvariant =
     }
     return !isGitLfsPlaceholder(content) && content.length < Number(consumerLimit);
   };
-const browserNodeBuiltinSources = new Set(['fs', 'node:crypto', 'node:fs', 'node:fs/promises', 'node:url']);
+const browserNodeBuiltinSource = /^(?:fs|node:(?:crypto|fs|fs\/promises|url))$/;
 const browserNodeBuiltinId = '\0taucad-runtime:browser-node-builtins';
 const browserNodeBuiltinModule = `
 const unavailable = (name) => () => {
@@ -64,21 +64,29 @@ export const promises = { readFile };
 export default { promises, randomUUID, readFile, readFileSync, statSync, watch, writeFileSync };
 `;
 
+// Filters keep Rolldown from calling into JS for every other import; the handlers repeat each
+// check for hosts that ignore hook filters.
 const browserNodeBuiltins = (): Plugin => ({
   name: 'taucad-runtime:browser-node-builtins',
   enforce: 'pre',
-  resolveId(source) {
-    if (
-      this.environment.config.mode !== 'test' &&
-      this.environment.config.consumer === 'client' &&
-      browserNodeBuiltinSources.has(source)
-    ) {
-      return browserNodeBuiltinId;
-    }
-    return null;
+  resolveId: {
+    filter: { id: browserNodeBuiltinSource },
+    handler(source) {
+      if (
+        this.environment.config.mode !== 'test' &&
+        this.environment.config.consumer === 'client' &&
+        browserNodeBuiltinSource.test(source)
+      ) {
+        return browserNodeBuiltinId;
+      }
+      return null;
+    },
   },
-  load(id) {
-    return id === browserNodeBuiltinId ? browserNodeBuiltinModule : null;
+  load: {
+    filter: { id: new RegExp(`^${browserNodeBuiltinId}$`) },
+    handler(id) {
+      return id === browserNodeBuiltinId ? browserNodeBuiltinModule : null;
+    },
   },
 });
 

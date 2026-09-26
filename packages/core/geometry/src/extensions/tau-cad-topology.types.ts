@@ -1,3 +1,4 @@
+import type { Mechanism } from '@taucad/kinematics';
 import type { JSONObject } from '@taucad/runtime/types';
 
 /** A range in one glTF primitive's index accessor. @public */
@@ -47,4 +48,9 @@ export type TauCadTopologyComponent = {
 export type TauCadTopologyPayload = {
   readonly schemaVersion: 1;
   readonly components: TauCadTopologyComponent[];
+  /**
+   * The model's mechanism in this glTF's vertex space: lengths in the vertices' unit, origins and
+   * axes in the vertices' frame, link components as `components[].id` values.
+   */
+  readonly mechanism?: Mechanism;
 };

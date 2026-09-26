@@ -97,8 +97,8 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     await screen.findByRole('group', { name: 'Bambu Studio presets' });
     await page.getByRole('button', { name: /^Advanced/u }).click();
     await page.getByRole('button', { name: 'Group: Quality' }).click();
-    await page.getByRole('textbox', { name: 'Input for Layer Height' }).fill('0.16');
-    await page.getByRole('textbox', { name: 'Input for Ironing Speed' }).click();
+    await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
+    await page.getByRole('spinbutton', { name: 'Input for Ironing Speed' }).click();
     await screen.findByRole('button', { name: 'Reset Layer Height' });
   } else if (scenario === 'prepare') {
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });

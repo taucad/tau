@@ -372,12 +372,12 @@ describe('fixed-length arrays', () => {
     );
 
     expect(screen.queryByLabelText('Invalid Field: background')).toBeNull();
-    expect(screen.getAllByRole('textbox')).toHaveLength(3);
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: /add item/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /remove/i })).toBeNull();
 
-    fireEvent.change(screen.getAllByRole('textbox')[1]!, { target: { value: '0.75' } });
-    fireEvent.keyDown(screen.getAllByRole('textbox')[1]!, { key: 'Enter' });
+    fireEvent.change(screen.getAllByRole('spinbutton')[1]!, { target: { value: '0.75' } });
+    fireEvent.keyDown(screen.getAllByRole('spinbutton')[1]!, { key: 'Enter' });
     expect(onChange.mock.lastCall?.[0].formData).toEqual({ point: [0, 0.75, 0.5] });
   });
 
@@ -653,7 +653,7 @@ describe('field labels', () => {
 
     /* WCAG 2.5.3: each control's accessible name contains the label its row shows. */
     for (const [role, name, label] of [
-      ['textbox', 'Input for Demo Speed', 'Demo Speed'],
+      ['spinbutton', 'Input for Demo Speed', 'Demo Speed'],
       ['textbox', 'Input for Printer Address', 'Printer Address'],
       ['switch', 'Toggle for Chamber Light', 'Chamber Light'],
       ['combobox', 'Select for Print Quality', 'Print Quality'],

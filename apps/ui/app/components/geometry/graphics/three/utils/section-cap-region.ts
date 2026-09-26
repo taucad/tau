@@ -16,6 +16,7 @@ const areaEpsilon = 1e-10;
 const _worldPoint = /* @__PURE__ */ new THREE.Vector3();
 const _delta = /* @__PURE__ */ new THREE.Vector3();
 const _normalizedPlane = /* @__PURE__ */ new THREE.Plane();
+const _denormalized = { u: 0, v: 0 };
 
 export type SectionCutPlaneBasis = Readonly<{
   origin: THREE.Vector3;
@@ -57,7 +58,8 @@ type ProjectedContour = {
 
 type CreateSectionCutPlaneBasisOptions = Readonly<{
   worldPlane: THREE.Plane;
-  worldPoints?: readonly THREE.Vector3[];
+  /** The cap contours the basis is normalized to, each in the local space of its mesh. */
+  sources?: ReadonlyArray<Readonly<{ closedContours: readonly ClosedContour[]; meshWorldMatrix: THREE.Matrix4 }>>;
 }>;
 
 type BuildSectionCapPolygonOptions = Readonly<{
@@ -164,6 +166,64 @@ const isCollinear = (a: CapPoint2, b: CapPoint2, c: CapPoint2): boolean => {
   return Math.abs(area) <= ringEpsilon;
 };
 
+/**
+ * Removes every vertex that is collinear with its two neighbours, in the order of a scan that restarts from the first
+ * vertex after each removal, but in one pass. A removal changes only the triples centred on the removed vertex's
+ * neighbours, so the scan resumes at the earlier neighbour. Removing the last vertex also changes the first vertex's
+ * triple, so the scan then checks the first vertex and jumps back to the new last one: every vertex between them is
+ * unchanged and already checked.
+ */
+const removeCollinearPoints = (points: CapRing): CapRing => {
+  let { length } = points;
+  if (length < 3) {
+    return points;
+  }
+
+  const nextIndex = new Uint32Array(length);
+  const previousIndex = new Uint32Array(length);
+  for (let index = 0; index < length; index++) {
+    nextIndex[index] = (index + 1) % length;
+    previousIndex[index] = (index + length - 1) % length;
+  }
+
+  let head = 0;
+  let tail = length - 1;
+  let cursor = head;
+  let isOnlyHeadAndTailUnchecked = false;
+  while (length >= 3) {
+    const before = previousIndex[cursor]!;
+    const after = nextIndex[cursor]!;
+    if (isCollinear(points[before]!, points[cursor]!, points[after]!)) {
+      nextIndex[before] = after;
+      previousIndex[after] = before;
+      length--;
+      if (cursor === head) {
+        head = after;
+        cursor = head;
+      } else if (cursor === tail) {
+        tail = before;
+        cursor = head;
+        isOnlyHeadAndTailUnchecked = true;
+      } else {
+        cursor = before;
+      }
+      continue;
+    }
+
+    if (cursor === tail) {
+      break;
+    }
+    cursor = isOnlyHeadAndTailUnchecked ? tail : after;
+  }
+
+  const kept: CapRing = [];
+  for (let index = head; kept.length < length; index = nextIndex[index]!) {
+    kept.push(points[index]!);
+  }
+
+  return kept;
+};
+
 export const sanitizeCapRing = (ring: readonly CapPoint2[]): CapRing => {
   const finite: CapRing = [];
   const epsilonSquared = ringEpsilon * ringEpsilon;
@@ -173,10 +233,10 @@ export const sanitizeCapRing = (ring: readonly CapPoint2[]): CapRing => {
       continue;
     }
 
-    const next: CapPoint2 = [point[0], point[1]];
+    // Points are readonly tuples, so the sanitized ring shares them with its input.
     const previous = finite.at(-1);
-    if (!previous || pointDistanceSquared(previous, next) > epsilonSquared) {
-      finite.push(next);
+    if (!previous || pointDistanceSquared(previous, point) > epsilonSquared) {
+      finite.push(point);
     }
   }
 
@@ -184,26 +244,12 @@ export const sanitizeCapRing = (ring: readonly CapPoint2[]): CapRing => {
     finite.pop();
   }
 
-  let changed = true;
-  while (changed && finite.length >= 3) {
-    changed = false;
-    for (let index = 0; index < finite.length; index++) {
-      const previous = finite[(index + finite.length - 1) % finite.length]!;
-      const current = finite[index]!;
-      const next = finite[(index + 1) % finite.length]!;
-      if (isCollinear(previous, current, next)) {
-        finite.splice(index, 1);
-        changed = true;
-        break;
-      }
-    }
-  }
-
-  if (finite.length < 3 || Math.abs(signedRingArea(finite)) <= areaEpsilon) {
+  const kept = removeCollinearPoints(finite);
+  if (kept.length < 3 || Math.abs(signedRingArea(kept)) <= areaEpsilon) {
     return [];
   }
 
-  return finite;
+  return kept;
 };
 
 const ensureRingWinding = (ring: CapRing, shouldBePositive: boolean): CapRing => {
@@ -294,20 +340,6 @@ const projectWorldPoint = (point: THREE.Vector3, basis: SectionCutPlaneBasis): C
   ];
 };
 
-export const collectSectionCapWorldPoints = (options: {
-  contours: readonly ClosedContour[];
-  meshWorldMatrix: THREE.Matrix4;
-}): THREE.Vector3[] => {
-  const points: THREE.Vector3[] = [];
-  for (const contour of options.contours) {
-    for (const point of contour) {
-      points.push(point.clone().applyMatrix4(options.meshWorldMatrix));
-    }
-  }
-
-  return points;
-};
-
 export const createSectionCutPlaneBasis = (options: CreateSectionCutPlaneBasisOptions): SectionCutPlaneBasis => {
   _normalizedPlane.copy(options.worldPlane).normalize();
   const normal = _normalizedPlane.normal.clone();
@@ -328,34 +360,60 @@ export const createSectionCutPlaneBasis = (options: CreateSectionCutPlaneBasisOp
     normalizationScale: 1,
   } satisfies SectionCutPlaneBasis;
 
-  const projected = (options.worldPoints ?? []).map((point) => projectWorldPoint(point, baseBasis));
-  if (projected.length === 0) {
+  // The contours' bounds in the unnormalized basis, projected through one scratch point.
+  let pointCount = 0;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const source of options.sources ?? []) {
+    for (const contour of source.closedContours) {
+      for (const point of contour) {
+        _delta.copy(point).applyMatrix4(source.meshWorldMatrix).sub(origin);
+        const projectedU = _delta.dot(u);
+        const projectedV = _delta.dot(v);
+        minX = Math.min(minX, projectedU);
+        minY = Math.min(minY, projectedV);
+        maxX = Math.max(maxX, projectedU);
+        maxY = Math.max(maxY, projectedV);
+        pointCount++;
+      }
+    }
+  }
+
+  if (pointCount === 0) {
     return baseBasis;
   }
 
-  const bounds = buildBounds(projected);
-  const width = bounds.maxX - bounds.minX;
-  const height = bounds.maxY - bounds.minY;
+  const width = maxX - minX;
+  const height = maxY - minY;
   const maxExtent = Math.max(width, height);
 
   return {
     ...baseBasis,
-    normalizationOffset: new THREE.Vector2((bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2),
+    normalizationOffset: new THREE.Vector2((minX + maxX) / 2, (minY + maxY) / 2),
     normalizationScale: maxExtent > ringEpsilon ? 1 / maxExtent : 1,
   };
 };
 
+/** Writes the plane coordinates of a normalized cap point into `target`. */
 export const denormalizeCapPoint = (
   point: CapPoint2,
   basis: SectionCutPlaneBasis,
-): Readonly<{ u: number; v: number }> => ({
-  u: point[0] / basis.normalizationScale + basis.normalizationOffset.x,
-  v: point[1] / basis.normalizationScale + basis.normalizationOffset.y,
-});
+  target: { u: number; v: number },
+): Readonly<{ u: number; v: number }> => {
+  target.u = point[0] / basis.normalizationScale + basis.normalizationOffset.x;
+  target.v = point[1] / basis.normalizationScale + basis.normalizationOffset.y;
+  return target;
+};
 
-export const capPointToWorld = (point: CapPoint2, basis: SectionCutPlaneBasis): THREE.Vector3 => {
-  const denormalized = denormalizeCapPoint(point, basis);
-  return basis.origin.clone().addScaledVector(basis.u, denormalized.u).addScaledVector(basis.v, denormalized.v);
+export const capPointToWorld = (
+  point: CapPoint2,
+  basis: SectionCutPlaneBasis,
+  target = new THREE.Vector3(),
+): THREE.Vector3 => {
+  const denormalized = denormalizeCapPoint(point, basis, _denormalized);
+  return target.copy(basis.origin).addScaledVector(basis.u, denormalized.u).addScaledVector(basis.v, denormalized.v);
 };
 
 const projectContoursToPolygon = (options: BuildSectionCapPolygonOptions): ProjectedContour[] => {

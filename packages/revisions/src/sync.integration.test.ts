@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -930,6 +930,84 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       );
       expect(await remote.git(['rev-parse', mainRef])).toBe(theirs);
       expect(await one.port.readRef(mainRef)).toBe(mine);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it("row 12: a fresh device backs up a project whose remote holds another device's empty chat", async () => {
+    const remoteRoot = await temporaryRoot('remote-empty-chat');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    /* The Tau API's `pre-receive` rule (`git.constants.ts`): a ref that does
+     * not fast-forward is refused, which stock `http-backend` does not do. */
+    const preReceive = join(remote.repositoryPath, 'hooks', 'pre-receive');
+    await writeFile(
+      preReceive,
+      [
+        '#!/bin/sh',
+        'status=0',
+        'while read old new ref; do',
+        '  case "$old" in *[!0]*)',
+        '    if ! git merge-base --is-ancestor "$old" "$new" 2>/dev/null; then',
+        '      echo "Tau: refused $ref — it does not fast-forward $old; fetch and merge first." >&2',
+        '      status=1',
+        '    fi',
+        '  ;; esac',
+        'done',
+        'exit "$status"',
+        '',
+      ].join('\n'),
+    );
+    await chmod(preReceive, 0o755);
+    const emptyChatId = '00000000-0000-4000-8000-000000000000';
+    const emptyChatRef = chatRefName(emptyChatId);
+    try {
+      const one = await device({
+        leg,
+        label: 'a-empty-chat',
+        remoteUrl: remote.url,
+        files: { 'bracket.scad': 'cube([6, 6, 6]);\n' },
+      });
+      const head = await record({ device: one, files: { 'bracket.scad': 'cube([6, 6, 6]);\n' }, summary: 'Device A' });
+      /* What a desktop registration probe left on Tau Cloud before it stopped
+       * creating chats: an orphan chat commit whose one segment is empty. */
+      const empty = await one.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([[chatSegmentPath('device-a-empty-chat'), new Uint8Array()]]),
+        largeObjects: false,
+        provenance: { source: 'user', actorId: 'tau-host', createdAt: Date.UTC(2026, 8, 25, 11, 51, 43) },
+        summary: { generated: `Chat ${emptyChatId}` },
+      });
+      await one.port.updateRef({ name: emptyChatRef, expectedHead: undefined, head: revisionId(empty.commitId) });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }, { name: emptyChatRef }] });
+      expect(await remote.git(['rev-parse', emptyChatRef])).toBe(empty.commitId);
+
+      const two = await device({ leg, label: 'b-empty-chat', remoteUrl: remote.url });
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      const mine = await record({
+        device: two,
+        files: { 'bracket.scad': 'cube([9, 9, 9]);\n' },
+        summary: 'Device B',
+        parent: head,
+      });
+      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: mine });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot())).toMatchObject({ state: 'backedUp', error: undefined });
+          expect(selectSyncFacet(second.getSnapshot()).pendingCount).toBe(0);
+        },
+        { timeout: 30_000 },
+      );
+      expect(await remote.git(['rev-parse', mainRef])).toBe(mine);
+      expect(await remote.git(['rev-parse', emptyChatRef])).toBe(empty.commitId);
+      second.stop();
     } finally {
       await remote.close();
     }

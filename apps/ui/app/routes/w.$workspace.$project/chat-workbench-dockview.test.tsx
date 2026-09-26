@@ -1416,6 +1416,7 @@ describe('Workbench file reconciliation', () => {
       'parameters',
       'model',
       'print',
+      'kinematics',
       'revisions',
       'agents',
       'jobs',
@@ -1437,6 +1438,8 @@ describe('Workbench file reconciliation', () => {
     expect(isWorkbenchSurfaceAllowed('jobs', 'editor')).toBe(true);
     expect(isWorkbenchSurfaceAllowed('jobs', 'shared')).toBe(false);
     expect(isWorkbenchSurfaceAllowed('export', 'shared')).toBe(true);
+    // Posing is transient view state, so shared and builtin example pages offer it too.
+    expect(isWorkbenchSurfaceAllowed('kinematics', 'shared')).toBe(true);
   });
 
   it('clears corrupt layouts and removes restored debug panels when the flag is off', () => {

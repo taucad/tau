@@ -250,6 +250,23 @@ describe.each([
     expect(await harness.port.readRef(chatRefName(offChat))).toBeUndefined();
   });
 
+  it.runIf(enabled)('writes no ref for a chat whose only log is empty', async () => {
+    /* What the desktop registration probe left behind: a log opened, never written. */
+    const emptyChat = '00000000-0000-4000-8000-000000000000';
+    await writeChatFiles(harness.checkout, { 'events.jsonl': '', [chatSegmentPath('device-b')]: '' }, emptyChat);
+    const written = await writeChatRef({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      chatId: emptyChat,
+      syncChats: true,
+      actorId,
+      now,
+    });
+    expect(written).toMatchObject({ status: 'upToDate', head: undefined });
+    expect(await harness.port.readRef(chatRefName(emptyChat))).toBeUndefined();
+  });
+
   it.runIf(enabled)('is a no-op when the directory already matches the ref', async () => {
     const repeated = await write('device-a');
     expect(repeated.status).toBe('upToDate');

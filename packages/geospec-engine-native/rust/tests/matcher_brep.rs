@@ -443,7 +443,7 @@ fn admitted_units_do_not_demand_a_failing_report() {
     ));
     assert_eq!(calls.get(), 0);
     assert_eq!(
-        subjects[0].report_bundle().unwrap_err().message,
+        subjects[0].report_faces(false).unwrap_err().message,
         "deliberate report failure"
     );
     assert_eq!(calls.get(), 1);

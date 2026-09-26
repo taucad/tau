@@ -6,6 +6,8 @@ import { useGraphicsSelector, useRenderFrame } from '#hooks/use-graphics.js';
 import type { GraphicsContext } from '#machines/graphics.machine.js';
 import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import { resolveSectionViewPlane } from '#components/geometry/graphics/section-view-plane.js';
+import { resolveSectionPieces, toRenderSectionPieces } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionPiece } from '#components/geometry/graphics/section-cuts.js';
 
 export type SectionViewState = {
   /** The computed clipping plane for the active section view. */
@@ -75,6 +77,23 @@ export function resolveSectionViewRaycastClip(
   }
 
   return { enabled: true, planes: [resolveSectionViewRenderPlane(context, renderFrame)] };
+}
+
+const noSectionPieces: readonly SectionPiece[] = [];
+
+/**
+ * The pieces the cut list removes while Section is on, in the render frame; one empty list while it is off. A cut
+ * edit gives a new list, and an unrelated context change keeps the same one.
+ */
+export function useSectionPieces(): readonly SectionPiece[] {
+  const renderFrame = useRenderFrame();
+  const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
+  const sectionCuts = useGraphicsSelector((state) => state.context.sectionCuts);
+  return useMemo(
+    () =>
+      isSectionViewActive ? toRenderSectionPieces(resolveSectionPieces(sectionCuts), renderFrame) : noSectionPieces,
+    [isSectionViewActive, renderFrame, sectionCuts],
+  );
 }
 
 /**

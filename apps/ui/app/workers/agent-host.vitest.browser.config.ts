@@ -44,6 +44,7 @@ export default defineConfig({
       'app/machines/file-manager.browser.test.ts',
       'app/machines/web-locks.browser.test.ts',
       'app/components/geometry/loader/metal-morph-spinner.browser.test.tsx',
+      'app/components/geometry/graphics/three/materials/section-clip.browser.test.ts',
     ],
     fileParallelism: false,
     browser: {
@@ -51,6 +52,8 @@ export default defineConfig({
       headless: true,
       // `--enable-unsafe-webgpu` is what `apps/ui-e2e` launches with; the
       // headless capture probe needs a real adapter or its answer is vacuous.
+      // CI's GPU-less lane sets the software profile, which takes SwiftShader's
+      // adapter exactly as `apps/ui-e2e`'s `webGpuLaunchArguments` does.
       // `@vitest/browser-playwright` resolves a second `vitest` peer variant (its jsdom lacks
       // the optional `supports-color` peer), so the option it returns is nominally — not
       // structurally — distinct from this program's own `vitest/node` declaration. This is the
@@ -59,7 +62,10 @@ export default defineConfig({
       provider: playwright({
         launchOptions: {
           channel: 'chromium',
-          args: ['--enable-unsafe-webgpu'],
+          args: [
+            '--enable-unsafe-webgpu',
+            ...(process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software' ? ['--use-webgpu-adapter=swiftshader'] : []),
+          ],
         },
       }) as unknown as BrowserProviderOption,
       instances: [{ browser: 'chromium' }],

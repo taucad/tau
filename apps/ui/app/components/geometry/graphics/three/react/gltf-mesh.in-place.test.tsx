@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
     gl: Object.create(null) as { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?: number },
     frameCallback: undefined as (() => void) | undefined,
     invalidate: vi.fn(),
+    rootScene: { name: 'viewport-lighting-scene' },
     modelUnit: {
       focusedComponentId: undefined as string | undefined,
       hiddenComponentIds: [],
@@ -59,13 +60,17 @@ vi.mock('@react-three/fiber', () => ({
   useFrame: (callback: () => void) => {
     mocks.frameCallback = callback;
   },
-  useThree: () => ({
-    camera: mocks.camera,
-    controls: undefined,
-    gl: mocks.gl,
-    invalidate: mocks.invalidate,
-    size: { height: 768, width: 1024 },
-  }),
+  useThree: (selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = {
+      camera: mocks.camera,
+      controls: undefined,
+      gl: mocks.gl,
+      invalidate: mocks.invalidate,
+      scene: mocks.rootScene,
+      size: { height: 768, width: 1024 },
+    };
+    return selector ? selector(state) : state;
+  },
 }));
 
 vi.mock('#hooks/use-theme.js', () => ({

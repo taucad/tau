@@ -37,6 +37,9 @@ import {
   updateLineMaterialResolution,
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import { applyGltfSurfaceDepthBiasToScene } from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
+import { transferSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
+import { useSectionClip } from '#components/geometry/graphics/three/react/section-clipping-group.js';
+import { installSectionClipUnder } from '#components/geometry/graphics/three/react/section-view.utils.js';
 import {
   gltfEdgeColorDarkMode,
   gltfEdgeColorLightMode,
@@ -285,7 +288,7 @@ function saveOriginalMaterials(scene: Group): Map<number, Material | Material[]>
  * Restore clones of saved original materials onto a scene.
  * The saved map remains an immutable ownership inventory for final disposal.
  */
-function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Material[]>): void {
+export function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Material[]>): void {
   scene.traverse((child) => {
     if ('isMesh' in child && child.isMesh && !isFatLineSegmentsMesh(child)) {
       const mesh = child as Mesh;
@@ -294,15 +297,14 @@ function restoreOriginalMaterials(scene: Group, saved: Map<number, Material | Ma
         return;
       }
 
-      // Preserve clipping planes so section-view clipping survives material restoration
+      // The section clip carries over to the restored materials.
       const currentMats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const replacement = Array.isArray(original) ? original.map((material) => material.clone()) : original.clone();
       const restoredMats = Array.isArray(replacement) ? replacement : [replacement];
-      for (let i = 0; i < restoredMats.length && i < currentMats.length; i++) {
-        const currentMat = currentMats[i];
-        const restoredMat = restoredMats[i];
-        if (currentMat && restoredMat && currentMat.clippingPlanes?.length) {
-          restoredMat.clippingPlanes = currentMat.clippingPlanes;
+      for (const [index, restoredMat] of restoredMats.entries()) {
+        const currentMat = currentMats[index] ?? currentMats[0];
+        if (currentMat) {
+          transferSectionClip(currentMat, restoredMat);
         }
       }
 
@@ -1019,7 +1021,12 @@ export function applyModelComponentVisualStateToScene({
       // Edges share one base material per presentation, so emphasis is a per-object material
       // swap rather than a tint on the shared material (which would let the last-visited
       // component win). Edge opacity is not per-component; see the edge emphasis blueprint.
+      const [worn] = getObjectMaterials(object);
       setGltfFatLineEmphasis(object, emphasis);
+      const [next] = getObjectMaterials(object);
+      if (worn && next) {
+        transferSectionClip(worn, next);
+      }
       return;
     }
 
@@ -1077,6 +1084,7 @@ export function GltfMesh({
 }: GltfMeshDisplayProperties): React.JSX.Element | undefined {
   const graphicsActor = useGraphics();
   const graphicsBackendThree = useThreeGraphicsBackend();
+  const sectionClip = useSectionClip();
   const sectionView = useSectionViewFlags();
   const cameraRig = useCameraRig();
   const renderFrame = useRenderFrame();
@@ -1425,6 +1433,8 @@ export function GltfMesh({
           await applyMatcap({ scene: gltf.scene }, materialOptions.matcapTint, graphicsBackendThree);
         }
         applyGltfSurfaceDepthBiasToScene(gltf.scene, graphicsBackendThree);
+        // In before the warm-up and the commit: the first frame draws the programs warmed here, already cut.
+        installSectionClipUnder(gltf.scene, sectionClip);
         seedSceneMaterialAppearances(gltf.scene);
         timings.materials = performance.now() - materialsStartedAt;
         const bundle: PreparedGltfPresentation = {
@@ -1613,6 +1623,7 @@ export function GltfMesh({
     presentationRevision,
     ensureSectionAnalysis,
     emitTelemetry,
+    sectionClip,
   ]);
 
   // Theme-aware edge tint without re-parsing the GLTF binary.

@@ -9,7 +9,7 @@ import { SectionContourFills } from '#components/geometry/graphics/three/react/s
 import { SectionClippingGroup } from '#components/geometry/graphics/three/react/section-clipping-group.js';
 import { SectionViewTestBridge } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
 import { useFeature } from '#flags/use-feature.js';
-import { useSectionView } from '#components/geometry/graphics/three/use-section-view.js';
+import { useSectionPieces, useSectionView } from '#components/geometry/graphics/three/use-section-view.js';
 import { useGeometryBounds } from '#components/geometry/graphics/three/use-geometry-bounds.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
 import { useGraphicsSelector, useRenderFrame, useRenderFrameRetarget, useSetRenderFrame } from '#hooks/use-graphics.js';
@@ -57,22 +57,16 @@ type SectionViewSceneProperties = {
 
 /**
  * Section clipping and caps around the stage's model. The section view is read here rather than in
- * `Stage`, so a plane step re-renders this subtree but not `Stage`, whose re-render would hand the
+ * `Stage`, so a cut step re-renders this subtree but not `Stage`, whose re-render would hand the
  * clipping group a new child element and make it re-traverse the model.
  */
 function SectionViewScene({ innerRef, snapshotRef, children }: SectionViewSceneProperties): React.JSX.Element {
   const sectionView = useSectionView();
+  const sectionPieces = useSectionPieces();
 
   return (
     <>
-      <SectionClippingGroup
-        enableLines={sectionView.enableLines}
-        enableMesh={sectionView.enableMesh}
-        enabled={sectionView.isActive}
-        innerRef={innerRef}
-        plane={sectionView.plane}
-        snapshotRef={snapshotRef}
-      >
+      <SectionClippingGroup innerRef={innerRef} pieces={sectionPieces}>
         {children}
       </SectionClippingGroup>
       <SectionContourFills

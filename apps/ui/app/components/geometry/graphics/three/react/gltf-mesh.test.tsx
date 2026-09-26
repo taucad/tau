@@ -30,6 +30,7 @@ import {
   resolveModelPointerClickDispatches,
   resolveModelPointerMissedAction,
   resolveViewerHoverUpdate,
+  restoreOriginalMaterials,
   shouldConsumeGuardedModelPointerClick,
 } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
@@ -38,6 +39,7 @@ import {
   setModelComponentOwner,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import { applyFatLineSegments } from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import { createSectionClip, installSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 import {
   applyModelMaterialAppearance,
   getOrCaptureModelMaterialAppearance,
@@ -670,7 +672,65 @@ describe('resolveComponentVisualState', () => {
   });
 });
 
+describe('restoreOriginalMaterials', () => {
+  it('should carry the section clip from the worn material to every restored one', () => {
+    const scene = new Group();
+    const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    scene.add(mesh);
+    const originals = [new MeshBasicMaterial(), new MeshBasicMaterial()];
+    const worn = new MeshBasicMaterial();
+    mesh.material = worn;
+    const clip = createSectionClip('webgpu');
+    installSectionClip(worn, clip);
+
+    restoreOriginalMaterials(scene, new Map([[mesh.id, originals]]));
+
+    const restored = mesh.material as unknown as Material[];
+    expect(restored).toHaveLength(2);
+    for (const [index, material] of restored.entries()) {
+      expect(material).not.toBe(originals[index]);
+      expect((material as Material & { maskNode?: unknown }).maskNode).toBe(clip.mask);
+    }
+  });
+});
+
 describe('applyModelComponentVisualStateToScene', () => {
+  it('should carry the section clip to the emphasis material an edge swaps to, and keep it on the way back', () => {
+    const scene = new Group();
+    scene.add(buildLineSegmentsWithPositions([0, 0, 0, 1, 0, 0]));
+    applyFatLineSegments({ scene } as GLTF, {
+      backend: 'webgpu',
+      resolution: new Vector2(1024, 768),
+      edgeColor: gltfEdgeColorLightMode,
+    });
+    scene.traverse((object) => {
+      if (object.type === 'LineSegments2') {
+        assignComponentOwner(object as unknown as LineSegments, firstComponentId);
+      }
+    });
+    const base = getOnlyFatLineMaterial(scene);
+    const clip = createSectionClip('webgpu');
+    installSectionClip(base, clip);
+    const hover = (hoveredComponentId: string | undefined): void => {
+      applyModelComponentVisualStateToScene({
+        scene,
+        componentManifest: createManifest(),
+        modelVisualState: createModelVisualState({ hoveredComponentId }),
+        enableSurfaces: true,
+        enableLines: true,
+      });
+    };
+
+    hover(firstComponentId);
+    const emphasis = getOnlyFatLineMaterial(scene);
+    expect(emphasis).not.toBe(base);
+    expect((emphasis as Material & { maskNode?: unknown }).maskNode).toBe(clip.mask);
+
+    hover(undefined);
+    expect(getOnlyFatLineMaterial(scene)).toBe(base);
+    expect((base as Material & { maskNode?: unknown }).maskNode).toBe(clip.mask);
+  });
+
   it('should build the selection set once for all component objects', () => {
     const scene = new Group();
     for (const componentId of [firstComponentId, secondComponentId]) {

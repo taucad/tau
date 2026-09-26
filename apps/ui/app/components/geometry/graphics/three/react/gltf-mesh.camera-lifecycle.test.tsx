@@ -1,24 +1,32 @@
 import { useLayoutEffect } from 'react';
 import type { RenderFrame } from '@taucad/spatial';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createRoot, events as createPointerEvents, extend } from '@react-three/fiber';
 import type * as Fiber from '@react-three/fiber';
 import {
   BoxGeometry,
+  BufferGeometry,
+  Float32BufferAttribute,
   Group,
+  Line,
+  LineBasicMaterial,
+  LineSegments,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   MeshPhysicalMaterial,
   Plane,
   PerspectiveCamera,
+  Points,
+  PointsMaterial,
   Raycaster,
   Texture,
   Vector3,
   WebGLRenderer,
 } from 'three';
+import type { Material, Object3D } from 'three';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
@@ -30,6 +38,8 @@ import {
   applyModelMaterialAppearance,
   captureModelMaterialAppearance,
 } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
+import { createSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
+import type { SectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 
 type RendererMock = {
   compileAsync?: ReturnType<typeof vi.fn>;
@@ -89,6 +99,8 @@ const mocks = vi.hoisted(() => {
     sectionView: { enableMesh: false, isActive: false, plane: undefined },
     raycastClipState: undefined as RaycastClipState | undefined,
     sceneBounds,
+    backend: 'webgl' as 'webgl' | 'webgpu',
+    sectionClip: undefined as SectionClip | undefined,
   };
 });
 
@@ -114,7 +126,11 @@ vi.mock('#hooks/use-theme.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/three-graphics-backend-context.js', () => ({
-  useThreeGraphicsBackend: () => 'webgl',
+  useThreeGraphicsBackend: () => mocks.backend,
+}));
+
+vi.mock('#components/geometry/graphics/three/react/section-clipping-group.js', () => ({
+  useSectionClip: () => mocks.sectionClip,
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
@@ -192,13 +208,71 @@ const createGltf = (): GLTF =>
     userData: {},
   }) as unknown as GLTF;
 
+/** Presents on `backend`, whose viewer clip is a fresh one. */
+const presentOn = (backend: 'webgl' | 'webgpu'): SectionClip => {
+  const clip = createSectionClip(backend);
+  mocks.backend = backend;
+  mocks.sectionClip = clip;
+  return clip;
+};
+
+/** A parsed model with each kind a GLB draws: a surface, edges, a line strip and points. */
+const createClippableGltf = (): GLTF => {
+  const gltf = createGltf();
+  const positions = (): BufferGeometry =>
+    new BufferGeometry().setAttribute('position', new Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0], 3));
+  gltf.scene.add(
+    new Mesh(positions(), new MeshStandardMaterial()),
+    new LineSegments(positions(), new LineBasicMaterial()),
+    new Line(positions(), new LineBasicMaterial()),
+    new Points(positions(), new PointsMaterial()),
+  );
+  return gltf;
+};
+
+/** Whether `material` compiles in `clip`: WebGPU keys its pipeline on the mask, WebGL its program on the clip. */
+const carriesClip = (material: Material, clip: SectionClip): boolean =>
+  clip.backend === 'webgpu'
+    ? (material as Material & { maskNode?: unknown }).maskNode === clip.mask
+    : material.customProgramCacheKey().endsWith('|tau-section-clip-v1');
+
+/** Per drawn kind of `scene` (the edges are fat lines by then), whether its material compiles in `clip`. */
+const clipByKind = (scene: Object3D, clip: SectionClip): Record<string, boolean> => {
+  const carried: Record<string, boolean> = {};
+  scene.traverse((object) => {
+    const { material } = object as Partial<Mesh>;
+    if (material && !Array.isArray(material)) {
+      carried[object.type] = carriesClip(material, clip);
+    }
+  });
+  return carried;
+};
+
+const clippedKinds = { Mesh: true, LineSegments2: true, Line: true, Points: true };
+
+/** Per committed revision, {@link clipByKind} of its scene at the moment it commits. */
+const recordClipAtCommit = (gltfs: readonly GLTF[], clip: SectionClip): Map<number, Record<string, boolean>> => {
+  const atCommit = new Map<number, Record<string, boolean>>();
+  mocks.graphicsActor.send.mockImplementation((event: { type: string; revision?: number }) => {
+    const gltf = gltfs[(event.revision ?? 0) - 1];
+    if (event.type === 'gltfPresentationCommitted' && gltf) {
+      atCommit.set(event.revision!, clipByKind(gltf.scene, clip));
+    }
+  });
+  return atCommit;
+};
+
 describe('GltfMesh camera lifecycle', () => {
+  beforeEach(() => {
+    presentOn('webgl');
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
     mocks.camera = { name: 'perspective' };
     mocks.cameraRig.actorRef.send.mockClear();
-    mocks.graphicsActor.send.mockClear();
+    mocks.graphicsActor.send.mockReset();
     mocks.frameCallback = undefined;
     mocks.invalidate.mockClear();
     mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: undefined };
@@ -951,5 +1025,69 @@ describe('GltfMesh camera lifecycle', () => {
       expect.objectContaining({ type: 'gltfPresentationCommitted', key: 'b' }),
     );
     expect(view.container.querySelectorAll('primitive')).toHaveLength(1);
+  });
+
+  it.each(['webgl', 'webgpu'] as const)(
+    'should warm a model whose surfaces, edges, line strips and points already carry the section clip on %s',
+    async (backend) => {
+      const clip = presentOn(backend);
+      const gltf = createClippableGltf();
+      vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+      const warmed: Array<Record<string, boolean>> = [];
+      mocks.gl.compileAsync = vi.fn(async (scene: Object3D) => {
+        warmed.push(clipByKind(scene, clip));
+      });
+
+      render(<GltfMesh gltfFile={new Uint8Array([1])} geometryHash='warm' enableMatcap={false} />);
+
+      await waitFor(() => {
+        expect(warmed).toHaveLength(2);
+      });
+      expect(warmed).toEqual([clippedKinds, clippedKinds]);
+    },
+  );
+
+  it.each(['webgl', 'webgpu'] as const)(
+    'should present the same geometry hash again with every material clipped at commit on %s',
+    async (backend) => {
+      const clip = presentOn(backend);
+      // With Section on a result is never written in place, so each revision presents a fresh scene.
+      mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+      vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
+      const gltfs = [createClippableGltf(), createClippableGltf()];
+      vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValueOnce(gltfs[0]!).mockResolvedValueOnce(gltfs[1]!);
+      const atCommit = recordClipAtCommit(gltfs, clip);
+      const view = render(
+        <GltfMesh gltfFile={new Uint8Array([1])} geometryHash='same' presentationRevision={1} enableMatcap={false} />,
+      );
+      await waitFor(() => {
+        expect(atCommit.has(1)).toBe(true);
+      });
+
+      view.rerender(
+        <GltfMesh gltfFile={new Uint8Array([1])} geometryHash='same' presentationRevision={2} enableMatcap={false} />,
+      );
+
+      await waitFor(() => {
+        expect(atCommit.get(2)).toEqual(clippedKinds);
+      });
+    },
+  );
+
+  it('should clip the first model before it commits when Section is already on', async () => {
+    const clip = presentOn('webgl');
+    mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+    vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
+    const gltf = createClippableGltf();
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    const atCommit = recordClipAtCommit([gltf], clip);
+
+    render(
+      <GltfMesh gltfFile={new Uint8Array([1])} geometryHash='restored' presentationRevision={1} enableMatcap={false} />,
+    );
+
+    await waitFor(() => {
+      expect(atCommit.get(1)).toEqual(clippedKinds);
+    });
   });
 });

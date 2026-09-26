@@ -931,6 +931,13 @@ export class BillableModelInvocationService {
         },
       );
     }
+    if (reason === 'attempt_voided') {
+      return new LlmGatewayError(
+        HttpStatus.CONFLICT,
+        'ATTEMPT_VOIDED',
+        'This model request was abandoned by its client and will not run.',
+      );
+    }
     if (reason === 'concurrency_unavailable') {
       const { pool } = classifyFundedLlmCapacity(intent.activity);
       this.metrics?.billingFundedOperationDenials.add(1, {

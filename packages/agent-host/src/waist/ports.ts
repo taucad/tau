@@ -10,6 +10,7 @@ import type {
   RunTrigger,
   RunLifecycleState,
 } from '#log/event-types.js';
+import type { InvocationResolution } from '#wire/gateway.js';
 
 /** W1: ordered, durable event-log port owned by the active host. @public */
 export type DurableEventLog = EventLogAppender;
@@ -187,8 +188,43 @@ export type MaterializedDocument = {
   readonly filename?: string | undefined;
 };
 
+/** Input for one invocation resolution. The signal cancels the lookup, not the attempt. @public */
+export type InvocationResolutionRequest = {
+  /** The prepared attempt's id, the gateway's attempt key. */
+  readonly attemptId: string;
+  /** Cancels the lookup; a `TimeoutError` reason answers `unavailable`, any other reason rethrows. */
+  readonly signal: AbortSignal;
+};
+
+/**
+ * Whether this transport's calls are funded by Tau's gateway ledger (library-API §11: one facet, not optional methods).
+ * A self-host transport is `unfunded`; the host refuses a chat whose attempts were funded elsewhere
+ * (`MODEL_ATTEMPT_OTHER_ACCOUNT`) and never resolves them.
+ *
+ * @public
+ */
+export type InvocationFunding =
+  | { readonly type: 'unfunded' }
+  | {
+      readonly type: 'funded';
+      /** The signed-in account the gateway charges, when the transport knows it (W7 RA-S11, `MODEL_ATTEMPT_OTHER_ACCOUNT`). */
+      principal?: () => Promise<string | undefined>;
+      /** Whether this provider/model selection uses Tau's funded gateway. */
+      usesBillingAttempt(providerKind: ModelProviderKind | undefined): boolean;
+      /**
+       * Two-way lookup: the gateway voids an unknown key before answering `voided` (GI-R3). A sign-in failure throws
+       * `UNAUTHENTICATED` as `stream` does; an answer this build cannot read throws `MALFORMED_RESPONSE`.
+       */
+      resolveInvocation(request: InvocationResolutionRequest): Promise<InvocationResolution>;
+    };
+
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */
 export type ModelTransport = {
+  /**
+   * The funded gateway's facet. Optional only until W7 RA-S11 makes it required and deletes `usesBillingAttempt`
+   * and `lookupAttempt` below (GI-S4, funded-facet).
+   */
+  readonly funding?: InvocationFunding | undefined;
   /** Whether this provider/model selection uses Tau's funded gateway. */
   usesBillingAttempt?: ((providerKind: ModelProviderKind | undefined) => boolean) | undefined;
   /** Resolve an ambiguous prepared attempt without dispatching it again. */

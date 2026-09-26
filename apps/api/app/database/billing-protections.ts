@@ -22,7 +22,7 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await transaction`GRANT SELECT ON billing.billing_policy, billing.billing_policy_activation,
       billing.billing_policy_activation_cancellation, billing.billing_policy_head TO tau_billing_policy_publisher`;
     await transaction`GRANT INSERT ON billing.credit_account, billing.billing_owner_binding, billing.credit_operation,
-      billing.credit_transaction, billing.billing_budget_hold, billing.supplier_cost_evidence, billing.billing_invocation_evidence, billing.billing_operation_exception,
+      billing.credit_transaction, billing.credit_attempt_void, billing.billing_budget_hold, billing.supplier_cost_evidence, billing.billing_invocation_evidence, billing.billing_operation_exception,
       billing.billing_route_pause, billing.billing_purchase, billing.billing_period, billing.billing_promotion_issuance, billing.billing_reversal_case TO tau_billing_runtime`;
     await transaction`GRANT INSERT ON billing.billing_stripe_customer, billing.billing_provider_leg,
       billing.stripe_event_inbox, billing.billing_stripe_source TO tau_billing_runtime`;
@@ -185,6 +185,7 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await Promise.all(
       [
         'credit_transaction',
+        'credit_attempt_void',
         'billing_policy',
         'billing_policy_activation',
         'billing_policy_activation_cancellation',

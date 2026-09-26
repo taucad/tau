@@ -32,6 +32,14 @@
       "kind": "witness",
       "ref": "mutant: refund holds count against the account"
     },
+    "GatewayInvocation.lost-reply-retries-NeverEndsRun.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NeverEndsRun"
+      },
+      "kind": "witness",
+      "ref": "vacuity: a second charged loss in one live run is reachable and ends the run (LostReplyRetries = 1, EQ1)"
+    },
     "GatewayInvocation.no-grace-defer-3.cfg": {
       "tier": "nightly",
       "expect": {
@@ -55,6 +63,14 @@
       },
       "kind": "witness",
       "ref": "vacuity: EventualResolution needs sweep fairness"
+    },
+    "GatewayInvocation.overflow-discard-ChargeAfterRecordedLoss.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ChargeAfterRecordedLoss"
+      },
+      "kind": "witness",
+      "ref": "RV5-F1 HostDiscard: the overflow retry drops a completed reply and sends again (KeepCompleted off); W0.20 lands first (RV6-F3)"
     },
     "GatewayInvocation.target-2workers-refunds.cfg": {
       "tier": "nightly",
@@ -80,6 +96,11 @@
       "tier": "pr",
       "expect": "pass",
       "ref": "W11 target safety, MaxTime 2 (~2 s)"
+    },
+    "GatewayInvocation.target-three-attempts.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "EQ1 with three attempts: re-prepare, end the run, Resume proceeds; ChargeAfterRecordedLoss, LostReplyBound and IndInv hold (927,265 states)"
     },
     "GatewayInvocation.today-NoUncodedDeadEnd-3.cfg": {
       "tier": "nightly",
@@ -133,5 +154,116 @@
       "ref": "W11 zombie trace: a lookup races a late admission (VoidOnLookup off)",
       "fixedBy": "W11"
     }
-  }
+  },
+  "apalache": [
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "GI-S7: IndInv holds initially",
+      "args": ["check", "--cinit=ConstInit", "--init=Init", "--inv=IndInv", "--length=0", "MC_GatewayInvocation.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "GI-S7: IndInv is inductive (two keys, two crashing workers, refund holds, unbounded integers); M* for I34's row conjuncts",
+      "args": ["check", "--cinit=ConstInit", "--init=IndInit", "--inv=IndInv", "--length=1", "MC_GatewayInvocation.tla"]
+    },
+    {
+      "tier": "nightly",
+      "expect": "NoError",
+      "ref": "GI-S7: every step from an IndInv state keeps (1) AtMostOneTerminal, (4) NoDispatchAfterCancellation and (7) SweepOnlyAfterDueAndLeaseExpiry",
+      "args": [
+        "check",
+        "--cinit=ConstInit",
+        "--init=IndInit",
+        "--inv=RowSteps",
+        "--length=1",
+        "MC_GatewayInvocation.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "GI-S7 mutant: finish without the generation predicate breaks StaleGenerationNeverTerminalizes",
+      "args": [
+        "check",
+        "--cinit=ConstInitUnfenced",
+        "--init=IndInit",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_GatewayInvocation.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "GI-S7 mutant: the sweep without deferRecovery breaks DispatchedWithoutEvidenceWaitsForGrace",
+      "args": [
+        "check",
+        "--cinit=ConstInitNoDefer",
+        "--init=IndInit",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_GatewayInvocation.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "GI-S7 mutant: L7 F14's hold statement without the refund term is not inductive",
+      "args": [
+        "check",
+        "--cinit=ConstInit",
+        "--init=IndInitWithoutRefunds",
+        "--inv=IndInvWithoutRefunds",
+        "--length=1",
+        "MC_GatewayInvocation.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "GI-S7 mutant, named: finish without the generation predicate breaks the conjunct StaleGenerationNeverTerminalizes itself",
+      "args": [
+        "check",
+        "--cinit=ConstInitUnfenced",
+        "--init=IndInit",
+        "--inv=StaleGenerationNeverTerminalizes",
+        "--length=1",
+        "MC_GatewayInvocation.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "GI-S7 mutant, named: the sweep without deferRecovery breaks the conjunct DispatchedWithoutEvidenceWaitsForGrace itself",
+      "args": [
+        "check",
+        "--cinit=ConstInitNoDefer",
+        "--init=IndInit",
+        "--inv=DispatchedWithoutEvidenceWaitsForGrace",
+        "--length=1",
+        "MC_GatewayInvocation.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "GI-S7 mutant, named: a refund hold breaks the conjunct AccountHoldWithoutRefunds itself",
+      "args": [
+        "check",
+        "--cinit=ConstInit",
+        "--init=IndInitWithoutRefunds",
+        "--inv=AccountHoldWithoutRefunds",
+        "--length=1",
+        "MC_GatewayInvocation.tla"
+      ]
+    }
+  ]
 }

@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
@@ -27,6 +27,8 @@ import { allocateSources, creditDebtFirst, CreditLedgerService } from '#api/bill
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { seedPaidPurchase, fulfillPaidFixture } from '#testing/billing-payment.fixture.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
+import { initialOracleState, oracleAuthorizedAtoms, step } from '#testing/credit-operation-oracle.js';
+import type { OracleCommand, OracleEvidence, OracleState } from '#testing/credit-operation-oracle.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy } from '#api/billing/billing-policy.js';
 import type {
@@ -537,6 +539,8 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     const debtBlocked = await firstLedger.admitOperation(admission(fixture, 'debt-blocked', 1n));
     expect(debtBlocked.status).toBe('denied');
 
+    // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
+    await firstLedger.markDispatchIntent(admittedA.operationId, 1n);
     const receiptA = await firstLedger.terminalizeOperation({
       operationId: admittedA.operationId,
       accountId: fixture.accountId,
@@ -642,6 +646,8 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     if (admitted.status !== 'admitted') {
       throw new Error('operation was not admitted');
     }
+    // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
+    await firstLedger.markDispatchIntent(admitted.operationId, 1n);
     const receipt = await firstLedger.terminalizeOperation({
       operationId: admitted.operationId,
       accountId: fixture.accountId,
@@ -1152,6 +1158,8 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     if (admitted.status !== 'admitted') {
       throw new Error('operation was not admitted');
     }
+    // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
+    await firstLedger.markDispatchIntent(admitted.operationId, 1n);
     const receipt = await firstLedger.terminalizeOperation({
       operationId: admitted.operationId,
       accountId: fixture.accountId,
@@ -1226,6 +1234,8 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     });
     ledgerHeadRevision += 1n;
     ledgerHeadActivation = nextActivationId;
+    // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
+    await firstLedger.markDispatchIntent(oldAdmission.operationId, 1n);
     const oldReceipt = await firstLedger.terminalizeOperation({
       operationId: oldAdmission.operationId,
       accountId: fixture.accountId,
@@ -1256,6 +1266,8 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     if (admitted.status !== 'admitted') {
       throw new Error('operation was not admitted');
     }
+    // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
+    await firstLedger.markDispatchIntent(admitted.operationId, 1n);
     const receipt = await firstLedger.terminalizeOperation({
       operationId: admitted.operationId,
       accountId: fixture.accountId,
@@ -1333,6 +1345,8 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
       throw new Error('operation was not admitted');
     }
     const actual = 10_000_000_000_000_000_000n;
+    // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
+    await firstLedger.markDispatchIntent(admitted.operationId, 1n);
     const receipt = await firstLedger.terminalizeOperation({
       operationId: admitted.operationId,
       accountId: fixture.accountId,
@@ -1369,6 +1383,8 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
       if (admitted.status !== 'admitted') {
         throw new Error('rounding operation was not admitted');
       }
+      // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
+      await firstLedger.markDispatchIntent(admitted.operationId, 1n);
       const receipt = await firstLedger.terminalizeOperation({
         operationId: admitted.operationId,
         accountId: fixture.accountId,
@@ -1421,6 +1437,8 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
         'billing policy temporal regression',
       );
     });
+    // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
+    await firstLedger.markDispatchIntent(pinned.operationId, 1n);
     const receipt = await firstLedger.terminalizeOperation({
       operationId: pinned.operationId,
       accountId: fixture.accountId,
@@ -2720,4 +2738,299 @@ it('should settle a long-context downgrade from a pinned policy naming a route t
     customerState: 'settled',
     chargedAtoms: 3n,
   });
+});
+
+describe('attempt void fence (GI-S3a, GI-R3)', () => {
+  it('should refuse admission for an attempt key a void row fences, and hold nothing', async () => {
+    const fixture = await createFixture();
+    const key = `fenced-${randomUUID()}`;
+    // The row GI-S3b's lookup writes; the admission guard ships first and reads it under the account lock.
+    await firstClient`insert into billing.credit_attempt_void (account_id, environment, surface, attempt_key)
+      values (${fixture.accountId}, ${fixture.environment}, 'chat', ${key})`;
+
+    expect(await firstLedger.admitOperation(admission(fixture, key, 5n))).toEqual({
+      status: 'denied',
+      reason: 'attempt_voided',
+    });
+    const operations = await firstDatabase
+      .select({ id: creditOperation.id })
+      .from(creditOperation)
+      .where(and(eq(creditOperation.accountId, fixture.accountId), eq(creditOperation.attemptKey, key)));
+    expect(operations).toHaveLength(0);
+    const [account] = await firstDatabase.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId));
+    expect(required(account, 'account')).toMatchObject({
+      promoHeldAtoms: 0n,
+      planHeldAtoms: 0n,
+      purchasedHeldAtoms: 0n,
+    });
+    // Immutable fact: the void can be neither moved nor removed.
+    await expect(firstClient`delete from billing.credit_attempt_void where attempt_key = ${key}`).rejects.toThrow();
+  });
+});
+
+describe('dispatch/customer CHECK (GI-S2, GI-R2)', () => {
+  it('should reject a settlement without a recorded dispatch intent', async () => {
+    const fixture = await createFixture();
+    const request = admission(fixture, `no-intent-${randomUUID()}`, 5n);
+    const admitted = await firstLedger.admitOperation(request);
+    if (admitted.status !== 'admitted') {
+      throw new Error('Expected admission');
+    }
+    const identity = {
+      operationId: admitted.operationId,
+      accountId: fixture.accountId,
+      requestDigest: request.requestDigest,
+    };
+    const evidence: TerminalEvidence = {
+      kind: 'final_usage',
+      usageOccurredAt: new Date(),
+      meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 3n }],
+    };
+    await firstLedger.recordInvocationEvidence({ ...identity, evidence });
+
+    await expect(
+      firstLedger.terminalizeOperation({
+        ...identity,
+        expectedGeneration: admitted.generation,
+        evidence,
+        resolvedAt: new Date(),
+      }),
+    ).rejects.toSatisfy((error: unknown) => {
+      // Drizzle wraps the driver's error; the SQLSTATE rides the cause chain.
+      for (let cause: unknown = error; cause instanceof Error; cause = cause.cause) {
+        if ((cause as Error & { code?: string }).code === '23514') {
+          return cause.message.includes('credit_operation_dispatch');
+        }
+      }
+      return false;
+    });
+    const [row] = await firstDatabase
+      .select()
+      .from(creditOperation)
+      .where(eq(creditOperation.id, admitted.operationId));
+    expect(required(row, 'operation')).toMatchObject({ customerState: 'pending', dispatchIntentAt: null });
+  });
+});
+
+describe('credit operation model (GI-S2, GI-A4)', () => {
+  /** Park-Miller minimal standard generator: a seeded sequence, so a failing run is reproduced from its seed. */
+  const random = (seed: number): (() => number) => {
+    let state = (seed % 2_147_483_646) + 1;
+    return () => {
+      state = (state * 48_271) % 2_147_483_647;
+      return (state - 1) / 2_147_483_646;
+    };
+  };
+  const evidenceKinds = ['final', 'unknown', 'rejected'] as const;
+  const commandFor = (next: () => number): OracleCommand => {
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)]!;
+    const stale = next() < 0.15;
+    return pick<OracleCommand>([
+      { kind: 'admit' },
+      { kind: 'admit' },
+      { kind: 'resolve' },
+      { kind: 'cancel' },
+      { kind: 'intent', stale },
+      { kind: 'intent', stale },
+      { kind: 'accept', stale },
+      { kind: 'evidence', evidence: pick(evidenceKinds) },
+      { kind: 'finish', evidence: pick(evidenceKinds), stale },
+      { kind: 'recover' },
+      { kind: 'recover' },
+      { kind: 'tick', minutes: pick([1, 4, 5, 6]) },
+    ]);
+  };
+  const usageOccurredAt = new Date();
+  const evidenceOf = (kind: OracleEvidence): TerminalEvidence =>
+    kind === 'final'
+      ? {
+          kind: 'final_usage',
+          usageOccurredAt,
+          meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 3n }],
+        }
+      : kind === 'unknown'
+        ? { kind: 'absorbed_unknown', executionStatus: 'unknown' }
+        : { kind: 'provider_rejected', executionStatus: 'rejected' };
+  const kindOf = (stored: string): OracleEvidence =>
+    stored === 'final_usage' ? 'final' : stored === 'provider_rejected' ? 'rejected' : 'unknown';
+
+  type Sequence = {
+    readonly environment: Fixture['environment'];
+    readonly accountId: string;
+    readonly request: QualifiedAdmissionInput;
+  };
+
+  /** Runs one writer against PostgreSQL; the answer is what the ledger method said, when it says one. */
+  const execute = async (sequence: Sequence, command: OracleCommand): Promise<string | undefined> => {
+    const { accountId, environment, request } = sequence;
+    const [before] = await firstDatabase
+      .select()
+      .from(creditOperation)
+      .where(and(eq(creditOperation.accountId, accountId), eq(creditOperation.attemptKey, request.attemptKey)));
+    const identity = before && { operationId: before.id, accountId, requestDigest: request.requestDigest };
+    const generation = (stale: boolean): bigint => (before?.generation ?? 0n) - (stale ? 1n : 0n);
+    switch (command.kind) {
+      case 'admit': {
+        const admitted = await firstLedger.admitOperation(request);
+        return admitted.status === 'admitted' ? 'applied' : admitted.status === 'replay' ? 'replayed' : 'refused';
+      }
+      case 'resolve': {
+        // ponytail: GI-S3a ships the fence without its writer; write the void GI-S3b's lookup writes (sequential here).
+        if (before) {
+          return 'replayed';
+        }
+        await secondClient`insert into billing.credit_attempt_void (account_id, environment, surface, attempt_key)
+          values (${accountId}, ${environment}, ${request.surface}, ${request.attemptKey}) on conflict do nothing`;
+        return 'voided';
+      }
+      case 'cancel': {
+        if (identity) {
+          await firstLedger.recordCancellation(identity);
+        }
+        return undefined;
+      }
+      case 'intent': {
+        const applied =
+          identity && (await firstLedger.markDispatchIntent(identity.operationId, generation(command.stale)));
+        return applied ? 'applied' : 'refused';
+      }
+      case 'accept': {
+        const applied =
+          identity && (await firstLedger.markDispatchAccepted(identity.operationId, generation(command.stale)));
+        return applied ? 'applied' : 'refused';
+      }
+      case 'evidence': {
+        if (identity) {
+          await firstLedger.recordInvocationEvidence({ ...identity, evidence: evidenceOf(command.evidence) });
+        }
+        return undefined;
+      }
+      case 'finish': {
+        if (!identity) {
+          return 'refused';
+        }
+        const evidence = evidenceOf(command.evidence);
+        await firstLedger.recordInvocationEvidence({ ...identity, evidence });
+        try {
+          await firstLedger.terminalizeOperation({
+            ...identity,
+            expectedGeneration: generation(command.stale),
+            evidence,
+            resolvedAt: new Date(),
+          });
+        } catch {
+          return 'refused';
+        }
+        return before.customerState === 'pending' ? 'applied' : 'replayed';
+      }
+      case 'recover': {
+        await firstLedger.recoverDueLlmOperations({ environment, limit: 1, accountId });
+        return undefined;
+      }
+      case 'tick': {
+        await firstClient`update billing.credit_operation
+          set due_at = due_at - make_interval(mins => ${command.minutes}),
+            lease_until = lease_until - make_interval(mins => ${command.minutes})
+          where account_id = ${accountId}`;
+        return undefined;
+      }
+    }
+  };
+
+  /** The row, the account's held total and the evidence kinds, projected onto the oracle's clock in minutes. */
+  const observe = async (accountId: string) => {
+    const [row] = await firstClient<
+      Array<{
+        dispatch_state: string;
+        customer_state: string;
+        generation: string;
+        due_minutes: number;
+        // oxlint-disable-next-line typescript/no-restricted-types -- SQL NULL for a row with no lease
+        lease_minutes: number | null;
+        intent: boolean;
+        cancelled: boolean;
+        evidence: string[];
+      }>
+    >`select o.dispatch_state, o.customer_state, o.generation::text,
+        round(extract(epoch from (o.due_at - o.admitted_at)) / 60)::int as due_minutes,
+        round(extract(epoch from (o.lease_until - o.admitted_at)) / 60)::int as lease_minutes,
+        o.dispatch_intent_at is not null as intent, o.cancellation_requested_at is not null as cancelled,
+        coalesce(array(select distinct e.evidence->>'kind' from billing.billing_invocation_evidence e
+          where e.operation_id = o.id), '{}') as evidence
+      from billing.credit_operation o where o.account_id = ${accountId}`;
+    const [account] = await firstDatabase.select().from(creditAccount).where(eq(creditAccount.id, accountId));
+    const held = required(account, 'account');
+    return {
+      heldAtoms: Number(held.promoHeldAtoms + held.planHeldAtoms + held.purchasedHeldAtoms),
+      row: row && {
+        dispatch: row.dispatch_state,
+        customer: row.customer_state,
+        generation: Number(row.generation),
+        dueMinutes: row.due_minutes,
+        leaseMinutes: row.lease_minutes ?? undefined,
+        intent: row.intent,
+        cancelled: row.cancelled,
+        evidence: [...new Set(row.evidence.map(kindOf))].toSorted(),
+      },
+    };
+  };
+
+  const expectedOf = (model: OracleState) => ({
+    heldAtoms: model.heldAtoms,
+    row: model.row && {
+      dispatch: model.row.dispatch,
+      customer: model.row.customer,
+      generation: model.row.generation,
+      dueMinutes: model.row.dueAt / 60_000,
+      leaseMinutes: model.row.leaseUntil === undefined ? undefined : model.row.leaseUntil / 60_000,
+      intent: model.row.intentAt !== undefined,
+      cancelled: model.row.cancelledAt !== undefined,
+      evidence: [...model.row.evidence].toSorted(),
+    },
+  });
+
+  /** One seeded sequence on a fresh owner, so the account's held total and the sweep see only this row. */
+  const runSequence = async (fixture: Fixture, seed: number): Promise<void> => {
+    const next = random(seed);
+    const authUserId = `model-${seed}-${randomUUID()}`;
+    await firstDatabase
+      .insert(user)
+      .values({ id: authUserId, name: 'Model', email: `${authUserId}@test.invalid`, emailVerified: true });
+    const accountId = await firstLedger.ensureAccountBinding({ environment: fixture.environment, authUserId });
+    await firstDatabase.update(creditAccount).set({ purchasedAtoms: 1000n }).where(eq(creditAccount.id, accountId));
+    const request = { ...admission(fixture, `model-${seed}`, BigInt(oracleAuthorizedAtoms)), authUserId };
+    const sequence = { environment: fixture.environment, accountId, request };
+    const commands = Array.from({ length: 4 + Math.floor(next() * 10) }, () => commandFor(next));
+    let model = initialOracleState;
+    for (const [index, command] of commands.entries()) {
+      const expected = step(model, command);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- the writers of one row run in sequence, as the oracle steps
+      const answer = await execute(sequence, command);
+      const context = `seed ${seed}: ${commands
+        .slice(0, index + 1)
+        .map((item) => JSON.stringify(item))
+        .join(' ')}`;
+      if (answer !== undefined) {
+        expect(answer, context).toBe(expected.answer);
+      }
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each writer is compared before the next runs
+      expect(await observe(accountId), context).toEqual(expectedOf(expected.state));
+      model = expected.state;
+    }
+  };
+
+  it('should match the transition oracle on random command sequences', async () => {
+    const fixture = await createFixture();
+    // A fresh base seed per run; a failure names the seed of its sequence.
+    const baseSeed = Number(process.env['CREDIT_OPERATION_MODEL_SEED'] ?? Date.now() % 1_000_000);
+    // A mistyped seed is NaN, which generates empty sequences and would pass having checked nothing.
+    expect(Number.isSafeInteger(baseSeed), `CREDIT_OPERATION_MODEL_SEED must be an integer, got ${baseSeed}`).toBe(
+      true,
+    );
+    const seeds = Array.from({ length: 200 }, (_, index) => baseSeed + index);
+    for (const seed of seeds) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- sequences share the fixture's policy and budgets
+      await runSequence(fixture, seed);
+    }
+  }, 600_000);
 });

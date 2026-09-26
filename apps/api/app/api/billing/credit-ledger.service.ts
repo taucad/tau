@@ -44,6 +44,7 @@ import {
   billingRoutePause,
   billingReversalCase,
   creditAccount,
+  creditAttemptVoid,
   creditOperation,
   creditTransaction,
   supplierCostEvidence,
@@ -847,6 +848,20 @@ export class CreditLedgerService {
             generation: replay.generation,
             customerState: customerState(replay.customerState),
           };
+        }
+        // GI-R3: a lookup found this key unadmitted and voided it under this same lock; its client has moved on.
+        const [voided] = await tx
+          .select({ attemptKey: creditAttemptVoid.attemptKey })
+          .from(creditAttemptVoid)
+          .where(
+            and(
+              eq(creditAttemptVoid.accountId, accountId),
+              eq(creditAttemptVoid.surface, input.surface),
+              eq(creditAttemptVoid.attemptKey, input.attemptKey),
+            ),
+          );
+        if (voided) {
+          return { status: 'denied', reason: 'attempt_voided' };
         }
         for (const requirement of requirements) {
           const budget = budgets.find(({ id }) => id === requirement.budgetId);

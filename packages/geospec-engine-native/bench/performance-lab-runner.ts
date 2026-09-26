@@ -81,8 +81,8 @@ export type PerformanceLabEngineModule = {
  * @returns The module with an Engine whose `evaluateClaim` makes the older calls.
  */
 export const withTwoCallClaims = (module: PerformanceLabEngineModule): PerformanceLabEngineModule => {
-  const { Engine: Base, canonicalize } = module;
-  class Engine extends Base {
+  const { canonicalize } = module;
+  class Engine extends module.Engine {
     /**
      * Evaluate one claim through the older add-on's calls.
      * @param request - Exact submitClaims request bytes with one claim.

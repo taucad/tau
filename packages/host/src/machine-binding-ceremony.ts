@@ -24,10 +24,8 @@ export type MachineBindingCeremonyEvent = Readonly<{
 export type CompleteMachineBindingInput = Readonly<{
   /** The host whose machines channel began the ceremony. */
   host: Pick<NodeMachineHost, 'completeBinding' | 'describeBinding' | 'removeBinding'>;
-  /** The custody the host's runtime resolves provider secrets through. */
+  /** The custody the host's runtime resolves provider secrets through; a binding whose code it cannot save is removed again. */
   secrets: MachineSecretStore;
-  /** The scope the ceremony's channel was served under; a binding whose code cannot be saved is removed from it. */
-  workspaceId: string;
   ceremonyId: string;
   /** The code the person typed. Absent, the saved code is reused only while the printer presents the certificate it was saved with. */
   accessCode?: string;
@@ -78,7 +76,7 @@ const pinServices = async (
  * ponytail: pins are taken silently; when an operator review of the digest is
  * wanted, return the probed trust to the form before committing.
  *
- * @param input - The host, its secret custody and scope, the ceremony and the typed code, if any.
+ * @param input - The host, its secret custody, the ceremony and the typed code, if any.
  * @returns The host's own outcome.
  * @throws `MACHINE_BINDING_UNKNOWN_CEREMONY`, `MACHINE_CREDENTIAL_REQUIRED` when no code is typed or saved,
  * `MACHINE_CREDENTIAL_TRUST_CHANGED` when the saved code's pin no longer matches, or
@@ -87,7 +85,7 @@ const pinServices = async (
  *
  * @example <caption>The desktop services utility completing the ceremony a renderer began</caption>
  * ```typescript
- * import { completeMachineBinding, hostMachineWorkspaceId } from '@taucad/host';
+ * import { completeMachineBinding } from '@taucad/host';
  * import type { MachineSecretStore } from '@taucad/host';
  * import type { NodeMachineHost } from '@taucad/runtime/host/node';
  *
@@ -95,11 +93,11 @@ const pinServices = async (
  *   host: NodeMachineHost,
  *   secrets: MachineSecretStore,
  *   frame: Readonly<{ ceremonyId: string; accessCode?: string }>,
- * ) => completeMachineBinding({ host, secrets, workspaceId: hostMachineWorkspaceId, ...frame });
+ * ) => completeMachineBinding({ host, secrets, ...frame });
  * ```
  */
 export const completeMachineBinding = async (input: CompleteMachineBindingInput): Promise<MachineBindingOutcome> => {
-  const { host, secrets, workspaceId, ceremonyId, accessCode } = input;
+  const { host, secrets, ceremonyId, accessCode } = input;
   const pending = host.describeBinding(ceremonyId);
   if (pending === undefined) {
     throw new Error('MACHINE_BINDING_UNKNOWN_CEREMONY');
@@ -143,7 +141,7 @@ export const completeMachineBinding = async (input: CompleteMachineBindingInput)
     } catch (error) {
       /* A binding whose code is not saved could never reconnect. */
       try {
-        await host.removeBinding({ workspaceId, machineId: outcome.machineId });
+        await host.removeBinding({ machineId: outcome.machineId });
       } catch {
         input.onEvent?.({ type: 'rollback-failed', providerId });
       }

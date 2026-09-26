@@ -1,8 +1,7 @@
 /**
  * Host-owned machine services shared by the desktop services utility and the
  * `tau serve --machines` daemon: the network, secret and artifact runtime a
- * `createNodeMachineHost` needs, its durable identity, and the workspace
- * identity a project root maps to.
+ * `createNodeMachineHost` needs, and its durable identity.
  *
  * Ported from the qualification script's runtime
  * (`packages/plugins/bambu/scripts/qualify-x1c.mts`) so both launchers run one
@@ -30,6 +29,7 @@ import { connectMachineChannel } from '@taucad/runtime/machine';
 import type {
   MachineArtifactReference,
   MachineClient,
+  MachineConnectionRuntime,
   MachineDatagram,
   MachineDatagramListenInput,
   MachineFileUploadInput,
@@ -42,6 +42,7 @@ import type {
 import type { HostRouteGrant } from '@taucad/runtime/host';
 import type { NodeMachineRuntime } from '@taucad/runtime/host/node';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
+import { projectManifestMaxBytes } from '@taucad/types';
 import { z } from 'zod';
 
 import { createFileSecretVault, readJson, writeProtected } from '#secret-vault.js';
@@ -55,7 +56,7 @@ import type { SecretVault, SecretVaultFacts, SecretVaultWriteOptions } from '#se
  * A serve that fails closes both ends, so every call rejects with the channel
  * instead of hanging; closing the facet retires the served session with it.
  *
- * @param serve - Attach the host's end of the channel, e.g. `host.serve({ port, session, workspaceId })`.
+ * @param serve - Attach the host's end of the channel, e.g. `host.serve({ port, session })`.
  * @returns The available facet and its close.
  * @public
  */
@@ -114,34 +115,8 @@ const certificatePem = (raw: Uint8Array<ArrayBuffer>): string =>
     .toString('base64')
     .replaceAll(/(.{64})/gu, '$1\n')}\n-----END CERTIFICATE-----\n`;
 
-/**
- * The workspace identity one project root maps to on this host.
- *
- * Machine bindings are journaled per workspace, and the directory cursor
- * carries this value back to clients, so it is a digest rather than the path:
- * opaque, stable, and always inside the journal's identity bounds.
- *
- * @param workspaceRoot - Canonical absolute project root.
- * @returns A 64-character hex identity.
- * @public
- */
-export const machineWorkspaceId = (workspaceRoot: string): string =>
-  createHash('sha256').update(workspaceRoot).digest('hex');
-
-/**
- * The one machine scope a host's projects share: printers belong to the host,
- * not a project.
- *
- * The desktop utility and the daemon serve every connection's machines route
- * under this id, so a printer bound from one project is listed, watched and
- * printed to from every other, and its request history is host-wide. The seed
- * is not a filesystem path, so it never equals a project's
- * {@link machineWorkspaceId}; bindings journaled under a project's id before
- * keep that scope.
- *
- * @public
- */
-export const hostMachineWorkspaceId: string = machineWorkspaceId('tau:machines:host');
+/* Only the id: every other field may be one a stricter reader refuses. */
+const manifestIdSchema = z.object({ id: z.string() });
 
 const identitySchema = z.strictObject({
   v: z.literal(1),
@@ -150,16 +125,17 @@ const identitySchema = z.strictObject({
   generation: z.string().min(1).max(256),
 });
 
-/** Durable identity of one machine host's journal, minted once per install. @public */
-export type MachineHostIdentity = Readonly<{ hostId: string; authorityId: string; generation: string }>;
+/** Durable identity of one machine store, minted once per install. @public */
+export type MachineHostIdentity = Readonly<{ hostId: string; authorityId: string }>;
 
 /**
- * Read this host's machine identity, minting it on first use.
+ * Read the machine store's identity, minting it on first use.
  *
- * `createNodeMachineHost` refuses a journal whose first record names another
- * `hostId`/`authorityId`/`generation`, so the three must survive restarts.
+ * The store's sessions are admitted under `hostId` and `authorityId`, so both
+ * survive restarts. The file keeps its `generation` too: an older Tau build that
+ * opens the same directory still requires it.
  *
- * @param directory - Protected state directory; created `0700` when missing.
+ * @param directory - The machine store root; created `0700` when missing.
  * @returns The stable identity.
  * @public
  */
@@ -168,12 +144,41 @@ export const openMachineHostIdentity = async (directory: string): Promise<Machin
   const path = join(directory, 'identity.json');
   const existing = await readJson(path);
   if (existing !== undefined) {
-    const { hostId, authorityId, generation } = identitySchema.parse(existing);
-    return { hostId, authorityId, generation };
+    const { hostId, authorityId } = identitySchema.parse(existing);
+    return { hostId, authorityId };
   }
   const minted = { v: 1, hostId: randomUUID(), authorityId: randomUUID(), generation: randomUUID() };
   await writeProtected(path, minted);
-  return { hostId: minted.hostId, authorityId: minted.authorityId, generation: minted.generation };
+  return { hostId: minted.hostId, authorityId: minted.authorityId };
+};
+
+/**
+ * The `tau.json` id of the project a directory holds, read the way a machine
+ * host names a print request's project: a bounded read of that one field, so
+ * a manifest another rule would refuse still names its project.
+ *
+ * @param project - The project directory's files, e.g. a `NodeFsProviderClient` rooted at it.
+ * @returns The id, or `undefined` when the directory holds no readable manifest.
+ * @public
+ */
+export const readProjectId = async (
+  project: Readonly<{
+    stat(path: string): Promise<Readonly<{ size: number }>>;
+    readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  }>,
+): Promise<string | undefined> => {
+  try {
+    const { size } = await project.stat('tau.json');
+    if (size > projectManifestMaxBytes) {
+      return undefined;
+    }
+    const manifest = manifestIdSchema.safeParse(
+      JSON.parse(new TextDecoder().decode(await project.readFile('tau.json'))),
+    );
+    return manifest.success ? manifest.data.id : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 /**
@@ -546,17 +551,15 @@ const uploadFile = async (
 /** Options for {@link createNodeMachineRuntime}. @public */
 export type CreateNodeMachineRuntimeOptions = Readonly<{
   secrets: MachineSecretStore;
+  /** Told every entry a provider logs. */
+  log?: (entry: MachineLogEntry) => void;
   /**
-   * Read one artifact's bytes from the workspace the connection is scoped to.
-   * The runtime verifies length and digest against the reference before a
-   * single byte reaches a provider; the reader only has to find the file.
+   * Read one artifact's bytes from the project its reference names
+   * (`artifact.projectId`), rejecting `MACHINE_ARTIFACT_NOT_FOUND` when no
+   * candidate holds a file with the reference's digest. The runtime verifies
+   * length and digest again before a single byte reaches a provider.
    */
-  log?: (workspaceId: string, entry: MachineLogEntry) => void;
-  readArtifact(
-    workspaceId: string,
-    artifact: MachineArtifactReference,
-    signal: AbortSignal,
-  ): Promise<Uint8Array<ArrayBuffer>>;
+  readArtifact(artifact: MachineArtifactReference, signal: AbortSignal): Promise<Uint8Array<ArrayBuffer>>;
 }>;
 
 /**
@@ -581,18 +584,18 @@ export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOption
       forget: async (reference: string) => secrets.forget(reference),
     }),
     discovery: Object.freeze({ clock, listenDatagrams }),
-    connection: (workspaceId) =>
+    connection: (): MachineConnectionRuntime =>
       Object.freeze({
         clock,
         async log(entry) {
-          options.log?.(workspaceId, entry);
+          options.log?.(entry);
         },
         connectStream,
         async *readArtifact(input) {
           if (input.artifact.length > input.maximumBytes) {
             throw new Error('MACHINE_ARTIFACT_TOO_LARGE');
           }
-          const bytes = await options.readArtifact(workspaceId, input.artifact, input.signal);
+          const bytes = await options.readArtifact(input.artifact, input.signal);
           if (bytes.byteLength !== input.artifact.length || digestOf(bytes) !== input.artifact.digest) {
             throw new Error('MACHINE_ARTIFACT_MISMATCH');
           }

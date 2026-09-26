@@ -276,6 +276,14 @@ export type HostToolRegistryOptions = {
    * `available` offers none either.
    */
   readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
+  /**
+   * The `tau.json` id of the project `workspaceRoot` holds: the desktop's
+   * attached project, or the daemon's served root. Every artifact `request_print`
+   * slices names it, which is how a machine host finds the file again. Omit it
+   * and `request_print` is not offered: a host that cannot name its project
+   * never guesses one.
+   */
+  readonly projectId?: string | undefined;
 };
 
 /**
@@ -452,22 +460,24 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     };
 
-    /* `request_print` needs every leg of the print path: the revision here
-     * qualifies the artifact, and the registry offers the tool only when a
-     * runtime to slice with and a machine to ask are attached too. */
-    const { revisions, machines } = options;
+    /* `request_print` needs every leg of the print path: the project id here
+     * names the artifact's project, and the registry offers the tool only when
+     * a runtime to slice with and a machine to ask are attached too. A
+     * candidate turn's slice lands in its checkout, which the machine host
+     * finds through the same project id. */
+    const { revisions, machines, projectId } = options;
     return createChatToolRegistry({
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(parameters === undefined ? {} : { parameters }),
       ...(geospec === undefined ? {} : { geospec }),
-      ...(revisions === undefined
+      ...(revisions === undefined ? {} : { revisions }),
+      ...(projectId === undefined
         ? {}
         : {
-            revisions,
             print: {
-              revisions,
+              projectId,
               readArtifact: async ({ path, signal }) => {
                 signal.throwIfAborted();
                 const bytes = await recordView.readFile(assertRootedPath(path));

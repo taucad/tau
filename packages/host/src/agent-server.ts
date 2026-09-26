@@ -92,7 +92,6 @@ export type AgentServerOptions = {
     | Readonly<{
         host: NodeMachineHost;
         session: HostSessionHandle;
-        workspaceId: string;
       }>
     | undefined;
   /** The launcher workspace's single revision root. */
@@ -242,7 +241,7 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     if (!machines) {
       throw new Error('machines capability is unavailable');
     }
-    machines.host.admitRoute({ session: machines.session, workspaceId: machines.workspaceId });
+    machines.host.admitRoute({ session: machines.session });
   };
 
   const serveMachineSocket = (socket: WebSocket): void => {
@@ -259,11 +258,7 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     let removeClose = (): void => undefined;
     let channel: NodeMachineChannelHandle;
     try {
-      channel = machines.host.serve({
-        port: socket,
-        session: machines.session,
-        workspaceId: machines.workspaceId,
-      });
+      channel = machines.host.serve({ port: socket, session: machines.session });
     } catch {
       socket.close(1011, 'machines channel unavailable');
       return;

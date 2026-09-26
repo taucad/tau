@@ -191,12 +191,19 @@ export type CheckoutCutActorInput = Readonly<{
   checkoutId: string;
   trigger: CheckoutCutTrigger;
   changedPaths?: readonly string[] | undefined;
+  /** The write generation the cut takes: every change event up to it is in the cut. */
+  generation?: number;
 }>;
 
 /** Input of the injected `captureTree` actor: hash the live tree without holding it (D4). @public */
 export type CheckoutCaptureTreeActorInput = Readonly<{
   checkoutId: string;
   changedPaths?: readonly string[] | undefined;
+  /**
+   * The write generation the comparison covers. A cut over the same one may
+   * take the comparison's capture rather than read the same files again (E1).
+   */
+  generation?: number;
 }>;
 
 /** Output of the injected `captureTree` actor. @public */
@@ -585,11 +592,18 @@ const checkoutMachineDefinition = setup({
       always: ({ context, guards }) =>
         guards.hasQueuedCut(context) ? { target: 'minting', context: takeQueuedRequest(context) } : undefined,
       on: {
-        changed: { target: 'dirty', context: ({ context, event }) => recordWrite(context, event) },
+        /*
+         * A write to a clean checkout is compared before it is called an edit
+         * (FX1 M). A host reports its own applies to the feed (E1), so a pull's
+         * burst lands here after `headChanged` with the head's own bytes; only
+         * the comparison, not the idle window, can say so. One capture per
+         * clean-to-dirty edge, through the memo, reading only the named paths.
+         */
+        changed: { target: '#checkout.dirty.comparing', context: ({ context, event }) => recordWrite(context, event) },
         cut: { target: 'minting', context: ({ context, event }) => takeRequest(context, event) },
         /* Files that matched the old head were applied to the new one (a switch,
          * a fast-forward) or are another writer's same bytes: `clean` reports
-         * the new head and compares nothing, as before (D4 compares once). */
+         * the new head, and the apply's own writes reach `changed`, which compares them. */
         headChanged: ({ context, event }) =>
           movedHead(context, event)
             ? { target: '#checkout.clean', reenter: true, context: adoptHead(event) }
@@ -613,7 +627,11 @@ const checkoutMachineDefinition = setup({
           entry: () => ({ context: { treeCompared: true } }),
           invoke: {
             src: 'captureTree',
-            input: ({ context }) => ({ checkoutId: context.checkoutId, changedPaths: context.changedPaths }),
+            input: ({ context }) => ({
+              checkoutId: context.checkoutId,
+              changedPaths: context.changedPaths,
+              generation: context.writeGeneration,
+            }),
             onDone: ({ context, event }) =>
               event.output.treeId === context.headTreeId ? { target: 'rested' } : { target: '#checkout.dirty' },
             onError: { target: 'rested' },
@@ -643,20 +661,37 @@ const checkoutMachineDefinition = setup({
       states: {
         /*
          * I6: the D4 comparison, for bytes that were unrecorded when the head
-         * moved. `dirty` until the capture shows the files are the new head's;
-         * a failed capture proves nothing, so it stays `dirty`.
+         * moved or written while the checkout read clean. `dirty` until the
+         * capture shows the files are the head's; a failed capture proves
+         * nothing, so it stays `dirty`.
+         *
+         * The answered capture is the host's new starting tree, as a cut's is,
+         * so it takes the paths it read: the cut after it re-reads only what
+         * was written since (E1). A cut asked meanwhile starts at once; the
+         * host hands it the capture already running over the same paths.
          */
         comparing: {
           entry: () => ({ context: { treeCompared: true } }),
           invoke: {
             src: 'captureTree',
-            input: ({ context }) => ({ checkoutId: context.checkoutId, changedPaths: context.changedPaths }),
+            input: ({ context }) => ({
+              checkoutId: context.checkoutId,
+              changedPaths: context.changedPaths,
+              generation: context.writeGeneration,
+            }),
             onDone: ({ context, event }) =>
-              event.output.treeId === context.headTreeId ? { target: '#checkout.clean' } : { target: 'quiet' },
+              event.output.treeId === context.headTreeId
+                ? { target: '#checkout.clean', context: { changedPaths: [] } }
+                : { target: 'quiet', context: { changedPaths: [] } },
             onError: { target: 'quiet' },
           },
           on: {
-            changed: { target: 'quiet', context: ({ context, event }) => recordWrite(context, event) },
+            /* The answer in flight predates this write, so it cannot clear it: compare again. */
+            changed: {
+              target: 'comparing',
+              reenter: true,
+              context: ({ context, event }) => recordWrite(context, event),
+            },
             headChanged: ({ context, event }) =>
               movedHead(context, event) ? { target: 'comparing', reenter: true, context: adoptHead(event) } : undefined,
           },
@@ -737,6 +772,7 @@ const checkoutMachineDefinition = setup({
               checkoutId: context.checkoutId,
               trigger: context.pending?.trigger ?? 'save',
               changedPaths: context.cutPaths,
+              generation: context.cutGeneration,
             }),
             onDone: ({ context, event, guards }, enq) => {
               if (event.output.nothingToSave === true || guards.treeUnchanged(context, event.output.treeId)) {

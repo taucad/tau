@@ -531,6 +531,20 @@ const noConnectivity = createCallbackLogic(() => () => undefined);
 
 const historyRefOf = (branch: string): string => `refs/heads/${branch}`;
 
+/*
+ * Whether a push's per-ref answer is a storage refusal.
+ *
+ * D20's ceiling and D17's plan quota arrive as per-ref results rather than as a
+ * thrown transport error: the hook's sentence, or an LFS batch refusal whose
+ * body carries no marker but names the files (FX1 Q). Either is a quota answer:
+ * *Sync now* replays the same bytes and cannot clear it (W10 defect 4). The
+ * hook's sentence is recognised by the same predicate the native leg uses;
+ * every other refusal stays `rejected`, and the remote's own sentence and file
+ * list are untouched either way.
+ */
+const isQuotaAnswer = (pending: readonly SyncQueueEntry[], overQuota: readonly string[] | undefined): boolean =>
+  pending.length > 0 && ((overQuota ?? []).length > 0 || pending.some((entry) => isStorageRefusal(entry.reason)));
+
 /** A refused ref's reason in a person's words; `leaseLost` is the ports' code for "the remote moved" (D39). */
 const refusalSaid = (reason: string | undefined): string | undefined =>
   reason === 'leaseLost' ? 'This branch changed on the remote; this project will catch up and try again.' : reason;
@@ -1405,28 +1419,20 @@ const syncMachineDefinition = setup({
           if (event.output.refs.some((entry) => entry.status === 'updated') && context.parentRef !== undefined) {
             enq.sendTo(context.parentRef, { type: 'remote', event: { type: 'pushed' } });
           }
+          const quota = isQuotaAnswer(pending, event.output.overQuota);
           return {
             target: 'recording',
             context: {
               leases,
               pending,
-              failure: pending.length > 0 ? 'retry' : 'none',
+              /* Rule 19: a refused history is terminal, as the thrown class is; a
+               * record's refusal never blocks history, so it keeps retrying. */
+              failure: quota && refusedHistory !== undefined ? 'fatal' : pending.length > 0 ? 'retry' : 'none',
               attempt: pending.length > 0 ? context.attempt + 1 : 0,
               retryAfterMilliseconds: undefined,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
               error: refusalSaid(refusedHistory?.reason ?? (pending.length > 0 ? pending[0]?.reason : undefined)),
-              /* D20's ceiling and D17's plan quota arrive here as per-ref results
-                 rather than as a thrown transport error, and each is a quota answer:
-                 *Sync now* replays the same bytes and cannot clear a ceiling
-                 (W10 defect 4). Recognised by the same predicate the native
-                 leg uses; every other refusal stays `rejected`, and the
-                 remote's own sentence and file list are untouched either way. */
-              reason:
-                pending.length > 0
-                  ? pending.some((entry) => isStorageRefusal(entry.reason))
-                    ? 'quota'
-                    : 'rejected'
-                  : undefined,
+              reason: quota ? 'quota' : pending.length > 0 ? 'rejected' : undefined,
             },
           };
         },

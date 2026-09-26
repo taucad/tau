@@ -495,14 +495,77 @@ describe('syncMachine', () => {
       output: pushResult({ name: mainRef, status: 'rejected', head: 'h1', reason: sentence }),
     });
     await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    /* Terminal, as the thrown class is (rule 19): no backoff replays it. */
     await vi.waitFor(() => {
-      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
     });
 
     const facet = selectSyncFacet(harness.actor.getSnapshot());
     expect(facet.reason).toBe('quota');
     expect(facet.error).toContain('Tau: repository size limit exceeded');
     expect(facet.error).toContain('huge.bin (5000 bytes)');
+
+    harness.stop();
+  });
+
+  /**
+   * FX1 Q: the browser leg settles an LFS batch refusal (413
+   * `GIT_LFS_QUOTA_EXCEEDED`) as per-ref rejections carrying the batch body,
+   * which has no hook marker. The file list is what makes it a storage answer,
+   * so an owner is offered *Upgrade*, never *Sync now*.
+   */
+  it('files a per-ref LFS over-allowance refusal that names files as a terminal quota answer', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    const sentence = 'This push needs more storage than your plan includes.';
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      output: {
+        refs: [{ name: mainRef, status: 'rejected', head: undefined, reason: sentence }],
+        overQuota: ['over-allowance.step'],
+      } satisfies SyncPushActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+
+    const facet = selectSyncFacet(harness.actor.getSnapshot());
+    expect(facet).toMatchObject({ state: 'failed', reason: 'quota', error: sentence });
+    expect(harness.parent.events).toContainEqual({
+      type: 'remote',
+      event: { type: 'quotaRefused', paths: ['over-allowance.step'] },
+    });
+
+    harness.stop();
+  });
+
+  it('keeps retrying when only a record ref is over quota, so history is never blocked (FX1 Q, I8)', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      output: {
+        refs: [
+          { name: mainRef, status: 'updated', head: 'h1' },
+          { name: 'refs/tau/evidence/exports', status: 'rejected', head: undefined, reason: 'over quota' },
+        ],
+        overQuota: ['exports/big.glb'],
+      } satisfies SyncPushActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot()).reason).toBe('quota');
 
     harness.stop();
   });

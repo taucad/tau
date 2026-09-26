@@ -751,7 +751,7 @@ describe('projectRevisionsMachine', () => {
     /* The pre-restore cut reaches the live checkout, and a clean tree mints nothing. */
     expect(promises.inputsFor('cut')).toEqual([]);
     callbacks.sendBack('fence', { type: 'fenceGranted' });
-    expect(promises.inputsFor('cut')).toEqual([{ checkoutId: 'checkout-live', trigger: 'restore' }]);
+    expect(promises.inputsFor('cut')).toEqual([{ checkoutId: 'checkout-live', trigger: 'restore', generation: 0 }]);
     promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
     await flush();
 

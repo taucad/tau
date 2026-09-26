@@ -19,6 +19,7 @@
  * | 12 | **W5b a1b (D13)** | a push that lands between opening and the stream's first read is not missed: the open pull reads the remote only once the stream knows its tail |
  * | 13 | **W6 (D14)** | two devices change one file: the device that meets the divergence records it on its conflict line and pushes that line; both list it; deciding on the other device lands a merge on `main` that fast-forwards the recorder and hides the line on both |
  * | 13b | **RV-W6 F2** | a line removed on the remote stays on the device that recorded it, still listed, and its next push offers it again |
+ * | 15 | **FX1 N** | a hook's plan-quota refusal of `main` reaches the per-ref result as the hook's sentence, and the push settles as a terminal quota answer |
  *
  * Each row runs on both legs: `isomorphic-git` (the browser's port) and native
  * `git` (a disk host's), because A15 is that the two legs are one transport.
@@ -298,6 +299,53 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       const shown = selectSyncFacet(scheduler.getSnapshot()).error ?? '';
       expect(shown).toContain('not allowed here');
       expect(shown).not.toMatch(/hook|pre-receive/iu);
+
+      scheduler.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it('row 15 (FX1 N): a hook’s quota refusal keeps its sentence per ref and settles as quota', async () => {
+    const saying = [
+      'Tau: storage quota exceeded — this push needs 4080 bytes more than your plan includes.',
+      'Tau: the largest files it adds are:',
+      'Tau:   bracket.scad (20 bytes)',
+    ];
+    const remoteRoot = await temporaryRoot('remote-quota');
+    const remote = await startGitHttpBackend({ root: remoteRoot, refusedRef: mainRef, refusedSaying: saying });
+    try {
+      const one = await device({
+        leg,
+        label: 'a-quota',
+        remoteUrl: remote.url,
+        files: { 'bracket.scad': 'cube([10, 20, 30]);\n' },
+      });
+      const head = await record({
+        device: one,
+        files: { 'bracket.scad': 'cube([10, 20, 30]);\n' },
+        summary: 'First revision',
+      });
+
+      const scheduler = one.scheduler();
+      scheduler.start();
+      scheduler.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(scheduler.getSnapshot()).state).toBe('failed');
+        },
+        { timeout: 30_000 },
+      );
+
+      /* The per-ref result carried the hook's sentence into the queue, not git's placeholder. */
+      const queue = await queueOf(one);
+      const [entry] = queue.entries;
+      expect(entry?.ref).toBe(mainRef);
+      expect(entry?.reason).toContain('Tau: storage quota exceeded');
+      const facet = selectSyncFacet(scheduler.getSnapshot());
+      expect(facet).toMatchObject({ state: 'failed', reason: 'quota' });
+      expect(facet.error).toContain('bracket.scad (20 bytes)');
+      expect(facet.error).not.toMatch(/hook|pre-receive/iu);
 
       scheduler.stop();
     } finally {

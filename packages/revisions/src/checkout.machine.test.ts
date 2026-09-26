@@ -19,7 +19,10 @@ import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/f
  * Path table — `checkout.machine` (catalogue: 24).
  *
  *  1  rehydrates from `input` and rests `clean`
- *  2  `changed` → `dirty` and bumps the write generation
+ *  2  `changed` → `dirty` and bumps the write generation; from `clean` it compares
+ *     first, so a write that restores the head's bytes (a pull's own apply) reads
+ *     clean again without the idle window, and a write during that comparison
+ *     restarts it (FX1 M)
  *  3  one `changed` carrying 50 paths is one transition (F9)
  *  4  `cut` mints: fence → cut → writeRevision → casHead → `clean` + `revisionMinted`
  *  5  the tree-hash gate (I5): equal `treeId` → `nothingToSave`, `writeRevision` never called
@@ -180,7 +183,7 @@ describe('checkoutMachine', () => {
     expect(actor.getSnapshot().matches('clean')).toBe(true);
     expect(actor.getSnapshot().context.headRevisionId).toBe('rev-2');
     expect(actor.getSnapshot().context.headTreeId).toBe(nextTreeId);
-    expect(promises.inputsFor('cut')).toEqual([{ checkoutId: 'checkout-1', trigger: 'turn' }]);
+    expect(promises.inputsFor('cut')).toEqual([{ checkoutId: 'checkout-1', trigger: 'turn', generation: 1 }]);
     expect(promises.inputsFor('writeRevision')).toEqual([
       {
         checkoutId: 'checkout-1',
@@ -485,6 +488,8 @@ describe('checkoutMachine', () => {
     promises.settle('captureTree', { output: { treeId: headTreeId } });
     await flush();
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
 
     actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
 
@@ -507,6 +512,8 @@ describe('checkoutMachine', () => {
     promises.settle('captureTree', { output: { treeId: headTreeId } });
     await flush();
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
 
     actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
     promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
@@ -609,8 +616,13 @@ describe('checkoutMachine', () => {
   it('mints one idle revision after the quiet window, restarted by every write', async () => {
     const harness = start({ idleWindow: 1000 });
     const { actor, clock, promises, emitted, parent } = harness;
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
 
+    /* The first write from clean is compared (FX1 M); a real edit leaves it quiet. */
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
     expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
 
     /* A burst restarts the window; a checkout that is still being typed into
@@ -841,7 +853,7 @@ describe('checkoutMachine', () => {
     expect(parent.events.filter((event) => event.type === 'checkoutStatusChanged')).toEqual([
       { type: 'checkoutStatusChanged', checkoutId: 'checkout-1', status: 'clean', headRevisionId: 'rev-1' },
     ]);
-    expect(promises.inputsFor('captureTree')).toEqual([{ checkoutId: 'checkout-1' }]);
+    expect(promises.inputsFor('captureTree')).toEqual([{ checkoutId: 'checkout-1', generation: 0 }]);
 
     promises.settle('captureTree', { output: { treeId: 'tree-stale' } });
     await flush();
@@ -903,6 +915,85 @@ describe('checkoutMachine', () => {
     expect(promises.inputsFor('captureTree')).toHaveLength(1);
 
     actor.stop();
+  });
+
+  describe('a write to a clean checkout (FX1 M)', () => {
+    /* Spawn, and answer D4's comparison with the head, so the checkout rests clean. */
+    const startRested = async (): Promise<Harness> => {
+      const harness = start({ idleWindow: 1000 });
+      harness.promises.settle('captureTree', { output: { treeId: headTreeId } });
+      await flush();
+      return harness;
+    };
+
+    it('should read clean at once when a pull’s own writes land after its head and equal it', async () => {
+      const { actor, promises, parent } = await startRested();
+
+      /* The host applies the pull, announces the head, and its watcher reports the apply (E1). */
+      actor.send({ type: 'headChanged', revisionId: 'rev-2', treeId: 'tree-2' });
+      actor.send({ type: 'changed', paths: ['main.scad', 'tau.json'], generation: 1 });
+
+      expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
+      promises.settle('captureTree', { output: { treeId: 'tree-2' } });
+      await flush();
+
+      /* No idle window elapsed and nothing was cut: the comparison alone cleared it. */
+      expect(actor.getSnapshot().matches('clean')).toBe(true);
+      expect(promises.inputsFor('cut')).toEqual([]);
+      expect(parent.events.findLast((event) => event.type === 'checkoutStatusChanged')).toMatchObject({
+        status: 'clean',
+        headRevisionId: 'rev-2',
+      });
+      actor.stop();
+    });
+
+    it('should stay dirty and start the idle window when the write is a real edit', async () => {
+      const { actor, promises, clock } = await startRested();
+
+      actor.send({ type: 'changed', paths: ['main.scad'], generation: 1 });
+      promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+      await flush();
+
+      expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
+      clock.advance(1000);
+      expect(actor.getSnapshot().context.pending).toEqual({ trigger: 'idle', leaseIds: [] });
+      actor.stop();
+    });
+
+    it('should hand the cut after an answered comparison no path the comparison read (E1)', async () => {
+      const harness = await startRested();
+      const { actor, promises } = harness;
+
+      actor.send({ type: 'changed', paths: ['main.scad'], generation: 1 });
+      promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+      await flush();
+      actor.send({ type: 'changed', paths: ['tau.json'], generation: 2 });
+      actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+      harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+      expect(promises.inputsFor('cut')).toEqual([
+        { checkoutId: 'checkout-1', trigger: 'save', changedPaths: ['tau.json'], generation: 2 },
+      ]);
+      actor.stop();
+    });
+
+    it('should compare again when another write lands while it compares', async () => {
+      const { actor, promises } = await startRested();
+
+      actor.send({ type: 'changed', paths: ['main.scad'], generation: 1 });
+      actor.send({ type: 'changed', paths: ['tau.json'], generation: 2 });
+
+      expect(promises.inputsFor('captureTree')).toHaveLength(3);
+      /* The first capture predates the second write, so its equal answer clears nothing. */
+      promises.settle('captureTree', { output: { treeId: headTreeId } });
+      await flush();
+      expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
+      promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+      await flush();
+
+      expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
+      actor.stop();
+    });
   });
 
   it('exercises every state value xstate/graph can generate', () => {
@@ -994,11 +1085,13 @@ describe('checkoutMachine changed paths (E1)', () => {
     actor.stop();
   });
 
-  it('should forget the paths when the head moves, so the comparison and the next cut read everything (I6)', async () => {
+  it('should forget the paths when the head moves, so the comparison reads everything and the next cut only what followed it (I6)', async () => {
     const harness = await startSettled();
     const { actor, promises } = harness;
 
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
     actor.send({ type: 'headChanged', revisionId: 'rev-7', treeId: 'tree-7' });
     expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
     promises.settle('captureTree', { output: { treeId: 'tree-other' } });
@@ -1007,8 +1100,9 @@ describe('checkoutMachine changed paths (E1)', () => {
     actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
     harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
 
-    expect(pathsOf(harness, 'captureTree')).toEqual([undefined, undefined]);
-    expect(pathsOf(harness, 'cut').at(-1)).toBeUndefined();
+    /* Spawn, the clean edge's comparison of the one path written (FX1 M), then the moved head's whole one. */
+    expect(pathsOf(harness, 'captureTree')).toEqual([undefined, ['a.ts'], undefined]);
+    expect(pathsOf(harness, 'cut').at(-1)).toEqual(['b.ts']);
     actor.stop();
   });
 

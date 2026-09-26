@@ -1573,8 +1573,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         stdout,
         offered,
         /* The server's sideband sentence, which is where a `pre-receive`
-         * refusal says *why* — the per-ref table only says a hook declined. */
-        refused?.code === 'REMOTE_REJECTED' ? refused.message : undefined,
+         * refusal says *why* — the per-ref table only says a hook declined.
+         * The ceiling and the plan quota are hook sentences too, and the
+         * scheduler files them as quota by their marker (FX1 N). */
+        refused?.code === 'REMOTE_REJECTED' || refused?.code === 'REMOTE_QUOTA_EXCEEDED' ? refused.message : undefined,
       );
       /* Where `fetch` would have put every accepted ref, as the browser leg does:
        * `git push` itself tracks only `refs/heads/*`, so a pushed chat ref or tag

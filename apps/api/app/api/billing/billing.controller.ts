@@ -100,21 +100,6 @@ export class BillingController {
     return this.usageService.getOperationReceipt({ authUserId: user.id, operationId, rawQuery });
   }
 
-  @Get('attempts/:surface/:attemptKey')
-  @Header('Cache-Control', 'private, no-store')
-  public async getAttemptReceipt(
-    @User() user: AuthUser,
-    @Param() params: { surface: string; attemptKey: string },
-    @Query() rawQuery: unknown,
-  ): Promise<WireOperationReceipt | { state: 'not_found' }> {
-    return this.usageService.getAttemptReceipt({
-      authUserId: user.id,
-      surface: params.surface,
-      attemptKey: params.attemptKey,
-      rawQuery,
-    });
-  }
-
   @Get('reload-consent')
   @Header('Cache-Control', 'private, no-store')
   // oxlint-disable-next-line typescript/no-restricted-types -- JSON absence is explicitly null in the shared wire contract.

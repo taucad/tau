@@ -45,6 +45,7 @@ const usage = new BillingUsageService(
       ['BILLING_USAGE_CURSOR_SECRET', 'c03-test-cursor-secret-is-at-least-32-bytes'],
     ]),
   ),
+  ledger,
 );
 const required = <T>(value: T | undefined, label: string): T => {
   if (value === undefined) {
@@ -53,6 +54,12 @@ const required = <T>(value: T | undefined, label: string): T => {
   return value;
 };
 afterAll(async () => Promise.all([firstClient.end(), secondClient.end()]));
+
+/**
+ * Changes the first sealed character, which always carries six full bits of the nonce. The last base64url character
+ * can hold padding bits, so swapping it sometimes decodes to the very same bytes and the "tampered" cursor still opens.
+ */
+const tampered = (cursor: string): string => `${cursor.slice(0, 3)}${cursor[3] === 'A' ? 'B' : 'A'}${cursor.slice(4)}`;
 
 const createFixture = async () => {
   const suffix = randomUUID();
@@ -342,7 +349,7 @@ describe('BillingUsageService PostgreSQL foundation', () => {
       if (key !== 'later-released' && key !== 'later-absorbed') {
         // GI-R2: only a dispatched call settles (the credit_operation_dispatch CHECK).
         // oxlint-disable-next-line eslint/no-await-in-loop -- sequential like the terminalization it precedes
-        await secondLedger.markDispatchIntent(admitted.operationId, admitted.generation);
+        expect(await secondLedger.markDispatchIntent(admitted.operationId, admitted.generation)).toBe(true);
       }
       // oxlint-disable-next-line eslint/no-await-in-loop -- second connection commits distinct post-snapshot terminal revisions
       await secondLedger.terminalizeOperation({
@@ -386,7 +393,7 @@ describe('BillingUsageService PostgreSQL foundation', () => {
     await expect(
       usage.getUsage({
         authUserId: fixture.userId,
-        rawQuery: { range: 'all_time', pageSize: '1', collection: 'rows', cursor: `${cursor.slice(0, -1)}x` },
+        rawQuery: { range: 'all_time', pageSize: '1', collection: 'rows', cursor: tampered(cursor) },
       }),
     ).rejects.toThrow('billing cursor');
     await expect(
@@ -969,6 +976,7 @@ describe('BillingUsageService PostgreSQL foundation', () => {
           ['BILLING_USAGE_CURSOR_SECRET', 'c03-test-cursor-secret-is-at-least-32-bytes'],
         ]),
       ),
+      ledger,
     );
     const wrongEnvironment = await wrongEnvironmentUsage.getUsage({ authUserId: userId, rawQuery: {} });
     expect(wrongEnvironment).toMatchObject({ environment: 'staging', totals: { eventCount: '0' } });
@@ -1024,7 +1032,7 @@ it('should return a gateway operation with the project and chat it was attribute
   });
 });
 
-it('should recover only the authenticated original attempt without creating an account or changing credit', async () => {
+it('should recover only the authenticated original attempt and void every other key without changing credit', async () => {
   const fixture = await createFixture();
   const key = randomUUID();
   const request = { ...admission(fixture, key), surface: 'gateway' };
@@ -1033,6 +1041,8 @@ it('should recover only the authenticated original attempt without creating an a
     throw new Error('Expected admitted invocation');
   }
   const before = await database.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId));
+  const otherOwner = `unfunded-unknown-owner-${key}`;
+  await database.insert(user).values({ id: otherOwner, name: 'Other', email: `${otherOwner}@test.invalid` });
   const recovered = await usage.getAttemptReceipt({
     authUserId: fixture.userId,
     surface: 'gateway',
@@ -1042,12 +1052,12 @@ it('should recover only the authenticated original attempt without creating an a
   expect(recovered).toMatchObject({ state: 'pending', operationId: admitted.operationId });
   expect(
     await usage.getAttemptReceipt({
-      authUserId: 'unfunded-unknown-owner',
+      authUserId: otherOwner,
       surface: 'gateway',
       attemptKey: key,
       rawQuery: {},
     }),
-  ).toEqual({ state: 'not_found' });
+  ).toEqual({ state: 'not_found', voided: true });
   expect(
     await usage.getAttemptReceipt({
       authUserId: fixture.userId,
@@ -1055,14 +1065,12 @@ it('should recover only the authenticated original attempt without creating an a
       attemptKey: key,
       rawQuery: {},
     }),
-  ).toEqual({ state: 'not_found' });
+  ).toEqual({ state: 'not_found', voided: true });
   expect(await database.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId))).toEqual(before);
+  // GI-R3: voiding needs the account row admission locks, so an unknown owner's lookup binds an empty account.
   expect(
-    await database
-      .select()
-      .from(billingOwnerBinding)
-      .where(eq(billingOwnerBinding.authUserId, 'unfunded-unknown-owner')),
-  ).toHaveLength(0);
+    await database.select().from(billingOwnerBinding).where(eq(billingOwnerBinding.authUserId, otherOwner)),
+  ).toHaveLength(1);
   await expect(
     usage.getAttemptReceipt({
       authUserId: fixture.userId,

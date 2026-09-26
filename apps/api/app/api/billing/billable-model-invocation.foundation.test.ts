@@ -41,6 +41,7 @@ import {
 } from '#api/billing/billable-model-qualification.js';
 import { createBillableModelProviderAdapters } from '#api/billing/billable-model-provider.js';
 import { BillingController } from '#api/billing/billing.controller.js';
+import { BillingAttemptController } from '#api/billing/billing-attempt.controller.js';
 import { BillingService } from '#api/billing/billing.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
@@ -940,9 +941,15 @@ describe('funded invocation HTTP boundary', () => {
         };
         auth.api.getSession.mockResolvedValue(sessionFor(firstOwner.authUserId));
         const databaseService = { database };
-        const usage = new BillingUsageService(databaseService, config);
+        const usage = new BillingUsageService(databaseService, config, ledger);
         const module = await Test.createTestingModule({
-          controllers: [BillingController, ChatController, CodeCompletionController, LlmGatewayController],
+          controllers: [
+            BillingController,
+            BillingAttemptController,
+            ChatController,
+            CodeCompletionController,
+            LlmGatewayController,
+          ],
           providers: [
             Reflector,
             AuthGuard,
@@ -1225,7 +1232,8 @@ describe('funded invocation HTTP boundary', () => {
         const otherLookup = await fetch(`${base}/v1/billing/attempts/gateway/${gatewayAttempt}`, {
           headers: { 'x-test-owner': secondOwner.authUserId },
         });
-        expect(await otherLookup.json()).toEqual({ state: 'not_found' });
+        // GI-R3: another owner's lookup finds no row it owns, so it voids the key in its own account, not the first owner's.
+        expect(await otherLookup.json()).toEqual({ state: 'not_found', voided: true });
       } finally {
         await app?.close();
         for (const timer of pendingProviderTimers) {

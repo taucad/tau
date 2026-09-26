@@ -95,7 +95,6 @@ describe('billing authenticated reporting endpoints', () => {
     const auth = mockDeep<Auth>();
     auth.api.getSession.mockResolvedValue(null);
     usage.getUsage.mockResolvedValue(emptyUsage);
-    usage.getAttemptReceipt.mockResolvedValue({ state: 'not_found' });
     usage.getOpenHolds.mockResolvedValue(openHolds);
     const module = await Test.createTestingModule({
       controllers: [BillingController],
@@ -121,12 +120,6 @@ describe('billing authenticated reporting endpoints', () => {
       });
       expect(unauthorized.statusCode).toBe(401);
       expect(usage.getUsage).not.toHaveBeenCalled();
-      const unauthorizedAttempt = await app.inject({
-        method: 'GET',
-        url: '/v1/billing/attempts/gateway/attempt-a',
-      });
-      expect(unauthorizedAttempt.statusCode).toBe(401);
-      expect(usage.getAttemptReceipt).not.toHaveBeenCalled();
       const unauthorizedHolds = await app.inject({ method: 'GET', url: '/v1/billing/holds' });
       expect(unauthorizedHolds.statusCode).toBe(401);
       expect(usage.getOpenHolds).not.toHaveBeenCalled();
@@ -280,19 +273,6 @@ describe('billing authenticated reporting endpoints', () => {
         authUserId: owner.id,
         operationId: 'operation-b',
         rawQuery: { snapshotRevision: '5' },
-      });
-      const attempt = await app.inject({
-        method: 'GET',
-        url: '/v1/billing/attempts/gateway/attempt-a',
-      });
-      expect(attempt.statusCode).toBe(200);
-      expect(attempt.json()).toEqual({ state: 'not_found' });
-      expect(attempt.headers['cache-control']).toBe('private, no-store');
-      expect(usage.getAttemptReceipt).toHaveBeenCalledWith({
-        authUserId: owner.id,
-        surface: 'gateway',
-        attemptKey: 'attempt-a',
-        rawQuery: {},
       });
       const holds = await app.inject({ method: 'GET', url: '/v1/billing/holds?accountId=other' });
       expect(holds.statusCode).toBe(200);

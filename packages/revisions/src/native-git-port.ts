@@ -549,10 +549,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       // oxlint-disable-next-line no-await-in-loop -- one tip per offered ref, on the pre-push check only.
       const listed = await run(['lfs', 'ls-files', '--json', reference.name]).catch(() => undefined);
       if (listed?.exitCode === 0) {
-        const { files = [] } = JSON.parse(textDecoder.decode(listed.stdout)) as {
-          files?: ReadonlyArray<{ name: string; size: number }>;
+        // A ref with no large files answers `{"files": null}`.
+        const { files } = JSON.parse(textDecoder.decode(listed.stdout)) as {
+          files: ReadonlyArray<{ name: string; size: number }> | null;
         };
-        for (const file of files) {
+        for (const file of files ?? []) {
           sizes.set(file.name, Math.max(file.size, sizes.get(file.name) ?? 0));
         }
         continue;

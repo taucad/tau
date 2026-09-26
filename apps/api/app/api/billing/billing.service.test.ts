@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import type Stripe from 'stripe';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BillingService } from '#api/billing/billing.service.js';
 import type { DatabaseService } from '#database/database.service.js';
@@ -29,7 +30,7 @@ const row = (fields: Partial<SubscriptionRow> = {}): SubscriptionRow => ({
   ...fields,
 });
 
-const createService = (rows: SubscriptionRow[], bound = true) => {
+const createService = (rows: SubscriptionRow[], bound = true, environment: Partial<Environment> = {}) => {
   vi.useFakeTimers();
   vi.setSystemTime(now);
   const database = mockDeep<DatabaseService>();
@@ -54,6 +55,7 @@ const createService = (rows: SubscriptionRow[], bound = true) => {
     STRIPE_READ_SECRET_KEY: 'rk_test_fixture',
     STRIPE_ACCOUNT_ID: 'acct_fixture',
     STRIPE_LIVEMODE: false,
+    ...environment,
   });
   const service = new BillingService(database, config, mockDeep<Stripe>());
   vi.mocked(resolveDefaultCard).mockResolvedValue(undefined);
@@ -134,5 +136,52 @@ describe('owned paid access deadlines', () => {
       tier: 'free',
       trainingConsent: true,
     });
+  });
+});
+
+/*
+ * Charter D23: the free tier's sync ships in code and stays shut until the
+ * go-live checklist opens it. Every server gate (push, register, publish) and
+ * the browser's plan read this projection, so this is the one switch.
+ */
+describe('free-tier sync gate (D23)', () => {
+  it('should keep a free account off Tau Cloud sync while the gate is unset, but not off GitHub', async () => {
+    const { service } = createService([], false);
+    expect(await service.getEntitlements('user-a')).toMatchObject({
+      tier: 'free',
+      canSyncFiles: false,
+      canConnectGitHub: true,
+    });
+  });
+
+  /* F1: the flag is inert in production until the go-live commit deletes the clause. */
+  it('should ignore the gate under NODE_ENV=production and say so once', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    /* ConfigService reads process.env before its own values, and vitest sets NODE_ENV=test. */
+    vi.stubEnv('NODE_ENV', 'production');
+    const { service } = createService([], false, { TAU_FREE_TIER_SYNC_ENABLED: true });
+
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'free', canSyncFiles: false });
+    await service.getEntitlements('user-a');
+    expect(warn.mock.calls.filter(([message]) => String(message).includes('TAU_FREE_TIER_SYNC_ENABLED'))).toHaveLength(
+      1,
+    );
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it('should let a free account sync, publish and connect GitHub once the deployment opens the gate', async () => {
+    const { service } = createService([], false, { TAU_FREE_TIER_SYNC_ENABLED: true });
+    expect(await service.getEntitlements('user-a')).toMatchObject({
+      tier: 'free',
+      canSyncFiles: true,
+      canConnectGitHub: true,
+      canUseProKernels: false,
+    });
+  });
+
+  it('should leave a paid account syncing whatever the gate says', async () => {
+    const { service } = createService([row()], true, { TAU_FREE_TIER_SYNC_ENABLED: false });
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'pro', canSyncFiles: true });
   });
 });

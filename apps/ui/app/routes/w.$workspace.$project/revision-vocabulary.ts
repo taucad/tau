@@ -13,7 +13,7 @@
  */
 import { ArrowDownToLine, CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { isGithubRemoteUrl } from '@taucad/revisions';
+import { isCeilingRefusal, isGithubRemoteUrl } from '@taucad/revisions';
 import type { RemoteFacet, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
 import type { SidebarMark } from '#hooks/use-sidebar-status.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
@@ -414,6 +414,7 @@ export const selectStripVerbs = ({
   undoable,
   canUndo = false,
   canWrite,
+  canUpgrade = true,
 }: Readonly<{
   status: RevisionStatusProjection | undefined;
   where: RevisionWhere;
@@ -428,6 +429,12 @@ export const selectStripVerbs = ({
    */
   canUndo?: boolean;
   canWrite: boolean;
+  /**
+   * *Upgrade* is this viewer's to take (D17): the owner, on a plan a larger one
+   * exists for. A collaborator's and a top-tier owner's storage refusal names
+   * no plan action, on this strip as in the Sync row.
+   */
+  canUpgrade?: boolean;
 }>): Readonly<{ primary: StripVerb | undefined; secondary: readonly StripVerb[] }> => {
   if (status === undefined || !canWrite || status.conflicts.length > 0 || status.sync.state === 'conflicted') {
     return { primary: undefined, secondary: [] };
@@ -450,7 +457,8 @@ export const selectStripVerbs = ({
     return { primary: 'Sign in', secondary };
   }
   if (sync.state === 'failed' && (sync.reason === 'quota' || sync.reason === 'notEntitled')) {
-    return { primary: 'Upgrade', secondary };
+    /* F2: no plan clears D20's per-repository ceiling. */
+    return { primary: canUpgrade && !isCeilingRefusal(sync.error) ? 'Upgrade' : undefined, secondary };
   }
   return { primary: undefined, secondary };
 };

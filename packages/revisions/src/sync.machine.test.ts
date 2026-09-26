@@ -67,6 +67,7 @@
  * | 60 | `pending --revisionMinted every 500 ms--> pushing` within `syncDebounceMaxWaitMilliseconds` | **W13 follow-up**: a steady mint cadence faster than the window still pushes, at least once per bound |
  * | 59 | `merging(merged) → pushing` | **D12**: a diverged clean checkout merges, re-heads its actor, and pushes the merge revision under the fetched lease |
  * | 63 | `pushing / opening --429--> queued --Retry-After--> opening` | **W13d**: a rate limit waits the remote's own wait, a remote move does not cut it short, and it does not advance the doubling |
+ * | 64 | `pushing --onDone[updated]--> parent pushed` | **RV-W8 F9**: a push that moved a ref tells `remote.machine` its stored figure is stale; a refused one does not |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -993,6 +994,41 @@ describe('syncMachine', () => {
     });
 
     harness.stop();
+  });
+
+  it('row 64 (F9): a push that moved a ref asks remote.machine to read storage again; a refused one does not', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      output: {
+        refs: [{ name: mainRef, status: 'rejected', head: undefined, reason: 'over quota' }],
+        overQuota: ['models/big.step'],
+      } satisfies SyncPushActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.parent.events).toContainEqual(expect.objectContaining({ type: 'remote' }));
+    });
+    expect(harness.parent.events).not.toContainEqual({ type: 'remote', event: { type: 'pushed' } });
+    harness.stop();
+
+    const moved = start();
+    await openCleanly(moved);
+    moved.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(moved.effects.running('push')).toBe(1);
+    });
+    moved.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }) });
+    await settleWhenRunning(moved.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(moved.parent.events).toContainEqual({ type: 'remote', event: { type: 'pushed' } });
+    });
+    moved.stop();
   });
 
   it('rows 25 + 26: disconnecting stops the scheduler and connecting starts it with a pull', async () => {

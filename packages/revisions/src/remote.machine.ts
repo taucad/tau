@@ -117,6 +117,9 @@ export type RemoteValidateActorInput = Readonly<{ remote: string; url: string }>
 /** What `validate` answers: the remote answered, and what it costs. @public */
 export type RemoteValidateActorOutput = Readonly<{ storage?: RemoteStorage }>;
 
+/** Which connected remote `readStorage` asks about. @public */
+export type RemoteReadStorageActorInput = Readonly<{ remote: string; kind: RemoteKind | 'none' }>;
+
 /** What the initial sync is asked to do. @public */
 export type RemoteInitialSyncActorInput = Readonly<{ remote: string; branch: string }>;
 
@@ -193,6 +196,19 @@ const reconnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
     ? { target: 'disconnecting' }
     : { target: 'choosing', context: { kind: event.kind, error: undefined } };
 
+/* A refused push's file list and figures: the root's handler and `connected`'s share it. */
+const quotaRefusedContext = (
+  context: RemoteMachineContext,
+  event: Extract<RemoteMachineEvent, { type: 'quotaRefused' }>,
+): Partial<RemoteMachineContext> => ({
+  overQuota: event.paths,
+  quota: event.storage ?? context.quota,
+  storage:
+    event.used === undefined || event.quota === undefined
+      ? context.storage
+      : { ...context.storage, used: event.used, quota: event.quota },
+});
+
 /* A connect gesture before any remote is recorded: *No remote* is already the answer. */
 const firstConnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
   event.kind === 'none' ? {} : { target: 'choosing', context: { kind: event.kind, error: undefined } };
@@ -259,6 +275,8 @@ const remoteMachineDefinition = setup({
     /** Resolves the *reference* the host will authenticate with, never a secret (I8). */
     authorize: createAsyncLogic<void, RemoteAuthorizeActorInput>({ run: unsupported }),
     validate: createAsyncLogic<RemoteValidateActorOutput, RemoteValidateActorInput>({ run: unsupported }),
+    /** What a connected remote says this project costs (D18); `undefined` when it cannot say. */
+    readStorage: createAsyncLogic<RemoteStorage | undefined, RemoteReadStorageActorInput>({ run: unsupported }),
     initialSync: createAsyncLogic<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>({ run: unsupported }),
   },
 }).createMachine({
@@ -282,16 +300,7 @@ const remoteMachineDefinition = setup({
    * dropped with the only copy of its file list. `choosing` clears it for a new
    * destination. */
   on: {
-    quotaRefused: {
-      context: ({ context, event }) => ({
-        overQuota: event.paths,
-        quota: event.storage ?? context.quota,
-        storage:
-          event.used === undefined || event.quota === undefined
-            ? context.storage
-            : { used: event.used, quota: event.quota },
-      }),
-    },
+    quotaRefused: { context: ({ context, event }) => quotaRefusedContext(context, event) },
   },
   initial: 'reading',
   states: {
@@ -461,9 +470,38 @@ const remoteMachineDefinition = setup({
 
     connected: {
       entry: () => ({ context: { attemptWroteRemote: false } }),
+      /*
+       * D18: the figure the Sync region renders, read on every arrival here —
+       * a reopened project included, which reaches `connected` from `reading`
+       * without ever validating. A host that cannot say leaves the row out, and
+       * a failed read is no reason to doubt a connection that already stands.
+       */
+      initial: 'reading',
+      states: {
+        reading: {
+          invoke: {
+            src: 'readStorage',
+            input: ({ context }) => ({ remote: context.remote?.name ?? '', kind: context.kind }),
+            onDone: ({ context, event }) => ({
+              target: 'settled',
+              context: { storage: event.output ?? context.storage },
+            }),
+            onError: { target: 'settled' },
+          },
+        },
+        settled: {},
+      },
       on: {
         disconnect: { target: 'disconnecting' },
         connect: ({ event }) => reconnect(event),
+        /* F9: a push changed what is stored; read it again, dropping any read in flight. */
+        pushed: { target: '.reading', reenter: true },
+        /* F9: a refusal's own figures are newer than a read still in flight, so
+           leaving `reading` stops that read before its answer can overwrite them. */
+        quotaRefused: ({ context, event }) =>
+          event.used === undefined || event.quota === undefined
+            ? { context: quotaRefusedContext(context, event) }
+            : { target: '.settled', context: quotaRefusedContext(context, event) },
       },
     },
 
@@ -587,7 +625,8 @@ const phaseOf = (value: string): RemoteFacet['phase'] => {
 export const selectRemoteFacet = (snapshot: SnapshotFrom<typeof remoteMachine>): RemoteFacet => ({
   kind: snapshot.context.kind,
   url: snapshot.context.remote?.url,
-  phase: phaseOf(String(snapshot.value)),
+  /* `connected` has children (F9); the phase is the top-level state either way. */
+  phase: phaseOf(typeof snapshot.value === 'string' ? snapshot.value : (Object.keys(snapshot.value)[0] ?? '')),
   storage: snapshot.context.storage,
   overQuota: snapshot.context.overQuota,
   quota: snapshot.context.quota,

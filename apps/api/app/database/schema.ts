@@ -221,6 +221,13 @@ export const projectGit = pgTable('project_git', {
   storageBytes: bigint('storage_bytes', { mode: 'number' }).notNull().default(0),
   lfsBytes: bigint('lfs_bytes', { mode: 'number' }).notNull().default(0),
   /**
+   * Bytes of packs a compaction retired that the store still keeps inside the
+   * retention window (charter D18, L6-F5): real storage, never counted against
+   * the plan. Written by the post-compaction sweep, which lists `packs/` anyway,
+   * so it is exact after every sweep and only changes when a sweep runs.
+   */
+  retainedBytes: bigint('retained_bytes', { mode: 'number' }).notNull().default(0),
+  /**
    * The manifest generation this row was last told about (D19). Derived state —
    * accounting, LFS marks, publications — is keyed to it, and any request that
    * sees `derived_generation` behind it re-derives. There is no reconcile job.

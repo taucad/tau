@@ -1,4 +1,13 @@
 import type { BillingTier } from '#billing-tier.js';
+import { formatStorageLimit, storageLimitBytesByTier } from '#entitlements.js';
+
+/*
+ * The backup line each plan advertises, from the table the Hosted Remote's
+ * quota enforces (charter D16). "(Coming Soon)" is the copy's half of the D23
+ * launch gate: it comes off when the go-live checklist opens free sync.
+ */
+const backupFeature = (tier: BillingTier): string =>
+  `Tau Cloud backup and sync — ${formatStorageLimit(storageLimitBytesByTier[tier])} (Coming Soon)`;
 
 /**
  * Call-to-action kinds for a plan card (ui-patterns doc Finding 5):
@@ -54,6 +63,8 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
       'Community support',
       'Export to all formats',
       'Public share links',
+      backupFeature('free'),
+      'GitHub connection',
     ],
     cta: { label: 'Start Creating Free', kind: 'signup' },
     popular: false,
@@ -74,8 +85,7 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
       'Hosted design verification (Coming Soon)',
       'Private & unlisted share links',
       'No training on your designs',
-      'Cross-device sync (Coming Soon)',
-      'GitHub connection (Coming Soon)',
+      backupFeature('pro'),
       'Early access to new features',
       'API CAD Gateway — 30k exports/mo (Coming Soon)',
       '3D Conversion API — 50k conversions/mo (Coming Soon)',
@@ -96,6 +106,7 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
       'Signed evidence reports + retention (Coming Soon)',
       'Verification CI concurrency + org dashboards (Coming Soon)',
       'Contractual no-train guarantee (DPA)',
+      backupFeature('enterprise'),
       'Custom API CAD Gateway limits',
       'Custom 3D Conversion API limits',
       'Enterprise Git (GitLab, Bitbucket, Azure DevOps)',

@@ -1728,6 +1728,53 @@ describe.runIf(gitToolchainOnPath)('native remote refusals (N1)', () => {
       await rm(root, { force: true, recursive: true });
     }
   }, 180_000);
+
+  /* RV-W8 F11: the native list reads like the server's — largest first, at most ten. */
+  it('names the largest ten files first when a push is over the storage plan', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-native-quota-order-'));
+    const fixture = await startGitHttpBackend({
+      root,
+      quotaRefusal: { message: 'Storage quota exceeded.', shortfallBytes: 1, remainingBytes: 0 },
+    });
+    const repositoryPath = join(root, 'project');
+    /* Eleven large files, named so alphabetical order is smallest first: the old sorted list fails this row. */
+    const files = Array.from({ length: 11 }, (_, index) => {
+      const bytes = new Uint8Array(new ArrayBuffer(1024 * 1024 + 1 + index * 4096));
+      for (let offset = 0; offset < bytes.length; offset += 1) {
+        bytes[offset] = (offset * 31 + index) % 256;
+      }
+      return [`models/${String.fromCodePoint(97 + index)}.step`, bytes] as const;
+    });
+    try {
+      await mkdir(repositoryPath, { recursive: true });
+      const port = createNativeGitRevisionPort({
+        repositoryPath,
+        tauCredential: () => ({ apiBaseUrl: fixture.url, authorization: 'Bearer session-token' }),
+      });
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree(files),
+        provenance: provenance('user'),
+        summary: summary('Large objects'),
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+
+      await expect(port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] })).rejects.toMatchObject({
+        name: 'LfsQuotaError',
+        refusal: {
+          paths: files
+            .toReversed()
+            .slice(0, 10)
+            .map(([path]) => path),
+        },
+      });
+    } finally {
+      await fixture.close();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
 });
 
 /**

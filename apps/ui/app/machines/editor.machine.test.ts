@@ -353,7 +353,7 @@ describe('editorMachine', () => {
       expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty(
         'componentDisplay',
       );
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(12);
       actor.stop();
     });
 
@@ -480,7 +480,7 @@ describe('editorMachine', () => {
         'src/utils.ts': { renderTimeout: 45_000 },
       });
       expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty('renderTimeout');
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(12);
       actor.stop();
     });
 
@@ -516,7 +516,7 @@ describe('editorMachine', () => {
 
       const settings = actor.getSnapshot().context.viewSettings['view1']?.graphicsSettings;
       expect(settings?.sectionView).toBeUndefined();
-      expect(settings?.sectionDisplay).toBeUndefined();
+      expect(settings).not.toHaveProperty('sectionDisplay');
       actor.stop();
     });
 

@@ -6,8 +6,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { MeasureControl } from '#components/geometry/cad/measure-control.js';
 
 type GraphicsState = {
-  readonly context: { readonly geometry: { readonly format: 'gltf' } };
-  readonly matches: (value: unknown) => boolean;
+  readonly context: { readonly geometry: { readonly format: 'gltf' }; readonly isMeasureActive: boolean };
 };
 
 const mocks = vi.hoisted(() => ({
@@ -18,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('#hooks/use-graphics.js', () => ({
   useGraphics: () => ({ send: mocks.graphicsSend }),
   useGraphicsSelector: <T,>(selector: (state: GraphicsState) => T): T =>
-    selector({ context: { geometry: { format: 'gltf' } }, matches: () => mocks.isMeasureActive }),
+    selector({ context: { geometry: { format: 'gltf' }, isMeasureActive: mocks.isMeasureActive } }),
 }));
 
 describe('MeasureControl', () => {

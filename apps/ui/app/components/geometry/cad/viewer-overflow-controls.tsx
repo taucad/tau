@@ -145,7 +145,7 @@ export function SectionViewOverflowControl(): React.ReactNode {
 /** Measure toggle rendered as a DropdownMenuSwitchItem */
 export function MeasureOverflowControl(): React.ReactNode {
   const graphicsRef = useGraphics();
-  const isMeasureActive = useGraphicsSelector((state) => state.matches({ operational: 'measure' }));
+  const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
   const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
 
   const handleToggle = useCallback(

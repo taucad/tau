@@ -295,7 +295,6 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     upDirection: settings.upDirection,
     pinnedMeasurements: settings.pinnedMeasurements,
     sectionView: settings.sectionView,
-    sectionDisplay: settings.sectionDisplay,
     graphicsBackend: settings.graphicsBackend ?? 'webgl',
   };
 

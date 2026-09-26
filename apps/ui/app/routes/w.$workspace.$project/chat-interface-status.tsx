@@ -24,29 +24,18 @@ type DetailedMode =
   | 'measure-selected'
   | 'unknown';
 
+/* Section and Measure can run together; the chip shows, and Escape closes, the measuring tool first. */
 function useDetailedOperationalMode(): DetailedMode {
   return useGraphicsSelector((state) => {
-    if (state.matches({ operational: 'ready' })) {
-      return 'ready';
+    if (state.context.isMeasureActive) {
+      return state.context.currentMeasurementStart === undefined ? 'measure-selecting' : 'measure-selected';
     }
 
-    if (state.matches({ operational: { 'section-view': 'pending' } })) {
-      return 'section-view-pending';
+    if (state.context.isSectionViewActive) {
+      return state.context.selectedSectionViewId === undefined ? 'section-view-pending' : 'section-view-active';
     }
 
-    if (state.matches({ operational: { 'section-view': 'active' } })) {
-      return 'section-view-active';
-    }
-
-    if (state.matches({ operational: { measure: 'selecting' } })) {
-      return 'measure-selecting';
-    }
-
-    if (state.matches({ operational: { measure: 'selected' } })) {
-      return 'measure-selected';
-    }
-
-    return 'unknown';
+    return 'ready';
   });
 }
 

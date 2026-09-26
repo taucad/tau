@@ -346,4 +346,20 @@ describe('enforceMaterialClipping', () => {
     expect(mat1.clippingPlanes).toHaveLength(1);
     expect(mat2.clippingPlanes).toHaveLength(1);
   });
+
+  it('should share one clipping-plane list per plane across materials and frames', () => {
+    const mesh1 = createDoubleSidedMesh();
+    const mesh2 = createFrontSidedMesh();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 2);
+
+    enforceMaterialClipping([mesh1, mesh2], plane, true);
+    const planes = (mesh1.material as THREE.MeshStandardMaterial).clippingPlanes;
+    // A material replaced between frames (a matcap toggle) picks up the same list.
+    mesh2.material = new THREE.MeshStandardMaterial();
+    enforceMaterialClipping([mesh1, mesh2], plane, true);
+
+    expect(planes).toEqual([plane]);
+    expect((mesh1.material as THREE.MeshStandardMaterial).clippingPlanes).toBe(planes);
+    expect((mesh2.material as THREE.MeshStandardMaterial).clippingPlanes).toBe(planes);
+  });
 });

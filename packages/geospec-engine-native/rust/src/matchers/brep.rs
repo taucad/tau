@@ -2774,6 +2774,7 @@ fn validity_json(value: &ValidityFacts) -> Json {
         ("solidCount", value.solid_count),
         ("invalidSolidCount", value.invalid_solid_count),
         ("openEdgeCount", value.open_edge_count),
+        ("nonManifoldEdgeCount", value.nonmanifold_edge_count),
     ] {
         if let Some(value) = value {
             fields.push((key.into(), Json::Number(value as f64)));

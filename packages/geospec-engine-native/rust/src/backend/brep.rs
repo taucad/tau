@@ -432,8 +432,41 @@ pub struct ValidityFacts {
     pub solid_count: Option<u32>,
     pub invalid_solid_count: Option<u32>,
     pub open_edge_count: Option<u32>,
+    pub nonmanifold_edge_count: Option<u32>,
     pub closed_wires: Option<bool>,
     pub reason: Option<String>,
+}
+
+/// Exact shell closure (V1): per unique shell definition, face uses per edge,
+/// skipping degenerated and INTERNAL/EXTERNAL uses. An odd count is open,
+/// three or more is non-manifold; faces outside any shell form one group.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClosureFacts {
+    pub shells: u32,
+    pub free_faces: u32,
+    pub open_edges: u32,
+    pub nonmanifold_edges: u32,
+    /// Groups with an open or non-manifold edge: shells, then the free faces.
+    pub failing: Vec<ClosureGroup>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClosureGroup {
+    pub free_faces: bool,
+    pub open_edges: u32,
+    pub nonmanifold_edges: u32,
+    /// Ordinals of the leaf occurrences that contain the group.
+    pub occurrences: Vec<u32>,
+    /// Up to four failing edges, placed at the group's first located instance.
+    pub samples: Vec<ClosureEdgeSample>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClosureEdgeSample {
+    pub face_uses: u32,
+    pub start: [f64; 3],
+    pub end: [f64; 3],
+    pub center: [f64; 3],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1169,6 +1202,13 @@ pub trait BrepSubject {
     /// `bounds` may be unmeasured (NaN); `face_optimal_bounds` measures one.
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
+    /// Exact shell closure alone: no validity analyzer and no tessellation.
+    fn closure(&self) -> Result<Rc<ClosureFacts>, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no exact shell-closure facet.".into(),
+        })
+    }
     /// Classify against the located trimmed face. Off-surface points are Out.
     fn classify_face_points(
         &self,

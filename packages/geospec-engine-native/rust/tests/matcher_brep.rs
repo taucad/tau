@@ -176,6 +176,7 @@ impl RetainedBrep {
                 solid_count: Some(1),
                 invalid_solid_count: Some(0),
                 open_edge_count: Some(0),
+                nonmanifold_edge_count: None,
                 closed_wires: Some(true),
                 reason: None,
             }),

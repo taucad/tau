@@ -15,6 +15,15 @@ const environmentSchemaBase = z.object({
   TAU_CLOUD_ENABLED: strictEnvironmentBoolean(false).describe(
     'Start Tau Cloud billing and funded-admission services. Defaults false for self-hosted deployments.',
   ),
+  /*
+   * Charter D23: sync opens to the free tier only after the deployment gate
+   * (DG1–DG4) closes. Off, a free account projects `canSyncFiles: false` and
+   * `canConnectGitHub: false` whatever the code's free tier says; only the
+   * go-live checklist sets it, in a committed `fly.*.toml`.
+   */
+  TAU_FREE_TIER_SYNC_ENABLED: strictEnvironmentBoolean(false).describe(
+    'Open Tau Cloud backup, publishing and GitHub connection to the free tier (charter D23). Set only by the go-live checklist.',
+  ),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   // Bounded runtime pool (B8 R3). Every value fails closed: a non-numeric or out-of-range

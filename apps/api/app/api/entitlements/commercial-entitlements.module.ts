@@ -7,7 +7,7 @@ import type {
   CommercialEntitlementsService,
 } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import { storageLimitBytesByTier } from '#api/git/git.constants.js';
+import { storageLimitBytesByTier } from '@taucad/billing';
 
 @Injectable()
 class CloudCommercialEntitlementsService implements CommercialEntitlementsService {

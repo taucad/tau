@@ -29,7 +29,7 @@ const row = (fields: Partial<SubscriptionRow> = {}): SubscriptionRow => ({
   ...fields,
 });
 
-const createService = (rows: SubscriptionRow[], bound = true) => {
+const createService = (rows: SubscriptionRow[], bound = true, environment: Partial<Environment> = {}) => {
   vi.useFakeTimers();
   vi.setSystemTime(now);
   const database = mockDeep<DatabaseService>();
@@ -54,6 +54,7 @@ const createService = (rows: SubscriptionRow[], bound = true) => {
     STRIPE_READ_SECRET_KEY: 'rk_test_fixture',
     STRIPE_ACCOUNT_ID: 'acct_fixture',
     STRIPE_LIVEMODE: false,
+    ...environment,
   });
   const service = new BillingService(database, config, mockDeep<Stripe>());
   vi.mocked(resolveDefaultCard).mockResolvedValue(undefined);
@@ -134,5 +135,36 @@ describe('owned paid access deadlines', () => {
       tier: 'free',
       trainingConsent: true,
     });
+  });
+});
+
+/*
+ * Charter D23: the free tier's sync ships in code and stays shut until the
+ * go-live checklist opens it. Every server gate (push, register, publish) and
+ * the browser's plan read this projection, so this is the one switch.
+ */
+describe('free-tier sync gate (D23)', () => {
+  it('should keep a free account off Tau Cloud sync and GitHub while the gate is unset', async () => {
+    const { service } = createService([], false);
+    expect(await service.getEntitlements('user-a')).toMatchObject({
+      tier: 'free',
+      canSyncFiles: false,
+      canConnectGitHub: false,
+    });
+  });
+
+  it('should let a free account sync, publish and connect GitHub once the deployment opens the gate', async () => {
+    const { service } = createService([], false, { TAU_FREE_TIER_SYNC_ENABLED: true });
+    expect(await service.getEntitlements('user-a')).toMatchObject({
+      tier: 'free',
+      canSyncFiles: true,
+      canConnectGitHub: true,
+      canUseProKernels: false,
+    });
+  });
+
+  it('should leave a paid account syncing whatever the gate says', async () => {
+    const { service } = createService([row()], true, { TAU_FREE_TIER_SYNC_ENABLED: false });
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'pro', canSyncFiles: true });
   });
 });

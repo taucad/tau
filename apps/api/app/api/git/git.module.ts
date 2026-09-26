@@ -13,6 +13,7 @@ import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { RevisionSaltController } from '#api/git/revision-salt.controller.js';
+import { UsageController } from '#api/git/usage.controller.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 
@@ -26,7 +27,7 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
  */
 @Module({
   imports: [DatabaseModule, ProjectAccessModule, DurableEventsModule],
-  controllers: [GitController, GitProxyController, RevisionSaltController],
+  controllers: [GitController, GitProxyController, RevisionSaltController, UsageController],
   providers: [
     GitRepositoryService,
     /* The API's one Redis budget primitive (D22). Provided here as well as in

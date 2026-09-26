@@ -25,22 +25,26 @@ import {
 } from '@nestjs/common';
 import type { OnModuleDestroy } from '@nestjs/common';
 import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { storageLimitBytesByTier } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
 import { project, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
-import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import type {
+  CommercialEntitlements,
+  CommercialEntitlementsService,
+} from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import {
   hydratesFromOthersPerOwnerPerDay,
   hydratesPerCallerPerDay,
   incompleteRepositoryMarker,
   isRemovableRef,
+  quotaRefusalSentence,
   repositoryStoreKey,
-  storageLimitBytesByTier,
 } from '#api/git/git.constants.js';
-import type { GitService as GitSmartService } from '#api/git/git.constants.js';
+import type { GitService as GitSmartService, QuotaAudience } from '#api/git/git.constants.js';
 import { commitLease } from '#api/git/store/commit.js';
 import type { MovedRef } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
@@ -116,7 +120,26 @@ export type GitAccess = {
   readonly remainingBytes: number;
   /** The owner's complete plan allowance, used by serialized write admission. */
   readonly storageLimitBytes: number;
+  /**
+   * Who a quota refusal speaks to (D17), resolved with the plan on a write;
+   * absent on a read, which is never refused for storage.
+   */
+  readonly quotaAudience?: QuotaAudience;
 };
+
+/**
+ * The allowance an owner's plan grants on the Hosted Remote (D16): nothing
+ * without `canSyncFiles`, otherwise the entitlement's own figure (self-host,
+ * an Enterprise override) or the tier's.
+ *
+ * @param entitlements - The owner's commercial entitlements.
+ * @returns The allowance in bytes.
+ */
+const storageLimitOf = (entitlements: CommercialEntitlements): number =>
+  entitlements.canSyncFiles
+    ? (entitlements.storageLimitBytes ??
+      (entitlements.tier === undefined ? storageLimitBytesByTier.pro : storageLimitBytesByTier[entitlements.tier]))
+    : 0;
 
 /** A publication a ref removal would leave without its named version (D24). */
 export type AffectedPublication = {
@@ -377,15 +400,22 @@ export class GitRepositoryService implements OnModuleDestroy {
       });
     }
 
-    const limit =
-      entitlements.storageLimitBytes ??
-      (entitlements.tier === undefined ? storageLimitBytesByTier.pro : storageLimitBytesByTier[entitlements.tier]);
+    const limit = storageLimitOf(entitlements);
+    /* D17: the account's own relationship, not the request's — a cloud host
+       pushes as its owner's device, and its refusal is the owner's to act on.
+       A self-host build has no tier and nothing to sell, so it is the top. */
+    const quotaAudience: QuotaAudience =
+      access.role === 'owner'
+        ? entitlements.tier === undefined || entitlements.tier === 'enterprise'
+          ? 'ownerAtTopTier'
+          : 'owner'
+        : 'collaborator';
     const usage = await this.readOwnerUsage(access.ownerId);
     const remainingBytes = Math.max(0, limit - usage.storageBytes - usage.lfsBytes);
     if (args.mode === 'write' && remainingBytes === 0) {
       throw new PayloadTooLargeException({
         code: 'GIT_QUOTA_EXCEEDED',
-        message: `Storage quota reached: ${String(usage.storageBytes + usage.lfsBytes)} of ${String(limit)} bytes used.`,
+        message: quotaRefusalSentence(quotaAudience, limit),
       });
     }
 
@@ -395,7 +425,26 @@ export class GitRepositoryService implements OnModuleDestroy {
       ...caller,
       remainingBytes,
       storageLimitBytes: limit,
+      quotaAudience,
     };
+  }
+
+  /**
+   * What an owner's account stores against its plan (D18): the figures the Sync
+   * region renders and a later `413` quotes, from the same accounting and the
+   * same allowance `authorize` enforces.
+   *
+   * @param ownerId - The account whose allowance is asked about.
+   * @returns Live pack bytes, LFS bytes and the allowance, all account-wide.
+   */
+  public async readStorageAllowance(
+    ownerId: string,
+  ): Promise<{ storageBytes: number; lfsBytes: number; storageLimitBytes: number }> {
+    const [entitlements, usage] = await Promise.all([
+      this.entitlementsService.getEntitlements(ownerId),
+      this.readOwnerUsage(ownerId),
+    ]);
+    return { ...usage, storageLimitBytes: storageLimitOf(entitlements) };
   }
 
   /** Account-wide usage; one plan allowance is shared by all owned projects. */
@@ -722,6 +771,13 @@ export class GitRepositoryService implements OnModuleDestroy {
           TAU_GIT_QUOTA_REMAINING_BYTES: String(args.access.remainingBytes),
           // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
           TAU_GIT_CEILING_REMAINING_BYTES: String(ceilingRemaining),
+          /* D17: the plan refusal's sentence, addressed to this caller. */
+          ...(args.access.quotaAudience === undefined
+            ? {}
+            : {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+                TAU_GIT_QUOTA_SENTENCE: quotaRefusalSentence(args.access.quotaAudience, args.access.storageLimitBytes),
+              }),
         },
       });
 

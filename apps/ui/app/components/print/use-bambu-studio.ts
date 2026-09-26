@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MachineDirectoryEntry, MachineManifest, MachineProvider } from '@taucad/runtime/machine';
-import type { PrintIntent } from '@taucad/slicer';
+import type { PrintIntent } from '@taucad/slicer/print-intent';
 import type {
   BambuMachineHints,
   BambuPlate,

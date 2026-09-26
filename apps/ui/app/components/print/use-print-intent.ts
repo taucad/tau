@@ -11,8 +11,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
-import { printIntentPath, readPrintIntent, serializePrintIntent } from '@taucad/slicer';
-import type { PrintIntent } from '@taucad/slicer';
+import { printIntentPath, readPrintIntent, serializePrintIntent } from '@taucad/slicer/print-intent';
+import type { PrintIntent } from '@taucad/slicer/print-intent';
 import { joinPath } from '@taucad/utils/path';
 import { useFileManager } from '#hooks/use-file-manager.js';
 

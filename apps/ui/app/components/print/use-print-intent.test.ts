@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { printIntentPath } from '@taucad/slicer';
+import { printIntentPath } from '@taucad/slicer/print-intent';
 import { projectFiles } from '#components/print/testing/project-files.js';
 import { usePrintIntent } from '#components/print/use-print-intent.js';
 

@@ -12,6 +12,7 @@ const baseConfig: UserConfig = {
     'src/index.ts',
     'src/toolpath.ts',
     'src/container.ts',
+    'src/print-intent.ts',
     'src/bambu-studio/engine.ts',
     'src/bambu-studio/engine.stub.ts',
   ],

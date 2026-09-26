@@ -73,6 +73,14 @@ export type CreateGeoSpecNativeModelLoaderOptions = {
   readonly readSource?: GeoSpecNativeSourceReader;
   readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
   readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
+  /**
+   * Subject handles carried between the release scopes of loaders that share one engine, keyed by
+   * subjectHash. With a carrier, `releaseAll` keeps this scope's subjects for the next scope and
+   * releases only the previous scope's subjects this scope did not load again, so reloading
+   * unchanged bytes in the next scope is digest-only. Share one carrier per engine and run its
+   * scopes one at a time: a scope's release touches only subjects whose scope has settled.
+   */
+  readonly carried?: Map<string, unknown>;
 };
 
 /**
@@ -99,7 +107,8 @@ export type GeoSpecNativeModelLoader = <Code extends Record<string, string> = Re
 export type ManagedGeoSpecNativeModelLoader = GeoSpecNativeModelLoader & {
   /**
    * Drain registered admissions, including additions while drainage awaits,
-   * then release this scope's subjects and owned Runtime clients.
+   * then release this scope's subjects (with a carrier: the previous scope's
+   * subjects this scope did not load again) and owned Runtime clients.
    *
    * Await the intended complete load chain before final release, and await
    * this method before closing the caller-owned engine. Calls after it returns
@@ -291,6 +300,21 @@ export const createGeoSpecNativeModelLoader = (
     ]);
   };
 
+  const release = (handle: unknown): void => {
+    defaults.engine.releaseSubject(
+      encode({
+        ...protocolHeader,
+        method: 'releaseSubject',
+        requestId: nextRequestId('release'),
+        subjectHandle: handle,
+      }),
+    );
+  };
+
+  // Previous-scope subjects this scope has not loaded again: the ones its release frees.
+  const staleCarried = (): Array<[string, unknown]> =>
+    [...(defaults.carried ?? [])].filter(([subjectHash]) => !admissions.has(subjectHash));
+
   const admit = (options: {
     format: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>;
     ingestOptions?: Readonly<Record<string, unknown>>;
@@ -299,24 +323,42 @@ export const createGeoSpecNativeModelLoader = (
     sourceUnit?: string;
   }): GeoSpecNativeModelSubject => {
     const format = options.format === 'stp' ? 'step' : options.format;
-    const admissionBytes = defaults.engine.ingestSubject(
-      encode({
-        ...protocolHeader,
-        method: 'ingestSubject',
-        requestId: nextRequestId('ingest'),
-        format,
-        frame: {
-          coordinateSystem: 'z-up',
-          sourceUnit: format === 'step' ? 'auto' : (options.sourceUnit ?? 'm'),
-          outputUnit: 'mm',
-        },
-        ingestOptions: options.ingestOptions ?? {},
-        primaryByteLength: options.primary.byteLength,
-        resources: options.resources.map(({ name, bytes }) => ({ name, byteLength: bytes.byteLength })),
-      }),
-      options.primary,
-      options.resources.map(({ bytes }) => bytes),
-    );
+    const ingest = (): Uint8Array<ArrayBuffer> =>
+      defaults.engine.ingestSubject(
+        encode({
+          ...protocolHeader,
+          method: 'ingestSubject',
+          requestId: nextRequestId('ingest'),
+          format,
+          frame: {
+            coordinateSystem: 'z-up',
+            sourceUnit: format === 'step' ? 'auto' : (options.sourceUnit ?? 'm'),
+            outputUnit: 'mm',
+          },
+          ingestOptions: options.ingestOptions ?? {},
+          primaryByteLength: options.primary.byteLength,
+          resources: options.resources.map(({ name, bytes }) => ({ name, byteLength: bytes.byteLength })),
+        }),
+        options.primary,
+        options.resources.map(({ bytes }) => bytes),
+      );
+    let admissionBytes: Uint8Array<ArrayBuffer>;
+    try {
+      admissionBytes = ingest();
+    } catch (error) {
+      // ponytail: carried subjects share the engine's retained-subject cap, so a full engine frees the stale ones
+      // and retries once; the retry re-reads nothing but repeats the parse the refusal discarded.
+      const stale = staleCarried();
+      const limited = typeof error === 'object' && error !== null && 'code' in error && error.code === 'limit-exceeded';
+      if (!limited || stale.length === 0) {
+        throw error;
+      }
+      for (const [subjectHash, handle] of stale) {
+        defaults.carried?.delete(subjectHash);
+        release(handle);
+      }
+      admissionBytes = ingest();
+    }
     const admission = decodeRecord(admissionBytes, 'admission response');
     const result = record(admission['result'], 'admission result');
     const subject = record(result['subject'], 'admitted subject');
@@ -498,18 +540,18 @@ export const createGeoSpecNativeModelLoader = (
         }
       } while (pendingLoads.size > 0);
       const errors: unknown[] = [];
-      const handles = [...admissions.values()].reverse();
+      const { carried } = defaults;
+      const handles = carried === undefined ? [...admissions.values()] : staleCarried().map(([, handle]) => handle);
+      if (carried !== undefined) {
+        carried.clear();
+        for (const [subjectHash, handle] of admissions) {
+          carried.set(subjectHash, handle);
+        }
+      }
       admissions.clear();
-      for (const handle of handles) {
+      for (const handle of handles.reverse()) {
         try {
-          defaults.engine.releaseSubject(
-            encode({
-              ...protocolHeader,
-              method: 'releaseSubject',
-              requestId: nextRequestId('release'),
-              subjectHandle: handle,
-            }),
-          );
+          release(handle);
         } catch (error) {
           errors.push(error);
         }

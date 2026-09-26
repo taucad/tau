@@ -57,10 +57,6 @@ class RecordingEngine implements GeoSpecNativeEngine {
     };
   }
 
-  protected canonicalClaim(claim: Record<string, JSONValue>): Uint8Array<ArrayBuffer> {
-    return encode(claim);
-  }
-
   public processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
     this.initializeCalls += 1;
     expect(new TextDecoder().decode(request)).toBe(
@@ -78,6 +74,10 @@ class RecordingEngine implements GeoSpecNativeEngine {
         registryVersion: 5,
       },
     });
+  }
+
+  protected canonicalClaim(claim: Record<string, JSONValue>): Uint8Array<ArrayBuffer> {
+    return encode(claim);
   }
 }
 

@@ -1,6 +1,9 @@
-//! The pinned STEP read profile (`DESTEP_Parameters`) on substrate lane O1's
-//! reader controls: fields whose reader defaults would move exact evidence.
+//! The STEP admission profile on substrate lane O1's reader controls: the
+//! pinned read parameters (`DESTEP_Parameters`), whose reader defaults would
+//! move exact evidence, the authored healing profile and the refusal of a
+//! transfer that loses an entity.
 
+use geospec_engine_native_core::backend::BackendErrorKind;
 use geospec_engine_native_occt::{BrepSubject, Document};
 use std::path::PathBuf;
 
@@ -66,4 +69,33 @@ fn should_read_inputs_without_length_uncertainty_at_the_pinned_precision() {
             "{stripped}"
         );
     }
+}
+
+#[test]
+fn should_admit_a_solid_with_an_open_shell_as_the_invalid_solid_it_is() {
+    // OCCT's default healing demotes this solid to a valid open shell. The
+    // authored profile keeps the solid, so validity reports the open shell.
+    let document =
+        Document::from_step(&fixture("component-interference/broken-shell.step")).unwrap();
+    let validity = BrepSubject::validity(&document).unwrap();
+    assert_eq!(validity.solid_count, Some(1));
+    assert!(!validity.valid);
+}
+
+#[test]
+fn should_refuse_a_transfer_that_loses_an_entity() {
+    // One face names a placement where its plane belongs. OCCT transfers the
+    // other five faces and returns success; it records the fail against the
+    // face's surface, which did not read and so has no entity type.
+    let error = match Document::from_step(&fixture("read-profile/box-face-wrong-surface.step")) {
+        Ok(_) => panic!("a partial transfer must be refused"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind, BackendErrorKind::InvalidInput);
+    assert_eq!(
+        error.message,
+        "STEP transfer lost an entity: Surface has not been created"
+    );
+    let intact = Document::from_step(&fixture("read-profile/box-brep-only.step")).unwrap();
+    assert_eq!(BrepSubject::faces(&intact).unwrap().len(), 6);
 }

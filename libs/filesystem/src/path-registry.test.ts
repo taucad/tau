@@ -106,6 +106,7 @@ describe('path registry', () => {
     /* The authored `.tau` controls answer the authored default through their
      * own rows, which is what re-opens them above the reserved `.tau` default. */
     '.tau/parameters/main.json',
+    '.tau/machines/printer.json',
     '.tau/skills/cad/SKILL.md',
     '.tau/AGENTS.md',
     /* No project-level `.cache` directory exists anywhere in the tree; the
@@ -352,6 +353,21 @@ describe('path registry', () => {
    * controls too, and an agent that cannot list `.tau` cannot find them. */
   it('leaves the `.tau` directory itself listable', () => {
     expect(classify('.tau')).toStrictEqual(unlistedPathClassification);
+  });
+
+  /* Project print intent fell to the reserved default, hidden from every view,
+   * until `.tau/machines` became a directory row of its own: the Print pane
+   * could not read or watch its own file. */
+  it('should give `.tau/machines` and everything beneath it the authored answer', () => {
+    expect(pathRegistry.find((row) => row.prefix === '.tau/machines')).toMatchObject({
+      anchored: true,
+      match: 'root',
+      directory: true,
+    });
+    expect(classify('.tau/machines')).toStrictEqual(unlistedPathClassification);
+    expect(classify('.tau/machines/printer.json')).toStrictEqual(unlistedPathClassification);
+    expect(classify('.tau/machines/printer.json.bak')).toStrictEqual(unlistedPathClassification);
+    expect(classify('.tau/machines-old/printer.json')).toStrictEqual(reservedTauPathClassification);
   });
 
   /* eslint-disable no-restricted-syntax -- the retired directory is this case's

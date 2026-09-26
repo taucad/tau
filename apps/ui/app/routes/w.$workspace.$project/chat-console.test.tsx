@@ -32,6 +32,7 @@ vi.mock('#components/panes/paneview-header.js', () => ({
     </div>
   ),
   PaneviewHeaderControls: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  paneviewAttachedBodyClassName: 'attached-body',
   paneviewAttachedSurfaceStyleOverrides: 'attached-paneview',
   paneviewHeaderSize: 40,
 }));

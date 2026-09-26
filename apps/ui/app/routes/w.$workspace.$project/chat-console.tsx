@@ -24,6 +24,7 @@ import { HighlightText } from '#components/highlight-text.js';
 import {
   PaneviewHeader,
   PaneviewHeaderControls,
+  paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
 } from '#components/panes/paneview-header.js';
@@ -217,10 +218,7 @@ const ConsolePanelBody = ({ params }: { readonly params: ConsolePanelParams }): 
   }
 
   return (
-    <div
-      data-slot='console-unit-surface'
-      className='relative h-full overflow-hidden rounded-b-xl border border-border bg-card'
-    >
+    <div data-slot='console-unit-surface' className={cn('relative h-full', paneviewAttachedBodyClassName)}>
       {content}
     </div>
   );

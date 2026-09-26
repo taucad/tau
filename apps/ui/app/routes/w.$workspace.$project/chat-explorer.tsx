@@ -36,6 +36,7 @@ import {
   PaneviewHeader,
   PaneviewHeaderAction,
   PaneviewHeaderControls,
+  paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
 } from '#components/panes/paneview-header.js';
@@ -431,7 +432,7 @@ function ModelPaneviewPanelSurface({
   readonly children?: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div data-slot='model-unit-surface' className='h-full overflow-hidden rounded-b-xl border border-border bg-card'>
+    <div data-slot='model-unit-surface' className={cn('h-full', paneviewAttachedBodyClassName)}>
       <div
         ref={contentRef}
         data-slot='model-unit-scroller'

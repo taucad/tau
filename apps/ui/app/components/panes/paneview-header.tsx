@@ -38,6 +38,9 @@ export const paneviewAttachedSurfaceStyleOverrides = cn(
   '[&_[data-slot=paneview-header][data-state=open]]:border-b-0!',
 );
 
+/** The bordered card a panel body draws under an attached header, in every state (loading, empty, error, loaded). */
+export const paneviewAttachedBodyClassName = 'overflow-hidden rounded-b-xl border border-border bg-card';
+
 type PaneviewHeaderContextValue = { expanded: boolean };
 
 const PaneviewHeaderContext = React.createContext<PaneviewHeaderContextValue | undefined>(undefined);

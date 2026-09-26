@@ -47,7 +47,7 @@ Fix geometry at its root; never weaken tolerances, delete assertions, or reduce 
 
 ## API reference
 
-All 366 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+All 367 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants

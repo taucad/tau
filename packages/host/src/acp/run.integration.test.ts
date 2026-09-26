@@ -929,9 +929,10 @@ describe('the external agent run kind', () => {
     await writeFile(
       join(workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl'),
       [
+        { ...base, sequence: 0, type: 'run.lifecycle', state: 'admitted', storageDurability: 'exclusive-append' },
         {
           ...base,
-          sequence: 0,
+          sequence: 1,
           type: 'message.appended',
           message: {
             id: 'user-1',
@@ -942,7 +943,6 @@ describe('the external agent run kind', () => {
             },
           },
         },
-        { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted', storageDurability: 'exclusive-append' },
         { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
       ]
         .map((event) => JSON.stringify(event))
@@ -1213,9 +1213,10 @@ describe('the external agent run kind', () => {
     await writeFile(
       join(workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl'),
       [
+        { ...base, sequence: 0, type: 'run.lifecycle', state: 'admitted', storageDurability: 'exclusive-append' },
         {
           ...base,
-          sequence: 0,
+          sequence: 1,
           type: 'message.appended',
           message: {
             id: 'user-1',
@@ -1224,7 +1225,6 @@ describe('the external agent run kind', () => {
             metadata: { tauInternal: { kind: 'external-agent', agentId: 'codex', acpSessionId: 'fake-session-1' } },
           },
         },
-        { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted', storageDurability: 'exclusive-append' },
         { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
         /* The agent's own stop, and the resume the person clicked on it. */
         {

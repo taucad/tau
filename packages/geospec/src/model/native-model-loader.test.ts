@@ -264,3 +264,58 @@ describe('native model loader ownership', () => {
     }
   });
 });
+
+/** Content-addressed stand-in: the first primary byte names the subject, as a digest would. */
+const contentEngine = () => {
+  const decodeRequest = (bytes: Uint8Array<ArrayBuffer>): Record<string, unknown> =>
+    JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+  const released: string[] = [];
+  const ingestSubject = vi.fn(
+    (
+      _request: Uint8Array<ArrayBuffer>,
+      primary: Uint8Array<ArrayBuffer>,
+      _resources: ReadonlyArray<Uint8Array<ArrayBuffer>>,
+    ) => encode({ result: { subject: { subjectHash: String(primary[0]).repeat(64) } } }),
+  );
+  const engine: GeoSpecNativeModelEngine = {
+    evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
+    processRequest: (input) => input,
+    ingestSubject,
+    subjectHandle: (request) =>
+      encode({ result: { subjectHandle: { subjectHash: decodeRequest(request)['subjectHash'], generation: 1 } } }),
+    releaseSubject: (request) => {
+      const handle = decodeRequest(request)['subjectHandle'] as { subjectHash: string };
+      released.push(handle.subjectHash[0]!);
+      return encode({ result: {} });
+    },
+  };
+  const files: Record<string, number> = { 'a.step': 1, 'b.step': 2, 'c.step': 3 };
+  const readSource = vi.fn(async (source: unknown) => Uint8Array.of(files[String(source)]!));
+  return {
+    engine,
+    files,
+    ingestSubject,
+    readSource,
+    released,
+  };
+};
+
+describe('native model loader freshness', () => {
+  it('should read every load again and admit edited bytes as a new subject', async () => {
+    const { engine, files, ingestSubject, readSource } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine, readSource });
+
+    const first = await loader({ source: 'a.step', format: 'step' });
+    const repeat = await loader({ source: 'a.step', format: 'step' });
+    files['a.step'] = 9;
+    const edited = await loader({ source: 'a.step', format: 'step' });
+
+    expect(readSource).toHaveBeenCalledTimes(3);
+    expect(ingestSubject).toHaveBeenCalledTimes(3);
+    expect([first, repeat, edited]).toStrictEqual([
+      { subjectHash: '1'.repeat(64) },
+      { subjectHash: '1'.repeat(64) },
+      { subjectHash: '9'.repeat(64) },
+    ]);
+  });
+});

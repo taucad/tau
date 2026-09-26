@@ -29,7 +29,10 @@ const started = (providerRunId: string): PrintRequest =>
 
 describe('selectPrinterLive', () => {
   it('draws the followed machine with its own provider manifest', () => {
-    const live = selectPrinterLive([entry({ machineId: 'idle-1' }), printing()], new Map([['bambu', manifest]]));
+    const live = selectPrinterLive(
+      [entry({ machineId: 'idle-1' }), printing()],
+      new Map([['bambu-simulator', manifest]]),
+    );
 
     expect(live?.isActive).toBe(true);
     expect(live?.manifest).toBe(manifest);
@@ -56,6 +59,8 @@ describe('selectPrinterLive', () => {
   });
 
   it('follows no machine that is stale or disconnected', () => {
-    expect(selectPrinterLive([entry({ freshness: 'stale' })], new Map([['bambu', manifest]]))).toBeUndefined();
+    expect(
+      selectPrinterLive([entry({ freshness: 'stale' })], new Map([['bambu-simulator', manifest]])),
+    ).toBeUndefined();
   });
 });

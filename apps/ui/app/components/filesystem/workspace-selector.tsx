@@ -18,7 +18,6 @@ import { cn } from '@taucad/ui/utils/cn';
 type WorkspaceSelectorProperties = Omit<React.HTMLAttributes<HTMLDivElement>, 'onSelect'> & {
   readonly state: ProjectCreationLocationState;
   readonly variant: 'toolbar' | 'field';
-  readonly isNested?: boolean;
   readonly onSelectionComplete?: () => void;
   readonly onRequestFocus?: () => void;
 };
@@ -55,7 +54,6 @@ const triggerStyles = {
 export function WorkspaceSelector({
   state,
   variant,
-  isNested = false,
   onSelectionComplete,
   onRequestFocus,
   className,
@@ -176,11 +174,10 @@ export function WorkspaceSelector({
       isSearchEnabled={state.options.length >= 5}
       title='Select a project location'
       description='Choose where new project files are stored.'
-      isNested={isNested}
       isOpen={open}
       onOpenChange={setOpen}
       onSelect={select}
-      onClose={isNested ? undefined : onRequestFocus}
+      onClose={onRequestFocus}
       shouldCloseOnSelect={(value) => isReadyOption(optionForValue(value))}
       footer={
         <>

@@ -43,14 +43,12 @@ type ChatKernelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'child
   readonly onClose?: () => void;
   readonly children: (props: { selectedKernel: (typeof kernelConfigurations)[number] }) => ReactNode;
   readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
-  readonly isNested?: boolean;
 };
 
 export const ChatKernelSelector = memo(function ({
   onSelect,
   onClose,
   children,
-  isNested,
   ...properties
 }: ChatKernelSelectorProps): React.JSX.Element {
   // Read AND write through the unified composer context. The active
@@ -125,7 +123,6 @@ export const ChatKernelSelector = memo(function ({
       getValue={(item) => item.id}
       placeholder='Select a kernel'
       value={selectedKernel}
-      isNested={isNested}
       onSelect={handleSelectKernel}
       onClose={onClose}
     >

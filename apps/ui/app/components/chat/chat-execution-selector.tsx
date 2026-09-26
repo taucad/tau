@@ -44,7 +44,6 @@ type ChatExecutionSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'ch
   readonly onSelect?: () => void;
   readonly onClose?: () => void;
   readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
-  readonly isNested?: boolean;
 };
 
 /**
@@ -218,7 +217,6 @@ export const ChatExecutionSelector = memo(function ({
   children,
   onSelect,
   onClose,
-  isNested,
   ...properties
 }: ChatExecutionSelectorProps): React.JSX.Element {
   const {
@@ -308,7 +306,6 @@ export const ChatExecutionSelector = memo(function ({
       description='Choose Tau in this browser, or a Tau Host workspace.'
       searchPlaceHolder='Search agents...'
       emptyListMessage='No agents discovered.'
-      isNested={isNested}
       onClose={onClose}
       onSelect={selectTarget}
       renderLabel={(target, selected) => (

@@ -18,7 +18,6 @@ type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'childr
   readonly onClose?: () => void;
   readonly children: (props: { selectedModel: ResolvedModel }) => ReactNode;
   readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
-  readonly isNested?: boolean;
 };
 
 function formatContextWindow(tokens: number): string {
@@ -41,7 +40,6 @@ export const ChatModelSelector = memo(function ({
   onSelect,
   onClose,
   children,
-  isNested,
   ...properties
 }: ChatModelSelectorProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -141,7 +139,6 @@ export const ChatModelSelector = memo(function ({
       getValue={(item) => item.id}
       placeholder='Select a model'
       value={comboboxSelectedModel}
-      isNested={isNested}
       isOpen={open}
       onOpenChange={setOpen}
       onSelect={handleSelectModel}

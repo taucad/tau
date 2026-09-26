@@ -180,6 +180,9 @@ const settingsCatalog = [
           '3d print',
           'bind',
           'access code',
+          'keychain',
+          'remove',
+          'forget',
           /* What each machine's details show. */
           'firmware',
           'nozzle',

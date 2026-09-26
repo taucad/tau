@@ -278,14 +278,14 @@ function MachineCard({
   );
 }
 
-/** Printers are set up in Settings › Machines, where the access code stays in the host ceremony. */
+/** Printers belong to this computer and are set up once in Settings › Machines, where the access code stays in the host ceremony. */
 function NoMachines(): React.JSX.Element {
   const { open } = useSettingsDialog();
   return (
     <PanelEmptyState
       icon={Printer}
       title='No printers yet'
-      description='Find a Bambu Lab printer on your network or add the simulated X1C in Settings.'
+      description='Find a Bambu Lab printer on your network or add the simulated X1C in Settings. Printers set up there are available in every project on this computer.'
     >
       <Button
         type='button'

@@ -45,7 +45,7 @@ describe('describeRevisionFailure', () => {
   });
 
   it('names the branch a person already has, when the refusal came with one', () => {
-    expect(describeRevisionFailure('branch', 'CHECKOUT_CONFLICT', 'bracket-fillet').description).toBe(
+    expect(describeRevisionFailure('branch', 'CHECKOUT_CONFLICT', { branch: 'bracket-fillet' }).description).toBe(
       'bracket-fillet already exists. Pick another name.',
     );
     expect(describeRevisionFailure('branch', 'CHECKOUT_CONFLICT').description).toBe(
@@ -116,6 +116,13 @@ describe('a restore or save the line refused (D1, D3)', () => {
       'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own revision. Your files are kept.',
     ],
     ['restore', 'UNDO_UNAVAILABLE', 'That restore was made on another branch. Open it there to undo it.'],
+    ['restore', 'NOTHING_TO_UNDO', 'Nothing you did on this branch is left to undo.'],
+    ['restore', 'UNDO_PAST_MERGE', 'Your last change on this branch was a merge. Restore an earlier revision instead.'],
+    [
+      'restore',
+      'UNDO_CONFLICT',
+      'A later revision changed the same lines, so that change can’t be undone. Restore an earlier revision instead.',
+    ],
     ['save', 'CAS_LOST', 'Something else changed this project first. Your changes are still here; save again.'],
   ] as const)('phrases a %s refused with %s', (subject, code, description) => {
     expect(describeRevisionFailure(subject, code).description).toBe(description);
@@ -129,6 +136,18 @@ describe('a restore whose files are back but not recorded (W0 N1, M1)', () => {
     expect(copy.title).toBe('Files restored');
     expect(copy.description).not.toMatch(/try again/iu);
     expect(describeRevisionFailure('restore', 'UNDO_UNAVAILABLE').title).toBe('Nothing to undo here');
+  });
+
+  it('titles an Undo that refused by what it is, never as a failed restore (D15)', () => {
+    expect(describeRevisionFailure('restore', 'NOTHING_TO_UNDO').title).toBe('Nothing to undo here');
+    expect(describeRevisionFailure('restore', 'UNDO_CONFLICT').title).toBe('That change can’t be undone');
+    expect(describeRevisionFailure('restore', 'UNDO_PAST_MERGE').title).toBe('A merge can’t be undone');
+  });
+
+  it('names the revision an Undo could not undo, when it has a number (RV-W7 #13)', () => {
+    expect(describeRevisionFailure('restore', 'UNDO_CONFLICT', { revisionNumber: 3 }).description).toBe(
+      'A later revision changed the same lines, so Rev 3 can’t be undone. Restore an earlier revision instead.',
+    );
   });
 });
 

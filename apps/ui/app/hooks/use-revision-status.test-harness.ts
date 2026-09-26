@@ -33,6 +33,7 @@ const emptyStatus = (): RevisionStatusProjection => ({
     dirty: false,
     revisionNumber: undefined,
     undoable: false,
+    canUndo: false,
   },
   remote: {
     kind: 'none',
@@ -86,6 +87,7 @@ export const revisionStatusHarness = {
   commands: {
     restore: vi.fn<(revisionId: string) => void>(),
     undo: vi.fn(),
+    undoOperation: vi.fn(),
     confirm: vi.fn(),
     cancel: vi.fn(),
     switchTo: vi.fn<(branch: string) => void>(),

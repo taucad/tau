@@ -644,7 +644,13 @@ describe('the page client of the worker revision root', () => {
     await settle();
 
     expect(root.inspect()).toMatchObject({ status: 'stopped', children: [] });
-    expect(registry.openProjectIds()).toEqual([]);
+    // Closing waits for the operation log's last append, so the registry lets go after the root stops.
+    await vi.waitFor(
+      () => {
+        expect(registry.openProjectIds()).toEqual([]);
+      },
+      { timeout: 10_000 },
+    );
   });
 
   it('should keep one lifecycle owner when one of multiple passive consumers unmounts', async () => {
@@ -875,7 +881,7 @@ describe('the page client of the worker revision root', () => {
       /* One hop from a surface, so the words are the table's rather than the
          registry's — "the registry made x without a checkout to run on" is
          banned vocabulary and unactionable besides (Rule 1). */
-      message: describeRevisionFailure('branch', 'BRANCH_UNPLACED', 'isolated-run').description,
+      message: describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: 'isolated-run' }).description,
     });
     client.close();
   });

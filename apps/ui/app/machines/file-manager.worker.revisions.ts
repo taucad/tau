@@ -110,6 +110,8 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'restore'; revisionId: string }>
   /** *Undo restore*: restore the first parent of `revisionId`, or of the last restore (D2). */
   | Readonly<{ command: 'undo' }>
+  /** *Undo*: reverse this device's newest operation on the selected line (D15). */
+  | Readonly<{ command: 'undoOperation' }>
   | Readonly<{ command: 'confirm' }>
   | Readonly<{ command: 'cancel' }>
   | Readonly<{ command: 'switch'; branch: string }>
@@ -292,6 +294,8 @@ export type RevisionFileComparison = Readonly<{ original: string; modified: stri
 export type RevisionToast =
   /** `revisionNumber` is `undefined` for a target that is not on the line (D5, A9). */
   | Readonly<{ type: 'restored'; revisionNumber: number | undefined }>
+  /** *Undo* landed; the number is the revision it undid (D15). */
+  | Readonly<{ type: 'undone'; revisionNumber: number | undefined }>
   | Readonly<{ type: 'nothingToSave' }>
   | Readonly<{
       type: 'branch';
@@ -353,6 +357,8 @@ export type RevisionToast =
       message: string;
       /* P4: the code is the refusal; the page turns it into product words. */
       code?: string;
+      /** The revision an undo could not undo, for the page's sentence (D15). */
+      revisionNumber?: number;
     }>;
 
 /**
@@ -911,12 +917,16 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   restoreChild?.on('toast.restored', (toast) => {
     toasts.emit({ type: 'restored', revisionNumber: toast.revisionNumber });
   });
+  restoreChild?.on('toast.undone', (toast) => {
+    toasts.emit({ type: 'undone', revisionNumber: toast.revisionNumber });
+  });
   restoreChild?.on('toast.error', (toast) => {
     toasts.emit({
       type: 'error',
       subject: 'restore',
       message: toast.message,
       ...(toast.code === undefined ? {} : { code: toast.code }),
+      ...(toast.revisionNumber === undefined ? {} : { revisionNumber: toast.revisionNumber }),
     });
   });
   /* The branch verbs settle out of sight of the region that started them — a
@@ -1125,9 +1135,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
            * `Chat.checkoutId` and leave the chat with nothing to run on (P2,
            * review finding 5). */
           created.reject(
-            Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', name).description), {
-              code: 'BRANCH_UNPLACED',
-            }),
+            Object.assign(
+              new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: name }).description),
+              {
+                code: 'BRANCH_UNPLACED',
+              },
+            ),
           );
           return;
         }
@@ -1371,8 +1384,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           actor.send({ type: command.command, turnId: command.turnId });
           return;
         }
-        case 'undo': {
-          actor.getSnapshot().children.restore?.send({ type: 'undo' });
+        case 'undo':
+        case 'undoOperation': {
+          actor.getSnapshot().children.restore?.send({ type: command.command });
           break;
         }
         case 'confirm':

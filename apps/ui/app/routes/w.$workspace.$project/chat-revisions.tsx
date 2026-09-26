@@ -150,7 +150,13 @@ function OrientationStrip({
   /* No head, no branch point; and nothing is offered over a line nobody has located yet (HQ7). */
   const canBranch = head !== undefined && canWrite && !isUnknown;
   /* M1: the restore machine's own undo target, never a restore row this device did not mint. */
-  const verbs = selectStripVerbs({ status, where, undoable: status?.restore.undoable === true, canWrite });
+  const verbs = selectStripVerbs({
+    status,
+    where,
+    undoable: status?.restore.undoable === true,
+    canUndo: status?.restore.canUndo === true,
+    canWrite,
+  });
   /* A29: the chooser is already open below, so Back up would repeat it. */
   const primary = verbs.primary === 'Back up' && isSyncOpen ? undefined : verbs.primary;
   const headName = revisionName(head?.n);
@@ -163,6 +169,10 @@ function OrientationStrip({
       }
       case 'Undo restore': {
         undo();
+        break;
+      }
+      case 'Undo': {
+        commands.undoOperation();
         break;
       }
       case 'Back up': {
@@ -191,7 +201,7 @@ function OrientationStrip({
       <ActionButton
         key={verb}
         verb={verb}
-        icon={verb === 'Undo restore' ? Undo2 : verb === 'Back up' ? CloudUpload : undefined}
+        icon={verb === 'Undo restore' || verb === 'Undo' ? Undo2 : verb === 'Back up' ? CloudUpload : undefined}
         variant={isPrimary && (verb === 'Save revision' || facts.mark === 'attention') ? 'default' : 'outline'}
         disabled={isBusy}
         onClick={() => {

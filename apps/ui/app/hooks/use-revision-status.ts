@@ -208,7 +208,7 @@ const awaitBranchCreated = async (
         /* A branch with no checkout named is no placement: `''` used to reach
          * `Chat.checkoutId` and leave the chat nothing to run on (finding 5). */
         created.reject(
-          Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', name).description), {
+          Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: name }).description), {
             code: 'BRANCH_UNPLACED',
           }),
         );
@@ -1301,7 +1301,10 @@ export const useRevisionStatus = (): RevisionStatusProjection | undefined =>
 /** The verbs the page sends to its revision root. @public */
 export type RevisionCommands = Readonly<{
   restore: (revisionId: string) => void;
+  /** *Undo restore* (D2). */
   undo: () => void;
+  /** *Undo*: reverse this device's newest operation on the line (D15). */
+  undoOperation: () => void;
   confirm: () => void;
   cancel: () => void;
   switchTo: (branch: string) => void;
@@ -1403,6 +1406,7 @@ export const useRevisionCommands = (): RevisionCommands => {
     () => ({
       restore: (revisionId: string) => client?.send({ command: 'restore', revisionId }),
       undo: () => client?.send({ command: 'undo' }),
+      undoOperation: () => client?.send({ command: 'undoOperation' }),
       confirm: () => client?.send({ command: 'confirm' }),
       cancel: () => client?.send({ command: 'cancel' }),
       switchTo: (branch: string) => client?.send({ command: 'switch', branch }),

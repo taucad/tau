@@ -76,17 +76,21 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
      alone left an enabled *Sync now* for a read collaborator, whose push the
      API refuses — one shared predicate rather than two conditions. */
   const syncReadOnly = isSyncReadOnly(revisionStatus?.remote, projectRole);
-  const { syncNow, undo } = useRevisionCommands();
+  const { syncNow, undo, undoOperation } = useRevisionCommands();
   /* D2, M1: *Undo restore* where the strip offers it and nowhere else — the restore row this
      device's restore machine minted, still the head — in the strip's own words. Never after a
      reload or another device's restore, which the machine would answer UNDO_UNAVAILABLE. */
   const { where, status } = useRevisionFacts();
-  const canUndoRestore = selectStripVerbs({
+  /* D15: *Undo* on the same condition as the strip, which *Undo restore* takes over when both apply. */
+  const { secondary: undoVerbs } = selectStripVerbs({
     status,
     where,
     undoable: status?.restore.undoable === true,
+    canUndo: status?.restore.canUndo === true,
     canWrite: projectRole !== 'read' && projectRole !== 'revoked',
-  }).secondary.includes('Undo restore');
+  });
+  const canUndoRestore = undoVerbs.includes('Undo restore');
+  const canUndo = undoVerbs.includes('Undo');
   const saveRevision = useSaveRevisionRequest();
   const isRemoteConnected = revisionStatus?.remote.kind !== undefined && revisionStatus.remote.kind !== 'none';
   /* HQ7: backup verbs wait until the projection has located the line; before it, they could only fail. */
@@ -254,6 +258,14 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         visible: canUndoRestore,
       },
       {
+        id: 'undo-operation',
+        label: 'Undo',
+        group: 'Revisions',
+        icon: <Undo2 />,
+        action: undoOperation,
+        visible: canUndo,
+      },
+      {
         id: 'share-project',
         label: 'Share project',
         group: 'Project',
@@ -389,6 +401,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       syncNow,
       undo,
       canUndoRestore,
+      undoOperation,
+      canUndo,
     ],
   );
 

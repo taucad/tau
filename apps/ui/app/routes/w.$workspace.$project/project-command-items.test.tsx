@@ -247,6 +247,38 @@ describe('ProjectCommandPaletteItems', () => {
     expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
   });
 
+  /* D15: Undo where the operation log has something of this device's to reverse, on the strip's condition;
+     Undo restore takes over when both apply, since on an unmoved line they make the same files. */
+  it('offers Undo where the log can answer it, and yields to Undo restore', async () => {
+    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    await waitFor(() => {
+      expect(registeredItems.find((item) => item.id === 'undo-operation')).toBeDefined();
+    });
+    expect(registeredItems.find((item) => item.id === 'undo-operation')?.visible).toBe(false);
+
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-2',
+      restore: { ...revisionStatusHarness.status.restore, canUndo: true },
+    };
+    rerender(<ProjectCommandPaletteItems match={match} />);
+    await waitFor(() => {
+      expect(registeredItems.find((item) => item.id === 'undo-operation')?.visible).toBe(true);
+    });
+    const undo = registeredItems.find((item) => item.id === 'undo-operation');
+    expect(undo).toMatchObject({ label: 'Undo', group: 'Revisions' });
+    undo?.action?.();
+    expect(revisionStatusHarness.commands.undoOperation).toHaveBeenCalledOnce();
+
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      restore: { ...revisionStatusHarness.status.restore, canUndo: true, undoable: true },
+    };
+    rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'undo-operation')?.visible).toBe(false);
+    expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(true);
+  });
+
   it('should defer command registration until project context exists', () => {
     hasProjectContext = false;
     const view = render(<ProjectCommandPaletteItems match={match} />, { wrapper });

@@ -85,11 +85,16 @@ export function RevisionRestore(): React.JSX.Element {
          * words (P4, Rule 1); the diagnostic — `Buffer is not defined`, a port
          * sentence naming a checkout — goes where someone can act on it, which
          * is not a toast (E5). */
-        const copy = describeRevisionFailure(entry.subject, entry.code);
+        const copy = describeRevisionFailure(entry.subject, entry.code, { revisionNumber: entry.revisionNumber });
         analytics.capture(revisionFailureEvent[entry.subject], { message: entry.message, code: entry.code });
         console.error('[revisions]', entry.subject, entry.code, entry.message);
-        /* W0 N1, M1: files that are back, and an undo that belongs elsewhere, lost nothing; they are not failures. */
-        if (entry.code === 'RESTORE_UNRECORDED' || entry.code === 'UNDO_UNAVAILABLE') {
+        /* W0 N1, M1, D15: files that are back, and an undo with nothing here to undo, lost nothing; they are not failures. */
+        if (
+          entry.code === 'RESTORE_UNRECORDED' ||
+          entry.code === 'UNDO_UNAVAILABLE' ||
+          entry.code === 'NOTHING_TO_UNDO' ||
+          entry.code === 'UNDO_PAST_MERGE'
+        ) {
           toast.warning(copy.title, { description: copy.description });
           return;
         }
@@ -140,6 +145,16 @@ export function RevisionRestore(): React.JSX.Element {
         toast.warning(`${needsDecision} on ${entry.into}`, {
           description: `${String(entry.paths.length)} ${entry.paths.length === 1 ? 'file changed' : 'files changed'} on both lines. ${entry.into} is untouched until you choose.`,
         });
+        return;
+      }
+      /* D15: an undo row names what it undid, as a restore row names its source. */
+      if (entry.type === 'undone') {
+        analytics.capture('revision_undone', { revision: entry.revisionNumber });
+        toast.success(
+          entry.revisionNumber === undefined
+            ? 'Undid an earlier revision'
+            : `Undid Rev ${String(entry.revisionNumber)}`,
+        );
         return;
       }
       analytics.capture('revision_restored', { revision: entry.revisionNumber });

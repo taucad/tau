@@ -174,6 +174,41 @@ describe('RevisionRestore', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
+  /* D15: an Undo names the revision it undid, and a refusal with nothing to undo is not a failure. */
+  it('announces an Undo by the revision it undid, and warns rather than fails when nothing is left', () => {
+    render(<RevisionRestore />);
+
+    for (const listener of revisionStatusHarness.toasts) {
+      listener({ type: 'undone', revisionNumber: 4 });
+      listener({
+        type: 'error',
+        subject: 'restore',
+        code: 'NOTHING_TO_UNDO',
+        message: 'Nothing you did on this branch is left to undo.',
+      });
+      listener({
+        type: 'error',
+        subject: 'restore',
+        code: 'UNDO_CONFLICT',
+        message: 'A later revision changed the same lines, so Rev 2 can’t be undone.',
+        revisionNumber: 2,
+      });
+    }
+
+    expect(toastSuccess.mock.calls[0]).toEqual(['Undid Rev 4']);
+    expect(toastWarning.mock.calls[0]).toEqual([
+      'Nothing to undo here',
+      { description: 'Nothing you did on this branch is left to undo.' },
+    ]);
+    expect(toastError.mock.calls[0]).toEqual([
+      'That change can’t be undone',
+      {
+        description:
+          'A later revision changed the same lines, so Rev 2 can’t be undone. Restore an earlier revision instead.',
+      },
+    ]);
+  });
+
   it('names a restore of a revision off the line without inventing its number (A9)', () => {
     render(<RevisionRestore />);
 

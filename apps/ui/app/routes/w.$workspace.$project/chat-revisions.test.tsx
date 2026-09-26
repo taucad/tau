@@ -1029,6 +1029,20 @@ describe('History over a long line (B2)', () => {
     expect(await screen.findByRole('button', { name: 'Rev 121 · Restored Rev 3' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Undo restore' })).not.toBeInTheDocument();
   });
+
+  /* D15: the strip offers Undo where the operation log has something of this device's to reverse. */
+  it('offers Undo in the strip where the log can answer it, and sends that verb', async () => {
+    const user = userEvent.setup();
+    onLongLine({
+      restore: { ...revisionStatusHarness.status.restore, canUndo: true },
+    });
+    renderStablePane();
+
+    await user.click(await screen.findByRole('button', { name: 'Undo' }));
+
+    expect(revisionStatusHarness.commands.undoOperation).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Undo restore' })).not.toBeInTheDocument();
+  });
 });
 
 describe('Revisions pane vocabulary and History', () => {

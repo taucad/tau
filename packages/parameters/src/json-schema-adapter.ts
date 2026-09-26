@@ -56,22 +56,40 @@ const draftTypeToNative = (value: unknown, width: string | undefined): unknown =
   return value;
 };
 
+// `pattern` is a keyword only on a schema object; in a name map or a data value it is an ordinary key.
+type PatternRole = 'schema' | 'schemas' | 'data';
+const patternChildRole = (role: PatternRole, key: string, value: unknown): PatternRole => {
+  if (role !== 'schema') {
+    return role === 'schemas' ? 'schema' : 'data';
+  }
+  if (
+    schemaMapKeywords.has(key) ||
+    schemaArrayKeywords.has(key) ||
+    key === 'dependencies' ||
+    (key === 'items' && Array.isArray(value))
+  ) {
+    return 'schemas';
+  }
+  return schemaKeywords.has(key) ? 'schema' : 'data';
+};
+
 const withoutStringPatterns = (root: Record<string, unknown>): Record<string, unknown> => {
   const projected: Record<string, unknown> = {};
   const stack: Array<{
     source: Record<string, unknown> | unknown[];
     target: Record<string, unknown> | unknown[];
     depth: number;
-  }> = [{ source: root, target: projected, depth: 0 }];
+    role: PatternRole;
+  }> = [{ source: root, target: projected, depth: 0, role: 'schema' }];
   let nodes = 0;
   while (stack.length > 0) {
-    const { source, target, depth } = stack.pop()!;
+    const { source, target, depth, role } = stack.pop()!;
     nodes += 1;
     if (nodes > 2048 || depth > 20) {
       throw new TypeError('SCHEMA_LIMIT: depth or node budget exceeded');
     }
     for (const [key, value] of Object.entries(source)) {
-      if (key === 'pattern') {
+      if (role === 'schema' && key === 'pattern') {
         continue;
       }
       if (value !== null && typeof value === 'object') {
@@ -81,6 +99,7 @@ const withoutStringPatterns = (root: Record<string, unknown>): Record<string, un
           source: Array.isArray(value) ? value : (value as Record<string, unknown>),
           target: child,
           depth: depth + 1,
+          role: patternChildRole(role, key, value),
         });
       } else {
         Reflect.set(target, key, value);

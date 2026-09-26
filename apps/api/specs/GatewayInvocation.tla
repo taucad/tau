@@ -1,10 +1,11 @@
 ---------------------------- MODULE GatewayInvocation ----------------------------
 (***************************************************************************)
-(* W11 draft, promoted by W1 (FM-S3): one funded model step of one chat.   *)
-(* W11 owns the content: GI-S1 strengthens ChargeAfterRecordedLoss to     *)
-(* "the settled row precedes the step's next prepared row", bounds        *)
-(* AutoProceed by lostReplyRetries, and adds HostDiscard, the voided      *)
-(* settled row, MODEL_ATTEMPT_PENDING and IndInv for Apalache.            *)
+(* W11 (GI-S1, GI-S7): one funded model step of one chat. The gateway row *)
+(* is the invocation machine (D19); ChargeAfterRecordedLoss says a charged *)
+(* attempt's settled row precedes the step's next prepared row (EQ1);      *)
+(* AutoProceed is bounded by LostReplyRetries per live run; HostDiscard is *)
+(* RV5's overflow retry; a void is recorded as a settled row; IndInv is    *)
+(* the Apalache inductive invariant of the row (M* conjuncts, MC_ module). *)
 (*                                                                         *)
 (* Processes: the host's attempt journal (prepare, send, bind, complete,   *)
 (* network drop, crash, resume with lookup); the API live path per attempt *)
@@ -26,31 +27,108 @@
 (*                  (pending: a coded wait) instead of an uncoded error    *)
 (*   AutoProceed    EQ1 (charge and proceed, ruled 2026-09-25): after a    *)
 (*                  charged loss is recorded the step re-prepares under a  *)
-(*                  new key with no gesture                                *)
+(*                  new key with no gesture, at most LostReplyRetries      *)
+(*                  times per live run; then the run ends resumably and    *)
+(*                  Resume proceeds the same way                           *)
+(*   KeepCompleted  a completed reply is kept (W0.20); FALSE is RV5-F1's   *)
+(*                  overflow retry, which discards it and sends again      *)
 (***************************************************************************)
 EXTENDS Integers, FiniteSets
 
-CONSTANTS Keys, Workers, Crashes, MaxTime, Due, Grace, MaxRecovery,
-          VoidOnLookup, LookupFailed, Reconcile, AutoProceed, RefundHolds,
-          FenceGen, DeferGrace   \* mutation knobs: TRUE is the code as written
+CONSTANTS
+    \* @type: Set(Str);
+    Keys,
+    \* @type: Int;
+    Workers,
+    \* @type: Bool;
+    Crashes,
+    \* @type: Int;
+    MaxTime,
+    \* @type: Int;
+    Due,
+    \* @type: Int;
+    Grace,
+    \* @type: Int;
+    MaxRecovery,
+    \* @type: Int;
+    LostReplyRetries,
+    \* @type: Bool;
+    VoidOnLookup,
+    \* @type: Bool;
+    LookupFailed,
+    \* @type: Bool;
+    Reconcile,
+    \* @type: Bool;
+    AutoProceed,
+    \* @type: Bool;
+    KeepCompleted,
+    \* @type: Bool;
+    RefundHolds,
+    \* mutation knobs: TRUE is the code as written
+    \* @type: Bool;
+    FenceGen,
+    \* @type: Bool;
+    DeferGrace,
+    \* @type: Bool;
+    CountRetries
 
 None == "none"
 
 VARIABLES
+    \* @type: Int;
     now,
     \* durable: billing.credit_operation, one row per attempt key (unique index)
-    row, acctHeld, refundHeld, voided,
+    \* @type: Str -> {ex: Bool, cust: Str, disp: Str, gen: Int, lease: Int, due: Int, intent: Int, igen: Int, cancel: Int, ev: Set(Str), tgen: Int, charged: Int, ttl: Bool, rat: Int, fails: Int};
+    row,
+    \* @type: Int;
+    acctHeld,
+    \* @type: Int;
+    refundHeld,
+    \* @type: Set(Str);
+    voided,
     \* API live path and supplier, per key (volatile)
-    req, fin, conn, sup, dispatches,
-    \* sweep claims in flight (volatile): a set of [k, gen]
+    \* @type: Str -> Str;
+    req,
+    \* @type: Str -> Str;
+    fin,
+    \* @type: Str -> Str;
+    conn,
+    \* @type: Str -> Str;
+    sup,
+    \* @type: Str -> Int;
+    dispatches,
+    \* sweep claims in flight (volatile): a set of [k, gen, t]
+    \* @type: Set({k: Str, gen: Int, t: Int});
     claims,
     \* host: volatile phase plus the durable chat log
-    host, prepared, bound, shown, marker, settledRow, reprepares
+    \* @type: {ph: Str, key: Str};
+    host,
+    \* @type: Set(Str);
+    prepared,
+    \* @type: Set(Str);
+    bound,
+    \* @type: Set(Str);
+    shown,
+    \* @type: Set(Str);
+    marker,
+    \* @type: Set(Str);
+    settledRow,
+    \* re-prepares after a recorded charged loss: in all, and in the current live run
+    \* @type: Int;
+    reprepares,
+    \* @type: Int;
+    runRetries,
+    \* history: the charged losses recorded in the current live run (LostReplyBound counts these, not runRetries)
+    \* @type: Int;
+    runLosses,
+    \* history: the earlier attempts neither shown nor recorded when each key was prepared
+    \* @type: Str -> Set(Str);
+    unrecorded
 
 vars == <<now, row, acctHeld, refundHeld, voided, req, fin, conn, sup, dispatches, claims,
-          host, prepared, bound, shown, marker, settledRow, reprepares>>
+          host, prepared, bound, shown, marker, settledRow, reprepares, runRetries, runLosses, unrecorded>>
 apiVars == <<req, fin, conn, sup, dispatches>>
-logVars == <<prepared, bound, shown, marker, settledRow, reprepares>>
+logVars == <<prepared, bound, shown, marker, settledRow, reprepares, runRetries, runLosses, unrecorded>>
 
 NoRow == [ex |-> FALSE, cust |-> None, disp |-> None, gen |-> 0, lease |-> -1, due |-> 0,
           intent |-> -1, igen |-> 0, cancel |-> -1, ev |-> {}, tgen |-> 0, charged |-> 0,
@@ -75,6 +153,9 @@ Init ==
     /\ marker = {}
     /\ settledRow = {}
     /\ reprepares = 0
+    /\ runRetries = 0
+    /\ runLosses = 0
+    /\ unrecorded = [k \in Keys |-> {}]
 
 Pending(k) == row[k].ex /\ row[k].cust = "pending"
 PendingCount == Cardinality({k \in Keys : Pending(k)})
@@ -108,8 +189,10 @@ HostPrepare ==
     /\ Keys \ prepared # {}
     /\ LET k == CHOOSE x \in Keys \ prepared : TRUE IN
          /\ prepared' = prepared \cup {k}
+         /\ unrecorded' = [unrecorded EXCEPT ![k] = prepared \ (shown \cup settledRow)]
          /\ host' = [ph |-> "prepared", key |-> k]
-    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, bound, shown, marker, settledRow, reprepares>>
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, bound, shown, marker, settledRow,
+                   reprepares, runRetries, runLosses>>
 
 HostSend ==
     /\ host.ph = "prepared"
@@ -128,7 +211,7 @@ HostBind ==
          /\ row[k].ex
          /\ conn[k] = "open"
          /\ bound' = bound \cup {k}
-    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, host, prepared, shown, marker, settledRow, reprepares>>
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, host, prepared, shown, marker, settledRow, reprepares, runRetries, runLosses, unrecorded>>
 
 \* The whole reply arrived: the assistant message with the billing marker is durable.
 HostComplete ==
@@ -140,7 +223,7 @@ HostComplete ==
          /\ conn[k] = "open"
          /\ shown' = shown \cup {k}
          /\ host' = [host EXCEPT !.ph = "done"]
-    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, bound, marker, settledRow, reprepares>>
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, bound, marker, settledRow, reprepares, runRetries, runLosses, unrecorded>>
 
 \* The stream ended without a reply: the harness appends a failure message that carries the
 \* billing marker when bound (session.ts metadataFor on the error path).
@@ -152,7 +235,7 @@ HostSeesFailure ==
             \/ req[k] \in {"gone", "refused"}
          /\ marker' = IF k \in bound THEN marker \cup {k} ELSE marker
          /\ host' = [host EXCEPT !.ph = "failed"]
-    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, bound, shown, settledRow, reprepares>>
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, bound, shown, settledRow, reprepares, runRetries, runLosses, unrecorded>>
 
 \* Laptop sleep, Wi-Fi loss: the host stays up and appends a failure message; the API may not
 \* notice for a while (half-open socket), so the request keeps running.
@@ -163,15 +246,31 @@ HostNetworkDrop ==
          /\ conn' = [conn EXCEPT ![k] = "dropped"]
          /\ marker' = IF k \in bound THEN marker \cup {k} ELSE marker
          /\ host' = [host EXCEPT !.ph = "failed"]
-    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, req, fin, sup, dispatches, claims, prepared, bound, shown, settledRow, reprepares>>
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, req, fin, sup, dispatches, claims, prepared, bound, shown, settledRow, reprepares, runRetries, runLosses, unrecorded>>
 
-\* Tab closed or process killed: volatile state is lost, the log keeps what was appended.
+\* Tab closed or process killed: volatile state is lost, the log keeps what was appended. The live run
+\* ends with it, so its re-prepare budget does too.
 HostCrash ==
     /\ host.ph \in {"prepared", "inflight"}
     /\ LET k == host.key IN
          conn' = IF conn[k] = "open" THEN [conn EXCEPT ![k] = "dropped"] ELSE conn
     /\ host' = [host EXCEPT !.ph = "down"]
-    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, req, fin, sup, dispatches, claims, logVars>>
+    /\ runRetries' = 0
+    /\ runLosses' = 0
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, req, fin, sup, dispatches, claims,
+                   prepared, bound, shown, marker, settledRow, reprepares, unrecorded>>
+
+\* RV5-F1 (today's overflow retry, fixed by W0.20): a completed reply is read, dropped, and the step
+\* is sent again at once; the dropped reply is neither shown nor recorded.
+HostDiscard ==
+    /\ ~KeepCompleted
+    /\ host.ph = "inflight"
+    /\ LET k == host.key IN
+         /\ k \in bound
+         /\ fin[k] = "final"
+         /\ conn[k] = "open"
+    /\ host' = [host EXCEPT !.ph = "ready"]
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, logVars>>
 
 \* The attempt counts as resolved in the log.
 Resolved(k) ==
@@ -187,33 +286,61 @@ HostResume ==
        THEN /\ host' = [host EXCEPT !.ph = IF k \in shown THEN "done" ELSE "ready"]
             /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, logVars>>
        ELSE IF ~row[k].ex
-       THEN \* not_found: today a fresh attempt at once; target: fence the key first
+       THEN \* not_found: today a fresh attempt at once; target: fence the key, then record the void
             /\ voided' = IF VoidOnLookup THEN voided \cup {k} ELSE voided
+            /\ settledRow' = IF VoidOnLookup /\ Reconcile THEN settledRow \cup {k} ELSE settledRow
             /\ host' = [host EXCEPT !.ph = "ready"]
-            /\ UNCHANGED <<now, row, acctHeld, refundHeld, apiVars, claims, logVars>>
+            /\ UNCHANGED <<now, row, acctHeld, refundHeld, apiVars, claims, prepared, bound, shown, marker,
+                           reprepares, runRetries, runLosses, unrecorded>>
        ELSE IF ~Reconcile
        THEN \* today: "has no durable result; it will not be sent again" (uncoded Error)
             /\ host' = [host EXCEPT !.ph = "stuck"]
             /\ bound' = bound \cup {k}
-            /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, shown, marker, settledRow, reprepares>>
+            /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, shown, marker, settledRow,
+                           reprepares, runRetries, runLosses, unrecorded>>
        ELSE IF row[k].cust = "pending"
-       THEN \* target: INVOCATION_PENDING, retry class wait
+       THEN \* target: MODEL_ATTEMPT_PENDING, retry class wait
             /\ host' = [host EXCEPT !.ph = "waiting"]
             /\ bound' = bound \cup {k}
-            /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, shown, marker, settledRow, reprepares>>
-       ELSE \* target: append model.invocation-settled; charged and unshown stops (INVOCATION_REPLY_LOST)
+            /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, shown, marker, settledRow,
+                           reprepares, runRetries, runLosses, unrecorded>>
+       ELSE \* target: append model.invocation-settled; a charged, unshown attempt is a recorded loss
             /\ settledRow' = settledRow \cup {k}
             /\ bound' = bound \cup {k}
             /\ host' = [host EXCEPT !.ph = IF row[k].charged > 0 /\ k \notin shown THEN "lost" ELSE "ready"]
-            /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, shown, marker, reprepares>>
+            /\ runLosses' = IF row[k].charged > 0 /\ k \notin shown THEN runLosses + 1 ELSE runLosses
+            /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, shown, marker, reprepares,
+                           runRetries, unrecorded>>
 
-\* EQ1: after the charged loss is recorded, the step starts a new attempt, charged again, with no gesture.
+\* EQ1: after the charged loss is recorded, the step starts a new attempt, charged again, with no gesture,
+\* at most LostReplyRetries times in one live run.
 HostReprepare ==
     /\ AutoProceed
     /\ host.ph = "lost"
+    /\ runRetries < LostReplyRetries
     /\ reprepares' = reprepares + 1
+    /\ runRetries' = IF CountRetries THEN runRetries + 1 ELSE runRetries
     /\ host' = [host EXCEPT !.ph = "ready"]
-    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, bound, shown, marker, settledRow>>
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, bound, shown, marker, settledRow,
+                   runLosses, unrecorded>>
+
+\* A further charged loss in the same live run ends the run with the transport's resumable code.
+HostEndRun ==
+    /\ AutoProceed
+    /\ host.ph = "lost"
+    /\ runRetries >= LostReplyRetries
+    /\ host' = [host EXCEPT !.ph = "ended"]
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, logVars>>
+
+\* Resume of that run proceeds the same way: a new live run, a new key, charged again, no gesture.
+HostUserResume ==
+    /\ host.ph = "ended"
+    /\ reprepares' = reprepares + 1
+    /\ runRetries' = 0
+    /\ runLosses' = 0
+    /\ host' = [host EXCEPT !.ph = "ready"]
+    /\ UNCHANGED <<now, row, acctHeld, refundHeld, voided, apiVars, claims, prepared, bound, shown, marker, settledRow,
+                   unrecorded>>
 
 -----------------------------------------------------------------------------
 (* API live path (billable-model-invocation.service.ts) and the supplier. *)
@@ -327,6 +454,7 @@ SweepClaim ==
          /\ claims' = claims \cup {[k |-> k, gen |-> row[k].gen + 1, t |-> t]}
     /\ UNCHANGED <<now, acctHeld, refundHeld, voided, apiVars, host, logVars>>
 
+\* @type: ({k: Str, gen: Int, t: Int}) => Bool;
 Current(c) == row[c.k].gen = c.gen /\ Pending(c.k)
 
 SweepResolve ==
@@ -372,7 +500,8 @@ SweepCrash ==
 -----------------------------------------------------------------------------
 
 Host == \/ HostPrepare \/ HostSend \/ HostBind \/ HostComplete \/ HostSeesFailure
-        \/ HostNetworkDrop \/ HostCrash \/ HostResume \/ HostReprepare
+        \/ HostNetworkDrop \/ HostCrash \/ HostDiscard \/ HostResume \/ HostReprepare \/ HostEndRun
+        \/ HostUserResume
 Api == \E k \in Keys : \/ ApiNotice(k) \/ ApiAbortBeforeAdmission(k) \/ ApiAdmit(k)
                        \/ ApiMarkIntent(k) \/ ApiDispatch(k) \/ SupplierEnd(k)
                        \/ ApiObserve(k) \/ ApiClientCancel(k) \/ ApiFinish(k)
@@ -388,7 +517,8 @@ SpecNoSweepFairness == Init /\ [][Next]_vars /\ WF_vars(Tick)
 
 \* Reconciliation liveness additionally assumes the chat is opened again and the host's stream ends.
 SpecReopen == Spec /\ WF_vars(HostBind) /\ WF_vars(HostComplete) /\ WF_vars(HostSeesFailure)
-                   /\ WF_vars(HostResume)
+                   /\ WF_vars(HostResume) /\ WF_vars(HostReprepare) /\ WF_vars(HostEndRun)
+                   /\ WF_vars(HostUserResume)
 
 -----------------------------------------------------------------------------
 (* Properties; numbers are rows of the lane's gateway-invariants.tsv. *)
@@ -397,7 +527,10 @@ TypeOK ==
     /\ now \in 0..MaxTime
     /\ acctHeld \in 0..(Cardinality(Keys) + 1)
     /\ refundHeld \in 0..1
+    /\ runRetries \in 0..LostReplyRetries
+    /\ runLosses \in 0..(LostReplyRetries + 1)
     /\ \A k \in Keys :
+         /\ unrecorded[k] \subseteq Keys
          /\ row[k].cust \in {None, "pending", "settled", "released", "absorbed"}
          /\ row[k].disp \in {None, "admitted", "intent_recorded", "accepted", "recovery_required"}
          /\ req[k] \in {"idle", "sent", "admitted", "intent", "streaming", "finishing", "done", "gone", "refused"}
@@ -451,9 +584,19 @@ EventualResolution == \A k \in Keys : Pending(k) ~> (row[k].ex /\ row[k].cust # 
 \* (10) at most one supplier call per key (the unique index makes one row per key structural)
 AttemptIdempotence == \A k \in Keys : dispatches[k] <= 1
 
-\* (11) one step is charged again only after a recorded charged loss (EQ1; W11 GI-S1 strengthens it)
+\* (11) EQ1: an earlier attempt that was neither shown nor recorded when the step's next attempt was
+\* prepared is never charged, so a charged attempt's settled row precedes the next prepared row; and
+\* every charge beyond the first follows a recorded loss. (No attempt is re-sent: each key is sent once.)
 ChargeAfterRecordedLoss ==
-    Cardinality({k \in Keys : row[k].ex /\ row[k].cust = "settled" /\ row[k].charged > 0}) <= 1 + reprepares
+    /\ \A k \in prepared : \A j \in unrecorded[k] : row[j].charged = 0
+    /\ Cardinality({k \in Keys : row[k].ex /\ row[k].cust = "settled" /\ row[k].charged > 0}) <= 1 + reprepares
+
+\* EQ1's bound, over the losses themselves rather than the guard's counter: once a live run has recorded
+\* more than LostReplyRetries charged losses it prepares and sends nothing more (it ends; Resume starts a
+\* new live run). A re-prepare that forgot to count (runRetries' = runRetries) violates it.
+LostReplyBound == host.ph \in {"ready", "prepared", "inflight"} => runLosses <= LostReplyRetries
+\* Vacuity: a second charged loss in one live run is reachable, so the run ends (then Resume proceeds).
+NeverEndsRun == host.ph # "ended"
 
 \* Reconciliation (R): a charged attempt is eventually shown or recorded as settled in the log
 ChargedReplyRecorded ==
@@ -461,5 +604,75 @@ ChargedReplyRecorded ==
 
 \* D-086: today's uncoded dead end is reachable; the target never reaches it
 NoUncodedDeadEnd == host.ph # "stuck"
+
+-----------------------------------------------------------------------------
+(* GI-S7: the row's inductive invariant for Apalache (MC_GatewayInvocation). *)
+(* The M* conjuncts of I34 plus the facts that make them inductive. The host *)
+(* history (ChargeAfterRecordedLoss) is not inductive and stays with TLC.    *)
+
+Evidence == {"final", "unknown", "abort", "rejected", "expired", "unresolvable"}
+CustStates == {None, "pending", "settled", "released", "absorbed"}
+DispStates == {None, "admitted", "intent_recorded", "accepted", "recovery_required"}
+ReqStates == {"idle", "sent", "admitted", "intent", "streaming", "finishing", "done", "gone", "refused"}
+FinStates == {None, "final", "unknown", "replay", "abort"}
+ConnStates == {None, "open", "dropped", "noticed"}
+SupStates == {None, "generating", "completed", "failed", "cut"}
+Phases == {"ready", "prepared", "inflight", "done", "failed", "down", "waiting", "stuck", "lost", "ended"}
+
+\* TypeOK without infinite sets: integer fields are typed Int by the annotations.
+TypeInv ==
+    /\ now \in 0..MaxTime
+    /\ refundHeld \in 0..1
+    /\ runRetries \in 0..LostReplyRetries
+    /\ host.ph \in Phases /\ host.key \in Keys \cup {None}
+    /\ host.key = None => host.ph = "ready"
+    /\ host.key # None => host.key \in prepared
+    /\ voided \cup prepared \cup bound \cup shown \cup marker \cup settledRow \subseteq Keys
+    /\ \A c \in claims : c.k \in Keys
+    /\ \A k \in Keys :
+         /\ row[k].cust \in CustStates /\ row[k].disp \in DispStates /\ row[k].ev \subseteq Evidence
+         /\ req[k] \in ReqStates /\ fin[k] \in FinStates /\ conn[k] \in ConnStates /\ sup[k] \in SupStates
+         /\ dispatches[k] \in 0..1 /\ unrecorded[k] \subseteq Keys
+
+\* Strengthening: what each row, request and supplier call implies about the others.
+RowFacts(k) ==
+    LET r == row[k] IN
+    /\ ~r.ex => r = NoRow
+    /\ r.ex => r.cust # None /\ r.disp # None
+    /\ r.cust = "pending" => r.charged = 0 /\ ~r.ttl
+    /\ r.charged = 1 => r.cust = "settled"
+    /\ r.intent >= 0 => r.igen = 1
+    /\ "final" \in r.ev => r.intent >= 0
+    /\ sup[k] # None => r.ex /\ r.intent >= 0 /\ dispatches[k] = 1
+    /\ dispatches[k] = 1 => sup[k] # None /\ req[k] \in {"streaming", "finishing", "done"}
+    /\ fin[k] = "final" => "final" \in r.ev /\ sup[k] = "completed"
+    /\ req[k] \in {"admitted", "intent", "streaming", "finishing"} => r.ex
+    /\ req[k] = "intent" => r.intent >= 0
+
+IndInv ==
+    /\ TypeInv
+    /\ RowHold
+    /\ AccountHoldConservation
+    /\ TerminalImpliesRecordedEvidence
+    /\ NoChargeWithoutDispatch
+    /\ NoChargeWithoutFinalEvidence
+    /\ NoDispatchAfterDue
+    /\ NoDispatchWithoutLiveGeneration
+    /\ StaleGenerationNeverTerminalizes
+    /\ DispatchedWithoutEvidenceWaitsForGrace
+    /\ AttemptIdempotence
+    /\ \A k \in Keys : RowFacts(k)
+
+\* The action properties (1), (4) and (7) as one step predicate, checked from every IndInv state.
+RowSteps ==
+    \A k \in Keys :
+      /\ row[k].ex /\ row[k].cust # "pending" => row'[k].cust = row[k].cust
+      /\ row[k].intent < 0 /\ row'[k].intent >= 0 => row[k].cancel < 0
+      /\ row'[k].gen > row[k].gen /\ row[k].ex =>
+            /\ row[k].cust = "pending" /\ row[k].due <= now
+            /\ (row[k].lease < 0 \/ row[k].lease <= now)
+
+\* Vacuity: the same invariant with L7 F14's hold statement, which a refund hold breaks.
+IndInvWithoutRefunds == IndInv /\ AccountHoldWithoutRefunds
 
 =============================================================================

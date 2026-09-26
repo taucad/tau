@@ -176,8 +176,11 @@ describe('createNodeAgentLauncher', () => {
     const logPath = join(currentRoot(), '.tau', 'chats', 'chat-1', 'events.jsonl');
     const durableLog = await readFile(logPath, 'utf8');
     expect(durableLog).toContain('"type":"run.lifecycle"');
-    // The gateway transport is unfunded (RA-S11): it records no invocation rows, only the Tau Cloud transport does.
-    expect(durableLog).not.toContain('"type":"model.invocation-prepared"');
+    // The Tau Cloud transport is funded: the prepared row lands before the bound one (RA-S11).
+    expect(durableLog.indexOf('"type":"model.invocation-prepared"')).toBeLessThan(
+      durableLog.indexOf('"type":"model.invocation-bound"'),
+    );
+    expect(durableLog).toContain('"operationId":"operation-daemon-1"');
     expect(durableLog).toContain(`"commandId":"${started.commandId}"`);
 
     // A reconnecting client reads the same transcript from a cursor.

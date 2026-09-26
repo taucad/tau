@@ -4,8 +4,10 @@ name: Formal nightly
 # liveness and two-turn configurations, Apalache, fresh-seed differentials and mutant
 # matrices. Each owner's `formal:nightly` target says what it runs; a changed verdict,
 # a surviving or stale mutant, or a fresh-seed mismatch fails the run, and the seed is
-# printed for replay. Host ACP log validation stays out until W3 and W10 fix the
-# `RowsNeedRun` rejections (go-live DEL-14): a known counterexample never turns CI red.
+# printed for replay. `host:formal:nightly` runs the AcpSessions nightly configs and
+# replays fresh-seed simulations on the real parent. Its ACP log validation stays out
+# until W7 writes `admitted` before an external run's `message.appended` (51 of 54 logs are
+# rejected at row 1 today; go-live DEL-14): a known counterexample never turns CI red.
 
 on:
   schedule:

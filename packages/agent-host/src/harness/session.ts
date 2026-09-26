@@ -354,13 +354,13 @@ export const settledRowOf = (
  * the person to sign in again, then resume.
  *
  * @param funding - The funded transport's facet.
- * @returns The funding principal, or `undefined` when the transport names none.
+ * @returns The funding principal, or `undefined` when it is unknown (a stamped attempt is then refused).
  */
 export const fundingPrincipal = async (
   funding: Extract<InvocationFunding, Readonly<{ type: 'funded' }>>,
 ): Promise<string | undefined> => {
   try {
-    return await funding.principal?.();
+    return await funding.principal();
   } catch (error) {
     throw Object.assign(
       new Error('Tau could not tell which account funds model requests; sign in again, then resume.', {

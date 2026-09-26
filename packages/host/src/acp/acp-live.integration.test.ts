@@ -30,7 +30,7 @@ import { createAcpExternalAgentPort } from '#acp/run.js';
 import { discoverAcpAgents } from '#acp/registry.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
-import { openAcpSession } from '#acp/session.js';
+import { openAcpSession } from '#acp/acp-session.js';
 import { defaultConfigDirectory } from '#credential-store.js';
 
 const execFileAsync = promisify(execFile);

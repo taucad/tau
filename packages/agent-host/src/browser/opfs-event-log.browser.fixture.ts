@@ -130,6 +130,7 @@ globalThis.addEventListener('message', async () => {
       funding: {
         type: 'funded',
         usesBillingAttempt: () => true,
+        principal: async () => undefined,
         resolveInvocation: async () => {
           recoveryLookups++;
           return {

@@ -1029,10 +1029,38 @@ export const creditOperation = billing.table(
       'credit_operation_states',
       sql`${table.category} IN ('llm','zoo_engine') AND ${table.dispatchState} IN ('admitted','intent_recorded','accepted','recovery_required') AND ${table.customerState} IN ('pending','settled','released','absorbed') AND ${table.supplierState} IN ('reserved','preliminary','unresolved','final','funded_exception') AND ${table.generation} > 0`,
     ),
+    // GI-R2: a row with a reporting history settles only after its dispatch intent; the timestamp is immutable, while
+    // a sweep claim overwrites dispatch_state. Rows from before 0021 (history_version NULL) cannot prove it either way.
+    check(
+      'credit_operation_dispatch',
+      sql`${table.historyVersion} IS NULL OR ${table.customerState} <> 'settled' OR ${table.dispatchIntentAt} IS NOT NULL`,
+    ),
     check(
       'credit_operation_terminal',
       sql`(${table.customerState} = 'pending' AND ${table.baseTransactionId} IS NULL AND ${table.terminalRevision} IS NULL AND ${table.resolvedAt} IS NULL AND ${table.chargedAtoms} IS NULL) OR (${table.customerState} <> 'pending' AND ${table.baseTransactionId} IS NOT NULL AND ${table.terminalRevision} IS NOT NULL AND ${table.terminalRevision} > 0 AND ${table.resolvedAt} IS NOT NULL AND ${table.chargedAtoms} IS NOT NULL AND ${table.chargedAtoms} BETWEEN 0 AND ${table.authorizedAtoms})`,
     ),
+  ],
+);
+
+/**
+ * Attempt keys an owner-scoped lookup found unadmitted and fenced (GI-R3): admission refuses a voided key, so a
+ * `not_found` answer means "never admitted, and never will be". Written and checked under the account-row lock.
+ */
+export const creditAttemptVoid = billing.table(
+  'credit_attempt_void',
+  {
+    accountId: text('account_id').notNull(),
+    environment: text('environment').notNull(),
+    surface: text('surface').notNull(),
+    attemptKey: text('attempt_key').notNull(),
+    voidedAt: timestamp('voided_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.accountId, table.surface, table.attemptKey] }),
+    foreignKey({
+      columns: [table.environment, table.accountId],
+      foreignColumns: [creditAccount.environment, creditAccount.id],
+    }).onDelete('restrict'),
   ],
 );
 

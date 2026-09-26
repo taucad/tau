@@ -189,13 +189,6 @@ export type GatewayModelTransportOptions = {
  * transport's `funding` facet (RA-S11); this seam only binds a response.
  */
 export type GatewayFundedOperationProtocol = {
-  /**
-   * @deprecated Ignored: `funding.usesBillingAttempt` decides. Deleted with the Tau Cloud transport's legacy lookup
-   * (W11's file, applied at merge).
-   */
-  usesBillingAttempt?(providerKind: ModelProviderKind | undefined): boolean;
-  /** @deprecated Ignored: `funding.resolveInvocation` resolves an attempt. Deleted with W11's legacy lookup at merge. */
-  lookupAttempt?(attemptId: string, signal: AbortSignal): Promise<unknown>;
   /** Require and validate the operation identity on an accepted gateway response. */
   bindResponse(response: Response): ModelInvocationBinding;
 };

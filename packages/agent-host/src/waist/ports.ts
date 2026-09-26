@@ -216,11 +216,6 @@ export type InvocationFunding =
   | { readonly type: 'unfunded' }
   | {
       readonly type: 'funded';
-      /**
-       * The opaque account this transport funds calls as, recorded on each prepared row. Reconciliation never resolves
-       * another account's attempt: it refuses `MODEL_ATTEMPT_OTHER_ACCOUNT` (RV5-F2). Absent, no account is recorded.
-       */
-      principal?: (() => Promise<string | undefined>) | undefined;
       /** Whether this provider/model selection uses Tau's funded gateway. */
       usesBillingAttempt(providerKind: ModelProviderKind | undefined): boolean;
       /**
@@ -228,6 +223,11 @@ export type InvocationFunding =
        * `UNAUTHENTICATED` as `stream` does; an answer this build cannot read throws `MALFORMED_RESPONSE`.
        */
       resolveInvocation(request: InvocationResolutionRequest): Promise<InvocationResolution>;
+      /**
+       * The signed-in account the gateway charges (W7 RA-S11, `MODEL_ATTEMPT_OTHER_ACCOUNT`); `undefined` means
+       * unknown, so the host cannot check the attempt's account.
+       */
+      principal(): Promise<string | undefined>;
     };
 
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */

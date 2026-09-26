@@ -24,74 +24,35 @@ import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promise
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import type { ContentBlock, McpServer, Usage as AcpUsage } from '@agentclientprotocol/sdk';
+import { createActor } from 'xstate';
+import type { Actor } from 'xstate';
+import type { ContentBlock, McpServer, StopReason, Usage as AcpUsage } from '@agentclientprotocol/sdk';
 
-import { materializeAttachments, reduceEventLog } from '@taucad/agent-host';
+import { isResumableRunFailure, materializeAttachments, reduceEventLog } from '@taucad/agent-host';
 import type {
   DocumentBlockBuilder,
   ExternalAgentPort,
   ExternalAgentTurn,
   JsonObject,
   JsonValue,
+  RunLifecycleEvent,
 } from '@taucad/agent-host';
+import { externalAgentStopCodes } from '@taucad/agent-host/wire';
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
 import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
 import { tauMcpInstructions } from '@taucad/mcp';
 import { isRecord } from '@taucad/utils/schema';
 
-import { openAcpSession } from '#acp/session.js';
-import type { AcpSession } from '#acp/session.js';
+import { failureError } from '#acp/acp-session.machine.js';
+import type { AcpFailure, AcpTurnResult } from '#acp/acp-session.machine.js';
+import { provideAcpSession } from '#acp/acp-session.js';
+import { acpSessionsMachine } from '#acp/acp-sessions.machine.js';
+import type { AcpAcquire } from '#acp/acp-sessions.machine.js';
+import type { AcpLimitReset } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { HostSystemSkillBundle } from '#agent-tools.js';
 import { defaultConfigDirectory } from '#credential-store.js';
-
-/**
- * Open with the turn's own cancellation in force.
- *
- * `initialize` and `session/new` have no timeout of their own, and the prompt
- * only listens for abort once the session exists — so an adapter that never
- * answers its handshake would otherwise hold `cancel` open forever (D12:
- * observe settlement, never wait on a peer that will not settle; review
- * 1-review S3). A session that opens after the abort is closed, not leaked.
- *
- * @param pending - The session being opened.
- * @param signal - The turn's signal.
- * @returns The open session, or a rejection carrying the abort reason.
- */
-const abortableOpen = async (pending: Promise<AcpSession>, signal: AbortSignal): Promise<AcpSession> => {
-  const abortReason = (): Error =>
-    signal.reason instanceof Error ? signal.reason : new DOMException('The turn was cancelled.', 'AbortError');
-  let onAbort: (() => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    onAbort = () => {
-      reject(abortReason());
-    };
-    if (signal.aborted) {
-      onAbort();
-    } else {
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-  });
-  try {
-    return await Promise.race([pending, aborted]);
-  } catch (error) {
-    // async-iife: bootstrap -- a session that opens after the abort is closed, not leaked; no caller waits for it.
-    void (async () => {
-      try {
-        const session = await pending;
-        await session.close();
-      } catch {
-        /* It never opened; there is nothing to close. */
-      }
-    })();
-    throw error;
-  } finally {
-    if (onAbort) {
-      signal.removeEventListener('abort', onAbort);
-    }
-  }
-};
 
 /** Name the daemon's own MCP server carries inside an agent session. @public */
 export const tauMcpServerName = 'tau';
@@ -162,6 +123,8 @@ export type AcpExternalAgentPortOptions = {
   readonly createId?: (() => string) | undefined;
   /** Idle milliseconds before a live session is closed; defaults to {@link acpSessionIdleTimeout}. */
   readonly idleTimeout?: number | undefined;
+  /** The clock an acquire is stamped with, for the capability's renewal margin; defaults to `Date.now`. */
+  readonly now?: (() => number) | undefined;
   /**
    * Where the host prepared each admitted turn to run (V19).
    *
@@ -172,20 +135,6 @@ export type AcpExternalAgentPortOptions = {
    * answer, so a host with no revision port still runs.
    */
   readonly checkouts?: ReadonlyMap<string, { readonly cwd: string; readonly mode: string }> | undefined;
-};
-
-/** One cached adapter child, connection and vendor session. */
-type LiveSession = {
-  readonly chatId: string;
-  readonly session: AcpSession;
-  /** The directory this session was opened against; a turn in another one reopens. */
-  readonly cwd: string;
-  /** A session answering a prompt is never evicted under it. */
-  busy: boolean;
-  /** Epoch milliseconds when the session's MCP capability expires; absent without MCP. */
-  readonly capabilityExpiresAt?: number | undefined;
-  readonly capabilityToken?: string | undefined;
-  timer?: NodeJS.Timeout | undefined;
 };
 
 const publishSystemSkills = async (
@@ -470,22 +419,31 @@ const continuationPrompt = 'Continue from where you stopped.';
  * turn; or a restart found the turn still `running`, and ACP can report
  * nothing about whether it finished. Only the first can be continued.
  *
- * Read from the row before this attempt's own `admitted`, not from the run's
- * whole history: a resume reuses the run id and appends `admitted`/`running`
- * again, so a run that stopped, resumed and was *then* cut short by a restart
- * still carries the first stop's `failed` row. Answering on that row would
- * continue exactly the turn the ambiguity guard exists for.
+ * Read from the row before this attempt's own opening rows, not from the run's
+ * whole history: a resume reuses the run id, so a run that stopped, resumed
+ * and was *then* cut short by a restart still carries the first stop's
+ * `failed` row, followed by the takeover's `RUN_ABANDONED`. Answering on the
+ * first would continue exactly the turn the ambiguity guard exists for, and
+ * `RUN_ABANDONED` is the host's record that nobody knows how the turn ended,
+ * not the agent's own stop.
  *
  * @param turn - The turn being run.
- * @returns Whether the state this attempt resumes from is a recorded failure.
+ * @returns Whether the state this attempt resumes from is the agent's own resumable stop.
  */
 const stopRecorded = (turn: ExternalAgentTurn): boolean => {
-  const states = turn.history.flatMap((event) =>
-    event.runId === turn.runId && event.type === 'run.lifecycle' ? [event.state] : [],
+  const rows = turn.history.filter(
+    (event): event is RunLifecycleEvent => event.runId === turn.runId && event.type === 'run.lifecycle',
   );
-  /* Every attempt opens with exactly one `admitted`, so the last one is this
-   * attempt's and everything after it is what admitting it just wrote. */
-  return states[states.lastIndexOf('admitted') - 1] === 'failed';
+  /* This attempt opened with `running` (a resume) or `admitted` then
+   * `running` (a first attempt); whatever precedes those rows is the state it
+   * resumes from. */
+  const opening = rows.findLastIndex((row) => row.state !== 'running' && row.state !== 'admitted');
+  const prior = rows[opening];
+  return (
+    prior?.state === 'failed' &&
+    externalAgentStopCodes.some((code) => code === prior.detail?.code) &&
+    isResumableRunFailure(prior.detail)
+  );
 };
 
 const usageNumber = (value: unknown): number | undefined =>
@@ -515,31 +473,16 @@ const usageField = (state: JsonObject | undefined): AcpUsage | undefined => {
   };
 };
 
-const usageState = (usage: AcpUsage): JsonObject => ({
-  totalTokens: usage.totalTokens,
-  inputTokens: usage.inputTokens,
-  outputTokens: usage.outputTokens,
-  ...(typeof usage.thoughtTokens === 'number' ? { thoughtTokens: usage.thoughtTokens } : {}),
-  ...(typeof usage.cachedReadTokens === 'number' ? { cachedReadTokens: usage.cachedReadTokens } : {}),
-  ...(typeof usage.cachedWriteTokens === 'number' ? { cachedWriteTokens: usage.cachedWriteTokens } : {}),
-});
-
-/** The last vendor counter durably committed for this ACP session. */
-const committedUsage = (turn: ExternalAgentTurn): AcpUsage | undefined => {
-  const remembered = usageField(turn.state);
-  if (remembered) {
-    return remembered;
+/** The limit reset the chat's record holds, when it names a usable one. */
+const limitField = (state: JsonObject | undefined): AcpLimitReset | undefined => {
+  const value = state?.['limit'];
+  if (!isRecord(value) || typeof value['resetsAt'] !== 'number') {
+    return undefined;
   }
-  for (const message of reduceEventLog(turn.history).toReversed()) {
-    const vendorUsage = isRecord(message.metadata?.tauInternal)
-      ? message.metadata.tauInternal['vendorUsage']
-      : undefined;
-    const usage = usageField(isRecord(vendorUsage) ? vendorUsage : undefined);
-    if (usage) {
-      return usage;
-    }
-  }
-  return undefined;
+  return {
+    resetsAt: value['resetsAt'],
+    ...(typeof value['window'] === 'string' ? { window: value['window'] } : {}),
+  };
 };
 
 /** The replaceable ACP session-state envelope already present in this chat. */
@@ -575,17 +518,18 @@ const committedSessionMessageId = (turn: ExternalAgentTurn): string | undefined 
  * console.log(externalAgents.list?.());
  * ```
  */
-// oxlint-disable-next-line eslint/max-lines-per-function -- the live-session map, its eviction and the turn that reuses it are one mechanism; the port closes over it precisely so no module-global session table exists.
+// oxlint-disable-next-line eslint/max-lines-per-function -- the facade turns three port calls into parent events and back; its helpers close over one parent.
 export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions): ExternalAgentPort => {
   const createId = options.createId ?? randomUUID;
-  const idleTimeout = options.idleTimeout ?? acpSessionIdleTimeout;
-  /* Per port, not per module: a chat id is unique inside one workspace, and two
-   * ports in one process serve two workspaces. */
-  const live = new Map<string, LiveSession>();
+  const now = options.now ?? Date.now;
   /* The chat log — and so its attachments — lives at the workspace root in
    * every mode; a candidate checkout never carries `.tau/chats`. */
   const attachments = createNodeAttachmentReader(options.workspaceRoot);
   const warnedAbsent = new Set<string>();
+  /* The seams of every lent turn, by request id: the machines hold only the id (MC-R5). */
+  const turns = new Map<string, ExternalAgentTurn>();
+  const settlements = new Map<string, (outcome: AcpTurnResult) => void>();
+  const closes = new Map<string, (refusal: AcpFailure | undefined) => void>();
 
   /**
    * The turn with its attachment references replaced by bytes (D15, D23).
@@ -619,35 +563,6 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
     return message === turn.message || message?.role !== 'user' ? turn : { ...turn, message };
   };
 
-  const forget = async (key: string): Promise<void> => {
-    const entry = live.get(key);
-    if (!entry) {
-      return;
-    }
-    live.delete(key);
-    clearTimeout(entry.timer);
-    await entry.session.close();
-  };
-
-  /**
-   * Move an entry to the most-recent end and restart its idle timer.
-   *
-   * @param key - Agent and chat whose session was just used.
-   */
-  const touch = (key: string): void => {
-    const entry = live.get(key);
-    if (!entry) {
-      return;
-    }
-    live.delete(key);
-    live.set(key, entry);
-    clearTimeout(entry.timer);
-    entry.timer = setTimeout(() => {
-      void forget(key);
-    }, idleTimeout);
-    entry.timer.unref();
-  };
-
   /**
    * The one server list a session keeps for its whole life.
    *
@@ -676,131 +591,69 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
     ];
   };
 
-  /**
-   * Open this chat's session, record it, and make room for it.
-   *
-   * @param input - Cache key, the turn opening it, its model and its adapter.
-   * @returns The live entry every later turn of the chat reuses.
-   */
-  const start = async (input: {
-    readonly key: string;
-    readonly turn: ExternalAgentTurn;
-    readonly model: string | undefined;
-    readonly adapter: AcpAdapter;
-    readonly cwd: string;
-    /** The revision mode the host prepared this turn in; recorded on the session record. */
-    readonly mode: string | undefined;
-  }): Promise<LiveSession> => {
-    const { turn, cwd } = input;
-    /* A marker naming a directory this turn does not run in — a pre-V2 per-run
-     * copy, or the previous turn's candidate checkout. That vendor session was
-     * created against *that* directory, so resuming it here would restore a
-     * conversation about files this session cannot see; it starts fresh
-     * instead (r1 risk 7). */
-    const rememberedCwd = stringField(turn.state, 'cwd');
-    const cwdContextLost = rememberedCwd !== undefined && rememberedCwd !== cwd;
-    const acpSessionId =
-      rememberedCwd === undefined || rememberedCwd === cwd ? stringField(turn.state, 'acpSessionId') : undefined;
-    /* Minted once per session, not per turn: the server list an agent is handed
-     * at `session/new` is the one it keeps for the session's whole life, and
-     * Claude tears a session down when that list changes (V7). */
-    const capability = options.mcp?.mint({ runId: turn.runId, chatId: turn.chatId });
-    const mcpServers = tauMcpServers(capability);
-    const skillPublication = await publishSystemSkills(options.systemSkillBundles, turn.signal);
-    const sessionMessageId = committedSessionMessageId(turn);
-    const session = await abortableOpen(
-      openAcpSession({
-        adapter: input.adapter,
-        cwd,
-        mcpServers,
-        ...(skillPublication === undefined ? {} : { additionalDirectories: [skillPublication.root] }),
-        createId,
-        ...(acpSessionId === undefined ? {} : { acpSessionId }),
-        ...(acpSessionId === undefined ? {} : { priorUsage: committedUsage(turn) }),
-        ...(sessionMessageId === undefined ? {} : { sessionMessageId }),
-        ...(options.onFrame ? { onFrame: options.onFrame } : {}),
-        signal: turn.signal,
-      }),
-      turn.signal,
-    );
-    /* Busy from the first instant: the awaits below would otherwise let a
-     * concurrent chat's eviction close this session before its own first
-     * prompt (review 2-review S7). `run` clears it. */
-    const entry: LiveSession = {
-      chatId: turn.chatId,
-      session,
-      cwd,
-      busy: true,
-      capabilityExpiresAt: capability === undefined ? undefined : Date.parse(capability.expiresAt),
-      capabilityToken: capability?.token,
-    };
-    live.set(input.key, entry);
-    const forgetClosed = async (): Promise<void> => {
-      await session.closed;
-      if (live.get(input.key) === entry) {
-        await forget(input.key);
-      }
-    };
-    // async-iife: lifecycle -- Session closure must retire the cache even when no run is awaiting it.
-    void forgetClosed();
-    try {
-      if (session.acpSessionId !== acpSessionId) {
-        /* One `remember`, not one per field: the record is rewritten from the
-         * turn's *appended* envelope, so a second call would drop what the
-         * first wrote (2-w2 §7.1). `cwd` and `mode` are the VSC3 fields that
-         * make the guard above answerable on the next turn. */
-        await turn.remember({
-          acpSessionId: session.acpSessionId,
-          cwd,
-          ...(input.mode === undefined ? {} : { mode: input.mode }),
-          ...(input.model === undefined ? {} : { model: input.model }),
-        });
-      }
-      if (session.contextLost || cwdContextLost) {
-        /* Never a silent fresh start: the reader has to be able to see why the
-         * agent stopped remembering. */
-        await turn.append([
-          {
-            type: 'message.appended',
-            message: {
-              id: createId(),
-              role: 'assistant',
-              content: [
-                {
-                  type: 'text',
-                  text: cwdContextLost
-                    ? `${turn.agentId} moved to a different Tau checkout, so it is starting a new session in that tree. Its earlier conversation remains in this chat but is not in the new agent session.`
-                    : `${turn.agentId} could not restore this chat's earlier session, so it is starting a new one. Everything before this point is missing from its own context.`,
-                },
-              ],
-              metadata: { tauInternal: { origin: 'external', agentId: turn.agentId } },
-            },
-          },
-        ]);
-      }
-    } catch (error) {
-      /* A busy entry nobody will ever clear must not outlive its failed open. */
-      await forget(input.key);
-      throw error;
+  const sessionLogic = provideAcpSession({
+    createId,
+    ...(options.onFrame ? { onFrame: options.onFrame } : {}),
+    seams: (requestId) => turns.get(requestId),
+    /* The binding lives exactly as long as the lend (EA-R6). */
+    bind: (requestId, token) => {
+      const turn = turns.get(requestId);
+      return options.mcp && token !== undefined && turn
+        ? options.mcp.activate({ token, runId: turn.runId, chatId: turn.chatId, signal: turn.signal })
+        : undefined;
+    },
+    publishSkills: async (signal) => {
+      const publication = await publishSystemSkills(options.systemSkillBundles, signal);
+      return publication === undefined ? [] : [publication.root];
+    },
+  });
+  const sessionsLogic = acpSessionsMachine.provide({ actors: { acpSession: sessionLogic } });
+
+  let parent: Actor<typeof acpSessionsMachine> | undefined;
+  /* A stopped actor is never restarted (MC-R24): a failed parent is replaced on the next call. */
+  const sessions = (): Actor<typeof acpSessionsMachine> => {
+    if (parent?.getSnapshot().status === 'active') {
+      return parent;
     }
-    /* Evict only after this session is in the map, and never one that is
-     * answering a prompt for another chat. */
-    for (const [candidate, held] of live) {
-      if (live.size <= acpLiveSessionLimit) {
-        break;
-      }
-      if (candidate !== input.key && !held.busy) {
-        // oxlint-disable-next-line no-await-in-loop -- eviction is the cold path and its close is ordered.
-        await forget(candidate);
-      }
-    }
-    return entry;
+    const created = createActor(sessionsLogic, {
+      input: {
+        limit: acpLiveSessionLimit,
+        idleTimeout: options.idleTimeout ?? acpSessionIdleTimeout,
+        renewalMargin: acpCapabilityRenewalMargin,
+      },
+    });
+    created.on('turnSettled', (event) => {
+      settlements.get(event.requestId)?.(event.outcome);
+    });
+    created.on('refused', (event) => {
+      settlements.get(event.requestId)?.({ ok: false, failure: event.failure });
+      closes.get(event.requestId)?.(event.failure);
+    });
+    created.on('chatClosed', (event) => {
+      closes.get(event.requestId)?.(undefined);
+    });
+    created.subscribe({ error: () => undefined });
+    parent = created;
+    created.start();
+    return created;
   };
 
   return {
     list: () => options.agents.map((adapter) => adapter.id),
     closeChat: async (chatId) => {
-      await Promise.all([...live].filter(([, entry]) => entry.chatId === chatId).map(async ([key]) => forget(key)));
+      const requestId = `close:${createId()}`;
+      const answered = new Promise<AcpFailure | undefined>((resolve) => {
+        closes.set(requestId, resolve);
+      });
+      try {
+        sessions().send({ type: 'closeChat', requestId, chatId });
+        const refusal = await answered;
+        if (refusal !== undefined) {
+          throw failureError(refusal);
+        }
+      } finally {
+        closes.delete(requestId);
+      }
     },
     run: async (turn) => {
       const adapter = options.agents.find((candidate) => candidate.id === turn.agentId);
@@ -814,97 +667,102 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
        * hard-coded default, so Tau never names a model the user did not pick). */
       const model =
         (typeof turn.agent['model'] === 'string' ? turn.agent['model'] : undefined) ?? stringField(turn.state, 'model');
-      const key = `${turn.agentId}:${turn.chatId}`;
       /* V19: direct mode is the workspace root, candidate mode the checkout the
        * host materialized for *this* run. The mode is read off the host's own
-       * record of the prepared turn, never off a reference comparison and never
-       * off what the agent claims. */
+       * record of the prepared turn, never off what the agent claims. */
       const checkout = options.checkouts?.get(turn.runId);
       const cwd = checkout?.cwd ?? options.workspaceRoot;
-      let entry = live.get(key);
-      /* Synchronously, before the first `await`: an idle timer that fired while
-       * this turn was being set up would close the session out from under it. */
-      clearTimeout(entry?.timer);
-      if (entry && entry.cwd !== cwd) {
-        /* A candidate turn runs in its own checkout, so the chat's live session
-         * is rooted in a directory this turn does not work in — and one the
-         * host has already destroyed. Close it and open a session in the tree
-         * this turn actually has. */
-        await forget(key);
-        entry = undefined;
-      }
-      if (
-        entry?.capabilityExpiresAt !== undefined &&
-        entry.capabilityExpiresAt - Date.now() < acpCapabilityRenewalMargin
-      ) {
-        /* The capability rides the session for its whole life (V7), so a
-         * session whose capability is about to lapse is closed here and the
-         * turn reopens through `session/resume` with a fresh one. */
-        await forget(key);
-        entry = undefined;
-      }
-      entry ??= await start({ key, turn, model, adapter, cwd, mode: checkout?.mode });
-      entry.busy = true;
-      let releaseMcp: (() => void | Promise<void>) | undefined;
-      try {
-        releaseMcp =
-          options.mcp && entry.capabilityToken
-            ? options.mcp.activate({
-                token: entry.capabilityToken,
-                runId: turn.runId,
-                chatId: turn.chatId,
-                signal: turn.signal,
-              })
-            : undefined;
-        /* The vendor session Tau is about to prompt is not the one this chat's
-         * record remembers: it is new (or a lost one was replaced), so it has
-         * never seen Tau's CAD context and this prompt carries it (V12). */
-        const reattached = entry.session.acpSessionId === stringField(turn.state, 'acpSessionId');
-        const prompt =
-          promptBlocksOf(await materializedTurn(turn), !reattached) ??
-          /* Reattached to the session the agent stopped in: it still holds the
-           * turn, so the resume nudges it on rather than replaying anything. */
-          (reattached && stopRecorded(turn)
-            ? [{ type: 'text', text: continuationPrompt } satisfies ContentBlock]
-            : undefined);
-        if (prompt === undefined) {
-          throw Object.assign(
-            new Error('Tau restored the ACP session, but ACP cannot prove whether the interrupted turn completed.'),
-            { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
-          );
-        }
-        const selectedConfig = isRecord(turn.agent['config'])
-          ? turn.agent['config']
-          : isRecord(turn.state?.['config'])
-            ? turn.state['config']
-            : undefined;
-        const configuration = selectedConfig
-          ? Object.fromEntries(
-              Object.entries(selectedConfig).filter(
-                (entry): entry is [string, string | boolean] =>
-                  typeof entry[1] === 'string' || typeof entry[1] === 'boolean',
-              ),
-            )
+      /* A record naming a directory this turn does not run in — a pre-V2 per-run
+       * copy, or the previous turn's candidate checkout — names a vendor session
+       * about files this one cannot see; it starts fresh instead (r1 risk 7). */
+      const rememberedCwd = stringField(turn.state, 'cwd');
+      const cwdMoved = rememberedCwd !== undefined && rememberedCwd !== cwd;
+      const acpSessionId = cwdMoved ? undefined : stringField(turn.state, 'acpSessionId');
+      /* Minted with every acquire and used only when a child is spawned: the
+       * server list a session is opened with is the one it keeps for life, and
+       * Claude tears a session down when that list changes (V7). */
+      const capability = options.mcp?.mint({ runId: turn.runId, chatId: turn.chatId });
+      const mcpServers = tauMcpServers(capability);
+      const materialized = await materializedTurn(turn);
+      const selectedConfig = isRecord(turn.agent['config'])
+        ? turn.agent['config']
+        : isRecord(turn.state?.['config'])
+          ? turn.state['config']
           : undefined;
-        const outcome = await entry.session.prompt(prompt, turn, model, configuration);
-        /* What the agent changed about its own session, written back to the
-         * chat's record so the next turn — and the selector above it — start
-         * from what actually ran rather than from what was last asked for
-         * (V6/VSC3). One `remember`, because each is an append. */
-        const moved = {
-          ...(outcome.usage === undefined ? {} : { acpPriorUsage: usageState(outcome.usage) }),
-          ...(outcome.model === undefined || outcome.model === model ? {} : { model: outcome.model }),
-          ...(outcome.title === undefined ? {} : { title: outcome.title }),
-          config: outcome.configuration,
-        };
-        if (Object.keys(moved).length > 0) {
-          await turn.remember(moved);
+      const configuration = selectedConfig
+        ? Object.fromEntries(
+            Object.entries(selectedConfig).filter(
+              (entry): entry is [string, string | boolean] =>
+                typeof entry[1] === 'string' || typeof entry[1] === 'boolean',
+            ),
+          )
+        : undefined;
+      const sessionMessageId = committedSessionMessageId(turn);
+      const priorUsage = acpSessionId === undefined ? undefined : usageField(turn.state);
+      const limit = limitField(turn.state);
+      /* M1 opens attempt n+1 on every reopening, so one live turn per request id (W7 RA-S14). */
+      const requestId = `${turn.runId}:${String(turn.attempt)}`;
+      const acquire: AcpAcquire = {
+        requestId,
+        key: `${turn.agentId}:${turn.chatId}`,
+        chatId: turn.chatId,
+        cwd,
+        at: now(),
+        ...(capability === undefined ? {} : { capabilityExpiresAt: Date.parse(capability.expiresAt) }),
+        opening: {
+          adapter,
+          cwd,
+          mcpServers,
+          ...(acpSessionId === undefined ? {} : { acpSessionId }),
+          ...(priorUsage === undefined ? {} : { priorUsage }),
+          ...(limit === undefined ? {} : { limit }),
+          sessionMessageId: sessionMessageId ?? createId(),
+          sessionCommitted: sessionMessageId !== undefined,
+          cwdMoved,
+          ...(checkout?.mode === undefined ? {} : { mode: checkout.mode }),
+          notices: true,
+          ...(capability === undefined ? {} : { capabilityToken: capability.token }),
+        },
+        lend: {
+          requestId,
+          ...(model === undefined ? {} : { model }),
+          ...(configuration === undefined ? {} : { configuration }),
+          prompt: {
+            /* A vendor session Tau has not prompted before has never seen Tau's CAD
+             * context, so its prompt carries it (V12). */
+            fresh: promptBlocksOf(materialized, true),
+            /* Reattached to the session the agent stopped in: it still holds the
+             * turn, so a resume with no message nudges it on (R9/S11). */
+            reattached:
+              promptBlocksOf(materialized, false) ??
+              (stopRecorded(turn) ? [{ type: 'text', text: continuationPrompt } satisfies ContentBlock] : undefined),
+          },
+          ...(turn.state === undefined ? {} : { record: turn.state }),
+        },
+      };
+      const outcome = new Promise<AcpTurnResult>((resolve) => {
+        settlements.set(requestId, resolve);
+      });
+      /* A cancel is settled, not assumed (EA-R8): `run` answers when the parent does. */
+      const onAbort = (): void => {
+        sessions().send({ type: 'cancel', requestId });
+      };
+      turns.set(requestId, turn);
+      turn.signal.addEventListener('abort', onAbort, { once: true });
+      try {
+        sessions().send({ type: 'acquire', acquire });
+        if (turn.signal.aborted) {
+          onAbort();
         }
-        return { stopReason: outcome.stopReason };
+        const result = await outcome;
+        if (!result.ok) {
+          throw failureError(result.failure);
+        }
+        return { stopReason: result.stopReason as StopReason };
       } finally {
-        await releaseMcp?.();
-        entry.busy = false;
-        touch(key);
+        turn.signal.removeEventListener('abort', onAbort);
+        turns.delete(requestId);
+        settlements.delete(requestId);
       }
     },
   };

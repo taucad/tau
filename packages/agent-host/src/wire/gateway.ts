@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { RefusalCode } from '#wire/refusals.js';
 
 /**
- * The codes Tau's LLM gateway (apps/api) refuses with: its 13 API codes plus W11's `ATTEMPT_VOIDED`. apps/api types
+ * The codes Tau's LLM gateway (apps/api) refuses with: its 13 API codes plus W11's `ATTEMPT_VOIDED` and
+ * `BILLING_ACCOUNT_CLOSED`. apps/api types
  * its errors from this as a type (`LlmGatewayErrorType = GatewayErrorCode`), and each code's recovery is its
  * {@link refusals} entry.
  *
@@ -32,6 +33,8 @@ export const gatewayErrorCodes = [
   'UPSTREAM_REJECTED',
   /** W11: the gateway voided a key it never admitted (HTTP 409); the host continues under a new key. */
   'ATTEMPT_VOIDED',
+  /** W11: the attempt lookup's account is closing, closed or restricted (HTTP 403); not a sign-in failure. */
+  'BILLING_ACCOUNT_CLOSED',
 ] as const satisfies readonly RefusalCode[];
 
 /** One {@link gatewayErrorCodes} value. @public */

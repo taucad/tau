@@ -33,6 +33,7 @@
  * | `reset:soon` / `reset:lifted` / `reset:past` | reports Claude Code's `_claude/rateLimit` on `usage_update` before answering: rejected with a reset an hour out then a report no client can read, rejected then allowed again, or rejected with a reset that has already passed |
  * | `reset:codex` | attaches Codex's own `_codex/rateLimit` snapshot beside the AIR failure, as the patched adapter does |
  * | `crash` | writes a stack to stderr and rejects `-32603 Internal error`, whatever the client advertised |
+ * | `mcp-when:<path>` | with `mcp`, waits for that file to exist before calling the tool |
  *
  * Anything that has to be decided *before* a prompt exists is steered by
  * `TAU_FAKE_AGENT_MODE`, which a test's own `AcpAdapter` literal supplies
@@ -49,6 +50,12 @@
  * | `silent` | `initialize` is never answered at all |
  * | `no-http` | HTTP MCP support is absent |
  * | `no-additional-directories` | additional-directory support is absent |
+ * | `stubborn` | SIGTERM is ignored, so only SIGKILL ends the process |
+ * | `grandchild` | a sleeping process is started in this process's group, as a shell tool would be |
+ * | `deaf` | `session/cancel` is ignored, so a cancelled prompt never answers |
+ *
+ * Modes combine, comma-separated. `TAU_FAKE_AGENT_PIDS` names a file each
+ * process (grandchild included) appends its pid to.
  *
  * Sessions are persisted under `cwd`, so a respawned fixture can resume or load
  * one it created in an earlier process. `session/fork` and the compaction
@@ -57,7 +64,8 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -96,6 +104,9 @@ type SessionState = {
 const models = ['gpt-5.3-codex-spark', 'gpt-5.3-codex'];
 
 const mode = process.env['TAU_FAKE_AGENT_MODE'] ?? '';
+/** One mode may combine several behaviours, comma-separated (`silent,stubborn`). */
+const modes = new Set(mode.split(','));
+const inMode = (name: string): boolean => modes.has(name);
 
 /**
  * Every ACP field this fixture reads is a string; anything else is a caller bug.
@@ -275,6 +286,28 @@ const nextSessionId = (): string => {
   return `fake-session-${String(store.nextOrdinal)}-${randomUUID().slice(0, 8)}`;
 };
 
+/*
+ * Process-lifecycle modes, for the close ladder (W10 EA-S2): `stubborn` ignores
+ * SIGTERM, as an adapter mid-write can; `grandchild` starts a sleeper in this
+ * process's group, as a shell tool does; `TAU_FAKE_AGENT_PIDS` names a file
+ * each process appends its pid to, so a test can tell which are still alive.
+ */
+const pidFile = process.env['TAU_FAKE_AGENT_PIDS'];
+const recordPid = (pid: number | undefined): void => {
+  if (pidFile !== undefined && pid !== undefined) {
+    appendFileSync(pidFile, `${String(pid)}\n`, 'utf8');
+  }
+};
+if (inMode('stubborn')) {
+  process.on('SIGTERM', () => undefined);
+}
+/* After the handler: a recorded pid is a process that already ignores SIGTERM. */
+recordPid(process.pid);
+if (inMode('grandchild')) {
+  const sleeper = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], { stdio: 'ignore' });
+  recordPid(sleeper.pid);
+}
+
 const pending = new Map<number, (message: JsonRpcMessage) => void>();
 const cancelled = new Set<string>();
 let nextId = 0;
@@ -354,7 +387,7 @@ const configOptionsOf = (session: SessionState): readonly unknown[] => {
       category: 'model',
       type: 'select',
       currentValue: session.model,
-      options: mode === 'grouped' ? [{ group: 'codex', name: 'Codex', options }] : options,
+      options: inMode('grouped') ? [{ group: 'codex', name: 'Codex', options }] : options,
     },
     {
       id: 'mode',
@@ -754,6 +787,15 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
     return 'refusal';
   }
   if (text.includes('mcp')) {
+    /* `mcp-when:<path>`: hold the call until the test creates that file, so a
+     * test can move the endpoint's clock while this prompt is in flight. */
+    const gate = /mcp-when:(\S+)/u.exec(text)?.[1];
+    if (gate !== undefined) {
+      for (let waited = 0; waited < 300 && !existsSync(gate); waited += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- polling for the test's gate file is ordered by construction.
+        await pause(100);
+      }
+    }
     await callTauMcp(sessionId, session.mcpServers);
   }
   return cancelled.has(sessionId) ? 'cancelled' : 'end_turn';
@@ -799,35 +841,36 @@ const openSession = (sessionId: string, params: Record<string, unknown>): Sessio
  * @returns The `InitializeResponse` body.
  */
 const initializeResult = (): Record<string, unknown> => ({
-  protocolVersion: mode === 'protocol-2' ? 2 : 1,
+  protocolVersion: inMode('protocol-2') ? 2 : 1,
   agentCapabilities: {
     loadSession: true,
     sessionCapabilities: {
-      ...(mode === 'grok-load' ? {} : { resume: {} }),
+      ...(inMode('grok-load') ? {} : { resume: {} }),
       close: {},
-      ...(mode === 'no-additional-directories' || mode.startsWith('grok') ? {} : { additionalDirectories: {} }),
+      ...(inMode('no-additional-directories') || [...modes].some((entry) => entry.startsWith('grok'))
+        ? {}
+        : { additionalDirectories: {} }),
     },
-    ...(mode === 'no-http' ? {} : { mcpCapabilities: { http: true } }),
+    ...(inMode('no-http') ? {} : { mcpCapabilities: { http: true } }),
     /* Both real pins advertise `image` too; the fixture withholds it unless the
      * `images` mode names it, so the refusal path has something to refuse. */
-    promptCapabilities: { image: mode === 'images', embeddedContext: mode !== 'text-only' },
+    promptCapabilities: { image: inMode('images'), embeddedContext: !inMode('text-only') },
   },
-  ...(mode.startsWith('grok') ? { _meta: { 'x.ai/pluginDirs': true } } : {}),
-  authMethods:
-    mode === 'auth-required'
-      ? [
-          {
-            id: 'codex-login',
-            name: 'Log in with Codex',
-            description: 'Sign in to the Codex CLI on the machine running this agent.',
-            /* What Claude sends back to a client that advertised
-             * `_meta['terminal-auth']`: a whole invocation the user can run. */
-            _meta: { 'terminal-auth': { command: 'codex', args: ['login'], label: 'Log in with Codex' } },
-          },
-        ]
-      : mode === 'grok-auth'
-        ? [{ id: 'grok.com', name: 'Grok' }]
-        : [],
+  ...([...modes].some((entry) => entry.startsWith('grok')) ? { _meta: { 'x.ai/pluginDirs': true } } : {}),
+  authMethods: inMode('auth-required')
+    ? [
+        {
+          id: 'codex-login',
+          name: 'Log in with Codex',
+          description: 'Sign in to the Codex CLI on the machine running this agent.',
+          /* What Claude sends back to a client that advertised
+           * `_meta['terminal-auth']`: a whole invocation the user can run. */
+          _meta: { 'terminal-auth': { command: 'codex', args: ['login'], label: 'Log in with Codex' } },
+        },
+      ]
+    : inMode('grok-auth')
+      ? [{ id: 'grok.com', name: 'Grok' }]
+      : [],
 });
 
 /**
@@ -890,7 +933,7 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
     case 'initialize': {
       urlElicitation = advertisesUrlElicitation(params);
       airSessionFailures = advertisesAirSessionFailures(params);
-      if (mode === 'silent') {
+      if (inMode('silent')) {
         /* The adapter that never answers: the client's own timeout is the only
          * thing that can end this turn. */
         return;
@@ -899,7 +942,7 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       return;
     }
     case 'session/new': {
-      if (mode === 'auth-required' || mode === 'grok-auth') {
+      if (inMode('auth-required') || inMode('grok-auth')) {
         fail(-32_000, 'Authentication required');
         return;
       }
@@ -908,7 +951,7 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       return;
     }
     case 'session/resume': {
-      if (mode === 'restore-auth') {
+      if (inMode('restore-auth')) {
         fail(-32_000, 'Authentication required');
         return;
       }
@@ -918,7 +961,7 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       return;
     }
     case 'session/load': {
-      if (mode === 'restore-auth') {
+      if (inMode('restore-auth')) {
         fail(-32_000, 'Authentication required');
         return;
       }
@@ -963,7 +1006,9 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       return;
     }
     case 'session/cancel': {
-      cancelled.add(asString(params['sessionId']));
+      if (!inMode('deaf')) {
+        cancelled.add(asString(params['sessionId']));
+      }
       return;
     }
     case 'session/prompt': {

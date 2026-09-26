@@ -44,16 +44,14 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('revision streams (D13)
   beforeAll(async () => {
     client = postgres(databaseUrl, { max: 2, prepare: false });
     const database = drizzle(client, { schema });
-    await database
-      .insert(user)
-      .values(
-        [ownerId, readerId, strangerId, heirId].map((id) => ({
-          id,
-          name: id,
-          email: `${id}@tau.test`,
-          emailVerified: false,
-        })),
-      );
+    await database.insert(user).values(
+      [ownerId, readerId, strangerId, heirId].map((id) => ({
+        id,
+        name: id,
+        email: `${id}@tau.test`,
+        emailVerified: false,
+      })),
+    );
     await database.insert(project).values({ id: projectId, ownerId, name: 'w5' });
     await database
       .insert(projectCollaborator)
@@ -104,7 +102,14 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('revision streams (D13)
       setTimeout(resolve, 200);
     });
     const started = Date.now();
-    await service.appendRevision({ projectId, ownerId, generation: 1, refs: ['refs/heads/main'] });
+    const main = 'a'.repeat(40);
+    await service.appendRevision({
+      projectId,
+      ownerId,
+      generation: 1,
+      refs: ['refs/heads/main'],
+      heads: { 'refs/heads/main': main },
+    });
 
     const outcome = await waiting;
 
@@ -112,11 +117,24 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('revision streams (D13)
     expect(outcome).toMatchObject({
       found: true,
       snapshot: { kind: 'revision', subjectId: projectId, data: { generation: 1 } },
-      events: [{ sequence: 1, type: 'revision.committed', payload: { generation: 1, refs: ['refs/heads/main'] } }],
+      /* W13e: the head rides along, so a reader that already holds it asks for nothing. */
+      events: [
+        {
+          sequence: 1,
+          type: 'revision.committed',
+          payload: { generation: 1, refs: ['refs/heads/main'], heads: { 'refs/heads/main': main } },
+        },
+      ],
       nextSequence: 1,
     });
 
-    await service.appendRevision({ projectId, ownerId, generation: 2, refs: ['refs/tau/chats/chat_w5'] });
+    await service.appendRevision({
+      projectId,
+      ownerId,
+      generation: 2,
+      refs: ['refs/tau/chats/chat_w5'],
+      heads: { 'refs/tau/chats/chat_w5': 'b'.repeat(40) },
+    });
     const next = await read(revisionStreamId(projectId), readerId, { afterSequence: 1 });
     expect(next).toMatchObject({
       found: true,
@@ -165,7 +183,13 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('revision streams (D13)
     const movedProjectId = `proj-w5-moved-${suffix}`;
     const database = drizzle(client, { schema });
     await database.insert(project).values({ id: movedProjectId, ownerId, name: 'w5 moved' });
-    await service.appendRevision({ projectId: movedProjectId, ownerId, generation: 1, refs: ['refs/heads/main'] });
+    await service.appendRevision({
+      projectId: movedProjectId,
+      ownerId,
+      generation: 1,
+      refs: ['refs/heads/main'],
+      heads: {},
+    });
 
     await database.update(project).set({ ownerId: heirId }).where(eq(project.id, movedProjectId));
 
@@ -178,6 +202,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('revision streams (D13)
       ownerId: heirId,
       generation: 2,
       refs: ['refs/heads/main'],
+      heads: {},
     });
     await expect(read(revisionStreamId(movedProjectId), heirId, { afterSequence: 1 })).resolves.toMatchObject({
       events: [{ sequence: 2, payload: { generation: 2 } }],

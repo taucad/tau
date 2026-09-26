@@ -1540,7 +1540,11 @@ export class GitRepositoryService implements OnModuleDestroy {
       });
   }
 
-  /** One `revision` entry for a committed manifest (D13); a failure is logged, never raised. */
+  /**
+   * One `revision` entry for a committed manifest (D13), with each moved ref's
+   * new head so a client that already holds them asks for nothing (W13e); a
+   * failure is logged, never raised.
+   */
   private async announce(access: GitAccess, generation: number, moved: readonly MovedRef[]): Promise<void> {
     try {
       await this.durableEvents.appendRevision({
@@ -1548,6 +1552,7 @@ export class GitRepositoryService implements OnModuleDestroy {
         ownerId: access.ownerId,
         generation,
         refs: moved.map((ref) => ref.ref),
+        heads: Object.fromEntries(moved.flatMap((ref) => (ref.after === undefined ? [] : [[ref.ref, ref.after]]))),
       });
     } catch (error) {
       this.#logger.warn(

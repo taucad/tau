@@ -127,11 +127,15 @@ export const gitRequestWindowSeconds = 60;
  * database and presigns but hydrates nothing, and which a push of many large
  * files calls once per object.
  *
- * Sized so one always-on client never meets them: a push is two `rpc` requests
- * and a fetch two to four, against a 2 s push debounce. A loop that is not a
- * client does, and is answered `429` with `Retry-After`.
+ * The key is the account and the project, so every device of one account
+ * shares it. Sized from the two-client tier's busiest 60 s (W13d): a desktop
+ * and a browser editing one project at the tier's cadence made 235 `rpc`
+ * requests and drew 24 `429`s before W13d, and 123 with none after it. 240
+ * keeps that pair clear with room for the stream echo a peer's push still
+ * costs. A loop that is not a client meets it and is answered `429` with
+ * `Retry-After`.
  */
-export const gitRequestsPerWindow = { rpc: 120, lfs: 1200 } as const;
+export const gitRequestsPerWindow = { rpc: 240, lfs: 1200 } as const;
 
 /**
  * Requests one account may make per window across every project and route

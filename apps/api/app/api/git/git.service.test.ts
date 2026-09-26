@@ -310,6 +310,8 @@ describe('GitRepositoryService derived state (D19)', () => {
   const store = memoryStore();
   const locator = repositoryLocator({ ownerId, projectId });
   let committedBytes = 0;
+  /* The heads a repair re-announces (W13e): every ref of the manifest, as it now stands. */
+  let heads: Record<string, string> = {};
 
   beforeAll(async () => {
     // One real push, committed through the real protocol, so the manifest this
@@ -322,6 +324,10 @@ describe('GitRepositoryService derived state (D19)', () => {
     git(client, 'add', '.');
     git(client, 'commit', '--quiet', '-m', 'first revision');
     git(client, 'tag', '-a', 'v1', '-m', 'v1');
+    heads = {
+      'refs/heads/main': git(client, 'rev-parse', 'refs/heads/main').trim(),
+      'refs/tags/v1': git(client, 'rev-parse', 'refs/tags/v1').trim(),
+    };
 
     const lease = await hydrateLease({ store, locator, parentDirectory: scratch('lease') });
     try {
@@ -365,7 +371,7 @@ describe('GitRepositoryService derived state (D19)', () => {
        though the rebuild failed; a parked reader makes no request that repairs it. */
     await service.settled();
     expect(durableEvents.appendRevision.mock.calls).toEqual([
-      [{ projectId, ownerId, generation: 1, refs: ['refs/heads/main', 'refs/tags/v1'] }],
+      [{ projectId, ownerId, generation: 1, refs: ['refs/heads/main', 'refs/tags/v1'], heads }],
     ]);
   }, 60_000);
 
@@ -440,9 +446,9 @@ describe('GitRepositoryService derived state (D19)', () => {
     await service.settled();
 
     expect(row.derivedGeneration).toBe(1);
-    /* D13: one `revision` entry for the committed manifest, refs only. */
+    /* D13: one `revision` entry for the committed manifest: its refs and their heads (W13e). */
     expect(durableEvents.appendRevision.mock.calls).toEqual([
-      [{ projectId, ownerId, generation: 1, refs: ['refs/heads/main', 'refs/tags/v1'] }],
+      [{ projectId, ownerId, generation: 1, refs: ['refs/heads/main', 'refs/tags/v1'], heads }],
     ]);
     /* Accounting is the manifest's own live pack bytes — nothing walks a
        directory to find out how large a repository is any more. */
@@ -1029,7 +1035,14 @@ describe('GitRepositoryService security floor (W9)', () => {
          Last, because `caughtUp()` pins the row at generation 1 and the request's
          own repair announces the earlier removal's generation first. */
       expect(durableEvents.appendRevision.mock.lastCall).toEqual([
-        { projectId, ownerId, generation: manifest.generation, refs: ['refs/heads/conflicts/main/device-b'] },
+        /* A removal names no head, so every reader pulls it (W13e). */
+        {
+          projectId,
+          ownerId,
+          generation: manifest.generation,
+          refs: ['refs/heads/conflicts/main/device-b'],
+          heads: {},
+        },
       ]);
       expect(manifest.refs).not.toHaveProperty(['refs/heads/conflicts/main/device-b']);
       expect(manifest.refs).toHaveProperty(['refs/heads/main']);

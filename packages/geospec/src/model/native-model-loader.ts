@@ -219,6 +219,10 @@ export const createGeoSpecNativeModelLoader = (
   let requestSequence = 0;
   const admissions = new Map<string, unknown>();
   const pendingLoads = new Set<Promise<GeoSpecNativeModelSubject>>();
+  const runtimeLoads = new Map<
+    GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory,
+    Map<string, Promise<GeoSpecNativeModelSubject>>
+  >();
   const ownedRuntimes = new Set<GeoSpecRuntimeClient>();
   const runtimeFactories = new Map<GeoSpecRuntimeClientFactory, Promise<GeoSpecRuntimeClient>>();
 
@@ -401,12 +405,64 @@ export const createGeoSpecNativeModelLoader = (
     });
   };
 
+  const coalescedRuntime = async (options: RuntimeOptions & GeoSpecNativeLoadModelOptions) => {
+    const configured = options.runtime ?? defaults.runtime;
+    if (
+      !('code' in options) ||
+      configured === undefined ||
+      options.parameters !== undefined ||
+      options.ingestOptions !== undefined ||
+      ['sourceUnit', 'unit', 'scale', 'coordinateSystem'].some((key) => key in options)
+    ) {
+      return loadRuntime(options);
+    }
+    const codePrototype: unknown = Object.getPrototypeOf(options.code);
+    if (
+      (codePrototype !== Object.prototype && codePrototype !== null) ||
+      Object.values(Object.getOwnPropertyDescriptors(options.code)).some(
+        (descriptor) => !('value' in descriptor) || typeof descriptor.value !== 'string',
+      )
+    ) {
+      return loadRuntime(options);
+    }
+    const files = Object.entries(options.code);
+    const code = Object.fromEntries(files);
+    const key = JSON.stringify({
+      file: options.file,
+      files,
+      format: options.format ?? defaults.format ?? 'glb',
+      meshLinearTolerance: options.meshLinearTolerance,
+      meshAngularToleranceDegrees: options.meshAngularToleranceDegrees,
+    });
+    let loads = runtimeLoads.get(configured);
+    if (loads === undefined) {
+      loads = new Map();
+      runtimeLoads.set(configured, loads);
+    }
+    const existing = loads.get(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const pending = loadRuntime({ ...options, code });
+    loads.set(key, pending);
+    const forget = (): void => {
+      loads.delete(key);
+      if (loads.size === 0) {
+        runtimeLoads.delete(configured);
+      }
+    };
+    // async-iife: bootstrap -- Remove only the in-flight entry after either settlement; the returned admission remains tracked.
+    // oxlint-disable-next-line promise/prefer-await-to-then -- Settlement callback must not replace the caller's promise.
+    void pending.then(forget, forget);
+    return pending;
+  };
+
   // oxlint-disable-next-line typescript/promise-function-async -- Return the tracked admission promise unchanged to its author.
   const loader: GeoSpecNativeModelLoader = (options) => {
     const pending =
       'source' in options
         ? loadDirect(options)
-        : loadRuntime(options as RuntimeOptions & GeoSpecNativeLoadModelOptions);
+        : coalescedRuntime(options as RuntimeOptions & GeoSpecNativeLoadModelOptions);
     pendingLoads.add(pending);
     return pending;
   };

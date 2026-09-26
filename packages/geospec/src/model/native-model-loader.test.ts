@@ -1,10 +1,123 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
+import type { GeoSpecRuntimeClient } from '#model/types.js';
 
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
 
+const testEngine = () => {
+  const ingestSubject = vi.fn(
+    (
+      _request: Uint8Array<ArrayBuffer>,
+      _primary: Uint8Array<ArrayBuffer>,
+      _resources: ReadonlyArray<Uint8Array<ArrayBuffer>>,
+    ) => encode({ result: { subject: { subjectHash: 'a'.repeat(64) } } }),
+  );
+  const subjectHandle = vi.fn(() =>
+    encode({
+      result: { subjectHandle: { subjectHash: 'a'.repeat(64), generation: 1 } },
+    }),
+  );
+  const releaseSubject = vi.fn(() => encode({ result: {} }));
+  const engine: GeoSpecNativeModelEngine = {
+    canonicalPlan: (input) => input,
+    evaluatePlan: (input) => input,
+    processRequest: (input) => input,
+    ingestSubject,
+    subjectHandle,
+    releaseSubject,
+  };
+  return { engine, ingestSubject, subjectHandle, releaseSubject };
+};
+
 describe('native model loader ownership', () => {
+  it('coalesces inline Runtime exports, drains release, and retries after failure', async () => {
+    const { engine, ingestSubject, releaseSubject } = testEngine();
+    const firstExport = Promise.withResolvers<Awaited<ReturnType<GeoSpecRuntimeClient['export']>>>();
+    const exportModel = vi
+      .fn()
+      .mockImplementationOnce(async () => firstExport.promise)
+      .mockResolvedValue({
+        success: true,
+        data: [{ name: 'model.glb', bytes: Uint8Array.of(8) }],
+      });
+    const terminate = vi.fn();
+    const runtime: GeoSpecRuntimeClient = {
+      connect: vi.fn(async () => undefined),
+      export: exportModel,
+      terminate,
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime });
+    const code = { 'main.ts': 'model A' };
+    const options = { code, file: 'main.ts', format: 'glb' } as const;
+    const first = loader(options);
+    const duplicate = loader({ ...options, code: { 'main.ts': 'model A' } });
+    const cleanup = loader.releaseAll();
+    await vi.waitFor(() => {
+      expect(exportModel).toHaveBeenCalledTimes(1);
+    });
+    firstExport.reject(new Error('export failed'));
+    await expect(first).rejects.toThrow('export failed');
+    await expect(duplicate).rejects.toThrow('export failed');
+    await cleanup;
+    expect(ingestSubject).not.toHaveBeenCalled();
+    expect(terminate).not.toHaveBeenCalled();
+    await loader(options);
+    expect(exportModel).toHaveBeenCalledTimes(2);
+    expect(ingestSubject).toHaveBeenCalledTimes(1);
+    code['main.ts'] = 'model B';
+    await loader(options);
+    expect(exportModel).toHaveBeenCalledTimes(3);
+    expect(exportModel.mock.calls[2]?.[1]).toMatchObject({
+      source: { files: { 'main.ts': 'model B' } },
+    });
+    await loader.releaseAll();
+    expect(releaseSubject).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a shared Runtime admission alive until releaseAll drains it', async () => {
+    const { engine, ingestSubject, releaseSubject } = testEngine();
+    const exported = Promise.withResolvers<Awaited<ReturnType<GeoSpecRuntimeClient['export']>>>();
+    const terminate = vi.fn();
+    const runtime: GeoSpecRuntimeClient = {
+      connect: vi.fn(async () => undefined),
+      export: vi.fn(async () => exported.promise),
+      terminate,
+    };
+    const loader = createGeoSpecNativeModelLoader({
+      engine,
+      runtime: async () => runtime,
+    });
+    const options = {
+      code: { 'main.ts': 'model' },
+      file: 'main.ts',
+      format: 'glb',
+    } as const;
+    const first = loader(options);
+    const duplicate = loader(options);
+    const cleanup = loader.releaseAll();
+    await vi.waitFor(() => {
+      expect(runtime.export).toHaveBeenCalledTimes(1);
+    });
+    expect(releaseSubject).not.toHaveBeenCalled();
+    expect(terminate).not.toHaveBeenCalled();
+    exported.resolve({
+      success: true,
+      issues: [],
+      data: [
+        {
+          name: 'model.glb',
+          mimeType: 'model/gltf-binary',
+          bytes: Uint8Array.of(9),
+        },
+      ],
+    });
+    await Promise.all([first, duplicate, cleanup]);
+    expect(ingestSubject).toHaveBeenCalledTimes(1);
+    expect(releaseSubject).toHaveBeenCalledTimes(1);
+    expect(terminate).toHaveBeenCalledTimes(1);
+  });
+
   it('should settle an in-flight admission before releasing its subject', async () => {
     const hash = 'a'.repeat(64);
     const source = Promise.withResolvers<Uint8Array<ArrayBuffer>>();

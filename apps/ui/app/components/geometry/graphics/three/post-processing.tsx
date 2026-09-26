@@ -36,9 +36,10 @@ function MainSceneFallback(): undefined {
 /**
  * Conditionally mounts the post-processing subtree for the active graphics backend.
  *
- * **Disabling** `enablePostProcessing` **unmounts** the AO stack on **both** backends but
- * **mounts** `MainSceneFallback` priority-**1** so the main scene is still shaded
- * every frame when other positive-priority owners exist (`SceneOverlay`, gizmo).
+ * **Disabling** `enablePostProcessing` on WebGL **unmounts** the AO stack but **mounts**
+ * `MainSceneFallback` priority-**1** so the main scene is still shaded every frame when other
+ * positive-priority owners exist (`SceneOverlay`, gizmo). WebGPU keeps its scene pass mounted
+ * and only drops AO: that pass is where its scene tone mapping happens.
  *
  * WebGL `N8AO` path (when mounted) is configured with `screenSpaceRadius={true}`, which means `aoRadius`
  * is measured in **CSS pixels**, converted to the drawing-buffer pixels used by N8AO. This makes ambient occlusion
@@ -57,17 +58,25 @@ export function PostProcessing({ settings }: { readonly settings?: Partial<PostP
   const toneMapping = settings?.toneMapping ?? defaultPostProcessingSettings.toneMapping;
 
   useLayoutEffect(() => {
+    // WebGPU tone-maps the scene inside its own pass, so the renderer's output pass only
+    // encodes sRGB and the overlays drawn after it stay untone-mapped, as on WebGL.
     // oxlint-disable-next-line react/immutability -- This component owns the external renderer's display transform, including the direct-render fallback.
-    gl.toneMapping = rendererToneMappingModes[toneMapping];
+    gl.toneMapping = backend === 'webgpu' ? NoToneMapping : rendererToneMappingModes[toneMapping];
     invalidate();
-  }, [gl, invalidate, toneMapping]);
+  }, [backend, gl, invalidate, toneMapping]);
+
+  if (backend === 'webgpu') {
+    return (
+      <PostProcessingWebGPU
+        settings={settings}
+        aoAllowed={enablePostProcessing}
+        toneMapping={rendererToneMappingModes[toneMapping]}
+      />
+    );
+  }
 
   if (!enablePostProcessing) {
     return <MainSceneFallback />;
-  }
-
-  if (backend === 'webgpu') {
-    return <PostProcessingWebGPU settings={settings} />;
   }
 
   return <PostProcessingWebGL settings={settings} />;

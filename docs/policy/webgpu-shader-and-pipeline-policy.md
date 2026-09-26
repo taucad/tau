@@ -3,7 +3,7 @@ title: 'WebGPU Shader and Pipeline Policy'
 description: 'Rules for portable Three.js shaders, generated-source evidence, and render-pipeline ownership'
 status: active
 created: '2026-05-15'
-updated: '2026-08-30'
+updated: '2026-09-27'
 related:
   - docs/policy/graphics-backend-policy.md
   - docs/policy/webgpu-rendering-pipeline.md
@@ -293,7 +293,13 @@ if (compositeMaterial !== undefined) {
 
 ### 13. Warm `RenderPipeline` pipelines via `PassNode.compileAsync` in `useLayoutEffect`
 
-After constructing the post pipeline (`new RenderPipeline(...)`, `post.outputNode = ...`, retained depth restore), schedule `await scenePass.compileAsync(renderer)` and warm the restore mesh inside the same `useLayoutEffect` (via an annotated `async-iife: bootstrap` so the layout-effect contract is preserved). Only publish `pipelineRef.current` once warmup resolves; the priority-1 `useFrame` skips on `pipelineRef.current === undefined`.
+After constructing the post pipeline (scene pass, output graph, retained depth restore), schedule `await scenePass.compileAsync(renderer)` and warm the restore mesh inside the same `useLayoutEffect` (via an annotated `async-iife: bootstrap` so the layout-effect contract is preserved). Only publish `pipelineRef.current` once warmup resolves; the priority-1 `useFrame` skips on `pipelineRef.current === undefined`.
+
+The viewport's WebGPU output graph is a `QuadMesh` drawn through the renderer's frame target, not `RenderPipeline.render()`: the pipeline writes the canvas directly, and the next overlay's output pass would copy the frame target's stale contents over it. The graph tone-maps the scene itself and `renderer.toneMapping` stays `NoToneMapping`, so the output pass only encodes sRGB and overlays stay untone-mapped, as on WebGL.
+
+A `gl.compileAsync(group, camera)` warm-up builds node graphs outside a render: no frame target, zero samples, and viewport copies taken of the canvas. A material whose graph depends on that live state (a viewport-copy composite such as the overlay `Line2NodeMaterial`) sets `needsUpdate` once the warm-up resolves, so the first real frame rebuilds it against the frame target; the WGSL matches, so the warmed pipeline is still reused.
+
+A scene pass warms only when it renders the way a live frame does. three keys render contexts by call depth, and a live frame renders the scene pass nested inside its output graph's `QuadMesh`. Warm an endpoint by rendering that `QuadMesh` into a throwaway 1×1 target, not by calling the pass's `updateBefore` at top level, which builds a context no frame uses. Scene content that mounts after the warm-up, such as loaded geometry, builds on each pass's first frame. Warm the inactive projection's pass again when new content lands; otherwise the first projection switch stalls on it.
 
 **Why**: The first call to `post.render()` triggers WGSL compilation and pipeline creation for every material in the scene — typically 10-100 ms of main-thread blocking. Since r184, `compileAsync` is genuinely non-blocking (issues `device.createRenderPipelineAsync` and awaits the GPU). Warming inside `useLayoutEffect` keeps the canvas empty for a sub-second beat (acceptable on initial mount, since geometry-loading flow already shows loading states) and eliminates the hitch on every subsequent route entry.
 

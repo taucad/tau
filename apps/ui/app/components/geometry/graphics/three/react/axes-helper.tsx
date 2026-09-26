@@ -226,6 +226,7 @@ export function AxesHelper({
                 opacity={axesHelperOpacity}
                 points={[axisOrigin, axis.positiveEnd]}
                 renderOrder={viewportRenderTiers.viewportGizmo}
+                toneMapped={false}
                 transparent
               />
             )}

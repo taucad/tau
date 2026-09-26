@@ -202,7 +202,7 @@ export const shaderEvidence = {
       'restores the selected scene-pass depth with one direct fullscreen draw',
     ),
     reference: [
-      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::should tone-map once before display AO and encode the raw AO diagnostic without exposure',
+      'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx::should tone-map the scene once in linear light and leave the sRGB encode to the output pass',
       'apps/ui/app/components/geometry/graphics/three/post-processing.test.tsx::should resolve viewport AO radius from the CSS diagonal independently of DPR above the physical minimum',
     ],
     lifecycle: [

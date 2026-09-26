@@ -2,12 +2,15 @@
  * Printer file recognition and G-code extraction.
  *
  * A `*.gcode.3mf` is a Bambu container whose `Metadata/plate_1.gcode` member
- * holds the program; a `*.gcode` is the program itself.
+ * holds the program and `Metadata/plate_1.json` the plate it was sliced for;
+ * a `*.gcode` is the program itself.
  *
  * @module
  */
 
 import { readBambuContainer } from '@taucad/slicer/container';
+import { plateForBedType, readGcodeBedType } from '#components/printer/printer-plates.js';
+import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 
 /** Which printer file a name and its leading bytes describe. */
 export type PrinterFileKind = 'container' | 'gcode';
@@ -28,6 +31,19 @@ export const printerFileKind = (name: string, head: Uint8Array<ArrayBuffer>): Pr
   return lower.endsWith('.gcode') ? 'gcode' : undefined;
 };
 
-/** The G-code bytes of a printer file. */
-export const extractGcode = (bytes: Uint8Array<ArrayBuffer>, kind: PrinterFileKind): Uint8Array<ArrayBuffer> =>
-  kind === 'container' ? readBambuContainer(bytes).gcode : bytes;
+/** What the viewer reads out of a printer file. */
+export type PrinterFileContents = Readonly<{
+  gcode: Uint8Array<ArrayBuffer>;
+  /**
+   * The X1C plate the file was sliced for: the container's `plate_1.json` when it names one Tau knows,
+   * else the G-code's `curr_bed_type`; `undefined` when neither does.
+   */
+  slicedPlate: PrinterPlateModel | undefined;
+}>;
+
+/** The G-code bytes of a printer file and the plate it was sliced for. */
+export const readPrinterFile = (bytes: Uint8Array<ArrayBuffer>, kind: PrinterFileKind): PrinterFileContents => {
+  const container = kind === 'container' ? readBambuContainer(bytes) : undefined;
+  const gcode = container?.gcode ?? bytes;
+  return { gcode, slicedPlate: plateForBedType(container?.bedType) ?? plateForBedType(readGcodeBedType(gcode)) };
+};

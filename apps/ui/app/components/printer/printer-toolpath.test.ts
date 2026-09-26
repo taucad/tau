@@ -5,10 +5,14 @@ import { printerToolpath } from '#components/printer/printer-colors.constants.js
 import {
   createToolpathPalette,
   createToolpathReveal,
+  groupToolpath,
   headPositionAt,
+  setToolpathVisibility,
+  toolpathGroups,
   trailSegmentCount,
   updateToolpathReveal,
 } from '#components/printer/printer-toolpath.js';
+import type { ToolpathReveal } from '#components/printer/printer-toolpath.js';
 import { fixtureProgram } from '#components/printer/testing/toolpath-fixture.js';
 
 const program = fixtureProgram({ layers: 6 });
@@ -24,6 +28,9 @@ const firstOfKind = (layer: number, kind: string): number => {
   }
   throw new Error(`Layer ${layer} has no ${kind} segment`);
 };
+/** Vertices every visible group draws. */
+const drawnVertices = (reveal: ToolpathReveal): number =>
+  reveal.groupLines.reduce((total, object) => total + (object?.visible ? object.geometry.drawRange.count : 0), 0);
 const vertexColor = (colors: ArrayLike<number>, vertex: number): THREE.Color =>
   new THREE.Color().fromArray(colors, vertex * 3);
 
@@ -42,13 +49,21 @@ describe('createToolpathReveal', () => {
   it('should upload every segment once with nothing drawn', () => {
     const reveal = createToolpathReveal(program, palette);
     try {
-      const position = reveal.lines.geometry.getAttribute('position');
+      const groups = reveal.groupLines.filter((object) => object !== undefined);
+      // The fixture has a purge line, walls, infill and travel; each group shares the one upload.
+      expect(groups).toHaveLength(4);
+      const position = groups[0]!.geometry.getAttribute('position');
       expect(position.count).toBe(program.segmentCount * 2);
       expect(position.array).toBe(program.positions);
+      for (const object of groups) {
+        expect(object.geometry.getAttribute('position')).toBe(position);
+        expect(object.geometry.getAttribute('color')).toBe(reveal.colors);
+        expect(object.material.vertexColors).toBe(true);
+      }
+      expect(groups.reduce((total, object) => total + object.geometry.index!.count, 0)).toBe(program.segmentCount * 2);
       expect(reveal.colors.count).toBe(program.segmentCount * 2);
-      expect(reveal.lines.geometry.drawRange).toEqual({ start: 0, count: 0 });
+      expect(drawnVertices(reveal)).toBe(0);
       expect(reveal.trail.geometry.drawRange).toEqual({ start: 0, count: 0 });
-      expect(reveal.lines.material.vertexColors).toBe(true);
       expect(reveal.trail.material.transparent).toBe(true);
       expect(reveal.trail.material.depthWrite).toBe(false);
     } finally {
@@ -98,7 +113,7 @@ describe('updateToolpathReveal', () => {
       const { segment, layer: activeLayer } = updateToolpathReveal({ reveal, program, time, head });
       expect(segment).toBe(segmentAtTime(program, time));
       expect(activeLayer).toBe(3);
-      expect(reveal.lines.geometry.drawRange.count).toBe(segment * 2);
+      expect(drawnVertices(reveal)).toBe(segment * 2);
 
       const activeVertex = layer.firstSegment * 2;
       const base = vertexColor(reveal.baseColors, activeVertex);
@@ -140,17 +155,74 @@ describe('updateToolpathReveal', () => {
     try {
       const head = new THREE.Vector3();
       expect(updateToolpathReveal({ reveal, program, time: -1, head }).segment).toBe(-1);
-      expect(reveal.lines.geometry.drawRange.count).toBe(0);
+      expect(drawnVertices(reveal)).toBe(0);
       expect(updateToolpathReveal({ reveal, program, time: program.duration + 1, head }).segment).toBe(
         program.segmentCount,
       );
-      expect(reveal.lines.geometry.drawRange.count).toBe(program.segmentCount * 2);
+      expect(drawnVertices(reveal)).toBe(program.segmentCount * 2);
       const last = (program.segmentCount - 1) * 6;
       expect(head.toArray()).toEqual([
         program.positions[last + 3],
         program.positions[last + 4],
         program.positions[last + 5],
       ]);
+    } finally {
+      reveal.dispose();
+    }
+  });
+});
+
+describe('groupToolpath', () => {
+  it('should put the start sequence in preparation, keep its moves travel, and sort the layers by kind', () => {
+    const { groupOf, counts } = groupToolpath(program);
+    const groupAt = (segment: number): string => toolpathGroups[groupOf[segment]!]!;
+    expect(program.preambleSegmentCount).toBeGreaterThan(0);
+    const preamble = Array.from({ length: program.preambleSegmentCount }, (_, segment) => groupAt(segment));
+    expect(new Set(preamble)).toEqual(new Set(['travel', 'preparation']));
+    expect(groupAt(firstOfKind(2, 'outer-wall'))).toBe('walls');
+    expect(groupAt(firstOfKind(2, 'inner-wall'))).toBe('walls');
+    expect(groupAt(firstOfKind(2, 'infill'))).toBe('infill');
+    expect(counts.reduce((total, count) => total + count, 0)).toBe(program.segmentCount);
+    expect(counts[toolpathGroups.indexOf('support')]).toBe(0);
+  });
+
+  it('should make unlabelled extrusion before the first layer preparation, not other', () => {
+    const unlabelled = fixtureProgram({ layers: 2 });
+    const kinds = Uint8Array.from(unlabelled.kinds, (kind, segment) =>
+      segment < unlabelled.preambleSegmentCount && kind !== 0 ? toolpathSegmentKinds.indexOf('unknown') : kind,
+    );
+    const { groupOf } = groupToolpath({ ...unlabelled, kinds });
+    const purge = unlabelled.kinds.indexOf(toolpathSegmentKinds.indexOf('purge'));
+    expect(toolpathGroups[groupOf[purge]!]).toBe('preparation');
+  });
+});
+
+describe('setToolpathVisibility', () => {
+  it('should stop drawing hidden groups and keep them out of the trail', () => {
+    const reveal = createToolpathReveal(program, palette);
+    try {
+      const head = new THREE.Vector3();
+      const layer = program.layerTable[3]!;
+      const time = (layer.startTime + layer.endTime) / 2;
+      updateToolpathReveal({ reveal, program, time, head });
+      const everything = drawnVertices(reveal);
+      setToolpathVisibility(reveal, new Set(['preparation', 'travel', 'walls', 'wipe']));
+      updateToolpathReveal({ reveal, program, time, head });
+      const infillOnly = drawnVertices(reveal);
+      expect(infillOnly).toBeGreaterThan(0);
+      expect(infillOnly).toBeLessThan(everything);
+      const walls = reveal.groupLines[toolpathGroups.indexOf('walls')]!;
+      expect(walls.visible).toBe(false);
+      // Hidden groups keep their draw range, so showing them again is one flag.
+      expect(walls.geometry.drawRange.count).toBeGreaterThan(0);
+      const trail = reveal.trailPositions.array;
+      for (let vertex = 0; vertex < reveal.trail.geometry.drawRange.count; vertex += 2) {
+        const start = [trail[vertex * 3], trail[vertex * 3 + 1]];
+        // Infill runs diagonally inside the square; the walls' corners never appear in the trail.
+        expect(start).not.toEqual([108, 108]);
+      }
+      setToolpathVisibility(reveal, new Set());
+      expect(drawnVertices(reveal)).toBe(everything);
     } finally {
       reveal.dispose();
     }

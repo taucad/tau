@@ -13,6 +13,8 @@
 import { toolpathSegmentKinds } from '@taucad/slicer/toolpath';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import type { PrinterManifest } from '#components/printer/printer-manifest.fixture.js';
+import { toolpathGroups } from '#components/printer/printer-toolpath.js';
+import type { ToolpathGroup, ToolpathGrouping } from '#components/printer/printer-toolpath.js';
 
 /** Axis-aligned box: centre and full size, millimetres. */
 export type PrinterBox = Readonly<{
@@ -248,6 +250,75 @@ export const partBounds = (
   return Number.isFinite(max[2]!) ? { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] } : undefined;
 };
 
+/** Groups that never widen the framing: they move the head without laying down filament. */
+const unframedGroups: ReadonlySet<ToolpathGroup> = new Set(['travel', 'wipe']);
+
+/**
+ * The extent of the filament the G-code filter shows: every extruding segment
+ * in a shown group, measured on the centrelines and standing on the plate
+ * (Z starts at 0). Travel and wipes never count, shown or not.
+ *
+ * @param program - The parsed toolpath.
+ * @param grouping - The filter group of every segment.
+ * @param hidden - The groups the filter hides.
+ * @returns The bounds, or `undefined` when nothing shown lays down filament.
+ */
+export const shownExtrusionBounds = (
+  program: Pick<ToolpathProgram, 'segmentCount' | 'positions' | 'extrusion'>,
+  { groupOf }: Pick<ToolpathGrouping, 'groupOf'>,
+  hidden: ReadonlySet<ToolpathGroup>,
+): PrinterBounds | undefined => {
+  const isFramed = toolpathGroups.map((group) => !hidden.has(group) && !unframedGroups.has(group));
+  const min = [Infinity, Infinity, 0];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let segment = 0; segment < program.segmentCount; segment += 1) {
+    if (program.extrusion[segment]! <= 0 || !isFramed[groupOf[segment]!]) {
+      continue;
+    }
+    for (let offset = segment * 6; offset < segment * 6 + 6; offset += 1) {
+      const axis = offset % 3;
+      const value = program.positions[offset]!;
+      min[axis] = Math.min(min[axis]!, value);
+      max[axis] = Math.max(max[axis]!, value);
+    }
+  }
+  return Number.isFinite(max[2]!) ? { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] } : undefined;
+};
+
+/** Millimetres of plate kept around a small print, so the plate reads as the surface it stands on. */
+const plateContextSpan = 90;
+
+/**
+ * The box the camera frames when only the plate is drawn. It is centred on the
+ * part and reaches every shown filament line on each side, so the part sits in
+ * the middle of the view with the purge line and skirt still in it; a small
+ * part keeps at least {@link plateContextSpan} of plate around it. It runs from
+ * the plate's underside to just above the nozzle at the top of the print, and
+ * holds for the whole run because the plate stays still in this view.
+ *
+ * @param geometry - The machine, for the plate's size when nothing is shown.
+ * @param extent - The shown filament's bounds, and the part's among them, from {@link shownExtrusionBounds}.
+ * @returns The box in the plate frame, which is world space in this view.
+ */
+export const framedPlateBox = (
+  geometry: Pick<PrinterGeometry, 'buildVolume'>,
+  { shown, part }: Readonly<{ shown: PrinterBounds | undefined; part: PrinterBounds | undefined }>,
+): PrinterBounds => {
+  if (!shown) {
+    const [width, depth] = geometry.buildVolume;
+    return { min: [0, 0, -plateThickness], max: [width, depth, nozzleContext] };
+  }
+  const subject = part ?? shown;
+  const across = (axis: 0 | 1): readonly [number, number] => {
+    const center = (subject.min[axis] + subject.max[axis]) / 2;
+    const half = Math.max(center - shown.min[axis], shown.max[axis] - center, plateContextSpan / 2);
+    return [center - half, center + half];
+  };
+  const [minX, maxX] = across(0);
+  const [minY, maxY] = across(1);
+  return { min: [minX, minY, -plateThickness], max: [maxX, maxY, Math.max(0, shown.max[2]) + nozzleContext] };
+};
+
 /** Plate group Z offset in world space for the print height reached so far. */
 export const plateOffsetForHeight = (geometry: Pick<PrinterGeometry, 'motion'>, height: number): number =>
   geometry.motion === 'plate-descends' ? -height : 0;
@@ -310,13 +381,13 @@ export const framedPrintBox = (
  * canvas aspect: the binding axis meets the fill margin exactly, the other
  * axis is centred, and the eye stays outside the enclosure.
  *
- * @param geometry - The machine whose enclosure the eye keeps clear of.
+ * @param geometry - The machine whose enclosure the eye keeps clear of; `undefined` when no enclosure is drawn.
  * @param box - The world-space box to frame, from {@link framedPrintBox}.
  * @param aspect - Canvas width over height.
  * @returns The camera pose; the target is on the view axis at the box's depth.
  */
 export const framePrinterCamera = (
-  geometry: Pick<PrinterGeometry, 'enclosure'>,
+  geometry: Pick<PrinterGeometry, 'enclosure'> | undefined,
   box: PrinterBounds,
   aspect: number,
 ): PrinterCameraPose => {
@@ -353,9 +424,10 @@ export const framePrinterCamera = (
   const fitted = [0, 1, 2].map(
     (axis) => center[axis]! + right[axis]! * across + up[axis]! * lift + forward[axis]! * depth,
   );
-  const { center: middle, size } = geometry.enclosure;
+  const { center: middle, size } = geometry?.enclosure ?? { center: [0, 0, 0], size: [0, 0, 0] };
   const half = size.map((value) => value / 2 + enclosureClearance);
-  const isInside = fitted.every((value, axis) => Math.abs(value - middle[axis]!) < half[axis]!);
+  const isInside =
+    geometry !== undefined && fitted.every((value, axis) => Math.abs(value - middle[axis]!) < half[axis]!);
   // Back straight out along the view axis: the framing stays centred and only grows smaller.
   const backOut = isInside
     ? Math.min(

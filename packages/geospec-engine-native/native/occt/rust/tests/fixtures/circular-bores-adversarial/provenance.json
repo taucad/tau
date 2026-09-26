@@ -1,0 +1,106 @@
+{
+  "schema": "circular-bores-adversarial-test-fixtures-v1",
+  "attribution": "Tau GeoSpec O4 adversarial bore fixtures, written by STEPControl_Writer from OCCT primitives and Booleans.",
+  "runtimeDependency": "All runtime inputs are files in this directory. Provenance locators are historical attribution only and are never read by the test.",
+  "generator": "docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-occt-substrate/lanes/o4-booleans-proximity-a1/evidence/adv_bores.cpp (pinned OCCT 8.1.0.dev1-3d097a0328, delivery-n10-20260926 native prefix)",
+  "provenance": "docs/research/artifacts/geospec-native-closeout-blueprint/runs/2026-09-26-occt-substrate/lanes/o4-booleans-proximity-a1/evidence/adv/ (Brain commit ad3f1f86); expectations from that lane report (O4-1) and adv_bores.jsonl.",
+  "bytePolicy": "Byte-locked assets: do not reformat, regenerate, or alter expectations. The STEP headers carry the generation timestamp, so regeneration is not byte-identical.",
+  "files": [
+    {
+      "file": "a0-clean-through.step",
+      "sha256": "fb622c854152ce81c205d416bbe903c090ac65564fe2a9b23cf32120097a83b1",
+      "bytes": 19137,
+      "description": "Plate 40 x 40 x 20 with a through bore r = 5 on the z axis; nothing near the bore."
+    },
+    {
+      "file": "a1-blind.step",
+      "sha256": "4da6a50844eba4429c3a6eca73a38fb5f05c83c57e0ec574e667ae62d4afcf07",
+      "bytes": 19351,
+      "description": "Blind bore r = 5 from z = 8 to the top face (planar disk bottom)."
+    },
+    {
+      "file": "b-pocket-wall-1.step",
+      "sha256": "e0a3ec1295d25cd9b58bd5000b9014786cb5e242c4ebda83d02674c4f7324b01",
+      "bytes": 33065,
+      "description": "Through bore r = 5 beside a rectangular pocket whose inner plane sits at x = 5 + 1: a wall of thickness 1 mm between pocket and bore."
+    },
+    {
+      "file": "b-pocket-wall-1e-2.step",
+      "sha256": "80d1e5c6ca1c373840599b8ed6c036111d38ab9df03d2e7bc7bcd1b366d4e9ce",
+      "bytes": 33107,
+      "description": "Through bore r = 5 beside a rectangular pocket whose inner plane sits at x = 5 + 1e-2: a wall of thickness 1e-2 mm between pocket and bore."
+    },
+    {
+      "file": "b-pocket-wall-1e-4.step",
+      "sha256": "e824c015668a2c9ebd6d45c9869470997755d13eff5ecb5ef21a781bb7ee1d92",
+      "bytes": 33149,
+      "description": "Through bore r = 5 beside a rectangular pocket whose inner plane sits at x = 5 + 1e-4: a wall of thickness 1e-4 mm between pocket and bore."
+    },
+    {
+      "file": "b-pocket-wall-1e-6.step",
+      "sha256": "5ba135694b6c2edcafefe091bd5f3334e01dcd12338696314f33cca4ce69d928",
+      "bytes": 33191,
+      "description": "Through bore r = 5 beside a rectangular pocket whose inner plane sits at x = 5 + 1e-6: a wall of thickness 1e-6 mm between pocket and bore."
+    },
+    {
+      "file": "b-pocket-wall-1e-7.step",
+      "sha256": "7719d18283dfc69fe40086cfe8855e07ccc540017130ed36e668dbcf3af79862",
+      "bytes": 38803,
+      "description": "Through bore r = 5 beside a rectangular pocket whose inner plane sits at x = 5 + 1e-7: a wall of thickness 1e-7 mm between pocket and bore."
+    },
+    {
+      "file": "c-parallel-hole-wall-1.step",
+      "sha256": "1ec485556aac8cbc1af2d452c39bb57e3995408b3cea448e16338d4a7b30afef",
+      "bytes": 22793,
+      "description": "Through bore r = 5 beside a parallel through hole r = 2 whose surface is 1 mm from the bore surface."
+    },
+    {
+      "file": "c-parallel-hole-wall-1e-2.step",
+      "sha256": "d045729a7b48ba6d9757451bcb74c9c8d85e7a12cb62f4b89638322e9f5ad4fe",
+      "bytes": 22806,
+      "description": "Through bore r = 5 beside a parallel through hole r = 2 whose surface is 1e-2 mm from the bore surface."
+    },
+    {
+      "file": "c-parallel-hole-wall-1e-4.step",
+      "sha256": "8085efd760db859a76b6654abee5f6260d706fc503835c75aba3c6ea07c335ec",
+      "bytes": 22822,
+      "description": "Through bore r = 5 beside a parallel through hole r = 2 whose surface is 1e-4 mm from the bore surface."
+    },
+    {
+      "file": "c-parallel-hole-wall-1e-6.step",
+      "sha256": "cbab78334cc6f464e01bd9252af793fd238685aac3a284338bc1abb2899efdab",
+      "bytes": 22840,
+      "description": "Through bore r = 5 beside a parallel through hole r = 2 whose surface is 1e-6 mm from the bore surface."
+    },
+    {
+      "file": "c-parallel-hole-wall-1e-7.step",
+      "sha256": "3317828a58df926a10987033560fa1cfc2d54c48c93aae87cfd5d603d1a3bb8c",
+      "bytes": 25522,
+      "description": "Through bore r = 5 beside a parallel through hole r = 2 whose surface is 1e-7 mm from the bore surface."
+    },
+    {
+      "file": "d-counterbore.step",
+      "sha256": "e1ce65e04bd9b3c7e04e9f1f3797097294d4a73944e9a654d331f799960191ce",
+      "bytes": 23008,
+      "description": "Through bore r = 5 with a coaxial counterbore R = 8 from z = 15 (bore band 0..15, mouth annulus at 15)."
+    },
+    {
+      "file": "e-pin-gap-1.step",
+      "sha256": "c2d697b62623abc838188f1af83283f0db1a2b41207947a43bb1b24c949c8e77",
+      "bytes": 66998,
+      "description": "Beam on posts above the plate with a pin r = 1 hanging into the bore to z = 10, its surface 1 mm from the bore wall (a true obstruction)."
+    },
+    {
+      "file": "e-pin-gap-1e-2.step",
+      "sha256": "a6382a88326f8e077ffe888e3153807cdb28b12c8f68b106e2fdfb8155944082",
+      "bytes": 67026,
+      "description": "Beam on posts above the plate with a pin r = 1 hanging into the bore to z = 10, its surface 1e-2 mm from the bore wall (a true obstruction)."
+    },
+    {
+      "file": "e-pin-gap-1e-4.step",
+      "sha256": "167ca6eb9879f554be357e23d1fe5c4bd1fea790d9ac8e64f2b201fdc5d89096",
+      "bytes": 67054,
+      "description": "Beam on posts above the plate with a pin r = 1 hanging into the bore to z = 10, its surface 1e-4 mm from the bore wall (a true obstruction)."
+    }
+  ]
+}

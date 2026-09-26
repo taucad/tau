@@ -14,16 +14,14 @@ fn fixture(name: &str) -> Vec<u8> {
 // Every source numeric the adapter transfers. Debug text distinguishes every
 // finite f64, including signed zero.
 fn source_numerics(document: &Document) -> String {
-    let facts = document.facts().unwrap();
-    let mut text = format!("{facts:?}\n{:?}\n", BrepSubject::faces(document).unwrap());
-    for occurrence in 0..facts.occurrences.len() as u32 {
-        text += &format!(
-            "{:?}\n{:?}\n",
-            document.occurrence_faces(occurrence).unwrap(),
-            document.occurrence_edges(occurrence).unwrap()
-        );
-    }
-    text
+    let faces = BrepSubject::faces(document).unwrap();
+    let boxes: Vec<_> = (0..faces.len() as u32)
+        .map(|face| document.face_optimal_bounds(face).unwrap())
+        .collect();
+    format!(
+        "{:?}\n{faces:?}\n{boxes:?}\n",
+        document.source_occurrences().unwrap()
+    )
 }
 
 fn validity(document: &Document) -> String {
@@ -50,8 +48,7 @@ fn source_numerics_and_validity_do_not_depend_on_demand_order() {
         assert_eq!(validity(&validity_first), expected_validity, "{name}");
         assert_eq!(source_numerics(&validity_first), expected, "{name}");
 
-        // The copied report generation reads no source numeric slot; it fills
-        // only the source edge addresses whose per-face counts it reports.
+        // The copied report generation reads no source numeric slot.
         let report_first = Document::from_step(&bytes).unwrap();
         report_first.reported_facts_and_mesh().unwrap();
         assert_eq!(source_numerics(&report_first), expected, "{name}");
@@ -74,7 +71,7 @@ fn numeric_failure_refuses_at_first_demand_not_admission() {
     for _ in 0..2 {
         // A failed fill stores nothing; a retry fails the same way.
         assert_eq!(
-            document.facts().unwrap_err(),
+            document.source_occurrences().unwrap_err(),
             BackendError {
                 kind: BackendErrorKind::ComputationFailed,
                 message: "Shape has no finite bounds.".into(),

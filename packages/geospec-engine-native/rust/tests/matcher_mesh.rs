@@ -8,8 +8,8 @@ use crate::{
     },
     backend::{
         brep::{
-            Bounds, BrepEntity, BrepSubject, DocumentFacts, EdgeFacts, LocatedFace, PointState,
-            ShapeFacts, TessellationProfile, TopologyCounts, ValidityFacts,
+            Bounds, BrepEntity, BrepSubject, DocumentFacts, LocatedFace, PointState, ShapeFacts,
+            TessellationProfile, TopologyCounts, ValidityFacts,
         },
         AnalysisRetentionLimits, BackendError, TriangleMesh,
     },
@@ -41,19 +41,7 @@ impl BrepSubject for FactsOnlyBrep {
         })
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(Rc::clone(&self.0))
-    }
-
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!()
-    }
-
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        unreachable!()
-    }
-
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
         unreachable!()
     }
 
@@ -140,10 +128,8 @@ fn subject_with_brep(record: MeshAnalysisRecord) -> Rc<Subject> {
     subject.brep = Some(Box::new(FactsOnlyBrep(Rc::new(DocumentFacts {
         source_length_unit: "millimetre".into(),
         source_unit_to_millimeters: 1.0,
-        products: Vec::new(),
         occurrences: Vec::new(),
         shape: ShapeFacts {
-            valid: true,
             bounds: Bounds {
                 min: [-3.0, -2.0, -1.0],
                 max: [7.0, 8.0, 9.0],
@@ -161,7 +147,6 @@ fn subject_with_brep(record: MeshAnalysisRecord) -> Rc<Subject> {
                 vertices: 8,
             },
         },
-        faces: Vec::new(),
         subshapes: Vec::new(),
         datum_placements: Vec::new(),
         semantic_datums: Vec::new(),

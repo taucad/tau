@@ -910,8 +910,6 @@ mod tests {
 
     fn occurrence(path: &str) -> crate::backend::brep::OccurrenceFacts {
         crate::backend::brep::OccurrenceFacts {
-            label: path.into(),
-            product_label: path.into(),
             name: path.into(),
             placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
             bounds: Bounds {
@@ -1156,22 +1154,7 @@ mod tests {
         ) -> Result<Rc<[crate::backend::brep::OccurrenceFacts]>, BackendError> {
             Ok(Rc::clone(&self.0))
         }
-        fn facts(&self) -> Result<Rc<crate::backend::brep::DocumentFacts>, BackendError> {
-            unreachable!()
-        }
         fn faces(&self) -> Result<Rc<[crate::backend::brep::LocatedFace]>, BackendError> {
-            unreachable!()
-        }
-        fn occurrence_faces(
-            &self,
-            _: u32,
-        ) -> Result<Rc<[crate::backend::brep::LocatedFace]>, BackendError> {
-            unreachable!()
-        }
-        fn occurrence_edges(
-            &self,
-            _: u32,
-        ) -> Result<Rc<[crate::backend::brep::EdgeFacts]>, BackendError> {
             unreachable!()
         }
         fn validity(&self) -> Result<Rc<crate::backend::brep::ValidityFacts>, BackendError> {

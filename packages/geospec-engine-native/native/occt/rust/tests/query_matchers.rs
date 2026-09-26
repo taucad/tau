@@ -35,12 +35,12 @@ fn close(actual: f64, expected: f64, tolerance: f64) {
 #[test]
 fn retained_box_exercises_whole_faces_trim_validity_and_mesh_transfer() {
     let document = Document::from_step(&fixture("ap242-box.step")).unwrap();
-    let facts = document.facts().unwrap();
+    let admission = document.admission_facts().unwrap();
     let faces = BrepSubject::faces(&document).unwrap();
 
-    assert_eq!(facts.source_length_unit, "millimetre");
+    assert_eq!(admission.source_length_unit, "millimetre");
     assert_eq!(
-        facts.source_unit_to_millimeters.to_bits(),
+        admission.source_unit_to_millimeters.to_bits(),
         1.0_f64.to_bits()
     );
     assert_eq!(faces.len(), 6);
@@ -107,41 +107,24 @@ fn retained_box_exercises_whole_faces_trim_validity_and_mesh_transfer() {
 #[test]
 fn retained_assembly_exercises_paths_transforms_topology_and_exact_queries() {
     let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
-    let facts = document.facts().unwrap();
+    let occurrences = document.source_occurrence_structure().unwrap();
 
-    assert_eq!(facts.occurrences.len(), 2);
-    assert!(facts.occurrences.iter().all(|occurrence| {
+    assert_eq!(occurrences.len(), 2);
+    assert!(occurrences.iter().all(|occurrence| {
         !occurrence.path.is_empty()
             && occurrence.parent.is_none()
-            && (occurrence.product as usize) < facts.products.len()
             && !occurrence.product_name.is_empty()
             && occurrence.ordinal_path.len() == 1
     }));
-    assert_eq!(
-        facts.occurrences[0].placement[3].to_bits(),
-        0.0_f64.to_bits()
-    );
-    assert_eq!(
-        facts.occurrences[1].placement[3].to_bits(),
-        30.0_f64.to_bits()
-    );
+    assert_eq!(occurrences[0].placement[3].to_bits(), 0.0_f64.to_bits());
+    assert_eq!(occurrences[1].placement[3].to_bits(), 30.0_f64.to_bits());
 
-    let faces = document.occurrence_faces(0).unwrap();
-    let edges = document.occurrence_edges(0).unwrap();
+    let faces = &document.reported_faces(true).unwrap().occurrence_faces[0];
     assert_eq!(faces.len(), 6);
-    assert_eq!(edges.len(), 12);
-    assert!(faces.iter().all(|face| {
-        !face.edge_indices.is_empty()
-            && face
-                .edge_indices
-                .iter()
-                .all(|index| *index > 0 && *index as usize <= edges.len())
-    }));
-    assert!(edges.iter().all(|edge| edge.length > 0.0));
-    let boundary_edge = &edges[(faces[0].edge_indices[0] - 1) as usize];
+    // A corner of the axis-aligned face's box lies on its boundary.
     assert_eq!(
         document
-            .classify_face_points(faces[0].entity, &[boundary_edge.start], 1e-6)
+            .classify_face_points(faces[0].entity, &[faces[0].bounds.min], 1e-6)
             .unwrap(),
         vec![PointState::On]
     );
@@ -157,30 +140,43 @@ fn retained_assembly_exercises_paths_transforms_topology_and_exact_queries() {
 #[test]
 fn retained_inch_fixture_preserves_source_units() {
     let document = Document::from_step(&fixture("inch-cube.step")).unwrap();
-    let facts = document.facts().unwrap();
-    assert_eq!(facts.source_length_unit, "INCH");
+    let admission = document.admission_facts().unwrap();
+    assert_eq!(admission.source_length_unit, "INCH");
     assert_eq!(
-        facts.source_unit_to_millimeters.to_bits(),
+        admission.source_unit_to_millimeters.to_bits(),
         25.4_f64.to_bits()
     );
-    assert_eq!(facts.shape.bounds.min.map(f64::to_bits), [0, 0, 0]);
-    assert_eq!(
-        facts.shape.bounds.max.map(f64::to_bits),
-        [25.4_f64.to_bits(); 3]
-    );
+    // The source box: the fold of the whole-face AddOptimal boxes (F6).
+    let boxes: Vec<_> = (0..BrepSubject::faces(&document).unwrap().len() as u32)
+        .map(|face| document.face_optimal_bounds(face).unwrap())
+        .collect();
+    let min: [f64; 3] = std::array::from_fn(|axis| {
+        boxes
+            .iter()
+            .map(|b| b.min[axis])
+            .fold(f64::INFINITY, f64::min)
+    });
+    let max: [f64; 3] = std::array::from_fn(|axis| {
+        boxes
+            .iter()
+            .map(|b| b.max[axis])
+            .fold(f64::NEG_INFINITY, f64::max)
+    });
+    assert_eq!(min.map(f64::to_bits), [0, 0, 0]);
+    assert_eq!(max.map(f64::to_bits), [25.4_f64.to_bits(); 3]);
 }
 
 #[test]
 fn retained_ap242_fixture_preserves_analytic_and_semantic_facts() {
     let document = Document::from_step(&fixture("nist-pmi-bspline.step")).unwrap();
-    let facts = document.facts().unwrap();
+    let faces = BrepSubject::faces(&document).unwrap();
+    let facts = document.document_rows().unwrap();
 
-    assert_eq!(facts.faces.len(), 156);
+    assert_eq!(faces.len(), 156);
     assert_eq!(
-        facts
-            .faces
+        faces
             .iter()
-            .filter(|face| matches!(face.surface, SurfaceFacts::Bspline { .. }))
+            .filter(|face| matches!(face.facts.surface, SurfaceFacts::Bspline { .. }))
             .count(),
         4
     );
@@ -233,7 +229,7 @@ fn retained_transformed_ap242_occurrence_locates_named_face_and_datum() {
         "packages/geospec-engine/fixtures/selector/second-producer-transformed/model.step",
     ))
     .unwrap();
-    let facts = document.facts().unwrap();
+    let facts = document.document_rows().unwrap();
 
     let datum = facts
         .datum_placements
@@ -255,9 +251,7 @@ fn retained_transformed_ap242_occurrence_locates_named_face_and_datum() {
     let face_index = subshape
         .face_index
         .expect("cubeB face must retain its zero-based public face ordinal");
-    let face = document
-        .occurrence_faces(occurrence)
-        .unwrap()
+    let face = document.reported_faces(true).unwrap().occurrence_faces[occurrence as usize]
         .iter()
         .find(|face| face.facts.index == face_index)
         .cloned()

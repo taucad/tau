@@ -196,9 +196,8 @@ fn finite_contact_adapter_boundary_receipts() {
         let row = table.lines().find(|line| line.contains(name)).unwrap();
         let fields: Vec<_> = row.splitn(5, '\t').collect();
         let document = Document::from_step(&std::fs::read(input.join(fields[2])).unwrap()).unwrap();
-        let facts = document.facts().unwrap();
-        for occurrence in 0..facts.occurrences.len() {
-            for face in document.occurrence_faces(occurrence as u32).unwrap().iter() {
+        for faces in document.reported_faces(false).unwrap().occurrence_faces {
+            for face in faces.iter() {
                 if matches!(
                     face.facts.surface,
                     geospec_engine_native_occt::SurfaceFacts::Plane { .. }

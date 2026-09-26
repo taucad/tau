@@ -14,7 +14,6 @@ fn fixture(name: &str) -> Vec<u8> {
 #[test]
 fn retained_box_certificate_is_unchanged() {
     let document = Document::from_step(&fixture("ap242-box.step")).unwrap();
-    let before = document.facts().unwrap();
     let domain = document.continuous_wall_domain(BrepEntity::Whole).unwrap();
     let ContinuousWallShape::AxisAlignedBox {
         corners,
@@ -40,13 +39,11 @@ fn retained_box_certificate_is_unchanged() {
     );
     assert_eq!(face_indices, [1, 2, 3, 4, 5, 6]);
     assert_eq!(edge_lengths, [10.0, 20.0, 30.0]);
-    assert_eq!(before.as_ref(), document.facts().unwrap().as_ref());
 }
 
 #[test]
 fn retained_rod_remains_unsupported() {
     let document = Document::from_step(&fixture("ap242-radius1-height10.step")).unwrap();
-    let before = document.facts().unwrap();
     let error = document
         .continuous_wall_domain(BrepEntity::Whole)
         .unwrap_err();
@@ -55,5 +52,4 @@ fn retained_rod_remains_unsupported() {
         error.message,
         "Continuous cylinder requires a finite increasing axial interval and an exact full analytic U period."
     );
-    assert_eq!(before.as_ref(), document.facts().unwrap().as_ref());
 }

@@ -29,10 +29,11 @@ fn fixture(name: &str) -> Vec<u8> {
 fn admitted(bytes: &[u8]) -> String {
     let document = Document::from_step(bytes).unwrap();
     format!(
-        "{:?}\n{:?}\n{:?}\n{:?}",
+        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
         document.admission_facts().unwrap(),
         document.step_subject_metadata().unwrap(),
-        document.facts().unwrap(),
+        document.faces().unwrap(),
+        document.document_rows().unwrap(),
         document.source_occurrences().unwrap()
     )
 }

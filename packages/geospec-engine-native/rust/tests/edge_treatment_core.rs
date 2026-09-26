@@ -4,10 +4,9 @@ use super::*;
 use crate::{
     backend::{
         brep::{
-            BrepEntity, CircularBoreInventory, EdgeFacts, EdgeTreatmentBoundaryUse,
-            EdgeTreatmentCounts, EdgeTreatmentResidual, EdgeTreatmentRow, EdgeTreatmentSupport,
-            FaceFacts, LocatedFace, PointState, ReportedBrepBundle, ShapeFacts,
-            TessellationProfile, ValidityFacts,
+            BrepEntity, CircularBoreInventory, EdgeTreatmentBoundaryUse, EdgeTreatmentCounts,
+            EdgeTreatmentResidual, EdgeTreatmentRow, EdgeTreatmentSupport, FaceFacts, LocatedFace,
+            PointState, ReportedBrepBundle, ShapeFacts, TessellationProfile, ValidityFacts,
         },
         TriangleMesh,
     },
@@ -34,7 +33,6 @@ impl EdgeTreatmentBrep {
                     entity: BrepEntity::WholeFace(index + 1),
                     facts: FaceFacts {
                         index,
-                        parameter_bounds: [0.0, 1.0, 2.0, 3.0],
                         area: 1.0,
                         center_of_mass: [index as f64, 0.0, 0.0],
                         surface: SurfaceFacts::Plane {
@@ -47,8 +45,6 @@ impl EdgeTreatmentBrep {
                         max: [index as f64 + 1.0, 1.0, 1.0],
                     },
                     reversed: false,
-                    edge_indices: Vec::new(),
-                    shape_label: None,
                 })
                 .collect::<Vec<_>>(),
         );
@@ -57,10 +53,8 @@ impl EdgeTreatmentBrep {
             facts: Rc::new(DocumentFacts {
                 source_length_unit: "millimetre".into(),
                 source_unit_to_millimeters: 1.0,
-                products: Vec::new(),
                 occurrences: Vec::new(),
                 shape: ShapeFacts {
-                    valid: true,
                     bounds: Bounds {
                         min: [0.0; 3],
                         max: [3.0, 1.0, 1.0],
@@ -78,7 +72,6 @@ impl EdgeTreatmentBrep {
                         vertices: 6,
                     },
                 },
-                faces: Vec::new(),
                 subshapes: Vec::new(),
                 datum_placements: Vec::new(),
                 semantic_datums: Vec::new(),
@@ -127,17 +120,8 @@ impl BrepSubject for EdgeTreatmentBrep {
         Ok(self.facts.occurrences.clone().into())
     }
 
-    fn facts(&self) -> Result<Rc<DocumentFacts>, BackendError> {
-        Ok(Rc::clone(&self.facts))
-    }
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         Ok(Rc::clone(&self.faces))
-    }
-    fn occurrence_faces(&self, _: u32) -> Result<Rc<[LocatedFace]>, BackendError> {
-        Ok(Rc::from(Vec::<LocatedFace>::new()))
-    }
-    fn occurrence_edges(&self, _: u32) -> Result<Rc<[EdgeFacts]>, BackendError> {
-        Err(unused())
     }
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         Ok(Rc::new(ValidityFacts {

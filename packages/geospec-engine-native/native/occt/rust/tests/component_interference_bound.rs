@@ -85,8 +85,8 @@ fn component_interference_bound_actual_source_admission() {
     use geospec_engine_native_core::backend::brep::SelectedInterferenceMaterial::*;
     let document =
         Document::from_step(&std::fs::read(input().join("original.step")).unwrap()).unwrap();
-    let facts = document.facts().unwrap();
-    assert_eq!(facts.occurrences.len(), 2);
+    assert_eq!(document.source_occurrence_structure().unwrap().len(), 2);
+    let faces = document.reported_faces(false).unwrap().occurrence_faces;
     for (occurrence, source, private, public) in [(0, 432, 7, 6), (1, 480, 1, 0)] {
         let selected = BrepEntity::Face {
             occurrence,
@@ -108,7 +108,7 @@ fn component_interference_bound_actual_source_admission() {
         assert_eq!(band.public_face_ordinal, public);
         assert_eq!(band.occurrence, occurrence);
         assert_eq!([band.from, band.to], [0., 30.]);
-        for face in document.occurrence_faces(occurrence).unwrap().iter() {
+        for face in faces[occurrence as usize].iter() {
             if face.entity != selected {
                 assert!(document
                     .selected_interference_material(face.entity)
@@ -246,8 +246,8 @@ fn component_interference_bound_rejects_incomplete_material_controls() {
     ] {
         let document = Document::from_step(&std::fs::read(input().join(name)).unwrap()).unwrap();
         let mut tested = 0;
-        for (occurrence, _) in document.facts().unwrap().occurrences.iter().enumerate() {
-            for face in document.occurrence_faces(occurrence as u32).unwrap().iter() {
+        for faces in document.reported_faces(false).unwrap().occurrence_faces {
+            for face in faces.iter() {
                 if !matches!(face.facts.surface, SurfaceFacts::Cylinder { .. }) {
                     continue;
                 }

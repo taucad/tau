@@ -117,12 +117,13 @@ import type {
   RemoteInitialSyncActorInput,
   RemoteInitialSyncActorOutput,
   RemoteReadActorOutput,
+  RemoteReadStorageActorInput,
   RemoteValidateActorInput,
   RemoteValidateActorOutput,
   RemoteWriteActorInput,
   RemoteWriteActorOutput,
 } from '#remote.machine.js';
-import type { RemoteStorageSupplier } from '#remote.types.js';
+import type { RemoteStorage, RemoteStorageSupplier } from '#remote.types.js';
 import { isHostLocalRef, remoteKindOf, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { createSyncQueue } from '#sync-queue.js';
@@ -497,11 +498,11 @@ export type RevisionActorsOptions = Readonly<{
    */
   remoteUrl?: (projectId: string) => string | undefined;
   /**
-   * What the remote says this project costs against its plan (S35).
+   * What Tau Cloud says this project's owner stores against the plan (S35, D18).
    *
    * Not part of the git protocol: the Tau API answers it and a third-party Git
    * remote does not, so the Sync region shows the storage row only when a host
-   * can fill it in. W11a/W13 wire the reader.
+   * can fill it in. Asked on every arrival at `connected`, for Tau Cloud only.
    */
   remoteStorage?: RemoteStorageSupplier;
   /**
@@ -3379,8 +3380,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * does it advertise. No object is fetched. */
       validate: fromAuthorityPromise<RemoteValidateActorOutput, RemoteValidateActorInput>(async ({ input }) => {
         await port.listRemoteRefs(input.remote);
-        const storage = await options.remoteStorage?.(input.remote);
-        return storage === undefined ? {} : { storage };
+        return {};
+      }),
+
+      /* D18: what Tau Cloud says the owner's account stores, read by the host
+       * that knows how to ask. Not the repository's business, so not an
+       * authority operation: nothing waits on it to close. A Git remote has no
+       * plan to report. */
+      readStorage: createAsyncLogic<RemoteStorage | undefined, RemoteReadStorageActorInput>({
+        run: async ({ input }) => (input.kind === 'tau' ? options.remoteStorage?.(input.remote) : undefined),
       }),
 
       /*

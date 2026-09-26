@@ -33,7 +33,7 @@ import type { AnyActorRef, AnyEventObject, EnqueueObject, SnapshotFrom } from 'x
 import type { CheckoutCutTrigger } from '#checkout.machine.js';
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
-import { isCeilingRefusal } from '#refusal-markers.js';
+import { isStorageRefusal } from '#refusal-markers.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
 import type {
   SyncFacet,
@@ -1370,6 +1370,10 @@ const syncMachineDefinition = setup({
               },
             });
           }
+          /* F9: bytes reached the remote, so its stored figure is stale. */
+          if (event.output.refs.some((entry) => entry.status === 'updated') && context.parentRef !== undefined) {
+            enq.sendTo(context.parentRef, { type: 'remote', event: { type: 'pushed' } });
+          }
           return {
             target: 'recording',
             context: {
@@ -1380,15 +1384,15 @@ const syncMachineDefinition = setup({
               retryAfterMilliseconds: undefined,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
               error: refusalSaid(refusedHistory?.reason ?? (pending.length > 0 ? pending[0]?.reason : undefined)),
-              /* D20's ceiling refusal arrives here as a per-ref result rather
-                 than as a thrown transport error, and it is a quota answer:
+              /* D20's ceiling and D17's plan quota arrive here as per-ref results
+                 rather than as a thrown transport error, and each is a quota answer:
                  *Sync now* replays the same bytes and cannot clear a ceiling
                  (W10 defect 4). Recognised by the same predicate the native
                  leg uses; every other refusal stays `rejected`, and the
                  remote's own sentence and file list are untouched either way. */
               reason:
                 pending.length > 0
-                  ? pending.some((entry) => isCeilingRefusal(entry.reason))
+                  ? pending.some((entry) => isStorageRefusal(entry.reason))
                     ? 'quota'
                     : 'rejected'
                   : undefined,

@@ -30,7 +30,7 @@ import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
-import { gitRemoteUrlProblem } from '@taucad/revisions';
+import { gitRemoteUrlProblem, isCeilingRefusal } from '@taucad/revisions';
 import type { RemoteFacet, SyncFacet, SyncFailureReason } from '@taucad/revisions';
 /* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
    and a second copy of the union here would be exactly the dual vocabulary the
@@ -40,7 +40,7 @@ import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#component
 import { githubConnections, githubErrorMessage } from '#lib/github-connections.js';
 import type { GithubRepository } from '#lib/github-connections.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
-import { formatBytes } from '#lib/format-bytes.js';
+import { formatStorageLimit } from '@taucad/billing';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
 import { Switch } from '@taucad/ui/components/switch';
@@ -110,8 +110,17 @@ export type RevisionSyncRegionProps = {
   readonly canSyncFiles?: boolean;
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the `useCommercialFeatures()` entitlement field.
   readonly canConnectGitHub?: boolean;
-  /** Take a free account to the plan surface; the pane supplies the route. */
+  /**
+   * Take the owner to the plan surface; the pane supplies it only when a larger
+   * plan exists, so an owner on the top tier and a self-host build are offered
+   * none (D17).
+   */
   readonly onUpgrade?: () => void;
+  /**
+   * The account's Tau Cloud allowance, when the plan is known (D16): the Tau
+   * Cloud choice says what is included instead of what is withheld.
+   */
+  readonly storageLimitBytes?: number;
   /** Where *Sign in* goes when the remote answered 401 (N3). */
   readonly signInHref?: string;
   /**
@@ -166,20 +175,27 @@ const reconnectCopy = (remote: RemoteFacet): string => {
  *
  * @param reason - The failure class the sync machine recorded.
  * @param remote - The connection, so a credential problem names its provider.
+ * @param role - The viewer's relationship to the project, which decides whether a plan action is theirs.
  * @returns Which action to render, or `undefined` when there is nothing to do.
  */
 const syncFailureAction = (
-  reason: SyncFailureReason | undefined,
+  { reason, error }: Readonly<{ reason?: SyncFailureReason | undefined; error?: string | undefined }>,
   remote: RemoteFacet,
+  role?: ProjectAccessRole,
 ): 'signIn' | 'upgrade' | 'reconnectGithub' | 'moved' | 'syncNow' | 'retry' | undefined => {
   switch (reason) {
     case 'unauthorized': {
       /* Only Tau Cloud is reached with this device's own session (D18). */
       return remote.kind === 'tau' ? 'signIn' : isGithubRemote(remote) ? 'reconnectGithub' : 'retry';
     }
+    /* D17: a plan is the owner's to change. A collaborator's refusal is the
+       owner-directed sentence alone; an owner with no larger plan gets none
+       either, because the pane withholds `onUpgrade` and the file list is what
+       they can act on. D20's ceiling is the same on every plan, so it offers
+       no plan action to anyone (RV-W8 F2). */
     case 'notEntitled':
     case 'quota': {
-      return 'upgrade';
+      return role === 'write' || role === 'read' || isCeilingRefusal(error) ? undefined : 'upgrade';
     }
     case 'forbidden':
     case 'notFound': {
@@ -243,6 +259,9 @@ const authoritySentence = (githubAvailable: boolean | undefined): string =>
 
 /**
  * *Available on Pro*, with the route the rest of the app already uses (N4).
+ *
+ * Only an account the plan still refuses sees it — while D23's gate keeps the
+ * free tier closed; an entitled account is told its allowance instead (D16).
  *
  * @param props - The upgrade verb the pane supplied, when this build has one.
  * @returns The label, or nothing on a build with no plans to sell.
@@ -447,6 +466,7 @@ export function RevisionSyncRegion({
   canSyncFiles = true,
   canConnectGitHub = true,
   onUpgrade,
+  storageLimitBytes,
   signInHref,
   role,
   projectId,
@@ -476,7 +496,7 @@ export function RevisionSyncRegion({
     setShouldConnect(false);
   };
   const syncState = backupCopy(sync, role);
-  const failureAction = syncFailureAction(sync.reason, remote);
+  const failureAction = syncFailureAction(sync, remote, role);
   /* W2a: a damaged cloud copy is terminal; the client has nothing to offer but the truth (I12). */
   const failureSentence =
     sync.reason === 'damaged' ? describeRevisionFailure('backup', 'REMOTE_DAMAGED').description : sync.error;
@@ -742,6 +762,12 @@ export function RevisionSyncRegion({
     the action is chosen from `sync.reason`, which is a contract.
   */
   const hasFigure = remote.storage !== undefined && !showMeter;
+  /* D18: packs a compaction retired but still keeps, beside the figure and never in it. */
+  const retained = remote.storage?.retained ?? 0;
+  const retainedFigure =
+    retained > 0 ? (
+      <span className='text-muted-foreground'>{formatStorageLimit(retained)} kept for recovery, not counted</span>
+    ) : undefined;
   const showsAccess = readOnly && role !== 'revoked' && remote.kind !== 'none';
   const statusBlock =
     syncState === undefined && !hasFigure && !showsAccess ? undefined : (
@@ -757,9 +783,10 @@ export function RevisionSyncRegion({
           ) : undefined}
           {remote.storage === undefined || !hasFigure ? undefined : (
             <span className='text-muted-foreground'>
-              {formatBytes(remote.storage.used)} of {formatBytes(remote.storage.quota)}
+              {formatStorageLimit(remote.storage.used)} of {formatStorageLimit(remote.storage.quota)}
             </span>
           )}
+          {hasFigure ? retainedFigure : undefined}
         </span>
         {role === 'revoked' ? (
           <span className='text-muted-foreground'>{accessRemovedSentence}</span>
@@ -922,7 +949,13 @@ export function RevisionSyncRegion({
             <Label htmlFor='remote-tau' className={cn('font-normal', !canSyncFiles && 'text-muted-foreground')}>
               Tau Cloud
             </Label>
-            {canSyncFiles ? null : <PlanGate onUpgrade={onUpgrade} />}
+            {canSyncFiles ? (
+              storageLimitBytes === undefined ? null : (
+                <span className='text-xs text-muted-foreground'>{formatStorageLimit(storageLimitBytes)} included</span>
+              )
+            ) : (
+              <PlanGate onUpgrade={onUpgrade} />
+            )}
           </div>
           <div className='flex items-center gap-2'>
             <RadioGroupItem id='remote-git' value='git' disabled={!canConnectGitHub} />
@@ -1164,8 +1197,11 @@ export function RevisionSyncRegion({
 
       {remote.storage === undefined || !showMeter ? undefined : (
         <div className='flex flex-col gap-1.5'>
-          <p className='text-sm tabular-nums'>
-            {formatBytes(remote.storage.used)} of {formatBytes(remote.storage.quota)}
+          <p className='flex flex-wrap items-baseline gap-x-3 text-sm tabular-nums'>
+            <span>
+              {formatStorageLimit(remote.storage.used)} of {formatStorageLimit(remote.storage.quota)}
+            </span>
+            {retainedFigure === undefined ? undefined : <span className='text-xs'>{retainedFigure}</span>}
           </p>
           <div
             role='meter'
@@ -1184,7 +1220,11 @@ export function RevisionSyncRegion({
         <div className='flex flex-col gap-1.5'>
           <p className='flex items-center gap-2 text-sm'>
             <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
-            <span>These files are over your plan and were not backed up:</span>
+            <span>
+              {role === 'write' || role === 'read'
+                ? 'These files did not fit in the project owner’s plan and were not backed up:'
+                : 'These files are over your plan and were not backed up:'}
+            </span>
           </p>
           <ul className='flex flex-col gap-1'>
             {remote.overQuota.map((path) => (
@@ -1208,7 +1248,7 @@ export function RevisionSyncRegion({
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
           <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
           <span className='min-w-0 flex-1'>{remote.error}</span>
-          {renderFailureAction(syncFailureAction(remote.reason, remote) ?? 'retry', () => {
+          {renderFailureAction(syncFailureAction(remote, remote, role) ?? 'retry', () => {
             setChangingBackup(true);
           })}
         </div>

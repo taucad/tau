@@ -197,6 +197,7 @@ const databaseStub = (
   return {
     database: {
       select,
+      update,
       insert: () => ({
         values: (values: Partial<GitRow>) => ({
           onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
@@ -537,6 +538,72 @@ describe('GitRepositoryService derived state (D19)', () => {
  * their own: the removal verb moves this store's refs, which the D19 rows above
  * must not see.
  */
+/*
+ * D18 / L6-F5: packs a compaction retires stay in the store for the retention
+ * window. They are real storage the plan does not charge, so the sweep that
+ * already lists `packs/` records their bytes on the accounting row for the
+ * usage route's second figure.
+ */
+describe('retained packs after a compacting sweep (D18)', () => {
+  it('should record the bytes of the retired packs the sweep keeps', async () => {
+    const store = memoryStore();
+    const retainedProject = 'proj-w8-retained';
+    const locator = repositoryLocator({ ownerId, projectId: retainedProject });
+    const client = scratch('retained-client');
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'W8');
+    git(client, 'config', 'user.email', 'w8@tau.test');
+    /* One more live pack than the bound, committed without compacting, so the
+       service's next commit compacts. */
+    for (let push = 0; push < 9; push += 1) {
+      writeFileSync(path.join(client, `part-${String(push)}.scad`), `cube(${String(push)});\n`);
+      git(client, 'add', '.');
+      git(client, 'commit', '--quiet', '-m', `revision ${String(push)}`);
+      if (push === 0) {
+        git(client, 'tag', 'v1');
+      }
+      // oxlint-disable-next-line no-await-in-loop -- each push is its own generation, in order.
+      const lease = await hydrateLease({ store, locator, parentDirectory: scratch('retained-lease') });
+      try {
+        execFileSync('git', ['push', lease.directory, 'main', 'refs/tags/v1'], {
+          cwd: client,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: gitEnvironment,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- see above.
+        const outcome = await commitLease({ store, lease, committedBy: ownerId, packBound: 100 });
+        expect(outcome.committed).toBe(true);
+      } finally {
+        // oxlint-disable-next-line no-await-in-loop -- see above.
+        await lease.dispose();
+      }
+    }
+    const updates: Array<Record<string, unknown>> = [];
+    const service = createService(
+      store,
+      databaseStub({ generation: 9, derivedGeneration: 9, storageBytes: 0 }, { failTransaction: false, updates }),
+    );
+
+    await service.removeRef({
+      access: { ...access, projectId: retainedProject },
+      ref: 'refs/tags/v1',
+      committedBy: ownerId,
+    });
+    await service.settled();
+
+    const read = await store.readManifest(locator);
+    const live = new Set(decodeManifest(read?.manifest ?? new Uint8Array()).packs.map((pack) => pack.key));
+    let retired = 0;
+    for await (const object of store.listObjects(locator, 'packs/')) {
+      const pack = object.key.endsWith('.idx') ? `${object.key.slice(0, -'.idx'.length)}.pack` : object.key;
+      retired += live.has(pack) ? 0 : object.bytes;
+    }
+    expect(live.size).toBeLessThan(9);
+    expect(retired).toBeGreaterThan(0);
+    expect(updates).toContainEqual({ retainedBytes: retired });
+  }, 120_000);
+});
+
 describe('GitRepositoryService security floor (W9)', () => {
   const store = memoryStore();
   const locator = repositoryLocator({ ownerId, projectId });
@@ -689,7 +756,7 @@ describe('GitRepositoryService security floor (W9)', () => {
      host even if the transport's allowlist ever admitted the route. */
   it('should hold a cloud host at write in every mode, and refuse it the removal verb', async () => {
     const service = createService(store, caughtUp());
-    vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({ storageBytes: 0, lfsBytes: 0 });
+    vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({ storageBytes: 0, lfsBytes: 0, retainedBytes: 0 });
 
     const accesses = await Promise.all(
       (['read', 'write', 'finalize'] as const).map(async (mode) =>
@@ -885,7 +952,7 @@ describe('GitRepositoryService security floor (W9)', () => {
           { failTransaction: false, publications: [published] },
         ),
       );
-      vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({ storageBytes: 0, lfsBytes: 0 });
+      vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({ storageBytes: 0, lfsBytes: 0, retainedBytes: 0 });
       const moduleRef = await Test.createTestingModule({
         controllers: [GitController],
         providers: [

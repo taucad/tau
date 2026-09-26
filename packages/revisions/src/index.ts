@@ -101,7 +101,7 @@ export { recordLastPush, sendKeepalivePush } from '#sync-keepalive.js';
 export type { KeepalivePushOutcome, PushRecorder } from '#sync-keepalive.js';
 /* The marker itself stays module-private: nothing outside this package should
    match on the sentence by hand (AC23 would call it an unimported export). */
-export { isCeilingRefusal } from '#refusal-markers.js';
+export { isCeilingRefusal, isStorageRefusal } from '#refusal-markers.js';
 export {
   createGitRemoteTransport,
   gitRemoteUrlProblem,
@@ -111,6 +111,7 @@ export {
   lfsRemoteUnsupportedMessage,
   publishFailureMessage,
   publishOverHttp,
+  readRemoteStorageOverHttp,
   refPatternIsHostLocal,
   registerProjectFailureMessage,
   registerProjectOverHttp,

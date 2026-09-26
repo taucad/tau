@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Stripe from 'stripe';
 import { and, desc, eq, isNull } from 'drizzle-orm';
@@ -54,11 +54,26 @@ const planToTier = (plan: string): BillingTier => {
 /** Projects paid access from the owned financial deadlines, independent of caches. */
 @Injectable()
 export class BillingService {
+  readonly #logger = new Logger(BillingService.name);
+  readonly #freeTierSync: boolean;
+
   public constructor(
     private readonly databaseService: DatabaseService,
     private readonly configService: ConfigService<Environment, true>,
     @Inject(stripeReadClientKey) private readonly stripe: Stripe,
-  ) {}
+  ) {
+    /*
+     * D23, in code and not by convention: a production process that inherits
+     * the flag (a stray Fly secret, a copied env file) still keeps free sync
+     * shut. The go-live commit deletes this clause, then sets the flag.
+     */
+    const requested = configService.get('TAU_FREE_TIER_SYNC_ENABLED', { infer: true });
+    const production = configService.get('NODE_ENV', { infer: true }) === 'production';
+    if (requested && production) {
+      this.#logger.warn('Ignoring TAU_FREE_TIER_SYNC_ENABLED under NODE_ENV=production while charter D23 is open.');
+    }
+    this.#freeTierSync = requested && !production;
+  }
 
   /** Reads PostgreSQL; a stale cached active label cannot extend paid access. */
   @Span()
@@ -119,7 +134,8 @@ export class BillingService {
       now < relevant.graceEndsAt.getTime();
     const tier = relevant && (paid || grace) ? planToTier(relevant.plan) : 'free';
     const status = this.resolveStatus(relevant);
-    const base = entitlementsFromTier(tier);
+    /* D23: the free tier's sync is a deployment gate, closed unless configured. */
+    const base = entitlementsFromTier(tier, { freeTierSync: this.#freeTierSync });
     const overrides = tier === 'enterprise' && relevant ? await this.loadOverrides(relevant.id) : {};
     const stripeAccountId = this.configService.get('STRIPE_ACCOUNT_ID', { infer: true });
     const livemode = this.configService.get('STRIPE_LIVEMODE', { infer: true });

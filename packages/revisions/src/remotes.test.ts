@@ -23,6 +23,7 @@ import {
   refPatternIsHostLocal,
   publishFailureMessage,
   publishOverHttp,
+  readRemoteStorageOverHttp,
   registerProjectFailureMessage,
   registerProjectOverHttp,
   remoteCarriesLargeObjects,
@@ -38,7 +39,12 @@ import type { PublishPublicationActorInput } from '#publish.types.js';
 /* The two W4 rows assert the *consequence* of the code, not only the code: a
    terminal class is what stops `sync.machine` retrying, and that classifier is
    the machine's, not this module's. */
-import { incompleteRepositoryMarker } from '#refusal-markers.js';
+import {
+  incompleteRepositoryMarker,
+  isCeilingRefusal,
+  isStorageRefusal,
+  quotaRefusalMarker,
+} from '#refusal-markers.js';
 import { syncFailureReason } from '#sync.machine.js';
 import { RevisionPortError } from '#revision-port.js';
 
@@ -291,6 +297,41 @@ describe('remoteTransportError', () => {
     expect(syncFailureReason(refusal)).toBe('quota');
     expect(refusal.message).toContain('Tau: repository size limit exceeded');
     expect(refusal.message).toContain('huge.bin (5000 bytes)');
+  });
+
+  /*
+   * D17: the plan's own refusal comes the same way, with the caller's sentence
+   * and the largest files, and is the same kind of answer: a quota, whose one
+   * action depends on who is asking, never *Sync now*.
+   */
+  it('should read the plan-quota refusal on the sideband as a quota answer, sentence and files intact', () => {
+    const stderr = [
+      'remote: Tau: storage quota exceeded — this push needs 4080 bytes more than the plan allows.',
+      'remote: Tau: This push needs more room than your 1 GB storage plan has left, so it was not backed up.',
+      'remote: Tau: the largest files it adds are:',
+      'remote: Tau:   scan.stl (5000 bytes)',
+      'remote: Tau: nothing was written.',
+      'To https://api.tau.build/v1/git/p1.git',
+      ' ! [remote rejected] refs/heads/main -> refs/heads/main (pre-receive hook declined)',
+    ].join('\n');
+
+    const refusal = remoteTransportError(new Error(stderr), { remote: tauRemoteName, stderr });
+
+    expect(refusal.code).toBe('REMOTE_QUOTA_EXCEEDED');
+    expect(syncFailureReason(refusal)).toBe('quota');
+    expect(refusal.message).toContain('your 1 GB storage plan');
+    expect(refusal.message).toContain('scan.stl (5000 bytes)');
+  });
+
+  it('should spell the quota marker the way the API prints it, and file only storage answers as storage', () => {
+    expect(quotaRefusalMarker).toBe('Tau: storage quota exceeded');
+    expect(isStorageRefusal('Tau: repository size limit exceeded — …')).toBe(true);
+    expect(isStorageRefusal('Tau: refused refs/heads/main — it does not fast-forward')).toBe(false);
+    expect(isStorageRefusal(undefined)).toBe(false);
+    /* F2: the ceiling is the one storage refusal no plan clears. */
+    expect(isCeilingRefusal('Tau: repository size limit exceeded — …')).toBe(true);
+    expect(isCeilingRefusal(`${quotaRefusalMarker}\nTau: …`)).toBe(false);
+    expect(isCeilingRefusal(undefined)).toBe(false);
   });
 
   /* D18: a Git remote that cannot hold large objects is not a plan problem,
@@ -717,6 +758,53 @@ describe('the Tau Cloud publish and register legs', () => {
       expect(refused.calls[1]?.body).toBe(JSON.stringify({}));
     } finally {
       refused.restore();
+    }
+  });
+
+  /* D18: the Sync region's figure, from the owner-scoped usage route. */
+  it('should read the owner’s usage as bytes used of the allowance, on either leg', async () => {
+    const answered = capture(200, { storageBytes: 300, lfsBytes: 40, storageLimitBytes: 1024 });
+    try {
+      expect(await readRemoteStorageOverHttp('https://api.test/', { kind: 'cookie' }, 'p1')).toStrictEqual({
+        used: 340,
+        quota: 1024,
+      });
+      await readRemoteStorageOverHttp('https://api.test', { kind: 'bearer', authorization: 'Bearer t' }, 'p1');
+
+      expect(answered.urls).toEqual(['https://api.test/v1/projects/p1/usage', 'https://api.test/v1/projects/p1/usage']);
+      expect(answered.calls[0]?.credentials).toBe('include');
+      expect((answered.calls[1]?.headers ?? {}) as Record<string, string>).toHaveProperty('Authorization', 'Bearer t');
+    } finally {
+      answered.restore();
+    }
+  });
+
+  it('should read retained packs as their own figure, outside what is used', async () => {
+    const answered = capture(200, { storageBytes: 300, lfsBytes: 40, storageLimitBytes: 1024, retainedBytes: 500 });
+    try {
+      expect(await readRemoteStorageOverHttp('https://api.test', { kind: 'cookie' }, 'p1')).toStrictEqual({
+        used: 340,
+        quota: 1024,
+        retained: 500,
+      });
+    } finally {
+      answered.restore();
+    }
+  });
+
+  it('should draw no figure for a collaborator, a plan that cannot sync or an answer it cannot read', async () => {
+    for (const [status, body] of [
+      [403, { code: 'PROJECT_ROLE_INSUFFICIENT' }],
+      [200, { storageBytes: 0, lfsBytes: 0, storageLimitBytes: 0 }],
+      [200, { storageBytes: '1' }],
+    ] as const) {
+      const answered = capture(status, body);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one stubbed answer at a time.
+        expect(await readRemoteStorageOverHttp('https://api.test', { kind: 'cookie' }, 'p1')).toBeUndefined();
+      } finally {
+        answered.restore();
+      }
     }
   });
 });

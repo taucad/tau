@@ -1,4 +1,4 @@
-import type { BillingTier } from '@taucad/billing';
+import { formatStorageLimit } from '@taucad/billing';
 
 /**
  * Server-side constants of the Tau Hosted Remote (architecture A16/A24/A39,
@@ -44,15 +44,45 @@ export const isGitService = (value: string | undefined): value is GitService =>
   value !== undefined && (gitServices as readonly string[]).includes(value);
 
 /**
- * Repository storage allowance per billing tier. The free tier cannot sync at
- * all (`canSyncFiles`), so its allowance is zero and the entitlement refusal
- * always fires first; Pro's 10 GB is the number the Sync region renders
- * (`2.1 GB of 10 GB`, architecture "Large-object policy").
+ * Who a quota refusal is addressed to (charter D17, I12): the one action a
+ * refused push offers depends on the caller's relationship to the project.
+ * `owner` may grow the plan (*Upgrade*); `ownerAtTopTier` has no larger plan,
+ * so the file list is the whole of what can be done; `collaborator` pushes
+ * against a plan they cannot change, so the sentence directs them to the owner.
  */
-export const storageLimitBytesByTier: Readonly<Record<BillingTier, number>> = {
-  free: 0,
-  pro: 10 * 1024 ** 3,
-  enterprise: 100 * 1024 ** 3,
+export type QuotaAudience = 'owner' | 'ownerAtTopTier' | 'collaborator';
+
+/**
+ * The fixed first words of the pre-receive quota refusal. A `pre-receive`
+ * refusal carries no HTTP status, so the client files it as a storage answer by
+ * these words (`packages/revisions/src/refusal-markers.ts` holds the same
+ * string), exactly as it does {@link ceilingRefusalMarker}.
+ */
+export const quotaRefusalMarker = 'Tau: storage quota exceeded';
+
+/**
+ * The one sentence a quota refusal says, on every leg (D17): the `413` of an
+ * exhausted allowance, the LFS batch `413` with its file list, and the
+ * `pre-receive` refusal. It names the allowance a person was sold — the figure
+ * the Sync region renders as `x of 1 GB` — to the owner, and never the owner's
+ * plan to a collaborator.
+ *
+ * @param audience - Who is being refused.
+ * @param limitBytes - The owner's allowance.
+ * @returns The sentence.
+ */
+export const quotaRefusalSentence = (audience: QuotaAudience, limitBytes: number): string => {
+  switch (audience) {
+    case 'owner': {
+      return `This push needs more room than your ${formatStorageLimit(limitBytes)} storage plan has left, so it was not backed up.`;
+    }
+    case 'ownerAtTopTier': {
+      return `This push needs more room than your ${formatStorageLimit(limitBytes)} storage plan has left, so it was not backed up. Remove or stop tracking the largest files to make room.`;
+    }
+    case 'collaborator': {
+      return "This push needs more room than the project owner's storage plan has left, so it was not backed up. Ask the owner to make room.";
+    }
+  }
 };
 
 /**
@@ -65,7 +95,7 @@ export const storageLimitBytesByTier: Readonly<Record<BillingTier, number>> = {
  * registration is a row, and every row is a tenant prefix a later push fills.
  *
  * One flat number rather than a per-tier table: the plan already bounds what a
- * project may *hold* (`storageLimitBytesByTier`), and a second per-tier
+ * project may *hold* (`storageLimitBytesByTier` in `@taucad/billing`), and a second per-tier
  * dimension would be a product decision nobody has made. It is a constant rather
  * than an operator environment value for the same reason `storageLimitBytesByTier`
  * is — none of the Hosted Remote's plan numbers is env-tunable today, and one
@@ -403,8 +433,16 @@ quarantine="\${GIT_QUARANTINE_PATH:-}"
 if [ -n "$quarantine" ] && [ -d "$quarantine" ]; then
   incoming=$(du -sk "$quarantine" | cut -f1)
   incoming=$((incoming * 1024))
+  # D17: the plan's refusal says who can act on it and carries the file list,
+  # because a free allowance equals the D20 ceiling and this is tested first
+  # (L6-F2) — without the list here, a free owner would never see one.
   if [ -n "$remaining" ] && [ "$incoming" -gt "$remaining" ]; then
-    echo "Tau: storage quota exceeded — this push needs $((incoming - remaining)) bytes more than the plan allows." >&2
+    echo "${quotaRefusalMarker} — this push needs $((incoming - remaining)) bytes more than the plan allows." >&2
+    if [ -n "\${TAU_GIT_QUOTA_SENTENCE:-}" ]; then
+      echo "Tau: $TAU_GIT_QUOTA_SENTENCE" >&2
+    fi
+    echo "Tau: the largest files it adds are:" >&2
+    arriving_files
     echo "Tau: nothing was written." >&2
     exit 1
   fi

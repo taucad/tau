@@ -5,9 +5,12 @@ import type { SyncFailureReason } from '#sync.types.js';
 /**
  * What a remote says this project stores against its plan (S35, C13).
  *
+ * `retained` is the bytes of packs a compaction retired but still keeps for
+ * recovery (D18): shown beside `used`, never counted against `quota`.
+ *
  * @public
  */
-export type RemoteStorage = Readonly<{ used: number; quota: number }>;
+export type RemoteStorage = Readonly<{ used: number; quota: number; retained?: number }>;
 
 /**
  * Where a host reads {@link RemoteStorage} from (C13, D18).
@@ -119,4 +122,9 @@ export type RemoteMachineEvent =
       quota?: number;
       /** What the remote said about room, when it said anything (C13). */
       storage?: RemoteStorageRefusal;
-    }>;
+    }>
+  /**
+   * A push put bytes on the remote (RV-W8 F9): the stored figure is stale, so
+   * a connected remote reads it again. Forwarded by `sync.machine`.
+   */
+  | Readonly<{ type: 'pushed' }>;

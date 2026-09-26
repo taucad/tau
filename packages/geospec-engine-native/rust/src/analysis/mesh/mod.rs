@@ -14,7 +14,6 @@ use std::{
     rc::Rc,
 };
 
-use crate::backend::BackendError;
 use crate::codec::compare_utf16;
 
 const SPATIAL_EPSILON: f64 = 1e-5;
@@ -1250,20 +1249,18 @@ fn component_clusters(
 
 /// GSM1 bounds use only referenced positions, while other analysis retains the
 /// complete admitted record. Other source formats keep their own bounds scope.
-pub(crate) fn analyze_indexed(
-    record: &Rc<MeshAnalysisRecord>,
-) -> Result<MeshAnalysis, BackendError> {
-    let mut analysis = analyze(record)?;
+pub(crate) fn analyze_indexed(record: &Rc<MeshAnalysisRecord>) -> MeshAnalysis {
+    let mut analysis = analyze(record);
     analysis.indexed_bounds = true;
-    Ok(analysis)
+    analysis
 }
 
 /// Every caller passes a record validated at decode (GLB/glTF) or built valid
 /// by the engine (GSM1, STEP report soup, interference components), so the
 /// check is not repeated here.
-pub fn analyze(record: &Rc<MeshAnalysisRecord>) -> Result<MeshAnalysis, BackendError> {
+pub fn analyze(record: &Rc<MeshAnalysisRecord>) -> MeshAnalysis {
     debug_assert_eq!(record.validate(), Ok(()));
-    Ok(MeshAnalysis {
+    MeshAnalysis {
         vertex_count: record.positions.len() as u32,
         mesh_count: record.primitives.len() as u32,
         triangle_count: record.triangles.len() as u32,
@@ -1276,7 +1273,7 @@ pub fn analyze(record: &Rc<MeshAnalysisRecord>) -> Result<MeshAnalysis, BackendE
         watertight: OnceCell::new(),
         pieces: OnceCell::new(),
         components: OnceCell::new(),
-    })
+    }
 }
 
 #[cfg(test)]
@@ -1322,7 +1319,7 @@ mod tests {
 
     #[test]
     fn analyzes_closed_asymmetric_translated_box() {
-        let analysis = analyze(&Rc::new(box_record(3.0))).unwrap();
+        let analysis = analyze(&Rc::new(box_record(3.0)));
         assert!(analysis.mesh_quality.get().is_none());
         assert!(analysis.canonical.get().is_none());
         assert!(analysis.watertight.get().is_none());
@@ -1366,7 +1363,7 @@ mod tests {
                 vertex_count: 3,
             });
         }
-        let analysis = analyze(&Rc::new(record)).unwrap();
+        let analysis = analyze(&Rc::new(record));
         let components = analysis.connected_components(0.0);
         let actual: Vec<_> = components
             .clusters
@@ -1479,7 +1476,7 @@ mod tests {
         let mut record = box_record(0.0);
         record.positions.push([100.0, 100.0, 100.0]);
         record.primitives[0].vertex_count += 1;
-        let analysis = analyze(&Rc::new(record)).unwrap();
+        let analysis = analyze(&Rc::new(record));
         assert_eq!(analysis.vertex_count, 9);
         assert_eq!(analysis.bounding_box().size, [100.0, 100.0, 100.0]);
         assert!(analysis.watertight().watertight);
@@ -1612,7 +1609,7 @@ mod tests {
                 vertex_count: 4,
             }],
         };
-        let analysis = analyze(&Rc::new(record)).unwrap();
+        let analysis = analyze(&Rc::new(record));
         let quality = analysis.mesh_quality();
         let watertight = analysis.watertight();
         assert!(quality.duplicate_faces.get().is_none());
@@ -1643,7 +1640,7 @@ mod tests {
             vertex_start,
             vertex_count: 8,
         });
-        let analysis = analyze(&Rc::new(record)).unwrap();
+        let analysis = analyze(&Rc::new(record));
         assert_eq!(analysis.connected_components(0.999_999).count, 2);
         assert_eq!(analysis.connected_components(1.0).count, 1);
     }
@@ -1666,7 +1663,7 @@ mod tests {
             vertex_start: 8,
             vertex_count: 8,
         });
-        let analysis = analyze(&Rc::new(record)).unwrap();
+        let analysis = analyze(&Rc::new(record));
         let plan = |tolerance: f64, max_mesh_bytes| {
             let limits = AnalysisRetentionLimits {
                 max_mesh_bytes,

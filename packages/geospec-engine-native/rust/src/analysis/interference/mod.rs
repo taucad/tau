@@ -305,7 +305,7 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
                 vertex_count: component.mesh.positions.len() as u32,
             }],
         };
-        let analysis = analyze(&Rc::new(record))?;
+        let analysis = analyze(&Rc::new(record));
         let watertight = analysis.watertight();
         if !watertight.watertight {
             let mut diagnostic = Diagnostic::error(

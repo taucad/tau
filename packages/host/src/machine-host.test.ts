@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createSocket } from 'node:dgram';
 import { once } from 'node:events';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,9 +12,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createMachineSecretStore,
   createNodeMachineRuntime,
+  hostMachineWorkspaceId,
+  machineRouteGrants,
   machineWorkspaceId,
   openMachineHostIdentity,
 } from '#machine-host.js';
+import { createKeychainSecretVaultWith, createMemorySecretVault } from '#secret-vault.js';
+import type { SecurityCommand } from '#secret-vault.js';
 
 const sandboxes: string[] = [];
 const sandbox = async (): Promise<string> => {
@@ -39,6 +43,20 @@ describe('machineWorkspaceId', () => {
   });
 });
 
+describe('hostMachineWorkspaceId', () => {
+  it('should be one fixed 64-character scope that no project root derives', () => {
+    expect(hostMachineWorkspaceId).toBe(machineWorkspaceId('tau:machines:host'));
+    expect(hostMachineWorkspaceId).toMatch(/^[\da-f]{64}$/u);
+    expect(hostMachineWorkspaceId).not.toBe(machineWorkspaceId('/'));
+  });
+});
+
+describe('machineRouteGrants', () => {
+  it('should grant a served session the removal of a binding', () => {
+    expect(machineRouteGrants).toContainEqual({ route: 'machines', operation: 'machines.removeBinding' });
+  });
+});
+
 describe('openMachineHostIdentity', () => {
   it('should mint once and return the same identity on every later open', async () => {
     const directory = join(await sandbox(), 'machines');
@@ -53,16 +71,83 @@ describe('openMachineHostIdentity', () => {
 });
 
 describe('createMachineSecretStore', () => {
-  it('should resolve only the references it stored, from a 0600 file', async () => {
+  const reference = 'vault:machine/bambu/00M00A391800004';
+  const pin = `sha256:${'a'.repeat(64)}`;
+
+  it('should resolve a staged code before the saved one and release only its own staging', async () => {
+    const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
+    await expect(secrets.resolve(reference)).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
+    const releaseFirst = secrets.stage(reference, '11111111');
+    await expect(secrets.resolve(reference)).resolves.toBe('11111111');
+    await expect(secrets.has(reference)).resolves.toBe(false);
+    const releaseSecond = secrets.stage(reference, '11111111');
+    releaseFirst();
+    await expect(secrets.resolve(reference)).resolves.toBe('11111111');
+    await secrets.save(reference, '22222222');
+    await expect(secrets.resolve(reference)).resolves.toBe('11111111');
+    releaseSecond();
+    releaseSecond();
+    await expect(secrets.resolve(reference)).resolves.toBe('22222222');
+  });
+
+  it('should save only vault references, with facts readable beside the secret', async () => {
+    const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
+    await secrets.save(reference, '12345678', { label: 'Tau: Workshop access code', facts: { mqtt: pin } });
+    await expect(secrets.has(reference)).resolves.toBe(true);
+    await expect(secrets.facts(reference)).resolves.toEqual({ mqtt: pin });
+    await expect(secrets.resolve(reference)).resolves.toBe('12345678');
+    await expect(secrets.save(`secret:${randomUUID()}`, 'code')).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
+    await expect(secrets.save('none', 'code')).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
+    await secrets.forget(reference);
+    await expect(secrets.has(reference)).resolves.toBe(false);
+    await expect(secrets.facts(reference)).resolves.toBeUndefined();
+    await expect(secrets.resolve(reference)).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
+  });
+
+  it('should resolve and forget a legacy secret:<uuid> reference from the first file store', async () => {
     const directory = join(await sandbox(), 'machines');
-    const store = createMachineSecretStore(directory);
-    const reference = await store.store('12345678');
-    expect(reference).toMatch(/^secret:[0-9a-f-]{36}$/u);
-    await expect(store.resolve(reference)).resolves.toBe('12345678');
-    await expect(store.resolve('secret:unknown')).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
-    const { mode } = await stat(join(directory, 'secrets.json'));
-    // oxlint-disable-next-line no-bitwise -- POSIX group/world bits must be absent on protected state.
-    expect(mode & 0o077).toBe(0);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const legacyReference = `secret:${randomUUID()}`;
+    await writeFile(
+      join(directory, 'secrets.json'),
+      JSON.stringify({ v: 1, secrets: { [legacyReference]: '12345678' } }),
+      { mode: 0o600 },
+    );
+    const secrets = createMachineSecretStore({ vault: createMemorySecretVault(), legacyDirectory: directory });
+    await expect(secrets.resolve(legacyReference)).resolves.toBe('12345678');
+    await expect(secrets.has(legacyReference)).resolves.toBe(true);
+    await expect(secrets.facts(legacyReference)).resolves.toEqual({});
+    await expect(secrets.save(legacyReference, '87654321')).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
+    await secrets.forget(legacyReference);
+    await expect(secrets.resolve(legacyReference)).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
+    expect(JSON.parse(await readFile(join(directory, 'secrets.json'), 'utf8'))).toEqual({ v: 2, entries: {} });
+  });
+
+  it.each([
+    { case: 'the simulator reference', reference: 'none' },
+    { case: 'a legacy reference without a legacy directory', reference: `secret:${randomUUID()}` },
+  ])('should know nothing of $case', async (input) => {
+    const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
+    await expect(secrets.resolve(input.reference)).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
+    await expect(secrets.has(input.reference)).resolves.toBe(false);
+    await expect(secrets.facts(input.reference)).resolves.toBeUndefined();
+    await expect(secrets.forget(input.reference)).resolves.toBeUndefined();
+  });
+
+  it('should answer has and facts over the keychain without reading the secret', async () => {
+    const calls: SecurityCommand[] = [];
+    const vault = createKeychainSecretVaultWith(async (command) => {
+      calls.push(command);
+      const comment = `tau1:${Buffer.from(JSON.stringify({ mqtt: pin })).toString('base64url')}`;
+      return { exitCode: 0, stdout: command.args.includes('-w') ? '12345678\n' : `    "icmt"<blob>="${comment}"\n` };
+    });
+    const secrets = createMachineSecretStore({ vault });
+    await expect(secrets.has(reference)).resolves.toBe(true);
+    await expect(secrets.facts(reference)).resolves.toEqual({ mqtt: pin });
+    expect(calls).toHaveLength(2);
+    expect(calls.filter(({ args }) => args.includes('-w'))).toEqual([]);
+    await expect(secrets.resolve(reference)).resolves.toBe('12345678');
+    expect(calls.filter(({ args }) => args.includes('-w'))).toHaveLength(1);
   });
 });
 
@@ -93,7 +178,7 @@ describe('createNodeMachineRuntime', () => {
   it('should hand a provider only artifact bytes whose length and digest match the reference', async () => {
     const readArtifact = vi.fn(async () => bytes);
     const runtime = createNodeMachineRuntime({
-      secrets: createMachineSecretStore(join(await sandbox(), 'machines')),
+      secrets: createMachineSecretStore({ vault: createMemorySecretVault() }),
       readArtifact,
     });
     const connection = runtime.connection('workspace-1');
@@ -112,16 +197,32 @@ describe('createNodeMachineRuntime', () => {
   });
 
   it('should resolve secrets through the store and refuse an aborted request', async () => {
-    const secrets = createMachineSecretStore(join(await sandbox(), 'machines'));
-    const reference = await secrets.store('code');
+    const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
+    const reference = 'vault:machine/fixture/printer-1';
+    await secrets.save(reference, 'code');
     const connection = createNodeMachineRuntime({ secrets, readArtifact: async () => bytes }).connection('w');
     await expect(connection.resolveSecret({ reference, signal: new AbortController().signal })).resolves.toBe('code');
     await expect(connection.resolveSecret({ reference, signal: AbortSignal.abort() })).rejects.toThrow();
   });
 
+  it('should tell the node host whether a code is saved and forget it on removal', async () => {
+    const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
+    const reference = 'vault:machine/fixture/printer-1';
+    await secrets.save(reference, 'code');
+    const { credentials } = createNodeMachineRuntime({ secrets, readArtifact: async () => bytes });
+    if (credentials === undefined) {
+      expect.fail('the runtime should carry credential hooks');
+    }
+    await expect(credentials.has(reference)).resolves.toBe(true);
+    await expect(credentials.has('none')).resolves.toBe(false);
+    await credentials.forget(reference);
+    await expect(credentials.has(reference)).resolves.toBe(false);
+    await expect(secrets.resolve(reference)).rejects.toThrow('MACHINE_SECRET_UNKNOWN');
+  });
+
   it('should deliver bounded LAN datagrams with their observed peer', async () => {
     const runtime = createNodeMachineRuntime({
-      secrets: createMachineSecretStore(join(await sandbox(), 'machines')),
+      secrets: createMachineSecretStore({ vault: createMemorySecretVault() }),
       readArtifact: async () => bytes,
     });
     const port = 20_000 + Math.floor(Math.random() * 20_000);
@@ -161,7 +262,7 @@ describe('createNodeMachineRuntime', () => {
       throw new Error('expected a TCP address');
     }
     const runtime = createNodeMachineRuntime({
-      secrets: createMachineSecretStore(join(await sandbox(), 'machines')),
+      secrets: createMachineSecretStore({ vault: createMemorySecretVault() }),
       readArtifact: async () => bytes,
     });
     const stream = await runtime.connection('w').connectStream({

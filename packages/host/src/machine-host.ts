@@ -16,7 +16,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createSocket } from 'node:dgram';
 import type { RemoteInfo } from 'node:dgram';
 import { on } from 'node:events';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { connect as connectTcp, isIP } from 'node:net';
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
@@ -43,6 +43,9 @@ import type { HostRouteGrant } from '@taucad/runtime/host';
 import type { NodeMachineRuntime } from '@taucad/runtime/host/node';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { z } from 'zod';
+
+import { createFileSecretVault, readJson, writeProtected } from '#secret-vault.js';
+import type { SecretVault, SecretVaultFacts, SecretVaultWriteOptions } from '#secret-vault.js';
 
 /**
  * A machines facet for the tools composed beside a host: one in-process
@@ -99,6 +102,7 @@ export const machineRouteGrants: readonly HostRouteGrant[] = (
     'machines.watchPrintRequests',
     'machines.resolvePrintRequest',
     'machines.withdrawPrintRequest',
+    'machines.removeBinding',
   ] as const
 ).map((operation) => ({ route: 'machines', operation }));
 
@@ -109,24 +113,6 @@ const certificatePem = (raw: Uint8Array<ArrayBuffer>): string =>
   `-----BEGIN CERTIFICATE-----\n${Buffer.from(raw)
     .toString('base64')
     .replaceAll(/(.{64})/gu, '$1\n')}\n-----END CERTIFICATE-----\n`;
-
-const writeProtected = async (path: string, value: unknown): Promise<void> => {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, undefined, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  await chmod(temporary, 0o600);
-  await rename(temporary, path);
-};
-
-const readJson = async (path: string): Promise<unknown> => {
-  try {
-    return JSON.parse(await readFile(path, 'utf8')) as unknown;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return undefined;
-    }
-    throw error;
-  }
-};
 
 /**
  * The workspace identity one project root maps to on this host.
@@ -141,6 +127,21 @@ const readJson = async (path: string): Promise<unknown> => {
  */
 export const machineWorkspaceId = (workspaceRoot: string): string =>
   createHash('sha256').update(workspaceRoot).digest('hex');
+
+/**
+ * The one machine scope a host's projects share: printers belong to the host,
+ * not a project.
+ *
+ * The desktop utility and the daemon serve every connection's machines route
+ * under this id, so a printer bound from one project is listed, watched and
+ * printed to from every other, and its request history is host-wide. The seed
+ * is not a filesystem path, so it never equals a project's
+ * {@link machineWorkspaceId}; bindings journaled under a project's id before
+ * keep that scope.
+ *
+ * @public
+ */
+export const hostMachineWorkspaceId: string = machineWorkspaceId('tau:machines:host');
 
 const identitySchema = z.strictObject({
   v: z.literal(1),
@@ -175,66 +176,110 @@ export const openMachineHostIdentity = async (directory: string): Promise<Machin
   return { hostId: minted.hostId, authorityId: minted.authorityId, generation: minted.generation };
 };
 
-/** Host-local secret custody keyed by the opaque references the machine journal stores. @public */
-export type MachineSecretStore = Readonly<{
-  /** Keep one secret and return the reference the binding ceremony records. */
-  store(secret: string): Promise<string>;
-  /** Resolve one reference; rejects an unknown one. */
-  resolve(reference: string): Promise<string>;
-}>;
-
-const secretsSchema = z.strictObject({ v: z.literal(1), secrets: z.record(z.string(), z.string()) });
-
 /**
- * A file-backed secret store under the protected machine directory.
+ * Host-local custody of machine credentials, keyed by the opaque references
+ * the machine journal stores.
  *
- * ponytail: plaintext JSON at mode 0600 under the app's protected state, the
- * same custody the daemon's device credential gets. Upgrade path when a
- * stronger claim is needed: encrypt the file with Electron `safeStorage` in
- * main and hand the utility a decrypt seam.
- *
- * @param directory - Protected state directory.
- * @returns Store and resolve seams over the protected file.
+ * A reference names its custody: `vault:<name>` lives in the host's
+ * {@link SecretVault}; `secret:<uuid>` is an entry of the first file store,
+ * which is read and forgotten but never written again. Any other reference,
+ * such as a simulator's `none`, is unknown.
  * @public
  */
-export const createMachineSecretStore = (directory: string): MachineSecretStore => {
-  const path = join(directory, 'secrets.json');
-  const read = async (): Promise<Record<string, string>> => {
-    const raw = await readJson(path);
-    return raw === undefined ? {} : secretsSchema.parse(raw).secrets;
+export type MachineSecretStore = Readonly<{
+  /** The secret a reference names: a staged one first, then the saved one; rejects `MACHINE_SECRET_UNKNOWN` when there is neither. */
+  resolve(reference: string): Promise<string>;
+  /** Whether a secret is saved under the reference, without reading it; staged secrets are not saved. */
+  has(reference: string): Promise<boolean>;
+  /** The facts saved beside the reference's secret, without reading it, or `undefined` when nothing is saved. */
+  facts(reference: string): Promise<SecretVaultFacts | undefined>;
+  /**
+   * Resolve `secret` for `reference` in memory for one binding ceremony, so a
+   * code that fails to connect never reaches the vault.
+   * @returns Its release: drops this staging unless a later one replaced it.
+   */
+  stage(reference: string, secret: string): () => void;
+  /** Save a `vault:` reference's secret; rejects `MACHINE_SECRET_UNKNOWN` for any other reference. */
+  save(reference: string, secret: string, options?: SecretVaultWriteOptions): Promise<void>;
+  /** Remove the reference's saved secret, if any. */
+  forget(reference: string): Promise<void>;
+}>;
+
+/**
+ * Machine credential custody over a host's vault.
+ *
+ * @param input - The vault `vault:` references live in, and the protected
+ * directory whose `secrets.json` holds legacy `secret:<uuid>` entries.
+ * @returns The store the machine runtime resolves provider secrets through.
+ * @public
+ *
+ * @example <caption>A daemon that also reads codes bound before the keychain</caption>
+ * ```typescript
+ * import { createMachineSecretStore, openSecretVault } from '@taucad/host';
+ *
+ * const directory = '/var/lib/tau/machines';
+ * const secrets = createMachineSecretStore({ vault: openSecretVault({ directory }), legacyDirectory: directory });
+ * const release = secrets.stage('vault:machine/bambu/00M00A391800004', '12345678');
+ * release();
+ * ```
+ */
+export const createMachineSecretStore = (
+  input: Readonly<{ vault: SecretVault; legacyDirectory?: string }>,
+): MachineSecretStore => {
+  const legacy = input.legacyDirectory === undefined ? undefined : createFileSecretVault(input.legacyDirectory);
+  const staged = new Map<string, Readonly<{ secret: string }>>();
+  const custody = (reference: string): Readonly<{ vault: SecretVault; name: string }> | undefined => {
+    if (reference.startsWith('vault:')) {
+      return { vault: input.vault, name: reference.slice('vault:'.length) };
+    }
+    if (reference.startsWith('secret:') && legacy !== undefined) {
+      return { vault: legacy, name: reference };
+    }
+    return undefined;
   };
-  let chain: Promise<unknown> = Promise.resolve();
-  const serialized = async <Result>(operation: () => Promise<Result>): Promise<Result> => {
-    const previous = chain;
-    const next = (async (): Promise<Result> => {
-      try {
-        await previous;
-      } catch {
-        /* The earlier operation reported its own failure to its own caller. */
+  return Object.freeze({
+    resolve: async (reference: string) => {
+      const stagedSecret = staged.get(reference)?.secret;
+      if (stagedSecret !== undefined) {
+        return stagedSecret;
       }
-      return operation();
-    })();
-    chain = next;
-    return next;
-  };
-  return {
-    store: async (secret) =>
-      serialized(async () => {
-        await mkdir(directory, { recursive: true, mode: 0o700 });
-        const reference = `secret:${randomUUID()}`;
-        await writeProtected(path, { v: 1, secrets: { ...(await read()), [reference]: secret } });
-        return reference;
-      }),
-    resolve: async (reference) =>
-      serialized(async () => {
-        const secrets = await read();
-        const secret = secrets[reference];
-        if (secret === undefined) {
-          throw new Error('MACHINE_SECRET_UNKNOWN');
+      const target = custody(reference);
+      const secret = target === undefined ? undefined : await target.vault.read(target.name);
+      if (secret === undefined) {
+        throw new Error('MACHINE_SECRET_UNKNOWN');
+      }
+      return secret;
+    },
+    has: async (reference: string) => {
+      const target = custody(reference);
+      return target !== undefined && (await target.vault.facts(target.name)) !== undefined;
+    },
+    facts: async (reference: string) => {
+      const target = custody(reference);
+      return target === undefined ? undefined : target.vault.facts(target.name);
+    },
+    stage: (reference: string, secret: string) => {
+      const staging = Object.freeze({ secret });
+      staged.set(reference, staging);
+      return () => {
+        if (staged.get(reference) === staging) {
+          staged.delete(reference);
         }
-        return secret;
-      }),
-  };
+      };
+    },
+    save: async (reference: string, secret: string, options?: SecretVaultWriteOptions) => {
+      if (!reference.startsWith('vault:')) {
+        throw new Error('MACHINE_SECRET_UNKNOWN');
+      }
+      await input.vault.write(reference.slice('vault:'.length), secret, options);
+    },
+    forget: async (reference: string) => {
+      const target = custody(reference);
+      if (target !== undefined) {
+        await target.vault.remove(target.name);
+      }
+    },
+  });
 };
 
 const readPeerCertificate = async (
@@ -523,12 +568,18 @@ export type CreateNodeMachineRuntimeOptions = Readonly<{
  * stills on hardware are wanted.
  *
  * @param options - Secret custody, artifact reader and log sink.
- * @returns The runtime for `createNodeMachineHost`.
+ * @returns The runtime for `createNodeMachineHost`, whose `credentials` answer
+ * whether a printer's code is saved and forget a removed binding's code.
  * @public
  */
 export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOptions): NodeMachineRuntime => {
   const clock = Object.freeze({ now: () => new Date().toISOString() });
+  const { secrets } = options;
   return Object.freeze({
+    credentials: Object.freeze({
+      has: async (reference: string) => secrets.has(reference),
+      forget: async (reference: string) => secrets.forget(reference),
+    }),
     discovery: Object.freeze({ clock, listenDatagrams }),
     connection: (workspaceId) =>
       Object.freeze({

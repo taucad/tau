@@ -549,9 +549,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       // oxlint-disable-next-line no-await-in-loop -- one tip per offered ref, on the pre-push check only.
       const listed = await run(['lfs', 'ls-files', '--json', reference.name]).catch(() => undefined);
       if (listed?.exitCode === 0) {
-        // A ref with no large files answers `{"files": null}`.
+        // A ref with no large files answers `{"files": null}`, which `??` reads as none.
         const { files } = JSON.parse(textDecoder.decode(listed.stdout)) as {
-          files: ReadonlyArray<{ name: string; size: number }> | null;
+          files?: ReadonlyArray<{ name: string; size: number }>;
         };
         for (const file of files ?? []) {
           sizes.set(file.name, Math.max(file.size, sizes.get(file.name) ?? 0));
@@ -1558,15 +1558,30 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           )
         );
       }
-      return Object.freeze({
-        refs: await parsePushPorcelain(
-          stdout,
-          input.refs.map((ref) => ref.name),
-          /* The server's sideband sentence, which is where a `pre-receive`
-           * refusal says *why* — the per-ref table only says a hook declined. */
-          refused?.code === 'REMOTE_REJECTED' ? refused.message : undefined,
-        ),
-      });
+      const results = await parsePushPorcelain(
+        stdout,
+        input.refs.map((ref) => ref.name),
+        /* The server's sideband sentence, which is where a `pre-receive`
+         * refusal says *why* — the per-ref table only says a hook declined. */
+        refused?.code === 'REMOTE_REJECTED' ? refused.message : undefined,
+      );
+      /* Where `fetch` would have put every accepted ref, as the browser leg does:
+       * `git push` itself tracks only `refs/heads/*`, so a pushed chat ref or tag
+       * kept a stale tracking ref and the next fetch could not tell it was
+       * already there (W13e). The local ref, unpeeled, is what was pushed. */
+      const accepted = input.refs.filter((_, index) => results[index]?.status !== 'rejected');
+      if (accepted.length > 0) {
+        await output(['update-ref', '--stdin'], {
+          input: [
+            textEncoder.encode(
+              accepted
+                .map((ref) => `update ${remoteTrackingRef(input.remote, ref.remoteName ?? ref.name)} ${ref.name}\n`)
+                .join(''),
+            ),
+          ],
+        });
+      }
+      return Object.freeze({ refs: results });
     },
 
     listRemotes: async (): Promise<readonly Remote[]> => {

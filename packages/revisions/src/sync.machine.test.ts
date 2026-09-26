@@ -47,7 +47,7 @@
  * | 40 | `opening --offline--> queued` + `pushSettled { queued }` | **C18**: a correlated `syncNow` made offline settles instead of hanging |
  * | 41 | `pendingCount` excludes `projection` | **C19**: `n` is what the remote is owed; a failed inbound restore shows through `error` |
  * | 42 | a queue entry naming another remote is not offered | **C12**: disconnect pauses that destination's queue |
- * | 44 | `pushing --syncNow { pushId }--> recording` + one `pushSettled` | **L2-F3**: a correlated request is never dropped by a busy state |
+ * | 44 | `pushing --syncNow { pushId }--> recording → pushing` + one `pushSettled` | **L2-F3**: a correlated request is never dropped by a busy state |
  * | 45 | `opening --syncNow { pushId }--> pushing` | **L2-F3**: a pull that owes nothing still pushes for a waiting request |
  * | 46 | `opening --onError / pullDeadline--> queued` + `pushSettled { queued }` | **L2-F3**: every exit from the pull answers |
  * | 47 | `noRemote --syncNow { pushId }--> pushSettled { failed }` | **L2-F3**: nowhere to push is an answer, not a wait |
@@ -68,6 +68,7 @@
  * | 59 | `merging(merged) → pushing` | **D12**: a diverged clean checkout merges, re-heads its actor, and pushes the merge revision under the fetched lease |
  * | 63 | `pushing / opening --429--> queued --Retry-After--> opening` | **W13d**: a rate limit waits the remote's own wait, a remote move does not cut it short, and it does not advance the doubling |
  * | 64 | `pushing --onDone[updated]--> parent pushed` | **RV-W8 F9**: a push that moved a ref tells `remote.machine` its stored figure is stale; a refused one does not |
+ * | 65 | `pushing / recording --syncNow { pushId }--> … → pushing → recording` + `pushSettled` | **W15 F1**: a correlated request is answered by a push that starts after it, so it carries the head current at the request |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -1414,7 +1415,7 @@ describe('syncMachine', () => {
   const settledPushes = (harness: Harness): ReadonlyArray<Record<string, unknown>> =>
     harness.parent.events.filter((event) => event.type === 'pushSettled');
 
-  it('row 44 (L2-F3): a syncNow that arrives mid-push settles once with that push, not at publish’s 60 s', async () => {
+  it('row 44 (L2-F3): a syncNow that arrives mid-push settles once, with the next push, not at publish’s 60 s', async () => {
     const harness = start();
     await openCleanly(harness);
 
@@ -1423,11 +1424,67 @@ describe('syncMachine', () => {
     harness.actor.send({ type: 'syncNow', pushId: 'publish-1', remote: 'tau' });
     harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }) });
     await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    /* The push that was running was assembled before the request (row 65). */
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'upToDate', head: 'r1' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
 
     await vi.waitFor(() => {
       expect(settledPushes(harness)).toEqual([{ type: 'pushSettled', pushId: 'publish-1', outcome: 'backedUp' }]);
     });
-    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+    expect(harness.effects.inputsFor('push')).toHaveLength(2);
+
+    harness.stop();
+  });
+
+  it('row 65 (W15 F1): a correlated syncNow during a running push is answered by a push that carries the head current at the request', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+    harness.clock.advance(2000);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    /* The requester mints, then asks: the pack on the wire was built before r2. */
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r2' });
+    harness.actor.send({ type: 'syncNow', pushId: 'save-1' });
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r1' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(settledPushes(harness)).toEqual([]);
+    expect(harness.actor.getSnapshot().context.localHead).toBe('r2');
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'r2' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(settledPushes(harness)).toEqual([{ type: 'pushSettled', pushId: 'save-1', outcome: 'backedUp' }]);
+    });
+
+    /* The same while the settled push is still being recorded. */
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'upToDate', head: 'r2' }),
+    });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('writePending')).toBe(1);
+    });
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r3' });
+    harness.actor.send({ type: 'syncNow', pushId: 'save-2' });
+    harness.effects.settle('writePending', { output: undefined });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'updated', head: 'r3' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(settledPushes(harness)).toEqual([
+        { type: 'pushSettled', pushId: 'save-1', outcome: 'backedUp' },
+        { type: 'pushSettled', pushId: 'save-2', outcome: 'backedUp' },
+      ]);
+    });
+    expect(harness.effects.inputsFor('push')).toHaveLength(4);
 
     harness.stop();
   });

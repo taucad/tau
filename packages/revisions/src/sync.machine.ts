@@ -81,6 +81,14 @@ type SyncMachineContextFields = Readonly<{
   leases: Readonly<Record<string, string>>;
   /** The correlated request in flight, when `publish.machine` asked for one. */
   pushId: string | undefined;
+  /**
+   * A correlated request that arrived while a push was already running (W15 F1).
+   *
+   * That push was assembled before the request — before the revision the
+   * requester minted and then asked about — so it is never the one that
+   * answers: the request is delivered again once that push is recorded.
+   */
+  nextPushId: string | undefined;
   /** How many pushes in a row have not been acknowledged. Never leaves context. */
   attempt: number;
   /**
@@ -699,6 +707,24 @@ const rememberHead = (context: SyncMachineContext, event: SyncMachineEvent): Syn
  * they skip the window the other triggers coalesce in (D28, S41). */
 const flushesNow = (trigger: string): boolean => trigger === 'close' || trigger === 'hidden';
 
+/*
+ * `pushing` and `recording` hold a push that was built before this request, so
+ * it waits for the next one (W15 F1). An uncorrelated ask falls through to the
+ * root, as before.
+ */
+const deferPush = ({ event }: Readonly<{ event: Readonly<{ pushId?: string }> }>) =>
+  event.pushId === undefined ? undefined : { context: { nextPushId: event.pushId } };
+
+/* Deliver a deferred request again, to whichever state the settled push left
+ * this machine in: that state's own `syncNow` answers it as if it arrived now. */
+const redeliverPush = (context: SyncMachineContext, enq: SyncEnqueue): SyncContextPatch => {
+  if (context.nextPushId === undefined) {
+    return {};
+  }
+  enq.raise({ type: 'syncNow', pushId: context.nextPushId });
+  return { nextPushId: undefined };
+};
+
 /** Tell the requester how its correlated push ended, and forget it. */
 const settlePush = (context: SyncMachineContext, enq: SyncEnqueue, outcome: SyncPushOutcome): SyncContextPatch => {
   if (context.pushId === undefined) {
@@ -883,6 +909,7 @@ const syncMachineDefinition = setup({
     pending: [],
     leases: {},
     pushId: undefined,
+    nextPushId: undefined,
     attempt: 0,
     retryAfterMilliseconds: undefined,
     failure: 'none',
@@ -948,13 +975,13 @@ const syncMachineDefinition = setup({
      * from another device (D14): the merge it minted is this device's own and
      * unsent, so it is pushed like a mint. `conflicted` answers it itself. */
     conflictResolved: { context: { pendingMint: true } },
-    /* The same fallback once more (L2-F3): `reading`, `opening`, `pushing` and
-     * `recording` are effects with no push edge of their own, and dropping a
+    /* The same fallback once more (L2-F3): `reading`, `opening` and `minting`
+     * are effects with no push edge of their own, and dropping a
      * correlated request there left `publish.machine` waiting out its 60 s and
      * then blaming the cloud. The request is remembered, and every way out of
-     * those states answers it: `recording` with the push it records,
-     * `opening` by pushing (or by the settle its failure edges make),
-     * `noRemote` at once. */
+     * those states answers it: `opening` by pushing (or by the settle its
+     * failure edges make), `noRemote` at once. `pushing` and `recording`
+     * defer it to the next push instead (W15 F1). */
     syncNow: { context: ({ context, event }) => ({ pushId: event.pushId ?? context.pushId }) },
     open: ({ context, guards }) => (guards.hasRemote(context) ? { target: '.opening', reenter: true } : undefined),
     remoteDisconnected: {
@@ -1077,7 +1104,7 @@ const syncMachineDefinition = setup({
        * waiting (L2-F3). */
       entry: ({ context }, enq) => {
         enq.sendTo('remoteMoves', { type: 'unwatch' });
-        return { context: settlePush(context, enq, 'failed') };
+        return { context: { ...settlePush(context, enq, 'failed'), ...redeliverPush(context, enq) } };
       },
       on: {
         syncNow: ({ context, event }, enq) =>
@@ -1430,6 +1457,7 @@ const syncMachineDefinition = setup({
         /* A revision minted mid-push is not lost: the push that is running was
          * built before it, so another one follows on the ordinary debounce. */
         revisionMinted: { context: ({ context, event }) => rememberHead(context, event) },
+        syncNow: deferPush,
       },
     },
 
@@ -1441,6 +1469,9 @@ const syncMachineDefinition = setup({
      * next open would retry a push that already landed.
      */
     recording: {
+      /* Every way out, so a deferred request is never stranded here. */
+      exit: ({ context }, enq) => ({ context: redeliverPush(context, enq) }),
+      on: { syncNow: deferPush },
       invoke: {
         src: 'writePending',
         input: ({ context }) => ({

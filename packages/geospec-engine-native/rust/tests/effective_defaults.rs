@@ -1,14 +1,9 @@
-use geospec_engine_native_core::{canonicalize, Engine};
+use geospec_engine_native_core::{canonicalize, sha256_hex, Engine};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::Path};
 
 // Independent oracle; Lead supplies an exact copy when registering this target.
 const CONTROLS_SHA256: &str = "7cf3e4674e827c0baa8edc5546d8adca8d6eaabd7a32597be55385af95eb13a9";
-
-fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
 
 fn current_request(value: &str) -> Vec<u8> {
     let mut value: Value = serde_json::from_str(value).unwrap();
@@ -58,7 +53,7 @@ fn portable_control_copies_match_recorded_origins_and_hashes() {
         let path = copy["path"].as_str().unwrap();
         let origin = copy["origin"].as_str().unwrap();
         assert!(origin.starts_with("docs/research/artifacts/geospec-native-engine-charter/"));
-        assert_eq!(sha256(bytes[path]), copy["sha256"]);
+        assert_eq!(sha256_hex(bytes[path]), copy["sha256"]);
     }
 }
 
@@ -68,7 +63,7 @@ fn effective_defaults_match_all_32_authorized_canonical_controls() {
         || include_bytes!("fixtures/portable-controls/effective-defaults.json").to_vec(),
         |path| fs::read(path).unwrap(),
     );
-    assert_eq!(sha256(&controls), CONTROLS_SHA256);
+    assert_eq!(sha256_hex(&controls), CONTROLS_SHA256);
     let corpus: Value = serde_json::from_slice(&controls).unwrap();
     let controls = corpus["controls"].as_array().unwrap();
     let pairs = corpus["pairChecks"].as_array().unwrap();
@@ -82,11 +77,11 @@ fn effective_defaults_match_all_32_authorized_canonical_controls() {
         let frozen_request = control["authoredRequestJson"].as_str().unwrap();
         let frozen_expected = control["canonicalPlanUtf8"].as_str().unwrap();
         assert_eq!(
-            sha256(frozen_request.as_bytes()),
+            sha256_hex(frozen_request.as_bytes()),
             control["hashes"]["authoredRequestJson"]["sha256"]
         );
         assert_eq!(
-            sha256(frozen_expected.as_bytes()),
+            sha256_hex(frozen_expected.as_bytes()),
             control["hashes"]["canonicalPlanUtf8"]["sha256"]
         );
         let request = current_request(frozen_request);
@@ -96,7 +91,7 @@ fn effective_defaults_match_all_32_authorized_canonical_controls() {
         let outcome = match engine.canonical_plan(&request) {
             Ok(actual) => {
                 let passed = actual == expected;
-                let actual_sha256 = sha256(&actual);
+                let actual_sha256 = sha256_hex(&actual);
                 let actual_utf8 = String::from_utf8(actual.clone()).unwrap();
                 assert!(actual_plans.insert(id.to_owned(), actual).is_none());
                 json!({

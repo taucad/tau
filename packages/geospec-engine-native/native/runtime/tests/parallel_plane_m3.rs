@@ -1,6 +1,6 @@
+use geospec_engine_native_core::sha256_hex;
 use geospec_engine_native_runtime::{create_engine, Engine, EngineConfig};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
 const CONTRACT: &str = "geospec.pmi.parallel-plane-distance/v1";
 const CAPABILITY: &str = "toSatisfyParallelPlaneDistance";
@@ -132,9 +132,7 @@ fn exact_source_planes_bind_runtime_polarity_budget_and_release() {
                         row["evidence"]["witnesses"]["distanceSquaredMillimeters"]
                             == json!({"numerator":"100","denominator":"1"}),
                     );
-                    checks.push(
-                        row["evidence"]["planHash"] == format!("{:x}", Sha256::digest(&plan)),
-                    );
+                    checks.push(row["evidence"]["planHash"] == sha256_hex(&plan));
                     checks.push(row["evidence"]["subjectHash"] == *hash);
                     checks.push(
                         row["evidence"]["witnesses"]["work"]

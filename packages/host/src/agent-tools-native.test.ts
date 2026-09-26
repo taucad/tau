@@ -3,14 +3,12 @@ import { mock } from 'vitest-mock-extended';
 import type { SourceRevision } from '@taucad/runtime/types';
 import type { GeoSpecNativeRunnerOptions } from 'geospec/runner/native';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
-import { createHostNativeGeoSpecRunner } from '#agent-tools.js';
 import type { HostGeoSpecRuntimeClient } from '#agent-tools.js';
 
 const native = vi.hoisted(() => {
   const close = vi.fn();
   return {
     close,
-    canonicalize: vi.fn(),
     engine: vi.fn(function () {
       return { close };
     }),
@@ -22,7 +20,6 @@ const native = vi.hoisted(() => {
 vi.mock('@taucad/geospec-engine-native/node', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the public module's constructor export.
   Engine: native.engine,
-  canonicalize: native.canonicalize,
 }));
 vi.mock('geospec/runner/native', () => ({ createNativeGeoSpecRunner: native.runner }));
 vi.mock('@taucad/geospec-engine/node-filesystem', () => ({ createNodeVmFileSystem: native.filesystem }));
@@ -30,10 +27,21 @@ vi.mock('@taucad/geospec-engine/register/node', () => {
   throw new Error('The native host factory must not register the legacy engine.');
 });
 
+/**
+ * Load the host module afresh, so each test starts before the process-wide engine exists.
+ * @returns The native runner factory of a new module instance.
+ */
+const freshFactory = async () => {
+  vi.resetModules();
+  const { createHostNativeGeoSpecRunner } = await import('#agent-tools.js');
+  return createHostNativeGeoSpecRunner;
+};
+
 describe('native host GeoSpec composition', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('should borrow the project runtime and close its own engine after the SDK runner', async () => {
+  it('should borrow the project runtime and keep the shared engine open after the SDK runner', async () => {
+    const createHostNativeGeoSpecRunner = await freshFactory();
     const runtime = mock<HostGeoSpecRuntimeClient>();
     const bytes = new Uint8Array([1, 2, 3]);
     const read = vi.fn();
@@ -69,8 +77,8 @@ describe('native host GeoSpec composition', () => {
     expect(runtime.export).toHaveBeenCalledExactlyOnceWith('glb', { source: { path: 'widget.ts' } });
     expect(runner.sourceRevisions?.()).toEqual([sourceRevision]);
     expect(options?.model?.projectPath).toBe('/projects/widget');
-    expect(options?.nativeAssertions.engine).toEqual({ close: native.close });
-    expect(options?.nativeAssertions.canonicalize).toBe(native.canonicalize);
+    expect(options?.nativeAssertions).toEqual({ engine: { close: native.close } });
+    expect(options?.model?.carried).toBeInstanceOf(Map);
     await expect(options?.model?.readSource?.('widget.step')).resolves.toBe(bytes);
     expect(read).toHaveBeenCalledExactlyOnceWith('widget.step');
 
@@ -79,7 +87,32 @@ describe('native host GeoSpec composition', () => {
     expect(sdkRunner.run).toHaveBeenCalledExactlyOnceWith(runOptions);
     await runner.close();
     expect(sdkRunner.close).toHaveBeenCalledOnce();
-    expect(native.close).toHaveBeenCalledOnce();
+    expect(native.close).not.toHaveBeenCalled();
     expect(runtime.terminate).not.toHaveBeenCalled();
+  });
+
+  it('should run calls one at a time on one engine and carrier', async () => {
+    const createHostNativeGeoSpecRunner = await freshFactory();
+    native.filesystem.mockReturnValue(mock<GeoSpecNativeRunnerOptions['filesystem']>());
+    native.runner.mockImplementation(() => mock<GeoSpecRunner>());
+    const runtime = mock<HostGeoSpecRuntimeClient>();
+
+    const first = await createHostNativeGeoSpecRunner('/projects/widget', runtime);
+    const pending = createHostNativeGeoSpecRunner('/projects/gadget', runtime);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    // The second call builds no runner until the first call's runner closes.
+    expect(native.runner).toHaveBeenCalledOnce();
+
+    await first.close();
+    const second = await pending;
+    expect(native.runner).toHaveBeenCalledTimes(2);
+    await second.close();
+    const [firstOptions, secondOptions] = native.runner.mock.calls.map(([options]) => options);
+    expect(native.engine).toHaveBeenCalledOnce();
+    expect(secondOptions?.nativeAssertions.engine).toBe(firstOptions?.nativeAssertions.engine);
+    expect(secondOptions?.model?.carried).toBe(firstOptions?.model?.carried);
+    expect(native.close).not.toHaveBeenCalled();
   });
 });

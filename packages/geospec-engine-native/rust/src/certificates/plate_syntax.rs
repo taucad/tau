@@ -3,7 +3,6 @@
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::Zero;
-use sha2::{Digest, Sha256};
 use std::str::FromStr;
 
 use super::plate_contract::{
@@ -51,7 +50,7 @@ impl PlateSource {
             .into_iter()
             .map(raw_box)
             .collect::<Result<Vec<_>, _>>()?;
-        let primary_hash = format!("{:x}", Sha256::digest(&primary));
+        let primary_hash = crate::identity::sha256_hex(&primary);
         Ok(Self {
             primary,
             primary_hash,

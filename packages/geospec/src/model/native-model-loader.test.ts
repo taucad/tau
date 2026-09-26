@@ -20,8 +20,7 @@ const testEngine = () => {
   );
   const releaseSubject = vi.fn(() => encode({ result: {} }));
   const engine: GeoSpecNativeModelEngine = {
-    canonicalPlan: (input) => input,
-    evaluatePlan: (input) => input,
+    evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
     processRequest: (input) => input,
     ingestSubject,
     subjectHandle,
@@ -155,8 +154,7 @@ describe('native model loader ownership', () => {
     const source = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
     const operations: string[] = [];
     const engine: GeoSpecNativeModelEngine = {
-      canonicalPlan: (input) => input,
-      evaluatePlan: (input) => input,
+      evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
       processRequest: (input) => input,
       ingestSubject: () => {
         operations.push('ingest');
@@ -197,8 +195,7 @@ describe('native model loader ownership', () => {
     const operations: string[] = [];
     let admission = 0;
     const engine: GeoSpecNativeModelEngine = {
-      canonicalPlan: (input) => input,
-      evaluatePlan: (input) => input,
+      evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
       processRequest: (input) => input,
       ingestSubject: () => {
         admission += 1;
@@ -265,5 +262,113 @@ describe('native model loader ownership', () => {
       await loading;
       await observed;
     }
+  });
+});
+
+/** Content-addressed stand-in: the first primary byte names the subject, as a digest would. */
+const contentEngine = () => {
+  const decodeRequest = (bytes: Uint8Array<ArrayBuffer>): Record<string, unknown> =>
+    JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+  const released: string[] = [];
+  let refusals = 0;
+  const ingestSubject = vi.fn(
+    (
+      _request: Uint8Array<ArrayBuffer>,
+      primary: Uint8Array<ArrayBuffer>,
+      _resources: ReadonlyArray<Uint8Array<ArrayBuffer>>,
+    ) => {
+      if (refusals > 0) {
+        refusals -= 1;
+        throw Object.assign(new Error('Engine exceeds the configured retained subject count.'), {
+          code: 'limit-exceeded',
+        });
+      }
+      return encode({ result: { subject: { subjectHash: String(primary[0]).repeat(64) } } });
+    },
+  );
+  const engine: GeoSpecNativeModelEngine = {
+    evaluateClaim: (input) => ({ canonicalClaim: input, canonicalPlan: input, canonicalResult: input }),
+    processRequest: (input) => input,
+    ingestSubject,
+    subjectHandle: (request) =>
+      encode({ result: { subjectHandle: { subjectHash: decodeRequest(request)['subjectHash'], generation: 1 } } }),
+    releaseSubject: (request) => {
+      const handle = decodeRequest(request)['subjectHandle'] as { subjectHash: string };
+      released.push(handle.subjectHash[0]!);
+      return encode({ result: {} });
+    },
+  };
+  const files: Record<string, number> = { 'a.step': 1, 'b.step': 2, 'c.step': 3 };
+  const readSource = vi.fn(async (source: unknown) => Uint8Array.of(files[String(source)]!));
+  return {
+    engine,
+    files,
+    ingestSubject,
+    readSource,
+    released,
+    refuseNext: () => {
+      refusals += 1;
+    },
+  };
+};
+
+describe('native model loader freshness', () => {
+  it('should read every load again and admit edited bytes as a new subject', async () => {
+    const { engine, files, ingestSubject, readSource } = contentEngine();
+    const loader = createGeoSpecNativeModelLoader({ engine, readSource });
+
+    const first = await loader({ source: 'a.step', format: 'step' });
+    const repeat = await loader({ source: 'a.step', format: 'step' });
+    files['a.step'] = 9;
+    const edited = await loader({ source: 'a.step', format: 'step' });
+
+    expect(readSource).toHaveBeenCalledTimes(3);
+    expect(ingestSubject).toHaveBeenCalledTimes(3);
+    expect([first, repeat, edited]).toStrictEqual([
+      { subjectHash: '1'.repeat(64) },
+      { subjectHash: '1'.repeat(64) },
+      { subjectHash: '9'.repeat(64) },
+    ]);
+  });
+});
+
+describe('native model loader carried scopes', () => {
+  it('should keep a scope for the next one and release only the subjects it did not load again', async () => {
+    const { engine, readSource, released } = contentEngine();
+    const carried = new Map<string, unknown>();
+    const first = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+    await first({ source: 'a.step', format: 'step' });
+    await first({ source: 'b.step', format: 'step' });
+    await first.releaseAll();
+
+    expect(released).toStrictEqual([]);
+    expect([...carried.keys()]).toStrictEqual(['1'.repeat(64), '2'.repeat(64)]);
+
+    const second = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+    await second({ source: 'b.step', format: 'step' });
+    await second({ source: 'c.step', format: 'step' });
+    await second.releaseAll();
+
+    expect(released).toStrictEqual(['1']);
+    expect([...carried.keys()]).toStrictEqual(['2'.repeat(64), '3'.repeat(64)]);
+  });
+
+  it('should free stale carried subjects and retry once when the engine is full', async () => {
+    const { engine, readSource, refuseNext, released } = contentEngine();
+    const carried = new Map<string, unknown>();
+    const first = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+    await first({ source: 'a.step', format: 'step' });
+    await first({ source: 'b.step', format: 'step' });
+    await first.releaseAll();
+
+    const second = createGeoSpecNativeModelLoader({ engine, readSource, carried });
+    await second({ source: 'b.step', format: 'step' });
+    refuseNext();
+    await expect(second({ source: 'c.step', format: 'step' })).resolves.toStrictEqual({ subjectHash: '3'.repeat(64) });
+    expect(released).toStrictEqual(['1']);
+    expect([...carried.keys()]).toStrictEqual(['2'.repeat(64)]);
+
+    refuseNext();
+    await expect(second({ source: 'a.step', format: 'step' })).rejects.toMatchObject({ code: 'limit-exceeded' });
   });
 });

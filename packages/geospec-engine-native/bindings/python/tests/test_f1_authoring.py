@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 import unittest
 
+from claim_frame import claim_frame
 from geospec import (
     GeoSpecAssertionReport,
     GeoSpecEngine,
@@ -23,6 +24,9 @@ class FakeNative:
             b'"defaultWorkUnitBudget":10000},"capabilities":['
             b'{"name":"toSatisfyRationalPlate"}]}}'
         )
+
+    def evaluate_claim(self, request):
+        return claim_frame(self.canonical_plan(request), self.evaluate_plan)
 
     def canonical_plan(self, request):
         self.canonical_request = request
@@ -60,7 +64,7 @@ def facade():
     native = FakeNative()
     engine = GeoSpecEngine(
         native_engine=native,
-        native_module=SimpleNamespace(canonicalize=lambda value: value),
+        native_module=SimpleNamespace(),
     )
     return native, GeoSpecSubject(engine, "part", "subjectHash", "a" * 64)
 

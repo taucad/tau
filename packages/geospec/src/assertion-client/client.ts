@@ -84,7 +84,6 @@ export type GeoSpecQueryOptions = {
 
 /** Flat construction options for a runner-independent native assertion client. @public */
 export type GeoSpecAssertionClientOptions = {
-  readonly canonicalize: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
   readonly claimId?: (matcher: GeoSpecNativeMatcherName, sequence: number) => string;
   readonly engine: GeoSpecNativeEngine;
   readonly subjectSlot?: string;
@@ -211,7 +210,6 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
         sequence += 1;
         const claimId = options.claimId?.(invocation.matcher, sequence) ?? `geospec-claim-${sequence}`;
         const context = {
-          canonicalize: options.canonicalize,
           claimId,
           engine: options.engine,
           polarity,
@@ -240,7 +238,6 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
     async query(query) {
       const claimId = query.claimId ?? `geospec-claim-${++sequence}`;
       return evaluateGeoSpecNativeQuery({
-        canonicalize: options.canonicalize,
         capability: query.capability,
         claimId,
         engine: options.engine,

@@ -1,6 +1,5 @@
-use geospec_engine_native_core::{process_request, Engine, ProtocolError};
+use geospec_engine_native_core::{process_request, sha256_hex, Engine, ProtocolError};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 const FIXTURES: &str = include_str!("fixtures/mesh-entry.json");
 const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
@@ -13,7 +12,7 @@ fn fixtures() -> Value {
 }
 
 fn current() -> Value {
-    assert_eq!(format!("{:x}", Sha256::digest(CURRENT)), CURRENT_SHA256);
+    assert_eq!(sha256_hex(CURRENT), CURRENT_SHA256);
     serde_json::from_str(CURRENT).expect("explicit current-profile bindings")
 }
 
@@ -87,16 +86,13 @@ fn ingest(engine: &mut Engine, fixture: &Value, current: &Value) {
     let name = string(fixture, "name");
     let mesh = bytes(string(fixture, "hex"));
     assert_eq!(
-        format!("{:x}", Sha256::digest(&mesh)),
+        sha256_hex(&mesh),
         string(fixture, "hash"),
         "independent frozen binary identity"
     );
     let bound = binding(current, &format!("a2/ingest/{name}"));
     let request = string(bound, "effectiveInputUtf8").as_bytes();
-    assert_eq!(
-        format!("{:x}", Sha256::digest(request)),
-        bound["effectiveInputSha256"]
-    );
+    assert_eq!(sha256_hex(request), bound["effectiveInputSha256"]);
     assert_outcome(engine.ingest_mesh(request, &mesh), bound, name);
 }
 

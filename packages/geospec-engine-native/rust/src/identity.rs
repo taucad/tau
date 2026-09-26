@@ -165,7 +165,7 @@ impl SubjectIdentity {
         ]);
         let canonical = codec::encode(&descriptor).map_err(|error| invalid(error.to_string()))?;
         Ok(Self {
-            hash: digest(&canonical),
+            hash: sha256_hex(&canonical),
             descriptor,
         })
     }
@@ -183,10 +183,10 @@ impl SubjectIdentity {
         let resource_hashes = resources
             .entries
             .iter()
-            .map(|(name, bytes)| (name.clone(), digest(bytes)))
+            .map(|(name, bytes)| (name.clone(), sha256_hex(bytes)))
             .collect();
         Self::gltf_prehashed(
-            digest(primary),
+            sha256_hex(primary),
             primary.len(),
             resources,
             &resource_hashes,
@@ -253,7 +253,7 @@ impl SubjectIdentity {
         ]);
         let canonical = codec::encode(&descriptor).map_err(|error| invalid(error.to_string()))?;
         Ok(Self {
-            hash: digest(&canonical),
+            hash: sha256_hex(&canonical),
             descriptor,
         })
     }
@@ -267,7 +267,7 @@ impl SubjectIdentity {
         name: Option<&str>,
     ) -> Result<Self, BackendError> {
         Self::step_prehashed(
-            digest(primary),
+            sha256_hex(primary),
             primary.len(),
             source_unit,
             scale,
@@ -321,7 +321,7 @@ impl SubjectIdentity {
         ]);
         let canonical = codec::encode(&descriptor).map_err(|error| invalid(error.to_string()))?;
         Ok(Self {
-            hash: digest(&canonical),
+            hash: sha256_hex(&canonical),
             descriptor,
         })
     }
@@ -370,8 +370,20 @@ impl SubjectIdentity {
     }
 }
 
-pub(crate) fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+/// Lowercase hexadecimal SHA-256 of `bytes`: the spelling of every content, plan and resource hash.
+pub fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
+    hex(&Sha256::digest(bytes))
+}
+
+/// Lowercase hexadecimal spelling of `bytes`, the one encoder behind every hash string.
+pub fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        out.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
+    out
 }
 
 fn byte_length(bytes: &[u8]) -> Result<Json, BackendError> {

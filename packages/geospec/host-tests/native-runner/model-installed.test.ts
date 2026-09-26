@@ -20,12 +20,10 @@ import type { GeoSpecRuntimeClient, RuntimeClientWithRoutes } from 'geospec/mode
 type NativeModule = {
   Engine: new () => GeoSpecNativeModelEngine & { close?: () => void };
   initialize?: () => Promise<void>;
-  canonicalize(input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
 };
 type InstalledClientModule = {
   createGeoSpecAssertionClient(options: {
     engine: GeoSpecNativeModelEngine;
-    canonicalize: NativeModule['canonicalize'];
     claimId: () => string;
     workUnitLimit: number;
   }): GeoSpecAssertionClient;
@@ -205,8 +203,7 @@ for (const route of routes) {
         resourceByteLengths: number[];
       }> = [];
       const engine: GeoSpecNativeModelEngine = {
-        canonicalPlan: (request) => inner.canonicalPlan(request),
-        evaluatePlan: (plan) => inner.evaluatePlan(plan),
+        evaluateClaim: (request) => inner.evaluateClaim(request),
         processRequest: (request) => inner.processRequest(request),
         ingestSubject(request, primary, resources) {
           ingests.push({
@@ -255,7 +252,7 @@ for (const route of routes) {
       const events: GeoSpecRunnerEvent[] = [];
       const runner = createNativeGeoSpecRunner({
         filesystem,
-        nativeAssertions: { engine, canonicalize: native.canonicalize, workUnitLimit: 1_000_000 },
+        nativeAssertions: { engine, workUnitLimit: 1_000_000 },
         model: {
           runtime,
           async readSource(source) {
@@ -363,7 +360,6 @@ for (const route of routes) {
             expect(assertion.subject).toEqual(subject);
             const client = standalone.createGeoSpecAssertionClient({
               engine: reference,
-              canonicalize: native.canonicalize,
               claimId: () => report.claimId,
               workUnitLimit: 1_000_000,
             });

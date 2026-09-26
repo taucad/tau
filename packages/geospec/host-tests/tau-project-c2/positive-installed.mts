@@ -124,7 +124,6 @@ try {
     try {
       const client = createGeoSpecAssertionClient({
         engine,
-        canonicalize: nativeModule.canonicalize,
         subjectSlot: 'subject',
         workUnitLimit: workUnitBudget,
         claimId: (matcher) => `c2-${record.id}-${matcher}`,

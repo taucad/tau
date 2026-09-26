@@ -25,7 +25,6 @@ for (const row of authority.rows) {
   const admission = admitSubject(nativeEngine, authority.admissions.get(row.geometryId));
   const recorder = createForwardingRecorder(nativeEngine);
   const client = createGeoSpecAssertionClient({
-    canonicalize,
     claimId: () => claim.claimId,
     engine: recorder.engine,
     subjectSlot: claim.subjectSlots[0],

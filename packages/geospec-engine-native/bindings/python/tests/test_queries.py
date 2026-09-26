@@ -4,6 +4,7 @@ import re
 from types import SimpleNamespace
 import unittest
 
+from claim_frame import claim_frame
 from geospec import (
     GeoSpecAssertionError,
     GeoSpecEngine,
@@ -38,6 +39,9 @@ class Native:
             ],
         }})
 
+    def evaluate_claim(self, request):
+        return claim_frame(self.canonical_plan(request), self.evaluate_plan)
+
     def canonical_plan(self, request):
         self.requests.append(json.loads(request))
         if self.error is not None:
@@ -60,7 +64,7 @@ def subject_and_native():
     native = Native()
     engine = GeoSpecEngine(
         native_engine=native,
-        native_module=SimpleNamespace(canonicalize=lambda value: value),
+        native_module=SimpleNamespace(),
     )
     return GeoSpecSubject(engine, "part", "subjectHash", "a" * 64), native
 

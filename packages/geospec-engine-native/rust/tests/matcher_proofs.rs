@@ -4,6 +4,7 @@ use std::{
     rc::Rc,
 };
 
+use geospec_engine_native_core::sha256_hex;
 use geospec_engine_native_core::{
     backend::{
         brep::{
@@ -22,7 +23,6 @@ use geospec_engine_native_core::{
     Engine, EngineConfig,
 };
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
 #[test]
 fn assigned_proof_capabilities_keep_the_registry_spelling() {
@@ -591,7 +591,7 @@ fn ingest_step(engine: &mut Engine) -> (String, String) {
             .as_str()
             .unwrap()
             .into(),
-        format!("{:x}", Sha256::digest(bytes)),
+        sha256_hex(bytes),
     )
 }
 
@@ -663,7 +663,7 @@ fn ingest_gltf(engine: &mut Engine) -> (String, String) {
             .as_str()
             .unwrap()
             .into(),
-        format!("{:x}", Sha256::digest(primary)),
+        sha256_hex(primary),
     )
 }
 

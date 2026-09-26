@@ -1,6 +1,10 @@
 import type { JSONValue } from '@taucad/runtime/types';
 import { createGeoSpecAssertionClient } from '#assertion-client/index.js';
-import type { GeoSpecAssertionClient, GeoSpecNativeEngine } from '#assertion-client/index.js';
+import type {
+  GeoSpecAssertionClient,
+  GeoSpecNativeClaimEvaluation,
+  GeoSpecNativeEngine,
+} from '#assertion-client/index.js';
 
 export const subject = { subjectHash: 'b'.repeat(64) };
 
@@ -11,22 +15,15 @@ let completed = 0;
 let retryAttempts = 0;
 
 class SettlementEngine implements GeoSpecNativeEngine {
-  #request?: Record<string, JSONValue>;
-
   readonly #engineId: string;
 
   public constructor(engineId: string) {
     this.#engineId = engineId;
   }
 
-  public canonicalPlan(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-    this.#request = decode(request);
-    return Uint8Array.from(request);
-  }
-
-  public evaluatePlan(_plan: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+  public evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation {
     completed += 1;
-    const plan = this.#request?.['plan'] as {
+    const plan = decode(request)['plan'] as {
       claims: [
         {
           claimId: string;
@@ -40,7 +37,7 @@ class SettlementEngine implements GeoSpecNativeEngine {
     const { disposition } = expected;
     const positiveSatisfied = expected.retry === true ? ++retryAttempts > 1 : expected.value === 1;
     const passed = positiveSatisfied === (claim.polarity === 'positive');
-    return encode({
+    const canonicalResult = encode({
       results: [
         disposition === 'refused'
           ? {
@@ -58,6 +55,7 @@ class SettlementEngine implements GeoSpecNativeEngine {
             },
       ],
     });
+    return { canonicalClaim: encode(claim), canonicalPlan: Uint8Array.from(request), canonicalResult };
   }
 
   public processRequest(_request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
@@ -67,7 +65,6 @@ class SettlementEngine implements GeoSpecNativeEngine {
 
 export const createSettlementClient = (engineId = 'settlement'): GeoSpecAssertionClient =>
   createGeoSpecAssertionClient({
-    canonicalize: (input) => Uint8Array.from(input),
     engine: new SettlementEngine(engineId),
     workUnitLimit: 10_000,
   });

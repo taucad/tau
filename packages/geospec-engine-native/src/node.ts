@@ -6,12 +6,27 @@ import {
   observeHostCopy,
   callHost,
   toHostBytes,
+  toHostClaimEvaluation,
 } from '#host-types.js';
-import type { HostBytes, HostCacheLifecycle, HostCacheOptions, HostEngine, HostSubjectLifecycle } from '#host-types.js';
+import type {
+  HostBytes,
+  HostCacheLifecycle,
+  HostCacheOptions,
+  HostClaimEvaluation,
+  HostEngine,
+  HostSubjectLifecycle,
+} from '#host-types.js';
 
 // oxlint-disable no-barrel-files/no-barrel-files -- The host facade exposes its shared public contracts.
 export { ProtocolError } from '#host-types.js';
-export type { HostBytes, HostCacheLifecycle, HostCacheOptions, HostEngine, HostSubjectLifecycle } from '#host-types.js';
+export type {
+  HostBytes,
+  HostCacheLifecycle,
+  HostCacheOptions,
+  HostClaimEvaluation,
+  HostEngine,
+  HostSubjectLifecycle,
+} from '#host-types.js';
 // oxlint-enable no-barrel-files/no-barrel-files
 
 const buffer = (value: unknown) => {
@@ -127,6 +142,15 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
    */
   public evaluatePlan(plan: HostBytes): HostBytes {
     return callHost(() => this.output(this.inner().evaluatePlan(buffer(plan))));
+  }
+
+  /**
+   * Canonicalize and evaluate a one-claim request in one engine call.
+   * @param request - Exact submitClaims request bytes with exactly one claim.
+   * @returns Views of the exact canonical plan, claim and result bytes over one host copy.
+   */
+  public evaluateClaim(request: HostBytes): HostClaimEvaluation {
+    return toHostClaimEvaluation(callHost(() => this.output(this.inner().evaluateClaim(buffer(request)))));
   }
 
   /**

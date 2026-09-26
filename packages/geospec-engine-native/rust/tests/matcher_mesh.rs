@@ -567,8 +567,6 @@ fn point_normalization_center_diagnostic_keeps_source_schema_and_actual_numbers(
 /// Pinned from M0 (446ff8ba0): the projection must move, not change, fields.
 #[test]
 fn projected_mesh_family_results_keep_their_bytes() {
-    use sha2::{Digest, Sha256};
-
     // A closed box, a disjoint fin and a fan with a duplicate, a degenerate
     // triangle and a non-finite corner.
     let mut flawed = box_record(0.0);
@@ -726,7 +724,7 @@ fn projected_mesh_family_results_keep_their_bytes() {
         )
         .unwrap();
         let bytes = crate::codec::encode(&result).unwrap();
-        actual.push(format!("{:x}", Sha256::digest(bytes)));
+        actual.push(crate::sha256_hex(bytes));
     }
     assert_eq!(
         actual,

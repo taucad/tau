@@ -20,7 +20,7 @@ export type GeoSpecNativeRunnerOptions = Omit<
   GeoSpecRunnerOptions,
   'modelLoader' | 'nativeAssertions' | 'nativeModelLoader' | 'stepLoader'
 > & {
-  /** Actual protocol-3 engine and canonicalizer used by authored assertions. */
+  /** Actual protocol-3 engine used by authored assertions. */
   readonly nativeAssertions: GeoSpecNativeRunnerAssertions;
   /** Optional managed loader; the runner releases its subjects after every run. */
   readonly nativeModelLoader?: ManagedGeoSpecNativeModelLoader;

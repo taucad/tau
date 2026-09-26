@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from test_conformance import CORPUS
 
+from claim_frame import claim_frame
 from geospec import (
     GeoSpecAssertionError,
     GeoSpecEngine,
@@ -236,6 +237,9 @@ def test_engine_default_budget_is_emitted_explicitly_without_host_lowering():
                 b'{"name":"toHaveBoundingBox"}]}}'
             )
 
+        def evaluate_claim(self, request):
+            return claim_frame(self.canonical_plan(request), self.evaluate_plan)
+
         def canonical_plan(self, request):
             authored = json.loads(request)
             claim = authored["plan"]["claims"][0]
@@ -264,7 +268,7 @@ def test_engine_default_budget_is_emitted_explicitly_without_host_lowering():
     native = Native()
     engine = GeoSpecEngine(
         native_engine=native,
-        native_module=SimpleNamespace(canonicalize=lambda value: value),
+        native_module=SimpleNamespace(),
     )
     subject = GeoSpecSubject(engine, "subject", "subjectHash", "a" * 64)
 

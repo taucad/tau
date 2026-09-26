@@ -23,6 +23,17 @@ export type HostEngine = {
   processRequest(request: HostBytes): HostBytes;
   canonicalPlan(request: HostBytes): HostBytes;
   evaluatePlan(plan: HostBytes): HostBytes;
+  evaluateClaim(request: HostBytes): HostClaimEvaluation;
+};
+
+/**
+ * Exact canonical bytes of one claim evaluated in one engine call: the bytes `canonicalPlan`,
+ * `canonicalize` of that plan's claim and `evaluatePlan` of that plan return. @public
+ */
+export type HostClaimEvaluation = {
+  readonly canonicalPlan: HostBytes;
+  readonly canonicalClaim: HostBytes;
+  readonly canonicalResult: HostBytes;
 };
 
 /** Node lifecycle operations over opaque core control bytes. @public */
@@ -80,6 +91,31 @@ export const toHostBytes = (value: unknown): HostBytes => {
     throw new ProtocolError('invalid-request', 'Host binding returned a non-byte value.');
   }
   return Uint8Array.from(value);
+};
+
+/**
+ * Split one `evaluateClaim` frame into views over its single host copy. The core frame is
+ * `u32le planLength, u32le claimLength, plan, claim, result`.
+ *
+ * @internal
+ * @param frame - Fresh host-owned frame bytes.
+ * @returns Canonical plan, claim and result views sharing the frame's buffer.
+ */
+export const toHostClaimEvaluation = (frame: HostBytes): HostClaimEvaluation => {
+  const header = 8;
+  if (frame.byteLength >= header) {
+    const lengths = new DataView(frame.buffer, frame.byteOffset, header);
+    const claimStart = header + lengths.getUint32(0, true);
+    const resultStart = claimStart + lengths.getUint32(4, true);
+    if (resultStart <= frame.byteLength) {
+      return {
+        canonicalPlan: frame.subarray(header, claimStart),
+        canonicalClaim: frame.subarray(claimStart, resultStart),
+        canonicalResult: frame.subarray(resultStart),
+      };
+    }
+  }
+  throw new ProtocolError('invalid-request', 'Host binding returned a malformed claim evaluation.');
 };
 
 /**

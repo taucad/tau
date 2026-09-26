@@ -3,7 +3,6 @@
 
 use num_rational::BigRational;
 use num_traits::Zero;
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::plate_contract::{
@@ -483,7 +482,7 @@ pub fn verify(
     candidate: PlateCandidate<'_>,
 ) -> Result<VerifiedPlate, PlateError> {
     check_plan(&request)?;
-    let plan_hash = format!("{:x}", Sha256::digest(request.canonical_plan));
+    let plan_hash = crate::identity::sha256_hex(request.canonical_plan);
     let binding = candidate.binding;
     if binding.subject_content_hash != request.source.primary_hash()
         || binding.subject_hash != request.expected_subject_hash

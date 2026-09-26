@@ -255,6 +255,46 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     });
   }, 20_000);
 
+  it('should give a port that connects while its project is closing a fresh root, not the one being released', async () => {
+    /* The close's first read is held, so the second port lands mid-release every time. */
+    let hold: Promise<void> | undefined;
+    let held = 0;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listCheckouts: async () => {
+        if (hold !== undefined) {
+          held += 1;
+          await hold;
+        }
+        return port.listCheckouts!();
+      },
+    }));
+    const first = await fixture.open('alpha');
+    const released = await fixture.root('alpha');
+    const gate = Promise.withResolvers<void>();
+    hold = gate.promise;
+    first.send({ command: 'close', id: 1 });
+    await vi.waitFor(() => {
+      expect(held).toBeGreaterThan(0);
+    });
+
+    const second = await fixture.open('alpha');
+    hold = undefined;
+    gate.resolve();
+    await vi.waitFor(() => {
+      expect(first.frames).toContainEqual({ type: 'result', id: 1, result: { kind: 'closed' } });
+    });
+    expect(released.inspect().status).toBe('stopped');
+
+    /* Joining the released root left the page on a stopped tree the registry no longer holds. */
+    await vi.waitFor(() => {
+      expect(second.frames.some((frame) => frame.type === 'status')).toBe(true);
+    });
+    const reopened = await fixture.root('alpha');
+    expect(reopened).not.toBe(released);
+    expect(reopened.inspect().status).toBe('active');
+  }, 20_000);
+
   it('should serve the projection to a port the moment it connects', async () => {
     const fixture = harness(['alpha']);
     const alpha = await fixture.open('alpha');

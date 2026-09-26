@@ -1928,26 +1928,54 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     return entry;
   };
 
+  /** Each project's release while its last port's close is in flight. */
+  const closing = new Map<string, Promise<void>>();
+
   const closeProject = async (projectId: string): Promise<void> => {
     const entry = projects.get(projectId);
     if (entry === undefined) {
       return;
     }
-    const tree = await entry.revisions;
-    /* A refused close keeps the entry and its live tree for the next close. */
-    await tree.release();
-    projects.delete(projectId);
-    entry.unsubscribe();
-    options.released?.(projectId);
+    const release = (async (): Promise<void> => {
+      const tree = await entry.revisions;
+      /* A refused close keeps the entry and its live tree for the next close. */
+      await tree.release();
+      projects.delete(projectId);
+      entry.unsubscribe();
+      options.released?.(projectId);
+    })();
+    closing.set(projectId, release);
+    try {
+      await release;
+    } finally {
+      closing.delete(projectId);
+    }
   };
 
-  return {
+  const registry: WorkerRevisionRegistry = {
     connect: (port, projectId) => {
       /* P31: nothing here owns a host-served project's revisions, so nothing
        * here opens a store for it. The port is closed rather than answered,
        * because an empty projection would be a second, wrong answer. */
       if (options.hostServesRevisions?.(projectId) === true) {
         port.close();
+        return;
+      }
+      /*
+       * A port that arrives while the project's last port is being released
+       * would join a root that stops under it and be left talking to a stopped
+       * tree: a page that reopens a project it just closed, or another tab,
+       * would never sync or stream. It connects once that close settles, to a
+       * fresh root or to the one a refused close kept; its frames wait in the
+       * port, which is not started until then.
+       */
+      const pending = closing.get(projectId);
+      if (pending !== undefined) {
+        // async-iife: bootstrap -- the closing port hears the close's outcome; this only waits it out.
+        void (async (): Promise<void> => {
+          await pending.catch(() => undefined);
+          registry.connect(port, projectId);
+        })();
         return;
       }
       const entry = openProject(projectId);
@@ -2038,4 +2066,5 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       await Promise.all([...projects.keys()].map(async (projectId) => closeProject(projectId)));
     },
   };
+  return registry;
 };

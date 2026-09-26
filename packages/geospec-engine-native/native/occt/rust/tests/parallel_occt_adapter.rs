@@ -265,10 +265,20 @@ fn connector_trait_dispatch_keeps_exact_facts_and_uses_the_bounded_worker() {
 
     let serial = serial_connector.open_step(regular_input).unwrap();
     let parallel = connector.open_step(regular_input).unwrap();
-    let expected_common = serial.common_volume(0, 1).unwrap();
+    let expected_cut = serial
+        .regular_solid_containment(
+            occurrence(serial.as_ref(), "protruding"),
+            occurrence(serial.as_ref(), "target"),
+        )
+        .unwrap();
     let before_worker = thread_times();
-    let warm_common = parallel.common_volume(0, 1).unwrap();
-    assert_eq!(warm_common, expected_common);
+    let warm_cut = parallel
+        .regular_solid_containment(
+            occurrence(parallel.as_ref(), "protruding"),
+            occurrence(parallel.as_ref(), "target"),
+        )
+        .unwrap();
+    assert_eq!(warm_cut, expected_cut);
     let after_worker = thread_times();
     let workers = after_worker
         .keys()
@@ -290,38 +300,6 @@ fn connector_trait_dispatch_keeps_exact_facts_and_uses_the_bounded_worker() {
         &parallel_validity,
         &parallel.validity().unwrap()
     ));
-    let validation_documents = (0..24)
-        .map(|_| {
-            let document = connector.open_step(regular_input).unwrap();
-            document.common_volume(0, 1).unwrap();
-            document
-        })
-        .collect::<Vec<_>>();
-    let validities = measured("adapter-validity", worker_id, || {
-        validation_documents
-            .iter()
-            .map(|document| document.validity())
-            .collect::<Result<Vec<_>, _>>()
-    })
-    .unwrap();
-    for value in validities {
-        assert_eq!(format!("{value:?}").into_bytes(), validity_bytes);
-    }
-    eprintln!("adapter-validity bytes={}", validity_bytes.len());
-
-    let commons = measured("adapter-common", worker_id, || {
-        (0..24)
-            .map(|_| parallel.common_volume(0, 1))
-            .collect::<Result<Vec<_>, _>>()
-    })
-    .unwrap();
-    for value in commons {
-        assert_eq!(value, expected_common);
-        assert_eq!(
-            format!("{value:?}").as_bytes(),
-            format!("{expected_common:?}").as_bytes()
-        );
-    }
 
     let mesh_input = include_bytes!("fixtures/nist-pmi-bspline.step");
     let serial_mesh = serial_connector.open_step(mesh_input).unwrap();
@@ -361,7 +339,8 @@ fn connector_trait_dispatch_keeps_exact_facts_and_uses_the_bounded_worker() {
         );
     }
 
-    let bore_input = include_bytes!("fixtures/circular-bores/01-through.step");
+    // The obstructed bore is the one whose clearance only the Common decides.
+    let bore_input = include_bytes!("fixtures/circular-bores/08-obstructed-through.step");
     let serial_bore = serial_connector.open_step(bore_input).unwrap();
     let parallel_bore = connector.open_step(bore_input).unwrap();
     let expected_bores = serial_bore.circular_bores(16).unwrap();

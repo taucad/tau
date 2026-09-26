@@ -8,9 +8,8 @@ use crate::{
     },
     backend::{
         brep::{
-            Bounds, BrepEntity, BrepSubject, CommonVolume, DocumentFacts, EdgeFacts, Extrema,
-            LocatedFace, PointState, ShapeFacts, TessellationProfile, TopologyCounts,
-            ValidityFacts, WallOptions, WallThicknessOutcome,
+            Bounds, BrepEntity, BrepSubject, DocumentFacts, EdgeFacts, LocatedFace, PointState,
+            ShapeFacts, TessellationProfile, TopologyCounts, ValidityFacts,
         },
         AnalysisRetentionLimits, BackendError, TriangleMesh,
     },
@@ -62,31 +61,12 @@ impl BrepSubject for FactsOnlyBrep {
         unreachable!()
     }
 
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        unreachable!()
-    }
-
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        unreachable!()
-    }
-
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        unreachable!()
-    }
-
     fn classify_face_points(
         &self,
         _: BrepEntity,
         _: &[[f64; 3]],
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
-        unreachable!()
-    }
-
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
         unreachable!()
     }
 

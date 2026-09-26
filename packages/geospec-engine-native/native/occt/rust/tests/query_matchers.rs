@@ -1,6 +1,5 @@
 use geospec_engine_native_occt::{
-    BrepEntity, BrepSubject, Document, PointState, SurfaceFacts, TessellationProfile, WallOptions,
-    WallThicknessOutcome,
+    BrepEntity, BrepSubject, Document, PointState, SurfaceFacts, TessellationProfile,
 };
 use std::path::PathBuf;
 
@@ -34,7 +33,7 @@ fn close(actual: f64, expected: f64, tolerance: f64) {
 }
 
 #[test]
-fn retained_box_exercises_whole_faces_trim_validity_wall_and_mesh_transfer() {
+fn retained_box_exercises_whole_faces_trim_validity_and_mesh_transfer() {
     let document = Document::from_step(&fixture("ap242-box.step")).unwrap();
     let facts = document.facts().unwrap();
     let faces = BrepSubject::faces(&document).unwrap();
@@ -87,22 +86,6 @@ fn retained_box_exercises_whole_faces_trim_validity_wall_and_mesh_transfer() {
     assert_eq!(validity.invalid_solid_count, Some(0));
     assert_eq!(validity.open_edge_count, Some(0));
     assert_eq!(validity.closed_solids, Some(true));
-
-    let wall = document
-        .minimum_wall_thickness(&WallOptions {
-            work_unit_budget: 100_000,
-            mesh_linear_tolerance_mm: 0.02,
-            mesh_angular_tolerance_degrees: 0.5,
-        })
-        .unwrap();
-    let WallThicknessOutcome::Measured(wall) = wall else {
-        panic!("closed box must yield measured wall evidence")
-    };
-    assert_eq!(wall.value.to_bits(), 10.0_f64.to_bits());
-    assert!(wall.point_a.is_some());
-    assert!(wall.point_b.is_some());
-    assert!(wall.support_a.as_ref().unwrap().face_index.is_some());
-    assert!(wall.support_b.as_ref().unwrap().face_index.is_some());
 
     let profile = TessellationProfile {
         linear_deflection_mm: 0.1,
@@ -158,43 +141,12 @@ fn retained_assembly_exercises_paths_transforms_topology_and_exact_queries() {
         vec![PointState::On]
     );
 
-    let extrema = document
-        .extrema(BrepEntity::Occurrence(0), BrepEntity::Occurrence(1))
-        .unwrap();
-    assert_eq!(extrema.distance.to_bits(), 20.0_f64.to_bits());
-    close(extrema.point_a[0], 5.0, 1e-9);
-    close(extrema.point_b[0], 25.0, 1e-9);
-
-    assert_eq!(
-        document
-            .classify_points(0, &[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [6.0, 0.0, 0.0]])
-            .unwrap(),
-        vec![PointState::In, PointState::On, PointState::Out]
-    );
-    let common = document.common_volume(0, 1).unwrap();
-    assert_eq!(common.volume.to_bits(), 0.0_f64.to_bits());
-    assert_eq!(common.centroid.map(f64::to_bits), [0, 0, 0]);
-
     let profile = TessellationProfile {
         linear_deflection_mm: 0.1,
         angular_deflection_rad: 0.5,
     };
     let mesh = BrepSubject::tessellate(&document, BrepEntity::Occurrence(0), profile).unwrap();
     assert_eq!(mesh.triangles.len(), 12);
-
-    assert!(matches!(
-        document
-            .minimum_wall_thickness(&WallOptions {
-                work_unit_budget: 1,
-                mesh_linear_tolerance_mm: 0.02,
-                mesh_angular_tolerance_degrees: 0.5,
-            })
-            .unwrap(),
-        WallThicknessOutcome::BudgetExceeded {
-            consumed: 1,
-            limit: 1
-        }
-    ));
 }
 
 #[test]

@@ -2841,35 +2841,12 @@ mod tests {
         ) -> Result<std::rc::Rc<crate::backend::brep::ValidityFacts>, BackendError> {
             unreachable!("only trim query belongs to this control")
         }
-        fn extrema(
-            &self,
-            _: BrepEntity,
-            _: BrepEntity,
-        ) -> Result<crate::backend::brep::Extrema, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
-        fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
-        fn common_volume(
-            &self,
-            _: u32,
-            _: u32,
-        ) -> Result<crate::backend::brep::CommonVolume, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
         fn classify_face_points(
             &self,
             _: BrepEntity,
             _: &[[f64; 3]],
             _: f64,
         ) -> Result<Vec<PointState>, BackendError> {
-            unreachable!("only trim query belongs to this control")
-        }
-        fn minimum_wall_thickness(
-            &self,
-            _: &crate::backend::brep::WallOptions,
-        ) -> Result<crate::backend::brep::WallThicknessOutcome, BackendError> {
             unreachable!("only trim query belongs to this control")
         }
         fn tessellate(

@@ -309,39 +309,12 @@ impl BrepSubject for BoxControl {
     fn validity(&self) -> Result<Rc<crate::backend::brep::ValidityFacts>, BackendError> {
         unreachable!()
     }
-    fn extrema(
-        &self,
-        _: BrepEntity,
-        _: BrepEntity,
-    ) -> Result<crate::backend::brep::Extrema, BackendError> {
-        unreachable!()
-    }
-    fn classify_points(
-        &self,
-        _: u32,
-        _: &[[f64; 3]],
-    ) -> Result<Vec<crate::backend::brep::PointState>, BackendError> {
-        unreachable!()
-    }
-    fn common_volume(
-        &self,
-        _: u32,
-        _: u32,
-    ) -> Result<crate::backend::brep::CommonVolume, BackendError> {
-        panic!("no general Boolean fallback")
-    }
     fn classify_face_points(
         &self,
         _: BrepEntity,
         _: &[[f64; 3]],
         _: f64,
     ) -> Result<Vec<crate::backend::brep::PointState>, BackendError> {
-        unreachable!()
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &crate::backend::brep::WallOptions,
-    ) -> Result<crate::backend::brep::WallThicknessOutcome, BackendError> {
         unreachable!()
     }
     fn tessellate(

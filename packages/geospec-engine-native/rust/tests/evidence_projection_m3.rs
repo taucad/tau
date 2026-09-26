@@ -4,9 +4,8 @@ use geospec_engine_native_core::{
     backend::{
         brep::{
             Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepIdentityProfile,
-            BrepSubject, CommonVolume, DocumentFacts, EdgeFacts, Extrema, LocatedFace, PointState,
-            ReportedBrepBundle, ShapeFacts, StepSubjectMetadata, TessellationProfile,
-            TopologyCounts, ValidityFacts, WallOptions, WallThicknessOutcome,
+            BrepSubject, DocumentFacts, EdgeFacts, LocatedFace, PointState, ReportedBrepBundle,
+            ShapeFacts, StepSubjectMetadata, TessellationProfile, TopologyCounts, ValidityFacts,
         },
         csg::{
             BooleanOp, CsgConnector, FillRule, MeshExport, Section, SectionOp, SolidId,
@@ -138,27 +137,12 @@ impl BrepSubject for ProjectionBrep {
             reason: None,
         }))
     }
-    fn extrema(&self, _: BrepEntity, _: BrepEntity) -> Result<Extrema, BackendError> {
-        Err(unsupported())
-    }
-    fn classify_points(&self, _: u32, _: &[[f64; 3]]) -> Result<Vec<PointState>, BackendError> {
-        Err(unsupported())
-    }
-    fn common_volume(&self, _: u32, _: u32) -> Result<CommonVolume, BackendError> {
-        Err(unsupported())
-    }
     fn classify_face_points(
         &self,
         _: BrepEntity,
         _: &[[f64; 3]],
         _: f64,
     ) -> Result<Vec<PointState>, BackendError> {
-        Err(unsupported())
-    }
-    fn minimum_wall_thickness(
-        &self,
-        _: &WallOptions,
-    ) -> Result<WallThicknessOutcome, BackendError> {
         Err(unsupported())
     }
     fn tessellate(
@@ -313,23 +297,17 @@ fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
         Box::new(UnusedCsg),
     );
     let request = step_request(bytes, None);
-    let unretained = uncached
-        .ingest_subject(&request, bytes, vec![])
-        .unwrap();
+    let unretained = uncached.ingest_subject(&request, bytes, vec![]).unwrap();
     // Ruling 15: digest, length and descriptor reuse a subject whose source was not retained.
     assert_eq!(
         unretained,
-        uncached
-            .ingest_subject(&request, bytes, vec![])
-            .unwrap()
+        uncached.ingest_subject(&request, bytes, vec![]).unwrap()
     );
     assert_eq!(opens.get(), 5);
     release_admitted(&mut uncached, &unretained);
     assert_eq!(
         unretained,
-        uncached
-            .ingest_subject(&request, bytes, vec![])
-            .unwrap()
+        uncached.ingest_subject(&request, bytes, vec![]).unwrap()
     );
     assert_eq!(opens.get(), 6);
 }

@@ -21,6 +21,7 @@ import {
 import { adjustHexColorBrightness } from '#utils/color.utils.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import { SceneOverlay } from '#components/geometry/graphics/three/scene-overlay.js';
 
 // Module-scope scratch vectors for PlaneSelector useFrame (avoids per-frame allocations)
@@ -538,6 +539,60 @@ const clearHoveredTransformAxis = (
   setter(undefined);
 };
 
+type TransformStepScheduler = {
+  readonly schedule: (step: () => void) => void;
+  /** Applies a step still waiting for its frame. */
+  readonly flush: () => void;
+  /** Drops a step still waiting for its frame. */
+  readonly cancel: () => void;
+};
+
+/**
+ * Sends drag steps at most once per animation frame, the latest winning (graphics policy §10).
+ *
+ * A frame's first step applies at once, as an uncoalesced send does. Applied from an animation-frame
+ * callback it would miss any frame R3F had already queued (each section-cap worker response queues
+ * one), leaving the cut a frame behind the gizmo. Later steps in the same frame wait for its callback.
+ */
+const createTransformStepScheduler = (invalidate: () => void): TransformStepScheduler => {
+  // The step waiting for the frame callback, 'applied' once the frame's first step went out.
+  let frameStep: (() => void) | 'applied' | undefined;
+  const takeWaitingStep = (): (() => void) | undefined => {
+    const step = frameStep;
+    frameStep = undefined;
+    return step === 'applied' ? undefined : step;
+  };
+  const frame = createRafCoalescer<true>(() => {
+    const step = takeWaitingStep();
+    if (step) {
+      step();
+      // The step may land after the frame R3F had queued, so request the frame that shows it.
+      invalidate();
+    }
+  });
+
+  return {
+    schedule(step) {
+      if (frameStep !== undefined) {
+        frameStep = step;
+        return;
+      }
+
+      frameStep = 'applied';
+      step();
+      frame.schedule(true);
+    },
+    flush() {
+      frame.cancel();
+      takeWaitingStep()?.();
+    },
+    cancel() {
+      frame.cancel();
+      frameStep = undefined;
+    },
+  };
+};
+
 export function SectionViewControls({
   isActive,
   selectedPlaneId,
@@ -568,17 +623,43 @@ export function SectionViewControls({
   const onTransformDragStartRef = useRef(onTransformDragStart);
   const onTransformDragMoveRef = useRef(onTransformDragMove);
   const onTransformDragEndRef = useRef(onTransformDragEnd);
+  const onSetRotationRef = useRef(onSetRotation);
+  const onSetRenderPivotRef = useRef(onSetRenderPivot);
   const [hoveredTransformAxis, setHoveredTransformAxisState] = React.useState<HoveredTransformAxis | undefined>(
     undefined,
   );
   // Render-local pivot point to keep the plane anchored during rotation.
   const pivotPointRef = useRef<THREE.Vector3>(new THREE.Vector3());
+  const invalidate = useThree((state) => state.invalidate);
 
   React.useLayoutEffect(() => {
     onTransformDragStartRef.current = onTransformDragStart;
     onTransformDragMoveRef.current = onTransformDragMove;
     onTransformDragEndRef.current = onTransformDragEnd;
-  }, [onTransformDragEnd, onTransformDragMove, onTransformDragStart]);
+    onSetRotationRef.current = onSetRotation;
+    onSetRenderPivotRef.current = onSetRenderPivot;
+  }, [onSetRenderPivot, onSetRotation, onTransformDragEnd, onTransformDragMove, onTransformDragStart]);
+
+  // A step reads the gizmo's transform when it applies, so the latest pointer move wins. It reads the object
+  // captured at drag start, as React clears the mesh ref before a deactivation's effect flushes the last step.
+  const dragObjectRef = useRef<THREE.Object3D | undefined>(undefined);
+  const applyTranslateStep = React.useCallback((): void => {
+    onTransformDragMoveRef.current?.();
+    const position = dragObjectRef.current?.position;
+    if (position) {
+      onSetRenderPivotRef.current?.([position.x, position.y, position.z]);
+    }
+  }, []);
+  const applyRotateStep = React.useCallback((): void => {
+    onTransformDragMoveRef.current?.();
+    if (dragObjectRef.current) {
+      // Do not change translation here; machine derives display value from pivot
+      const rotation = dragObjectRef.current.rotation.clone();
+      rotationRef.current.copy(rotation);
+      onSetRotationRef.current(rotation);
+    }
+  }, []);
+  const [transformSteps] = React.useState(() => createTransformStepScheduler(invalidate));
 
   const planes = React.useMemo(() => {
     /* oxlint-disable tau-lint/no-hardcoded-color -- Three.js plane selector colors */
@@ -653,6 +734,8 @@ export function SectionViewControls({
   }, [selectedPlaneId, rotation, renderPivot]);
 
   const endActiveTransformDrag = React.useCallback((): void => {
+    // The drag's last step applies now rather than on the next frame, before the end is announced.
+    transformSteps.flush();
     let hadActiveDrag = false;
 
     if (isTranslatingRef.current) {
@@ -671,7 +754,7 @@ export function SectionViewControls({
     if (hadActiveDrag) {
       onTransformDragEndRef.current?.();
     }
-  }, []);
+  }, [transformSteps]);
 
   React.useEffect(() => {
     if (isActive) {
@@ -686,9 +769,11 @@ export function SectionViewControls({
   React.useEffect(() => {
     if (dragPlaneIdRef.current !== selectedPlaneId) {
       dragPlaneIdRef.current = selectedPlaneId;
+      // A step dragged on the previous plane must not land on the new one.
+      transformSteps.cancel();
       endActiveTransformDrag();
     }
-  }, [endActiveTransformDrag, selectedPlaneId]);
+  }, [endActiveTransformDrag, selectedPlaneId, transformSteps]);
 
   React.useEffect(
     () => () => {
@@ -803,22 +888,14 @@ export function SectionViewControls({
         showY={Math.abs(normal.y) > 0.5}
         showZ={Math.abs(normal.z) > 0.5}
         onChange={() => {
-          if (!isTranslatingRef.current) {
-            return;
-          }
-
-          onTransformDragMoveRef.current?.();
-          const currentObject = transformControlsRef.current;
-          if (currentObject) {
-            const { position } = currentObject;
-            if (onSetRenderPivot) {
-              onSetRenderPivot([position.x, position.y, position.z]);
-            }
+          if (isTranslatingRef.current) {
+            transformSteps.schedule(applyTranslateStep);
           }
         }}
         onPointerDown={() => {
           // Keep current anchor so the gizmo does not snap to the plane projection
           isTranslatingRef.current = true;
+          dragObjectRef.current = transformControlsRef.current;
           onTransformDragStartRef.current?.();
         }}
         onPointerUp={endActiveTransformDrag}
@@ -836,22 +913,13 @@ export function SectionViewControls({
         showY={Math.abs(normal.x) > 0.5 || Math.abs(normal.z) > 0.5}
         showZ={Math.abs(normal.x) > 0.5 || Math.abs(normal.y) > 0.5}
         onChange={() => {
-          if (!isRotatingRef.current) {
-            return;
-          }
-
-          onTransformDragMoveRef.current?.();
-          const currentObject = transformControlsRef.current;
-          if (currentObject) {
-            // Extract the rotation from the object
-            const rotation = currentObject.rotation.clone();
-            rotationRef.current.copy(rotation);
-            onSetRotation(rotation);
-            // Do not change translation here; machine derives display value from pivot
+          if (isRotatingRef.current) {
+            transformSteps.schedule(applyRotateStep);
           }
         }}
         onPointerDown={() => {
           isRotatingRef.current = true;
+          dragObjectRef.current = transformControlsRef.current;
           onTransformDragStartRef.current?.();
           if (transformControlsRef.current) {
             // Capture current gizmo world position as the rotation pivot

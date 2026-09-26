@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import type { WebGLRenderer } from 'three';
 import { TransformControls as TransformControlsImpl } from '#components/geometry/graphics/three/controls/transform-controls.js';
 import { SectionViewControls } from '#components/geometry/graphics/three/react/section-view-controls.js';
+import type { AvailablePlane } from '#components/geometry/graphics/three/react/section-view-controls.js';
 import { sceneTag, hasSceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 
@@ -72,8 +73,12 @@ function SceneProbe({ onScene }: { readonly onScene: (scene: THREE.Scene) => voi
   return undefined;
 }
 
-async function renderSectionViewControls(element: React.ReactElement): Promise<{
+async function renderSectionViewControls(
+  element: React.ReactElement,
+  frameloop: 'never' | 'demand' = 'never',
+): Promise<{
   readonly scene: THREE.Scene;
+  readonly gl: WebGLRenderer;
   readonly rerender: (next: React.ReactElement) => Promise<void>;
   readonly cleanup: () => void;
 }> {
@@ -87,7 +92,7 @@ async function renderSectionViewControls(element: React.ReactElement): Promise<{
     await root.configure({
       camera: new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 100_000),
       gl: stubGl,
-      frameloop: 'never',
+      frameloop,
       size: { height: 600, left: 0, top: 0, width: 800 },
     });
 
@@ -109,6 +114,7 @@ async function renderSectionViewControls(element: React.ReactElement): Promise<{
 
   return {
     scene,
+    gl: stubGl,
     rerender: async (next): Promise<void> => {
       await act(async () => {
         root.render(
@@ -146,6 +152,74 @@ function baseProperties(): React.ComponentProps<typeof SectionViewControls> {
     onSetRotation: vi.fn(),
   };
 }
+
+/** Holds animation-frame callbacks, in request order, until the test runs the frame. */
+function queueAnimationFrames(): {
+  readonly runFrame: () => void;
+  readonly pendingCount: () => number;
+  readonly restore: () => void;
+} {
+  const callbacks = new Map<number, FrameRequestCallback>();
+  let lastId = 0;
+  const request = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+    lastId += 1;
+    callbacks.set(lastId, callback);
+    return lastId;
+  });
+  const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation((id) => {
+    callbacks.delete(id);
+  });
+
+  return {
+    runFrame(): void {
+      const due = [...callbacks.values()];
+      callbacks.clear();
+      for (const callback of due) {
+        callback(performance.now());
+      }
+    },
+    pendingCount: () => callbacks.size,
+    restore(): void {
+      request.mockRestore();
+      cancel.mockRestore();
+    },
+  };
+}
+
+function findTransformGizmo(scene: THREE.Scene): {
+  readonly translate: TransformControlsImpl;
+  readonly rotate: TransformControlsImpl;
+  readonly object: THREE.Object3D;
+} {
+  let translate: TransformControlsImpl | undefined;
+  let rotate: TransformControlsImpl | undefined;
+  let object: THREE.Object3D | undefined;
+  scene.traverse((child) => {
+    if (child instanceof TransformControlsImpl) {
+      if (child.mode === 'translate') {
+        translate = child;
+      } else if (child.mode === 'rotate') {
+        rotate = child;
+      }
+    } else if (
+      child instanceof THREE.Mesh &&
+      child.geometry instanceof THREE.BoxGeometry &&
+      child.material instanceof THREE.MeshBasicMaterial &&
+      !child.material.visible
+    ) {
+      object = child;
+    }
+  });
+
+  if (!translate || !rotate || !object) {
+    throw new Error('section-view-controls test did not find the transform gizmo.');
+  }
+
+  return { translate, rotate, object };
+}
+
+const xyPlane: AvailablePlane = { id: 'xy', normal: [0, 0, 1], constant: 0 };
+const xzPlane: AvailablePlane = { id: 'xz', normal: [0, 1, 0], constant: 0 };
 
 describe('SectionViewControls', () => {
   beforeAll(() => {
@@ -433,6 +507,186 @@ describe('SectionViewControls', () => {
       expectSharedHighlight(undefined);
     } finally {
       cleanup();
+    }
+  });
+
+  it('should send the first drag step of a frame at once, then only the latest step when the frame runs', async () => {
+    const onSetRenderPivot = vi.fn<(value: [number, number, number]) => void>();
+    const onTransformDragEnd = vi.fn<() => void>();
+    const { scene, cleanup } = await renderSectionViewControls(
+      <SectionViewControls
+        {...baseProperties()}
+        availablePlanes={[xyPlane]}
+        renderPivot={[0, 0, 0]}
+        selectedPlaneId='xy'
+        onSetRenderPivot={onSetRenderPivot}
+        onTransformDragEnd={onTransformDragEnd}
+      />,
+    );
+    const frames = queueAnimationFrames();
+
+    try {
+      const { translate, object } = findTransformGizmo(scene);
+      const dragTo = (x: number): void => {
+        object.position.set(x, 0, 0);
+        translate.dispatchEvent({ type: 'change' });
+      };
+
+      translate.dispatchEvent({ type: 'pointerDown', mode: 'translate' });
+      dragTo(1);
+      dragTo(2);
+      dragTo(3);
+      expect(onSetRenderPivot.mock.calls).toEqual([[[1, 0, 0]]]);
+
+      frames.runFrame();
+      expect(onSetRenderPivot.mock.calls).toEqual([[[1, 0, 0]], [[3, 0, 0]]]);
+
+      dragTo(4);
+      dragTo(5);
+      expect(onSetRenderPivot).toHaveBeenLastCalledWith([4, 0, 0]);
+
+      // Releasing applies the waiting step before announcing the end, and leaves no frame behind.
+      translate.dispatchEvent({ type: 'pointerUp', mode: 'translate' });
+      expect(onSetRenderPivot).toHaveBeenLastCalledWith([5, 0, 0]);
+      expect(onTransformDragEnd).toHaveBeenCalledOnce();
+      expect(onSetRenderPivot.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        onTransformDragEnd.mock.invocationCallOrder[0]!,
+      );
+      expect(frames.pendingCount()).toBe(0);
+      expect(onSetRenderPivot).toHaveBeenCalledTimes(4);
+    } finally {
+      frames.restore();
+      cleanup();
+    }
+  });
+
+  it('should send the latest rotate step of a frame and drop a waiting one when the plane changes', async () => {
+    const onSetRotation = vi.fn<(rotation: THREE.Euler) => void>();
+    const onTransformDragEnd = vi.fn<() => void>();
+    const origin: [number, number, number] = [0, 0, 0];
+    const renderControls = (selectedPlaneId: 'xy' | 'xz'): React.ReactElement => (
+      <SectionViewControls
+        {...baseProperties()}
+        availablePlanes={[xyPlane, xzPlane]}
+        renderPivot={origin}
+        selectedPlaneId={selectedPlaneId}
+        onSetRotation={onSetRotation}
+        onTransformDragEnd={onTransformDragEnd}
+      />
+    );
+    const { scene, rerender, cleanup } = await renderSectionViewControls(renderControls('xy'));
+    const frames = queueAnimationFrames();
+
+    try {
+      const { rotate, object } = findTransformGizmo(scene);
+      const rotateTo = (angle: number): void => {
+        object.rotation.set(angle, 0, 0);
+        rotate.dispatchEvent({ type: 'change' });
+      };
+      const sentAngles = (): number[] => onSetRotation.mock.calls.map(([rotation]) => rotation.x);
+
+      rotate.dispatchEvent({ type: 'pointerDown', mode: 'rotate' });
+      rotateTo(0.1);
+      rotateTo(0.2);
+      rotateTo(0.3);
+      frames.runFrame();
+      expect(sentAngles()).toEqual([0.1, 0.3]);
+
+      // The new plane resets its pivot and rotation, so the old plane's waiting step must not follow it.
+      rotateTo(0.4);
+      rotateTo(0.5);
+      await rerender(renderControls('xz'));
+      frames.runFrame();
+      expect(sentAngles()).toEqual([0.1, 0.3, 0.4]);
+      expect(onTransformDragEnd).toHaveBeenCalledOnce();
+    } finally {
+      frames.restore();
+      cleanup();
+    }
+  });
+
+  it('should apply a waiting drag step when the section view deactivates mid-drag', async () => {
+    const onSetRenderPivot = vi.fn<(value: [number, number, number]) => void>();
+    const onTransformDragEnd = vi.fn<() => void>();
+    const origin: [number, number, number] = [0, 0, 0];
+    const renderControls = (isActive: boolean): React.ReactElement => (
+      <SectionViewControls
+        {...baseProperties()}
+        isActive={isActive}
+        availablePlanes={[xyPlane]}
+        renderPivot={origin}
+        selectedPlaneId='xy'
+        onSetRenderPivot={onSetRenderPivot}
+        onTransformDragEnd={onTransformDragEnd}
+      />
+    );
+    const { scene, rerender, cleanup } = await renderSectionViewControls(renderControls(true));
+    const frames = queueAnimationFrames();
+
+    try {
+      const { translate, object } = findTransformGizmo(scene);
+      translate.dispatchEvent({ type: 'pointerDown', mode: 'translate' });
+      object.position.set(1, 0, 0);
+      translate.dispatchEvent({ type: 'change' });
+      object.position.set(2, 0, 0);
+      translate.dispatchEvent({ type: 'change' });
+
+      // Deactivating unmounts the gizmo, and React clears its mesh ref, before the drag ends.
+      await rerender(renderControls(false));
+      expect(onSetRenderPivot).toHaveBeenLastCalledWith([2, 0, 0]);
+      expect(onTransformDragEnd).toHaveBeenCalledOnce();
+      expect(frames.pendingCount()).toBe(0);
+    } finally {
+      frames.restore();
+      cleanup();
+    }
+  });
+
+  it("should land a frame's waiting drag step before R3F renders that frame", async () => {
+    // Installed before mount so R3F's demand frames queue here too.
+    const frames = queueAnimationFrames();
+    const rendersAtStep: number[] = [];
+    let countRenders = (): number => 0;
+    const onSetRenderPivot = vi.fn<(value: [number, number, number]) => void>(() => {
+      rendersAtStep.push(countRenders());
+    });
+    let cleanup: (() => void) | undefined;
+
+    try {
+      const rendered = await renderSectionViewControls(
+        <SectionViewControls
+          {...baseProperties()}
+          availablePlanes={[xyPlane]}
+          renderPivot={[0, 0, 0]}
+          selectedPlaneId='xy'
+          onSetRenderPivot={onSetRenderPivot}
+        />,
+        'demand',
+      );
+      cleanup = rendered.cleanup;
+      for (let frame = 0; frame < 10 && frames.pendingCount() > 0; frame += 1) {
+        frames.runFrame();
+      }
+
+      expect(frames.pendingCount()).toBe(0);
+      const render = vi.mocked(rendered.gl.render);
+      render.mockClear();
+      countRenders = (): number => render.mock.calls.length;
+      const { translate, object } = findTransformGizmo(rendered.scene);
+
+      translate.dispatchEvent({ type: 'pointerDown', mode: 'translate' });
+      object.position.set(1, 0, 0);
+      translate.dispatchEvent({ type: 'change' });
+      object.position.set(2, 0, 0);
+      translate.dispatchEvent({ type: 'change' });
+      frames.runFrame();
+
+      expect(onSetRenderPivot).toHaveBeenLastCalledWith([2, 0, 0]);
+      expect(rendersAtStep).toEqual([0, 0]);
+      expect(render).toHaveBeenCalledOnce();
+    } finally {
+      cleanup?.();
+      frames.restore();
     }
   });
 });

@@ -13,8 +13,8 @@ import type {
   MachineProvider,
   MachineRequestPrintInput,
 } from '@taucad/runtime/machine';
-import { printIntentPath, printIntentSchema } from '@taucad/slicer';
-import type { PrintIntent } from '@taucad/slicer';
+import { printIntentPath, printIntentSchema } from '@taucad/slicer/print-intent';
+import type { PrintIntent } from '@taucad/slicer/print-intent';
 import type { FileExtension } from '@taucad/types';
 import { quantityKinds } from '@taucad/units/quantity';
 import { Button } from '@taucad/ui/components/button';

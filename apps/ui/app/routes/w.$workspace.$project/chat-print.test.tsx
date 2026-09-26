@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineClient } from '@taucad/runtime/machine';
-import { printIntentPath } from '@taucad/slicer';
+import { printIntentPath } from '@taucad/slicer/print-intent';
 import { writeBambuContainer } from '@taucad/slicer/container';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { projectFiles } from '#components/print/testing/project-files.js';

@@ -39,6 +39,7 @@
     ".": "./src/index.ts",
     "./toolpath": "./src/toolpath.ts",
     "./container": "./src/container.ts",
+    "./print-intent": "./src/print-intent.ts",
     "./bambu-studio": {
       "types": "./src/bambu-studio/engine.ts",
       "node": "./src/bambu-studio/engine.ts",
@@ -63,6 +64,11 @@
         "types": "./dist/container.d.mts",
         "import": "./dist/container.mjs",
         "default": "./dist/container.mjs"
+      },
+      "./print-intent": {
+        "types": "./dist/print-intent.d.mts",
+        "import": "./dist/print-intent.mjs",
+        "default": "./dist/print-intent.mjs"
       },
       "./bambu-studio": {
         "types": "./dist/bambu-studio/engine.d.mts",

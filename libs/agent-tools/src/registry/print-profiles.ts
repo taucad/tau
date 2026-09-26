@@ -2,8 +2,8 @@ import type { JsonObject } from '@taucad/agent-host';
 import type { RequestPrintInput } from '@taucad/chat';
 import type { RpcFileSystem } from '@taucad/chat/rpc';
 import type { MachineDirectoryEntry, MachineObservedMaterial, MachineProvider } from '@taucad/runtime/machine';
-import { printIntentPath, readPrintIntent } from '@taucad/slicer';
-import type { PrintIntent } from '@taucad/slicer';
+import { printIntentPath, readPrintIntent } from '@taucad/slicer/print-intent';
+import type { PrintIntent } from '@taucad/slicer/print-intent';
 import {
   bambuPlates,
   describeBambuStudioSettings,

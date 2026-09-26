@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { JSONValue } from '@taucad/runtime/types';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from '#assertion-client/index.js';
-import type { GeoSpecNativeEngine } from '#assertion-client/index.js';
+import type { GeoSpecNativeClaimEvaluation, GeoSpecNativeEngine } from '#assertion-client/index.js';
 import { evaluateGeoSpecNativeClaim } from '#engine/client.js';
 import { geoSpecMatcherDescriptors, geoSpecNativeMatcherDescriptors } from '#engine/matchers.js';
 import { createGeoSpecVitestAdapter } from '#vitest/index.js';
@@ -27,14 +27,10 @@ class FixedContractEngine implements GeoSpecNativeEngine {
     this.status = status;
   }
 
-  public canonicalPlan(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+  public evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation {
     this.request = record(decode(request));
     this.returnedPlan = encode({ plan: this.request['plan']! });
-    return this.returnedPlan;
-  }
-
-  public evaluatePlan(_plan: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-    const plan = record(this.request?.['plan'] ?? null);
+    const plan = record(this.request['plan']!);
     const { claims } = plan;
     const claim = record(Array.isArray(claims) ? claims[0]! : null);
     this.returnedResult = encode({
@@ -50,7 +46,7 @@ class FixedContractEngine implements GeoSpecNativeEngine {
         },
       ],
     });
-    return this.returnedResult;
+    return { canonicalClaim: encode(claim), canonicalPlan: this.returnedPlan, canonicalResult: this.returnedResult };
   }
 
   public processRequest(_request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
@@ -60,7 +56,6 @@ class FixedContractEngine implements GeoSpecNativeEngine {
 
 const createClient = (engine: GeoSpecNativeEngine) =>
   createGeoSpecAssertionClient({
-    canonicalize: (input) => Uint8Array.from(input),
     claimId: () => 'f1-public-authoring',
     engine,
     subjectSlot: 'part',
@@ -119,7 +114,6 @@ describe('fixed rational-plate public authoring', () => {
     expect(() =>
       evaluateGeoSpecNativeClaim({
         arguments: [{}],
-        canonicalize: (input) => input,
         capability: 'toSatisfyRationalPlate',
         claimId: 'direct-arity',
         engine,

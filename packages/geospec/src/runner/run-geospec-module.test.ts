@@ -42,10 +42,12 @@ class MemoryFileSystem implements VmFileSystem {
 
 const subject = { kind: 'geometry-subject' } as unknown as GeometrySubject;
 const nativeAssertions = {
-  canonicalize: (input: Uint8Array<ArrayBuffer>) => input,
   engine: {
-    canonicalPlan: (input: Uint8Array<ArrayBuffer>) => input,
-    evaluatePlan: (input: Uint8Array<ArrayBuffer>) => input,
+    evaluateClaim: (input: Uint8Array<ArrayBuffer>) => ({
+      canonicalClaim: input,
+      canonicalPlan: input,
+      canonicalResult: input,
+    }),
     processRequest: (input: Uint8Array<ArrayBuffer>) => input,
   },
 } satisfies GeoSpecAssertionClientOptions;

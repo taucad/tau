@@ -21,10 +21,20 @@ const nativeRegistryVersion = 5;
 const nativeCanonicalProfile = 'geospec-jcs-v1';
 const maximumSafeWorkUnitLimit = 9_007_199_254_740_991;
 
+/**
+ * Exact core bytes of one claim evaluated in one engine call: the canonical plan, its one
+ * canonical claim and the canonical result, as fresh bytes the client retains without copying.
+ * @public
+ */
+export type GeoSpecNativeClaimEvaluation = {
+  readonly canonicalClaim: Uint8Array<ArrayBuffer>;
+  readonly canonicalPlan: Uint8Array<ArrayBuffer>;
+  readonly canonicalResult: Uint8Array<ArrayBuffer>;
+};
+
 /** Byte-only engine surface consumed by the runner-independent assertion client. @public */
 export type GeoSpecNativeEngine = {
-  canonicalPlan(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
-  evaluatePlan(plan: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
+  evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
   processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
 };
 
@@ -63,7 +73,6 @@ export type GeoSpecCanonicalClaimReport = {
 };
 
 type GeoSpecNativeClaimContext = {
-  readonly canonicalize: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
   readonly claimId: string;
   readonly engine: GeoSpecNativeEngine;
   readonly polarity: GeoSpecClaimPolarity;
@@ -72,7 +81,7 @@ type GeoSpecNativeClaimContext = {
   readonly workUnitLimit: number;
 };
 
-/** One authored matcher call lowered by Rust through canonicalPlan. @public */
+/** One authored matcher call lowered and evaluated by Rust in one engine call. @public */
 export type GeoSpecNativeClaimOptions = GeoSpecNativeClaimContext &
   (
     | {
@@ -280,21 +289,13 @@ const evaluateNativePayload = (options: NativePayloadOptions): GeoSpecCanonicalC
       ],
     },
   };
-  const requestBytes = new TextEncoder().encode(JSON.stringify(request));
-  const canonicalPlan = Uint8Array.from(options.engine.canonicalPlan(requestBytes));
-  const planEnvelope = jsonRecord(decodeNativeJson(canonicalPlan), 'canonical plan envelope');
-  const plan = jsonRecord(planEnvelope['plan']!, 'canonical plan');
-  const { claims } = plan;
-  if (!Array.isArray(claims) || claims.length !== 1) {
-    throw new TypeError('GeoSpec engine returned a canonical plan without exactly one claim.');
-  }
-  const [claimValue] = claims;
-  const claim = jsonRecord(claimValue!, 'canonical claim');
+  const { canonicalClaim, canonicalPlan, canonicalResult } = options.engine.evaluateClaim(
+    new TextEncoder().encode(JSON.stringify(request)),
+  );
+  const claim = jsonRecord(decodeNativeJson(canonicalClaim), 'canonical claim');
   if (claim['claimId'] !== options.claimId) {
     throw new TypeError(`GeoSpec engine returned a malformed canonical claim for '${options.claimId}'.`);
   }
-  const canonicalClaim = Uint8Array.from(options.canonicalize(new TextEncoder().encode(JSON.stringify(claim))));
-  const canonicalResult = Uint8Array.from(options.engine.evaluatePlan(canonicalPlan));
   const envelope = jsonRecord(decodeNativeJson(canonicalResult), 'canonical result envelope');
   const { results } = envelope;
   if (!Array.isArray(results) || results.length !== 1) {

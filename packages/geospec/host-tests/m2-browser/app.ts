@@ -4,6 +4,7 @@ import { createGeoSpecAssertionClient, GeoSpecAssertionError } from 'geospec/ass
 import type {
   GeoSpecAssertionClient,
   GeoSpecCanonicalClaimReport,
+  GeoSpecNativeClaimEvaluation,
   GeoSpecNativeEngine,
   GeoSpecQueryCapability,
 } from 'geospec/assertion-client';
@@ -95,7 +96,7 @@ type ErrorRecord = {
 type RecorderCall = {
   error?: ErrorRecord;
   inputUtf8: string;
-  operation: 'canonicalPlan' | 'evaluatePlan' | 'processRequest';
+  operation: 'evaluateClaim' | 'processRequest';
   outputUtf8?: string;
 };
 
@@ -251,13 +252,18 @@ const readAsset = async (asset: Asset): Promise<ByteArray> => {
 
 const recorder = (engine: Engine): { calls: RecorderCall[]; engine: GeoSpecNativeEngine } => {
   const calls: RecorderCall[] = [];
-  const forward = (operation: RecorderCall['operation'], input: ByteArray, invoke: () => ByteArray): ByteArray => {
+  const forward = <Output extends ByteArray | GeoSpecNativeClaimEvaluation>(
+    operation: RecorderCall['operation'],
+    input: ByteArray,
+    invoke: () => Output,
+  ): Output => {
     const call: RecorderCall = { inputUtf8: decoder.decode(input), operation };
     calls.push(call);
     try {
-      const output = invoke();
-      call.outputUtf8 = decoder.decode(output);
-      return output;
+      const value = invoke();
+      // An evaluateClaim call records its canonical result.
+      call.outputUtf8 = decoder.decode(value instanceof Uint8Array ? value : value.canonicalResult);
+      return value;
     } catch (error) {
       call.error = errorRecord(error);
       throw error;
@@ -266,8 +272,7 @@ const recorder = (engine: Engine): { calls: RecorderCall[]; engine: GeoSpecNativ
   return {
     calls,
     engine: {
-      canonicalPlan: (input: ByteArray) => forward('canonicalPlan', input, () => engine.canonicalPlan(input)),
-      evaluatePlan: (input: ByteArray) => forward('evaluatePlan', input, () => engine.evaluatePlan(input)),
+      evaluateClaim: (input: ByteArray) => forward('evaluateClaim', input, () => engine.evaluateClaim(input)),
       processRequest: (input: ByteArray) => forward('processRequest', input, () => engine.processRequest(input)),
     },
   };
@@ -341,7 +346,6 @@ const runWarmup = async (
   };
   try {
     const client = createGeoSpecAssertionClient({
-      canonicalize,
       claimId: () => setup.invocation.claimId,
       engine: forwarding.engine,
       subjectSlot: setup.invocation.subjectSlot,
@@ -517,7 +521,6 @@ const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResul
     phase = 'public';
     const forwarding = recorder(engine);
     const client = createGeoSpecAssertionClient({
-      canonicalize,
       claimId: () => row.invocation.claimId,
       engine: forwarding.engine,
       subjectSlot: row.invocation.subjectSlot,

@@ -491,8 +491,16 @@ const recordingEngine = (nativeEngine) => {
     calls,
     engine: {
       processRequest: (input) => forward('processRequest', input, () => nativeEngine.processRequest(input)),
-      canonicalPlan: (input) => forward('canonicalPlan', input, () => nativeEngine.canonicalPlan(input)),
-      evaluatePlan: (input) => forward('evaluatePlan', input, () => nativeEngine.evaluatePlan(input)),
+      // The recorded output is the canonical result; the canonical plan rides beside it.
+      evaluateClaim: (input) => {
+        let evaluation;
+        forward('evaluateClaim', input, () => {
+          evaluation = nativeEngine.evaluateClaim(input);
+          return evaluation.canonicalResult;
+        });
+        calls.at(-1).plan = byteRecord(evaluation.canonicalPlan);
+        return evaluation;
+      },
     },
   };
 };
@@ -511,19 +519,18 @@ const reportRecord = (report) => ({
 });
 
 const reportFromCalls = (calls) => {
-  const planCall = calls.find((call) => call.operation === 'canonicalPlan');
-  const resultCall = calls.find((call) => call.operation === 'evaluatePlan');
-  if (!planCall?.output || !resultCall?.output) {
+  const evaluation = calls.find((call) => call.operation === 'evaluateClaim');
+  if (!evaluation?.plan || !evaluation.output) {
     return null;
   }
-  const plan = JSON.parse(planCall.output.utf8);
-  const resultEnvelope = JSON.parse(resultCall.output.utf8);
+  const plan = JSON.parse(evaluation.plan.utf8);
+  const resultEnvelope = JSON.parse(evaluation.output.utf8);
   const claim = plan.plan.claims[0];
   const result = resultEnvelope.results[0];
   return reportRecord({
     canonicalClaim: canonicalize(Buffer.from(JSON.stringify(claim))),
-    canonicalPlan: Buffer.from(planCall.output.utf8),
-    canonicalResult: Buffer.from(resultCall.output.utf8),
+    canonicalPlan: Buffer.from(evaluation.plan.utf8),
+    canonicalResult: Buffer.from(evaluation.output.utf8),
     claim,
     claimId: result.claimId,
     diagnostics: result.diagnostics,
@@ -553,7 +560,6 @@ const standaloneEvaluation = async (nativeEngine, row, subject) => {
   const recorder = recordingEngine(nativeEngine);
   const client = createGeoSpecAssertionClient({
     engine: recorder.engine,
-    canonicalize,
     claimId: () => row.claimId,
     subjectSlot: row.subjectSlot,
     workUnitLimit: row.workUnitBudget,
@@ -599,7 +605,6 @@ const vitestEvaluation = async (nativeEngine, row, subject, hostExpect) => {
   const recorder = recordingEngine(nativeEngine);
   const client = createGeoSpecAssertionClient({
     engine: recorder.engine,
-    canonicalize,
     claimId: () => row.claimId,
     subjectSlot: row.subjectSlot,
     workUnitLimit: row.workUnitBudget,

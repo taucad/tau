@@ -81,7 +81,7 @@
     "test:e2e:packaged": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "Packaged-app specs (macOS arm64 only: they launch package-out/Tau-darwin-arm64). Kept off `test:e2e` so the Ubuntu e2e runner is not asked for a package it cannot build. `TAU_E2E_DESKTOP_EXECUTABLE` is assigned on the vitest command rather than in `env` because the Assimp spec requires an absolute path and Nx strips a leading `{workspaceRoot}/` from option values."
+        "description": "Packaged-app specs (macOS arm64 only: they launch package-out/Tau-darwin-arm64). Kept off `test:e2e` so the Ubuntu e2e runner is not asked for a package it cannot build. `TAU_E2E_DESKTOP_EXECUTABLE` is assigned on the vitest command rather than in `env` because the Assimp and native-payload specs require an absolute path and Nx strips a leading `{workspaceRoot}/` from option values. Its spec list is the one `scripts/run-completed-artifact.mts` runs; a new packaged spec joins both."
       },
       "dependsOn": [
         {
@@ -98,7 +98,7 @@
         "parallel": false,
         "commands": [
           "./scripts/ensure-services.sh",
-          "TAU_E2E_DESKTOP_EXECUTABLE=\"$PWD/../desktop/package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau\" ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts"
+          "TAU_E2E_DESKTOP_EXECUTABLE=\"$PWD/../desktop/package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau\" ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts src/desktop-main-editor-kernels.spec.ts src/desktop-converter.spec.ts src/desktop-ephemeral-isolation.spec.ts src/desktop-image-geospec.spec.ts src/desktop-thumbnail-lifecycle.spec.ts src/desktop-native-payload.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014"

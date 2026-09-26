@@ -720,7 +720,7 @@ function ModelRow({
   );
 }
 
-/** Backspace in an empty search goes back one step. */
+/** Backspace in an empty search goes back one step; Escape does too, via the sheet's `onEscapeKeyDown`. */
 const backOnEmpty =
   (query: string, onBack: () => void) =>
   (event: React.KeyboardEvent): void => {
@@ -959,12 +959,15 @@ function Sheet({
   sheetModel,
   placements,
   agentConfig,
+  backRef,
 }: {
   readonly agents: readonly SheetAgent[];
   readonly current: SheetAgent;
   readonly sheetModel: SheetModel;
   readonly placements: readonly AgentHostPlacementTarget[];
   readonly agentConfig: AgentConfig;
+  /** Set while a sub-view is open, so Escape steps back instead of closing the sheet. */
+  readonly backRef: React.RefObject<(() => void) | undefined>;
 }): React.JSX.Element {
   const {
     model: { setActiveModel },
@@ -1005,6 +1008,9 @@ function Sheet({
     }
     go('settings');
   };
+  useEffect(() => {
+    backRef.current = view === 'settings' ? undefined : back;
+  });
 
   const choose = (agent: SheetAgent, modelId: string | undefined): void => {
     if (agent.kind === 'tau') {
@@ -1108,17 +1114,16 @@ function Sheet({
             view === 'agents' ? 'max-h-[min(25rem,70vh)]' : 'h-[25rem] max-h-[70vh]',
           )}
         >
-          <div className='flex h-9 shrink-0 items-center gap-1 border-b px-1'>
-            <Button
-              variant='ghost'
-              size='sm'
+          <div className='shrink-0 border-b p-1'>
+            <button
+              type='button'
               aria-label={view === 'models' && isFromAgents ? 'Back to agents' : 'Back to settings'}
-              className='h-7 gap-1 px-1.5 text-xs font-normal text-muted-foreground hover:text-foreground'
+              className={cn(rowClass, 'h-8 w-full gap-1.5 px-2')}
               onClick={back}
             >
-              <ChevronLeft aria-hidden='true' className='size-4' />
-              {view === 'models' && isFromAgents ? 'Agents' : sheetModel.name}
-            </Button>
+              <ChevronLeft aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
+              <span className='truncate'>{view === 'models' && isFromAgents ? 'Agents' : sheetModel.name}</span>
+            </button>
           </div>
           {view === 'agents' ? (
             <AgentList
@@ -1172,6 +1177,7 @@ export function ChatAgentSheet({
   const sheetModel = useSheetModel(current, agentConfig);
   const name = triggerName(current, sheetModel);
   const closedOutside = useRef(false);
+  const backRef = useRef<(() => void) | undefined>(undefined);
 
   const open = useCallback(() => {
     setIsOpen(true);
@@ -1211,8 +1217,15 @@ export function ChatAgentSheet({
       sheetModel={sheetModel}
       placements={placements}
       agentConfig={agentConfig}
+      backRef={backRef}
     />
   );
+  const onEscapeKeyDown = (event: KeyboardEvent): void => {
+    if (backRef.current) {
+      event.preventDefault();
+      backRef.current();
+    }
+  };
   const onCloseAutoFocus = (event: Event): void => {
     const wasOutside = closedOutside.current;
     closedOutside.current = false;
@@ -1226,7 +1239,11 @@ export function ChatAgentSheet({
     return (
       <Drawer open={isOpen} onOpenChange={setIsOpen}>
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-        <DrawerContent data-chat-textarea-focustrap onCloseAutoFocus={onCloseAutoFocus}>
+        <DrawerContent
+          data-chat-textarea-focustrap
+          onCloseAutoFocus={onCloseAutoFocus}
+          onEscapeKeyDown={onEscapeKeyDown}
+        >
           <DrawerTitle className='sr-only'>Agent and model</DrawerTitle>
           <DrawerDescription className='sr-only'>
             Choose who runs the next turn, on which model, and how hard it thinks.
@@ -1255,6 +1272,7 @@ export function ChatAgentSheet({
             closedOutside.current = true;
           }}
           onCloseAutoFocus={onCloseAutoFocus}
+          onEscapeKeyDown={onEscapeKeyDown}
         >
           {sheet}
         </PopoverContent>

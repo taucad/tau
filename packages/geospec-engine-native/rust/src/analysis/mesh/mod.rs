@@ -1,5 +1,6 @@
 //! Complete retained mesh analysis for owned indexed triangle records.
 
+pub(crate) mod exact;
 mod gltf;
 #[cfg(test)]
 mod reference_tests;
@@ -1012,20 +1013,21 @@ fn sub_meshes(record: &MeshAnalysisRecord, canonical: &[u32]) -> Vec<Piece> {
         .collect()
 }
 
-fn sweep_axis(pieces: &[Piece]) -> usize {
-    if pieces.is_empty() {
+/// The axis along which box centres spread most.
+fn sweep_axis(boxes: impl ExactSizeIterator<Item = Aabb>) -> usize {
+    if boxes.len() == 0 {
         return 0;
     }
+    let count = boxes.len() as f64;
     let mut sums = [0.0; 3];
     let mut squares = [0.0; 3];
-    for piece in pieces {
-        let center = center(piece.aabb);
+    for aabb in boxes {
+        let center = center(aabb);
         for axis in 0..3 {
             sums[axis] += center[axis];
             squares[axis] += center[axis] * center[axis];
         }
     }
-    let count = pieces.len() as f64;
     let variance =
         std::array::from_fn::<_, 3, _>(|axis| squares[axis] / count - (sums[axis] / count).powi(2));
     if variance[0] >= variance[1] && variance[0] >= variance[2] {
@@ -1062,10 +1064,10 @@ fn partial_cmp(left: f64, right: f64) -> Ordering {
     left.partial_cmp(&right).unwrap_or(Ordering::Equal)
 }
 
-fn cluster_gaps(clusters: &[ClusterReport]) -> Vec<ClusterGap> {
-    // Cluster AABBs cover referenced triangles; primitive AABBs can also include
-    // unused vertices, so bounds for this search must come from primitives.
-    let bounds: Vec<_> = clusters
+/// Cluster AABBs cover referenced triangles; primitive AABBs can also include
+/// unused vertices, so bounds for gap searches must come from primitives.
+fn primitive_bounds(clusters: &[ClusterReport]) -> Vec<Aabb> {
+    clusters
         .iter()
         .map(|cluster| {
             let mut aabb = empty_aabb();
@@ -1075,43 +1077,119 @@ fn cluster_gaps(clusters: &[ClusterReport]) -> Vec<ClusterGap> {
             }
             aabb
         })
-        .collect();
-    let mut gaps = Vec::new();
-    for left in 0..clusters.len() {
-        for right in left + 1..clusters.len() {
-            let from = &clusters[left];
-            let to = &clusters[right];
-            let mut best: Option<ClusterGap> = None;
-            for from_primitive in &from.primitives {
-                // Every target box lies inside bounds[right]. A later pair can
-                // replace the first minimum only with a strictly smaller gap.
-                if best.as_ref().is_some_and(|current| {
-                    dominant_gap(from_primitive.aabb, bounds[right]).1 >= current.gap_mm
-                }) {
-                    continue;
-                }
-                for to_primitive in &to.primitives {
-                    let (axis, gap) = dominant_gap(from_primitive.aabb, to_primitive.aabb);
-                    if best.as_ref().is_none_or(|current| gap < current.gap_mm) {
-                        best = Some(ClusterGap {
-                            from_label: from.label.clone(),
-                            to_label: to.label.clone(),
-                            axis: ['x', 'y', 'z'][axis],
-                            gap_mm: gap,
-                            from_primitive: from_primitive.name.clone(),
-                            to_primitive: to_primitive.name.clone(),
-                        });
-                    }
-                }
+        .collect()
+}
+
+/// The first minimum primitive-pair gap from one cluster to another whose
+/// primitive boxes all lie inside `to_bounds`.
+fn pair_gap(from: &ClusterReport, to: &ClusterReport, to_bounds: Aabb) -> ClusterGap {
+    let mut best: Option<ClusterGap> = None;
+    for from_primitive in &from.primitives {
+        // Every target box lies inside to_bounds. A later pair can replace
+        // the first minimum only with a strictly smaller gap.
+        if best
+            .as_ref()
+            .is_some_and(|current| dominant_gap(from_primitive.aabb, to_bounds).1 >= current.gap_mm)
+        {
+            continue;
+        }
+        for to_primitive in &to.primitives {
+            let (axis, gap) = dominant_gap(from_primitive.aabb, to_primitive.aabb);
+            if best.as_ref().is_none_or(|current| gap < current.gap_mm) {
+                best = Some(ClusterGap {
+                    from_label: from.label.clone(),
+                    to_label: to.label.clone(),
+                    axis: ['x', 'y', 'z'][axis],
+                    gap_mm: gap,
+                    from_primitive: from_primitive.name.clone(),
+                    to_primitive: to_primitive.name.clone(),
+                });
             }
-            gaps.push(best.expect("clusters contain primitives"));
         }
     }
+    best.expect("clusters contain primitives")
+}
+
+fn sort_gaps(gaps: &mut [ClusterGap]) {
     gaps.sort_by(|left, right| {
         partial_cmp(left.gap_mm, right.gap_mm)
             .then_with(|| compare_utf16(&left.from_label, &right.from_label))
             .then_with(|| compare_utf16(&left.to_label, &right.to_label))
     });
+}
+
+fn cluster_gaps(clusters: &[ClusterReport]) -> Vec<ClusterGap> {
+    let bounds = primitive_bounds(clusters);
+    let mut gaps = Vec::new();
+    for left in 0..clusters.len() {
+        for right in left + 1..clusters.len() {
+            gaps.push(pair_gap(&clusters[left], &clusters[right], bounds[right]));
+        }
+    }
+    sort_gaps(&mut gaps);
+    gaps
+}
+
+/// The bounded profile's failure gaps (PERF-OUTPUT-01): each cluster's
+/// nearest other cluster by (gap, index), as the `cluster_gaps` entries of
+/// those pairs in its order. That relation is a forest, so at most C - 1.
+/// A gap is at least the sweep-axis separation of primitive bounds, which
+/// stops each scan; `longest` bounds how far back an overlapping box starts.
+// ponytail: one long cluster makes the backward scans quadratic; an interval
+// tree over the sweep axis if such inputs fail often at large C.
+pub(crate) fn nearest_cluster_gaps(clusters: &[ClusterReport]) -> Vec<ClusterGap> {
+    let bounds = primitive_bounds(clusters);
+    let axis = sweep_axis(bounds.iter().copied());
+    let mut order: Vec<usize> = (0..clusters.len()).collect();
+    order.sort_by(|&left, &right| {
+        partial_cmp(bounds[left].min[axis], bounds[right].min[axis]).then_with(|| left.cmp(&right))
+    });
+    let longest = bounds
+        .iter()
+        .map(|aabb| aabb.max[axis] - aabb.min[axis])
+        .fold(0.0, js_max);
+    let mut nearest: Vec<Option<(f64, usize)>> = vec![None; clusters.len()];
+    let consider = |current: usize, candidate: usize, nearest: &mut [Option<(f64, usize)>]| {
+        let (left, right) = (current.min(candidate), current.max(candidate));
+        let gap = pair_gap(&clusters[left], &clusters[right], bounds[right]).gap_mm;
+        if nearest[current].is_none_or(|(best, index)| {
+            gap.total_cmp(&best).then(candidate.cmp(&index)) == Ordering::Less
+        }) {
+            nearest[current] = Some((gap, candidate));
+        }
+    };
+    for (position, &current) in order.iter().enumerate() {
+        for &candidate in &order[position + 1..] {
+            if nearest[current].is_some_and(|(gap, _)| {
+                bounds[candidate].min[axis] - bounds[current].max[axis] > gap
+            }) {
+                break;
+            }
+            consider(current, candidate, &mut nearest);
+        }
+        for &candidate in order[..position].iter().rev() {
+            if nearest[current].is_some_and(|(gap, _)| {
+                bounds[current].min[axis] - (bounds[candidate].min[axis] + longest) > gap
+            }) {
+                break;
+            }
+            consider(current, candidate, &mut nearest);
+        }
+    }
+    let mut pairs: Vec<(usize, usize)> = nearest
+        .iter()
+        .enumerate()
+        .filter_map(|(current, best)| {
+            best.map(|(_, candidate)| (current.min(candidate), current.max(candidate)))
+        })
+        .collect();
+    pairs.sort_unstable();
+    pairs.dedup();
+    let mut gaps: Vec<ClusterGap> = pairs
+        .into_iter()
+        .map(|(left, right)| pair_gap(&clusters[left], &clusters[right], bounds[right]))
+        .collect();
+    sort_gaps(&mut gaps);
     gaps
 }
 
@@ -1121,7 +1199,7 @@ fn component_clusters(
     tolerance_mm: f64,
 ) -> Vec<ClusterReport> {
     let mut parent: Vec<usize> = (0..pieces.len()).collect();
-    let axis = sweep_axis(pieces);
+    let axis = sweep_axis(pieces.iter().map(|piece| piece.aabb));
     let mut order: Vec<usize> = (0..pieces.len()).collect();
     order.sort_by(|&left, &right| {
         partial_cmp(pieces[left].aabb.min[axis], pieces[right].aabb.min[axis])

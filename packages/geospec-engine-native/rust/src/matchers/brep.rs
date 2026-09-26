@@ -2,8 +2,6 @@
 
 use std::collections::HashSet;
 
-#[cfg(test)]
-use crate::backend::brep::DocumentFacts;
 use crate::{
     analysis::selection::{EcmaRegexEngine, EcmaRegexError, TextPattern},
     backend::{
@@ -1072,15 +1070,6 @@ fn geometric(prepared: &Prepared, content_hash: &str, outcome: MatchOutcome) -> 
         ),
         negated_diagnostic: None,
     }
-}
-
-#[cfg(test)]
-fn evaluate_units(expected: &str, facts: &DocumentFacts) -> Result<MatchOutcome, BackendError> {
-    Ok(unit_outcome(
-        expected,
-        &facts.source_length_unit,
-        facts.source_unit_to_millimeters,
-    ))
 }
 
 fn unit_outcome(expected: &str, source_unit: &str, scale: f64) -> MatchOutcome {

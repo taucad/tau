@@ -24,7 +24,7 @@ use crate::{
             ContinuousWallShape, DocumentRows, EdgeTreatmentCounts, EdgeTreatmentDisposition,
             EdgeTreatmentInventory, EdgeTreatmentKind, LocatedFace, NominalCylindricalBand,
             OccurrenceFacts, OperandMemo, RegularSolidContainment, ReportedFaces,
-            SelectedContinuousDomain, ShapeFacts, StepSubjectMetadata, SurfaceFacts,
+            SelectedContinuousDomain, ShapeFacts, ShapeParts, StepSubjectMetadata, SurfaceFacts,
             TessellationProfile, MAX_CIRCULAR_BORE_CANDIDATES, MAX_CIRCULAR_BORE_OWNED_BYTES,
         },
         csg_scope::CsgScope,
@@ -83,8 +83,9 @@ pub(crate) struct Subject {
     mesh_analysis: OnceCell<Rc<MeshAnalysis>>,
     /// Accounted bytes of the report mesh, retained once as `mesh_record` (F9).
     report_mesh_bytes: OnceCell<u64>,
-    /// Report facts facet: whole-shape facts (F2: `valid` unmeasured).
-    report_shape: OnceCell<ShapeFacts>,
+    /// Report facts facet: whole-shape facts on the source (F1), one cell per
+    /// demanded `ShapeParts` set, indexed by its bits.
+    report_shape: [OnceCell<ShapeFacts>; 16],
     /// Report face tables (F5); a measured transfer replaces an address one.
     report_faces: RefCell<Option<RetainedReportFaces>>,
     /// Structure-only occurrences are replaced once bounds are demanded.
@@ -168,7 +169,7 @@ impl Subject {
             brep: None,
             mesh_analysis: OnceCell::new(),
             report_mesh_bytes: OnceCell::new(),
-            report_shape: OnceCell::new(),
+            report_shape: std::array::from_fn(|_| OnceCell::new()),
             report_faces: RefCell::new(None),
             source_occurrences: RefCell::new(None),
             circular_bores: OnceCell::new(),
@@ -372,20 +373,30 @@ impl Subject {
         Ok(())
     }
 
-    /// The report facts facet: whole-shape facts, `valid` unmeasured (F2).
-    pub(crate) fn report_shape(&self) -> Result<Option<&ShapeFacts>, BackendError> {
+    /// The report facts facet measuring `parts` (F1): whole-shape facts of the
+    /// source shape, with no copy or mesh, so the report-mesh limits never
+    /// refuse it. A retained cell covering `parts` answers; only the requested
+    /// parts may be read.
+    pub(crate) fn report_shape(
+        &self,
+        parts: ShapeParts,
+    ) -> Result<Option<&ShapeFacts>, BackendError> {
         let Some(brep) = &self.brep else {
             return Ok(None);
         };
         self.cache_identity()?;
-        if let Some(value) = self.report_shape.get() {
+        let wanted = usize::from(parts.bits());
+        if let Some(value) = (wanted..self.report_shape.len())
+            .filter(|bits| bits & wanted == wanted)
+            .find_map(|bits| self.report_shape[bits].get())
+        {
             self.observations.add(WorkCounter::DerivedHits, 1);
             return Ok(Some(value));
         }
-        let shape = brep.reported_shape()?;
+        let shape = brep.reported_shape_parts(parts)?;
         self.check_f2_pending(size_of::<ShapeFacts>() as u64)?;
         self.observations.add(WorkCounter::ReportBuilds, 1);
-        Ok(Some(self.report_shape.get_or_init(|| shape)))
+        Ok(Some(self.report_shape[wanted].get_or_init(|| shape)))
     }
 
     /// Report face tables (F5): the address part (entity, index, orientation,
@@ -429,8 +440,10 @@ impl Subject {
     fn retained_report_bytes(&self) -> u64 {
         let shape = self
             .report_shape
-            .get()
-            .map_or(0, |_| size_of::<ShapeFacts>() as u64);
+            .iter()
+            .filter(|cell| cell.get().is_some())
+            .count() as u64
+            * size_of::<ShapeFacts>() as u64;
         self.report_mesh_bytes
             .get()
             .copied()
@@ -918,7 +931,8 @@ impl Subject {
         let faces = self.report_faces(true)?.expect("BRep report faces");
         let rows = brep.document_rows()?;
         let whole_bounds = if occurrences.is_empty() {
-            self.report_shape()?.map(|shape| shape.bounds)
+            self.report_shape(ShapeParts::BOUNDS)?
+                .map(|shape| shape.bounds)
         } else {
             None
         };
@@ -1185,6 +1199,21 @@ fn complete_query_map(values: &[u32], count: usize) -> bool {
             .all(|index| values.iter().filter(|value| **value == index).count() == 1)
 }
 
+/// The whole-shape fact parts each claim reads (F1): a scalar claim measures
+/// its own integral and never the exact bounds. Any other capability, including
+/// `analyzeBrep`, reads them all.
+fn shape_parts(capability: Capability) -> ShapeParts {
+    match capability {
+        Capability::ToHaveVolume | Capability::ToHaveMass | Capability::ToHaveCenterOfMass => {
+            ShapeParts::VOLUME
+        }
+        Capability::ToHaveSurfaceArea => ShapeParts::AREA,
+        Capability::ToHaveBoundingBox => ShapeParts::BOUNDS,
+        Capability::ToHaveTopologyCounts => ShapeParts::COUNTS,
+        _ => ShapeParts::ALL,
+    }
+}
+
 fn report_limit() -> BackendError {
     BackendError {
         kind: BackendErrorKind::Unsupported,
@@ -1407,10 +1436,17 @@ impl<'a> EvaluationContext<'a> {
         Ok(self.subject().brep.as_deref())
     }
 
-    /// The report facts facet alone: whole-shape facts.
+    /// The report facts facet alone: the whole-shape facts this claim reads.
     pub(crate) fn brep_shape(&mut self) -> Result<Option<&'a ShapeFacts>, Evaluation> {
+        self.brep_shape_parts(shape_parts(self.capability))
+    }
+
+    fn brep_shape_parts(
+        &mut self,
+        parts: ShapeParts,
+    ) -> Result<Option<&'a ShapeFacts>, Evaluation> {
         self.charge_brep_demand()?;
-        self.subject().report_shape().map_err(backend_refusal)
+        self.subject().report_shape(parts).map_err(backend_refusal)
     }
 
     /// F12: `analyzeBrep` meets the edge-treatment face-count limit from the
@@ -1480,7 +1516,10 @@ impl<'a> EvaluationContext<'a> {
                 message: "Circular-bore topology requires retained BRep faces.".into(),
             })
         };
-        let topology = self.brep_shape()?.ok_or_else(unavailable)?.topology;
+        let topology = self
+            .brep_shape_parts(ShapeParts::COUNTS)?
+            .ok_or_else(unavailable)?
+            .topology;
         let subject = self.subject();
         let faces = subject
             .report_faces(false)
@@ -1505,7 +1544,9 @@ impl<'a> EvaluationContext<'a> {
         &mut self,
         occurrence: u32,
     ) -> Result<Vec<crate::backend::brep::SelectedInterferenceMaterial>, Evaluation> {
-        let topology = self.brep_shape()?.map(|shape| shape.topology);
+        let topology = self
+            .brep_shape_parts(ShapeParts::COUNTS)?
+            .map(|shape| shape.topology);
         let subject = self.subject();
         let refusal = || {
             backend_refusal(BackendError {

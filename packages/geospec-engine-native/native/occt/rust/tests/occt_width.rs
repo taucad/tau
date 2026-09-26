@@ -2,7 +2,7 @@
 
 use geospec_engine_native_occt::{
     configure_thread_pool_width, BrepConnector, BrepEntity, BrepSubject, ParallelOcctConnector,
-    TessellationProfile,
+    ShapeParts, TessellationProfile,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -133,6 +133,7 @@ fn mesh_bytes(mesh: &geospec_engine_native_core::backend::TriangleMesh) -> Vec<u
 enum Operation {
     Mesh,
     ReportMesh,
+    Bounds,
     Cut,
     Bore,
 }
@@ -143,9 +144,10 @@ struct Prepared {
 }
 
 fn prepare(connector: &ParallelOcctConnector, operation: Operation) -> Vec<Prepared> {
-    // A report mesh is built once per document, so each query needs its own.
+    // A report mesh is built once per document, and whole-shape bounds are
+    // measured once per document, so each query needs its own.
     let count = match operation {
-        Operation::ReportMesh => 3,
+        Operation::ReportMesh | Operation::Bounds => 3,
         _ => 1,
     };
     (0..count)
@@ -154,6 +156,8 @@ fn prepare(connector: &ParallelOcctConnector, operation: Operation) -> Vec<Prepa
                 Operation::Mesh | Operation::ReportMesh => {
                     include_bytes!("fixtures/nist-pmi-bspline.step")
                 }
+                // V2: 16 BSpline faces pass the per-face pass's gate.
+                Operation::Bounds => include_bytes!("fixtures/bounds-free-edges.step"),
                 // Only the obstructed bore's clearance still needs the Common.
                 Operation::Bore => {
                     include_bytes!("fixtures/circular-bores/08-obstructed-through.step")
@@ -188,6 +192,18 @@ fn query(prepared: &Prepared, operation: Operation) -> Vec<u8> {
             mesh_bytes(&mesh)
         }
         Operation::ReportMesh => mesh_bytes(&document.reported_mesh().unwrap()),
+        Operation::Bounds => {
+            let bounds = document
+                .reported_shape_parts(ShapeParts::BOUNDS)
+                .unwrap()
+                .bounds;
+            bounds
+                .min
+                .iter()
+                .chain(&bounds.max)
+                .flat_map(|value| value.to_bits().to_le_bytes())
+                .collect()
+        }
         Operation::Cut => {
             let (subject, target) = prepared.cut.unwrap();
             serde_json::to_vec(&document.regular_solid_containment(subject, target).unwrap())
@@ -317,6 +333,7 @@ fn one_pool_bounds_width_one_two_four_and_preserves_exact_ordered_results() {
     for operation in [
         Operation::Mesh,
         Operation::ReportMesh,
+        Operation::Bounds,
         Operation::Cut,
         Operation::Bore,
     ] {
@@ -325,7 +342,7 @@ fn one_pool_bounds_width_one_two_four_and_preserves_exact_ordered_results() {
             let (width, connector) = profiles[index];
             let prepared = prepare(connector, operation);
             let count = match operation {
-                Operation::ReportMesh => prepared.len(),
+                Operation::ReportMesh | Operation::Bounds => prepared.len(),
                 Operation::Mesh => 3,
                 _ => 24,
             };

@@ -121,7 +121,7 @@ fn report_copy_preserves_public_order_and_private_selected_domain_addresses() {
     observe("two-cube-assembly.step", &document);
 
     let whole = document.faces().unwrap();
-    let report = document.reported_facts_and_mesh().unwrap();
+    let report = document.reported_faces(true).unwrap();
     assert_eq!(addresses(&whole), addresses(&report.whole_faces));
     assert_eq!(report.occurrence_faces.len(), 2);
     for (occurrence, faces) in report.occurrence_faces.iter().enumerate() {

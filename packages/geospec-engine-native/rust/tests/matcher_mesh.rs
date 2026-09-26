@@ -8,8 +8,9 @@ use crate::{
     },
     backend::{
         brep::{
-            Bounds, BrepEntity, BrepSubject, DocumentFacts, LocatedFace, PointState, ShapeFacts,
-            TessellationProfile, TopologyCounts, ValidityFacts,
+            Bounds, BrepEntity, BrepSubject, DocumentRows, LocatedFace, OccurrenceFacts,
+            PointState, ReportedFaces, ShapeFacts, TessellationProfile, TopologyCounts,
+            ValidityFacts,
         },
         AnalysisRetentionLimits, BackendError, TriangleMesh,
     },
@@ -18,27 +19,35 @@ use crate::{
     subject::{EvaluationContext, Subject, SubjectFormat},
 };
 
-struct FactsOnlyBrep(Rc<DocumentFacts>);
+/// Whole-shape facts of an occurrence-free document; its empty mesh is unused
+/// by these fact-only predicate/early-selection controls.
+struct FactsOnlyBrep(ShapeFacts);
 
 impl BrepSubject for FactsOnlyBrep {
-    fn reported_facts_and_mesh(
-        &self,
-    ) -> Result<crate::backend::brep::ReportedBrepBundle, BackendError> {
-        // This test double supplies the explicit coherent report seam. Its empty
-        // mesh is unused by these fact-only predicate/early-selection controls.
-        let facts = Rc::clone(&self.0);
-        let occurrence_faces = (0..facts.occurrences.len())
-            .map(|_| Rc::from(Vec::<LocatedFace>::new()))
-            .collect();
-        Ok(crate::backend::brep::ReportedBrepBundle {
-            facts,
-            whole_faces: Rc::from(Vec::<LocatedFace>::new()),
-            occurrence_faces,
-            mesh: Rc::new(TriangleMesh {
-                positions: Vec::new(),
-                triangles: Vec::new(),
-            }),
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        Ok(self.0.clone())
+    }
+
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
+        Ok(TriangleMesh {
+            positions: Vec::new(),
+            triangles: Vec::new(),
         })
+    }
+
+    fn reported_faces(&self, _: bool) -> Result<ReportedFaces, BackendError> {
+        Ok(ReportedFaces {
+            whole_faces: Rc::from(Vec::<LocatedFace>::new()),
+            occurrence_faces: Vec::new(),
+        })
+    }
+
+    fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        Ok(Rc::from(Vec::new()))
+    }
+
+    fn document_rows(&self) -> Result<DocumentRows, BackendError> {
+        Ok(DocumentRows::default())
     }
 
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
@@ -125,32 +134,24 @@ fn subject_with_brep(record: MeshAnalysisRecord) -> Rc<Subject> {
         "mm".into(),
     );
     subject.mesh_record.set(Rc::new(record)).unwrap();
-    subject.brep = Some(Box::new(FactsOnlyBrep(Rc::new(DocumentFacts {
-        source_length_unit: "millimetre".into(),
-        source_unit_to_millimeters: 1.0,
-        occurrences: Vec::new(),
-        shape: ShapeFacts {
-            bounds: Bounds {
-                min: [-3.0, -2.0, -1.0],
-                max: [7.0, 8.0, 9.0],
-            },
-            volume: 50.0,
-            surface_area: 100.0,
-            center_of_mass: [2.0, 3.0, 4.0],
-            topology: TopologyCounts {
-                compounds: 1,
-                solids: 1,
-                shells: 1,
-                faces: 6,
-                wires: 6,
-                edges: 12,
-                vertices: 8,
-            },
+    subject.brep = Some(Box::new(FactsOnlyBrep(ShapeFacts {
+        bounds: Bounds {
+            min: [-3.0, -2.0, -1.0],
+            max: [7.0, 8.0, 9.0],
         },
-        subshapes: Vec::new(),
-        datum_placements: Vec::new(),
-        semantic_datums: Vec::new(),
-    }))));
+        volume: 50.0,
+        surface_area: 100.0,
+        center_of_mass: [2.0, 3.0, 4.0],
+        topology: TopologyCounts {
+            compounds: 1,
+            solids: 1,
+            shells: 1,
+            faces: 6,
+            wires: 6,
+            edges: 12,
+            vertices: 8,
+        },
+    })));
     Rc::new(subject)
 }
 

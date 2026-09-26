@@ -74,6 +74,7 @@
     "@gltf-transform/extensions": "catalog:",
     "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/occt-core": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "culori": "catalog:",
@@ -86,6 +87,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@msgpack/msgpack": "catalog:",
     "@taucad/esbuild": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",

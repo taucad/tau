@@ -14,6 +14,7 @@ import {
   formatNamedComponentId,
   formatNodeSelector,
   formatPrimitiveSelector,
+  uniqueComponentId,
 } from '@taucad/geometry-core';
 import type {
   GeometryOutputTransformOptions,
@@ -25,12 +26,14 @@ import type {
   TauCadTopologyComponent,
   TauCadTopologyPayload,
 } from '@taucad/geometry-core';
+import { resolveMechanismComponents, transformMechanism } from '@taucad/kinematics';
+import type { Issue, Mechanism, TransformMechanismInput } from '@taucad/kinematics';
 import { normalizeColor } from '#utils/normalize-color.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
-import type { JSONObject } from '@taucad/runtime/types';
+import type { JSONObject, KernelIssue } from '@taucad/runtime/types';
 
 type ReplicadTopologyComponent = TauCadTopologyComponent & {
   kind: 'part';
@@ -50,12 +53,75 @@ type ReplicadGltfOptions = GeometryOutputTransformOptions &
     format?: 'glb' | 'gltf';
     includeTauTopology?: boolean;
     logger?: RuntimeLogger;
+    /** The entry module's `mechanism` export value, written to the topology payload in the output frame. */
+    mechanism?: unknown;
+    /** Receives mechanism diagnostics; the geometry is then written without a mechanism. */
+    onMechanismIssues?: (issues: KernelIssue[]) => void;
   };
+
+type ConvertMechanismOptions = {
+  value: unknown;
+  componentIds: ReadonlyMap<string, string>;
+  transformOptions: GeometryOutputTransformOptions;
+  onIssues: ((issues: KernelIssue[]) => void) | undefined;
+};
+
+// ponytail: the frame change `createVertexTransform` applies to every vertex, (x, y, z) → (x, z, −y) from
+// Z-up to Y-up, as the column-major matrix `transformMechanism` takes; z-up output keeps the source frame.
+const zUpToYup: NonNullable<TransformMechanismInput['matrix']> = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
+
+/**
+ * Report a mechanism problem as a kernel warning; `details.mechanism` carries the kinematics issue.
+ *
+ * @internal
+ * @param issue - Kinematics-style issue with a JSON pointer into the authored mechanism.
+ * @returns The kernel issue the editor and the Kinematics pane read.
+ */
+export const toMechanismKernelIssue = (issue: Issue): KernelIssue => ({
+  code: issue.code.startsWith('UNKNOWN_') ? 'INVALID_REFERENCE' : 'INVALID_ANNOTATION',
+  severity: 'warning',
+  type: 'kernel',
+  message: `Mechanism${issue.path && ` ${issue.path}`}: ${issue.message} ${issue.recovery}`,
+  details: { producer: { kernelId: 'replicad' }, mechanism: issue },
+});
+
+/**
+ * Resolve the author's mechanism source against the component ids this glTF assigns, and express
+ * it in the same frame and length unit as the vertices.
+ *
+ * @param options - Authored value, shape name to component id map, and the vertex transform.
+ * @returns The wire mechanism, or undefined after reporting its issues.
+ */
+function convertMechanism({
+  value,
+  componentIds,
+  transformOptions,
+  onIssues,
+}: ConvertMechanismOptions): Mechanism | undefined {
+  const resolved = resolveMechanismComponents({ source: value, componentIds: Object.fromEntries(componentIds) });
+  const outcome =
+    resolved.status === 'resolved'
+      ? transformMechanism({
+          mechanism: resolved.mechanism,
+          units: {
+            length: transformOptions.unit?.length === 'millimeter' ? 'mm' : 'm',
+            angle: resolved.mechanism.units.angle,
+          },
+          ...(transformOptions.coordinateSystem === 'z-up' ? {} : { matrix: zUpToYup }),
+        })
+      : resolved;
+  if (outcome.status === 'invalid') {
+    onIssues?.(outcome.issues.map((issue) => toMechanismKernelIssue(issue)));
+    return undefined;
+  }
+  return outcome.mechanism;
+}
 
 type BuildNodeFromReplicadGeometryOptions = {
   geometry: GeometryReplicad;
   nodeIndex: number;
   usedNames: Map<string, number>;
+  usedIds: Map<string, number>;
   transformOptions: GeometryOutputTransformOptions;
   includeTauTopology: boolean;
 };
@@ -70,6 +136,7 @@ function buildNodeFromReplicadGeometry({
   geometry,
   nodeIndex,
   usedNames,
+  usedIds,
   transformOptions,
   includeTauTopology,
 }: BuildNodeFromReplicadGeometryOptions): ReplicadNodeBuildResult | undefined {
@@ -81,7 +148,10 @@ function buildNodeFromReplicadGeometry({
 
   const resolvedName = resolveShapeName({ index: nodeIndex, name: geometry.name, source: 'generated' });
   const nodeName = uniqueShapeName(resolvedName, usedNames);
-  const componentId = formatNamedComponentId(nodeName, nodeIndex) ?? formatComponentId(nodeIndex);
+  const componentId = uniqueComponentId(
+    formatNamedComponentId(nodeName, nodeIndex) ?? formatComponentId(nodeIndex),
+    usedIds,
+  );
   const selector = formatNodeSelector(nodeIndex);
   const faceOccurrences = faces.faceGroups.map((group, faceId) => ({ ...group, faceId }));
   const compactedFaces =
@@ -271,12 +341,15 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
   const nodes: GlbNode[] = [];
   const topologyComponents: ReplicadTopologyComponent[] = [];
   const usedNames = new Map<string, number>();
+  const usedIds = new Map<string, number>();
+  const componentIds = new Map<string, string>();
 
   for (const geometry of geometries) {
     const result = buildNodeFromReplicadGeometry({
       geometry,
       nodeIndex: nodes.length,
       usedNames,
+      usedIds,
       transformOptions,
       includeTauTopology,
     });
@@ -285,13 +358,24 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
       nodes.push(result.node);
       if (includeTauTopology) {
         topologyComponents.push({ ...result.component, nodeIndex });
+        componentIds.set(result.component.name, result.component.id);
       }
     }
   }
 
+  const mechanism =
+    topologyComponents.length > 0 && options.mechanism !== undefined
+      ? convertMechanism({
+          value: options.mechanism,
+          componentIds,
+          transformOptions,
+          onIssues: options.onMechanismIssues,
+        })
+      : undefined;
   const topologyPayload: TauCadTopologyPayload = {
     schemaVersion: 1,
     components: topologyComponents,
+    ...(mechanism ? { mechanism } : {}),
   };
   const topologyData = new TextEncoder().encode(JSON.stringify(topologyPayload));
   const hasLinePrimitives = nodes.some((node) =>

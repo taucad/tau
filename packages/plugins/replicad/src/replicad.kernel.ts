@@ -76,7 +76,7 @@ import { resolveEntryInterfaces, rotateNativeEntryToYup } from '#interface-resol
 import type { NativeHandleEntry } from '#interface-resolution.js';
 import type { GlbResources } from '@taucad/geometry-core';
 
-import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
+import { convertReplicadGeometriesToGltf, toMechanismKernelIssue } from '#utils/replicad-to-gltf.js';
 import { createReplicadComputeReuse, replicadComputeNamespace } from '#replicad-compute-reuse.js';
 import type { ReplicadComputeReuseAdapter } from '#replicad-compute-reuse.js';
 
@@ -91,8 +91,13 @@ import {
   resolveShapeName,
   validateGlbResources,
 } from '@taucad/geometry-core';
+import type { Issue } from '@taucad/kinematics';
 
-type NativeHandle = GlbResources & { shapes: NativeHandleEntry[] };
+/**
+ * Live Replicad native handle: the shapes `main` returned, the model's GLB resources and the entry module's
+ * `mechanism` export, normalised to plain JSON. All are export-facing evidence, so all survive a snapshot.
+ */
+type NativeHandle = GlbResources & { shapes: NativeHandleEntry[]; mechanism?: unknown };
 
 const tracedStep = <T>(tracer: RuntimeSpanTracer, label: string, operation: () => T): T => {
   const span = tracer.startSpan(label);
@@ -384,6 +389,73 @@ function extractDefaultName(module: unknown): string | undefined {
   return typeof module['defaultName'] === 'string' ? module['defaultName'] : undefined;
 }
 
+const isMechanismFunction = (value: unknown): value is (parameters: Record<string, unknown>) => unknown =>
+  typeof value === 'function';
+
+// The kinematics-style issue for a `mechanism` export the kernel could not read.
+const mechanismExportIssue = (message: string, recovery: string): Issue => ({
+  code: 'INVALID_VALUE',
+  path: '',
+  message,
+  recovery,
+});
+
+/**
+ * Read the entry module's optional `mechanism` export: a value, or a function (sync or async) of the
+ * same parameters object `main` received. The value is normalised to plain JSON here, once, so the
+ * fresh build and a build-cache snapshot, whose msgpack codec turns `undefined` into `null`, carry the
+ * same mechanism. A throw, or a value JSON cannot hold, is a warning: the model builds without one.
+ *
+ * @internal
+ * @param module - Executed entry module.
+ * @param parameters - Parameters passed to `main`.
+ * @param formatError - Source-maps a thrown error the way `main` errors are.
+ * @returns The normalised value, admitted later against the rendered component ids, and its warnings.
+ */
+export async function readMechanismExport(
+  module: unknown,
+  parameters: Record<string, unknown>,
+  formatError: (error: unknown) => KernelIssue,
+): Promise<{ mechanism: unknown; issues: KernelIssue[] }> {
+  const exported = isRecordObject(module) ? module['mechanism'] : undefined;
+  let value: unknown;
+  try {
+    value = await (isMechanismFunction(exported) ? exported(parameters) : exported);
+  } catch (error) {
+    const thrown = formatError(error);
+    const { message, details } = toMechanismKernelIssue(
+      mechanismExportIssue(
+        `mechanism() threw "${thrown.message}".`,
+        'Fix the error in mechanism(); the model renders without a mechanism until then.',
+      ),
+    );
+    return { mechanism: undefined, issues: [{ ...thrown, severity: 'warning', message, details }] };
+  }
+
+  if (value === undefined) {
+    return { mechanism: undefined, issues: [] };
+  }
+
+  try {
+    // ponytail: `MechanismSource` is plain JSON by contract, so a JSON round trip is the whole normalisation.
+    // oxlint-disable-next-line unicorn/prefer-structured-clone -- structuredClone keeps `undefined`, which msgpack restores as null.
+    const mechanism: unknown = JSON.parse(JSON.stringify(value));
+    return { mechanism, issues: [] };
+  } catch {
+    return {
+      mechanism: undefined,
+      issues: [
+        toMechanismKernelIssue(
+          mechanismExportIssue(
+            'The mechanism cannot be written as JSON: it holds a BigInt or a reference cycle, or is a function or symbol.',
+            'Return plain data: objects, arrays, strings, numbers and booleans.',
+          ),
+        ),
+      ],
+    };
+  }
+}
+
 function getReplicadFirstArgument(): unknown {
   const registry = getModuleRegistry();
   return registry.get('replicad');
@@ -451,7 +523,7 @@ export const replicadKernel = defineKernel({
   detectImport: replicadDetectPattern,
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
   name: 'ReplicadKernel',
-  version: '1.1.1',
+  version: '1.4.0',
   optionsSchema: replicadOptionsSchema,
   render: {
     optionsSchema: replicadRenderSchema,
@@ -729,6 +801,9 @@ export const replicadKernel = defineKernel({
           validateGlbResources(model);
         }
         const defaultName = extractDefaultName(executeResult.value);
+        const { mechanism, issues } = await readMechanismExport(executeResult.value, parameters, (error) =>
+          formatOcRuntimeError(error, context.openCascade, buildErrorContext(context, { bundleSourceMap, entryUrl })),
+        );
 
         // Build phase ends here: normalize main() output and resolve GeoSpec
         // interfaces (pure BRep queries) onto the nativeHandle. The handle carries
@@ -751,9 +826,10 @@ export const replicadKernel = defineKernel({
         runtime.signal.throwIfAborted();
         const nativeHandle: NativeHandle = {
           shapes: entries,
+          mechanism,
           ...(model ? { images: model.images, textures: model.textures, samplers: model.samplers } : {}),
         };
-        return { nativeHandle };
+        return { nativeHandle, issues };
       });
 
       if (runtime.compute.status !== 'on' || !context.computeReuse) {
@@ -800,6 +876,7 @@ export const replicadKernel = defineKernel({
       const { tessellation } = options;
       const includeEdges = content?.includeEdges === true;
       const includeTopology = content?.includeTopology === true;
+      let mechanismIssues: KernelIssue[] = [];
       const namedShapes = nativeHandle.shapes.map((entry, index) => ({
         ...entry,
         name: resolveShapeName({ index, name: entry.name, source: 'authored' }),
@@ -866,6 +943,10 @@ export const replicadKernel = defineKernel({
               format: 'glb',
               includeTauTopology: includeTopology,
               logger: runtime.logger,
+              mechanism: nativeHandle.mechanism,
+              onMechanismIssues(issues) {
+                mechanismIssues = issues;
+              },
             });
           } finally {
             gltfSpan.end();
@@ -875,7 +956,7 @@ export const replicadKernel = defineKernel({
       }
       artifacts.push(...shapes2d);
 
-      return finalizeMeshOutput({ artifacts });
+      return finalizeMeshOutput({ artifacts, issues: mechanismIssues });
     } catch (error) {
       if (error instanceof RenderArtifactFinalizationError) {
         throw error;
@@ -891,6 +972,7 @@ export const replicadKernel = defineKernel({
       scope: 'export',
       operation: async () => {
         const { format, nativeHandle } = input;
+        const { shapes: entries, mechanism } = nativeHandle;
         const emptyGltfExport = () =>
           createKernelSuccess([
             createExportFile(
@@ -922,13 +1004,13 @@ export const replicadKernel = defineKernel({
           case 'glb':
           case 'gltf': {
             const { options, content } = input;
-            if (nativeHandle.shapes.length === 0) {
+            if (entries.length === 0) {
               return emptyGltfExport();
             }
 
             const { linearTolerance, angularTolerance } = options.tessellation;
             const { coordinateSystem, unit } = options;
-            const namedShapes = nativeHandle.shapes.map((shapeConfig, index) => ({
+            const namedShapes = entries.map((shapeConfig, index) => ({
               ...shapeConfig,
               name: resolveShapeName({
                 index,
@@ -953,6 +1035,7 @@ export const replicadKernel = defineKernel({
               return emptyGltfExport();
             }
 
+            let mechanismIssues: KernelIssue[] = [];
             const gltfData = await tracedPhase(runtime.tracer, 'export.packGltf', () =>
               convertReplicadGeometriesToGltf({
                 images: nativeHandle.images,
@@ -970,25 +1053,28 @@ export const replicadKernel = defineKernel({
                 logger: runtime.logger,
                 coordinateSystem,
                 unit,
+                mechanism,
+                onMechanismIssues(issues) {
+                  mechanismIssues = issues;
+                },
               }),
             );
-            return createKernelSuccess([
-              createExportFile(format, format === 'glb' ? 'model.glb' : 'model.gltf', asBuffer(gltfData)),
-            ]);
+            return createKernelSuccess(
+              [createExportFile(format, format === 'glb' ? 'model.glb' : 'model.gltf', asBuffer(gltfData))],
+              mechanismIssues,
+            );
           }
 
           case 'step': {
             const { options } = input;
-            if (nativeHandle.shapes.length === 0) {
+            if (entries.length === 0) {
               return noGeometryExportError();
             }
 
             const { coordinateSystem } = options;
 
             const shapes =
-              coordinateSystem === 'y-up'
-                ? nativeHandle.shapes.map((entry) => rotateNativeEntryToYup(entry))
-                : nativeHandle.shapes;
+              coordinateSystem === 'y-up' ? entries.map((entry) => rotateNativeEntryToYup(entry)) : entries;
 
             let stepBlob: Blob;
             try {
@@ -1006,7 +1092,7 @@ export const replicadKernel = defineKernel({
 
           case 'stl': {
             const { options } = input;
-            if (nativeHandle.shapes.length === 0) {
+            if (entries.length === 0) {
               return noGeometryExportError();
             }
 
@@ -1016,11 +1102,11 @@ export const replicadKernel = defineKernel({
 
             const shapes =
               coordinateSystem === 'y-up'
-                ? nativeHandle.shapes.map((s) => ({
+                ? entries.map((s) => ({
                     ...s,
                     shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
                   }))
-                : nativeHandle.shapes;
+                : entries;
 
             const result = await Promise.all(
               shapes.map(async ({ shape, name }, index) => {
@@ -1055,7 +1141,7 @@ export const replicadKernel = defineKernel({
     return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () => serializeReplicadHandle(nativeHandle));
   },
 
-  deserializeNativeHandle({ serializedNativeHandle }, _runtime, context) {
+  deserializeNativeHandle({ serializedNativeHandle }, _runtime, context): NativeHandle {
     return {
       ...serializedNativeHandle,
       shapes: serializedNativeHandle.shapes.map((entry) => ({
@@ -1083,6 +1169,7 @@ const serializeReplicadHandle = (nativeHandle: NativeHandle) => ({
       resolvedInterfaces: entry.resolvedInterfaces,
     },
   })),
+  mechanism: nativeHandle.mechanism,
 });
 
 async function buildExportBytes(

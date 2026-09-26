@@ -9,6 +9,7 @@ import {
   Plus,
   Undo2,
   XIcon,
+  Cloud,
   CloudUpload,
 } from 'lucide-react';
 import { Link, useLocation, useParams } from 'react-router';
@@ -82,6 +83,13 @@ import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import {
+  backupByDefaultNotice,
+  tauCloudIntent,
+  useTauCloudEligibility,
+  useTauCloudIntent,
+} from '#hooks/use-cloud-projects.js';
+import type { TauCloudIntent } from '#hooks/use-cloud-projects.js';
 
 /**
  * The Revisions pane (S26, A18, A29), as a mobile `FloatingPanel` around the
@@ -120,6 +128,55 @@ export function ChatRevisions({
 }
 
 /**
+ * Backup by default's one line (D19, NS8): what happens to a new project and
+ * its per-project opt-out. Before the first revision it is the opt-out before
+ * anything leaves the device; after, *Turn off backup* disconnects (the
+ * revisions stay) and nothing reconnects it, because the intent is gone.
+ *
+ * @param props - The project's intent.
+ * @returns The line, or nothing when it does not apply.
+ */
+function BackupByDefaultLine({ intent }: { readonly intent: TauCloudIntent }): React.JSX.Element | undefined {
+  const { projectId } = useProject();
+  const status = useRevisionStatus();
+  const { disconnectRemote } = useRevisionCommands();
+  const notice = backupByDefaultNotice(intent, useTauCloudEligibility(), status?.remote);
+  if (notice === undefined) {
+    return undefined;
+  }
+  return (
+    <div data-slot='backup-by-default' className='flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
+      <Cloud aria-hidden className='size-3.5 shrink-0' />
+      <p className='min-w-0 flex-auto'>Backs up to Tau Cloud automatically.</p>
+      <Button
+        size='xs'
+        variant='ghost'
+        onClick={() => {
+          if (notice === 'on') {
+            disconnectRemote();
+          }
+          tauCloudIntent.set(projectId, undefined);
+        }}
+      >
+        Turn off backup
+      </Button>
+      {notice === 'on' ? (
+        <Button
+          size='icon-xs'
+          variant='ghost'
+          aria-label='Dismiss'
+          onClick={() => {
+            tauCloudIntent.set(projectId, undefined);
+          }}
+        >
+          <XIcon aria-hidden />
+        </Button>
+      ) : undefined}
+    </div>
+  );
+}
+
+/**
  * The pinned strip (canvas rounds 4, 14, 17, 18): where you are, with New
  * branch and More pinned to that line, then the one status sentence — the
  * header's, word for word (RA11) — ending in its verbs and Details, which wrap
@@ -145,6 +202,8 @@ function OrientationStrip({
   const { requestUpgrade, canUpgradePlan } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
   const isAnonymous = useAnonymousRevisions(workspace);
+  const { projectId } = useProject();
+  const cloudIntent = useTauCloudIntent(projectId);
   const isUnknown = line.kind === 'unknown';
   const canWrite = role !== 'read' && role !== 'revoked';
   /* No head, no branch point; and nothing is offered over a line nobody has located yet (HQ7). */
@@ -336,6 +395,7 @@ function OrientationStrip({
           </dl>
         </CollapsibleContent>
       </Collapsible>
+      {cloudIntent === undefined ? null : <BackupByDefaultLine intent={cloudIntent} />}
     </section>
   );
 }

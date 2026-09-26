@@ -6,7 +6,6 @@
 import { Link, Outlet, useLocation } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
-import { CloudProjects } from '#routes/projects_/cloud-projects.js';
 import type { Handle } from '#types/matches.types.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -36,12 +35,7 @@ export default function Projects(): React.JSX.Element {
   if (location.pathname !== '/projects') {
     return <Outlet />;
   }
-  return (
-    <>
-      <ProjectLibrary />
-      {/* Below the library, because it is what this device does *not* have
-          (W18 DEF-2): the projects this account backed up from somewhere else. */}
-      <CloudProjects />
-    </>
-  );
+  /* One list (D20): the library lists this account's Tau Cloud projects beside
+     this device's own, so there is no second *From Tau Cloud* section. */
+  return <ProjectLibrary />;
 }

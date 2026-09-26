@@ -79,6 +79,17 @@ import type { WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js'
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
+import { useCloudProjects } from '#hooks/use-cloud-projects.js';
+import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
+import {
+  CloudProjectCard,
+  OnTauCloudMark,
+  isCloudOnly,
+  toLibraryRows,
+  useMaterializeCloudProjects,
+} from '#routes/projects_/cloud-projects.js';
+import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
 
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 
@@ -94,6 +105,12 @@ export type ProjectActions = {
 const recoveryDirectoryName = (recovery: PendingProjectRecovery): string =>
   recovery.storage.providerBasePath.split('/').findLast(Boolean) ?? recovery.storage.providerBasePath;
 
+/**
+ * The project library: this device's projects and the account's Tau Cloud
+ * projects in one list, each with the glyphs of where it is (charter D20).
+ *
+ * @returns The library.
+ */
 export function ProjectLibrary(): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
@@ -122,6 +139,21 @@ export function ProjectLibrary(): React.JSX.Element {
   } = useProjects({ includeDeleted: showDeleted });
   const navigate = useNavigate();
   const projectManager = useProjectManager();
+  const { projects: cloudProjects, isSettled: isCloudSettled } = useCloudProjects();
+  const openCloudProject = useOpenCloudProject();
+  useMaterializeCloudProjects({ cloud: cloudProjects, isSettled: isCloudSettled, projects, isLoading });
+  const handleOpenCloudProject = useCallback(
+    async (entry: CloudProject): Promise<void> => {
+      try {
+        await openCloudProject(entry);
+      } catch (error) {
+        toast.error(`Could not open ${entry.name} from Tau Cloud`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      }
+    },
+    [openCloudProject],
+  );
   const { closeProject } = useSidebarCommands();
 
   const handleToggleDeleted = useCallback(
@@ -479,7 +511,12 @@ export function ProjectLibrary(): React.JSX.Element {
           ))}
         </div>
       ) : (
-        <UnifiedProjectList projects={projects} viewMode={viewMode} actions={actions} />
+        <UnifiedProjectList
+          rows={toLibraryRows(projects, cloudProjects, !showDeleted)}
+          viewMode={viewMode}
+          actions={actions}
+          onOpenCloudProject={handleOpenCloudProject}
+        />
       )}
       <AlertDialog
         open={repairTarget !== undefined}
@@ -538,16 +575,17 @@ export function ProjectLibrary(): React.JSX.Element {
 }
 
 type UnifiedProjectListProps = {
-  readonly projects: ProjectListItem[];
+  readonly rows: LibraryRow[];
   readonly viewMode: 'grid' | 'table';
   readonly actions: ProjectActions;
+  readonly onOpenCloudProject: (entry: CloudProject) => Promise<void>;
 };
 
 // Page size options, shared by both view modes so the remembered choice survives a view switch.
 const defaultPageSize = 20;
 const pageSizeOptions = [defaultPageSize, 50, 100, 150, 200];
 
-function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListProps) {
+function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: UnifiedProjectListProps) {
   'use no memo';
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'lastActivityAt', desc: true }]);
@@ -559,8 +597,10 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
 
   // oxlint-disable-next-line react/incompatible-library -- This component is explicitly opted out because TanStack Table returns mutable functions that cannot be compiler-memoized safely.
   const table = useReactTable({
-    data: projects,
-    columns: createColumns(actions),
+    data: rows,
+    columns: createColumns(actions, onOpenCloudProject),
+    /* A project this device does not hold has nothing here to trash (D20). */
+    enableRowSelection: (row) => !isCloudOnly(row.original),
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     onSortingChange: setSorting,
@@ -584,7 +624,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
   });
 
   // Show empty state if no projects at all
-  if (projects.length === 0) {
+  if (rows.length === 0) {
     return (
       <CollectionEmptyState className='min-h-[60vh]'>
         {/* Empty-library CTA — composer-only, no chat session to attach to. */}
@@ -618,7 +658,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
     );
   }
 
-  const columns = createColumns(actions);
+  const columns = createColumns(actions, onOpenCloudProject);
   return (
     <div className='space-y-4'>
       <div className='flex items-center justify-between gap-2'>
@@ -639,17 +679,22 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
       ) : (
         // Grid View
         <div className='grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'>
-          {table.getRowModel().rows.map((row) => (
-            <ProjectLibraryCard
-              key={row.original.id}
-              project={row.original}
-              actions={actions}
-              isSelected={row.getIsSelected()}
-              onSelect={() => {
-                row.toggleSelected();
-              }}
-            />
-          ))}
+          {table.getRowModel().rows.map((row) => {
+            const { original } = row;
+            return isCloudOnly(original) ? (
+              <CloudProjectCard key={original.id} entry={original} onOpen={onOpenCloudProject} />
+            ) : (
+              <ProjectLibraryCard
+                key={original.id}
+                project={original}
+                actions={actions}
+                isSelected={row.getIsSelected()}
+                onSelect={() => {
+                  row.toggleSelected();
+                }}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -659,7 +704,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
 }
 
 type ProjectLibraryCardProps = {
-  readonly project: ProjectListItem;
+  readonly project: ProjectListItem & { readonly onCloud?: boolean };
   readonly actions: ProjectActions;
   readonly isSelected?: boolean;
   readonly onSelect?: () => void;
@@ -731,6 +776,7 @@ export function ProjectLibraryCard({
               >
                 <LocationIcon className='size-3 shrink-0' />
                 <span className='truncate'>{slugPath}</span>
+                {project.onCloud === true ? <OnTauCloudMark /> : undefined}
               </div>
             </TooltipTrigger>
             <TooltipContent side='right'>{fullLocationLabel}</TooltipContent>
@@ -754,7 +800,7 @@ export function ProjectLibraryCard({
 }
 
 type BulkActionsProps = {
-  readonly table: ReturnType<typeof useReactTable<ProjectListItem>>;
+  readonly table: ReturnType<typeof useReactTable<LibraryRow>>;
   readonly deleteProject: (project: ProjectListItem) => void;
 };
 
@@ -776,6 +822,10 @@ function BulkActions({ table, deleteProject }: BulkActionsProps) {
     for (const row of selectedRows) {
       try {
         const project = row.original;
+        /* Never selectable (D20): a Tau-Cloud-only row has nothing here to trash. */
+        if (isCloudOnly(project)) {
+          continue;
+        }
         deleteProject(project);
         successCount++;
       } catch (error) {

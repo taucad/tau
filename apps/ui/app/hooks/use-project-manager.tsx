@@ -85,6 +85,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 import type {
   PreparedWorkspaceCatalog,
@@ -1097,6 +1098,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         storage: pendingStorage,
       });
       await resumePendingProjectOperation(operation, worker);
+      /* D19: a project born with no remote backs up to Tau Cloud from its first
+         revision — a template, a fork, a file or zip import. A caller that
+         supplies the id is adopting an identity that has a remote of its own (a
+         Tau Cloud open, a materialized project, a linked GitHub import), so it
+         is left alone. The session decides once it knows the account (W11). */
+      if (options.id === undefined) {
+        tauCloudIntent.set(projectId, 'default');
+      }
       /* Route callers navigate with the returned slugs immediately. Publish
        * the completed filesystem commit to every active project-list query
        * before that navigation can ask the sole slug resolver for its id. */
@@ -1638,6 +1647,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         sourceChats: await chatStore.getChatsForResource(projectId),
       });
       await resumePendingProjectOperation(operation, worker);
+      /* D19: a copy has no remote of its own, so it backs up by default too. */
+      tauCloudIntent.set(targetId, 'default');
       return { ...operation.manifest, slugs: { workspaceSlug, projectSlug: directorySlug(providerBasePath) } };
     },
     [chatStore, ensureDiscoveryReady, fileManager, getProject, getReadiedWorker, resumePendingProjectOperation],

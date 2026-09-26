@@ -12,6 +12,35 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
+
+/**
+ * What this device creates for a Tau Cloud project before its first pull: the
+ * remote's id and name, no chat and no files — *Open*'s first half, and all
+ * that materialize on sign-in (D20) creates.
+ *
+ * @param entry - The Tau Cloud project.
+ * @returns The `createProject` options.
+ * @public
+ */
+export const cloudProjectStub = (entry: CloudProject): CreateProjectOptions => ({
+  /* The remote's id, because the id is the repository path there. */
+  id: entry.id,
+  /* The chats come with the pull (W17), so creating one here would be an empty
+     chat nobody asked for that the pull cannot remove and the next push offers
+     to the account (review R5). */
+  chat: false,
+  project: {
+    name: entry.name,
+    description: '',
+    tags: [],
+    /* A placeholder for one round trip: `tau.json` is versioned, so the
+       remote's own manifest — its name and the file it opens with — arrives
+       with the open pull and replaces this one. */
+    assets: { main: { entryPath: 'main.scad' } },
+  },
+  files: {},
+});
 
 /**
  * Open a Tau Cloud project on this device.
@@ -40,23 +69,7 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
         await navigate(projectUrl(held.slugs));
         return;
       }
-      const created = await createProject({
-        id: entry.id,
-        /* The chats come with the pull (W17), so creating one here would be an
-           empty chat nobody asked for that the pull cannot remove and the next
-           push offers to the account (review R5). */
-        chat: false,
-        project: {
-          name: entry.name,
-          description: '',
-          tags: [],
-          /* A placeholder for one round trip: `tau.json` is versioned, so the
-             remote's own manifest — its name and the file it opens with —
-             arrives with the open pull and replaces this one. */
-          assets: { main: { entryPath: 'main.scad' } },
-        },
-        files: {},
-      });
+      const created = await createProject(cloudProjectStub(entry));
       /* The library owns the root file-manager worker, while the project route
          owns a project-scoped worker. Carry the gesture across navigation so
          the owning worker records and opens the remote; sending it here loses

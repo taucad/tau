@@ -9,9 +9,15 @@
  * rather than three times under three different cache keys.
  */
 
+import { useEffect, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { RemoteFacet } from '@taucad/revisions';
+import { Topic } from '@taucad/events';
+import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 import { ENV } from '#environment.config.js';
+import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
+import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
+import { useCommercialFeatures } from '#cloud/commercial-features.js';
 
 /** What this account may do with a project on Tau Cloud (D27). @public */
 export type ProjectRole = 'owner' | 'write' | 'read';
@@ -48,10 +54,10 @@ export const isSyncReadOnly = (remote: RemoteFacet | undefined, role: ProjectAcc
 /**
  * One row of `GET /v1/projects`, as the client surfaces use it.
  *
- * The route also answers `updatedAt`; nothing renders a date, so it is not in
- * the type (review R7). Add it back with the copy that shows it.
+ * `updatedAt` (epoch milliseconds) is what the one library (D20) sorts a
+ * project this device does not hold by, under *Last Updated*.
  */
-export type CloudProject = Readonly<{ id: string; name: string; role: ProjectRole }>;
+export type CloudProject = Readonly<{ id: string; name: string; role: ProjectRole; updatedAt?: number }>;
 
 /** One cache key for one listing: a role read here is the role the library shows. */
 export const cloudProjectsQueryKey = ['cloud-projects'] as const;
@@ -59,14 +65,20 @@ export const cloudProjectsQueryKey = ['cloud-projects'] as const;
 const isRole = (value: unknown): value is ProjectRole => value === 'owner' || value === 'write' || value === 'read';
 
 const toCloudProject = (value: unknown): CloudProject | undefined => {
-  const row = value as Readonly<{ id?: unknown; name?: unknown; role?: unknown }>;
+  const row = value as Readonly<{ id?: unknown; name?: unknown; role?: unknown; updatedAt?: unknown }>;
   if (typeof row.id !== 'string' || typeof row.name !== 'string') {
     return undefined;
   }
+  const updatedAt = typeof row.updatedAt === 'string' ? Date.parse(row.updatedAt) : Number.NaN;
   /* Before D27 this route answered the caller's own projects and nothing else,
      so an absent role means "mine". It is a *label*, never an access decision:
      every collaborator surface it gates is refused again by the API. */
-  return { id: row.id, name: row.name, role: isRole(row.role) ? row.role : 'owner' };
+  return {
+    id: row.id,
+    name: row.name,
+    role: isRole(row.role) ? row.role : 'owner',
+    ...(Number.isNaN(updatedAt) ? {} : { updatedAt }),
+  };
 };
 
 /**
@@ -163,3 +175,244 @@ export const useProjectAccessRole = (projectId: string, isTauRemote: boolean): P
      now — which says nothing. */
   return isSettled && !isFetching ? 'revoked' : undefined;
 };
+
+/**
+ * What this device still owes one project's Tau Cloud backup (D19, D20).
+ *
+ * - `default`: a new project, backed up from its first revision once the
+ *   account is signed in and entitled (D19).
+ * - `notice`: backed up by default; *Where you are* says so beside its opt-out.
+ * - `open`: brought to this device on sign-in (D20); its first open connects
+ *   Tau Cloud and pulls, exactly what *Open* does for a cloud-only row.
+ *
+ * Per device and per project, like `githubProjectBinding`: whether a project is
+ * backed up is recorded in its own git config once it is, and this is only what
+ * happens before then.
+ *
+ * @public
+ */
+export type TauCloudIntent = 'default' | 'notice' | 'open';
+
+const intentKey = (projectId: string): string => `tau:tau-cloud-intent:${projectId}`;
+const intentTopic = new Topic<void>({ name: 'tau-cloud-intent' });
+const isIntent = (value: unknown): value is TauCloudIntent =>
+  value === 'default' || value === 'notice' || value === 'open';
+
+/** The per-project intent store. Storage failures read as "nothing owed". @public */
+export const tauCloudIntent = Object.freeze({
+  get(projectId: string): TauCloudIntent | undefined {
+    try {
+      const value = globalThis.localStorage.getItem(intentKey(projectId));
+      return isIntent(value) ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  set(projectId: string, intent: TauCloudIntent | undefined): void {
+    try {
+      if (intent === undefined) {
+        globalThis.localStorage.removeItem(intentKey(projectId));
+      } else {
+        globalThis.localStorage.setItem(intentKey(projectId), intent);
+      }
+    } catch {
+      // Without storage a new project is simply not backed up by default.
+    }
+    intentTopic.emit();
+  },
+  subscribe: (listener: () => void): (() => void) => intentTopic.subscribe(listener),
+});
+
+/**
+ * One project's intent, live.
+ *
+ * @param projectId - The project.
+ * @returns Its intent, or `undefined` when nothing is owed.
+ * @public
+ */
+export const useTauCloudIntent = (projectId: string): TauCloudIntent | undefined =>
+  useSyncExternalStore(
+    tauCloudIntent.subscribe,
+    () => tauCloudIntent.get(projectId),
+    () => undefined,
+  );
+
+/** Who is asking, as far as backup by default cares (D19). @public */
+export type TauCloudEligibility = Readonly<{
+  /** `useResolvedAuth`'s answer. */
+  auth: 'authed' | 'anonymous' | 'indeterminate';
+  /** Whether the plan is known yet; nothing is decided before it is. */
+  isResolved: boolean;
+  /** W8's entitlement: closed for Free while the D23 gate is. */
+  canSyncFiles: boolean;
+}>;
+
+/**
+ * What a project's session does about its intent now.
+ *
+ * A project whose remote is already chosen owes nothing. `open` connects as
+ * soon as there is a root to connect, like *Open*. `default` waits for a signed-in, entitled account and the project's first revision
+ * (D19), and is forgotten for an account that is neither — or once somebody
+ * picked a remote by hand. Only a new project carries it, and a new project has
+ * no remote in its config, so the connect cannot race a remote being read back.
+ *
+ * @param intent - The project's intent.
+ * @param eligibility - The account, as far as it is known.
+ * @param status - The project's revision projection, once the root answers.
+ * @returns `connect`, `forget` or `wait`.
+ * @public
+ */
+export const nextTauCloudStep = (
+  intent: TauCloudIntent | undefined,
+  eligibility: TauCloudEligibility,
+  status: RevisionStatusProjection | undefined,
+): 'connect' | 'forget' | 'wait' => {
+  if (status === undefined || intent === undefined || intent === 'notice') {
+    return 'wait';
+  }
+  if (status.remote.kind !== 'none') {
+    return 'forget';
+  }
+  if (intent === 'open') {
+    return 'connect';
+  }
+  if (eligibility.auth === 'anonymous') {
+    return 'forget';
+  }
+  if (eligibility.auth !== 'authed' || !eligibility.isResolved) {
+    return 'wait';
+  }
+  if (!eligibility.canSyncFiles) {
+    return 'forget';
+  }
+  return status.headRevisionId === undefined ? 'wait' : 'connect';
+};
+
+/**
+ * The account, as far as backup by default cares (D19).
+ *
+ * @returns The session's answer and W8's entitlement.
+ * @public
+ */
+export const useTauCloudEligibility = (): TauCloudEligibility => {
+  const auth = useResolvedAuth();
+  const { isResolved, canSyncFiles } = useCommercialFeatures();
+  return { auth, isResolved, canSyncFiles };
+};
+
+/**
+ * Act on a project's intent from inside its session: connect Tau Cloud through
+ * the same verb the `cloudOpen` path sends, or forget the intent (W11).
+ *
+ * The intent is rewritten before the send — `notice` after a default
+ * connection, nothing after a materialized open — so it connects once.
+ *
+ * @param input - The project, its intent, its revision projection and the
+ * session's `connectRemote`.
+ * @public
+ */
+export const useTauCloudIntentConnection = ({
+  projectId,
+  intent,
+  status,
+  connectRemote,
+}: Readonly<{
+  projectId: string;
+  intent: TauCloudIntent;
+  status: RevisionStatusProjection | undefined;
+  connectRemote: (kind: 'tau') => Promise<void>;
+}>): void => {
+  const step = nextTauCloudStep(intent, useTauCloudEligibility(), status);
+  useEffect(() => {
+    if (step === 'forget') {
+      tauCloudIntent.set(projectId, undefined);
+      return;
+    }
+    if (step !== 'connect') {
+      return;
+    }
+    tauCloudIntent.set(projectId, intent === 'default' ? 'notice' : undefined);
+    void connectRemote('tau');
+  }, [connectRemote, intent, projectId, step]);
+};
+
+/**
+ * Whether *Where you are* carries the backup-by-default line, and in which form.
+ *
+ * `pending` is before the first revision, so the opt-out is visible before
+ * anything leaves the device (DESIGN: first-connect opt-out before commitment);
+ * `on` is after the default connection landed.
+ *
+ * @param intent - The project's intent.
+ * @param eligibility - The account, as far as it is known.
+ * @param remote - The project's remote facet.
+ * @returns The line's form, or `undefined` for no line.
+ * @public
+ */
+export const backupByDefaultNotice = (
+  intent: TauCloudIntent | undefined,
+  eligibility: TauCloudEligibility,
+  remote: RemoteFacet | undefined,
+): 'pending' | 'on' | undefined => {
+  if (intent === 'notice') {
+    return remote?.kind === 'tau' && remote.phase !== 'disconnecting' ? 'on' : undefined;
+  }
+  return intent === 'default' &&
+    remote?.kind === 'none' &&
+    eligibility.auth === 'authed' &&
+    eligibility.isResolved &&
+    eligibility.canSyncFiles
+    ? 'pending'
+    : undefined;
+};
+
+const materializeKey = 'tau:materialize-cloud-projects';
+const materializeTopic = new Topic<void>({ name: 'materialize-cloud-projects' });
+
+const readMaterializeLocation = (): ProjectCreationLocation | undefined => {
+  try {
+    const value = globalThis.localStorage.getItem(materializeKey);
+    return value === null ? undefined : parseProjectCreationLocation(JSON.parse(value));
+  } catch {
+    return undefined;
+  }
+};
+
+/* One cached answer, so `useSyncExternalStore` sees a stable snapshot. */
+let materializeLocation = readMaterializeLocation();
+
+/**
+ * Where this device brings the account's Tau Cloud projects on sign-in (D20),
+ * or `undefined` — the default — for nowhere.
+ *
+ * One workspace at most: a project is one directory per device, and two
+ * workspaces bringing the same id would be a `duplicate-id` conflict.
+ *
+ * @public
+ */
+export const materializeOnSignIn = Object.freeze({
+  get: (): ProjectCreationLocation | undefined => materializeLocation,
+  set(location: ProjectCreationLocation | undefined): void {
+    materializeLocation = location;
+    try {
+      if (location === undefined) {
+        globalThis.localStorage.removeItem(materializeKey);
+      } else {
+        globalThis.localStorage.setItem(materializeKey, JSON.stringify(location));
+      }
+    } catch {
+      // The in-memory choice still applies for this document.
+    }
+    materializeTopic.emit();
+  },
+  subscribe: (listener: () => void): (() => void) => materializeTopic.subscribe(listener),
+});
+
+/**
+ * The materialize-on-sign-in destination, live.
+ *
+ * @returns The workspace, or `undefined` when the setting is off.
+ * @public
+ */
+export const useMaterializeOnSignInLocation = (): ProjectCreationLocation | undefined =>
+  useSyncExternalStore(materializeOnSignIn.subscribe, materializeOnSignIn.get, () => undefined);

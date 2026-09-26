@@ -349,7 +349,6 @@ test.describe('Chat viewer model component context menu', () => {
       .not.toBe(restVisualState.backgroundColor);
     expect(await readMenuItemVisualState(focusMenuItem)).toEqual(restVisualState);
 
-    await target.keyboardPress('Escape');
     await target.click(opacityRow);
     await expect
       .poll(async () => {
@@ -371,6 +370,8 @@ test.describe('Chat viewer model component context menu', () => {
     const revertedOpacityInput = await target.read(opacityInput);
     expect(revertedOpacityInput.value).toBe('100');
 
+    // The first Escape only reverted the edit; the next one closes the menu.
+    await target.keyboardPress('Escape');
     await target.expectCount(focusMenuItem, 0);
 
     const rightDragPoint = await findComponentHitPoint();

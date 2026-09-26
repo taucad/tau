@@ -115,6 +115,7 @@ const grants: readonly HostRouteGrant[] = [
   { route: 'machines', operation: 'machines.listProviders' },
   { route: 'machines', operation: 'machines.discover' },
   { route: 'machines', operation: 'machines.beginBinding' },
+  { route: 'machines', operation: 'machines.removeBinding' },
   { route: 'machines', operation: 'machines.preparePrint' },
   { route: 'machines', operation: 'machines.uploadPrint' },
   { route: 'machines', operation: 'machines.startPrint' },
@@ -160,6 +161,10 @@ const open = (
     beginBinding: vi.fn<MachineChannelHostOperations['beginBinding']>(async () => ({
       status: 'bound',
       machineId: 'machine-1',
+    })),
+    removeBinding: vi.fn<MachineChannelHostOperations['removeBinding']>(async (input) => ({
+      status: 'removed',
+      machineId: input.machineId,
     })),
     preparePrint: vi.fn<MachineChannelHostOperations['preparePrint']>(async () => prepared),
     uploadPrint: vi.fn<MachineChannelHostOperations['uploadPrint']>(async (input) => ({
@@ -247,6 +252,13 @@ describe('machine channel', () => {
         status: 'bound',
         machineId: 'machine-1',
       });
+      await expect(fixture.client.removeBinding({ machineId: 'machine-1' })).resolves.toEqual({
+        status: 'removed',
+        machineId: 'machine-1',
+      });
+      expect(fixture.operations.removeBinding).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ machineId: 'machine-1' }),
+      );
       await expect(
         fixture.client.preparePrint({ machineId: 'machine-1', artifact, configuration: {} }),
       ).resolves.toEqual(prepared);
@@ -314,6 +326,41 @@ describe('machine channel', () => {
         done: false,
         value: { type: 'found', candidate },
       });
+    } finally {
+      fixture.client.close();
+      fixture.server.dispose();
+    }
+  });
+
+  it('should carry the saved-credential flag on discovery frames and accept it back on beginBinding', async () => {
+    const saved: MachineCandidate = { ...candidate, credential: 'saved' };
+    const fixture = open(undefined, undefined, {
+      async *discover() {
+        yield { type: 'found', candidate: saved };
+      },
+    });
+    try {
+      const discovery = fixture.client.discover({ providerId: 'fixture-provider', configuration: {} });
+      await expect(discovery[Symbol.asyncIterator]().next()).resolves.toEqual({
+        done: false,
+        value: { type: 'found', candidate: saved },
+      });
+      await expect(fixture.client.beginBinding({ candidate: saved, name: 'Workshop printer' })).resolves.toEqual({
+        status: 'bound',
+        machineId: 'machine-1',
+      });
+      expect(fixture.operations.beginBinding).toHaveBeenCalledWith(expect.objectContaining({ candidate: saved }));
+    } finally {
+      fixture.client.close();
+      fixture.server.dispose();
+    }
+  });
+
+  it('should refuse removeBinding without its exact grant before host work', async () => {
+    const fixture = open(grants.filter(({ operation }) => operation !== 'machines.removeBinding'));
+    try {
+      await expect(fixture.client.removeBinding({ machineId: 'machine-1' })).rejects.toThrow('ROUTE_DENIED');
+      expect(fixture.operations.removeBinding).not.toHaveBeenCalled();
     } finally {
       fixture.client.close();
       fixture.server.dispose();

@@ -194,6 +194,8 @@ export type MachineCandidate = Readonly<{
   claimedIdentity: MachineClaimedIdentity;
   observedAt: string;
   expiresAt: string;
+  /** Host-set on discovery frames when a credential is saved for the claimed identity; never the secret, never set by a provider. */
+  credential?: 'saved';
 }>;
 
 /** One discovery stream event. @public */

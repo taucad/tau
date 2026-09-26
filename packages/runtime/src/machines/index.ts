@@ -1,10 +1,12 @@
 export { defineMachine, defineMachineQuery, parseMachineProvider } from '#machines/machine.js';
 export { connectMachineChannel } from '#machines/machine-channel.js';
+export { machineCredentialReference } from '#machines/machine-credential.js';
 export type { MachineChannelClient, MachineChannelEndpoint } from '#machines/machine-channel.js';
 export { machineManifestSchema, parseMachineManifest } from '#machines/machine-manifest.js';
 export type { MachineActionDescriptor, MachineManifest } from '#machines/machine-manifest.js';
 export type {
   MachineBeginBindingInput,
+  MachineBindingRemoval,
   MachineCaptureStillClientInput,
   MachineClient,
   MachineDiscoverInput,
@@ -18,6 +20,7 @@ export type {
   MachinePreparedPrint,
   MachinePreparePrintInput,
   MachineReconcileOperationInput,
+  MachineRemoveBindingInput,
   MachineRunOperationKind,
   MachineStartPrintInput,
   MachineControlRunInput,

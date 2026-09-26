@@ -56,6 +56,9 @@ describe('RuntimeClient TransportPlugin materialization', () => {
       async beginBinding() {
         return { status: 'operator-action-required', ceremonyId: 'fixture' };
       },
+      async removeBinding() {
+        throw new Error('Unused fixture operation');
+      },
       async preparePrint() {
         throw new Error('Unused fixture operation');
       },

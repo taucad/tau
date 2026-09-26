@@ -138,6 +138,7 @@ export const webSocketClient = (
         listProviders: async (input) => getMachineChannel().listProviders(input),
         discover: (input) => getMachineChannel().discover(input),
         beginBinding: async (input) => getMachineChannel().beginBinding(input),
+        removeBinding: async (input) => getMachineChannel().removeBinding(input),
         preparePrint: async (input) => getMachineChannel().preparePrint(input),
         uploadPrint: async (input) => getMachineChannel().uploadPrint(input),
         startPrint: async (input) => getMachineChannel().startPrint(input),

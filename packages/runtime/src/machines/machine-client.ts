@@ -36,6 +36,19 @@ export type MachineBeginBindingInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
+/**
+ * Unbind one machine and forget its saved credential. Refused with `MACHINE_BINDING_BUSY` while one of its
+ * print requests is preparing, awaiting approval, uploading or starting; a running print keeps running.
+ * @public
+ */
+export type MachineRemoveBindingInput = Readonly<{
+  machineId: string;
+  signal?: AbortSignal;
+}>;
+
+/** Non-secret outcome of removing one binding. @public */
+export type MachineBindingRemoval = Readonly<{ status: 'removed'; machineId: string }>;
+
 /** Preflight one immutable machine artifact against the observed setup without transferring or starting anything. @public */
 export type MachinePreparePrintInput = Readonly<{
   machineId: string;
@@ -172,6 +185,7 @@ export type MachineClient = MachinePrintRequestClient &
     listProviders(input: MachineListProvidersInput): Promise<readonly MachineProvider[]>;
     discover(input: MachineDiscoverInput): AsyncIterable<MachineDiscoveryFrame>;
     beginBinding(input: MachineBeginBindingInput): Promise<MachineBindingOutcome>;
+    removeBinding(input: MachineRemoveBindingInput): Promise<MachineBindingRemoval>;
     preparePrint(input: MachinePreparePrintInput): Promise<MachinePreparedPrint>;
     uploadPrint(input: MachineUploadPrintInput): Promise<MachineOperationReceipt>;
     startPrint(input: MachineStartPrintInput): Promise<MachineOperationReceipt>;

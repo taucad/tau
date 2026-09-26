@@ -20,6 +20,7 @@ import type {
 } from '#host/host-admission.js';
 import type {
   MachineBeginBindingInput,
+  MachineBindingRemoval,
   MachineCaptureStillClientInput,
   MachineClient,
   MachineDiscoverInput,
@@ -30,6 +31,7 @@ import type {
   MachinePreparePrintInput,
   MachinePreparedPrint,
   MachineReconcileOperationInput,
+  MachineRemoveBindingInput,
   MachineStartPrintInput,
   MachineUploadPrintInput,
 } from '#machines/machine-client.js';
@@ -65,6 +67,7 @@ import type {
 type EmptyInput = Readonly<Record<string, never>>;
 type DiscoverInput = Omit<MachineDiscoverInput, 'signal'>;
 type BeginBindingInput = Omit<MachineBeginBindingInput, 'signal'>;
+type RemoveBindingInput = Omit<MachineRemoveBindingInput, 'signal'>;
 type PreparePrintInput = Omit<MachinePreparePrintInput, 'signal'>;
 type UploadPrintInput = Omit<MachineUploadPrintInput, 'signal'>;
 type StartPrintInput = Omit<MachineStartPrintInput, 'signal'>;
@@ -84,6 +87,7 @@ type MachineChannelProtocol = {
   readonly calls: {
     readonly listProviders: { readonly args: EmptyInput; readonly result: readonly MachineProvider[] };
     readonly beginBinding: { readonly args: BeginBindingInput; readonly result: MachineBindingOutcome };
+    readonly removeBinding: { readonly args: RemoveBindingInput; readonly result: MachineBindingRemoval };
     readonly preparePrint: { readonly args: PreparePrintInput; readonly result: MachinePreparedPrint };
     readonly uploadPrint: { readonly args: UploadPrintInput; readonly result: MachineOperationReceipt };
     readonly startPrint: { readonly args: StartPrintInput; readonly result: MachineOperationReceipt };
@@ -115,6 +119,7 @@ type Admitted = Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal 
 export type MachineChannelHostOperations = Readonly<{
   discover(input: DiscoverInput & Admitted): AsyncIterable<MachineDiscoveryFrame>;
   beginBinding(input: BeginBindingInput & Admitted): Promise<MachineBindingOutcome>;
+  removeBinding(input: RemoveBindingInput & Admitted): Promise<MachineBindingRemoval>;
   preparePrint(input: PreparePrintInput & Admitted): Promise<MachinePreparedPrint>;
   uploadPrint(input: UploadPrintInput & Admitted): Promise<MachineOperationReceipt>;
   startPrint(input: StartPrintInput & Admitted): Promise<MachineOperationReceipt>;
@@ -156,6 +161,7 @@ const candidateSchema = z.strictObject({
   claimedIdentity: z.strictObject({ serial: identitySchema.optional(), model: identitySchema.optional() }),
   observedAt: timestampSchema,
   expiresAt: timestampSchema,
+  credential: z.literal('saved').optional(),
 });
 const discoveryFrameSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.enum(['found', 'updated']), candidate: candidateSchema }),
@@ -165,6 +171,7 @@ const bindingOutcomeSchema = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('bound'), machineId: identitySchema }),
   z.strictObject({ status: z.literal('operator-action-required'), ceremonyId: identitySchema }),
 ]);
+const bindingRemovalSchema = z.strictObject({ status: z.literal('removed'), machineId: identitySchema });
 const digestSchema = z.custom<ContentDigest>(
   (value) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value),
 );
@@ -353,6 +360,10 @@ const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
     beginBinding: {
       args: z.strictObject({ candidate: candidateSchema, name: identitySchema }),
       result: bindingOutcomeSchema,
+    },
+    removeBinding: {
+      args: z.strictObject({ machineId: identitySchema }),
+      result: bindingRemovalSchema,
     },
     preparePrint: {
       args: z.strictObject({ machineId: identitySchema, artifact: artifactSchema, configuration: configurationSchema }),
@@ -579,6 +590,11 @@ export const exposeMachineChannel = (input: {
               bindingOutcomeSchema.parse(value),
             );
           }
+          case 'removeBinding': {
+            return settle(operations.removeBinding({ ...(args as RemoveBindingInput), ...scope }), (value) =>
+              bindingRemovalSchema.parse(value),
+            );
+          }
           case 'preparePrint': {
             return settle(operations.preparePrint({ ...(args as PreparePrintInput), ...scope }), (value) =>
               preparedPrintSchema.parse(value),
@@ -686,6 +702,7 @@ export const connectMachineChannel = (port: MachineChannelEndpoint): MachineChan
     listProviders: async ({ signal }) => channel.call('listProviders', {}, signal),
     discover: ({ signal, ...input }) => channel.listen('discover', input, signal),
     beginBinding: async ({ signal, ...input }) => channel.call('beginBinding', input, signal),
+    removeBinding: async ({ signal, ...input }) => channel.call('removeBinding', input, signal),
     preparePrint: async ({ signal, ...input }) => channel.call('preparePrint', input, signal),
     uploadPrint: async ({ signal, ...input }) => channel.call('uploadPrint', input, signal),
     startPrint: async ({ signal, ...input }) => channel.call('startPrint', input, signal),

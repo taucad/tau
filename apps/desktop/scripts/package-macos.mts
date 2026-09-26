@@ -5,14 +5,16 @@
  * Why: Quick Look extensions must enter Contents/PlugIns before one inside-out signing pass.
  * Environment: macOS, Xcode tools, built desktop/UI/native artifacts; optional TAU_MACOS_PACKAGE_OUTPUT_ROOT;
  * Apple credentials only for --release; --unsigned skips all package signing.
- * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned]
+ * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip]
+ * Output: <output root>/Tau-darwin-arm64/Tau.app, copied as APFS clones of its inputs; the distribution archive
+ * <output root>/Tau-macos-arm64.zip only for --release or when --zip is passed.
  * Exit codes: 0 on a verified app/ZIP; non-zero on missing artifacts, credentials, or validation failure.
  */
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, openSync, readSync } from 'node:fs';
-import { cp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
@@ -26,7 +28,7 @@ import { packager } from '@electron/packager';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { parseMacosPackageMode } from './macos-package-mode.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { copyGeoSpecNative, copyRuntimeClosure } from './runtime-closure.mjs';
+import { copyGeoSpecNative, copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
 
 type PackageMetadata = {
   readonly name: string;
@@ -66,7 +68,7 @@ const picoGkResourceRoot = resolve(desktopRoot, 'resources/picogk');
  * so `git lfs` resolves through the binary main points the services host at. */
 const gitResourceRoot = resolve(desktopRoot, 'resources/git/darwin-arm64');
 const shipsGit = existsSync(gitResourceRoot);
-const { release, unsigned } = parseMacosPackageMode(process.argv.slice(2));
+const { release, unsigned, zip } = parseMacosPackageMode(process.argv.slice(2));
 const extensions = ['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const;
 const adhocAppEntitlements = [
   'com.apple.security.cs.allow-jit',
@@ -79,10 +81,10 @@ const adhocAppEntitlements = [
   'com.apple.security.personal-information.location',
   'com.apple.security.personal-information.photos-library',
 ];
-const machObjectMagics = new Set([
-  0xfe_ed_fa_ce, 0xce_fa_ed_fe, 0xfe_ed_fa_cf, 0xcf_fa_ed_fe, 0xca_fe_ba_be, 0xbe_ba_fe_ca, 0xca_fe_ba_bf,
-  0xbf_ba_fe_ca,
-]);
+const universalMagics = new Set([0xca_fe_ba_be, 0xbe_ba_fe_ca, 0xca_fe_ba_bf, 0xbf_ba_fe_ca]);
+const machObjectMagics = new Set([...universalMagics, 0xfe_ed_fa_ce, 0xce_fa_ed_fe, 0xfe_ed_fa_cf, 0xcf_fa_ed_fe]);
+/** `CPU_TYPE_ARM64`; with subtype `CPU_SUBTYPE_ARM64_ALL` (0) it is the header `lipo -archs` names `arm64`. */
+const arm64CpuType = 0x01_00_00_0c;
 
 if (process.platform !== 'darwin') {
   throw new Error('The macOS package can only be assembled on macOS.');
@@ -108,42 +110,74 @@ const sha256 = async (path: string): Promise<string> =>
     .update(await readFile(path))
     .digest('hex');
 
+/** The Mach-O header (magic, CPU type, CPU subtype) in a file's first 12 bytes, or `undefined` for any other file. */
+const machHeader = (bytes: Uint8Array<ArrayBuffer>): DataView | undefined => {
+  const header = new DataView(bytes.buffer);
+  return machObjectMagics.has(header.getUint32(0)) ? header : undefined;
+};
+
 const isMachObject = (path: string): boolean => {
+  const bytes = new Uint8Array(12);
   const file = openSync(path, 'r');
-  const bytes = Buffer.allocUnsafe(4);
   try {
-    return (
-      readSync(file, bytes, 0, bytes.byteLength, 0) === bytes.byteLength && machObjectMagics.has(bytes.readUInt32BE())
-    );
+    readSync(file, bytes, 0, bytes.byteLength, 0);
   } finally {
     closeSync(file);
   }
+  return machHeader(bytes) !== undefined;
 };
 
 const thinIntelSlices = async (root: string): Promise<number> => {
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  const files = entries.filter((entry) => entry.isFile()).map((entry) => resolve(entry.parentPath, entry.name));
+  const universal: string[] = [];
+  /* A fresh clone shares no page cache with its source, so every header is a
+   * disk read: read them concurrently, one bounded batch of open files at a time. */
+  for (let start = 0; start < files.length; start += 256) {
+    // oxlint-disable-next-line no-await-in-loop -- See above.
+    await Promise.all(
+      files.slice(start, start + 256).map(async (path) => {
+        const bytes = new Uint8Array(12);
+        const file = await open(path, 'r');
+        try {
+          await file.read(bytes, 0, bytes.byteLength, 0);
+        } finally {
+          await file.close();
+        }
+        const header = machHeader(bytes);
+        if (header && universalMagics.has(header.getUint32(0))) {
+          universal.push(path);
+        } else if (header) {
+          /* A thin file names its one architecture in its own header, so only a
+           * universal file needs `lipo`. The header is in the file's byte order:
+           * an arm64 or x86_64 file starts `cf fa ed fe`, a little-endian magic. */
+          const littleEndian = [0xfe_ed_fa_ce, 0xfe_ed_fa_cf].includes(header.getUint32(0, true));
+          const cpuType = header.getUint32(4, littleEndian);
+          // oxlint-disable-next-line no-bitwise -- The high byte of a CPU subtype holds capability flags.
+          const cpuSubtype = header.getUint32(8, littleEndian) & 0x00_ff_ff_ff;
+          if (cpuType !== arm64CpuType || cpuSubtype !== 0) {
+            throw new Error(
+              `${path} has no arm64 slice: CPU type 0x${cpuType.toString(16)}, subtype ${String(cpuSubtype)}`,
+            );
+          }
+        }
+      }),
+    );
+  }
   let count = 0;
-  const visit = async (path: string): Promise<void> => {
-    for (const entry of await readdir(path, { withFileTypes: true })) {
-      const child = resolve(path, entry.name);
-      if (entry.isDirectory()) {
-        // oxlint-disable-next-line no-await-in-loop -- Serial traversal avoids unbounded filesystem work.
-        await visit(child);
-      } else if (entry.isFile() && isMachObject(child)) {
-        const architectures = execFileSync('lipo', ['-archs', child], { encoding: 'utf8' }).trim().split(/\s+/u);
-        if (!architectures.includes('arm64')) {
-          throw new Error(`${child} has no arm64 slice: ${architectures.join(', ')}`);
-        }
-        if (architectures.includes('x86_64')) {
-          const output = `${child}.arm64`;
-          execFileSync('lipo', [child, '-thin', 'arm64', '-output', output]);
-          // oxlint-disable-next-line no-await-in-loop -- Each replacement follows its synchronous lipo operation.
-          await rename(output, child);
-          count += 1;
-        }
-      }
+  for (const path of universal) {
+    const architectures = execFileSync('lipo', ['-archs', path], { encoding: 'utf8' }).trim().split(/\s+/u);
+    if (!architectures.includes('arm64')) {
+      throw new Error(`${path} has no arm64 slice: ${architectures.join(', ')}`);
     }
-  };
-  await visit(root);
+    if (architectures.includes('x86_64')) {
+      const output = `${path}.arm64`;
+      execFileSync('lipo', [path, '-thin', 'arm64', '-output', output]);
+      // oxlint-disable-next-line no-await-in-loop -- Each replacement follows its synchronous lipo operation.
+      await rename(output, path);
+      count += 1;
+    }
+  }
   return count;
 };
 
@@ -171,14 +205,25 @@ const developerIdentity = (): string => {
   return identity;
 };
 
+/* Bundler and declaration source maps are build diagnostics. Other `.map` files are payload:
+ * replicad's kernel loads its `replicad.js-<hash>.map` asset at run time to map library frames. */
 const excludesBuildDiagnostics = (path: string): boolean =>
-  !path.endsWith('.map') && !/^tau-module-graph.*\.json$/u.test(basename(path));
+  !/\.(?:[cm]?[jt]s|css)\.map$|^tau-module-graph.*\.json$/u.test(basename(path));
 
-const copyRuntimePackage = async (name: string, source: string): Promise<void> => {
-  await cp(source, resolve(stageRoot, 'node_modules', name), {
-    recursive: true,
-    filter: (path) => !['node_modules', 'src'].includes(basename(path)) && excludesBuildDiagnostics(path),
-  });
+/**
+ * Stage one installed package without its sources, nested packages, build diagnostics or `unused` paths.
+ * @param name - Package name, which is also its directory under the staged `node_modules`.
+ * @param source - Installed package root.
+ * @param unused - Paths relative to `source` the packaged app never loads.
+ */
+const copyRuntimePackage = async (name: string, source: string, unused: readonly string[] = []): Promise<void> => {
+  const excluded = new Set(unused.map((path) => resolve(source, path)));
+  await copyTree(
+    source,
+    resolve(stageRoot, 'node_modules', name),
+    (path) =>
+      !['node_modules', 'src'].includes(basename(path)) && excludesBuildDiagnostics(path) && !excluded.has(path),
+  );
 };
 
 const openrscadEngine = await realpath(resolve(openrscadPluginModules, '@taulabs/openrscad-engine'));
@@ -244,17 +289,15 @@ const electron = await readJson<{ readonly version: string }>(
   resolve(desktopRoot, 'node_modules/electron/package.json'),
 );
 await Promise.all([
-  cp(resolve(desktopRoot, 'dist/main'), resolve(stageRoot, 'dist/main'), {
-    recursive: true,
-    filter: excludesBuildDiagnostics,
-  }),
-  cp(resolve(desktopRoot, 'dist/preload'), resolve(stageRoot, 'dist/preload'), {
-    recursive: true,
-    filter: excludesBuildDiagnostics,
-  }),
-  copyRuntimePackage('@taulabs/openrscad-engine', openrscadEngine),
+  copyTree(resolve(desktopRoot, 'dist/main'), resolve(stageRoot, 'dist/main'), excludesBuildDiagnostics),
+  copyTree(resolve(desktopRoot, 'dist/preload'), resolve(stageRoot, 'dist/preload'), excludesBuildDiagnostics),
+  /* The utilities import the engine through its `node` export (`dist/node.js`: addon, else `pkg/node`);
+   * only the `browser` export and the `./web` subpaths load `pkg/web`. */
+  copyRuntimePackage('@taulabs/openrscad-engine', openrscadEngine, ['pkg/web']),
   copyRuntimePackage('@taulabs/openrscad-engine-darwin-arm64', openrscadEngineDarwinArm64),
-  copyRuntimePackage('esbuild', esbuild),
+  /* `bin/esbuild` is install.js's copy of the platform binary for the CLI. The API in `lib/main.js`
+   * runs `ESBUILD_BINARY_PATH`, which the utilities point at the unpacked `@esbuild/darwin-arm64` binary. */
+  copyRuntimePackage('esbuild', esbuild, ['bin']),
   copyRuntimePackage('@esbuild/darwin-arm64', esbuildDarwinArm64),
   copyRuntimePackage('libassimp', libassimp),
   copyRuntimePackage('libassimp-darwin-arm64', libassimpDarwinArm64),
@@ -336,35 +379,16 @@ const resources = resolve(appPath, 'Contents/Resources');
 const plugins = resolve(appPath, 'Contents/PlugIns');
 await mkdir(resolve(resources, 'branding'), { recursive: true });
 await Promise.all([
-  cp(uiClientRoot, resolve(resources, 'ui/client'), { recursive: true, filter: excludesBuildDiagnostics }),
+  copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
   cp(resolve(desktopRoot, 'resources/icon.png'), resolve(resources, 'branding/icon.png')),
   cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
-  cp(resolve(pythonResourceRoot, 'darwin-arm64'), resolve(resources, 'python/darwin-arm64'), {
-    recursive: true,
-    verbatimSymlinks: true,
-  }),
-  cp(resolve(picoGkResourceRoot, 'darwin-arm64'), resolve(resources, 'picogk/darwin-arm64'), {
-    recursive: true,
-    verbatimSymlinks: true,
-  }),
-  ...(shipsGit
-    ? [
-        cp(gitResourceRoot, resolve(resources, 'git/darwin-arm64'), {
-          recursive: true,
-          verbatimSymlinks: true,
-        }),
-      ]
-    : []),
-  mkdir(plugins, { recursive: true }),
-]);
-await Promise.all(
-  extensions.map(async (extension) =>
-    cp(resolve(extensionRoot, extension), resolve(plugins, extension), {
-      recursive: true,
-      filter: excludesBuildDiagnostics,
-    }),
+  copyTree(resolve(pythonResourceRoot, 'darwin-arm64'), resolve(resources, 'python/darwin-arm64')),
+  copyTree(resolve(picoGkResourceRoot, 'darwin-arm64'), resolve(resources, 'picogk/darwin-arm64')),
+  ...(shipsGit ? [copyTree(gitResourceRoot, resolve(resources, 'git/darwin-arm64'))] : []),
+  ...extensions.map(async (extension) =>
+    copyTree(resolve(extensionRoot, extension), resolve(plugins, extension), excludesBuildDiagnostics),
   ),
-);
+]);
 console.log(`Removed Intel slices from ${String(await thinIntelSlices(appPath))} bundled Mach-O files`);
 
 const identity = release ? developerIdentity() : '-';
@@ -467,7 +491,9 @@ if (release) {
 }
 
 const zipPath = resolve(outputRoot, 'Tau-macos-arm64.zip');
-execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], { stdio: 'inherit' });
+if (zip) {
+  execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], { stdio: 'inherit' });
+}
 await rm(stageRoot, { recursive: true, force: true });
 console.log(`${release ? 'Signed and notarized' : unsigned ? 'Unsigned' : 'Ad-hoc signed'} Tau: ${appPath}`);
-console.log(`Distribution archive: ${zipPath}`);
+console.log(zip ? `Distribution archive: ${zipPath}` : 'No distribution archive; pass --zip to write one.');

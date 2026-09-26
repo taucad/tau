@@ -1,14 +1,59 @@
 /**
- * Purpose: Stage one npm package and its runtime dependency closure into a packaged app.
+ * Purpose: Stage one npm package and its runtime dependency closure into a packaged app, and copy
+ * the package's other trees, as APFS clones on macOS.
  * Why: The ACP adapters are spawned as `node <modulePath>` from the packaged app, so their
  * own imports must resolve from disk; the engine packages beside them have no dependencies.
  * Environment: Node with filesystem access to the workspace store and the staging directory.
- * Usage: import { copyRuntimeClosure } from './runtime-closure.mts'
+ * Usage: import { copyRuntimeClosure, copyTree } from './runtime-closure.mts'
  * Exit codes: n/a (library module).
  */
 
-import { cp, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { cp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
+/** Remove each path under `target` whose counterpart under `source` fails `keep`. */
+const prune = async (target: string, source: string, keep: (path: string) => boolean): Promise<void> => {
+  const entries = await readdir(target, { withFileTypes: true });
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (!keep(resolve(source, entry.name))) {
+        await rm(resolve(target, entry.name), { recursive: true, force: true });
+      } else if (entry.isDirectory()) {
+        await prune(resolve(target, entry.name), resolve(source, entry.name), keep);
+      }
+    }),
+  );
+};
+
+/**
+ * Copy a directory tree, keeping symlinks verbatim and only the source paths `keep` accepts.
+ *
+ * On macOS the copy is an APFS clone: `cp -c` uses clonefile(2) (a byte copy on
+ * a filesystem without clones), then the rejected paths are removed from the
+ * clone. Node's `COPYFILE_FICLONE` cannot do this: libuv 1.51 copies the bytes
+ * on macOS and `COPYFILE_FICLONE_FORCE` fails with ENOSYS. A clone also carries
+ * the source's extended attributes, which `fs.cp` drops.
+ * @param source - Directory to copy.
+ * @param target - Directory to create or merge into; its parent need not exist.
+ * @param keep - Predicate over source paths; a rejected directory is dropped whole.
+ */
+export const copyTree = async (source: string, target: string, keep?: (path: string) => boolean): Promise<void> => {
+  if (process.platform !== 'darwin') {
+    await cp(source, target, { recursive: true, verbatimSymlinks: true, ...(keep ? { filter: keep } : {}) });
+    return;
+  }
+  await mkdir(dirname(target), { recursive: true });
+  /* BSD `cp` by path: GNU coreutils earlier on PATH has no `-c`. The trailing
+   * slash copies the directory's contents, merging into an existing target as `fs.cp` does. */
+  await execFileAsync('/bin/cp', ['-c', '-R', `${source}/`, target]);
+  if (keep) {
+    await prune(target, source, keep);
+  }
+};
 
 /**
  * Stage GeoSpec's runtime-loaded native subpath; the engine itself is bundled.
@@ -23,8 +68,7 @@ export const copyGeoSpecNative = async (source: string, modulesRoot: string): Pr
     readonly version: string;
   };
   const target = resolve(modulesRoot, manifest.name);
-  await mkdir(target, { recursive: true });
-  await cp(resolve(source, 'native/opencascade/dist'), resolve(target, 'native'), { recursive: true });
+  await copyTree(resolve(source, 'native/opencascade/dist'), resolve(target, 'native'));
   await cp(resolve(source, 'LICENSE'), resolve(target, 'LICENSE'));
   await writeFile(
     resolve(target, 'package.json'),
@@ -104,13 +148,10 @@ export const copyRuntimeClosure = async (options: {
   const { modulesRoot, filter = (): boolean => true } = options;
   const stage = async (packageName: string, from: string, into: string): Promise<void> => {
     const target = resolve(into, packageName);
-    await cp(from, target, {
-      recursive: true,
-      /* `node_modules` is dropped because this function rebuilds it; `src` is
-       * dropped for the same reason the engine packages drop it — published
-       * packages run from their build output. */
-      filter: (path) => !['node_modules', 'src'].includes(basename(path)) && filter(path),
-    });
+    /* `node_modules` is dropped because this function rebuilds it; `src` is
+     * dropped for the same reason the engine packages drop it — published
+     * packages run from their build output. */
+    await copyTree(from, target, (path) => !['node_modules', 'src'].includes(basename(path)) && filter(path));
     for (const dependency of await runtimeDependencies(from)) {
       /* oxlint-disable no-await-in-loop -- Siblings would race on the same nested
        * directories; staging one dependency at a time keeps the layout decidable. */

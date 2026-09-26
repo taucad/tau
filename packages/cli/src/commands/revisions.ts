@@ -348,10 +348,26 @@ const saveCommand = defineCommand({
     try {
       const outcome = await revisions.save();
       if (args.json) {
-        await emit({ kind: 'revision-save', ok: outcome.status !== 'refused', ...outcome });
+        await emit({
+          kind: 'revision-save',
+          ok: outcome.status === 'saved' || outcome.status === 'unchanged',
+          ...outcome,
+        });
       }
       if (outcome.status === 'refused') {
         throw cliError('SAVE_REFUSED', outcome.reason, exitCodes.refused);
+      }
+      /* Neither is a refusal: the save may still land, so a script is told
+       * the outcome is unknown rather than that it failed. */
+      if (outcome.status === 'timedOut') {
+        throw cliError('SAVE_TIMED_OUT', outcome.reason, exitCodes.unknown);
+      }
+      if (outcome.status === 'saved' && outcome.backup === 'timedOut') {
+        throw cliError(
+          'BACKUP_TIMED_OUT',
+          `Saved ${outcome.line}. ${outcome.reason ?? 'The backup did not answer in time.'}`,
+          exitCodes.unknown,
+        );
       }
       if (args.json) {
         return;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectDraft7SchemaToParameterDeclaration } from '#json-schema-adapter.js';
+import { projectJsonSchemaToParameterDeclaration } from '#json-schema-adapter.js';
 import { ParameterAdmissionError } from '#manifest.js';
 
 const identity = {
@@ -7,9 +7,9 @@ const identity = {
   schemaName: 'ProducerParameters',
 } as const;
 
-describe('Draft-7 parameter declaration adapter', () => {
+describe('JSON Schema parameter declaration adapter', () => {
   it('should omit empty schema maps so parameterless producers remain valid', () => {
-    const declaration = projectDraft7SchemaToParameterDeclaration({
+    const declaration = projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults: {},
       schema: { type: 'object', properties: {}, definitions: {}, additionalProperties: false },
@@ -55,7 +55,7 @@ describe('Draft-7 parameter declaration adapter', () => {
     } as const;
     const defaults = { dimensions: { length: 10 }, samples: [1], duration: 1, count: 2 };
 
-    const declaration = projectDraft7SchemaToParameterDeclaration({ schema, defaults, ...identity });
+    const declaration = projectJsonSchemaToParameterDeclaration({ schema, defaults, ...identity });
 
     expect(declaration).toMatchObject({
       schema: {
@@ -95,7 +95,7 @@ describe('Draft-7 parameter declaration adapter', () => {
   });
 
   it('should preserve point reference bindings and equivalent Tau and OGC unit declarations', () => {
-    const declaration = projectDraft7SchemaToParameterDeclaration({
+    const declaration = projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults: { temperature: 20 },
       schema: {
@@ -125,7 +125,7 @@ describe('Draft-7 parameter declaration adapter', () => {
   });
 
   it('should retain referenced quantity semantics at the referencing instance pointer', () => {
-    const declaration = projectDraft7SchemaToParameterDeclaration({
+    const declaration = projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults: { value: 2 },
       schema: {
@@ -155,7 +155,7 @@ describe('Draft-7 parameter declaration adapter', () => {
       { $ref: reference, type: 'number', 'x-tau-unit': 'cm' },
     ]) {
       expect(() =>
-        projectDraft7SchemaToParameterDeclaration({
+        projectJsonSchemaToParameterDeclaration({
           ...identity,
           defaults: { value: 2 },
           schema: {
@@ -199,7 +199,7 @@ describe('Draft-7 parameter declaration adapter', () => {
         },
       },
     ]) {
-      expect(() => projectDraft7SchemaToParameterDeclaration({ ...identity, defaults: {}, schema })).toThrow(
+      expect(() => projectJsonSchemaToParameterDeclaration({ ...identity, defaults: {}, schema })).toThrow(
         'NATIVE_PROJECTION_UNSUPPORTED: percent-encoded bundled reference',
       );
     }
@@ -212,7 +212,7 @@ describe('Draft-7 parameter declaration adapter', () => {
       'x-tau-quantity-kind': 'http://qudt.org/vocab/quantitykind/Length',
       'x-tau-space': 'linear',
     } as const;
-    const declaration = projectDraft7SchemaToParameterDeclaration({
+    const declaration = projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults: { values: [1, 2] },
       schema: { type: 'object', properties: { values: { type: 'array', items: length } } },
@@ -237,7 +237,7 @@ describe('Draft-7 parameter declaration adapter', () => {
       'x-tau-quantity-kind': 'http://qudt.org/vocab/quantitykind/Length',
       'x-tau-space': 'linear',
     } as const;
-    const declaration = projectDraft7SchemaToParameterDeclaration({
+    const declaration = projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults: { mode: 'a', value: 1 },
       schema: {
@@ -264,7 +264,7 @@ describe('Draft-7 parameter declaration adapter', () => {
       'x-tau-space': 'linear',
     } as const;
     for (const schema of [{ type: 'object', definitions: { unused: length } }]) {
-      expect(() => projectDraft7SchemaToParameterDeclaration({ ...identity, defaults: {}, schema })).toThrow(
+      expect(() => projectJsonSchemaToParameterDeclaration({ ...identity, defaults: {}, schema })).toThrow(
         'NATIVE_PROJECTION_UNSUPPORTED',
       );
     }
@@ -272,7 +272,7 @@ describe('Draft-7 parameter declaration adapter', () => {
 
   it('should preserve object-valued schema payloads without interpreting their keys', () => {
     const literal = { type: 'number', 'x-tau-unit': 'literal', nested: { type: 'integer' } };
-    const declaration = projectDraft7SchemaToParameterDeclaration({
+    const declaration = projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults: {},
       schema: {
@@ -294,14 +294,14 @@ describe('Draft-7 parameter declaration adapter', () => {
 
   it('should reject invalid, conflicting, and unsupported Draft-7 declarations', () => {
     expect(() =>
-      projectDraft7SchemaToParameterDeclaration({
+      projectJsonSchemaToParameterDeclaration({
         ...identity,
         defaults: {},
         schema: { type: 'number', 'x-ogc-unit': 'mm', 'x-ogc-unitLang': 'ucum' },
       }),
     ).toThrow('INVALID_QUANTITY');
     expect(() =>
-      projectDraft7SchemaToParameterDeclaration({
+      projectJsonSchemaToParameterDeclaration({
         ...identity,
         defaults: {},
         schema: {
@@ -313,14 +313,14 @@ describe('Draft-7 parameter declaration adapter', () => {
       }),
     ).toThrow(/^METADATA_CONFLICT at \/x-ogc-unit: conflicting Tau and OGC unit annotations/u);
     expect(() =>
-      projectDraft7SchemaToParameterDeclaration({
+      projectJsonSchemaToParameterDeclaration({
         ...identity,
         defaults: {},
         schema: { type: 'object', dependencies: { mode: { properties: { value: { type: 'number' } } } } },
       }),
     ).toThrow('schema-valued Draft-7 dependencies');
     expect(() =>
-      projectDraft7SchemaToParameterDeclaration({
+      projectJsonSchemaToParameterDeclaration({
         ...identity,
         defaults: {},
         schema: { type: 'object', if: { properties: { mode: { const: 'strict' } } } },
@@ -334,7 +334,7 @@ describe('Draft-7 parameter declaration adapter', () => {
     const schemaBefore = structuredClone(schema);
     const defaultsBefore = structuredClone(defaults);
 
-    const declaration = projectDraft7SchemaToParameterDeclaration({ schema, defaults, ...identity });
+    const declaration = projectJsonSchemaToParameterDeclaration({ schema, defaults, ...identity });
 
     expect(schema).toEqual(schemaBefore);
     expect(defaults).toEqual(defaultsBefore);
@@ -352,7 +352,7 @@ const lengthKind = 'http://qudt.org/vocab/quantitykind/Length';
 // The refusal text: an admission message, followed by carrier diagnostics when the carrier refused.
 const refusal = (schema: Readonly<Record<string, unknown>>, defaults: Readonly<Record<string, unknown>> = {}) => {
   try {
-    projectDraft7SchemaToParameterDeclaration({ ...identity, defaults, schema });
+    projectJsonSchemaToParameterDeclaration({ ...identity, defaults, schema });
   } catch (error) {
     const details = error instanceof ParameterAdmissionError ? error.diagnostics.map((item) => item.message) : [];
     return [error instanceof Error ? error.message : String(error), ...details].join('; ');
@@ -382,13 +382,13 @@ describe('JSON Schema dialects', () => {
 
   it('should admit a 2020-12 document into the same declaration as its Draft-07 twin (Requirement 1)', () => {
     const defaults = { width: 2, count: 1 };
-    const fromDraft07 = projectDraft7SchemaToParameterDeclaration({
+    const fromDraft07 = projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults,
       schema: bracket(draft07, 'definitions'),
     });
     // Requirement 1 B: an HTTP $id and an object root; the caller-owned schemaId still names the carrier.
-    const from202012 = projectDraft7SchemaToParameterDeclaration({
+    const from202012 = projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults,
       schema: { ...bracket(draft202012, '$defs'), $id: 'https://parameters.tau.test/bracket' },
@@ -449,7 +449,7 @@ describe('JSON Schema dialects', () => {
   });
 
   it('should carry 2020-12 dependentRequired into the carrier', () => {
-    const declaration = projectDraft7SchemaToParameterDeclaration({
+    const declaration = projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults: {},
       schema: {
@@ -469,7 +469,7 @@ describe('JSON Schema dialects', () => {
 
 describe('OGC numeric format widths (Recommendation 1 G–L)', () => {
   const widths = (dialect: string) =>
-    projectDraft7SchemaToParameterDeclaration({
+    projectJsonSchemaToParameterDeclaration({
       ...identity,
       defaults: {},
       schema: {
@@ -542,7 +542,7 @@ describe('OGC quantity keywords (Requirements 3, 7 and 8)', () => {
     properties: { depth: { type: 'number', ...claims } },
   });
   const project = (schema: Readonly<Record<string, unknown>>) =>
-    projectDraft7SchemaToParameterDeclaration({ ...identity, defaults: {}, schema });
+    projectJsonSchemaToParameterDeclaration({ ...identity, defaults: {}, schema });
 
   // Requirement 7: UCUM is the unit language when x-ogc-unitLang is absent.
   it('should read x-ogc-unit alone as UCUM (Requirement 7)', () => {

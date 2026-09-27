@@ -25,6 +25,49 @@ export type PicovoxelArtifact = 'serial' | 'multi';
 const laneSchema = z.enum(picovoxelLanes);
 
 /**
+ * The multi-threaded build's linear memory (`INITIAL_MEMORY=256MB`, `MAXIMUM_MEMORY=4GB`, shared), in
+ * 64 KiB pages. A shared memory reserves its maximum up front.
+ */
+const multiMemoryPages = { initial: 4096, maximum: 65_536 } as const;
+
+let sharedMemoryProbe: { readonly reason: string | undefined } | undefined;
+
+/**
+ * Probe once per realm whether the multi build's shared memory can be reserved at all (D21).
+ *
+ * Cross-origin isolation is necessary but not sufficient: a device short of address space refuses
+ * the 4 GiB reservation, and the multi build would then fail to start on every render.
+ *
+ * @returns The refusal reason, or `undefined` when the reservation succeeds.
+ */
+const probeSharedMemory = (): string | undefined => {
+  if (!sharedMemoryProbe) {
+    try {
+      // Dropped at once; only whether the engine grants the reservation matters.
+      void new WebAssembly.Memory({ ...multiMemoryPages, shared: true });
+      sharedMemoryProbe = { reason: undefined };
+    } catch (error) {
+      sharedMemoryProbe = {
+        reason: `shared-memory-reservation-failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+  return sharedMemoryProbe.reason;
+};
+
+/**
+ * Why the multi-threaded build cannot run in this realm: not cross-origin isolated, or its shared
+ * memory cannot be reserved. A capability probe before admission, never a verdict retry.
+ *
+ * @returns The reason, or `undefined` when the multi build can run.
+ * @public
+ */
+export const multiUnavailableReason = (): string | undefined => {
+  const isolation = getIsolationStatus();
+  return isolation.crossOriginIsolated ? probeSharedMemory() : isolation.reason;
+};
+
+/**
  * Resolve the host's `wasm` option to the artifact the fast lane uses.
  *
  * Runs where `optionsSchema` is parsed — inside the kernel worker — so the validated option, and
@@ -35,7 +78,7 @@ const laneSchema = z.enum(picovoxelLanes);
  * @returns The concrete artifact.
  */
 const resolveWasmArtifact = (wasm: 'auto' | PicovoxelArtifact): PicovoxelArtifact =>
-  wasm === 'auto' ? (getIsolationStatus().crossOriginIsolated ? 'multi' : 'serial') : wasm;
+  wasm === 'auto' ? (multiUnavailableReason() === undefined ? 'multi' : 'serial') : wasm;
 
 /**
  * PicoVoxel kernel initialization options.

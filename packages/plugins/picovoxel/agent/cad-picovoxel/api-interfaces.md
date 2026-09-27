@@ -1,6 +1,6 @@
 # picovoxel — Interfaces
 
-47 top-level symbols. Signatures are verbatim typescript.
+50 top-level symbols. Signatures are verbatim typescript.
 
 AddBeamOptions: interface AddBeamOptions
 
@@ -25,13 +25,23 @@ Bounds: interface Bounds
 
   max: Vec3
 
-CreatePicoOptions: interface CreatePicoOptions
+// `createPico` options
+CreatePicoOptions: interface CreatePicoOptions extends CreatePicoRuntimeOptions, CreatePicoSessionOptions
 
-  // Voxel edge length in millimetres
-  voxelSize: number
+// Options that shape a runtime
+CreatePicoRuntimeOptions: interface CreatePicoRuntimeOptions
 
   // Emscripten Module overrides (e.g
   wasm: object
+
+  // A compiled `WebAssembly.Module` of this entry's wasm (`pico.wasm` for the base entry, `pico-multi.wasm` for `picovoxel/multi`)
+  wasmModule: WebAssembly.Module
+
+// Options that shape a session
+CreatePicoSessionOptions: interface CreatePicoSessionOptions
+
+  // Voxel edge length in millimetres
+  voxelSize: number
 
   // Native-memory warning threshold in bytes (default 1 GiB)
   memoryWarningBytes: number
@@ -252,6 +262,17 @@ Pico: interface Pico
 
   [Symbol.dispose](): void;
 
+// One instantiated wasm module — plus, on `picovoxel/multi`, its warm pthread pool — that any number of sessions share
+PicoRuntime: interface PicoRuntime
+
+  // Opens a session on this runtime
+  createPico(options?: CreatePicoSessionOptions): Promise<Pico>;
+
+  // Disposes every open session, then terminates the pthread pool
+  dispose(): void;
+
+  [Symbol.dispose](): void;
+
 PolyLine: interface PolyLine
 
   // Appends one vertex
@@ -361,7 +382,7 @@ ToStlOptions: interface ToStlOptions
   // Offset in mm, applied first
   offset: Vec3
 
-  // §14.1 — acknowledges exporting `'fast'`-provenance geometry across the L0 boundary
+  // §14.1 — acknowledges, for this one export, that the geometry has non-exact provenance
   acceptLane: 'fast'
 
 VdbFile: interface VdbFile
@@ -769,6 +790,9 @@ Slice: interface Slice
 
   contours: SliceContour[]
 
+  // §14.1 value-class provenance of the sliced voxels (absent = `'exact'`)
+  lane: 'exact' | 'fast'
+
 SliceContour: interface SliceContour
 
   // Flat [x0, y0, x1, y1, …] loop in mm
@@ -786,6 +810,9 @@ SliceStack: interface SliceStack
       min: readonly [number, number, number];
       max: readonly [number, number, number];
     }
+
+  // §14.1 value-class provenance (absent = `'exact'`)
+  lane: 'exact' | 'fast'
 
 SliceVoxelsOptions: interface SliceVoxelsOptions
 

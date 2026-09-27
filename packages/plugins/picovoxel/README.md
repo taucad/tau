@@ -59,6 +59,21 @@ serial build, so exact output is identical in every host.
 
 - STL: an explicit `lane: 'fast'` export writes a `LANE=fast` STL header.
 - GLB: a fast-lane GLB export is refused with a typed `REPRESENTATION_UNSUPPORTED` issue.
+- An exact build that reads fast-lane data (a `LANE=fast` STL or `.vdb`, or a `fastRenorm: true`
+  offset) is refused with a typed `REPRESENTATION_UNSUPPORTED` issue naming the remedy.
+- Exactly-zero-area triangles are dropped from every snapshot; area, volume and every other triangle
+  are unchanged.
+
+### Runtime lifetime
+
+Each kernel worker compiles and instantiates each build once and keeps one warm PicoVoxel runtime per
+build (the multi build's thread pool included); every render opens a fresh session on it and disposes
+it, together with any session the model created itself, when the render ends. A runtime is replaced
+after a WebAssembly trap or once its heap passes 1.5 GiB. Renders are cancelled cooperatively: a
+superseded render stops at its next PicoVoxel call.
+
+If the multi build runs out of memory (or cannot start), the render is rebuilt once on the serial build
+and the result carries a `RESOURCE_LIMIT` warning naming the remedy (a coarser `voxelSize`).
 
 ### WebAssembly build
 
@@ -69,7 +84,8 @@ picovoxel({ kernels: { default: { wasm: 'auto' } } }); // the default
 ```
 
 `'auto'` resolves in the worker: the multi-threaded build when the realm is cross-origin isolated with
-`SharedArrayBuffer`, otherwise serial. Node reports isolated, so `'auto'` selects multi there; pin
+`SharedArrayBuffer` and can reserve the build's shared memory, otherwise serial with the reason
+logged. Node reports isolated, so `'auto'` selects multi there; pin
 `wasm: 'serial'` for single-threaded, deterministic headless hosts. An explicit `'multi'` that cannot
 run fails the fast build with a `KERNEL_CAPABILITY_MISSING` issue rather than silently downgrading;
 exact builds still work. GLB is normalized through Tau's geometry pipeline; STL is emitted by
@@ -77,20 +93,22 @@ PicoVoxel's pure serializer.
 
 ## Local candidate provenance
 
-| Field            | Value                                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------- |
-| Picovoxel commit | `802d86da6e6120a472b045fddb306ce0dfa5d5f8`                                                        |
-| Version          | `picovoxel@0.1.0`                                                                                 |
-| Tarball          | `vendor/picovoxel-0.1.0.tgz`                                                                      |
-| Files            | 39                                                                                                |
-| Compressed size  | 2,751,090 bytes                                                                                   |
-| Unpacked size    | 12,842,741 bytes                                                                                  |
-| SHA-1            | `7587a19df4f358559302aaa78619c7b54fe5173a`                                                        |
-| SHA-256          | `1fc2c8ddbea4034d52a8502198fc86fca104bb42ef89065b4103cbfa98a1aaf0`                                |
-| Integrity        | `sha512-OeU3Lrfg+BdwVmlBbgGRRLBGd7kNRJYAI29yuU8fh98j1A6WV/NJYRYZwyXaMkbC2XARtIyvO/i+Odt9Pc6Vfg==` |
+| Field           | Value                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------- |
+| Picovoxel base  | `6779245` (local `webgpu`) + `lanes/ratified-menu` `add8e7b` + `perf/runtime-reuse` `a36e41d`     |
+| Version         | `picovoxel@0.1.0`                                                                                 |
+| Tarball         | `vendor/picovoxel-0.1.0.tgz`                                                                      |
+| Files           | 40                                                                                                |
+| Compressed size | 2,781,792 bytes                                                                                   |
+| Unpacked size   | 12,868,529 bytes                                                                                  |
+| SHA-1           | `dc4f069d76ead5cf4f510d6304160aaf309ae964`                                                        |
+| SHA-256         | `ab1ff8445121882be5ca82249ecf87fc9c14cd43b4a8d683169f3204b4c85c25`                                |
+| Integrity       | `sha512-LTwo10Gw9vlcLPoFnxBsLCMreK48CEfBxAo1k4pBuZKM/EEi9ZzwGm18WpqYi68xuPpuJSIaJbUrNr9OKt8cgw==` |
 
-The upstream full suite passes 504 tests in 57 files with 100% statement, branch, function, and line
-coverage. The tarball inventory comes from `npm pack --dry-run --json --ignore-scripts` at that commit.
+The candidate is packed from a local, unpushed merge branch (`integration/local-tarball`) that
+combines the ratified lane menu and the shared-runtime API ahead of their pull requests; both
+WebAssembly artifacts are byte-identical to the previous candidate's. The registry release replaces
+it. The merged branches' own suites pass at 100% statement, branch, function, and line coverage.
 
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.

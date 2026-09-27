@@ -1,9 +1,12 @@
 # picovoxel — Functions
 
-14 top-level symbols. Signatures are verbatim typescript.
+15 top-level symbols. Signatures are verbatim typescript.
 
 // Creates a single-threaded PicoGK session
 declare function createPico(options?: CreatePicoOptions): Promise<Pico>;
+
+// Creates a single-threaded runtime
+declare function createPicoRuntime(options?: CreatePicoRuntimeOptions): Promise<PicoRuntime>;
 
 // SG15 — the empty-bounds sentinel the ABI structs use (`BBox3()` default
 declare function emptyBounds(): Bounds;
@@ -12,7 +15,7 @@ declare function emptyBounds(): Bounds;
 declare function isEmptyBounds(bounds: Bounds): boolean;
 
 // Serialises indexed geometry to binary STL bytes (deindexed, as the format is)
-declare function meshToStlBytes(vertices: Float32Array, triangles: Uint32Array, options?: ToStlOptions, lane?: 'fast'): Uint8Array;
+declare function meshToStlBytes(vertices: Float32Array, triangles: Uint32Array, options?: ToStlOptions, lane?: 'exact' | 'fast'): Uint8Array<ArrayBuffer>;
 
 // Builds a VectorField of surface normals from a voxel field's narrow band (C# `SurfaceNormalFieldExtractor.oExtract`)
 declare function surfaceNormalFieldExtractor(pk: Pico, voxels: Voxels, options?: SurfaceNormalFieldOptions): VectorField;

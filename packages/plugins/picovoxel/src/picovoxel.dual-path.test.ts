@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { esbuild } from '@taucad/esbuild';
+import { geometryCache } from '@taucad/middleware';
 import { createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
-import type { CreatePicoOptions } from 'picovoxel';
+import type { CreatePicoOptions, CreatePicoRuntimeOptions } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
 
 import { picovoxel } from '#index.js';
@@ -13,9 +14,15 @@ vi.mock('picovoxel', async (importOriginal) => {
   const actual = await importOriginal<typeof PicovoxelModule>();
   return {
     ...actual,
-    async createPico(options?: CreatePicoOptions) {
-      sessions.lanes.push(options?.lane);
-      return actual.createPico(options);
+    async createPicoRuntime(options?: CreatePicoRuntimeOptions) {
+      const runtime = await actual.createPicoRuntime(options);
+      const createSession = runtime.createPico.bind(runtime);
+      return Object.assign(runtime, {
+        async createPico(sessionOptions?: CreatePicoOptions) {
+          sessions.lanes.push(sessionOptions?.lane);
+          return createSession(sessionOptions);
+        },
+      });
     },
   };
 });
@@ -102,6 +109,27 @@ describe('PicoVoxel dual path through the runtime', () => {
 
       expect(sessions.lanes).toEqual(['fast', 'exact']);
       expect(fast.data).not.toEqual(exact.data);
+    } finally {
+      await client.shutdown();
+    }
+  }, 120_000);
+
+  it('should serve a repeated lane from the geometry cache and keep the two lanes apart (DP2)', async () => {
+    const client = createTestRuntimeClient({
+      runtime: defineRuntime({
+        plugins: [picovoxel({ kernels: { default: { wasm: 'serial' } } }), esbuild()],
+        middleware: [geometryCache()],
+      }),
+      files: { 'main.ts': model },
+    });
+    try {
+      const fast = await render(client);
+      const exact = await render(client, 'exact');
+      const fastAgain = await render(client);
+      const exactAgain = await render(client, 'exact');
+
+      expect(sessions.lanes).toEqual(['fast', 'exact']);
+      expect([fastAgain.data, exactAgain.data]).toEqual([fast.data, exact.data]);
     } finally {
       await client.shutdown();
     }

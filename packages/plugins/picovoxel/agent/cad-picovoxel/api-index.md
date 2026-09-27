@@ -1,6 +1,6 @@
 # picovoxel API index
 
-picovoxel 0.1.0-beta.0 · 705 symbols · extracted by TypeScript 5.9.3.
+picovoxel 0.1.0-beta.0 · 715 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -16,15 +16,18 @@ AddBeamOptions (interface) [6 members]
 Bounds (interface) [2 members] — An axis-aligned box in millimetres
   Bounds.min (property)
   Bounds.max (property)
-CreatePicoOptions (interface) [8 members]
-  CreatePicoOptions.voxelSize (property) — Voxel edge length in millimetres
-  CreatePicoOptions.wasm (property) — Emscripten Module overrides (e.g
-  CreatePicoOptions.memoryWarningBytes (property) — Native-memory warning threshold in bytes (default 1 GiB)
-  CreatePicoOptions.lane (property) — SKv2-0 V0.5 (§14.1) — the named lane bundle
-  CreatePicoOptions.fastRenorm (property) — Session-wide default for the offset family's `fastRenorm` (SK-0.8 first-order renormalization…
-  CreatePicoOptions.serialLattice (property) — SKv2-0 V0.6 — routes lattice rendering down the serial C#-identical…
-  CreatePicoOptions.registry (property)
-  CreatePicoOptions.now (property)
+CreatePicoOptions (interface) — `createPico` options
+CreatePicoRuntimeOptions (interface) [2 members] — Options that shape a runtime
+  CreatePicoRuntimeOptions.wasm (property) — Emscripten Module overrides (e.g
+  CreatePicoRuntimeOptions.wasmModule (property) — A compiled `WebAssembly.Module` of this entry's wasm (`pico.wasm` for the…
+CreatePicoSessionOptions (interface) [7 members] — Options that shape a session
+  CreatePicoSessionOptions.voxelSize (property) — Voxel edge length in millimetres
+  CreatePicoSessionOptions.memoryWarningBytes (property) — Native-memory warning threshold in bytes (default 1 GiB)
+  CreatePicoSessionOptions.lane (property) — SKv2-0 V0.5 (§14.1) — the named lane bundle
+  CreatePicoSessionOptions.fastRenorm (property) — Session-wide default for the offset family's `fastRenorm` (SK-0.8 first-order renormalization…
+  CreatePicoSessionOptions.serialLattice (property) — SKv2-0 V0.6 — routes lattice rendering down the serial C#-identical…
+  CreatePicoSessionOptions.registry (property)
+  CreatePicoSessionOptions.now (property)
 FromStlOptions (interface) [3 members]
   FromStlOptions.unit (property) — 'auto' honours the UNITS= header, defaulting to mm
   FromStlOptions.scale (property) — Post-scale applied after unit conversion
@@ -99,6 +102,10 @@ Pico (interface) [24 members]
   Pico.handle (property) — §10 escape hatch
   Pico.dispose (method) — Deterministic teardown
   Pico.[Symbol.dispose] (method)
+PicoRuntime (interface) [3 members] — One instantiated wasm module — plus, on `picovoxel/multi`, its warm…
+  PicoRuntime.createPico (method) — Opens a session on this runtime
+  PicoRuntime.dispose (method) — Disposes every open session, then terminates the pthread pool
+  PicoRuntime.[Symbol.dispose] (method)
 PolyLine (interface) [10 members]
   PolyLine.addVertex (method) — Appends one vertex
   PolyLine.addVertices (method) — Appends many vertices
@@ -139,7 +146,7 @@ ToStlOptions (interface) [4 members]
   ToStlOptions.unit (property)
   ToStlOptions.scale (property) — Scale applied while still in mm, after offset
   ToStlOptions.offset (property) — Offset in mm, applied first
-  ToStlOptions.acceptLane (property) — §14.1 — acknowledges exporting `'fast'`-provenance geometry across the L0 boundary
+  ToStlOptions.acceptLane (property) — §14.1 — acknowledges, for this one export, that the geometry…
 VdbFile (interface) [10 members]
   VdbFile.fieldCount (property)
   VdbFile.fields (method) — Name + type of every field, index order
@@ -277,15 +284,17 @@ SdfImage (interface) [3 members]
   SdfImage.width (property)
   SdfImage.height (property)
   SdfImage.data (property) — Row-major samples, negative inside
-Slice (interface) [2 members]
+Slice (interface) [3 members]
   Slice.z (property) — Layer height position in mm (first layer at one layerHeight,…
   Slice.contours (property)
+  Slice.lane (property) — §14.1 value-class provenance of the sliced voxels (absent = `'exact'`)
 SliceContour (interface) [2 members]
   SliceContour.points (property) — Flat [x0, y0, x1, y1, …] loop in mm
   SliceContour.winding (property) — Solid boundaries are CCW, holes CW (upstream contract)
-SliceStack (interface) [2 members]
+SliceStack (interface) [3 members]
   SliceStack.slices (property)
   SliceStack.bounds (property) — XY bounds over every contour + Z from first/last layer
+  SliceStack.lane (property) — §14.1 value-class provenance (absent = `'exact'`)
 SliceVoxelsOptions (interface) [3 members]
   SliceVoxelsOptions.layerHeight (property) — Layer height in mm
   SliceVoxelsOptions.useAbsoluteXY (property) — Keep absolute XY coordinates instead of the bbox-relative default
@@ -687,6 +696,7 @@ TangentialControlSpline (class) [3 members] — Cubic-feel connector between two
 ## Functions — `api-functions.md`
 
 createPico (function) — Creates a single-threaded PicoGK session
+createPicoRuntime (function) — Creates a single-threaded runtime
 emptyBounds (function) — SG15 — the empty-bounds sentinel the ABI structs use (`BBox3()`…
 isEmptyBounds (function) — True for the SG15 sentinel (an empty mesh/field produced it)
 meshToStlBytes (function) — Serialises indexed geometry to binary STL bytes (deindexed, as the…

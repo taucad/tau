@@ -98,6 +98,22 @@ const codexAvailable = ((): boolean => {
   }
 })();
 
+/**
+ * One captured view's pixels as a data URL.
+ *
+ * An in-app capture carries them inline; one an external agent took through
+ * Tau's MCP endpoint was saved as a chat attachment and names its file instead.
+ *
+ * @param image - A captured view, inline or saved.
+ * @returns The image as a `data:` URL.
+ */
+const captureDataUrl = (
+  image: { readonly dataUrl: string } | { readonly mimeType: string; readonly absolutePath: string },
+): string =>
+  'dataUrl' in image
+    ? image.dataUrl
+    : `data:${image.mimeType};base64,${readFileSync(image.absolutePath).toString('base64')}`;
+
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
 let seededEmail: string | undefined;
@@ -191,7 +207,7 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     const capture = screenshotOutputSchema.parse(
       toolResult(events, { runId, toolName: 'screenshot', targetFile: 'main.scad' }),
     );
-    expect(capture.images.every((image) => image.dataUrl.startsWith('data:image/'))).toBe(true);
+    expect(capture.images.every((image) => captureDataUrl(image).startsWith('data:image/'))).toBe(true);
     await expect
       .poll(() => finalizedRevisions(eventsPathNow()).at(-1)?.changedPaths.includes('main.scad'), { timeout: 60_000 })
       .toBe(true);
@@ -282,9 +298,10 @@ it('conformance other volume and envelope', async () => {
           toolResult(current, { runId: currentRun, toolName: 'test_model', targetFile: 'conformance.geospec.ts' }),
         );
         expect(tests).toMatchObject({ passed: 2, total: 2, failures: [] });
-        return screenshotOutputSchema.parse(
-          toolResult(current, { runId: currentRun, toolName: 'screenshot', targetFile }),
-        ).images[0]!.dataUrl;
+        return captureDataUrl(
+          screenshotOutputSchema.parse(toolResult(current, { runId: currentRun, toolName: 'screenshot', targetFile }))
+            .images[0]!,
+        );
       });
       expect(captures[0]).not.toBe(captures[1]);
       if (previousCapture !== undefined) {
@@ -444,7 +461,7 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
           );
         }
         return { colors: colors.size, height, luminanceRange: maximum - minimum, opaque, width };
-      }, image.dataUrl);
+      }, captureDataUrl(image));
       expect(pixels.width).toBeGreaterThan(100);
       expect(pixels.height).toBeGreaterThan(100);
       expect(pixels.opaque).toBeGreaterThan(1000);

@@ -39,8 +39,8 @@ export type PrinterSceneProps = Readonly<{
   geometry: PrinterGeometry;
   store: PlaybackStore;
   theme: 'light' | 'dark';
-  /** `#RRGGBB` of the filament the walls take. */
-  filamentColor: string;
+  /** `#RRGGBB` per tool: entry *i* is the filament whose colour tool `T<i>`'s walls and infill take. */
+  filamentColors: readonly string[];
   chamberLight: 'on' | 'off' | 'unknown';
   /** No glow pulse; autoplay is the viewer's decision. */
   isReducedMotion: boolean;
@@ -186,12 +186,12 @@ const buildMachine = ({
   geometry,
   program,
   theme,
-  filamentColor,
+  filamentColors,
   isWholePrinter,
   grouping,
 }: Pick<
   PrinterSceneProps,
-  'geometry' | 'program' | 'theme' | 'filamentColor' | 'isWholePrinter' | 'grouping'
+  'geometry' | 'program' | 'theme' | 'filamentColors' | 'isWholePrinter' | 'grouping'
 >): MachineParts => {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
@@ -357,7 +357,8 @@ const buildMachine = ({
       track(plateGrid(geometry, own(new THREE.LineBasicMaterial({ color: printerBody.plateGrid[theme] })))),
     );
   }
-  const reveal = createToolpathReveal(program, createToolpathPalette(filamentColor, theme), grouping);
+  const palettes = filamentColors.map((color) => createToolpathPalette(color, theme));
+  const reveal = createToolpathReveal(program, palettes, grouping);
   plateGroup.add(reveal.lines, reveal.trail);
   root.add(plateGroup);
 
@@ -586,7 +587,7 @@ function PrinterObjects({
   geometry,
   store,
   theme,
-  filamentColor,
+  filamentColors,
   chamberLight,
   isReducedMotion,
   liveNozzleTarget,
@@ -599,8 +600,8 @@ function PrinterObjects({
   const { invalidate, scene } = useThree();
   const [eye] = useState(() => new THREE.Vector3());
   const machine = useMemo(
-    () => buildMachine({ geometry, program, theme, filamentColor, isWholePrinter, grouping }),
-    [geometry, program, theme, filamentColor, isWholePrinter, grouping],
+    () => buildMachine({ geometry, program, theme, filamentColors, isWholePrinter, grouping }),
+    [geometry, program, theme, filamentColors, isWholePrinter, grouping],
   );
   useEffect(
     () => () => {

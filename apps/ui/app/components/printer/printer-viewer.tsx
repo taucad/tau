@@ -58,6 +58,7 @@ import { PrinterScene } from '#components/printer/printer-scene.js';
 import {
   createToolpathPalette,
   defaultHiddenToolpathGroups,
+  extrudingTools,
   groupToolpath,
   toolpathGroupLabels,
   toolpathGroupSwatchKind,
@@ -82,7 +83,7 @@ type ProgramResource =
       kind: 'ready';
       program: ToolpathProgram;
       slicedPlate: PrinterPlateModel | undefined;
-      filamentColor: string | undefined;
+      filamentColors: readonly string[];
       digest: string | undefined;
     }>
   | Readonly<{ kind: 'error'; message: string }>;
@@ -139,12 +140,12 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
     const load = async (): Promise<void> => {
       try {
         const bytes = await readAll();
-        const { program, slicedPlate, filamentColor } = loadPrinterProgram(bytes, kind);
+        const { program, slicedPlate, filamentColors } = loadPrinterProgram(bytes, kind);
         // The print request ledger names artifacts by digest; Live mode follows a run only from its own bytes.
         // WebCrypto needs a secure context: without one (a LAN address over http) Live mode stays off.
         const digest = await digestBytes(bytes).catch(() => undefined);
         if (active) {
-          setResource({ kind: 'ready', program, slicedPlate, filamentColor, digest });
+          setResource({ kind: 'ready', program, slicedPlate, filamentColors, digest });
         }
       } catch (error) {
         if (active) {
@@ -225,7 +226,7 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
       <PrinterSimulation
         name={name}
         program={resource.program}
-        slicedFilamentColor={resource.filamentColor}
+        slicedFilamentColors={resource.filamentColors}
         digest={resource.digest}
         frameRequest={frameRequest}
         isWholePrinter={isWholePrinter}
@@ -248,16 +249,40 @@ const usePrinterGeometry = (live: PrinterLiveState | undefined) => {
   return { manifest, geometry };
 };
 
-/** The first known filament colour, in priority order, and each filter group's colour as the scene draws it. */
-const useToolpathColors = (filaments: ReadonlyArray<string | undefined>, theme: 'light' | 'dark') => {
-  const filamentColor = filaments.find((color) => color !== undefined) ?? printerAccent;
-  // The legend swatches read the scene's own palette, so they match the drawn toolpath.
-  const groupColors = useMemo(() => {
-    const palette = createToolpathPalette(filamentColor, theme);
-    return toolpathGroups.map((group) => `#${palette[toolpathGroupSwatchKind[group]].getHexString()}`);
-  }, [filamentColor, theme]);
-  return { filamentColor, groupColors };
-};
+/**
+ * Each tool's filament colour, each filter group's colours as the scene draws them, and the filaments the
+ * legend lists. A tool the file records no colour for takes the colour a file without any takes: the loaded
+ * spool's, else the accent. A program that prints with one filament lists none.
+ *
+ * @param colours - `recorded`: `#RRGGBB` per filament the file records, in filament order; `loaded`: the followed
+ * machine's loaded spool colour; `tools`: the tools the program extrudes with, ascending; `theme`: the resolved theme.
+ * @returns The colour per tool (one at least), per group and per listed filament.
+ */
+const useToolpathColors = ({
+  recorded,
+  loaded,
+  tools,
+  theme,
+}: Readonly<{
+  recorded: readonly string[];
+  loaded: string | undefined;
+  tools: readonly number[];
+  theme: 'light' | 'dark';
+}>) =>
+  useMemo(() => {
+    const fallback = loaded ?? printerAccent;
+    const toolColors = Array.from(
+      { length: Math.max(1, ...tools.map((tool) => tool + 1)) },
+      (_, tool) => recorded[tool] ?? fallback,
+    );
+    // The legend swatches read the scene's own palettes, so they match the drawn toolpath.
+    const palettes = (tools.length > 0 ? tools : [0]).map((tool) => createToolpathPalette(toolColors[tool]!, theme));
+    const groupColors = toolpathGroups.map((group) =>
+      palettes.map((palette) => `#${palette[toolpathGroupSwatchKind[group]].getHexString()}`),
+    );
+    const filaments = tools.length > 1 ? tools.map((tool) => ({ tool, color: toolColors[tool]! })) : [];
+    return { toolColors, groupColors, filaments };
+  }, [recorded, loaded, tools, theme]);
 
 /**
  * The G-code filter's state: every segment's group, and the groups hidden,
@@ -321,7 +346,7 @@ const useLivePlayback = (
 function PrinterSimulation({
   name,
   program,
-  slicedFilamentColor,
+  slicedFilamentColors,
   digest,
   frameRequest,
   isWholePrinter,
@@ -329,8 +354,8 @@ function PrinterSimulation({
 }: Readonly<{
   name: string;
   program: ToolpathProgram;
-  /** The colour the file was sliced with, which the model's own colour sets. */
-  slicedFilamentColor: string | undefined;
+  /** The colours the file was sliced with, in filament order, which the model's own colours set. */
+  slicedFilamentColors: readonly string[];
   digest: string | undefined;
   frameRequest: number;
   isWholePrinter: boolean;
@@ -348,7 +373,13 @@ function PrinterSimulation({
   const prefix = useMemo(() => createExtrusionPrefix(program), [program]);
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const { grouping, hiddenGroups, handleGroupShown } = useToolpathFilter(program);
-  const { filamentColor, groupColors } = useToolpathColors([slicedFilamentColor, live?.filamentColor], theme);
+  const tools = useMemo(() => extrudingTools(program), [program]);
+  const { toolColors, groupColors, filaments } = useToolpathColors({
+    recorded: slicedFilamentColors,
+    loaded: live?.filamentColor,
+    tools,
+    theme,
+  });
   useLivePlayback(store, {
     isLive: snapshot.isLive,
     position: live?.position,
@@ -408,7 +439,7 @@ function PrinterSimulation({
               geometry={geometry}
               store={store}
               theme={theme}
-              filamentColor={filamentColor}
+              filamentColors={toolColors}
               chamberLight={live?.chamberLight ?? 'unknown'}
               isReducedMotion={isReducedMotion}
               liveNozzleTarget={live?.nozzleTarget}
@@ -432,6 +463,7 @@ function PrinterSimulation({
         <ToolpathFilter
           counts={grouping.counts}
           colors={groupColors}
+          filaments={filaments}
           hiddenGroups={hiddenGroups}
           onGroupShown={handleGroupShown}
         />
@@ -623,18 +655,22 @@ function PlaybackControls({
 }
 
 /**
- * Which groups of the G-code the scene draws, top right over the scene. Only
- * the groups the program contains are listed; it folds to its heading.
+ * Which groups of the G-code the scene draws, top right over the scene, and
+ * the filaments a multi-colour program prints with. Only the groups the
+ * program contains are listed; it folds to its heading.
  */
 function ToolpathFilter({
   counts,
   colors,
+  filaments,
   hiddenGroups,
   onGroupShown,
 }: Readonly<{
   counts: readonly number[];
-  /** CSS colour per {@link toolpathGroups} entry, as the scene tints the group. */
-  colors: readonly string[];
+  /** CSS colours per {@link toolpathGroups} entry, one per filament, as the scene tints the group. */
+  colors: ReadonlyArray<readonly string[]>;
+  /** Each filament listed, in filament order: its tool and colour. */
+  filaments: ReadonlyArray<Readonly<{ tool: number; color: string }>>;
   hiddenGroups: ReadonlySet<ToolpathGroup>;
   onGroupShown: (group: ToolpathGroup, isShown: boolean) => void;
 }>): React.JSX.Element {
@@ -660,24 +696,43 @@ function ToolpathFilter({
         />
       </button>
       {isOpen ? (
-        <ul id={listId} className='flex flex-col gap-1.5 px-2 pt-0.5 pb-2'>
-          {toolpathGroups.map((group, index) =>
-            counts[index] ? (
-              <li key={group}>
-                <label className='flex cursor-action items-center gap-2'>
-                  <Checkbox
-                    checked={!hiddenGroups.has(group)}
-                    onCheckedChange={(checked) => {
-                      onGroupShown(group, checked === true);
-                    }}
-                  />
-                  <MaterialSwatch materials={[{ color: colors[index], roughness: 1, metalness: 0, isUnlit: true }]} />
-                  {toolpathGroupLabels[group]}
-                </label>
-              </li>
-            ) : null,
-          )}
-        </ul>
+        <div id={listId}>
+          <ul className='flex flex-col gap-1.5 px-2 pt-0.5 pb-2'>
+            {toolpathGroups.map((group, index) =>
+              counts[index] ? (
+                <li key={group}>
+                  <label className='flex cursor-action items-center gap-2'>
+                    <Checkbox
+                      checked={!hiddenGroups.has(group)}
+                      onCheckedChange={(checked) => {
+                        onGroupShown(group, checked === true);
+                      }}
+                    />
+                    <MaterialSwatch
+                      materials={(colors[index] ?? []).map((color) => ({
+                        color,
+                        roughness: 1,
+                        metalness: 0,
+                        isUnlit: true,
+                      }))}
+                    />
+                    {toolpathGroupLabels[group]}
+                  </label>
+                </li>
+              ) : null,
+            )}
+          </ul>
+          {filaments.length > 0 ? (
+            <ul aria-label='Filaments' className='flex flex-col gap-1.5 border-t border-border/70 py-2 pr-2 pl-8'>
+              {filaments.map(({ tool, color }) => (
+                <li key={tool} className='flex items-center gap-2'>
+                  <MaterialSwatch materials={[{ color, roughness: 1, metalness: 0, isUnlit: true }]} />
+                  Filament {tool + 1}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

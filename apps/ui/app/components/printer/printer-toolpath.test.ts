@@ -6,6 +6,7 @@ import { liftPlateSurface, x1cPlates } from '#components/printer/printer-plates.
 import {
   createToolpathPalette,
   createToolpathReveal,
+  extrudingTools,
   groupToolpath,
   headPositionAt,
   setToolpathVisibility,
@@ -71,7 +72,7 @@ describe('createToolpathPalette', () => {
 
 describe('createToolpathReveal', () => {
   it('should upload every segment once with nothing drawn', () => {
-    const reveal = createToolpathReveal(program, palette);
+    const reveal = createToolpathReveal(program, [palette]);
     try {
       const groups = reveal.groupLines.filter((object) => object !== undefined);
       // The fixture has a purge line, walls, infill and travel; each group shares the one upload.
@@ -96,7 +97,7 @@ describe('createToolpathReveal', () => {
   });
 
   it('should tint each segment by kind, fading the lowest layers toward muted but not the preparation', () => {
-    const reveal = createToolpathReveal(program, palette);
+    const reveal = createToolpathReveal(program, [palette]);
     try {
       const purge = program.kinds.indexOf(toolpathSegmentKinds.indexOf('purge'));
       const topOuter = firstOfKind(5, 'outer-wall');
@@ -117,7 +118,7 @@ describe('createToolpathReveal', () => {
   });
 
   it('should keep the lowest layers the filament colour on the light theme, fading toward shade, not white', () => {
-    const reveal = createToolpathReveal(program, createToolpathPalette('#ff0000', 'light'));
+    const reveal = createToolpathReveal(program, [createToolpathPalette('#ff0000', 'light')]);
     try {
       const bottom = vertexColor(reveal.baseColors, firstOfKind(0, 'outer-wall') * 2);
       // Fading toward a light tint turned the whole print pink on the dark plate.
@@ -129,9 +130,53 @@ describe('createToolpathReveal', () => {
   });
 });
 
+describe('colour by tool', () => {
+  const twoTools = fixtureProgram({ layers: 6, tools: [0, 1] });
+  const blue = createToolpathPalette('#0000ff', 'dark');
+  /** Middle of the first extruding segment one tool prints. */
+  const timeIn = (tool: number): number => {
+    const segment = twoTools.tools.findIndex((each, index) => each === tool && twoTools.extrusion[index]! > 0);
+    return (twoTools.times[segment * 2]! + twoTools.times[segment * 2 + 1]!) / 2;
+  };
+
+  it("should draw each segment in its tool's filament, as a one-colour reveal of that filament would", () => {
+    expect(extrudingTools(twoTools)).toEqual([0, 1]);
+    const [both, reds, blues] = [[palette, blue], [palette], [blue]].map((palettes) =>
+      createToolpathReveal(twoTools, palettes),
+    );
+    try {
+      // A tool past the palettes takes the first, so `reds` and `blues` each draw everything in one filament.
+      const expected = new Float32Array(both!.baseColors.length);
+      for (let segment = 0; segment < twoTools.segmentCount; segment += 1) {
+        const source = twoTools.tools[segment] === 1 ? blues! : reds!;
+        expected.set(source.baseColors.subarray(segment * 6, segment * 6 + 6), segment * 6);
+      }
+      expect(both!.baseColors).toEqual(expected);
+      expect(both!.baseColors).not.toEqual(reds!.baseColors);
+    } finally {
+      for (const reveal of [both, reds, blues]) {
+        reveal!.dispose();
+      }
+    }
+  });
+
+  it('should give the trail the filament at the head', () => {
+    const reveal = createToolpathReveal(twoTools, [palette, blue]);
+    try {
+      const head = new THREE.Vector3();
+      updateToolpathReveal({ reveal, program: twoTools, time: timeIn(1), head });
+      expect(reveal.trail.material.color.equals(blue.trail)).toBe(true);
+      updateToolpathReveal({ reveal, program: twoTools, time: timeIn(0), head });
+      expect(reveal.trail.material.color.equals(palette.trail)).toBe(true);
+    } finally {
+      reveal.dispose();
+    }
+  });
+});
+
 describe('updateToolpathReveal', () => {
   it('should reveal completed segments, brighten the active layer and keep a trail', () => {
-    const reveal = createToolpathReveal(program, palette);
+    const reveal = createToolpathReveal(program, [palette]);
     try {
       const head = new THREE.Vector3();
       const layer = program.layerTable[3]!;
@@ -160,7 +205,7 @@ describe('updateToolpathReveal', () => {
   });
 
   it('should keep the preparation its tint while its layer is active and the walls beside it brighten', () => {
-    const reveal = createToolpathReveal(program, palette);
+    const reveal = createToolpathReveal(program, [palette]);
     try {
       const head = new THREE.Vector3();
       const first = program.layerTable[0]!;
@@ -179,7 +224,7 @@ describe('updateToolpathReveal', () => {
   });
 
   it('should restore the previous layer when the cursor moves on', () => {
-    const reveal = createToolpathReveal(program, palette);
+    const reveal = createToolpathReveal(program, [palette]);
     try {
       const head = new THREE.Vector3();
       updateToolpathReveal({ reveal, program, time: program.layerTable[1]!.startTime + 0.01, head });
@@ -196,7 +241,7 @@ describe('updateToolpathReveal', () => {
   });
 
   it('should draw everything after the run and nothing before it', () => {
-    const reveal = createToolpathReveal(program, palette);
+    const reveal = createToolpathReveal(program, [palette]);
     try {
       const head = new THREE.Vector3();
       expect(updateToolpathReveal({ reveal, program, time: -1, head }).segment).toBe(-1);
@@ -244,7 +289,7 @@ describe('groupToolpath', () => {
 
 describe('setToolpathVisibility', () => {
   it('should stop drawing hidden groups and keep them out of the trail', () => {
-    const reveal = createToolpathReveal(program, palette);
+    const reveal = createToolpathReveal(program, [palette]);
     try {
       const head = new THREE.Vector3();
       const layer = program.layerTable[3]!;

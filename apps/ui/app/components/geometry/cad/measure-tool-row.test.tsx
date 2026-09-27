@@ -6,6 +6,7 @@ import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { MeasureOptions } from '#components/geometry/cad/measure-tool-row.js';
+import { AxisLabel } from '#components/geometry/cad/section-tool-row.js';
 import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
@@ -100,6 +101,7 @@ describe('MeasureOptions', () => {
     await user.click(count);
 
     expect(count).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('dialog', { name: 'Measurements' })).toBeInTheDocument();
     expect(listedValues()).toEqual(['20.0 mm', '10.0 mm']);
     expect(screen.getAllByRole('listitem')[1]).toHaveTextContent('X 10.0Y 0.0Z 0.0');
 
@@ -108,6 +110,20 @@ describe('MeasureOptions', () => {
     expect(screen.getByRole('button', { name: 'Pin 10.0 mm', pressed: true })).toBeInTheDocument();
     expect(listedValues()).toEqual(['10.0 mm', '20.0 mm']);
     expect(actor.getSnapshot().context.measurements[0]).toMatchObject({ isPinned: true });
+  });
+
+  it('should mark the axis letters of each measurement as the Section editor does', async () => {
+    const actor = startMeasuring();
+    measure(actor, 0.01);
+    const user = userEvent.setup();
+    renderRow(actor);
+    await user.click(screen.getByRole('button', { name: '1 measurement' }));
+    const item = screen.getByRole('listitem');
+
+    for (const axis of ['x', 'y', 'z'] as const) {
+      const { container } = render(<AxisLabel axis={axis} />);
+      expect(within(item).getByText(axis.toUpperCase()).outerHTML).toBe(container.innerHTML);
+    }
   });
 
   it('should preview a measurement while its row is hovered', async () => {

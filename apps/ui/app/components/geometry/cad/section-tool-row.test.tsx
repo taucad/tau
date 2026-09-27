@@ -498,7 +498,7 @@ describe('Revolution editor', () => {
     });
     const user = userEvent.setup();
     renderRow(actor);
-    const start = screen.getByRole('spinbutton', { name: 'Start angle in degrees' });
+    const start = screen.getByRole('spinbutton', { name: 'From, start angle in degrees' });
 
     await user.click(start);
     await user.keyboard('{ArrowDown}');

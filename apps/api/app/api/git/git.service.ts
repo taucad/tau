@@ -17,12 +17,14 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
   PayloadTooLargeException,
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { DatabaseService } from '#database/database.service.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { project, projectGit, projectGitLfsObject } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
@@ -231,6 +233,7 @@ export class GitRepositoryService {
     private readonly projectAccess: ProjectAccessService,
     @Inject(repositoryStoreKey)
     private readonly store: RepositoryStore,
+    @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
   ) {
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
        first chance to give the dead worker's disk back (W10 defect 2). Tracked
@@ -646,6 +649,16 @@ export class GitRepositoryService {
         return body;
       }
 
+      /* The stop gate (D4 makes this safe): a push that has not started to
+         commit when the process begins to stop is refused before its first
+         upload, and the client re-pushes against a Machine that is staying.
+         One that has started finishes, because the drain waits for it. */
+      if (this.shutdown.signal.aborted) {
+        throw new ServiceUnavailableException({
+          code: 'GIT_SERVICE_RESTARTING',
+          message: 'This server is restarting; retry the push.',
+        });
+      }
       const result = await commitLease({
         store: this.store,
         lease,
@@ -654,7 +667,17 @@ export class GitRepositoryService {
         ...(this.faults === undefined ? {} : { faults: this.faults }),
       });
       if (result.committed) {
-        await this.recordGeneration(args.access.projectId, result.manifest.generation);
+        /* The push is durable: a failure to record its generation must not
+           answer 500 for it. The row trails the manifest, which is the case
+           `repairDerivedState` repairs on the next request. */
+        try {
+          await this.recordGeneration(args.access.projectId, result.manifest.generation);
+        } catch (error) {
+          this.#logger.warn(
+            { err: error, projectId: args.access.projectId, generation: result.manifest.generation },
+            'A committed push could not record its generation; the next request repairs it',
+          );
+        }
         await this.derive({ access: args.access, lease, manifest: result.manifest, moved: result.moved });
       }
       return body;
@@ -901,6 +924,7 @@ export class GitRepositoryService {
     };
     const tracked = settle();
     this.#background.add(tracked);
+    this.shutdown.track(tracked);
   }
 
   /**
@@ -1066,32 +1090,40 @@ export class GitRepositoryService {
       return;
     }
 
-    await this.databaseService.database
-      .insert(projectGit)
-      .values({
-        projectId: access.projectId,
-        storageBytes,
-        generation: manifest.generation,
-        derivedGeneration: manifest.generation,
-      })
-      .onConflictDoUpdate({
-        target: projectGit.projectId,
-        set: {
+    /* Swallowed like the rebuild above: the push this follows is durable. */
+    try {
+      await this.databaseService.database
+        .insert(projectGit)
+        .values({
+          projectId: access.projectId,
           storageBytes,
-          /* `generation` moves with the marker: this row is the proof that the
-             store reached this generation, so a repair that runs because
-             `recordGeneration` never did must leave the two columns agreeing
-             (review F1). */
           generation: manifest.generation,
           derivedGeneration: manifest.generation,
-          updatedAt: new Date(),
-        },
-        /* Compare-and-swap (review F4). A request repairing generation 5 and a
-           request committing generation 6 are not ordered by anything, and the
-           slower of the two must not take `derived_generation` — and
-           `storage_bytes` with it — backwards. */
-        setWhere: lt(projectGit.derivedGeneration, manifest.generation),
-      });
+        })
+        .onConflictDoUpdate({
+          target: projectGit.projectId,
+          set: {
+            storageBytes,
+            /* `generation` moves with the marker: this row is the proof that the
+               store reached this generation, so a repair that runs because
+               `recordGeneration` never did must leave the two columns agreeing
+               (review F1). */
+            generation: manifest.generation,
+            derivedGeneration: manifest.generation,
+            updatedAt: new Date(),
+          },
+          /* Compare-and-swap (review F4). A request repairing generation 5 and a
+             request committing generation 6 are not ordered by anything, and the
+             slower of the two must not take `derived_generation` — and
+             `storage_bytes` with it — backwards. */
+          setWhere: lt(projectGit.derivedGeneration, manifest.generation),
+        });
+    } catch (error) {
+      this.#logger.warn(
+        { err: error, projectId: access.projectId, generation: manifest.generation },
+        'Derived state could not be recorded; the next request for this project repairs it',
+      );
+    }
   }
 
   /**

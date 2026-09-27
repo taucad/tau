@@ -46,6 +46,7 @@ import type { PeerCertificate } from 'node:tls';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MessageChannel } from 'node:worker_threads';
 
+import { createMachineSecretStore, createMemorySecretVault, createNodeMachineRuntime } from '@taucad/host';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type {
@@ -522,8 +523,6 @@ const validateRtspsStillInput = (input: MachineNetworkStillInput, configuration:
 const createHostStillCapture = async (
   configuration: QualificationConfiguration,
 ): Promise<NonNullable<MachineConnectionRuntime['captureNetworkStill']>> => {
-  // Only the camera stages load the host; the other stages start without it.
-  const { createMachineSecretStore, createMemorySecretVault, createNodeMachineRuntime } = await import('@taucad/host');
   const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
   secrets.stage('keychain:x1c-qualification', await readAccessCode(configuration));
   const { captureNetworkStill } = createNodeMachineRuntime({

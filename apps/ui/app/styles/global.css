@@ -490,6 +490,10 @@
  * (Chrome/Edge 115+, Safari 26+). Browsers without support degrade
  * gracefully to no fade (initial-value: black = fully opaque mask).
  *
+ * Every animation spells out its `auto` duration: Lightning CSS expands a
+ * duration-less shorthand to `animation-duration: 0s`, which collapses the
+ * scroll range so `both` fill pins the edges to their `to` keyframe.
+ *
  * Usage: scroll-shadows-x, scroll-shadows-y, or scroll-shadows (both)
  * Override --scroll-fade-size to control the fade distance.
  *
@@ -575,7 +579,7 @@
     black calc(100% - var(--scroll-fade-size)),
     var(--scroll-fade-right)
   );
-  animation: scroll-fade-x linear;
+  animation: auto scroll-fade-x linear;
   animation-timeline: scroll(self x);
 }
 
@@ -589,8 +593,8 @@
     var(--scroll-fade-bottom)
   );
   animation:
-    scroll-fade-top linear both,
-    scroll-fade-bottom linear both;
+    auto scroll-fade-top linear both,
+    auto scroll-fade-bottom linear both;
   animation-timeline: scroll(self y);
   animation-range:
     0 var(--scroll-fade-size),
@@ -616,9 +620,9 @@
     );
   mask-composite: intersect;
   animation:
-    scroll-fade-top linear both,
-    scroll-fade-bottom linear both,
-    scroll-fade-x linear;
+    auto scroll-fade-top linear both,
+    auto scroll-fade-bottom linear both,
+    auto scroll-fade-x linear;
   animation-timeline: scroll(self y), scroll(self y), scroll(self x);
   animation-range:
     0 var(--scroll-fade-size),

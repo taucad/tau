@@ -25,7 +25,7 @@ const keptReplyFields: ReadonlySet<string> = new Set([
  * IPv4 addresses are masked wherever they remain, field names included.
  *
  * @param reply - The parsed MQTT payload.
- * @param sensitive - Values to mask wherever they appear, such as the printer's serial and address.
+ * @param sensitive - Values to mask wherever they appear: the printer's serial, address and access code.
  * @returns A redacted copy with the reply's shape.
  */
 export const redactProjectFileReply = (reply: unknown, sensitive: readonly string[]): unknown => {
@@ -83,7 +83,7 @@ const mqttPacketBounds = (
  *
  * @param stream - The provider's pinned MQTT stream.
  * @param replies - Where each redacted reply goes; at most 16 are kept.
- * @param sensitive - Values to mask wherever they appear, such as the printer's serial and address.
+ * @param sensitive - Values to mask wherever they appear: the printer's serial, address and access code.
  * @returns The same stream, observed.
  */
 export const tapProjectFileReplies = (

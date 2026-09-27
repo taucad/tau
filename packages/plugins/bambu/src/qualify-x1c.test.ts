@@ -86,6 +86,19 @@ describe('redactProjectFileReply', () => {
     expect(JSON.stringify(result)).not.toMatch(/00M09C123456789|198\.51\.100\.23|203\.0\.113\.9|Zq8Wx3Kp/u);
   });
 
+  it('should mask the access code inside a kept string', () => {
+    const accessCode = 'Fk3Qa9Zt';
+    const result = redactProjectFileReply(
+      JSON.parse(`{"print":{"command":"project_file","result":"FAIL","reason":"code ${accessCode} refused"}}`),
+      [serial, address, accessCode],
+    );
+
+    expect(result).toEqual(
+      JSON.parse('{"print":{"command":"project_file","result":"FAIL","reason":"code [redacted] refused"}}'),
+    );
+    expect(JSON.stringify(result)).not.toContain(accessCode);
+  });
+
   it('should keep a numeric sequence_id a number', () => {
     expect(redactProjectFileReply(JSON.parse('{"print":{"command":"project_file","sequence_id":20000}}'), [])).toEqual(
       JSON.parse('{"print":{"command":"project_file","sequence_id":20000}}'),

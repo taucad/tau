@@ -21,7 +21,7 @@ const clientVersion = /<header_item\s+key="X-BBL-Client-Version"\s+value="([\w.-
 export type BambuArtifactProducer = Readonly<{ name: 'Bambu Studio' | '@taucad/slicer reference'; version?: string }>;
 
 // ponytail: mirrors readBambuContainerProducer in @taucad/slicer/container so the provider takes no slicer
-// dependency; slicer's container.test.ts asserts both agree.
+// dependency; bambu.archive.slicer.test.ts asserts both agree.
 const readProducer = (
   plate: Uint8Array<ArrayBuffer>,
   sliceInfo: Uint8Array<ArrayBuffer> | undefined,

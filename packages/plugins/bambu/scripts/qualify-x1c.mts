@@ -793,10 +793,9 @@ const createPrintConnectionRuntime = (
 ): MachineConnectionRuntime => ({
   ...createConnectionRuntime(configuration),
   async connectStream(input) {
-    return tapProjectFileReplies(await connectPinnedStream(input), replies, [
-      configuration.serial,
-      configuration.address,
-    ]);
+    // The access code only ever masks itself out of the recorded replies; it is never written or logged.
+    const sensitive = [configuration.serial, configuration.address, await readAccessCode(configuration)];
+    return tapProjectFileReplies(await connectPinnedStream(input), replies, sensitive);
   },
   async *readArtifact(input) {
     if (

@@ -1712,11 +1712,9 @@ export function SectionContourFills({
     finishSectionCapPerformanceFrame(root, performanceFrame, frameStartedAt);
   }, -1);
 
-  return (
-    <group
-      ref={rootRef}
-      data-testid='tau-section-contour-fills-root'
-      userData={sceneTagData(sceneTag.sectionViewHelper)}
-    />
-  );
+  // One object per instance: R3F replaces `userData` when the prop changes identity, which would wipe the diagnostics
+  // the frames publish on it, and a skipped frame does not write them again.
+  const [rootUserData] = React.useState(() => sceneTagData(sceneTag.sectionViewHelper));
+
+  return <group ref={rootRef} data-testid='tau-section-contour-fills-root' userData={rootUserData} />;
 }

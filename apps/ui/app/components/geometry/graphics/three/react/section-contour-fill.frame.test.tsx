@@ -387,6 +387,16 @@ describe('SectionContourFills frame', () => {
     },
   );
 
+  it('should keep the published diagnostics when the caps re-render with nothing new to draw', async () => {
+    const fills = await mountAndSettle({ cutSet: cutSetOf(xyCut(0)) });
+    const appliedFrame = fills.performance().latestFrame;
+
+    await fills.render({ cutSet: cutSetOf(xyCut(0)) });
+    fills.frame();
+
+    expect(fills.performance().latestFrame).toBe(appliedFrame);
+  });
+
   it('should draw a cap on every face of the cuts and none on the plane between the halves of a wide cutaway', async () => {
     const fills = await mountAndSettle({ cutSet: cutSetOf(xyCut(0), wideCutaway) });
 

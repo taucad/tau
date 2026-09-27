@@ -157,12 +157,13 @@ describe('MeasureTool with section cuts', () => {
     parent.append(canvas);
     document.body.append(parent);
     canvas.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width: 800, height: 600 });
+    // The handles capture the pointer where R3F listens.
     let captured: number | undefined;
-    canvas.setPointerCapture = (pointerId) => {
+    parent.setPointerCapture = (pointerId) => {
       captured = pointerId;
     };
-    canvas.hasPointerCapture = (pointerId) => captured === pointerId;
-    canvas.releasePointerCapture = () => {
+    parent.hasPointerCapture = (pointerId) => captured === pointerId;
+    parent.releasePointerCapture = () => {
       captured = undefined;
     };
 

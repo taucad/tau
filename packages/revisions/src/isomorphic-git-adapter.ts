@@ -46,6 +46,7 @@ import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
+import { encodeGitIndex } from '#git-index.js';
 import { digestHex } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
 import {
@@ -279,7 +280,8 @@ const clearProvider = async (provider: FileSystemProvider, path = ''): Promise<v
  * The library needs all ten of its commands present and errors that carry an
  * `errno` code; providers already throw those. `readlink` and `symlink` are the
  * two Tau has no provider for, and nothing in this adapter's call graph reaches
- * them — no index, no working-tree checkout — so they refuse rather than lie.
+ * them — no library index or working-tree command (Tau encodes the index
+ * itself, `#git-index.js`) — so they refuse rather than lie.
  *
  * @param provider - The backing provider.
  * @returns A promise-shaped `FsClient`.
@@ -300,8 +302,8 @@ const fileSystemShim = (provider: FileSystemProvider) => {
   const stats = async (path: string): Promise<Record<string, unknown>> => {
     const stat = await provider.stat(at(path));
     const directory = stat.type === 'dir';
-    /* No `mode`: nothing this adapter calls reads one — there is no index and no
-     * working-tree checkout — and a provider has no file mode to report. */
+    /* No `mode`: nothing this adapter calls reads one — no library index or
+     * working-tree command — and a provider has no file mode to report. */
     return {
       type: stat.type,
       size: stat.size,
@@ -461,6 +463,50 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const paths = new Map<string, Readonly<{ oid: string; mode: string }>>();
     await walkTree(oid, '', paths);
     return paths;
+  };
+
+  /**
+   * Point the index at the tree `HEAD`'s branch names (R14).
+   *
+   * Tau never reads the index; stock Git does, on a folder a person opened from
+   * disk, and without this `git status` there shows every Tau revision
+   * reversed. The disk leg runs `git read-tree`; `isomorphic-git` has none, so
+   * the whole file is encoded once and swapped in the way Git swaps its own:
+   * `index.lock`, then a rename. A lock already there is the person's own Git
+   * mid-operation, and it wins.
+   *
+   * One lock so the last refresh reads the last head, and every failure is
+   * swallowed: the ref has already moved. Linked checkouts are plain provider
+   * roots on this leg, with no index of their own.
+   *
+   * @param moved - The fully-qualified branch that moved, or `undefined` for
+   *   whatever `HEAD` names (a switch, or an open that found no index).
+   * @returns Once the index names the new tree, or once the refresh was skipped.
+   */
+  const syncLiveIndex = async (moved?: string): Promise<void> => {
+    try {
+      await withRefLock(`${filesystem.id}:${gitdir}:index`, async () => {
+        const target = await resolveRef({ fs, gitdir, ref: 'HEAD', depth: 1 });
+        if (!target.startsWith(symbolicRefPrefix)) {
+          return;
+        }
+        const named = target.slice(symbolicRefPrefix.length).trim();
+        if (moved !== undefined && named !== moved) {
+          return;
+        }
+        const head = await port.readRef(named);
+        const commit = head === undefined ? undefined : await requireCommit(head);
+        const paths = commit === undefined ? [] : [...(await flatTree(commit.tree))];
+        const lock = `${gitdir}/index.lock`;
+        if (await filesystem.exists(lock)) {
+          return;
+        }
+        await filesystem.writeFile(lock, encodeGitIndex(paths.map(([path, entry]) => ({ path, ...entry }))));
+        await filesystem.rename(lock, `${gitdir}/index`);
+      });
+    } catch {
+      // Advisory: the ref this follows has already moved (see above).
+    }
   };
 
   const writeTreeGraph = async (node: TreeDraft): Promise<string> => {
@@ -863,6 +909,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.
       await init({ fs, dir: '', gitdir, defaultBranch });
+      /* Every project an older build recorded has no index at all, so this open
+       * heals it. An existing index is left alone: in a repository Tau adopted
+       * it may hold the person's own staged work. */
+      if (!(await filesystem.exists(`${gitdir}/index`))) {
+        await syncLiveIndex();
+      }
     },
 
     readRevision: async (id: RevisionId): Promise<RevisionRecord | undefined> => {
@@ -958,8 +1010,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * @param input - The ref, the value it must currently hold, and the new one.
      * @returns The publication, or the conflict that refused it.
      */
-    updateRef: async (input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult> =>
-      withRefLock(`${filesystem.id}:${gitdir}:${input.name}`, async () => {
+    updateRef: async (input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult> => {
+      const result = await withRefLock(`${filesystem.id}:${gitdir}:${input.name}`, async () => {
         const actualHead = await port.readRef(input.name);
         if (actualHead !== input.expectedHead) {
           return Object.freeze({
@@ -986,7 +1038,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           previousHead: actualHead,
           head: input.head,
         });
-      }),
+      });
+      if (result.status === 'updated' && refOf(input.name).startsWith(`${branchRefPrefix}/`)) {
+        await syncLiveIndex(refOf(input.name));
+      }
+      return result;
+    },
 
     /* Symbolic, like Git's own HEAD: the file names a *branch*, so a turn
      * recorded onto that branch moves the head with it and nothing is written
@@ -1012,10 +1069,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * tab, or from the host process beside the renderer, would otherwise be a
      * bare write a concurrent `readHead` can observe half of — and an empty
      * head sends the next direct turn back to the trunk (c2-review S2). */
-    setHead: async (branch: string): Promise<void> =>
-      withRefLock(`${filesystem.id}:${gitdir}:HEAD`, async () => {
+    setHead: async (branch: string): Promise<void> => {
+      await withRefLock(`${filesystem.id}:${gitdir}:HEAD`, async () => {
         await writeRef({ fs, gitdir, ref: 'HEAD', value: refOf(branch), force: true, symbolic: true });
-      }),
+      });
+      await syncLiveIndex();
+    },
 
     listRefs: async (prefix?: string): Promise<readonly RevisionRef[]> => {
       /* Answered in the vocabulary it was asked in: a `refs/`-qualified prefix

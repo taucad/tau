@@ -6,10 +6,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
-    "target": "ES2024",
-    "paths": {
-      "#*": ["./src/*"]
-    }
+    "target": "ES2024"
   },
   "include": ["vitest.config.ts", "src/**/*.ts", "src/**/*.d.ts"]
 }

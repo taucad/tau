@@ -55,8 +55,8 @@ Library.Go(1f, () => Library.oViewer().Add(Utils.mshCreateCube(new Vector3(3, 4,
 """);
         Write("Helper.cs", "public static class Helper { public const int Value = 3; }");
 
-        var first = CompilationService.Compile(root);
-        var second = CompilationService.Compile(root);
+        var first = CompilationService.Compile(root, "main.cs");
+        var second = CompilationService.Compile(root, "main.cs");
 
         Assert.False(first.Timings.CacheHit);
         Assert.True(second.Timings.CacheHit);
@@ -67,7 +67,186 @@ Library.Go(1f, () => Library.oViewer().Add(Utils.mshCreateCube(new Vector3(3, 4,
         Assert.Equal("object", first.JsonSchema["type"]);
 
         Write("Helper.cs", "public static class Helper { public const int Value = 4; }");
-        Assert.False(CompilationService.Compile(root).Timings.CacheHit);
+        Assert.False(CompilationService.Compile(root, "main.cs").Timings.CacheHit);
+    }
+
+    // Two independent programs in one project, as a person or an agent writes them: each declares its
+    // own top-level statements, `Params` and `ModelPart`, and both build on one shared helper.
+    private void WriteTwoPrograms(float helperScale = 1f)
+    {
+        Write("main.cs", """
+using System.Numerics;
+using PicoGK;
+Library.Go(Params.VoxelSizeMm, () => Library.oViewer().Add(Shared.Box(Params.Part == ModelPart.Base ? Params.SizeMm : 1f)));
+public enum ModelPart { Base, Lid }
+public static class Params
+{
+    public static float VoxelSizeMm { get; set; } = 1f;
+    public static float SizeMm { get; set; } = 10f;
+    public static ModelPart Part { get; set; } = ModelPart.Base;
+}
+""");
+        Write("regions/other.cs", """
+using System.Numerics;
+using PicoGK;
+Library.Go(Params.VoxelSizeMm, () => Library.oViewer().Add(Shared.Box(Params.Part == ModelPart.Relief ? Params.SizeMm : 2f)));
+public enum ModelPart { Relief, Frame, Label }
+public static class Params
+{
+    public static float VoxelSizeMm { get; set; } = 1f;
+    public static float SizeMm { get; set; } = 20f;
+    public static ModelPart Part { get; set; } = ModelPart.Relief;
+}
+""");
+        Write("Shared.cs", $$"""
+using System.Numerics;
+using PicoGK;
+public static class Shared
+{
+    public static Mesh Box(float size) => Utils.mshCreateCube(new Vector3(size * {{helperScale}}f, 4f, 4f));
+}
+public class Runner { public void Main() { } public static void Other() { } }
+""");
+    }
+
+    private float BuiltWidth(string entryPath, string parameters = "{}") =>
+        AxisExtent(
+            Assert.Single(ModelRunner.Execute(
+                CompilationService.Compile(root, entryPath),
+                Path.Combine(root, "entry-artifacts"),
+                Json(parameters)).Components).Positions,
+            0);
+
+    [Fact]
+    public void EachProgramCompilesAloneWithTheSharedHelpersAndItsOwnParameters()
+    {
+        WriteTwoPrograms();
+
+        Assert.Equal(["Shared.cs", "main.cs"], CompilationService.SelectSources(root, "main.cs"));
+        Assert.Equal(["Shared.cs", "regions/other.cs"], CompilationService.SelectSources(root, "regions/other.cs"));
+        Assert.Equal(10f, CompilationService.Compile(root, "main.cs").Defaults["SizeMm"]);
+        var other = CompilationService.Compile(root, "regions/other.cs");
+        Assert.Equal(20f, other.Defaults["SizeMm"]);
+        Assert.Equal(["Relief", "Frame", "Label"], other.Parameters.Single(parameter => parameter.Name == "Part").EnumValues);
+
+        // Switching back and forth keeps each model's geometry, and an override stays with its entry.
+        Assert.InRange(BuiltWidth("main.cs"), 9.99f, 10.01f);
+        Assert.InRange(BuiltWidth("regions/other.cs"), 19.99f, 20.01f);
+        Assert.InRange(BuiltWidth("main.cs", """{"SizeMm":5}"""), 4.99f, 5.01f);
+        Assert.InRange(BuiltWidth("regions/other.cs"), 19.99f, 20.01f);
+        Assert.InRange(BuiltWidth("regions/other.cs", """{"Part":"Frame"}"""), 1.99f, 2.01f);
+        Assert.InRange(BuiltWidth("main.cs"), 9.99f, 10.01f);
+        Assert.Throws<WorkerException>(() => CompilationService.BindParameters(
+            CompilationService.Compile(root, "main.cs"), Json("""{"Part":"Relief"}""")));
+
+        // The shared helper is a source of both programs, so an edit to it reaches both.
+        WriteTwoPrograms(helperScale: 2f);
+        Assert.InRange(BuiltWidth("main.cs"), 19.99f, 20.01f);
+        Assert.InRange(BuiltWidth("regions/other.cs"), 39.99f, 40.01f);
+    }
+
+    [Fact]
+    public void ASyntaxErrorInAnotherProgramLeavesThisOneRunning()
+    {
+        WriteTwoPrograms();
+        Write("regions/other.cs", """
+using PicoGK;
+Library.Go(1f, () => { Library.oViewer().Add(Shared.Box(3f);
+public static class Params { public static float SizeMm { get; set; } = 20f; }
+""");
+
+        Assert.Equal(["Shared.cs", "main.cs"], CompilationService.SelectSources(root, "main.cs"));
+        Assert.InRange(BuiltWidth("main.cs"), 9.99f, 10.01f);
+        var error = Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "regions/other.cs"));
+        Assert.All(error.Issues, issue => Assert.Equal("regions/other.cs", issue.Location?.FileName));
+    }
+
+    [Fact]
+    public void ClassicMainProgramsAreIndependentEntriesAndKeepTheirPartialHelpers()
+    {
+        Write("a.cs", """
+using PicoGK;
+public static partial class Model
+{
+    public static void Main() => Library.Go(1f, () => Library.oViewer().Add(Box(Params.SizeMm)));
+}
+public static class Params { public static float SizeMm { get; set; } = 6f; }
+""");
+        Write("b.cs", """
+using PicoGK;
+internal static class Program
+{
+    private static async Task<int> Main(string[] args)
+    {
+        await Task.Yield();
+        Library.Go(1f, () => Library.oViewer().Add(Model.Box(Params.SizeMm)));
+        return 0;
+    }
+}
+public static class Params { public static float SizeMm { get; set; } = 8f; }
+""");
+        Write("ModelParts.cs", """
+using System.Numerics;
+using PicoGK;
+public static partial class Model
+{
+    public static Mesh Box(float size) => Utils.mshCreateCube(new Vector3(size, 1f, 1f));
+}
+""");
+
+        Assert.Equal(["ModelParts.cs", "a.cs"], CompilationService.SelectSources(root, "a.cs"));
+        Assert.Equal(["ModelParts.cs", "b.cs"], CompilationService.SelectSources(root, "b.cs"));
+        Assert.InRange(BuiltWidth("a.cs"), 5.99f, 6.01f);
+        Assert.InRange(BuiltWidth("b.cs"), 7.99f, 8.01f);
+        Assert.InRange(BuiltWidth("a.cs", """{"SizeMm":3}"""), 2.99f, 3.01f);
+    }
+
+    [Fact]
+    public void EntryAmbiguityIsNamedWhereItIsDecided()
+    {
+        WriteTwoPrograms();
+
+        // A helper opened on its own has no model of its own to run when two programs could claim it.
+        var helper = Assert.Throws<WorkerException>(() => CompilationService.SelectSources(root, "Shared.cs"));
+        Assert.Equal("CS_TAU_ENTRY", helper.Issues[0].Code);
+        Assert.Contains("main.cs, regions/other.cs", helper.Message, StringComparison.Ordinal);
+        Assert.Equal("Shared.cs", helper.Issues[0].Location?.FileName);
+        Assert.Equal("CS_TAU_PATH", Assert.Throws<WorkerException>(() => CompilationService.SelectSources(root, "missing.cs")).Issues[0].Code);
+
+        // With one program, a helper runs it, as a console project would.
+        File.Delete(Path.Combine(root, "regions/other.cs"));
+        Assert.Equal(["Shared.cs", "main.cs"], CompilationService.SelectSources(root, "Shared.cs"));
+
+        // Top-level statements beside a Main method are still one program: C# runs the statements.
+        Write("regions/other.cs", "using PicoGK; Library.Go(1f, () => { }); static class Legacy { static void Main() { } }");
+        Assert.Equal(["Shared.cs", "regions/other.cs"], CompilationService.SelectSources(root, "regions/other.cs"));
+
+        Write("regions/other.cs", """
+static class First { static void Main() { } }
+static class Second
+{
+    static void Main(string[] args) { }
+}
+""");
+        var twoMains = Assert.Throws<WorkerException>(() => CompilationService.SelectSources(root, "regions/other.cs"));
+        Assert.Equal("CS_TAU_ENTRY", twoMains.Issues[0].Code);
+        Assert.Contains("2 static Main methods (lines 1, 4)", twoMains.Message, StringComparison.Ordinal);
+        Assert.Equal(new Location("regions/other.cs", 4, 5), twoMains.Issues[0].Location);
+    }
+
+    [Fact]
+    public void TheWorkerResolvesAnEntryToTheSourcesItCompiles()
+    {
+        WriteTwoPrograms();
+        var arguments = new[] { "--workspace", root, "--artifacts", Path.Combine(root, "artifacts"), "--parent-pid", Environment.ProcessId.ToString() };
+
+        var output = Run(arguments, """
+{"protocolVersion":5,"requestId":"1","method":"resolve","params":{"entryPath":"./regions/other.cs"}}
+{"protocolVersion":5,"requestId":"2","method":"resolve","params":{"entryPath":"Shared.cs"}}
+""");
+
+        Assert.Contains("\"sources\":[\"Shared.cs\",\"regions/other.cs\"]", output);
+        Assert.Contains("CS_TAU_ENTRY", output);
     }
 
     [Fact]
@@ -98,7 +277,7 @@ public static class Params
 }
 """);
 
-        var compiled = CompilationService.Compile(root);
+        var compiled = CompilationService.Compile(root, "main.cs");
 
         Assert.Equal(0.5f, Assert.IsType<float>(compiled.Defaults["VoxelSizeMm"]));
         Assert.Equal(20, Assert.IsType<int>(compiled.Defaults["RadiusMm"]));
@@ -174,7 +353,7 @@ public static class Params
 """);
 
         var result = ModelRunner.Execute(
-            CompilationService.Compile(root),
+            CompilationService.Compile(root, "main.cs"),
             Path.Combine(root, "parameter-artifacts"),
             Json("""{"VoxelSizeMm":0.5,"WidthMm":9,"Color":"ff0000","Finish":"Glossy"}"""));
 
@@ -205,7 +384,7 @@ public static class Params
     [Range(1, 20)] public static int WidthMm { get; set; } = 3;
 }
 """);
-        var compiled = CompilationService.Compile(root);
+        var compiled = CompilationService.Compile(root, "main.cs");
 
         var first = ModelRunner.Execute(compiled, Path.Combine(root, "retain-artifacts"), Json("""{"WidthMm":4}"""));
         var second = ModelRunner.Execute(compiled, Path.Combine(root, "retain-artifacts"), Json("""{"WidthMm":5}"""));
@@ -252,7 +431,7 @@ using System.ComponentModel.DataAnnotations;
 System.Console.WriteLine(0);
 public static class Params { {{property}} }
 """);
-            var error = Assert.Throws<WorkerException>(() => CompilationService.Compile(root));
+            var error = Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs"));
             Assert.Equal("CS_TAU_PARAMETERS", error.Issues[0].Code);
             Assert.Contains(expected, error.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Equal("main.cs", error.Issues[0].Location?.FileName);
@@ -267,7 +446,7 @@ public static class Params { {{property}} }
         })
         {
             Write("main.cs", source);
-            var defaults = CompilationService.Compile(root).Defaults;
+            var defaults = CompilationService.Compile(root, "main.cs").Defaults;
             if (source.Contains("private static", StringComparison.Ordinal))
             {
                 Assert.Equal(new[] { "Value" }, defaults.Keys);
@@ -279,7 +458,7 @@ public static class Params { {{property}} }
         }
 
         Write("main.cs", "System.Console.WriteLine(Params.Value); public static class Params { static Params() { } public static int Value { get; set; } = 1; }");
-        var constructorError = Assert.Throws<WorkerException>(() => CompilationService.Compile(root));
+        var constructorError = Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs"));
         Assert.Equal("CS_TAU_PARAMETERS", constructorError.Issues[0].Code);
         Assert.Contains("static constructor", constructorError.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -289,7 +468,7 @@ public static class Params { {{property}} }
     {
         Write("main.cs", string.Join(Environment.NewLine, Enumerable.Range(0, 257).Select(index => $"Missing{index} value{index};")));
 
-        var error = Assert.Throws<WorkerException>(() => CompilationService.Compile(root));
+        var error = Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs"));
 
         Assert.Equal(256, error.Issues.Count);
         Assert.All(error.Issues, issue => Assert.StartsWith("CS", issue.Code, StringComparison.Ordinal));
@@ -298,27 +477,27 @@ public static class Params { {{property}} }
         Assert.True(error.Issues[0].Location?.StartLineNumber > 0);
 
         Write("main.cs", "public static class Broken {");
-        error = Assert.Throws<WorkerException>(() => CompilationService.Compile(root));
+        error = Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs"));
         Assert.Equal("CS1513", error.Issues[0].Code);
     }
 
     [Fact]
     public void CompilationEnforcesProjectAndSyntaxLimits()
     {
-        Assert.Contains("no C#", Assert.Throws<WorkerException>(() => CompilationService.Compile(root)).Message);
+        Assert.Contains("no C#", Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs")).Message);
         for (var index = 0; index < 257; index++)
         {
             Write($"{index}.cs", $"public static class C{index} {{ }}");
         }
-        Assert.Contains("256", Assert.Throws<WorkerException>(() => CompilationService.Compile(root)).Message);
+        Assert.Contains("256", Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs")).Message);
 
         Directory.Delete(root, recursive: true);
         Directory.CreateDirectory(root);
         Write("main.cs", new string(' ', 1024 * 1024 + 1));
-        Assert.Contains("byte limit", Assert.Throws<WorkerException>(() => CompilationService.Compile(root)).Message);
+        Assert.Contains("byte limit", Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs")).Message);
 
         Write("main.cs", string.Concat(Enumerable.Repeat("(", 520)) + "1" + string.Concat(Enumerable.Repeat(")", 520)) + ";");
-        Assert.Contains("depth", Assert.Throws<WorkerException>(() => CompilationService.Compile(root)).Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("depth", Assert.Throws<WorkerException>(() => CompilationService.Compile(root, "main.cs")).Message, StringComparison.OrdinalIgnoreCase);
         Assert.Throws<InvalidOperationException>(() => CompilationService.CreateReferences(null));
     }
 
@@ -345,7 +524,7 @@ public static class Params { {{property}} }
         }
         Assert.Equal(63, sourceCount);
 
-        var compiled = CompilationService.Compile(fixture);
+        var compiled = CompilationService.Compile(fixture, "Program.cs");
 
         Assert.NotEmpty(compiled.Assembly);
         Assert.Empty(compiled.Defaults);
@@ -366,7 +545,7 @@ public static class Params { {{property}} }
                 Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant());
         }
 
-        var result = ModelRunner.Execute(CompilationService.Compile(fixture), Path.Combine(root, "official-artifacts"));
+        var result = ModelRunner.Execute(CompilationService.Compile(fixture, "Program.cs"), Path.Combine(root, "official-artifacts"));
 
         Assert.Equal(6, result.Components.Count);
         Assert.All(result.Components, component => Assert.Equal("triangles", component.Kind));
@@ -421,7 +600,7 @@ Library.Go(2f, () =>
 });
 """);
 
-        var result = ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts"));
+        var result = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "artifacts"));
 
         Assert.False(result.RecycleAfterResponse);
         Assert.True(result.PicoGkNativeBytes > 0);
@@ -456,25 +635,25 @@ using System.Numerics;
 using PicoGK;
 Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
 """);
-        var result = ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts"));
+        var result = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "artifacts"));
         Assert.Single(result.Components);
         Assert.NotEmpty(result.Components[0].Positions);
         Assert.True(result.Timings.MeshConstruction >= 0);
 
         Write("main.cs", "throw new InvalidOperationException(\"model exploded\");");
         Assert.Contains("model exploded", Assert.Throws<InvalidOperationException>(() =>
-            ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts"))).Message);
+            ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "artifacts"))).Message);
 
         Write("main.cs", "System.Console.WriteLine(\"no scene\");");
         Assert.Equal("CS_TAU_NO_SCENE", Assert.Throws<WorkerException>(() =>
-            ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts"))).Issues[0].Code);
+            ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "artifacts"))).Issues[0].Code);
 
         Write("main.cs", "using PicoGK; Library.Go(1f, () => { });");
-        Assert.Empty(ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts")).Components);
+        Assert.Empty(ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "artifacts")).Components);
 
         Write("main.cs", "using PicoGK; Library.Go(1f, () => throw new InvalidOperationException(\"task exploded\"));");
         Assert.Contains("task exploded", Assert.Throws<InvalidOperationException>(() =>
-            ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts"))).Message);
+            ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "artifacts"))).Message);
     }
 
     [Fact]
@@ -603,7 +782,7 @@ Library.Go(1f, () =>
     System.Threading.Thread.Sleep(90);
 });
 """);
-        var result = ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "animation-artifacts"));
+        var result = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "animation-artifacts"));
 
         Assert.True(AxisExtent(result.Components[0].Positions, 0) > 5f);
         Assert.True(AxisExtent(result.Components[0].Positions, 1) < 3f);
@@ -623,12 +802,12 @@ Library.Go(1f, () =>
     Library.oViewer().Add(Utils.mshCreateCube(Vector3.One));
 });
 """);
-        var accepted = ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "presentation-artifacts"));
+        var accepted = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "presentation-artifacts"));
         Assert.Single(accepted.Components);
 
         Write("main.cs", "using PicoGK; Library.Go(1f, () => { }, strLightsFile: \"environment.zip\");");
         var unsupported = Assert.Throws<WorkerException>(() => ModelRunner.Execute(
-            CompilationService.Compile(root),
+            CompilationService.Compile(root, "main.cs"),
             Path.Combine(root, "environment-artifacts")));
         Assert.Equal("CS_TAU_VIEWER_CAPABILITY", unsupported.Issues[0].Code);
     }
@@ -693,9 +872,9 @@ Library.Go(2f, () =>
         Assert.Throws<KeyNotFoundException>(() => Program.ParseArguments(["--workspace", root]));
 
         var output = Run(arguments, """
-{"protocolVersion":4,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
-{"protocolVersion":4,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
-{"protocolVersion":4,"requestId":"3","method":"shutdown","params":{}}
+{"protocolVersion":5,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
+{"protocolVersion":5,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
+{"protocolVersion":5,"requestId":"3","method":"shutdown","params":{}}
 """);
         Assert.Contains("\"type\":\"ready\"", output);
         Assert.Contains("\"defaultParameters\":{}", output);
@@ -707,9 +886,9 @@ Library.Go(2f, () =>
 
         foreach (var parameters in new[] { "[]", "{\"unexpected\":1}" })
         {
-            Assert.Throws<WorkerException>(() => CompilationService.BindParameters(CompilationService.Compile(root), Json(parameters)));
+            Assert.Throws<WorkerException>(() => CompilationService.BindParameters(CompilationService.Compile(root, "main.cs"), Json(parameters)));
         }
-        CompilationService.BindParameters(CompilationService.Compile(root), Json("{}"));
+        CompilationService.BindParameters(CompilationService.Compile(root, "main.cs"), Json("{}"));
     }
 
     [Fact]
@@ -723,9 +902,9 @@ Library.Go(2f, () =>
         Assert.Equal(2, Program.Run(arguments, new StringReader("{\"protocolVersion\":3,\"requestId\":\"1\",\"method\":\"x\",\"params\":{}}"), new StringWriter(), new StringWriter()));
         Assert.Equal(2, Program.Run(arguments, new StringReader(new string('x', 1_048_577)), new StringWriter(), new StringWriter()));
 
-        var output = Run(arguments, "{\"protocolVersion\":4,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
+        var output = Run(arguments, "{\"protocolVersion\":5,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
         Assert.Contains("CS_TAU_PROTOCOL", output);
-        output = Run(arguments, "{\"protocolVersion\":4,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
+        output = Run(arguments, "{\"protocolVersion\":5,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
         Assert.Contains("CS_TAU_RUNTIME", output);
         Assert.DoesNotContain("\"location\":null", output);
 
@@ -736,11 +915,11 @@ Library.Go(2f, () =>
         {
             Assert.ThrowsAny<Exception>(() => Program.ValidateEntryPath(Json(json), root));
         }
-        output = Run(arguments, "{\"protocolVersion\":4,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":5,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("CS_TAU_NO_SCENE", output);
 
         Write("main.cs", "using System; using System.Numerics; using PicoGK; Library.Go(1f, () => { Library.oViewer().Add(Utils.mshCreateCube(Vector3.One)); throw new InvalidOperationException(\"failed after start\"); });");
-        output = Run(arguments, "{\"protocolVersion\":4,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":5,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("failed after start", output);
     }
 
@@ -778,11 +957,11 @@ public static class Params
         var frames = new[]
         {
             // A cancel with nothing in flight has nothing to stop.
-            """{"protocolVersion":4,"requestId":"0","method":"cancel"}""",
-            """{"protocolVersion":4,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":4,"requestId":"1","method":"cancel"}""",
-            """{"protocolVersion":4,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":4,"requestId":"3","method":"shutdown","params":{}}""",
+            """{"protocolVersion":5,"requestId":"0","method":"cancel"}""",
+            """{"protocolVersion":5,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":5,"requestId":"1","method":"cancel"}""",
+            """{"protocolVersion":5,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":5,"requestId":"3","method":"shutdown","params":{}}""",
         };
 
         // The cancel is held back until the model is demonstrably running, so it stops a build in flight.
@@ -859,7 +1038,7 @@ public static class Params
         var originalError = Console.Error;
         try
         {
-            Console.SetIn(new StringReader("{\"protocolVersion\":4,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
+            Console.SetIn(new StringReader("{\"protocolVersion\":5,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
             var output = new StringWriter();
             Console.SetOut(output);
             Console.SetError(new StringWriter());

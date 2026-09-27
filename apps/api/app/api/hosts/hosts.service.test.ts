@@ -8,6 +8,7 @@ import type { WebSocket } from 'ws';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { hostControlMessageSchema } from '#api/hosts/hosts.dto.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { agentRun } from '#database/schema.js';
@@ -17,7 +18,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
 
 vi.mock('#api/hosts/host-frame-relay.js', () => ({
-  relayHostFramesThroughRedis: vi.fn(async () => ({ close: vi.fn() })),
+  relayHostFramesThroughRedis: vi.fn(async () => ({ close: vi.fn(), depart: vi.fn(async () => undefined) })),
 }));
 
 const hash = (value: string): string => createHash('sha256').update(value).digest('base64url');
@@ -459,6 +460,8 @@ describe('HostsService session lifetime', () => {
         }
         if (typeof replacement === 'string' && replacement.startsWith('{')) {
           put(key, replacement, 60);
+        } else {
+          values.delete(key);
         }
         return 1;
       },
@@ -564,7 +567,8 @@ describe('HostsService session lifetime', () => {
   };
 
   const openSession = async (service: HostsService, offers: Array<Record<string, unknown>>) => {
-    await service.registerControl('device-1', routeSocket());
+    const control = routeSocket();
+    await service.registerControl('device-1', control);
     await service.handleControlMessage(
       'device-1',
       JSON.stringify({
@@ -581,7 +585,7 @@ describe('HostsService session lifetime', () => {
       userId: 'owner-1',
       runtimeVersion: '1.0.0',
     });
-    return { session, offer: offers[0] as { agentAuthorization: string } };
+    return { session, offer: offers[0] as { agentAuthorization: string }, control };
   };
 
   afterEach(() => {
@@ -675,6 +679,37 @@ describe('HostsService session lifetime', () => {
     expect(relay?.close).not.toHaveBeenCalled();
     service.onModuleDestroy();
     expect(relay?.close).not.toHaveBeenCalled();
+  });
+
+  it('departs every socket, while Redis is up, the moment the process begins to stop', async () => {
+    vi.useFakeTimers();
+    const { offers, redis, database, config, values } = ttlHarness();
+    const shutdown = new ShutdownService();
+    const service = new HostsService(database, redis, config, undefined, shutdown);
+    const { session, offer, control } = await openSession(service, offers);
+    const host = routeSocket();
+    await service.acceptHostRoute({
+      sessionId: session.id,
+      route: 'agent',
+      authorization: `Bearer ${offer.agentAuthorization}`,
+      socket: host,
+    });
+    const parked = vi.mocked(relayHostFramesThroughRedis).mock.results.at(-1);
+    const relay = parked?.type === 'return' ? await parked.value : undefined;
+    expect(values.has('host:online:device-1')).toBe(true);
+
+    shutdown.stop();
+
+    expect(control.close).toHaveBeenCalledWith(1012, 'service restart');
+    expect(host.close).toHaveBeenCalledWith(1012, 'service restart');
+    // The departure is published before the handle closes, or the peer on another Machine never hears of it.
+    expect(relay?.depart).toHaveBeenCalledWith(1012, 'service restart');
+    expect(vi.mocked(relay!.depart).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(relay!.close).mock.invocationCallOrder[0]!,
+    );
+    await expect(shutdown.settled(Date.now() + 1000)).resolves.toBe(0);
+    expect(values.has('host:online:device-1')).toBe(false);
+    service.onModuleDestroy();
   });
 
   /**

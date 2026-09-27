@@ -215,7 +215,7 @@ describe('path registry', () => {
 
   /* A family no row names falls to the reserved answer through the folded
    * spelling too. */
-  it.each(['.Tau/library.json', '.TAU/Foo/x', '.tau./unknown/y'])(
+  it.each(['.Tau/retired.json', '.TAU/Foo/x', '.tau./unknown/y'])(
     'should give %s the reserved `.tau` answer',
     (path) => {
       expect(classify(path)).toStrictEqual(reservedTauPathClassification);

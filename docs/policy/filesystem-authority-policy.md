@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-09-20'
+updated: '2026-09-27'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/revisions-policy.md
@@ -14,6 +14,7 @@ related:
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
   - docs/research/tau-json-project-library-state-boundary.md
+  - docs/research/tau-json-manifest-failure-recovery-blueprint.md
   - docs/research/pending-project-import-recovery-bootstrap-isolation.md
   - docs/research/filesystem-post-implementation-congruency-audit.md
   - docs/research/workspace-naming-and-storage-backend-abstraction.md
@@ -97,7 +98,7 @@ Trusted authority and administration APIs take canonical authority-global paths 
 
 ### 5. Project discovery is manifest-based
 
-The authority owns a discovery plane: scan configured storage roots for `/projects/*/tau.json`, parse and validate manifests as untrusted input (`docs/policy/project-manifest-policy.md` Rules 4 and 14), preserve the physical `ProjectLocator`, detect duplicate logical IDs, serve the project list, and emit change events when projects appear or disappear. Use `FileSystemObserver` where available and visibility-aware polling otherwise. An invalid manifest, adoption-required directory, or duplicate ID quarantines only that entry with a structured status; it must never sink the whole list.
+The authority owns a discovery plane: scan configured storage roots for `/projects/*/tau.json`, parse and validate manifests as untrusted input (`docs/policy/project-manifest-policy.md` Rules 4 and 14), preserve the physical `ProjectLocator`, detect duplicate logical IDs, serve the project list, and emit change events when projects appear or disappear. Use `FileSystemObserver` where available and visibility-aware polling otherwise. A manifest whose identity reads but whose declaration is defective is a routable project carrying a structured issue (`docs/policy/project-manifest-policy.md` Rule 15). An unreadable, oversize or foreign-schema manifest, an adoption-required directory (including one that holds `.tau/` but no `tau.json`), or a duplicate ID quarantines only that entry with a structured status that names the reason; it must never sink the whole list. A duplicate never demotes the directory the persisted route binding names.
 
 After discovery, the UI may left-join host-local `ProjectLibraryState` for recency, soft-delete visibility, and revision initialization. That row never establishes existence, supplies manifest content, or changes the physical locator. A missing row is seeded only after a valid manifest is discovered; an inaccessible, omitted, or incomplete root does not prove absence and must not trigger rebind or local-state cleanup. Only a recognized not-found/type-mismatch result from a complete current scan establishes absence; permission, security, and I/O failures remain uncertainty. React Query remains the current listing cache. The authority gains no additional memory or persistent manifest projection without a measured need and a separately reviewed rebuild/invalidation contract.
 
@@ -121,7 +122,7 @@ Each backend (`indexeddb`, `webaccess`, `opfs`, `memory`) is an independent stor
 
 Standalone providers (used to browse or discover a backend without mounting it, e.g. the files route grid) reuse the same per-root instances from `ProviderRegistry` (Rule 2). Feature code receives read-only discovery results, never a raw provider. Mutations normally use a mounted authority path; generic scoped `unlink`/`rmdir` APIs and Files-route mutations are forbidden. The narrow exceptions—journal-backed project commit at an allocated physical basename and confirmed permanent deletion at an observed `ProjectLocator`—remain named `WorkspaceFileService` authority operations. They take an explicit durable storage scope and exact physical path, acquire logical-project and canonical physical locks, re-establish identity, and publish ordinary authority invalidation/events. Directory invalidations include the physical identity because a pending locator may still be quarantined and therefore have no logical mount in a sibling tab.
 
-Adoption and re-mint remain read-only quarantine outcomes until a product requirement justifies one named expected-manifest mutation. Never write a new manifest through a stale discovery result or a generic conditional-write surface.
+Adopt and Repair are the named expected-manifest mutations. Adopt writes a strictly valid manifest into an adoption-required directory after a fresh scan, restoring the id the route binding remembers when no discovered project holds it. Repair canonicalizes a degraded manifest only on explicit request, and never for a JSON syntax error. Choosing the canonical directory for a duplicate ID re-verifies it with a fresh scan and only writes the binding; it never writes project files. Re-mint stays unimplemented until a copy's chat identities can be re-keyed. Never write a new manifest through a stale discovery result or a generic conditional-write surface.
 
 Before journaling permanent deletion, run a fresh uniqueness-aware discovery and require exactly one valid current occurrence. Check `deletedAt` and insert the pending operation in one existing IndexedDB transaction; Restore rejects while that operation exists. Re-discover after an `absent` result before local cleanup. If final directory removal fails after marker unlink, best-effort restore the exact manifest bytes already verified and retain replay state.
 

@@ -1044,16 +1044,19 @@ export class WorkspaceFileService {
   }
 
   /**
-   * Give an `adoption-required` project directory a fresh Tau identity in
-   * place.
+   * Give an `adoption-required` project directory a Tau identity in place.
    *
    * @param locator - Discovery locator of the directory to adopt.
+   * @param options - `id` restores the identity this directory's route was bound to.
    * @returns The manifest now on disk, identity included.
    */
   /* The return type is the lifecycle's own: this class no longer names the
    * product's manifest (boundary rule `project-manifest`). */
-  public async adoptProjectDirectory(locator: ProjectLocator): ReturnType<ProjectDirectories['adoptProjectDirectory']> {
-    return this._projectDirectories.adoptProjectDirectory(locator);
+  public async adoptProjectDirectory(
+    locator: ProjectLocator,
+    options?: { readonly id?: string },
+  ): ReturnType<ProjectDirectories['adoptProjectDirectory']> {
+    return this._projectDirectories.adoptProjectDirectory(locator, options);
   }
 
   /**

@@ -3,9 +3,10 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-23'
+updated: '2026-09-27'
 related:
   - docs/research/git-storage-substrate-charter.md
+  - docs/research/project-git-index-always-empty.md
   - docs/architecture/revisions-cloud-handbook.md
   - docs/research/revisions-sync-closeout-blueprint.md
   - docs/architecture/workspace-filesystem-and-revisions.md
@@ -113,6 +114,8 @@ Choose one backend per project per host from control-plane configuration. No lay
 | Future disk host                 | jj over colocated Git only after its blockers close, through the same port    |
 
 Keep commit identity, regular-file mode, refs, log, diff, merge, tags, checkouts, remote operations, and LFS clean/smudge behind the port. Never put clean/smudge in the composed view. Preserve `100644` and `100755` modes in the immutable tree, hashing, capture, merge, restore, and every port; refuse symlinks, gitlinks, and unknown modes before applying them. Require browser and native conformance to produce identical tree and revision identities for identical inputs and to expose the same L2–L4 behavior; the CLI exposes the same verbs headlessly.
+
+Keep each worktree's Git index naming its branch's head tree, for stock Git only. Tau never reads the index and decides dirtiness by capture, so the port refreshes it after every branch move, every `HEAD` switch, and at open when no index exists, and never fails the move because of it. Leave an existing index alone at open: an adopted repository may hold the person's staged work. A person's staging is folded into the next revision.
 
 Keep remote transport to `listRemoteRefs`, `fetch`, and `push`; do not add bundle or import-bundle wires.
 

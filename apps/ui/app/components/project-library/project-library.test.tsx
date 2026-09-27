@@ -41,6 +41,8 @@ const createUseProjectsResult = () => ({
   permanentlyDeleteProject: vi.fn(),
   updateName: vi.fn(),
   adoptProject: vi.fn(async () => undefined),
+  repairProject: vi.fn(async () => undefined),
+  chooseProjectDirectory: vi.fn(async () => undefined),
 });
 let mockUseProjectsResult = createUseProjectsResult();
 
@@ -451,6 +453,104 @@ describe('ProjectLibrary', () => {
     await vi.waitFor(() => {
       expect(mockUseProjectsResult.adoptProject).toHaveBeenCalledExactlyOnceWith(locator);
     });
+  });
+
+  it('lets a person choose which copied folder a project opens from', async () => {
+    const locator = {
+      backend: 'webaccess',
+      storageRootKey: 'webaccess:wsp_alpha',
+      relativeDirectory: 'relief-copy',
+      workspaceId: 'wsp_alpha',
+    } as const;
+    const manifest = projectToManifest({
+      id: 'proj_ccccccccccccccccccccc',
+      name: 'Relief',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.cs' } },
+    });
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      conflicts: [{ status: 'duplicate-id', manifest, locator }],
+    };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+    screen.getByRole('button', { name: 'Use this folder' }).click();
+
+    await vi.waitFor(() => {
+      expect(mockUseProjectsResult.chooseProjectDirectory).toHaveBeenCalledExactlyOnceWith(locator, manifest.id);
+    });
+  });
+
+  it('names a degraded manifest’s exact defect and repairs it on request', async () => {
+    const degraded: ProjectListItem = {
+      ...mockProjects[0]!,
+      manifestIssue: {
+        code: 'manifest-invalid',
+        issues: [
+          { code: 'unrecognized_keys', keys: ['second'], path: ['assets'], message: 'Unrecognized key: "second"' },
+        ],
+      },
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [degraded, mockProjects[1]!] };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('assets: Unrecognized key: "second"')).toBeInTheDocument();
+    screen.getByRole('button', { name: 'Repair' }).click();
+
+    await vi.waitFor(() => {
+      expect(mockUseProjectsResult.repairProject).toHaveBeenCalledExactlyOnceWith(degraded.id);
+    });
+  });
+
+  it('names what quarantines a manifest it cannot read as this project', () => {
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      conflicts: [
+        {
+          status: 'invalid',
+          locator: {
+            backend: 'webaccess',
+            storageRootKey: 'webaccess:wsp_alpha',
+            relativeDirectory: 'from-the-future',
+            workspaceId: 'wsp_alpha',
+          },
+          issue: {
+            code: 'manifest-unknown-schema',
+            found: 'https://tau.new/schemas/tau-schema-v2.json',
+            supported: projectManifestSchemaUrl,
+          },
+        },
+      ],
+    };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByText('tau.json uses a format this version of Tau does not support. Update Tau to open it.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('$schema "https://tau.new/schemas/tau-schema-v2.json" is not supported by this version of Tau.'),
+    ).toBeInTheDocument();
   });
 
   it('reports the trash outcome instead of assuming success', async () => {

@@ -45,6 +45,7 @@
     "@taucad/parameters": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/slicer": "workspace:*",
+    "@taucad/types": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
     "geospec": "workspace:*",

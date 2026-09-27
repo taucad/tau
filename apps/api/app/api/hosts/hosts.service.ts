@@ -6,6 +6,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { OnModuleDestroy } from '@nestjs/common';
@@ -19,6 +20,8 @@ import { DatabaseService } from '#database/database.service.js';
 import { agentRun, hostDevice } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
+import type { DistributedRelayHandle } from '#api/hosts/host-frame-relay.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import {
   cloudHostProvisionerToken,
   cloudHostRefusalReason,
@@ -195,8 +198,10 @@ const randomUserCode = (): string => {
 @Injectable()
 export class HostsService implements OnModuleDestroy {
   private readonly onlineDevices = new Map<string, OnlineDevice>();
-  private readonly relayHandles = new Map<WebSocket, { close(): void }>();
+  private readonly relayHandles = new Map<WebSocket, DistributedRelayHandle>();
   private readonly sessionSockets = new Map<string, SessionRelay>();
+  /** Devices whose control socket this process closed when it began to stop. */
+  private readonly departedAtStop = new Set<string>();
 
   public constructor(
     private readonly databaseService: DatabaseService,
@@ -207,23 +212,21 @@ export class HostsService implements OnModuleDestroy {
      * production rather than a second concept to keep in sync. */
     @Inject(cloudHostProvisionerToken)
     private readonly cloudHostProvisioner: CloudHostProvisioner = createConfiguredCloudHostProvisioner(),
-  ) {}
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
+  ) {
+    this.shutdown.signal.addEventListener(
+      'abort',
+      () => {
+        this.departAll();
+      },
+      { once: true },
+    );
+  }
 
+  /** The backstop for a close that skipped the stop signal (tests, dev). */
   public onModuleDestroy(): void {
-    for (const device of this.onlineDevices.values()) {
-      clearInterval(device.presenceTimer);
-      device.subscriber.disconnect();
-      device.socket.close(1001, 'service stopping');
-    }
-    for (const relay of this.sessionSockets.values()) {
-      clearInterval(relay.timer);
-      for (const socket of relay.sockets) {
-        socket.close(1001, 'service stopping');
-      }
-    }
-    for (const relay of this.relayHandles.values()) {
-      relay.close();
-    }
+    this.departAll();
     this.onlineDevices.clear();
     this.relayHandles.clear();
     this.sessionSockets.clear();
@@ -738,7 +741,7 @@ export class HostsService implements OnModuleDestroy {
       kind: 'message',
       payload: offer,
     });
-    const outcome = delivered > 0 ? await this.waitForSessionOutcome(sessionId) : undefined;
+    const outcome = delivered > 0 ? await this.waitForSessionOutcome(sessionId, options.deviceId) : undefined;
     if (!outcome?.accepted) {
       await this.deleteSession(sessionId, state);
       throw new ConflictException({ code: outcome?.code ?? 'CHILD_UNAVAILABLE' });
@@ -1002,6 +1005,43 @@ export class HostsService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Tells every socket on this process that it is going, while Redis is still
+   * up: control and relay sockets close with 1012 (Service Restart), so daemons
+   * and browsers reconnect to a Machine that is staying; presence is deleted so
+   * no offer is routed to a connection that is closing; and each relay
+   * publishes its departure, so the peer half on another Machine closes and
+   * frees its session slot rather than waiting on a socket that is gone. The
+   * Redis writes are tracked, not awaited: this runs inside the stop, which must
+   * not wait on I/O before the listener closes. Runs once; later calls find
+   * nothing left to depart.
+   */
+  private departAll(): void {
+    for (const [deviceId, device] of this.onlineDevices) {
+      if (device.socket.readyState !== device.socket.OPEN) {
+        continue;
+      }
+      clearInterval(device.presenceTimer);
+      device.subscriber.disconnect();
+      device.socket.close(1012, 'service restart');
+      this.departedAtStop.add(deviceId);
+      this.shutdown.track(this.deleteControlPresence(deviceId, device.connectionId));
+    }
+    for (const relay of this.sessionSockets.values()) {
+      clearInterval(relay.timer);
+      for (const socket of relay.sockets) {
+        socket.close(1012, 'service restart');
+      }
+    }
+    for (const relay of this.relayHandles.values()) {
+      /* Departure first: `close()` alone marks the relay closed, and the
+         socket's own close event would then find nothing left to publish. Once
+         the publish has started, `close()` only stops the inbound reader. */
+      this.shutdown.track(relay.depart(1012, 'service restart'));
+      relay.close();
+    }
+  }
+
   private async deleteControlPresence(deviceId: string, connectionId: string): Promise<void> {
     await this.redisService.client.eval(
       `local raw = redis.call('GET', KEYS[1])
@@ -1025,9 +1065,13 @@ export class HostsService implements OnModuleDestroy {
    * 5.3 ms, because the answer landed just after a tick.
    *
    * @param sessionId - The offer being waited on.
-   * @returns The outcome, or `undefined` when the offer timed out.
+   * @param deviceId - The daemon the offer went to.
+   * @returns The outcome, or `undefined` when the offer timed out or cannot be answered.
    */
-  private async waitForSessionOutcome(sessionId: string): Promise<z.infer<typeof sessionOutcomeSchema> | undefined> {
+  private async waitForSessionOutcome(
+    sessionId: string,
+    deviceId: string,
+  ): Promise<z.infer<typeof sessionOutcomeSchema> | undefined> {
     const announced = Promise.withResolvers<z.infer<typeof sessionOutcomeSchema>>();
     const subscriber = this.redisService.createDuplicateClient();
     try {
@@ -1042,7 +1086,7 @@ export class HostsService implements OnModuleDestroy {
         await subscriber.connect();
       }
       await subscriber.subscribe(sessionOutcomeChannel(sessionId));
-      return await this.pollSessionOutcome(sessionId, announced.promise);
+      return await this.pollSessionOutcome(sessionId, deviceId, announced.promise);
     } finally {
       subscriber.disconnect();
     }
@@ -1050,10 +1094,16 @@ export class HostsService implements OnModuleDestroy {
 
   private async pollSessionOutcome(
     sessionId: string,
+    deviceId: string,
     announced: Promise<z.infer<typeof sessionOutcomeSchema>>,
   ): Promise<z.infer<typeof sessionOutcomeSchema> | undefined> {
     const deadline = Date.now() + sessionOfferTimeout;
-    while (Date.now() < deadline) {
+    /* A daemon whose control socket this process closed at stop never sees the
+       offer: it went out on that socket's subscription. Give up within a tick
+       rather than hold the drain for the full timeout; the caller's retry lands
+       on the Machine the daemon has reconnected to. A daemon connected
+       elsewhere still answers through Redis, so its offer keeps waiting. */
+    while (Date.now() < deadline && !this.departedAtStop.has(deviceId)) {
       // oxlint-disable-next-line no-await-in-loop -- broker polling is bounded by the offer timeout.
       const raw = await this.redisService.client.getdel(sessionOutcomeKey(sessionId));
       if (raw) {

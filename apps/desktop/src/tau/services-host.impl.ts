@@ -450,6 +450,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const endpoint = createHostMcpEndpoint({
       secret: randomBytes(32).toString('base64url'),
       registry,
+      /* The chat attachments a screenshot or an oversized GeoSpec report is saved as live under this root. */
+      workspaceRoot,
     });
     const route = `/mcp/${randomUUID()}`;
     mcpEndpoints.set(route, endpoint);

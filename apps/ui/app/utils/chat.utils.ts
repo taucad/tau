@@ -1,5 +1,13 @@
 import type { ToolUIPart } from 'ai';
-import type { MyMessagePart, MyUIMessage, ModelSupport, ToolInvocation, MyTools, UsageData } from '@taucad/chat';
+import type {
+  CadAgentExecution,
+  MyMessagePart,
+  MyUIMessage,
+  ModelSupport,
+  ToolInvocation,
+  MyTools,
+  UsageData,
+} from '@taucad/chat';
 import { getToolPartName, isAnyToolPart, isToolPart, modelSupportsInput } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { idPrefix } from '@taucad/types/constants';
@@ -10,6 +18,7 @@ import { getRpcOutcome } from '#services/rpc-ledger.js';
 import { attachmentKind, attachmentUrl } from '#utils/attachment.utils.js';
 import type { AttachmentName, AttachmentReference } from '#utils/attachment.utils.js';
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
+import type { ResolvedModel } from '#hooks/use-models.js';
 
 /**
  * The maximum number of characters to include in a snippet of web search results.
@@ -688,6 +697,24 @@ export function buildUserMessage(input: {
     metadata: { createdAt: Date.now(), status: 'pending' },
   };
 }
+
+// ACP transports both media kinds; the local agent's prompt capabilities decide what it can read.
+const acpAttachmentSupport: ModelSupport = { modalities: { input: ['text', 'image', 'pdf'], output: ['text'] } };
+
+/**
+ * The selected execution's draft attachment admission, independent of the Tau catalog for ACP.
+ *
+ * @param execution - The selected execution.
+ * @param selectedModel - The last selected Tau model.
+ * @returns The name and transport support checked before draft storage.
+ */
+export const attachmentModelForExecution = (
+  execution: CadAgentExecution,
+  selectedModel: ResolvedModel,
+): { readonly name: string; readonly support?: ModelSupport } =>
+  execution.kind === 'acp'
+    ? { name: execution.agentId, support: acpAttachmentSupport }
+    : { name: selectedModel.name, support: selectedModel.model?.support };
 
 /**
  * Why a message holding these attachments cannot be sent to the selected

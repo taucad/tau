@@ -124,14 +124,15 @@ export const createAcpMediaStore = (
 
   /* Sequential on purpose: a tool-output row names its rendered content before
    * its raw output, so the image is stored before the string repeating it is met.
-   * Typed over `unknown`, not `JsonValue`: a row is JSON only once serialized — in memory
-   * its provider metadata holds optional (`undefined`) fields and pi's `Usage` interface. */
+   * `unknown`, not `JsonValue`: a log event's optional fields admit `undefined`,
+   * and the walk keeps every value it does not replace exactly as it found it. */
   const walk = async (value: unknown): Promise<unknown> => {
     if (typeof value === 'string') {
       return stored.get(value)?.path ?? value;
     }
     if (Array.isArray(value)) {
       const items: unknown[] = [];
+      // `Array.isArray` narrows to `any[]`; read the elements as `unknown`.
       for (const item of value as readonly unknown[]) {
         // oxlint-disable-next-line no-await-in-loop -- order is the dedupe (see above).
         items.push(await walk(item));
@@ -157,7 +158,7 @@ export const createAcpMediaStore = (
   return async (events) => {
     const moved: ExternalAgentLogEvent[] = [];
     for (const event of events) {
-      // The walk only swaps media blocks for `file-ref` blocks the schema accepts and keeps every other field.
+      // The walk only swaps media blocks for the `file-ref` blocks the log accepts in their place.
       // oxlint-disable-next-line no-await-in-loop -- rows are recorded in order, and so is the dedupe.
       moved.push((await walk(event)) as ExternalAgentLogEvent);
     }

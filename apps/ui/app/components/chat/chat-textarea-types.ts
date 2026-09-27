@@ -7,7 +7,7 @@ import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
 import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { attachmentSendBlockReason } from '#utils/chat.utils.js';
+import { attachmentModelForExecution, attachmentSendBlockReason } from '#utils/chat.utils.js';
 import {
   attachmentKind,
   isSupportedAttachmentMediaType,
@@ -274,19 +274,23 @@ export function useChatTextareaLogic({
   // and `stop`. Composer-only mounts (marketing CTA, library) get the
   // cookie-resolved model, a constant `'ready'` status and a no-op stop;
   // session-backed mounts get the chat-row-preferred model, the live AI
-  // SDK status and a real `stopRequest` dispatcher. The submit handler
-  // stamps `selectedModel.id` into outgoing metadata regardless.
+  // SDK status and a real `stopRequest` dispatcher. ACP execution carries
+  // its own model, so the Tau model does not decide attachment admission.
   const {
     model: { model: selectedModel },
+    execution: { execution },
     status,
     stop,
     attachmentSource,
   } = useChatComposer();
-  const support = selectedModel.model?.support;
+  const attachmentModel = useMemo(
+    () => attachmentModelForExecution(execution, selectedModel),
+    [execution, selectedModel],
+  );
+  const support = attachmentModel.support;
   const imageInputSupported = modelSupportsInput(support, 'image');
   const pdfInputSupported = modelSupportsInput(support, 'pdf');
   const attachmentInputSupported = imageInputSupported || pdfInputSupported;
-  const attachmentModel = useMemo(() => ({ name: selectedModel.name, support }), [selectedModel.name, support]);
   const attachmentAccept = useMemo(
     () =>
       supportedAttachmentMediaTypes

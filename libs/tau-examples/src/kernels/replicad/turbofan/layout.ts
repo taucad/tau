@@ -546,6 +546,7 @@ export function buildMechanism(reverserTravel: number, vaneAngle: number) {
   const joints: Record<string, MechanismSource['joints'][string]> = {
     n1: {
       type: 'revolute',
+      name: 'Fan',
       parent: 'engine',
       child: 'lp-spool',
       origin: [0, 0, 0],
@@ -553,6 +554,7 @@ export function buildMechanism(reverserTravel: number, vaneAngle: number) {
     },
     n2: {
       type: 'revolute',
+      name: 'Core',
       parent: 'engine',
       child: 'hp-spool',
       origin: [0, 0, 0],
@@ -592,6 +594,8 @@ export function buildMechanism(reverserTravel: number, vaneAngle: number) {
     links[ringId] = { shapes: [ringName(vaneRow)] };
     joints[ringId] = {
       type: 'revolute',
+      // The actuator moves the inlet guide vane ring; the stage-1 ring is its follower.
+      ...(vaneRow === igv ? { name: 'Inlet guide vanes' } : {}),
       parent: 'engine',
       child: ringId,
       origin: [0, 0, 0],
@@ -628,6 +632,7 @@ export function buildMechanism(reverserTravel: number, vaneAngle: number) {
     links[id] = { shapes: [sleeveName(half)] };
     joints[id] = {
       type: 'prismatic',
+      ...(half === 'left' ? { name: 'Reverser sleeve' } : {}),
       parent: 'engine',
       child: id,
       origin: [0, 0, 0],

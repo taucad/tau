@@ -62,6 +62,7 @@
       "required": ["type", "parent", "child", "origin"],
       "properties": {
         "type": { "enum": ["fixed", "revolute", "prismatic", "cylindrical", "screw", "spherical", "planar"] },
+        "name": { "type": "string" },
         "parent": { "type": "string" },
         "child": { "type": "string" },
         "origin": { "$ref": "#/$defs/vector3" }

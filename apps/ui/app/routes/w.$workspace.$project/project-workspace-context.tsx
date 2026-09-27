@@ -230,8 +230,12 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     const modelSubscription = editorRef.on('modelComponentRevealRequested', () => {
       openPanel('model');
     });
+    const kinematicsSubscription = editorRef.on('kinematicsRevealRequested', () => {
+      openPanel('kinematics');
+    });
     return () => {
       modelSubscription.unsubscribe();
+      kinematicsSubscription.unsubscribe();
     };
   }, [editorRef, openPanel]);
 

@@ -556,6 +556,19 @@ const validateSchema = (
   }
 };
 
+// ponytail: @json-structure/sdk 0.7.0 rejects when `instance % multipleOf > 1e-10`, so `50 % 0.1` (≈ 0.0999…) fails.
+// The error carries no schema path, so the step is read back from its message; an unparsable message keeps the error.
+// Remove once the SDK compares the rounded quotient upstream.
+const isFloatMultipleOfFalsePositive = (error: ValidationError, values: JsonStructureSchema): boolean => {
+  if (error.code !== 'INSTANCE_NUMBER_MULTIPLE_OF') {
+    return false;
+  }
+  const value = resolvePointer(values, error.path.replace(/^#/u, ''));
+  const step = Number(/ is not a multiple of (\S+)$/u.exec(error.message)?.[1]);
+  const quotient = typeof value === 'number' && step > 0 ? value / step : Number.NaN;
+  return Math.abs(quotient - Math.round(quotient)) <= Number.EPSILON * Math.max(1, Math.abs(quotient)) * 8;
+};
+
 const validateDefaults = (declaration: ParameterDeclaration): void => {
   if (Object.keys(declaration.defaults).length === 0) {
     return;
@@ -647,9 +660,10 @@ const validateDefaults = (declaration: ParameterDeclaration): void => {
     externalSchemas: external,
     maxValidationDepth: 64,
   }).validate(structuredClone(declaration.defaults) as JsonValue, schema);
-  if (!result.isValid) {
+  const errors = result.errors.filter((error) => !isFloatMultipleOfFalsePositive(error, declaration.defaults));
+  if (errors.length > 0) {
     throw new ParameterAdmissionError(
-      result.errors.map((error) =>
+      errors.map((error) =>
         diagnostic('INVALID_SCHEMA', `default value: ${error.message}`, rootResource, error.path.replace(/^#/u, '')),
       ),
     );

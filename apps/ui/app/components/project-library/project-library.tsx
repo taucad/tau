@@ -22,7 +22,7 @@ import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
 import type { ProjectManifestParseIssue } from '@taucad/types';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import { createColumns } from '#components/project-library/columns.js';
 import { Button, buttonVariants } from '@taucad/ui/components/button';

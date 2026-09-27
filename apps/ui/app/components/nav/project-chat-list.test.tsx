@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import type { Chat } from '@taucad/chat';
 import { projectToManifest } from '@taucad/types';
 import type { useChats } from '#hooks/use-chats.js';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
 const mockUseChats = vi.fn();

@@ -50,7 +50,13 @@ Library.Go(0.5f, () =>
 });
 ```
 
-The packaged desktop host compiles the project as a standard C# console program and JIT-runs its entry point in the trusted native worker. Each render settles exactly once with the authoritative final GLB. Helper `.cs` files and project assets participate in the existing filesystem live-update loop.
+The packaged desktop host compiles the selected entry as a standard C# console program and JIT-runs its entry point in the trusted native worker. Each render settles exactly once with the authoritative final GLB. Helper `.cs` files and project assets participate in the existing filesystem live-update loop. Relative asset paths resolve from the project root.
+
+### Several models in one project
+
+A project may hold several independent programs. Every `.cs` file with top-level statements or a static `Main` method is a program. Every other `.cs` file is a helper. Rendering, evaluating, exporting or testing a program compiles that file with every helper, and never with another program. So each program may declare its own `Params`, enums and `Program` class, and an edit to one program never re-renders another. Helpers are shared: an edit to a helper re-renders every program that uses it.
+
+Opening a helper runs the project's program when there is exactly one. When several programs could claim a helper, the worker reports `CS_TAU_ENTRY` and names them; open the program to run instead. A program file with several static `Main` methods and no top-level statements is reported the same way. Each program is its own model: no `tau.json` entry is needed, because `assets.main` only names the file that opens first.
 
 ### Interactive parameters
 

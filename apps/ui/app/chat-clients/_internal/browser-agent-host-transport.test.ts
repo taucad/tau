@@ -3063,6 +3063,54 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  it("never writes this device's running reply into another device's later turn when a reopen reattaches", async () => {
+    /*
+     * The attach finds this device's run still going, and the chat's files
+     * already hold another device's turns after it. The AI SDK continues the
+     * transcript's trailing assistant message, which is the other device's, so
+     * streaming this run would write its reply into that message. The run is
+     * rebuilt in place from the log instead, and nothing streams.
+     */
+    installBrowserGlobals();
+    const chatId = 'chat-two-device-reattach-running';
+    const events = hexagonalNutFourRunEvents();
+    const runIds = [...new Set(events.map((event) => event.runId))];
+    const ownRunIds = new Set(runIds.slice(0, 2));
+    const own = events.filter((event) => ownRunIds.has(event.runId));
+    const runningRunId = runIds[1]!;
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A reattach reads the log, not the workspace.');
+      },
+      createClient: async () =>
+        clientFor(chatId, runningRunId, {
+          attach: vi.fn(async () => ({
+            cursor: 0,
+            nextCursor: own.length,
+            endCursor: own.length,
+            events: own,
+            snapshot: snapshot(chatId, runningRunId, 'running'),
+          })),
+        }),
+      markRunId: async () => undefined,
+    });
+    const merged = await deriveChatTranscript(events);
+    const chat = new Chat<MyUIMessage>({
+      id: chatId,
+      transport: new BrowserPlacementChatTransport(),
+      messages: structuredClone([...merged]),
+    });
+    const unregisterReset = applyRunResets(chat, chatId);
+
+    await chat.resumeStream();
+
+    expect(chat.messages.map((message) => message.id)).toEqual(merged.map((message) => message.id));
+    expect(chat.messages.at(-1)).toEqual(merged.at(-1));
+    expect(chat.messages).toEqual(merged);
+    unregisterReset();
+    unregister();
+  });
+
   it('replays only the outcome of a settled failed run whose transcript owner rebuilt it', async () => {
     installBrowserGlobals();
     const chatId = 'chat-reopen-failed-owned';

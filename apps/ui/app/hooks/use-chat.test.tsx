@@ -427,7 +427,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
   // are translated faithfully by the store-side dispatch listeners.
   // ===========================================================================
 
-  it('records accepted user actions once and ignores invalid targets and stop', () => {
+  it('records an accepted send once and ignores invalid targets and stop', async () => {
     const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
       wrapper: createWrapper(defaultTestChatId),
     });
@@ -439,22 +439,36 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       stopTurnOwner = startTurnOwner(result.current.store, defaultTestChatId);
     });
 
+    await act(async () => {
+      await result.current.actions.sendMessage(user);
+    });
     act(() => {
-      void result.current.actions.sendMessage(user);
-      result.current.actions.regenerate();
-      result.current.actions.continueChat();
-      result.current.actions.editMessage(user.id, 'edited');
       result.current.actions.stop();
       result.current.actions.editMessage('missing-edit', 'ignored');
     });
 
-    expect(harness.touchChatRecency).toHaveBeenCalledTimes(4);
-    expect(harness.touchChatRecency).toHaveBeenNthCalledWith(1, defaultTestChatId, user.metadata?.createdAt);
-    expect(harness.touchChatRecency.mock.calls.slice(1)).toEqual([
-      [defaultTestChatId, expect.any(Number)],
-      [defaultTestChatId, expect.any(Number)],
-      [defaultTestChatId, expect.any(Number)],
-    ]);
+    /* Once, when the turn is taken (PV-S6), at the message's own time. */
+    expect(harness.touchChatRecency).toHaveBeenCalledOnce();
+    expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, user.metadata?.createdAt);
+  });
+
+  /* L3 D16, LT08: recency counts a taken gesture. A send the admission refuses never became a turn. */
+  it('leaves recency alone when the admission refuses a send (PV-S6)', async () => {
+    const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
+      wrapper: createWrapper(defaultTestChatId),
+    });
+    act(() => {
+      stopTurnOwner = startTurnOwner(result.current.store, defaultTestChatId, async () => {
+        throw new Error('No credit left for this turn.');
+      });
+    });
+
+    await act(async () => {
+      await result.current.actions.sendMessage(makeUserMessage('msg_refused', 'refused'));
+    });
+
+    expect(getFake(defaultTestChatId).sendMessage).not.toHaveBeenCalled();
+    expect(harness.touchChatRecency).not.toHaveBeenCalled();
   });
 
   it('routes a `send` request through to chat.sendMessage', async () => {

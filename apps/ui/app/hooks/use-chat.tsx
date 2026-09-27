@@ -584,7 +584,6 @@ export function useChatActions(chatId?: string): ChatActions {
         }
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
         const outgoingMessage = message as MyUIMessage;
-        void store.touchChatRecency(resolvedChatId, outgoingMessage.metadata?.createdAt ?? Date.now());
         /* I5: the composer is this message's only copy until the dispatch
          * appends it to the transcript, so `requestTurn` owns when it is
          * cleared — and when the draft-stage bytes behind it are released. It
@@ -602,14 +601,12 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!requireSession('regenerate')) {
           return;
         }
-        void store.touchChatRecency(resolvedChatId, Date.now());
         void store.requestTurn(resolvedChatId, { kind: 'regenerate' });
       },
       continueChat() {
         if (!requireSession('continueChat')) {
           return;
         }
-        void store.touchChatRecency(resolvedChatId, Date.now());
         void store.requestTurn(resolvedChatId, { kind: 'continue' });
       },
       stop() {
@@ -642,7 +639,6 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session.chat.messages.some((m) => m.id === messageId)) {
           return;
         }
-        void store.touchChatRecency(resolvedChatId, Date.now());
         void store.requestTurn(resolvedChatId, {
           kind: 'edit',
           messageId,

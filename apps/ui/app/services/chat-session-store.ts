@@ -1293,6 +1293,11 @@ export class ChatSessionStore {
     let admitting = this.#isAdmittingTurn(session);
     session.turnSubscriptions = [
       stateActorRef.on('startTurnRequest', ({ request }) => {
+        /* Recency counts a taken gesture: a refused one never gets here (L3 D16, LT08). */
+        void this.touchChatRecency(
+          session.chatId,
+          request.kind === 'send' ? (request.message.metadata?.createdAt ?? Date.now()) : Date.now(),
+        );
         session.persistenceActorRef.send({ type: 'startRequest', request });
       }),
       stateActorRef.on('stopTurnRequest', () => {

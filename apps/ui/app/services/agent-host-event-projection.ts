@@ -332,11 +332,14 @@ const assistantChunks = (
       }
       continue;
     }
-    if (
-      (value['type'] === 'image' || value['type'] === 'audio') &&
-      typeof value['mimeType'] === 'string' &&
-      typeof value['data'] === 'string'
-    ) {
+    /* An agent's media: an image or document by attachment reference (as the
+     * host now records it), or inline — the legacy image and any audio. */
+    const file = userFilePart(value);
+    if (file) {
+      chunks.push({ type: 'file', mediaType: file.mediaType, url: file.url });
+      continue;
+    }
+    if (value['type'] === 'audio' && typeof value['mimeType'] === 'string' && typeof value['data'] === 'string') {
       chunks.push({
         type: 'file',
         mediaType: value['mimeType'],

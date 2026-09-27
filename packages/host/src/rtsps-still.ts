@@ -484,7 +484,8 @@ export const createRtspSession = (
   });
 };
 
-type RtspProxy = Readonly<{ port: number; close(): Promise<void> }>;
+/** A listening loopback proxy. @internal */
+export type RtspProxy = Readonly<{ port: number; close(): Promise<void> }>;
 
 const relayTransform = (convert: (chunk: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>): Transform =>
   new Transform({
@@ -500,13 +501,15 @@ const relayTransform = (convert: (chunk: Uint8Array<ArrayBuffer>) => Uint8Array<
 
 /**
  * Serve one loopback RTSP client over the pinned upstream the caller opens,
- * speaking for it to the camera.
+ * speaking for it to the camera. The listener closes at the first connection,
+ * so no later one, from any local process, reaches the authenticated camera.
  *
+ * @internal
  * @param options - Open the pinned TLS socket to the camera; the camera's
  * endpoint; the capture's authenticator; and where each fixed-code failure goes.
  * @returns The listening proxy.
  */
-const listenRtspProxy = async (
+export const listenRtspProxy = async (
   options: Readonly<{
     openUpstream: () => Promise<Duplex>;
     remote: Readonly<{ address: string; port: number }>;
@@ -572,9 +575,10 @@ const listenRtspProxy = async (
     client.resume();
   };
   const server = createServer((client) => {
+    /* The first connection is ffmpeg's; stop listening so nothing else can connect, now or after it closes. */
+    server.close();
     void relay(client);
   });
-  server.maxConnections = 1;
   await new Promise<void>((resolve, reject) => {
     server.once('error', () => {
       reject(new Error('MACHINE_STILL_PROXY_FAILED'));

@@ -12,6 +12,8 @@
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepExtrema_DistanceSS.hxx>
+#include <Geom_BSplineSurface.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <IMeshTools_Parameters.hxx>
@@ -6709,13 +6711,160 @@ struct geospec_occt_component_bodies {
   size_t face_count = 0;
 };
 
+namespace {
+
+// Ruling 28: every piece of component work asks the caller's charge callback
+// before it runs. A unit is about 20 us of one core at load 50-70, fitted per
+// kind of work on the 140 corpus STEP files (W2-COMP a2 calib.tsv, where the
+// gearboxes' candidate pairs land within 1% of each other in us per unit).
+// The costs that scale with the geometry are a face's edges (UV bounds and
+// point classification walk them) and free-form curves and surfaces (their
+// extrema and bounds sample or optimize).
+constexpr uint64_t kComponentBoxTestsPerUnit = 1024;
+
+uint32_t component_edge_count(const TopoDS_Shape& face) {
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+  TopExp::MapShapes(face, TopAbs_EDGE, edges);
+  return static_cast<uint32_t>(edges.Extent());
+}
+
+// A face's box (BRepBndLib::AddOptimal) walks its edges on a plane,
+// cylinder, cone, extrusion or ruled B-spline surface and optimizes over any
+// other surface.
+uint64_t component_box_units(const TopoDS_Face& face) {
+  const uint64_t edges = component_edge_count(face);
+  const BRepAdaptor_Surface surface(face, false);
+  switch (surface.GetType()) {
+    case GeomAbs_Plane:
+    case GeomAbs_Cylinder:
+    case GeomAbs_Cone:
+    case GeomAbs_SurfaceOfExtrusion:
+      return 1 + edges / 8;
+    case GeomAbs_BSplineSurface: {
+      const auto spline = surface.BSpline();
+      const bool ruled = (spline->UDegree() == 1 && spline->NbUKnots() == 2) ||
+                         (spline->VDegree() == 1 && spline->NbVKnots() == 2);
+      return ruled ? 8 + edges / 8 : 256;
+    }
+    case GeomAbs_Sphere:
+      return 128;
+    case GeomAbs_Torus:
+      return 1024;
+    default:
+      return 256;
+  }
+}
+
+// One vertex, edge or face of a listed face set, decomposed and boxed as the
+// exact shape distance decomposes and boxes its shapes, with its cost class:
+// a vertex; a line, conic or free-form edge; a plane, elementary or
+// free-form face.
+struct ComponentPiece {
+  TopoDS_Shape shape;
+  Bnd_Box box;
+  double low = 0.0;
+  double high = 0.0;
+  int kind = 0;
+  uint32_t edges = 0;
+  uint32_t edge_poles = 0;
+};
+
+int component_curve_kind(const TopoDS_Edge& edge) {
+  if (BRep_Tool::Degenerated(edge)) return 1;
+  switch (BRepAdaptor_Curve(edge).GetType()) {
+    case GeomAbs_Line:
+      return 1;
+    case GeomAbs_Circle:
+    case GeomAbs_Ellipse:
+    case GeomAbs_Hyperbola:
+    case GeomAbs_Parabola:
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+int component_surface_kind(const TopoDS_Face& face) {
+  switch (BRepAdaptor_Surface(face, false).GetType()) {
+    case GeomAbs_Plane:
+      return 4;
+    case GeomAbs_Cylinder:
+    case GeomAbs_Cone:
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus:
+      return 5;
+    default:
+      return 6;
+  }
+}
+
+// Units of one pair's extrema by the pieces' classes (vertex, line, conic,
+// free-form edge, plane, elementary, free-form face), before the faces'
+// edges and edge poles.
+constexpr uint16_t kComponentPairUnits[7][7] = {
+    {1, 1, 1, 1, 1, 16, 64},       {1, 1, 1, 128, 1, 16, 64},
+    {1, 1, 512, 128, 4, 32, 64},   {1, 128, 128, 64, 64, 64, 128},
+    {1, 1, 4, 64, 1, 64, 64},      {16, 16, 32, 64, 64, 64, 64},
+    {64, 64, 64, 128, 64, 64, 64},
+};
+
+std::vector<ComponentPiece> component_pieces(
+    const geospec_occt_component_bodies::Body& body, const uint32_t* faces,
+    size_t count) {
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> vertices, edges, listed;
+  for (size_t index = 0; index < count; ++index) {
+    const TopoDS_Face& face = body.faces[faces[index]];
+    TopExp::MapShapes(face, TopAbs_VERTEX, vertices);
+    TopExp::MapShapes(face, TopAbs_EDGE, edges);
+    listed.Add(face);
+  }
+  std::vector<ComponentPiece> pieces;
+  for (const auto* map : {&vertices, &edges, &listed}) {
+    for (int index = 1; index <= map->Extent(); ++index) {
+      ComponentPiece piece;
+      piece.shape = (*map)(index);
+      BRepBndLib::Add(piece.shape, piece.box);
+      if (piece.box.IsVoid()) continue;
+      double ymin, zmin, ymax, zmax;
+      piece.box.Get(piece.low, ymin, zmin, piece.high, ymax, zmax);
+      if (piece.shape.ShapeType() == TopAbs_EDGE) {
+        piece.kind = component_curve_kind(TopoDS::Edge(piece.shape));
+      } else if (piece.shape.ShapeType() == TopAbs_FACE) {
+        piece.kind = component_surface_kind(TopoDS::Face(piece.shape));
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> bounding;
+        TopExp::MapShapes(piece.shape, TopAbs_EDGE, bounding);
+        piece.edges = static_cast<uint32_t>(bounding.Extent());
+        for (int edge = 1; edge <= bounding.Extent(); ++edge) {
+          if (BRep_Tool::Degenerated(TopoDS::Edge(bounding(edge)))) continue;
+          const BRepAdaptor_Curve curve(TopoDS::Edge(bounding(edge)));
+          if (curve.GetType() == GeomAbs_BSplineCurve ||
+              curve.GetType() == GeomAbs_BezierCurve) {
+            piece.edge_poles += static_cast<uint32_t>(curve.NbPoles());
+          }
+        }
+      }
+      pieces.push_back(std::move(piece));
+    }
+  }
+  return pieces;
+}
+
+uint64_t component_pair_units(const ComponentPiece& left,
+                              const ComponentPiece& right) {
+  return kComponentPairUnits[left.kind][right.kind] + (left.edges + right.edges) / 4 +
+         (left.edge_poles + right.edge_poles) / 4;
+}
+
+}  // namespace
+
 int geospec_occt_component_bodies_new(
     const geospec_occt_document* document, const uint32_t* occurrences,
-    size_t occurrence_count, geospec_occt_component_bodies** out_bodies,
-    size_t* out_body_count, size_t* out_face_count,
-    geospec_occt_string* error) noexcept {
-  if (document == nullptr || out_bodies == nullptr || out_body_count == nullptr ||
-      out_face_count == nullptr || (occurrence_count != 0 && occurrences == nullptr)) {
+    size_t occurrence_count, geospec_occt_charge charge, void* context,
+    geospec_occt_component_bodies** out_bodies, size_t* out_body_count,
+    size_t* out_face_count, geospec_occt_string* error) noexcept {
+  if (document == nullptr || charge == nullptr || out_bodies == nullptr ||
+      out_body_count == nullptr || out_face_count == nullptr ||
+      (occurrence_count != 0 && occurrences == nullptr)) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Component-body request is invalid.", error);
   }
@@ -6729,12 +6878,42 @@ int geospec_occt_component_bodies_new(
     }
   }
   return guarded(error, [&]() -> int {
+    struct Candidate {
+      TopoDS_Shape shape;
+      uint32_t occurrence;
+      bool solid;
+    };
+    std::vector<Candidate> candidates;
+    auto explode = [&](const TopoDS_Shape& shape, uint32_t occurrence) {
+      for (TopExp_Explorer solid(shape, TopAbs_SOLID); solid.More(); solid.Next()) {
+        candidates.push_back({solid.Current(), occurrence, true});
+      }
+      for (TopExp_Explorer shell(shape, TopAbs_SHELL, TopAbs_SOLID); shell.More();
+           shell.Next()) {
+        candidates.push_back({shell.Current(), occurrence, false});
+      }
+      for (TopExp_Explorer face(shape, TopAbs_FACE, TopAbs_SHELL); face.More();
+           face.Next()) {
+        candidates.push_back({face.Current(), occurrence, false});
+      }
+    };
+    if (occurrence_count == 0) explode(document->shape, UINT32_MAX);
+    for (size_t index = 0; index < occurrence_count; ++index) {
+      explode(document->occurrences[occurrences[index]].shape, occurrences[index]);
+    }
+    uint64_t units = 0;
+    for (const Candidate& candidate : candidates) {
+      for (TopExp_Explorer face(candidate.shape, TopAbs_FACE); face.More(); face.Next()) {
+        units += component_box_units(TopoDS::Face(face.Current()));
+      }
+    }
+    if (charge(context, units) != 0) return GEOSPEC_OCCT_STOPPED;
     auto result = std::make_unique<geospec_occt_component_bodies>();
     result->document = document;
-    auto add = [&](const TopoDS_Shape& shape, uint32_t occurrence, bool solid) {
+    for (const Candidate& candidate : candidates) {
       geospec_occt_component_bodies::Body body;
       Bnd_Box box;
-      for (TopExp_Explorer face(shape, TopAbs_FACE); face.More(); face.Next()) {
+      for (TopExp_Explorer face(candidate.shape, TopAbs_FACE); face.More(); face.Next()) {
         const Bnd_Box& local = memo_face_box(*document, face.Current());
         if (local.IsVoid()) continue;
         geospec_occt_bounds bounds{};
@@ -6745,12 +6924,12 @@ int geospec_occt_component_bodies_new(
         body.faces.push_back(TopoDS::Face(face.Current()));
         body.boxes.push_back(bounds);
       }
-      if (body.faces.empty()) return;
+      if (body.faces.empty()) continue;
       NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> vertices;
-      TopExp::MapShapes(shape, TopAbs_VERTEX, vertices);
-      body.shape = shape;
-      body.facts.occurrence = occurrence;
-      body.facts.solid = solid ? 1 : 0;
+      TopExp::MapShapes(candidate.shape, TopAbs_VERTEX, vertices);
+      body.shape = candidate.shape;
+      body.facts.occurrence = candidate.occurrence;
+      body.facts.solid = candidate.solid ? 1 : 0;
       body.facts.vertex_count = static_cast<uint32_t>(vertices.Extent());
       body.facts.face_count = static_cast<uint32_t>(body.faces.size());
       box.Get(body.facts.bounds.min[0], body.facts.bounds.min[1],
@@ -6758,23 +6937,6 @@ int geospec_occt_component_bodies_new(
               body.facts.bounds.max[1], body.facts.bounds.max[2]);
       result->face_count += body.faces.size();
       result->bodies.push_back(std::move(body));
-    };
-    auto explode = [&](const TopoDS_Shape& shape, uint32_t occurrence) {
-      for (TopExp_Explorer solid(shape, TopAbs_SOLID); solid.More(); solid.Next()) {
-        add(solid.Current(), occurrence, true);
-      }
-      for (TopExp_Explorer shell(shape, TopAbs_SHELL, TopAbs_SOLID); shell.More();
-           shell.Next()) {
-        add(shell.Current(), occurrence, false);
-      }
-      for (TopExp_Explorer face(shape, TopAbs_FACE, TopAbs_SHELL); face.More();
-           face.Next()) {
-        add(face.Current(), occurrence, false);
-      }
-    };
-    if (occurrence_count == 0) explode(document->shape, UINT32_MAX);
-    for (size_t index = 0; index < occurrence_count; ++index) {
-      explode(document->occurrences[occurrences[index]].shape, occurrences[index]);
     }
     *out_body_count = result->bodies.size();
     *out_face_count = result->face_count;
@@ -6813,26 +6975,103 @@ int geospec_occt_component_bodies_facts(
 
 int geospec_occt_component_faces_within(
     const geospec_occt_component_bodies* bodies, size_t left,
-    uint32_t left_face, size_t right, uint32_t right_face, double tolerance,
-    int* out_within, geospec_occt_string* error) noexcept {
-  if (bodies == nullptr || out_within == nullptr || left >= bodies->bodies.size() ||
-      right >= bodies->bodies.size() ||
-      left_face >= bodies->bodies[left].faces.size() ||
-      right_face >= bodies->bodies[right].faces.size() || !(tolerance >= 0.0)) {
+    const uint32_t* left_faces, size_t left_count, size_t right,
+    const uint32_t* right_faces, size_t right_count, double tolerance,
+    geospec_occt_charge charge, void* context, int* out_within,
+    geospec_occt_string* error) noexcept {
+  auto listed = [&](size_t body, const uint32_t* faces, size_t count) {
+    if (body >= bodies->bodies.size() || count == 0 || faces == nullptr) return false;
+    for (size_t index = 0; index < count; ++index) {
+      if (faces[index] >= bodies->bodies[body].faces.size()) return false;
+    }
+    return true;
+  };
+  if (bodies == nullptr || charge == nullptr || out_within == nullptr ||
+      !listed(left, left_faces, left_count) || !listed(right, right_faces, right_count) ||
+      !(tolerance >= 0.0) || !std::isfinite(tolerance)) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                "Component face pair is invalid.", error);
+                "Component face sets are invalid.", error);
   }
   return guarded(error, [&]() -> int {
-    BRepExtrema_DistShapeShape distance;
-    distance.SetMultiThread(false);
-    distance.LoadS1(bodies->bodies[left].faces[left_face]);
-    distance.LoadS2(bodies->bodies[right].faces[right_face]);
-    distance.Perform();
-    if (!distance.IsDone()) {
-      return fail(GEOSPEC_OCCT_NATIVE_ERROR,
-                  "OCCT extrema computation did not converge.", error);
+    *out_within = 0;
+    const auto& lbody = bodies->bodies[left];
+    const auto& rbody = bodies->bodies[right];
+    // The decomposition and its boxes walk each listed face's edges.
+    uint64_t units = 0;
+    for (size_t index = 0; index < left_count; ++index) {
+      units += 1 + component_edge_count(lbody.faces[left_faces[index]]) / 8;
     }
-    *out_within = distance.Value() <= tolerance ? 1 : 0;
+    for (size_t index = 0; index < right_count; ++index) {
+      units += 1 + component_edge_count(rbody.faces[right_faces[index]]) / 8;
+    }
+    if (charge(context, units) != 0) return GEOSPEC_OCCT_STOPPED;
+    const std::vector<ComponentPiece> lpieces = component_pieces(lbody, left_faces, left_count);
+    const std::vector<ComponentPiece> rpieces = component_pieces(rbody, right_faces, right_count);
+    // The shape distance's per-pair reference: every pair whose boxes lie
+    // farther apart is proven beyond the tolerance, and a pair within it
+    // reports its own distance.
+    const double reference = tolerance + 1.0e-6;
+    const double eps = Precision::Confusion();
+    // Sort-and-sweep on x: each box meets the other side's boxes still open
+    // within reach, one unit per kComponentBoxTestsPerUnit tests, charged in
+    // advance of each batch.
+    struct Event {
+      double x;
+      int side;
+      size_t piece;
+    };
+    std::vector<Event> events;
+    events.reserve(lpieces.size() + rpieces.size());
+    for (size_t index = 0; index < lpieces.size(); ++index) {
+      events.push_back({lpieces[index].low, 0, index});
+    }
+    for (size_t index = 0; index < rpieces.size(); ++index) {
+      events.push_back({rpieces[index].low, 1, index});
+    }
+    std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) {
+      return std::tie(a.x, a.side, a.piece) < std::tie(b.x, b.side, b.piece);
+    });
+    std::vector<size_t> open[2];
+    std::vector<std::tuple<double, size_t, size_t>> pairs;
+    uint64_t tests = 0;
+    for (const Event& event : events) {
+      const std::vector<ComponentPiece>& mine = event.side == 0 ? lpieces : rpieces;
+      const std::vector<ComponentPiece>& theirs = event.side == 0 ? rpieces : lpieces;
+      std::vector<size_t>& others = open[1 - event.side];
+      others.erase(std::remove_if(others.begin(), others.end(),
+                                  [&](size_t index) {
+                                    return theirs[index].high + reference + eps < event.x;
+                                  }),
+                   others.end());
+      for (const size_t other : others) {
+        if (tests++ % kComponentBoxTestsPerUnit == 0 && charge(context, 1) != 0) {
+          return GEOSPEC_OCCT_STOPPED;
+        }
+        const double gap = mine[event.piece].box.Distance(theirs[other].box);
+        if (gap - reference < eps) {
+          if (event.side == 0) {
+            pairs.emplace_back(gap, event.piece, other);
+          } else {
+            pairs.emplace_back(gap, other, event.piece);
+          }
+        }
+      }
+      open[event.side].push_back(event.piece);
+    }
+    std::sort(pairs.begin(), pairs.end());
+    for (const auto& [gap, lindex, rindex] : pairs) {
+      const ComponentPiece& lpiece = lpieces[lindex];
+      const ComponentPiece& rpiece = rpieces[rindex];
+      if (charge(context, component_pair_units(lpiece, rpiece)) != 0) {
+        return GEOSPEC_OCCT_STOPPED;
+      }
+      BRepExtrema_DistanceSS distance(lpiece.shape, rpiece.shape, lpiece.box, rpiece.box,
+                                      reference, eps);
+      if (distance.IsDone() && distance.DistValue() <= tolerance) {
+        *out_within = 1;
+        break;
+      }
+    }
     return GEOSPEC_OCCT_OK;
   });
 }

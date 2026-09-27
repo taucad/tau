@@ -451,19 +451,27 @@ pub struct ComponentBody {
     pub faces: Vec<Bounds>,
 }
 
-/// Exact narrow-phase verdicts over one set of component bodies. Callers
-/// charge each evaluation before asking; nothing here publishes a point.
+/// Asked for the work units of the next native step before it runs (ruling
+/// 28); `false` stops the step, which then answers `None`.
+pub type Charge<'a> = dyn FnMut(u64) -> bool + 'a;
+
+/// Exact narrow-phase verdicts over one set of component bodies; nothing
+/// here publishes a point.
 pub trait ComponentBodies {
     fn bodies(&self) -> &[ComponentBody];
-    /// Whether two faces lie within `tolerance` (serial exact distance).
+    /// Whether any listed face of `left` lies within `tolerance` of any
+    /// listed face of `right`: their vertex, edge and face pairs whose boxes
+    /// lie within reach, nearest first, each charged before its serial exact
+    /// distance, stopping at the first within `tolerance`.
     fn faces_within(
         &self,
         left: usize,
-        left_face: usize,
+        left_faces: &[u32],
         right: usize,
-        right_face: usize,
+        right_faces: &[u32],
         tolerance: f64,
-    ) -> Result<bool, BackendError>;
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<bool>, BackendError>;
     /// Whether two whole bodies lie within `tolerance`, a solid's interior
     /// included; parallel under a grant, which leaves the distance exact.
     fn bodies_within(
@@ -1208,11 +1216,13 @@ pub trait BrepSubject {
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
     /// Component bodies of the listed occurrences, or of the whole shape
-    /// when the list is empty (M2).
+    /// when the list is empty (M2), with their face boxes charged before
+    /// they are measured; `None` when `charge` stops them.
     fn component_bodies(
         &self,
         _occurrences: &[u32],
-    ) -> Result<Box<dyn ComponentBodies + '_>, BackendError> {
+        _charge: &mut Charge<'_>,
+    ) -> Result<Option<Box<dyn ComponentBodies + '_>>, BackendError> {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no exact component-body query.".into(),

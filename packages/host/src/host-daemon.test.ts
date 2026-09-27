@@ -13,14 +13,15 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
-import { bambuMachine } from '@taucad/bambu';
 import { tauRemoteUrl } from '@taucad/revisions';
-import { connectMachineChannel } from '@taucad/runtime/machine';
+import { defineConfiguration } from '@taucad/runtime/configuration';
+import { connectMachineChannel, defineMachine } from '@taucad/runtime/machine';
 import type { MachineArtifactReference } from '@taucad/runtime/machine';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
 import type * as RuntimeFileSystem from '@taucad/runtime/filesystem';
+import { z } from 'zod';
 
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
@@ -71,6 +72,89 @@ afterEach(async () => {
 });
 
 const agentToken = 'daemon-agent-token-with-at-least-32-characters';
+
+const fixtureConfiguration = defineConfiguration({
+  id: 'fixture.configuration',
+  version: '1',
+  schema: z.strictObject({}),
+  ui: { version: 1, rjsf: {} },
+});
+
+/* The daemon only lists what `--machines` admitted; the host names no real provider. */
+const fixtureMachine = defineMachine({
+  id: 'fixture-printer',
+  name: 'Fixture printer',
+  version: '1',
+  protocolVersion: 1,
+  vendor: 'fixture',
+  technologies: ['additive.fff'],
+  accepts: [
+    {
+      contract: { id: 'fixture.gcode', version: 1 },
+      mediaType: 'text/x.gcode',
+      requiredMembers: [],
+      payloadSelection: 'single',
+      technology: 'additive.fff',
+    },
+  ],
+  manifest: {
+    version: 1,
+    identity: { vendor: 'fixture', model: 'fixture-printer', displayName: 'Fixture printer', qualifiedFirmware: [] },
+    technology: 'additive.fff',
+    geometry: {
+      unit: 'mm',
+      buildVolume: { x: 200, y: 200, z: 200 },
+      enclosure: { outer: { x: 300, y: 300, z: 400 }, enclosed: false, doors: [] },
+      kinematics: 'cartesian-bedslinger',
+      bedMotion: 'y',
+      origin: 'front-left',
+      toolheadHome: { x: 1, y: 1, z: 200 },
+      materialSystemMount: 'none',
+    },
+    toolhead: {
+      filamentDiameter: { value: 1.75, unit: 'mm' },
+      nozzles: [
+        {
+          id: 'nozzle-0.4',
+          diameter: { value: 0.4, unit: 'mm' },
+          maximumTemperature: { value: 260, unit: 'Cel' },
+          material: 'stainless',
+        },
+      ],
+    },
+    bed: { maximumTemperature: { value: 100, unit: 'Cel' }, plates: [{ id: 'smooth', label: 'Smooth plate' }] },
+    chamber: { enclosed: false, heated: false, light: false, fans: [] },
+    materialSystem: { units: 0, slotsPerUnit: 0, externalSpool: true, drying: false },
+    camera: { stills: false },
+    storage: { removable: false },
+    network: { lanMode: true, cloud: false },
+    speedProfiles: [],
+    actions: [],
+    observations: [],
+    slicing: {
+      recommended: {
+        layerHeight: { value: 0.2, unit: 'mm' },
+        walls: 2,
+        infillPercent: 15,
+        nozzleTemperature: { value: 210, unit: 'Cel' },
+        bedTemperature: { value: 60, unit: 'Cel' },
+      },
+      presets: [
+        { id: 'fast', label: 'Fast', layerHeight: { value: 0.28, unit: 'mm' } },
+        { id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } },
+        { id: 'fine', label: 'Fine', layerHeight: { value: 0.12, unit: 'mm' } },
+      ],
+    },
+  },
+  bindingConfiguration: fixtureConfiguration,
+  submissionConfiguration: fixtureConfiguration,
+  async *discover() {
+    yield* [];
+  },
+  async connect() {
+    throw new Error('The fixture printer does not connect.');
+  },
+});
 
 /** A machine with no `git` records nothing, so the native rows sit out. */
 const hasGit = ((): boolean => {
@@ -641,7 +725,7 @@ describe('startHostDaemon', () => {
     const daemon = startHostDaemon({
       relayUrl: new URL('http://127.0.0.1:1'),
       runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
-      agent: { ...agentOptions, machines: { providers: [bambuMachine()] } },
+      agent: { ...agentOptions, machines: { providers: [fixtureMachine()] } },
       onEvent: (event) => events.push(event),
     });
     await daemon.ready;
@@ -668,7 +752,7 @@ describe('startHostDaemon', () => {
     const client = connectMachineChannel(socket);
     try {
       const providers = await client.listProviders({});
-      expect(providers.map((provider) => provider.id)).toEqual(['bambu']);
+      expect(providers.map((provider) => provider.id)).toEqual(['fixture-printer']);
       await expect(client.list({})).resolves.toMatchObject({ entries: [] });
     } finally {
       client.close();
@@ -748,7 +832,7 @@ describe('startHostDaemon', () => {
       const daemon = startHostDaemon({
         relayUrl: new URL('http://127.0.0.1:1'),
         runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
-        agent: { ...(await agentOptionsIn(temporaryDirectory)), machines: { providers: [bambuMachine()] } },
+        agent: { ...(await agentOptionsIn(temporaryDirectory)), machines: { providers: [fixtureMachine()] } },
         onEvent: (event) => events.push(event),
       });
       await daemon.ready;

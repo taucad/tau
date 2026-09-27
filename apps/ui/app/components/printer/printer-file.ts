@@ -9,7 +9,7 @@
  */
 
 import { readBambuContainer } from '@taucad/slicer/container';
-import { plateForBedType, readGcodeBedType } from '#components/printer/printer-plates.js';
+import { plateForBedType } from '#components/printer/printer-plates.js';
 import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 
 /** Which printer file a name and its leading bytes describe. */
@@ -39,11 +39,42 @@ export type PrinterFileContents = Readonly<{
    * else the G-code's `curr_bed_type`; `undefined` when neither does.
    */
   slicedPlate: PrinterPlateModel | undefined;
+  /** `#RRGGBB` of the first filament the file was sliced with; `undefined` when it records none. */
+  filamentColor: string | undefined;
 }>;
 
-/** The G-code bytes of a printer file and the plate it was sliced for. */
+/** Bytes at each end of the G-code searched for a setting: Bambu Studio writes its config block first, Orca last. */
+const configScanBytes = 64 * 1024;
+
+/**
+ * A `; <name> = …` setting from a slicer's config block, read from the first
+ * and last 64 KiB of the G-code only.
+ *
+ * @param gcode - The plate G-code.
+ * @param name - The setting's key, e.g. `curr_bed_type`.
+ * @returns The recorded value, or `undefined` when neither end states one.
+ */
+export const readGcodeSetting = (gcode: Uint8Array<ArrayBuffer>, name: string): string | undefined => {
+  const setting = new RegExp(`^;\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'mu');
+  const decoder = new TextDecoder();
+  const head = decoder.decode(gcode.subarray(0, configScanBytes));
+  const tail = gcode.byteLength > configScanBytes ? decoder.decode(gcode.subarray(-configScanBytes)) : '';
+  return (setting.exec(head) ?? setting.exec(tail))?.[1];
+};
+
+/** The first colour of a `filament_colour` list such as `#F5A623;#FFFFFF`, as `#RRGGBB`. */
+const firstFilamentColor = (value: string | undefined): string | undefined => {
+  const hex = value && /#([\da-f]{6})/iu.exec(value)?.[1];
+  return hex ? `#${hex.toUpperCase()}` : undefined;
+};
+
+/** The G-code bytes of a printer file, the plate it was sliced for and its filament colour. */
 export const readPrinterFile = (bytes: Uint8Array<ArrayBuffer>, kind: PrinterFileKind): PrinterFileContents => {
   const container = kind === 'container' ? readBambuContainer(bytes) : undefined;
   const gcode = container?.gcode ?? bytes;
-  return { gcode, slicedPlate: plateForBedType(container?.bedType) ?? plateForBedType(readGcodeBedType(gcode)) };
+  return {
+    gcode,
+    slicedPlate: plateForBedType(container?.bedType) ?? plateForBedType(readGcodeSetting(gcode, 'curr_bed_type')),
+    filamentColor: firstFilamentColor(readGcodeSetting(gcode, 'filament_colour')),
+  };
 };

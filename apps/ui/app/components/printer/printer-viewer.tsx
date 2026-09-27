@@ -77,6 +77,7 @@ type ProgramResource =
       kind: 'ready';
       program: ToolpathProgram;
       slicedPlate: PrinterPlateModel | undefined;
+      filamentColor: string | undefined;
       digest: string | undefined;
     }>
   | Readonly<{ kind: 'error'; message: string }>;
@@ -133,12 +134,12 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
     const load = async (): Promise<void> => {
       try {
         const bytes = await readAll();
-        const { program, slicedPlate } = loadPrinterProgram(bytes, kind);
+        const { program, slicedPlate, filamentColor } = loadPrinterProgram(bytes, kind);
         // The print request ledger names artifacts by digest; Live mode follows a run only from its own bytes.
         // WebCrypto needs a secure context: without one (a LAN address over http) Live mode stays off.
         const digest = await digestBytes(bytes).catch(() => undefined);
         if (active) {
-          setResource({ kind: 'ready', program, slicedPlate, digest });
+          setResource({ kind: 'ready', program, slicedPlate, filamentColor, digest });
         }
       } catch (error) {
         if (active) {
@@ -219,6 +220,7 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
       <PrinterSimulation
         name={name}
         program={resource.program}
+        slicedFilamentColor={resource.filamentColor}
         digest={resource.digest}
         frameRequest={frameRequest}
         isWholePrinter={isWholePrinter}
@@ -248,9 +250,9 @@ const usePrinterGeometry = (live: PrinterLiveState | undefined) => {
  * @param program - The loaded toolpath.
  * @returns The grouping, the hidden set (a new set per change) and its toggle.
  */
-/** The filament the scene tints with, and each filter group's colour as the scene draws it. */
-const useToolpathColors = (liveFilament: string | undefined, theme: 'light' | 'dark') => {
-  const filamentColor = liveFilament ?? printerAccent;
+/** The first known filament colour, in priority order, and each filter group's colour as the scene draws it. */
+const useToolpathColors = (filaments: ReadonlyArray<string | undefined>, theme: 'light' | 'dark') => {
+  const filamentColor = filaments.find((color) => color !== undefined) ?? printerAccent;
   // The legend swatches read the scene's own palette, so they match the drawn toolpath.
   const groupColors = useMemo(() => {
     const palette = createToolpathPalette(filamentColor, theme);
@@ -279,6 +281,7 @@ const useToolpathFilter = (program: ToolpathProgram) => {
 function PrinterSimulation({
   name,
   program,
+  slicedFilamentColor,
   digest,
   frameRequest,
   isWholePrinter,
@@ -286,6 +289,8 @@ function PrinterSimulation({
 }: Readonly<{
   name: string;
   program: ToolpathProgram;
+  /** The colour the file was sliced with, which the model's own colour sets. */
+  slicedFilamentColor: string | undefined;
   digest: string | undefined;
   frameRequest: number;
   isWholePrinter: boolean;
@@ -303,7 +308,7 @@ function PrinterSimulation({
   const prefix = useMemo(() => createExtrusionPrefix(program), [program]);
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const { grouping, hiddenGroups, handleGroupShown } = useToolpathFilter(program);
-  const { filamentColor, groupColors } = useToolpathColors(live?.filamentColor, theme);
+  const { filamentColor, groupColors } = useToolpathColors([slicedFilamentColor, live?.filamentColor], theme);
   const position = live?.position;
   const isLiveAvailable = live?.printsThisFile === true;
 

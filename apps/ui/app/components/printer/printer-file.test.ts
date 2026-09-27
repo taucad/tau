@@ -5,6 +5,7 @@ import {
   readPrinterFile,
   isPrinterFileName,
   printerFileKind,
+  readGcodeSetting,
 } from '#components/printer/printer-file.js';
 import { loadPrinterProgram } from '#components/printer/printer-program.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
@@ -44,7 +45,7 @@ describe('readPrinterFile and loadPrinterProgram', () => {
 
   it('should pass text G-code through untouched', () => {
     const bytes = new TextEncoder().encode(fixtureGcode({ layers: 2 }));
-    expect(readPrinterFile(bytes, 'gcode')).toEqual({ gcode: bytes, slicedPlate: undefined });
+    expect(readPrinterFile(bytes, 'gcode')).toEqual({ gcode: bytes, slicedPlate: undefined, filamentColor: undefined });
     expect(loadPrinterProgram(bytes, 'gcode').program.layerTable).toHaveLength(2);
   });
 
@@ -59,5 +60,40 @@ describe('readPrinterFile and loadPrinterProgram', () => {
     expect(readPrinterFile(new TextEncoder().encode(gcode), 'gcode').slicedPlate?.id).toBe('high-temperature');
     const cool = writeBambuContainer({ gcode, modelName: 'fixture', plate: 'cool_plate' });
     expect(readPrinterFile(cool, 'container').slicedPlate?.id).toBe('cool');
+  });
+});
+
+const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
+
+describe('readGcodeSetting', () => {
+  it("should read Bambu Studio's leading config block", () => {
+    expect(
+      readGcodeSetting(encode('; HEADER_BLOCK_START\n; curr_bed_type = Textured PEI Plate\nG28\n'), 'curr_bed_type'),
+    ).toBe('Textured PEI Plate');
+  });
+
+  it('should read a config block at the end of a long file and ignore the middle', () => {
+    const middle = 'G1 X1 Y1\n'.repeat(20_000);
+    expect(readGcodeSetting(encode(`G28\n${middle}; curr_bed_type = Cool Plate\n`), 'curr_bed_type')).toBe(
+      'Cool Plate',
+    );
+    expect(
+      readGcodeSetting(encode(`G28\n${middle}; curr_bed_type = Cool Plate\n${middle}`), 'curr_bed_type'),
+    ).toBeUndefined();
+  });
+
+  it('should report nothing when no setting is present', () => {
+    expect(readGcodeSetting(encode('G28\nG1 X1 F600\n'), 'curr_bed_type')).toBeUndefined();
+  });
+});
+
+describe('sliced filament colour', () => {
+  it("should take the first colour of the config block's filament list", () => {
+    const gcode = `; CONFIG_BLOCK_START\n; filament_colour = #f5a623;#FFFFFF\n; CONFIG_BLOCK_END\n${fixtureGcode({ layers: 1 })}`;
+    expect(readPrinterFile(encode(gcode), 'gcode').filamentColor).toBe('#F5A623');
+    expect(readPrinterFile(writeBambuContainer({ gcode, modelName: 'fixture' }), 'container').filamentColor).toBe(
+      '#F5A623',
+    );
+    expect(readPrinterFile(encode(fixtureGcode({ layers: 1 })), 'gcode').filamentColor).toBeUndefined();
   });
 });

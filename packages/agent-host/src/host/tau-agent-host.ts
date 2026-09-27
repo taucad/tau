@@ -670,16 +670,20 @@ export const appendChatRows = async (
  * continued attempt reads. The paused call's own output only says the run paused (TS-R10 ends the attempt before any
  * answer exists), so without this the model saw a failed call and nothing else.
  *
+ * A denial or a Stop ends the run with no attempt left to tell, so the chat's next run is told instead (`ended`): its
+ * calls ask again, because a recalled answer never crosses runs.
+ *
  * @param events - The chat's rows.
- * @param runId - The run being continued.
- * @param timestamp - The reminder's time.
+ * @param runId - The run being continued, or the ended run the next one follows.
+ * @param at - The reminder's time, and whether it is for the next run after `runId` ended.
  * @returns The reminder, or `undefined` when no approval was answered since the run's last attempt.
  */
 const approvalAnswers = (
   events: readonly AgentLogEvent[],
   runId: string,
-  timestamp: number,
+  at: Readonly<{ timestamp: number; ended?: boolean }>,
 ): UserProviderMessage | undefined => {
+  const { timestamp, ended = false } = at;
   const asked = new Map<string, Readonly<{ prompt: string; toolName: string; toolCallId: string }>>();
   let answers: Array<Readonly<{ interruptId: string; line: string }>> = [];
   for (const row of events) {
@@ -715,9 +719,13 @@ const approvalAnswers = (
     role: 'user',
     content: [
       '<system-reminder>',
-      "The run paused for the person's approval, and they answered:",
+      ended
+        ? "The last run paused for the person's approval, and they answered:"
+        : "The run paused for the person's approval, and they answered:",
       ...answers.map(({ line }) => line),
-      'The tool has their answer: call it again with the same input to continue from it; it does not ask again.',
+      ended
+        ? 'That run has ended, so its answers do not carry into this one: a call that needs approval asks again.'
+        : 'The tool has their answer: call it again with the same input to continue from it; it does not ask again.',
       '</system-reminder>',
     ].join('\n'),
     metadata: {
@@ -1404,11 +1412,19 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         clientContext,
         recentSkills: options.recentSkills,
       });
+      /* The chat's last run ended on answers no attempt was told (a denial, a Stop): this run is told first. */
+      const lastRunId = events.findLast(
+        (row) => row.type === 'run.lifecycle' && row.state === 'admitted' && row.runId !== start.runId,
+      )?.runId;
+      const told =
+        rewind === undefined && lastRunId !== undefined
+          ? approvalAnswers(events, lastRunId, { timestamp: now().getTime(), ended: true })
+          : undefined;
       return {
         kind: 'tau',
         turnId: start.message.id,
         intent: intent({ kind: 'tau', ...base, selection: turnModelOf(model), context }),
-        start: [],
+        start: told === undefined ? [] : [{ type: 'message.appended', message: told }],
         ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
       };
     },
@@ -1469,7 +1485,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (reminder) {
         recovery.push({ type: 'message.appended', message: reminder });
       }
-      const answered = approvalAnswers(events, runId, now().getTime());
+      const answered = approvalAnswers(events, runId, { timestamp: now().getTime() });
       if (answered) {
         recovery.push({ type: 'message.appended', message: answered });
       }

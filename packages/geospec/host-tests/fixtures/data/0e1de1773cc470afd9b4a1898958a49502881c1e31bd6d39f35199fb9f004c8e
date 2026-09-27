@@ -22,7 +22,7 @@
       "backendProfile": "occt-8.1.0-dev1-3d097a-report-authored-v5"
     },
     "rule": "Only the descriptor ingestProfile and backendProfile strings change; subjectHash is the SHA-256 of the JCS descriptor, and every request, plan and receipt byte string that names a predecessor subjectHash names its successor instead.",
-    "product": "impl/w2-int 52f3b044f add-on (sha256 c0c58244), loaded through the generated binding path"
+    "product": "impl/w2-int 9a549c62d add-on (sha256 3c2fe5b5), loaded through the generated binding path"
   },
   "replayEvidence": {
     "method": "W2-INT authority replay: each request on one product with the subject identity rebound to that product's admission (masks the identity move only).",
@@ -34,7 +34,7 @@
       ]
     },
     "after": {
-      "product": "impl/w2-int 52f3b044f",
+      "product": "impl/w2-int 9a549c62d",
       "sha256": [
         "eb700b5aba1b0bb035eec730487196320b73c5be7149b9968286ea021ed2035e",
         "21dabd4b5bcf84695ffca7b8701cf36b4bf0b1d248a25db7e9bec9c8fd9a56b0"
@@ -42,6 +42,12 @@
     },
     "attribution": {
       "sha256": "c6c4666ebad3ac55ecf5ae6e71cd34360dad1a5aba35b3ce8adf9690d9d2dc93"
+    },
+    "fixAttribution": {
+      "sha256": "43af805260fca84a4c13c421180fdc74340a719e9931e7a0b2895d0808768284",
+      "counts": {
+        "equal": 1407
+      }
     }
   },
   "subjectVariants": [

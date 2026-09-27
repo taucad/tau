@@ -207,13 +207,16 @@ export const createCanvasConfig = (
     // writer's fails with 504 Outdated Optimize Dep.
     cacheDir: resolve(repoRoot, 'node_modules/.vite/canvas', relative(realpathSync(allowedRoot), root)),
     resolve: {
-      alias: {
-        '@taucad/ui': resolve(repoRoot, 'packages/ui/src'),
-        // The shared API design guide renderer (create-ts-api skill).
-        '@tau/api-guide': resolve(import.meta.dirname, '../canvas/api-guide.tsx'),
-        react: resolve(repoRoot, 'scripts/node_modules/react'),
-        'react-dom': resolve(repoRoot, 'packages/ui/node_modules/react-dom'),
-      },
+      alias: [
+        { find: '@taucad/ui', replacement: resolve(repoRoot, 'packages/ui/src') },
+        // Tau's precompiled Shiki grammars, which a guide passes for languages Shiki does not bundle (KCL).
+        // Exact match: a string alias would also rewrite the app's `@taucad/grammars/openscad` imports.
+        { find: /^@taucad\/grammars$/, replacement: resolve(repoRoot, 'libs/grammars/src/index.ts') },
+        // The shared API design guide renderer (create-api skill).
+        { find: '@tau/api-guide', replacement: resolve(import.meta.dirname, '../canvas/api-guide.tsx') },
+        { find: 'react', replacement: resolve(repoRoot, 'scripts/node_modules/react') },
+        { find: 'react-dom', replacement: resolve(repoRoot, 'packages/ui/node_modules/react-dom') },
+      ],
     },
     plugins: [
       {

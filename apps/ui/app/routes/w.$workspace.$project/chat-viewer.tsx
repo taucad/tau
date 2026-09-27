@@ -1,5 +1,7 @@
 import { memo, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
+import type { SnapshotFrom } from 'xstate';
+import type { FileEntry } from '@taucad/types';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
@@ -11,7 +13,7 @@ import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '@taucad/ui/components/button';
 import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
 import { useProject } from '#hooks/use-project.js';
-import { useFileTreeMap } from '#hooks/use-file-tree.js';
+import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
@@ -36,10 +38,10 @@ import { describeKinematicsHover, getKinematicsUnitState } from '#machines/kinem
 import {
   selectCadGeometry,
   selectCadKernelClient,
-  selectCadUnits,
   selectCadFailureIssues,
   selectIsCadLoading,
 } from '#machines/cad.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
 import {
   attachViewerSecondaryGestureTarget,
   beginViewerSecondaryGesture,
@@ -117,31 +119,33 @@ export const ChatViewer = memo(function ({
   // Get the geometry unit for this view's entry path
   const cadActor = entryPath ? geometryUnits.get(entryPath) : undefined;
 
-  // Lazy tree snapshot for isDirectory checks (prefix / loaded dir entry)
-  const fileTree = useFileTreeMap();
-
-  // Detect if the entry path is a directory.
-  // The fileTree only stores file entries (not directories), so we check
-  // whether entryPath is a prefix of any file path in the tree.
-  const isDirectory = useMemo(() => {
-    if (!entryPath) {
-      return false;
-    }
-
-    const entry = fileTree.get(entryPath);
-    if (entry) {
-      return entry.type === 'dir';
-    }
-
-    const directoryPrefix = `${entryPath}/`;
-    for (const key of fileTree.keys()) {
-      if (key.startsWith(directoryPrefix)) {
-        return true;
+  // Detect if the entry path is a directory: a listed directory entry, or a
+  // prefix of a listed path when its directory has not been listed itself.
+  // Selected as a boolean so a tree publication (every file write) re-renders
+  // the viewer only when the answer changes.
+  const selectIsDirectory = useCallback(
+    (fileTree: ReadonlyMap<string, FileEntry>): boolean => {
+      if (!entryPath) {
+        return false;
       }
-    }
 
-    return false;
-  }, [entryPath, fileTree]);
+      const entry = fileTree.get(entryPath);
+      if (entry) {
+        return entry.type === 'dir';
+      }
+
+      const directoryPrefix = `${entryPath}/`;
+      for (const key of fileTree.keys()) {
+        if (key.startsWith(directoryPrefix)) {
+          return true;
+        }
+      }
+
+      return false;
+    },
+    [entryPath],
+  );
+  const isDirectory = useFileTreeSelector(selectIsDirectory);
 
   // Derive isMissing from content service orphan outcome (VS Code pattern).
   // useFileContent auto-loads on cache miss; missing files resolve to the
@@ -321,7 +325,6 @@ const ViewerContent = memo(function ({
   const cadRef = useCad();
   const geometry = useCadSelector(selectCadGeometry, undefined);
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
-  const units = useCadSelector(selectCadUnits, undefined);
   const kernelClient = useCadSelector(selectCadKernelClient, undefined);
   const failureMessage =
     failureIssues?.find((issue) => issue.severity === 'error')?.message ?? failureIssues?.[0]?.message;
@@ -341,18 +344,32 @@ const ViewerContent = memo(function ({
     });
   }, [projectRef, entryPath, unitSettings]);
 
-  // Bridge geometry data from the headless CadMachine to the per-view GraphicsMachine
+  // Bridge geometry from the headless CadMachine to the per-view GraphicsMachine in
+  // the same tick the cad machine publishes it. The canvas then renders a new
+  // geometry together with the presentation revision the graphics machine
+  // assigns it; bridged after the commit instead, the mesh would render (and
+  // start preparing) the new geometry under the previous revision first, then
+  // again under its own.
   const graphicsActor = useGraphics();
   useEffect(() => {
-    if (units && geometry) {
-      graphicsActor.send({
-        type: 'updateGeometry',
-        geometry,
-        units,
-        sourceFile: entryPath,
-      });
+    if (!cadRef) {
+      return undefined;
     }
-  }, [entryPath, graphicsActor, geometry, units]);
+
+    let forwarded: Pick<SnapshotFrom<typeof cadMachine>['context'], 'geometry' | 'units'> | undefined;
+    const forward = ({ context: { geometry, units } }: SnapshotFrom<typeof cadMachine>): void => {
+      if (!geometry || (geometry === forwarded?.geometry && units === forwarded.units)) {
+        return;
+      }
+      forwarded = { geometry, units };
+      graphicsActor.send({ type: 'updateGeometry', geometry, units, sourceFile: entryPath });
+    };
+    forward(cadRef.getSnapshot());
+    const subscription = cadRef.subscribe(forward);
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [cadRef, entryPath, graphicsActor]);
 
   // Select individual primitive values so that useSelector's reference equality
   // check works correctly. An object-returning selector creates a new reference

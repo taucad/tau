@@ -24,7 +24,7 @@ import {
 import type { PrinterBounds, PrinterBox, PrinterGeometry, PrinterPanel } from '#components/printer/printer-geometry.js';
 import { eventValueAt } from '#components/printer/printer-playback.js';
 import type { PlaybackStore } from '#components/printer/printer-playback.js';
-import { plateModelMatrix, printerHotendModel } from '#components/printer/printer-plates.js';
+import { liftPlateSurface, plateModelMatrix, printerHotendModel } from '#components/printer/printer-plates.js';
 import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 import {
   createToolpathPalette,
@@ -87,19 +87,11 @@ const plateRoughness: Readonly<Record<PrinterPlateModel['finish'], number>> = {
   matte: 0.65,
   textured: 0.9,
 };
-/**
- * How far the print surface lifts toward white. The plates' true surfaces are near black, so the
- * first layers and the empty build area vanish against them; the viewer draws them lighter.
- */
-const plateSurfaceLift = 0.3;
-const plateSurfaceLiftTarget = new THREE.Color(printerBody.plateSurfaceLift);
 const gltfLoader = new GLTFLoader();
 const boundsKey = ({ min, max }: PrinterBounds): string => [...min, ...max].join(',');
 /** The CAD viewer's own camera feel, without its easing. */
 const printerCameraControlProps = resolveCameraControlProps({ enablePan: true, enableZoom: true });
 
-/** The print surface's colour as the viewer draws it; `color` is changed in place. */
-const liftPlateSurface = (color: THREE.Color): THREE.Color => color.lerp(plateSurfaceLiftTarget, plateSurfaceLift);
 /** The plate's opacity seen from below the print surface: a shade over the print, as Bambu Studio draws it. */
 const plateUndersideOpacity = 0.2;
 /** The mesh that is the print surface, in the plate GLBs and the flat stand-in alike. */

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { segmentAtTime, toolpathSegmentKinds } from '@taucad/slicer/toolpath';
 import { printerToolpath } from '#components/printer/printer-colors.constants.js';
+import { liftPlateSurface, x1cPlates } from '#components/printer/printer-plates.js';
 import {
   createToolpathPalette,
   createToolpathReveal,
@@ -33,6 +34,16 @@ const drawnVertices = (reveal: ToolpathReveal): number =>
   reveal.groupLines.reduce((total, object) => total + (object?.visible ? object.geometry.drawRange.count : 0), 0);
 const vertexColor = (colors: ArrayLike<number>, vertex: number): THREE.Color =>
   new THREE.Color().fromArray(colors, vertex * 3);
+/** WCAG 2 relative luminance, from the colour's linear sRGB components. */
+const luminance = (color: THREE.Color): number => {
+  const { r, g, b } = color.getRGB({ r: 0, g: 0, b: 0 }, THREE.LinearSRGBColorSpace);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+/** WCAG 2 contrast ratio between two colours. */
+const contrast = (first: THREE.Color, second: THREE.Color): number => {
+  const [one, other] = [luminance(first), luminance(second)];
+  return (Math.max(one, other) + 0.05) / (Math.min(one, other) + 0.05);
+};
 
 describe('createToolpathPalette', () => {
   it('should derive wall shades from the filament and keep travel dim', () => {
@@ -41,7 +52,20 @@ describe('createToolpathPalette', () => {
     expect(palette.infill.getHSL({ h: 0, s: 0, l: 0 }).s).toBeLessThan(1);
     expect(palette.travel.getHexString()).toBe(printerToolpath.travel.dark.slice(1));
     expect(palette.retract).toBe(palette.travel);
-    expect(palette.purge.getHexString()).toBe(printerToolpath.purge.slice(1));
+    expect(palette.purge.getHexString()).toBe(printerToolpath.preparation.slice(1));
+  });
+
+  it('should keep the preparation at 3:1 non-text contrast against every plate surface as the viewer draws it', () => {
+    expect(x1cPlates.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(['cool', 'engineering', 'high-temperature', 'textured-pei']),
+    );
+    for (const theme of ['light', 'dark'] as const) {
+      const preparation = createToolpathPalette('#ff0000', theme).purge;
+      for (const plate of x1cPlates) {
+        const surface = liftPlateSurface(new THREE.Color(plate.color));
+        expect(contrast(preparation, surface), `${plate.label}, ${theme}`).toBeGreaterThanOrEqual(3);
+      }
+    }
   });
 });
 
@@ -71,7 +95,7 @@ describe('createToolpathReveal', () => {
     }
   });
 
-  it('should tint each segment by kind, fading the lowest layers toward muted', () => {
+  it('should tint each segment by kind, fading the lowest layers toward muted but not the preparation', () => {
     const reveal = createToolpathReveal(program, palette);
     try {
       const purge = program.kinds.indexOf(toolpathSegmentKinds.indexOf('purge'));
@@ -83,8 +107,10 @@ describe('createToolpathReveal', () => {
       const bottomColor = vertexColor(reveal.baseColors, bottomOuter * 2);
       expect(bottomColor.r).toBeLessThan(topColor.r);
       expect(bottomColor.g).toBeGreaterThan(topColor.g);
-      const purgeColor = vertexColor(reveal.baseColors, purge * 2);
-      expect(purgeColor.getHex()).not.toBe(topColor.getHex());
+      // The purge line lies on layer 0, where a fade would be deepest; it keeps its tint exactly.
+      expect(program.layers[purge]).toBe(0);
+      expect(vertexColor(reveal.baseColors, purge * 2).getHex()).toBe(palette.purge.getHex());
+      expect(vertexColor(reveal.baseColors, purge * 2 + 1).getHex()).toBe(palette.purge.getHex());
     } finally {
       reveal.dispose();
     }
@@ -128,6 +154,25 @@ describe('updateToolpathReveal', () => {
       expect(trailCount).toBeGreaterThan(0);
       expect(trailCount).toBeLessThanOrEqual(trailSegmentCount);
       expect(head.z).toBeCloseTo(layer.z, 6);
+    } finally {
+      reveal.dispose();
+    }
+  });
+
+  it('should keep the preparation its tint while its layer is active and the walls beside it brighten', () => {
+    const reveal = createToolpathReveal(program, palette);
+    try {
+      const head = new THREE.Vector3();
+      const first = program.layerTable[0]!;
+      expect(updateToolpathReveal({ reveal, program, time: (first.startTime + first.endTime) / 2, head }).layer).toBe(
+        0,
+      );
+      const purgeVertex = program.kinds.indexOf(toolpathSegmentKinds.indexOf('purge')) * 2;
+      expect(vertexColor(reveal.colors.array, purgeVertex).getHex()).toBe(palette.purge.getHex());
+      const wallVertex = firstOfKind(0, 'outer-wall') * 2;
+      expect(vertexColor(reveal.colors.array, wallVertex).g).toBeGreaterThan(
+        vertexColor(reveal.baseColors, wallVertex).g,
+      );
     } finally {
       reveal.dispose();
     }

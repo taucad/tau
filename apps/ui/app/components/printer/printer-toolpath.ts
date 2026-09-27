@@ -135,7 +135,7 @@ export const createToolpathPalette = (filament: string, theme: 'light' | 'dark')
     support: new THREE.Color(printerToolpath.support),
     skirt: new THREE.Color(printerToolpath.skirt),
     brim: new THREE.Color(printerToolpath.brim),
-    purge: new THREE.Color(printerToolpath.purge),
+    purge: new THREE.Color(printerToolpath.preparation),
     travel,
     retract: travel,
     wipe: travel,
@@ -175,9 +175,13 @@ export const createToolpathReveal = (
   const topLayer = Math.max(1, program.layerTable.length - 1);
   const color = new THREE.Color();
   for (let segment = 0; segment < program.segmentCount; segment += 1) {
-    const height = Math.min(1, program.layers[segment]! / topLayer);
-    const tint = groupOf[segment] === preparationGroup ? palette.purge : palette[kindOf(program, segment)];
-    color.copy(tint).lerp(palette.muted, depthFade * (1 - height));
+    if (groupOf[segment] === preparationGroup) {
+      // Preparation keeps its one tint: faded toward the muted shade, it sinks into the plate.
+      color.copy(palette.purge);
+    } else {
+      const height = Math.min(1, program.layers[segment]! / topLayer);
+      color.copy(palette[kindOf(program, segment)]).lerp(palette.muted, depthFade * (1 - height));
+    }
     color.toArray(baseColors, segment * 6);
     color.toArray(baseColors, segment * 6 + 3);
   }
@@ -284,7 +288,8 @@ const recolorLayer = (
   const highlight = new THREE.Color(printerToolpath.highlight);
   for (let offset = start; offset < start + length; offset += 3) {
     color.fromArray(reveal.baseColors, offset);
-    if (brighten > 0) {
+    // Preparation shares layer 0 but stays its tint: brightened, it fades into the lifted plate.
+    if (brighten > 0 && reveal.groupOf[Math.floor(offset / 6)] !== preparationGroup) {
       color.lerp(highlight, brighten);
     }
     color.toArray(target, offset);

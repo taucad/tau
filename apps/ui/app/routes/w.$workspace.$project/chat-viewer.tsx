@@ -289,6 +289,19 @@ export const ChatViewer = memo(function ({
   );
 });
 
+/** Stands in for geometry that has not arrived; subscribes to loading so the viewer does not. */
+function GeometryPlaceholder(): React.JSX.Element {
+  const isCadLoading = useCadSelector(selectIsCadLoading, false);
+  return (
+    <div
+      role='status'
+      aria-label={isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
+      aria-busy={isCadLoading || undefined}
+      className='size-full bg-background'
+    />
+  );
+}
+
 /**
  * Inner content of a viewer panel with an active file.
  * Separated to avoid conditional hook usage in the parent.
@@ -308,7 +321,6 @@ const ViewerContent = memo(function ({
   const cadRef = useCad();
   const geometry = useCadSelector(selectCadGeometry, undefined);
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
-  const isCadLoading = useCadSelector(selectIsCadLoading, false);
   const units = useCadSelector(selectCadUnits, undefined);
   const kernelClient = useCadSelector(selectCadKernelClient, undefined);
   const failureMessage =
@@ -569,12 +581,7 @@ const ViewerContent = memo(function ({
             className='size-full flex-col justify-center gap-3 bg-background text-center [&>svg]:size-10'
           />
         ) : (
-          <div
-            role='status'
-            aria-label={isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
-            aria-busy={isCadLoading || undefined}
-            className='size-full bg-background'
-          />
+          <GeometryPlaceholder />
         )}
         {geometry && overlayFailureMessage ? (
           <RuntimeErrorOverlay

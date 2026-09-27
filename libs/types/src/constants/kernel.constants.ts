@@ -55,24 +55,15 @@ export const kernelConfigurations = [
     longDescription:
       'A native C# computational-engineering workflow backed by PicoGK and OpenVDB. Author strongly typed voxel models with live desktop rendering and mesh export.',
     emptyCode: `using System.ComponentModel.DataAnnotations;
-using System.Numerics;
 using PicoGK;
 
-Library.Go(Params.VoxelSizeMm, () =>
-{
-    Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0f, 0.7f);
-    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, Params.RadiusMm), 0);
-});
+Library.Go(Params.VoxelSizeMm, () => { });
 
 public static class Params
 {
     [Range(0.05, 5.0)]
     [Display(Name = "Voxel size", Description = "OpenVDB voxel size in millimetres", Order = 0)]
     public static float VoxelSizeMm { get; set; } = 0.5f;
-
-    [Range(1.0, 100.0)]
-    [Display(Name = "Radius", Description = "Sphere radius in millimetres", Order = 1)]
-    public static float RadiusMm { get; set; } = 20f;
 }
 `,
     recommended: 'Native C# Voxel Engineering',
@@ -91,18 +82,14 @@ public static class Params
     longDescription:
       'A best-in-class Python CAD API backed by native OpenCascade. Build precise parametric parts and assemblies with direct STEP export and topology-aware rendering in the Tau desktop app.',
     emptyCode: `from dataclasses import dataclass
-from build123d import Box, Shape
+from build123d import Shape
 
 @dataclass(frozen=True)
 class Params:
-    width: float = 40.0
-    depth: float = 30.0
-    height: float = 20.0
+    pass
 
-def main(params: Params) -> Shape:
-    result = Box(params.width, params.depth, params.height)
-    result.label = "Body"
-    return result
+def main(params: Params) -> Shape | None:
+    return None
 `,
     recommended: 'Native Python Engineering CAD',
     tags: ['Python', 'OpenCascade', 'BRep', 'Desktop', 'Precision'],

@@ -123,6 +123,23 @@ describe.runIf(install !== undefined)('Bambu Studio parity (installed app)', { t
     expect(config).toContain('\n; nozzle_temperature = 250\n');
   }, 300_000);
 
+  it('should record the given filament colour in the project and G-code', async () => {
+    const coloured = await sliceWithBambuStudio({
+      install: found,
+      selection,
+      stl,
+      filamentColor: '#F5A623',
+      signal: AbortSignal.timeout(300_000),
+    });
+    const members = unzipSync(coloured.archive);
+    const config = section(decoder.decode(members[plateMember]), '; CONFIG_BLOCK_START', '; CONFIG_BLOCK_END');
+    expect(config).toMatch(/\n; filament_colour = #F5A623\b/u);
+    const project = JSON.parse(decoder.decode(members['Metadata/project_settings.config'])) as {
+      filament_colour: string[];
+    };
+    expect(project.filament_colour[0]).toBe('#F5A623');
+  }, 300_000);
+
   it.runIf(golden !== undefined)('should match the app’s start, end and project settings', async () => {
     const theirs = unzipSync(Uint8Array.from(await readFile(golden!)));
     const ours = unzipSync(first.archive);

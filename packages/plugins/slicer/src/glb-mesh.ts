@@ -9,7 +9,7 @@
  * @module
  */
 
-import { Logger, WebIO } from '@gltf-transform/core';
+import { ColorUtils, Logger, WebIO } from '@gltf-transform/core';
 
 /** Welded triangle soup in Z-up millimetres. @internal */
 export type TriangleMesh = Readonly<{
@@ -19,6 +19,8 @@ export type TriangleMesh = Readonly<{
   indices: Uint32Array;
   /** Axis-aligned bounds in millimetres. */
   bounds: Readonly<{ min: readonly [number, number, number]; max: readonly [number, number, number] }>;
+  /** The first triangle primitive's material colour as sRGB `#RRGGBB`; `undefined` when none has a material. */
+  color: string | undefined;
 }>;
 
 const triangleMode = 4;
@@ -39,6 +41,8 @@ export const readTriangleMesh = async (glb: Uint8Array<ArrayBuffer>): Promise<Tr
   const positions: number[] = [];
   const indices: number[] = [];
   const welded = new Map<string, number>();
+  // ponytail: one colour for one filament; per-part colours when multi-material slicing lands.
+  let color: string | undefined;
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   const weld = (x: number, y: number, z: number): number => {
@@ -66,6 +70,11 @@ export const readTriangleMesh = async (glb: Uint8Array<ArrayBuffer>): Promise<Tr
       const position = primitive.getAttribute('POSITION');
       if (primitive.getMode() !== triangleMode || !position) {
         continue;
+      }
+      const material = primitive.getMaterial();
+      if (color === undefined && material) {
+        // The factor is linear; the hex is sRGB, as slicers and CSS read it.
+        color = `#${ColorUtils.factorToHex(material.getBaseColorFactor()).toString(16).padStart(6, '0').toUpperCase()}`;
       }
       const array = position.getArray()!;
       const count = position.getCount();
@@ -101,6 +110,7 @@ export const readTriangleMesh = async (glb: Uint8Array<ArrayBuffer>): Promise<Tr
     positions: Float32Array.from(positions),
     indices: Uint32Array.from(indices),
     bounds: { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] },
+    color,
   };
 };
 

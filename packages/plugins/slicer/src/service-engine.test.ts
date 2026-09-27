@@ -309,6 +309,7 @@ describe('sliceWithService', () => {
       positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
       indices: new Uint32Array(triangleCount * 3),
       bounds: { min: [0, 0, 0], max: [1, 1, 0] },
+      color: undefined,
     };
     await expect(
       sliceWithService({

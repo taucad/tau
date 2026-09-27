@@ -67,8 +67,14 @@ const sliceThroughBambuStudio = async (
       : { printer: partial.printer },
   );
   const selection = resolveBambuStudioSelection(catalog, hints, partial);
-  const stl = writeBinaryStl(await readTriangleMesh(glb));
-  const { archive } = await sliceWithBambuStudio({ install, selection, stl, signal });
+  const mesh = await readTriangleMesh(glb);
+  const { archive } = await sliceWithBambuStudio({
+    install,
+    selection,
+    stl: writeBinaryStl(mesh),
+    ...(mesh.color === undefined ? {} : { filamentColor: mesh.color }),
+    signal,
+  });
   return archive;
 };
 

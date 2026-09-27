@@ -666,6 +666,68 @@ export const appendChatRows = async (
 };
 
 /**
+ * What the person answered to the approvals this run paused on since it last ran (D5, GM.r1 H2), as one reminder the
+ * continued attempt reads. The paused call's own output only says the run paused (TS-R10 ends the attempt before any
+ * answer exists), so without this the model saw a failed call and nothing else.
+ *
+ * @param events - The chat's rows.
+ * @param runId - The run being continued.
+ * @param timestamp - The reminder's time.
+ * @returns The reminder, or `undefined` when no approval was answered since the run's last attempt.
+ */
+const approvalAnswers = (
+  events: readonly AgentLogEvent[],
+  runId: string,
+  timestamp: number,
+): UserProviderMessage | undefined => {
+  const asked = new Map<string, Readonly<{ prompt: string; toolName: string; toolCallId: string }>>();
+  let answers: Array<Readonly<{ interruptId: string; line: string }>> = [];
+  for (const row of events) {
+    if (row.runId !== runId) {
+      continue;
+    }
+    if (row.type === 'run.lifecycle' && row.state === 'running') {
+      /* Answered before this attempt ran: that attempt was already told. */
+      answers = [];
+    } else if (row.type === 'interrupt.recorded' && isJsonObject(row.payload)) {
+      const { context, prompt, outcome } = row.payload;
+      if (row.phase === 'requested' && isJsonObject(context) && typeof context['approvalTool'] === 'string') {
+        asked.set(row.interruptId, {
+          prompt: typeof prompt === 'string' ? prompt : '',
+          toolName: context['approvalTool'],
+          toolCallId: typeof context['approvalCall'] === 'string' ? context['approvalCall'] : '',
+        });
+      } else if (row.phase === 'resolved' && typeof outcome === 'string' && asked.has(row.interruptId)) {
+        const { prompt: question, toolName, toolCallId } = asked.get(row.interruptId)!;
+        answers.push({
+          interruptId: row.interruptId,
+          line: `- ${outcome}: "${question}" (your call ${toolCallId} to ${toolName})`,
+        });
+      }
+    }
+  }
+  if (answers.length === 0) {
+    return undefined;
+  }
+  const anchorId = answers.map(({ interruptId }) => interruptId).join(':');
+  return {
+    id: `tau:approval-answer:${anchorId}`,
+    role: 'user',
+    content: [
+      '<system-reminder>',
+      "The run paused for the person's approval, and they answered:",
+      ...answers.map(({ line }) => line),
+      'The tool has their answer: call it again with the same input to continue from it; it does not ask again.',
+      '</system-reminder>',
+    ].join('\n'),
+    metadata: {
+      tauInternal: { kind: 'approval-answer', anchorId, pruning: 'preserve-until-compaction' },
+      timestamp,
+    },
+  };
+};
+
+/**
  * Assemble Tau's portable host: one M1 incarnation per chat (W7), over the chat logs, the pi session driver and the
  * external runners.
  *
@@ -748,32 +810,48 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /**
-   * A tool's resolved approval under `key` in this run, until the tool records a result after it (D5).
+   * Approvals a call of this host recalled, by run and interrupt: spent the moment a call recalls one, so two
+   * parallel calls under one key never both use one answer (GM.r1 L4). The output row's `approval` mark is the durable
+   * spend a later incarnation reads.
    *
-   * The request row names the key and the tool; the answer is the `resolved` row of the same interrupt. A result the
-   * tool records after that row used the answer, so a later call asks again rather than reusing one decision twice.
+   * ponytail: grows by one entry per recalled approval for the host's life; drop a run's entries when it settles if
+   * a host ever serves enough approvals for that to matter.
+   */
+  const recalledApprovals = new Set<string>();
+
+  /**
+   * A tool's resolved approval under `key` in this run, until a call uses it (D5).
+   *
+   * The request row names the key and the tool; the answer is the `resolved` row of the same interrupt. The call that
+   * recalls an answer spends it: its output row carries the interrupt (`metadata.approval`), and this host remembers
+   * the recall, so a later call under the same key asks again rather than reusing one decision twice (GM.r1 M1).
    */
   const recallApproval = async (
-    { chatId, runId, toolName }: Readonly<{ chatId: string; runId: string; toolName: string }>,
+    { chatId, runId }: Readonly<{ chatId: string; runId: string }>,
     key: string,
   ): Promise<HostToolApprovalRecord | undefined> => {
     const rows = await readRows(chatId);
-    let found: (HostToolApprovalRecord & { readonly at: number }) | undefined;
     const asked = new Map<string, JsonObject>();
-    for (const [at, row] of rows.entries()) {
+    const answered: HostToolApprovalRecord[] = [];
+    const spent = new Set<string>();
+    for (const row of rows) {
       if (row.runId !== runId) {
         continue;
       }
-      if (row.type === 'interrupt.recorded' && isJsonObject(row.payload)) {
+      if (row.type === 'message.appended' && row.message.role === 'tool-output') {
+        const approval: unknown = row.message.metadata?.['approval'];
+        if (typeof approval === 'object' && approval !== null && 'interruptId' in approval) {
+          spent.add(String(approval.interruptId));
+        }
+      } else if (row.type === 'interrupt.recorded' && isJsonObject(row.payload)) {
         const { context } = row.payload;
         if (row.phase === 'requested' && isJsonObject(context) && context['approvalKey'] === key) {
-          const { approvalKey: _key, approvalTool: _tool, ...payload } = context;
+          const { approvalKey: _key, approvalTool: _tool, approvalCall: _call, ...payload } = context;
           asked.set(row.interruptId, payload);
         } else if (row.phase === 'resolved' && asked.has(row.interruptId)) {
           const { outcome, optionId, response } = row.payload;
           if (outcome === 'approved' || outcome === 'denied' || outcome === 'cancelled') {
-            found = {
-              at,
+            answered.push({
               payload: asked.get(row.interruptId)!,
               resolution: {
                 interruptId: row.interruptId,
@@ -781,23 +859,61 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
                 ...(typeof optionId === 'string' ? { optionId } : {}),
                 ...(response === undefined ? {} : { payload: response }),
               },
-            };
+            });
           }
         }
       }
     }
-    const used =
-      found !== undefined &&
-      rows
-        .slice(found.at + 1)
-        .some(
-          (row) =>
-            row.runId === runId &&
-            row.type === 'message.appended' &&
-            row.message.role === 'tool-output' &&
-            row.message.toolName === toolName,
-        );
-    return found === undefined || used ? undefined : { payload: found.payload, resolution: found.resolution };
+    const found = answered.findLast(
+      ({ resolution }) =>
+        !spent.has(resolution.interruptId) && !recalledApprovals.has(`${runId}/${resolution.interruptId}`),
+    );
+    if (found !== undefined) {
+      /* Claimed after the read, with no await between: a parallel call's recall sees it spent (GM.r1 L4). */
+      recalledApprovals.add(`${runId}/${found.resolution.interruptId}`);
+    }
+    return found;
+  };
+
+  /**
+   * Hand the chat's answers to the tools that asked (D5, GM.r1 H2): after a `resolve-interrupt` or a `cancel` is
+   * applied, each approval request of the run that now has an answer goes to the registry's `answerApproval`, so what
+   * the tool guards follows the person's answer whether or not the run continues. The registry is idempotent, so an
+   * answer handed over twice (a replayed command) settles once.
+   *
+   * @param chatId - The chat the command named.
+   * @param runId - The run it named.
+   */
+  const answerApprovals = async (chatId: string, runId: string): Promise<void> => {
+    const { answerApproval } = options.toolRegistry;
+    if (answerApproval === undefined) {
+      return;
+    }
+    const asked = new Map<string, Readonly<{ toolName: string; payload: JsonObject }>>();
+    for (const row of await readRows(chatId)) {
+      if (row.runId !== runId || row.type !== 'interrupt.recorded' || !isJsonObject(row.payload)) {
+        continue;
+      }
+      const { context } = row.payload;
+      if (row.phase === 'requested' && isJsonObject(context) && typeof context['approvalTool'] === 'string') {
+        const { approvalKey: _key, approvalTool: toolName, approvalCall: _call, ...payload } = context;
+        asked.set(row.interruptId, { toolName, payload });
+      } else if (row.phase === 'resolved' && asked.has(row.interruptId)) {
+        const { outcome, optionId, response } = row.payload;
+        if (outcome === 'approved' || outcome === 'denied' || outcome === 'cancelled') {
+          // oxlint-disable-next-line no-await-in-loop -- one tool's answer at a time, in the order the chat gave them.
+          await answerApproval({
+            ...asked.get(row.interruptId)!,
+            resolution: {
+              interruptId: row.interruptId,
+              outcome,
+              ...(typeof optionId === 'string' ? { optionId } : {}),
+              ...(response === undefined ? {} : { payload: response }),
+            },
+          });
+        }
+      }
+    }
   };
 
   /**
@@ -805,20 +921,24 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    *
    * Asking sends the chat's own `interrupt` command, keyed by the tool call, as a person's operator interrupt would:
    * M1 aborts this attempt's driver and records `interrupt.recorded` and `paused` as its ending (running.tau, D10,
-   * TS-R10). The call therefore never answers; it rejects when the abort reaches it, or with the command's refusal.
-   * The decision resolves the interrupt, and the run's next attempt asks again and `recall` answers.
+   * TS-R10). The call therefore never answers; it rejects saying the run paused for the person, which is what its
+   * output row tells the model. The decision resolves the interrupt; the next attempt is told the answer and the
+   * tool's `recall` finds it.
    *
    * @param key - The attempt the tool runs in.
    * @param invocation - The tool call asking.
-   * @returns The approval for that call.
+   * @returns The approval for that call, and the recalled approval it used, if any.
    */
   const approvalFor = (
     key: TurnAttemptKey,
     invocation: Readonly<{ toolCallId: string; toolName: string; signal: AbortSignal }>,
-  ): HostToolApproval => {
-    const scope = { chatId: key.chatId, runId: key.runId, toolName: invocation.toolName };
-    const recall = async (approvalKey: string): Promise<HostToolApprovalRecord | undefined> =>
-      recallApproval(scope, approvalKey);
+  ): Readonly<{ approve: HostToolApproval; spent: () => string | undefined }> => {
+    let spent: string | undefined;
+    const recall = async (approvalKey: string): Promise<HostToolApprovalRecord | undefined> => {
+      const record = await recallApproval(key, approvalKey);
+      spent ??= record?.resolution.interruptId;
+      return record;
+    };
     const approve = async (request: Parameters<HostToolApproval>[0]): Promise<InterruptResolution> => {
       if (request.key !== undefined) {
         const prior = await recall(request.key);
@@ -829,7 +949,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const { signal } = invocation;
       const aborted = Promise.withResolvers<never>();
       const onAbort = (): void => {
-        aborted.reject(signal.reason ?? new Error('The run paused for the approval.'));
+        aborted.reject(new Error(`The run paused for the person's approval: ${request.prompt}`));
       };
       if (signal.aborted) {
         onAbort();
@@ -850,6 +970,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               ...request.payload,
               ...(request.key === undefined ? {} : { approvalKey: request.key }),
               approvalTool: invocation.toolName,
+              approvalCall: invocation.toolCallId,
             },
           },
         });
@@ -870,13 +991,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         void settleQuietly(aborted.promise);
       }
     };
-    return Object.assign(approve, { recall });
+    return { approve: Object.assign(approve, { recall }), spent: () => spent };
   };
 
-  /** A Tau attempt's tools, each call carrying its approval (D5). */
+  /** A Tau attempt's tools, each call carrying its approval and marking the recalled one it used (D5). */
   const approvingTools = (key: TurnAttemptKey, tools: ToolRegistry): ToolRegistry => ({
     list: () => tools.list(),
-    invoke: async (invocation) => tools.invoke({ ...invocation, approve: approvalFor(key, invocation) }),
+    invoke: async (invocation) => {
+      const { approve, spent } = approvalFor(key, invocation);
+      const result = await tools.invoke({ ...invocation, approve });
+      const interruptId = spent();
+      return interruptId === undefined ? result : { ...result, approval: { interruptId } };
+    },
   });
 
   const messagesOf = async (chatId: string): ReturnType<DurableEventLog['messages']> => {
@@ -1326,11 +1452,15 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (reminder) {
         recovery.push({ type: 'message.appended', message: reminder });
       }
+      const answered = approvalAnswers(events, runId, now().getTime());
+      if (answered) {
+        recovery.push({ type: 'message.appended', message: answered });
+      }
       return {
         kind: 'tau',
         turnId: entry?.turnId ?? latestTurnId(history, runId),
         /* The tail already answers the turn: the attempt ends with no call. */
-        mode: !reminder && history.at(-1)?.role === 'assistant' ? 'complete' : 'continue',
+        mode: !reminder && !answered && history.at(-1)?.role === 'assistant' ? 'complete' : 'continue',
         /* `running` first, so the command's cursor is the reopening row (ChatRunSlot.tla resume; W7.r1). */
         intent: [running, ...recovery],
       };
@@ -1649,6 +1779,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       runChats.set(command.payload.runId, command.payload.chatId);
     }
     const answer = registry.execute(command);
+    if (command.type === 'resolve-interrupt' || command.type === 'cancel') {
+      const { chatId, runId } = command.payload;
+      const answerTools = async (): Promise<void> => {
+        try {
+          const applied = await answer;
+          if (applied.status === 'applied') {
+            await answerApprovals(chatId, runId);
+          }
+        } catch (error) {
+          console.error('[agent-host] a tool could not act on the answer to its approval', chatId, runId, error);
+        }
+      };
+      /* Not awaited: an approved print uploads before it answers, and the command answers when its rows are durable. */
+      void answerTools();
+    }
     if (command.type === 'start' || command.type === 'resume') {
       const entry = { runId: command.payload.runId, answer };
       admissions.set(command.payload.chatId, entry);

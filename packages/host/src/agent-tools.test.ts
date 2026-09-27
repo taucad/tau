@@ -450,6 +450,7 @@ describe('createHostToolRegistry', () => {
       createdAt: timestamp,
       updatedAt: timestamp,
     }));
+    const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>();
     const machines = {
       available: true,
       list: async () => ({
@@ -458,6 +459,11 @@ describe('createHostToolRegistry', () => {
       }),
       listProviders: async () => [provider],
       requestPrint,
+      listPrintRequests: async () =>
+        Promise.all(
+          requestPrint.mock.results.map(async (result) => result.value as ReturnType<MachineClient['requestPrint']>),
+        ),
+      withdrawPrintRequest,
     } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
 
     const names = (options: Partial<HostToolRegistryOptions>) =>
@@ -522,6 +528,14 @@ describe('createHostToolRegistry', () => {
     });
     expect(slice).toHaveBeenCalledOnce();
     expect(requestPrint).toHaveBeenCalledOnce();
+
+    /* A chat's answer to the request reaches the registry that asked, whichever root the run used (D5, GM.r1 H2). */
+    await registry.answerApproval?.({
+      toolName: 'request_print',
+      payload: { kind: 'print-request', requestId: 'call-1' },
+      resolution: { interruptId: 'interrupt-1', outcome: 'cancelled' },
+    });
+    expect(withdrawPrintRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: 'call-1' }));
   });
 
   it('offers both parameter tools only with a native parameter actor and preserves its outcome', async () => {

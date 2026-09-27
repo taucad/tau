@@ -2021,17 +2021,29 @@ pub(crate) fn resolve_budgeted_with_brep(
             let mut matched_rows = Vec::new();
             for row in rows {
                 let scoped = match of {
-                    Some(scope) => match index
-                        .occurrences
-                        .iter()
-                        .find(|occurrence| occurrence.path == row.occurrence_path)
-                    {
-                        Some(occurrence) => match occurrence_matches(occurrence, scope, regex) {
-                            Ok(value) => value && row.name == *name,
-                            Err(error) => return regex_unsupported(expect.clone(), error),
-                        },
-                        None => false,
-                    },
+                    Some(scope) => {
+                        // Ruling 6: `of` names the row's occurrence or an
+                        // enclosing assembly occurrence (parents own no faces).
+                        let mut current = index
+                            .occurrences
+                            .iter()
+                            .find(|occurrence| occurrence.path == row.occurrence_path);
+                        let mut matched = false;
+                        while let Some(occurrence) = current {
+                            match occurrence_matches(occurrence, scope, regex) {
+                                Ok(true) => {
+                                    matched = true;
+                                    break;
+                                }
+                                Ok(false) => {}
+                                Err(error) => return regex_unsupported(expect.clone(), error),
+                            }
+                            current = occurrence
+                                .parent
+                                .and_then(|parent| index.occurrences.get(parent as usize));
+                        }
+                        matched && row.name == *name
+                    }
                     None => row.full_name == *name,
                 };
                 if scoped {
@@ -2706,6 +2718,36 @@ mod tests {
         assert_eq!(ids(Some("asm/a"), None), ["face:asm/a#0", "face:asm/a#1"]);
         assert_eq!(ids(None, Some("asm/b")), ["face:asm/b#0", "face:asm/b#1"]);
         assert_eq!(ids(Some("loose"), Some("asm")), Vec::<String>::new());
+
+        // A named datum on a leaf resolves through its assembly scope too.
+        index.datums.push(named_datum(
+            "asm/a.A".into(),
+            "A".into(),
+            "asm/a".into(),
+            Some(1),
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ));
+        let datum = |of: &str| {
+            resolve(
+                &Selector::Named {
+                    kind: EntityType::Datum,
+                    name: "A".into(),
+                    of: Some(TextPattern::Exact(of.into())),
+                    expect: Cardinality::One,
+                },
+                &index,
+                &TestRegex,
+            )
+            .entities
+            .into_iter()
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(datum("asm"), ["datum:asm/a.A"]);
+        assert_eq!(datum("asm/a"), ["datum:asm/a.A"]);
+        assert_eq!(datum("loose"), Vec::<String>::new());
     }
 
     struct ProbeBrep;

@@ -1242,13 +1242,37 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         case 'adoptHostFinalized': {
-          actor.send({
-            type: 'checkoutChanged',
-            checkoutId: command.checkoutId,
-            revisionId: command.revisionId,
-            treeId: command.treeId,
-            branch: command.branch,
-          });
+          /*
+           * Only a revision the host wrote into *this* store. A daemon on this
+           * Git moved the line's ref itself; a cloud host minted in its own
+           * clone, and its revision reaches this store through the sync fetch,
+           * which fast-forwards a clean checkout on its own (D12).
+           * Adopted earlier, the head names an object this store does not hold:
+           * History loses its head row and a save would mint on a parent the
+           * store cannot read. The ref check also refuses a replayed older
+           * settlement, which would move the head backwards.
+           */
+          const { branch } = command;
+          // async-iife: bootstrap -- a skipped adoption is the sync fetch's to finish.
+          void (async (): Promise<void> => {
+            try {
+              const held =
+                branch === undefined
+                  ? (await options.port.readRevision(revisionId(command.revisionId))) !== undefined
+                  : (await options.port.readRef(branch)) === command.revisionId;
+              if (held) {
+                actor.send({
+                  type: 'checkoutChanged',
+                  checkoutId: command.checkoutId,
+                  revisionId: command.revisionId,
+                  treeId: command.treeId,
+                  branch,
+                });
+              }
+            } catch (error) {
+              console.warn('[revisions] a host settlement could not be adopted', error);
+            }
+          })();
           return;
         }
         /* The root invokes `restore` as a child and forwards none of its five

@@ -575,27 +575,102 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     }
   });
 
-  it('should adopt a daemon revision into the worker projection', async () => {
+  /** Save once and answer the head that save recorded, once it is not `previous`. */
+  const savedHead = async (client: Client, previous?: string): Promise<string> => {
+    client.send({ command: 'saveRevision' });
+    let head: string | undefined;
+    await vi.waitFor(
+      () => {
+        head = client.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+        expect(head).toBeDefined();
+        expect(head).not.toBe(previous);
+      },
+      { timeout: 10_000 },
+    );
+    return head!;
+  };
+
+  it('should adopt a revision a daemon on this store recorded, and never an older one again', async () => {
+    let port: RevisionPort | undefined;
+    const fixture = harness(['alpha'], (inner) => {
+      port = inner;
+      return inner;
+    });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const base = revisionId(await savedHead(alpha));
+
+    /* The daemon shares this Git: it records on the line and moves its ref. */
+    const record = (await port!.readRevision(base))!;
+    const daemon = await port!.writeRevision({
+      parents: [base],
+      tree: (await port!.readTree(base))!,
+      provenance: record.provenance,
+      summary: record.summary,
+    });
+    await port!.updateRef({ name: 'main', expectedHead: base, head: revisionId(daemon.commitId) });
+    const adopt = {
+      command: 'adoptHostFinalized',
+      checkoutId: 'live',
+      revisionId: daemon.commitId,
+      treeId: record.treeId,
+      branch: 'main',
+    } as const;
+    alpha.send(adopt);
+
+    const root = await fixture.root('alpha');
+    await vi.waitFor(() => {
+      expect(root.status()).toMatchObject({
+        checkoutId: 'live',
+        headRevisionId: daemon.commitId,
+        line: { kind: 'branch', name: 'main' },
+      });
+    });
+
+    /* A replay of that settlement after a later save must not move the head back. */
+    await project.writeFile('main.scad', 'cube(20);');
+    const later = await savedHead(alpha, daemon.commitId);
+    alpha.send(adopt);
+    await settle(20);
+    expect(root.status().headRevisionId).toBe(later);
+  });
+
+  /*
+   * A cloud host records in its own clone. Its `turn.finalized` reaches the
+   * page before its push, so the revision it names is not in this store yet:
+   * adopting it left the head on an object nothing could read ("Nothing saved
+   * yet" until a reload) and a save in that window minted on it (W10-L D1).
+   */
+  it('should not adopt a revision this store does not hold, so a save mints on the head it holds', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
+    const base = await savedHead(alpha);
 
     alpha.send({
       command: 'adoptHostFinalized',
       checkoutId: 'live',
-      revisionId: 'rev-daemon',
-      treeId: 'tree-daemon',
+      revisionId: '3ff0c6c0000000000000000000000000000000aa',
+      treeId: '4ee0c6c0000000000000000000000000000000bb',
       branch: 'main',
     });
-    await alpha.settle();
+    await settle(20);
 
     const root = await fixture.root('alpha');
-    expect(root.status()).toMatchObject({
-      checkoutId: 'live',
-      headRevisionId: 'rev-daemon',
-      line: { kind: 'branch', name: 'main' },
-    });
+    expect(root.status().headRevisionId).toBe(base);
+
+    await project.writeFile('main.scad', 'cube(20);');
+    alpha.send({ command: 'saveRevision' });
+    await vi.waitFor(
+      async () => {
+        const [top] = await root.log();
+        expect(top?.revisionId).not.toBe(base);
+        expect(top?.parent).toBe(base);
+      },
+      { timeout: 10_000 },
+    );
   });
 
   it('should restore a recorded revision through the port commands', async () => {

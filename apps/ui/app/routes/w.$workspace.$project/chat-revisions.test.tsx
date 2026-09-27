@@ -73,10 +73,13 @@ const chats = [
   { id: 'chat-2', name: 'Sketch lid', checkoutId: undefined },
 ];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+/* Whether the creation toast is still carrying the backup offer. */
+let backupAnnouncing = false;
 /* D19: the backup-by-default line asks about the account; these rows are signed in and entitled. */
 vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useTauCloudEligibility: () => ({ auth: 'authed', isResolved: true, canSyncFiles: true }),
+  useBackupAnnouncing: () => backupAnnouncing,
 }));
 const placeChat = vi.fn(async () => undefined);
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
@@ -1240,6 +1243,7 @@ describe('Revisions pane vocabulary and History', () => {
 describe('Backup by default (D19)', () => {
   beforeEach(() => {
     localStorage.clear();
+    backupAnnouncing = false;
   });
 
   it.each(['default', 'noticed'] as const)(
@@ -1252,7 +1256,9 @@ describe('Backup by default (D19)', () => {
 
       const line = await screen.findByRole('group', { name: 'Backup by default' });
       expect(line).toHaveTextContent('Backs up to Tau Cloud automatically.');
-      expect(line).toHaveTextContent('Stops backing up. The copy already on Tau Cloud stays.');
+      /* Nothing is on Tau Cloud yet, so no copy there is promised (W10-L B-1). */
+      expect(line).toHaveTextContent('Turning it off keeps this project on this device.');
+      expect(line).not.toHaveTextContent('The copy already on Tau Cloud stays.');
       await user.click(within(line).getByRole('button', { name: 'Turn off backup' }));
 
       /* Nothing was connected yet, so there is nothing to disconnect; the intent is gone, so a reload stays off. */
@@ -1302,6 +1308,7 @@ describe('Backup by default (D19)', () => {
       expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent('Saved · Backed up');
     });
     expect(screen.getByText('Backs up to Tau Cloud automatically.')).toBeInTheDocument();
+    expect(screen.getByText('Stops backing up. The copy already on Tau Cloud stays.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Turn off backup' }));
 
     expect(revisionStatusHarness.commands.disconnectRemote).toHaveBeenCalledOnce();
@@ -1323,6 +1330,22 @@ describe('Backup by default (D19)', () => {
 
     expect(revisionStatusHarness.commands.disconnectRemote).not.toHaveBeenCalled();
     expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
+  });
+
+  /* DESIGN's one concise offer: the creation toast carries it first, and the line
+     takes it over once the toast closes, still before the first save (W10-L B-2). */
+  it('holds the pending offer back while the creation toast shows it', async () => {
+    tauCloudIntent.set('p', 'noticed');
+    backupAnnouncing = true;
+
+    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
+
+    await screen.findByRole('region', { name: 'Where you are' });
+    expect(screen.queryByRole('group', { name: 'Backup by default' })).not.toBeInTheDocument();
+
+    backupAnnouncing = false;
+    rerender(<RevisionsPanelBody />);
+    expect(await screen.findByRole('group', { name: 'Backup by default' })).toHaveTextContent('Turn off backup');
   });
 
   it('shows no line for a project nothing is owed on', () => {

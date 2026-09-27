@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Cloud, Users } from 'lucide-react';
+import { ArrowRight, Cloud, Users } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardFooter, CardHeader } from '@taucad/ui/components/card';
@@ -125,8 +125,11 @@ export function OnTauCloudMark(): React.JSX.Element {
 
 /**
  * *Open* for a project only Tau Cloud holds: clones it under the remote's id.
+ * Drawn as the local project's *Open* beside it: `→ Open` on a card, `Open →`
+ * in a list row.
  *
- * @param props - The row and the open verb, which reports its own failure.
+ * @param props - The row, the open verb, which reports its own failure, and
+ * whether it sits on a card.
  * @returns The button.
  * @public
  */
@@ -134,15 +137,18 @@ export function OpenCloudProjectButton({
   entry,
   onOpen,
   className,
+  isCard = false,
 }: {
   readonly entry: CloudProject;
   readonly onOpen: (entry: CloudProject) => Promise<void>;
   readonly className?: string;
+  readonly isCard?: boolean;
 }): React.JSX.Element {
   const [isOpening, setIsOpening] = useState(false);
+  const arrow = isOpening ? undefined : <ArrowRight aria-hidden className='size-4' />;
   return (
     <Button
-      size='sm'
+      size={isCard ? 'default' : 'sm'}
       variant='outline'
       className={className}
       disabled={isOpening}
@@ -156,8 +162,10 @@ export function OpenCloudProjectButton({
         }
       }}
     >
+      {isCard ? arrow : undefined}
       {isOpening ? 'Opening…' : 'Open'}
       <span className='sr-only'> {entry.name}</span>
+      {isCard ? undefined : arrow}
     </Button>
   );
 }
@@ -231,7 +239,7 @@ export function CloudProjectCard({
         </div>
       </CardHeader>
       <CardFooter className='mt-auto'>
-        <OpenCloudProjectButton entry={entry} onOpen={onOpen} />
+        <OpenCloudProjectButton isCard entry={entry} onOpen={onOpen} />
       </CardFooter>
     </Card>
   );

@@ -7,7 +7,7 @@
  * chat works somewhere else.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -47,6 +47,11 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
 }));
 let chats = [{ id: 'chat-1', name: 'Initial design', checkoutId: 'live' }];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+/* D19: the card's Backup row asks about the account; these rows are signed in and entitled. */
+vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useTauCloudEligibility: () => ({ auth: 'authed', isResolved: true, canSyncFiles: true }),
+}));
 
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
@@ -359,6 +364,25 @@ describe('RevisionStatusAction', () => {
     expect(recent).toHaveTextContent('Thinner arms');
     expect(screen.getByText('Modified since Rev 12')).toBeInTheDocument();
     expect(screen.getByText('Click to open Revisions')).toBeInTheDocument();
+  });
+
+  /* Before the first save of a project backed up by default, the card agrees with the pane (W10-L B-3). */
+  it.each([
+    ['noticed', 'Backs up to Tau Cloud automatically after your first save'],
+    [undefined, 'No backup connected'],
+  ] as const)('reads the Backup row of a project whose backup intent is %s', async (intent, backup) => {
+    const user = userEvent.setup();
+    const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
+    tauCloudIntent.set('p', intent);
+    onTestFinished(() => {
+      tauCloudIntent.set('p', undefined);
+    });
+
+    render(<RevisionStatusAction />, { wrapper });
+    await screen.findByRole('button', { name: /^Open Revisions\./u });
+    await user.tab();
+
+    expect(await screen.findByText(backup)).toBeInTheDocument();
   });
 
   it('offers Follow chat only while the chat works on another branch', async () => {

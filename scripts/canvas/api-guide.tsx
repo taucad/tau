@@ -3,6 +3,7 @@
  * sketch files; this module only lays them out. Import it as `@tau/api-guide` from a guide's
  * `main.tsx` under `docs/research/artifacts/<subject>/api/`.
  */
+import { Circle, CircleCheck, CircleDot } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { codeToHtml } from 'shiki';
@@ -36,6 +37,8 @@ export type Verdict = 'pass' | 'concern' | 'fail' | 'n/a';
 export type Audience = 'author' | 'host' | 'agent' | 'kernel' | 'framework';
 /** How far a reference chapter is from shipping: what exists, what this guide proposes, what is only mapped. */
 export type Horizon = 'shipped' | 'proposed' | 'later' | 'placeholder';
+/** Where a reference chapter stands in delivery, marked in the table of contents: landed, built next, or waiting. */
+export type Progress = 'complete' | 'next' | 'pending';
 
 export type CallSite = Readonly<{ audience: Audience; title: string; sketch: Sketch; notes?: readonly string[] }>;
 
@@ -47,6 +50,7 @@ export type Chapter = Readonly<{
   id: string;
   title: string;
   horizon: Horizon;
+  progress: Progress;
   summary: string;
   /** The child guide that owns this chapter's options and rulings, when one exists. */
   guide?: Readonly<{ title: string; href: string }>;
@@ -357,6 +361,19 @@ const tocEntry =
 const tocNested = `${tocEntry} truncate py-0.5 text-xs leading-5`;
 const tocList = 'mt-0.5 mb-1.5 ml-2 space-y-0.5 border-l pl-2';
 
+const progressIcon = { complete: CircleCheck, next: CircleDot, pending: Circle } as const;
+const progressTone: Record<Progress, string> = {
+  complete: 'text-success',
+  next: 'text-information',
+  pending: 'text-muted-foreground',
+};
+
+/** A chapter's delivery state as a colored leading glyph; the text beside it names the state. */
+function ProgressMark({ progress }: { progress: Progress }): React.JSX.Element {
+  const Icon = progressIcon[progress];
+  return <Icon aria-hidden className={`mr-1 inline size-3 align-[-2px] ${progressTone[progress]}`} />;
+}
+
 /**
  * The guide's table of contents: every section, and inside them the options, the chapters and the
  * questions. The entry being read carries `aria-current`, and the list scrolls itself to keep it in view.
@@ -443,22 +460,38 @@ function Contents({
               </ol>
             ) : undefined}
             {section.id === 'chapters' ? (
-              <ol className={tocList}>
-                {(guide.chapters ?? []).map((chapter) => (
-                  <li key={chapter.id}>
-                    <a
-                      href={`#chapter-${chapter.id}`}
-                      data-toc={`chapter-${chapter.id}`}
-                      aria-current={mark(`chapter-${chapter.id}`)}
-                      title={chapter.title}
-                      className={tocNested}
-                      onClick={onNavigate}
-                    >
-                      {chapter.title}
-                    </a>
-                  </li>
-                ))}
-              </ol>
+              <>
+                {/* The legend is for sighted readers; each entry also names its state in text. */}
+                <p
+                  aria-hidden
+                  className='mt-0.5 ml-2 flex flex-wrap gap-x-3 px-2 text-xs leading-5 text-muted-foreground'
+                >
+                  {(['complete', 'next', 'pending'] as const).map((progress) => (
+                    <span key={progress}>
+                      <ProgressMark progress={progress} />
+                      {progress}
+                    </span>
+                  ))}
+                </p>
+                <ol className={tocList}>
+                  {(guide.chapters ?? []).map((chapter) => (
+                    <li key={chapter.id}>
+                      <a
+                        href={`#chapter-${chapter.id}`}
+                        data-toc={`chapter-${chapter.id}`}
+                        aria-current={mark(`chapter-${chapter.id}`)}
+                        title={`${chapter.title} (${chapter.progress})`}
+                        className={tocNested}
+                        onClick={onNavigate}
+                      >
+                        <ProgressMark progress={chapter.progress} />
+                        {chapter.title}
+                        <span className='sr-only'> ({chapter.progress})</span>
+                      </a>
+                    </li>
+                  ))}
+                </ol>
+              </>
             ) : undefined}
             {section.id === 'questions' ? (
               <ol className='mt-0.5 mb-1.5 ml-2 flex flex-wrap gap-1 pl-2'>

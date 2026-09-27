@@ -595,10 +595,16 @@ bool rigid_placements(const std::vector<TopoDS_Shape>& solids) {
   return true;
 }
 
-SourceValidity shape_is_valid(const TopoDS_Shape& shape) {
+// `analyses`, when given, counts the located-solid analyzer runs (the
+// qualification controls read it).
+SourceValidity shape_is_valid(const TopoDS_Shape& shape, uint32_t* analyses = nullptr) {
   if (shape.IsNull() || shape.ShapeType() != TopAbs_COMPOUND) {
     return whole_shape_validity(shape);
   }
+  const auto solid_valid = [analyses](const TopoDS_Shape& solid) {
+    if (analyses != nullptr) ++*analyses;
+    return BRepCheck_Analyzer(solid, true, false, false).IsValid();
+  };
   std::vector<TopoDS_Shape> solids;
   if (collect_validation_solids(shape, solids) && solids.size() > 1 &&
       disjoint_validation_solids(solids)) {
@@ -612,7 +618,7 @@ SourceValidity shape_is_valid(const TopoDS_Shape& shape) {
             solid.Located(TopLoc_Location()).Oriented(TopAbs_FORWARD);
         if (definitions.Contains(definition)) continue;
         definitions.Add(definition);
-        if (!BRepCheck_Analyzer(solid, true, false, false).IsValid()) {
+        if (!solid_valid(solid)) {
           valid = false;
           break;
         }
@@ -623,8 +629,7 @@ SourceValidity shape_is_valid(const TopoDS_Shape& shape) {
     // oriented solid, with the same geometric/ST/non-exact settings as before.
     bool valid = true;
     for (const TopoDS_Shape& solid : solids) {
-      const bool leaf_valid = BRepCheck_Analyzer(solid, true, false, false).IsValid();
-      if (!leaf_valid) {
+      if (!solid_valid(solid)) {
         valid = false;
         break;
       }

@@ -454,7 +454,8 @@ pub struct ClosureFacts {
     pub free_faces: u32,
     pub open_edges: u32,
     pub nonmanifold_edges: u32,
-    /// Groups with an open or non-manifold edge: shells, then the free faces.
+    /// Groups that are not closed (an open or non-manifold edge, or no counted
+    /// edge use): shells, then the free faces.
     pub failing: Vec<ClosureGroup>,
 }
 

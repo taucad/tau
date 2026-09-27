@@ -130,6 +130,7 @@
         "{workspaceRoot}/packages/plugins/picogk/agent/cad-picogk",
         "{workspaceRoot}/packages/plugins/replicad/agent/cad-replicad",
         "{workspaceRoot}/packages/plugins/zoo/agent/cad-zoo",
+        "{workspaceRoot}/packages/plugins/tscircuit/agent/cad-tscircuit",
         "{workspaceRoot}/packages/geospec/agent/geospec-authoring",
         "{workspaceRoot}/packages/plugins/*/agent/resources.js",
         "{workspaceRoot}/packages/plugins/*/agent/resources.d.ts",

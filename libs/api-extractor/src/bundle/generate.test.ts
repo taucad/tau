@@ -153,10 +153,14 @@ describe('every committed bundle', () => {
     },
   );
 
-  it.each(declarations.map((entry) => [entry.owner.slug, entry.owner] as const))(
+  // Doctrine-only owners (no `corpus`) have no extracted symbols to cover.
+  it.each(
+    declarations
+      .filter(({ owner }) => owner.corpus !== undefined)
+      .map((entry) => [entry.owner.slug, entry.owner] as const),
+  )(
     '%s covers every extracted symbol exactly once',
     (_slug, owner) => {
-      expect(owner.corpus).toBeDefined();
       expect(owner.groupBy).toBeDefined();
       if (owner.corpus === undefined || owner.groupBy === undefined) {
         return;

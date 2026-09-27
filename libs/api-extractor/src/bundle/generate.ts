@@ -316,6 +316,15 @@ export const bundleOwners: readonly BundleOwner[] = [
     groupBy: byCategory,
   },
   {
+    slug: 'cad-tscircuit',
+    packageDirectory: 'packages/plugins/tscircuit',
+    name: 'tscircuit TSX authoring',
+    title: 'tscircuit TSX authoring',
+    description:
+      'Guides tscircuit TSX electronics authoring in main.tsx. Use when creating or editing boards, schematics or PCB layouts in Tau.',
+    whenToUse: 'Use when creating or editing boards, schematics or PCB layouts in Tau.',
+  },
+  {
     slug: 'geospec-authoring',
     packageDirectory: 'packages/geospec',
     name: 'GeoSpec authoring',

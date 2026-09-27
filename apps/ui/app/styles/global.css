@@ -523,18 +523,25 @@
   initial-value: black;
 }
 
-@keyframes scroll-fade-y {
-  0% {
+/*
+ * Vertical edges fade over the first/last --scroll-fade-size pixels of
+ * scroll rather than a percentage of it, so a region that overflows by a
+ * sub-pixel rounding sliver (then pinned to its bottom) shows no fade.
+ */
+@keyframes scroll-fade-top {
+  from {
     --scroll-fade-top: black;
+  }
+  to {
+    --scroll-fade-top: var(--scroll-fade-end);
+  }
+}
+
+@keyframes scroll-fade-bottom {
+  from {
     --scroll-fade-bottom: var(--scroll-fade-end);
   }
-  3%,
-  97% {
-    --scroll-fade-top: var(--scroll-fade-end);
-    --scroll-fade-bottom: var(--scroll-fade-end);
-  }
-  100% {
-    --scroll-fade-top: var(--scroll-fade-end);
+  to {
     --scroll-fade-bottom: black;
   }
 }
@@ -577,8 +584,13 @@
     black calc(100% - var(--scroll-fade-size)),
     var(--scroll-fade-bottom)
   );
-  animation: scroll-fade-y linear;
+  animation:
+    scroll-fade-top linear both,
+    scroll-fade-bottom linear both;
   animation-timeline: scroll(self y);
+  animation-range:
+    0 var(--scroll-fade-size),
+    calc(100% - var(--scroll-fade-size)) 100%;
 }
 
 @utility scroll-shadows {
@@ -600,9 +612,14 @@
     );
   mask-composite: intersect;
   animation:
-    scroll-fade-y linear,
+    scroll-fade-top linear both,
+    scroll-fade-bottom linear both,
     scroll-fade-x linear;
-  animation-timeline: scroll(self y), scroll(self x);
+  animation-timeline: scroll(self y), scroll(self y), scroll(self x);
+  animation-range:
+    0 var(--scroll-fade-size),
+    calc(100% - var(--scroll-fade-size)) 100%,
+    normal;
 }
 
 /*

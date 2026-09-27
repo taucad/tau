@@ -207,6 +207,7 @@ describe.runIf(gitToolchainOnPath)('a Node host records the person it runs for',
  * account and never the account email.
  */
 describe.runIf(gitToolchainOnPath)('a cloud host records the owner it runs for', () => {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names, as the provisioner sets them
   const ownerEnvironment = { TAU_HOST_OWNER_ID: 'usr_owner1', TAU_HOST_OWNER_NAME: 'Ada Owner' } as const;
 
   afterEach(() => {

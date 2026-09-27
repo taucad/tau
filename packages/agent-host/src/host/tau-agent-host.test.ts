@@ -1468,6 +1468,37 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  it("tells the chat's next run the answer a denial ended the last run with (GM.r3 clause 10)", async () => {
+    const { host, file, admit } = keyedHost(
+      'denied-next-run',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', text: 'Understood, no print.', usage },
+      ],
+      [],
+    );
+    await admit('run-denied');
+    const [pending] = await host.pendingInterrupts('run-denied');
+    await host.resolveInterrupt({ runId: 'run-denied', interruptId: pending!.interruptId, outcome: 'denied' });
+    await expect(host.snapshot('chat-denied-next-run')).resolves.toMatchObject({ state: 'cancelled' });
+
+    await admit('run-after-denial');
+
+    const eventLog = await file.open();
+    const messages = await eventLog.messages();
+    const told = messages.filter(
+      (message) => message.role === 'user' && message.metadata?.tauInternal?.['kind'] === 'approval-answer',
+    );
+    expect(told).toHaveLength(1);
+    expect(told[0]!.content).toContain('- denied: "Print a.ts?"');
+    expect(told[0]!.content).toContain('That run has ended');
+    /* Told before the person's new message, and only once: a third run is not told again. */
+    expect(messages.indexOf(told[0]!)).toBeLessThan(
+      messages.findIndex((message) => message.id === 'turn-run-after-denial'),
+    );
+    await host.close();
+  });
+
   it("does not carry an earlier run's unused approval into a later run of the chat (GM.r1 M2, mutant A)", async () => {
     const outcomes: string[] = [];
     const { host, admit } = keyedHost(

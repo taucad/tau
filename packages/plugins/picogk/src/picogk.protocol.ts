@@ -100,7 +100,7 @@ export const picogkBuildSchema = z.object({
   artifactPath: z.string().min(1),
   byteLength: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[\da-f]{64}$/iu),
-  components: z.array(picogkComponentSchema).min(1),
+  components: z.array(picogkComponentSchema),
   recycleAfterResponse: z.boolean(),
   timings: picogkWorkerTimingsSchema,
   metrics: picogkWorkerMetricsSchema,

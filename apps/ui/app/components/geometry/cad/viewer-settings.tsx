@@ -20,6 +20,7 @@ import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { selectCadRenderTimeout } from '#machines/cad.machine.js';
+import { OutputOverflowControl } from '#components/geometry/cad/viewer-overflow-controls.js';
 
 // Up direction options
 type UpDirection = 'x' | 'y' | 'z';
@@ -253,6 +254,7 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
         )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Rendering</DropdownMenuLabel>
+        <OutputOverflowControl />
         <DropdownMenuSelectItem
           value={currentTimeoutOption}
           options={timeoutOptions}

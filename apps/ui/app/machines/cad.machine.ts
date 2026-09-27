@@ -10,6 +10,7 @@ import type {
   TelemetrySpanRecord,
   WorkerState,
 } from '@taucad/runtime';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import { isRenderTimeoutError } from '@taucad/runtime/client';
 import { isKernelIssueCode } from '@taucad/runtime/types';
@@ -53,13 +54,15 @@ export type CadContext = {
   renderPhase: RenderPhase | undefined;
   telemetryEntries: TelemetrySpanRecord[];
   renderTimeout: number;
+  /** Kernel render options (for example an output kind) sent with every render request. */
+  renderOptions: Record<string, unknown>;
   kernelClient?: AppRuntimeClient;
   capabilities?: AppCapabilitiesManifest;
   activeKernelId?: string;
   eventCleanups: Array<() => void>;
   /**
    * Monotonically increasing render identifier. Bumped whenever the UI
-   * issues a render-triggering event (`setEntryPath`, `initializeModel`).
+   * issues a render-triggering event (`setEntryPath`, `setRenderOptions`, `initializeModel`).
    * Consumed by `awaitFreshRender` to detect when a
    * settled geometry result corresponds to a request issued at-or-after a
    * given baseline.
@@ -107,6 +110,7 @@ type CadEvent =
     }
   | { type: 'stateChanged'; state: WorkerState; detail?: string }
   | { type: 'setRenderTimeout'; renderTimeout: number }
+  | { type: 'setRenderOptions'; renderOptions: Record<string, unknown> }
   | { type: 'capabilitiesUpdated'; capabilities: AppCapabilitiesManifest }
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
   | { type: 'parkRuntime' }
@@ -157,6 +161,7 @@ type RenderModelInput = {
   client: AppRuntimeClient | undefined;
   entryPath: string | undefined;
   parameterRender: ParameterRender | undefined;
+  renderOptions: Record<string, unknown>;
   /** Whether no newer UI render was requested since this one. */
   isLatestRequest: () => boolean;
 };
@@ -365,6 +370,8 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
   const request = {
     source: { path: input.entryPath },
     content: { includeEdges: true },
+    // An empty object and an omitted field are the same render identity; send only what is set.
+    ...(Object.keys(input.renderOptions).length > 0 ? { renderOptions: input.renderOptions } : {}),
     ...(input.parameterRender?.kind === 'commit' ? { stage: input.parameterRender.stage } : {}),
     ...(input.parameterRender?.kind === 'initial' ? { parameters: input.parameterRender.parameters } : {}),
     ...(input.parameterRender?.kind === 'scrub'
@@ -429,7 +436,7 @@ type CadArgs<EventType extends CadEvent['type']> = Readonly<{
 }>;
 type RenderTrigger = Extract<
   CadEvent,
-  { type: 'initializeModel' | 'setEntryPath' | 'commitParameters' | 'scrubParameters' }
+  { type: 'initializeModel' | 'setEntryPath' | 'setRenderOptions' | 'commitParameters' | 'scrubParameters' }
 >;
 
 /**
@@ -529,6 +536,15 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
         latestGeometryOutcome: undefined,
       };
     }
+    /* A render option (for example the output kind) is part of the render identity, so a
+     * change is a new render; the runtime serves an already-published identity from cache. */
+    case 'setRenderOptions': {
+      return {
+        ...bumped,
+        renderOptions: { ...context.renderOptions, ...event.renderOptions },
+        latestGeometryOutcome: undefined,
+      };
+    }
   }
 };
 
@@ -547,6 +563,14 @@ const renderRequest =
       context: withExportAvailability(context, enq, { self, patch }),
     };
   };
+
+/** An output-kind change renders the open entry; with no entry open it only records the choice. */
+const renderOptionsRequest =
+  (target?: string, options: Readonly<{ reenter?: boolean; destroy?: boolean }> = {}) =>
+  (args: CadArgs<'setRenderOptions'>, enq: CadEnqueue) =>
+    args.context.entryPath === undefined
+      ? { context: { renderOptions: { ...args.context.renderOptions, ...args.event.renderOptions } } }
+      : renderRequest(target, options)(args, enq);
 
 /** Record issues against the entry this unit renders; nothing to key them by without one. */
 const withEntryIssues = (
@@ -693,6 +717,7 @@ export const cadMachine = setup({
     renderPhase: undefined,
     telemetryEntries: [],
     renderTimeout: input.renderTimeout ?? defaultRenderTimeout,
+    renderOptions: {},
     kernelClient: undefined,
     capabilities: undefined,
     activeKernelId: undefined,
@@ -770,6 +795,7 @@ export const cadMachine = setup({
         },
         initializeModel: renderRequest(),
         setEntryPath: renderRequest(),
+        setRenderOptions: renderOptionsRequest(),
         ...runtimeSignals,
       },
     },
@@ -789,6 +815,7 @@ export const cadMachine = setup({
         }),
         initializeModel: renderRequest('#cad.rendering.submitting'),
         setEntryPath: renderRequest('#cad.rendering.submitting'),
+        setRenderOptions: renderOptionsRequest('#cad.rendering.submitting'),
         commitParameters: renderRequest('#cad.rendering.submitting'),
         scrubParameters: renderRequest('#cad.rendering.submitting'),
         ...resultSignals,
@@ -801,6 +828,7 @@ export const cadMachine = setup({
       on: {
         initializeModel: renderRequest('#cad.rendering.submitting'),
         setEntryPath: renderRequest('#cad.rendering.submitting'),
+        setRenderOptions: renderOptionsRequest('#cad.rendering.submitting'),
         commitParameters: renderRequest('#cad.rendering.submitting'),
         scrubParameters: renderRequest('#cad.rendering.submitting'),
         ...resultSignals,
@@ -820,6 +848,7 @@ export const cadMachine = setup({
               client: context.kernelClient,
               entryPath: context.entryPath,
               parameterRender: context.parameterRender,
+              renderOptions: context.renderOptions,
               isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
             }),
             onDone: { target: '#cad.idle' },
@@ -859,6 +888,7 @@ export const cadMachine = setup({
       on: {
         initializeModel: renderRequest('#cad.rendering.submitting', { reenter: true }),
         setEntryPath: renderRequest('#cad.rendering.submitting', { reenter: true }),
+        setRenderOptions: renderOptionsRequest('#cad.rendering.submitting', { reenter: true }),
         commitParameters: renderRequest('#cad.rendering.submitting', { reenter: true }),
         scrubParameters: renderRequest('#cad.rendering.submitting', { reenter: true }),
         ...resultSignals,
@@ -877,8 +907,9 @@ export const cadMachine = setup({
     parked: {
       on: {
         resumeRuntime: { target: 'connecting' },
-        /* A rename while parked retargets the unit; the render happens on resume. */
+        /* A rename or output change while parked retargets the unit; the render happens on resume. */
         setEntryPath: renderRequest(),
+        setRenderOptions: renderOptionsRequest(),
         /* The root's `restoreParameters` renders, and there is no client to render
          * with: take the intent (drop the staged values) and leave the render to
          * the reconnect, instead of failing into `error` (V1-4). */
@@ -909,6 +940,7 @@ export const cadMachine = setup({
         resumeRuntime: ({ context }, enq) => ({ target: 'connecting', context: destroyKernel(context, enq) }),
         initializeModel: renderRequest('connecting', { destroy: true }),
         setEntryPath: renderRequest('connecting', { destroy: true }),
+        setRenderOptions: renderOptionsRequest('connecting', { destroy: true }),
         ...resultSignals,
         stateChanged: followWorkerState({ buffering: 'buffering', idle: 'idle', rendering: 'rendering' }),
       },
@@ -949,6 +981,27 @@ export const selectCadEntryIssues =
     snapshot.context.kernelIssues.get(entryPath);
 
 export const selectCadRenderTimeout = (snapshot: CadSnapshot): number => snapshot.context.renderTimeout;
+
+const selectActiveRenderCapability = (
+  snapshot: CadSnapshot,
+): AppCapabilitiesManifest['renderCapabilities'][string] | undefined => {
+  const { activeKernelId, capabilities } = snapshot.context;
+  return activeKernelId === undefined ? undefined : capabilities?.renderCapabilities[activeKernelId];
+};
+
+/** Select the active kernel's render-option schema; stable across snapshots because it is a manifest reference. */
+export const selectRenderOptionsSchema = (snapshot: CadSnapshot): JSONSchema7 | undefined =>
+  selectActiveRenderCapability(snapshot)?.renderOptions.schema;
+
+/** Select the active kernel's render-option defaults. */
+export const selectRenderOptionsDefaults = (snapshot: CadSnapshot): Record<string, unknown> | undefined => {
+  // The wide manifest projection types kernel defaults as `any`; narrow before returning.
+  const defaults: unknown = selectActiveRenderCapability(snapshot)?.renderOptions.defaults;
+  return typeof defaults === 'object' && defaults !== null ? (defaults as Record<string, unknown>) : undefined;
+};
+
+/** Select the render options this unit sends with every render. */
+export const selectRenderOptions = (snapshot: CadSnapshot): Record<string, unknown> => snapshot.context.renderOptions;
 
 export const selectCadGeometry = (snapshot: CadSnapshot): Geometry | undefined => snapshot.context.geometry;
 export const selectCadUnits = (snapshot: CadSnapshot): CadContext['units'] => snapshot.context.units;

@@ -20,6 +20,7 @@ import { ensureSelectorLabelAtlasReady } from '#components/geometry/graphics/thr
 import { SceneOverlay } from '#components/geometry/graphics/three/scene-overlay.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
+import { setRaycasterFromCamera } from '#components/geometry/graphics/three/utils/raycaster-from-camera.js';
 import {
   useCameraRig,
   useCameraSelector,
@@ -241,7 +242,7 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
     const pointerRay = (x: number, y: number): THREE.Ray => {
       const { camera, size } = get();
       pointer.set((x / size.width) * 2 - 1, -(y / size.height) * 2 + 1);
-      raycaster.setFromCamera(pointer, camera);
+      setRaycasterFromCamera(raycaster, pointer, camera);
       return raycaster.ray;
     };
 

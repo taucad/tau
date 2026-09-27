@@ -13,6 +13,7 @@ import {
 } from '#components/geometry/graphics/three/controls/selector-label-atlas.js';
 import { createViewportControlLabelMaterial } from '#components/geometry/graphics/three/materials/viewport-control-material.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
+import { setRaycasterFromCamera } from '#components/geometry/graphics/three/utils/raycaster-from-camera.js';
 
 /*
  * The section plane picker: three bevelled tiles on the faces of a small exploded cube, each parallel to the plane
@@ -239,7 +240,7 @@ export const createSectionPlanePicker = (): SectionPlanePicker => {
         return undefined;
       }
       pointer.set(((pointerX - rect.left) / rect.size) * 2 - 1, -((pointerY - rect.top) / rect.size) * 2 + 1);
-      raycaster.setFromCamera(pointer, camera);
+      setRaycasterFromCamera(raycaster, pointer, camera);
       const hit = raycaster.intersectObjects(faces, false)[0];
       return tiles.find((tile) => tile.face === hit?.object)?.plane;
     },

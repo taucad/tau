@@ -410,6 +410,8 @@ export const connectBambuMachine = async (
     }
     const updates = new EventTarget();
     const commandContexts = new Map<string, 'pause' | 'project_file' | 'resume' | 'stop'>();
+    // The run name each start in this session asked for; the wire id is derived from the operation.
+    const startRunNames = new Map<string, string>();
     const commandResults = new Map<string, Readonly<{ result: BambuCommandResult; observedAt: string }>>();
     let closed = false;
     let firmware: string | undefined;
@@ -575,9 +577,43 @@ export const connectBambuMachine = async (
       closed = true;
       await client.endAsync(true).catch(() => undefined);
     };
+    /**
+     * The run a start produced, from the printer's own status: its run carries the `subtask_id` or
+     * `subtask_name` the start sent. An X1C may start without an echo Tau can correlate, so the
+     * printer's status is start evidence in its own right.
+     *
+     * @param operationId - The start's operation, whose wire id the command sent.
+     * @param transferId - The start's transfer, whose name the command sent; only needed after a reconnect.
+     * @returns The printer's run id for that start, or `undefined` while its status shows no such run.
+     */
+    const startedRunId = (operationId: string, transferId?: string): string | undefined => {
+      const wireId = bambuWireId(operationId);
+      const runName =
+        startRunNames.get(operationId) ??
+        (transferId !== undefined && remoteNamePattern.test(transferId)
+          ? transferId.replace('.gcode.3mf', '')
+          : undefined);
+      // A name is reused when the same preparation is sent again, so only a live run proves it.
+      const runState = status ? mapRunState(status.runState) : 'unknown';
+      const isLive = runState === 'preparing' || runState === 'printing' || runState === 'paused';
+      const isOurs =
+        status?.providerRunId === wireId || (isLive && runName !== undefined && status?.runName === runName);
+      return isOurs ? (status?.providerRunId ?? wireId) : undefined;
+    };
     const commandReceipt = (
-      stored: Readonly<{ result: BambuCommandResult; observedAt: string }> | undefined,
+      operationId: string,
+      command: 'pause' | 'project_file' | 'resume' | 'stop',
+      transferId?: string,
     ): MachineSubmissionReceipt => {
+      const stored = commandResults.get(operationId);
+      const runId = command === 'project_file' ? startedRunId(operationId, transferId) : undefined;
+      if ((!stored || stored.result.status === 'unrelated') && runId !== undefined) {
+        return Object.freeze({
+          status: 'accepted',
+          providerRunId: runId,
+          observedAt: statusObservedAt ?? runtime.clock.now(),
+        });
+      }
       if (!stored || stored.result.status === 'unrelated') {
         return Object.freeze({
           status: 'unknown',
@@ -593,9 +629,10 @@ export const connectBambuMachine = async (
           observedAt: stored.observedAt,
         });
       }
+      const providerRunId = stored.result.providerRunId ?? runId;
       return Object.freeze({
         status: 'accepted',
-        ...(stored.result.providerRunId ? { providerRunId: stored.result.providerRunId } : {}),
+        ...(providerRunId ? { providerRunId } : {}),
         observedAt: stored.observedAt,
       });
     };
@@ -615,7 +652,7 @@ export const connectBambuMachine = async (
         if (existing !== commandInput.command) {
           throw new Error('BAMBU_OPERATION_ID_CONFLICT');
         }
-        return commandReceipt(commandResults.get(commandInput.operationId));
+        return commandReceipt(commandInput.operationId, commandInput.command);
       }
       // Ponytail: one live session retains at most 128 reconciliation slots; reconnect after operator resolution if exhausted.
       if (commandContexts.size >= 128) {
@@ -631,23 +668,33 @@ export const connectBambuMachine = async (
       try {
         await client.publishAsync(bambuTopic(serial, 'request'), JSON.stringify(commandInput.payload), { qos: 0 });
       } catch {
-        return commandReceipt(undefined);
+        return commandReceipt(commandInput.operationId, commandInput.command);
       }
-      if (!commandResults.has(commandInput.operationId)) {
+      const isSettled = (): boolean =>
+        commandResults.has(commandInput.operationId) ||
+        (commandInput.command === 'project_file' && startedRunId(commandInput.operationId) !== undefined);
+      if (!isSettled()) {
         await new Promise<void>((resolve) => {
           const eventName = `command:${commandInput.operationId}`;
           const commandTimeout = setTimeout(finish, 15_000);
           function finish(): void {
             clearTimeout(commandTimeout);
             updates.removeEventListener(eventName, finish);
+            updates.removeEventListener('facts', observed);
             commandInput.signal.removeEventListener('abort', finish);
             resolve();
           }
+          function observed(): void {
+            if (isSettled()) {
+              finish();
+            }
+          }
           updates.addEventListener(eventName, finish, { once: true });
+          updates.addEventListener('facts', observed);
           commandInput.signal.addEventListener('abort', finish, { once: true });
         });
       }
-      return commandReceipt(commandResults.get(commandInput.operationId));
+      return commandReceipt(commandInput.operationId, commandInput.command);
     };
     const cameraTrust = input.connection.serviceTrust['camera'];
     const cameraModel = status.model ?? input.candidate.claimedIdentity.model;
@@ -926,6 +973,8 @@ export const connectBambuMachine = async (
         }
         const { configuration } = submitInput;
         const wireId = bambuWireId(submitInput.operationId);
+        const runName = submitInput.remoteName.replace('.gcode.3mf', '');
+        startRunNames.set(submitInput.operationId, runName);
         /* eslint-disable @typescript-eslint/naming-convention -- Bambu wire field names are fixed. */
         const amsMapping2 = configuration.amsMapping.map((slot) => ({
           ams_id: Math.floor(slot / 4),
@@ -941,7 +990,7 @@ export const connectBambuMachine = async (
               param: submitInput.artifact.selectedMember,
               url: `ftp://${submitInput.remoteName}`,
               file: submitInput.remoteName,
-              subtask_name: submitInput.remoteName.replace('.gcode.3mf', ''),
+              subtask_name: runName,
               md5: memberMd5,
               flow_cali: configuration.flowCalibration,
               extrude_cali_flag: configuration.flowCalibration ? 1 : 0,
@@ -986,14 +1035,21 @@ export const connectBambuMachine = async (
         /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
       },
       async reconcile(reconcileInput) {
-        if (commandContexts.get(reconcileInput.operationId) !== reconcileInput.command) {
+        const { operationId, command, transferId } = reconcileInput;
+        // After a reconnect only a start is still provable: its run carries the operation's wire id or transfer name.
+        const isStartOnRecord = command === 'project_file' && startedRunId(operationId, transferId) !== undefined;
+        if (commandContexts.get(operationId) !== command && !isStartOnRecord) {
           return Object.freeze({
             status: 'unknown',
             reason: 'no-correlated-provider-reply',
             observedAt: runtime.clock.now(),
           });
         }
-        return commandReceipt(commandResults.get(reconcileInput.operationId));
+        return commandReceipt(
+          operationId,
+          command === 'project_file' ? 'project_file' : commandContexts.get(operationId)!,
+          transferId,
+        );
       },
       close,
       dispose: close,

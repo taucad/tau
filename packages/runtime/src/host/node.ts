@@ -1636,7 +1636,13 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
                 : state.intent.intent.kind;
           let providerReceipt: MachineSubmissionReceipt;
           try {
-            providerReceipt = await session.reconcile({ operationId, command, signal: operationInput.signal });
+            const { intent } = state.intent;
+            providerReceipt = await session.reconcile({
+              operationId,
+              command,
+              ...(intent.kind === 'start' ? { transferId: intent.transferId } : {}),
+              signal: operationInput.signal,
+            });
           } catch {
             return effectSnapshot(state);
           }

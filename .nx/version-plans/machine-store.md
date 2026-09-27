@@ -13,6 +13,7 @@ The runtime API changes:
 - Channels, cursors and requests no longer carry a workspace id.
 - `MachineArtifactReference` names its artifact by `projectId`, rooted `path` and SHA-256 `digest`, instead of a `revision` block.
 - Request lists and watches can filter by `projectId`.
+- `MachineReconcileInput` gains an optional `transferId`, which the host passes when it reconciles a start.
 
 `@taucad/host` drops `machineWorkspaceId` and `hostMachineWorkspaceId`, adds `readProjectId`, and takes a `projectId` for its print tools. Its daemon keeps serving without printers when another Tau app holds the store.
 

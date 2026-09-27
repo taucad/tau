@@ -41,7 +41,7 @@ export type PerformanceLabCase = {
   subjectSlot?: string;
   workUnitBudget?: number;
   polarity: 'positive' | 'negative';
-  expectedStatus: 'passed' | 'failed' | 'unverified';
+  expectedStatus: 'passed' | 'failed' | 'refused' | 'unverified';
 };
 
 /** Byte-only input shared by the browser and desktop benchmark hosts. @internal */
@@ -370,6 +370,7 @@ export const parsePerformanceLabRunInput = async (value: unknown): Promise<Perfo
       (entry['polarity'] !== 'positive' && entry['polarity'] !== 'negative') ||
       (entry['expectedStatus'] !== 'passed' &&
         entry['expectedStatus'] !== 'failed' &&
+        entry['expectedStatus'] !== 'refused' &&
         entry['expectedStatus'] !== 'unverified')
     ) {
       throw new TypeError('Invalid performance-lab matcher case.');

@@ -66,10 +66,6 @@ export const cookieName = {
   // The last selected project list page size.
   projectPageSize: 'project-page-size',
 
-  /* Graphics */
-  // Whether the section view status is open.
-  viewOpStatus: 'view-op-status',
-
   /* Console */
   // The last selected log level.
   consoleLogLevel: 'console-log-level',

@@ -675,7 +675,8 @@ const StartField = memo(function StartField({ cutId }: CutProps): React.JSX.Elem
       leadingContent={<span>From</span>}
       trailingAdornment={degreeAdornment}
       className={cn(sliderField, 'w-26')}
-      aria-label='Start angle in degrees'
+      // The name starts with the visible label, so a voice command for it reaches the field.
+      aria-label='From, start angle in degrees'
       onScrubChange={handleChange}
       onInputCommit={handleChange}
       onStep={handleStep}
@@ -722,17 +723,21 @@ export function SectionEditor(): React.ReactNode {
 }
 
 /**
- * Says so when the caps refuse the latest cuts, while the view keeps the last section they drew. It stays mounted
- * with the row, so the words are announced when they arrive, and takes no room while there is nothing to say.
+ * Says so when the caps refuse the latest cuts, and that the view keeps the last section they drew, if they ever drew
+ * one. It stays mounted with the row, so the words are announced when they arrive, and takes no room while there is
+ * nothing to say.
  */
 export function SectionStatus(): React.JSX.Element {
   const isRejected = useGraphicsSelector((state) => state.context.sectionCertification === 'rejected');
+  const hasLastSection = useGraphicsSelector((state) => state.context.committedSectionCuts.length > 0);
   return (
     <p role='status' className={isRejected ? 'flex items-center gap-1 px-1 text-xs text-muted-foreground' : 'sr-only'}>
       {isRejected ? (
         <>
           <CircleAlert aria-hidden='true' className='size-3.5 shrink-0 text-feature' />
-          Section unavailable for this model; showing the last section
+          {hasLastSection
+            ? 'Section unavailable for this model; showing the last section'
+            : 'Section unavailable for this model'}
         </>
       ) : null}
     </p>

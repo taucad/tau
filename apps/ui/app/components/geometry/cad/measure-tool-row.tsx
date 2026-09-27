@@ -150,7 +150,7 @@ export function MeasureOptions(): React.JSX.Element {
               <ChevronUp className='size-3 text-muted-foreground' />
             </Button>
           </PopoverTrigger>
-          <PopoverContent side='top' align='start' className='w-72 p-1'>
+          <PopoverContent side='top' align='start' className='w-72 p-1' aria-label='Measurements'>
             <MeasurementList onEmptied={focusRow} />
           </PopoverContent>
         </Popover>

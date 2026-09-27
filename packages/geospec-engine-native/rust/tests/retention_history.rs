@@ -203,3 +203,45 @@ fn a_claim_phase_counts_only_the_facts_cells_it_demands() {
     assert_eq!(claim(&cold), Ok(()));
     assert_eq!(warm.demanded_report_bytes(), cell);
 }
+
+#[test]
+fn a_claim_phase_counts_the_sets_it_demands_whichever_cell_answers_them() {
+    // analyzeBrep demands ALL, then the bores' COUNTS, then a mesh.
+    // Cold, the ALL cell the phase built answers COUNTS; warm, an earlier
+    // toHaveTopologyCounts claim kept a COUNTS cell that answers it instead.
+    // Either way the phase demanded one set covering both, so one cell.
+    let probe = subject(u64::MAX, u32::MAX);
+    phase(&probe, false, &[0]).unwrap();
+    let mesh = probe.tessellations.borrow()[0].bytes;
+    let fixed = probe.continuous_owned_bytes();
+    let cell = size_of::<ShapeFacts>() as u64;
+    let claim = |subject: &Subject, order: [ShapeParts; 2]| {
+        subject.begin_demand_phase();
+        for parts in order {
+            subject.report_shape(parts).map_err(|error| error.message)?;
+        }
+        let demanded = subject.demanded_report_bytes();
+        subject
+            .tessellate(BrepEntity::Occurrence(0), PROFILE)
+            .map(|_| demanded)
+            .map_err(|error| error.message)
+    };
+    let limit = mesh + cell + fixed;
+    let superset_first = [ShapeParts::ALL, ShapeParts::COUNTS];
+    let cold = subject(limit, 256);
+    let warm = subject(limit, 256);
+    warm.begin_demand_phase();
+    warm.report_shape(ShapeParts::COUNTS).unwrap();
+    assert_eq!(claim(&warm, superset_first), claim(&cold, superset_first));
+    assert_eq!(claim(&cold, superset_first), Ok(cell));
+    // COUNTS first, then ALL: two demanded sets, two cells, refused alike
+    // whether an earlier claim kept the ALL cell or nothing.
+    let subset_first = [ShapeParts::COUNTS, ShapeParts::ALL];
+    let cold = subject(limit, 256);
+    let warm = subject(limit, 256);
+    warm.begin_demand_phase();
+    warm.report_shape(ShapeParts::ALL).unwrap();
+    let refused = claim(&cold, subset_first);
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(claim(&warm, subset_first), refused);
+}

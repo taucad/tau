@@ -264,7 +264,35 @@ typedef struct geospec_occt_validity_facts {
   uint32_t invalid_solid_count;
   uint32_t open_edge_count;
   int closed_wires;
+  uint32_t nonmanifold_edge_count;
 } geospec_occt_validity_facts;
+
+// V1 shell closure: per unique shell definition, face uses per edge, skipping
+// degenerated and INTERNAL/EXTERNAL uses; odd is open, three or more is
+// non-manifold. Faces outside any shell form one group.
+typedef struct geospec_occt_closure_facts {
+  uint32_t shell_count;
+  uint32_t free_face_count;
+  uint32_t open_edge_count;
+  uint32_t nonmanifold_edge_count;
+  size_t failing_group_count;
+} geospec_occt_closure_facts;
+
+typedef struct geospec_occt_closure_edge_sample {
+  uint32_t face_uses;
+  double start[3];
+  double end[3];
+  double center[3];
+} geospec_occt_closure_edge_sample;
+
+typedef struct geospec_occt_closure_group {
+  int free_faces;
+  uint32_t open_edge_count;
+  uint32_t nonmanifold_edge_count;
+  uint32_t sample_count;
+  geospec_occt_closure_edge_sample samples[4];
+  size_t occurrence_count;
+} geospec_occt_closure_group;
 
 typedef struct geospec_occt_regular_solid_containment_result {
   int contained;
@@ -707,6 +735,17 @@ int geospec_occt_validity_dedicated(
     int* out_used_parallel, geospec_occt_validity_facts* out_validity,
     geospec_occt_string* reason,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// The shell-closure facet alone: no validity analyzer, no tessellation.
+int geospec_occt_validity_closure(const geospec_occt_document* document,
+                                  geospec_occt_closure_facts* out_closure,
+                                  geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Failing group `index` (shells in explorer order, then the free faces): its
+// samples placed at the group's first located instance, and the ordinals of
+// the leaf occurrences containing it (capacity: the occurrence count).
+int geospec_occt_validity_closure_group(
+    const geospec_occt_document* document, size_t index,
+    geospec_occt_closure_group* out_group, uint32_t* out_occurrences,
+    size_t occurrence_capacity, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment(
     const geospec_occt_document* document, geospec_occt_entity subject,
     geospec_occt_entity target,

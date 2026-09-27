@@ -12,9 +12,11 @@ import type { ChatToolIconTone } from '#components/chat/chat-tool-card.js';
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
+import { describePrintFailure } from '#routes/w.$workspace.$project/chat-print-send.js';
 
 type RequestPrintInvocation = ToolInvocation<typeof toolName.requestPrint>;
-type PrintRequestState = Extract<RequestPrintInvocation, { state: 'output-available' }>['output']['request']['state'];
+type PrintRequestRecord = Extract<RequestPrintInvocation, { state: 'output-available' }>['output']['request'];
+type PrintRequestState = PrintRequestRecord['state'];
 
 type Presentation = {
   readonly verb: string;
@@ -40,8 +42,32 @@ const presentation: Record<PrintRequestState, Presentation> = {
   unknown: { verb: 'Start not confirmed', tone: 'warning', separated: true },
 };
 
-/** Said when the printer never confirmed a start and the ledger names no cause. */
-const unconfirmedStart = 'The printer did not confirm the start. Check it in the Print pane before trying again.';
+/** Said when the printer never confirmed a start: whether it prints is unknown, so nothing invites a retry. */
+const unconfirmedStart =
+  'The printer did not confirm the start. Check the printer, or Reconcile the request in the Print pane.';
+
+/**
+ * Why a request settled as it did, in the words the agent's `nextStep` and the
+ * Print pane use. A failure message that is one bare token, such as
+ * `MACHINE_BUSY` or `provider-rejected`, says nothing to a person, so it
+ * follows the outcome instead of standing in for it.
+ *
+ * @param request - The settled request.
+ * @returns The reason, or `undefined` when there is nothing to explain.
+ */
+const reasonOf = ({ state, failure }: PrintRequestRecord): string | undefined => {
+  if (state === 'unknown') {
+    return unconfirmedStart;
+  }
+  if (failure === undefined) {
+    return undefined;
+  }
+  const described = describePrintFailure(failure.code, failure.message).trim();
+  if (/\s/u.test(described)) {
+    return described;
+  }
+  return `${state === 'rejected' ? 'The printer rejected the start' : 'The print request failed'} (${described}).`;
+};
 
 /**
  * The transcript's record of one `request_print` call: which file, on which
@@ -81,7 +107,7 @@ export function ChatMessageToolRequestPrint({ part }: { readonly part: RequestPr
       const { verb, tone, separated, pending } = presentation[request.state];
       const where = `${request.summary.fileName} on ${machineName ?? request.machineId}`;
       const detail = `${separated ? '· ' : ''}${where}${pending ? ' · waiting for approval in the Print pane' : ''}`;
-      const reason = request.failure?.message ?? (request.state === 'unknown' ? unconfirmedStart : undefined);
+      const reason = reasonOf(request);
       return (
         <ChatToolCard
           variant='minimal'

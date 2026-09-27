@@ -4,6 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import type { RequestPrintOutput, ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
 import { ChatMessageToolRequestPrint } from '#routes/w.$workspace.$project/chat-message-tool-request-print.js';
+import { developerModeRequired } from '#routes/w.$workspace.$project/chat-print-send.js';
 
 vi.mock('#components/chat/chat-tool-error.js', () => ({
   ChatToolError: ({ errorText, noun }: { readonly errorText: string; readonly noun: string }) => (
@@ -76,8 +77,44 @@ describe('ChatMessageToolRequestPrint', () => {
       screen.getByRole('button', { name: 'Start not confirmed · pyramid.gcode.3mf on Workshop X1C' }),
     ).toHaveAttribute('aria-expanded', 'true');
     expect(
-      screen.getByText('The printer did not confirm the start. Check it in the Print pane before trying again.'),
+      screen.getByText(
+        'The printer did not confirm the start. Check the printer, or Reconcile the request in the Print pane.',
+      ),
     ).toBeVisible();
+    /* Whether it prints is unknown, so nothing invites a second start. */
+    expect(screen.queryByText(/try again/iu)).not.toBeInTheDocument();
+  });
+
+  it.each<
+    Readonly<{
+      scenario: string;
+      state: 'rejected' | 'failed';
+      failure: { code: string; message: string };
+      reason: string;
+    }>
+  >([
+    {
+      scenario: 'put a bare rejection reason after the outcome',
+      state: 'rejected',
+      failure: { code: 'PROVIDER_REJECTED', message: 'provider-rejected' },
+      reason: 'The printer rejected the start (provider-rejected).',
+    },
+    {
+      scenario: 'put a bare failure code after the outcome',
+      state: 'failed',
+      failure: { code: 'MACHINE_UPLOAD_TRANSFER_MISMATCH', message: 'MACHINE_UPLOAD_TRANSFER_MISMATCH' },
+      reason: 'The print request failed (MACHINE_UPLOAD_TRANSFER_MISMATCH).',
+    },
+    {
+      scenario: "add the Print pane's fix to the printer's reason",
+      state: 'rejected',
+      failure: { code: 'PROVIDER_REJECTED', message: 'mqtt message verify failed' },
+      reason: `mqtt message verify failed. ${developerModeRequired}`,
+    },
+  ])('should $scenario', ({ state, failure, reason }) => {
+    render(<ChatMessageToolRequestPrint part={settled({ state, failure }, { machineName: 'Workshop X1C' })} />);
+
+    expect(screen.getByText(reason)).toBeVisible();
   });
 
   it('should show the reason the ledger gives when a print failed', () => {

@@ -11,7 +11,7 @@ import type { Mock } from 'vitest';
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
 import type { JSONSchema7 } from '@taucad/json-schema';
-import type { CapabilitiesManifest } from '@taucad/runtime';
+import type { CapabilitiesManifest, KernelIssue } from '@taucad/runtime';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { parseMachineManifest } from '@taucad/runtime/machine';
 import type {
@@ -51,6 +51,8 @@ export const mockWriteFiles = vi.fn(async (files: Readonly<Record<string, { cont
     projectFiles.write(path, content);
   }
 });
+/** What a slice the slicer still made warns about; none unless a test says so. */
+const noIssues: KernelIssue[] = [];
 export const mockExport = vi.fn(async () => ({
   success: true,
   data: [
@@ -60,7 +62,7 @@ export const mockExport = vi.fn(async () => ({
       mimeType: 'application/vnd.bambulab.gcode-3mf',
     },
   ],
-  issues: [],
+  issues: noIssues,
 }));
 
 const capabilities: CapabilitiesManifest = {
@@ -176,6 +178,8 @@ export const baseSliceSummary: SliceSummary = {
   bounds: { min: [0, 0, 0], max: [236, 153, 35] },
   partBounds: { min: [103, 103, 0], max: [153, 153, 25] },
   coverageComplete: true,
+  filamentColors: [],
+  previewRefusal: undefined,
 };
 
 /** The summary the slicer would read from the exported container. */
@@ -777,6 +781,7 @@ export const sliceFixture: SlicedArtifact = {
   geometry: {},
   summary: baseSliceSummary,
   fit: { fits: true, message: 'The part fits the plate' },
+  warnings: [],
 };
 
 /* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio setting keys and filament ids are fixed names. */

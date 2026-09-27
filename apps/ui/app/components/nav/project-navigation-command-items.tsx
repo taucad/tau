@@ -7,7 +7,7 @@ import { useProjects } from '#hooks/use-projects.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
 
 const hasSlugs = (

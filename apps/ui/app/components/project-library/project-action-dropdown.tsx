@@ -1,7 +1,7 @@
 import { Copy, EllipsisVertical, Pencil, Trash, ArrowUpRightSquare } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import {
   DropdownMenu,
   DropdownMenuContent,

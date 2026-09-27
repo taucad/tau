@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import type { Chat } from '@taucad/chat';
 import { Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import { useChats } from '#hooks/use-chats.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';

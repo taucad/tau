@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { ChevronRight, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useAppUiPreferences } from '#hooks/use-app-ui-preferences.js';

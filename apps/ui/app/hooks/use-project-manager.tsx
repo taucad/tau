@@ -76,7 +76,7 @@ import type {
   PendingProjectRecoveryReason,
   PendingProjectStorage,
 } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
 import { allocateProjectDirectorySlug } from '#utils/project-directory.utils.js';
 import { directorySlug, homeWorkspaceSlug, projectSlugsOf } from '#utils/project-url.utils.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';

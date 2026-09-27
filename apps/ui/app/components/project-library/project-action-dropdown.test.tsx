@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectToManifest } from '@taucad/types';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 
 let rowRuns = 0;
 vi.mock('#hooks/use-sidebar-status.js', () => ({

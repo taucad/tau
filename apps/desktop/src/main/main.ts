@@ -81,6 +81,7 @@ import type { QuickLookController } from '#main/quick-look.js';
 import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
 import { createOpenFileQueue } from '#main/open-files.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
+import { readWindowState, writeWindowState } from '#main/window-state.js';
 import {
   appIconThemeChannel,
   agentHostSessionChannels,
@@ -360,6 +361,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * forgot would answer `EACCES` for a folder the user believes is connected. */
   const roots = createProjectRootRegistry({ storePath: join(app.getPath('userData'), 'granted-roots.json') });
   roots.admit(homeRoot);
+  const windowStatePath = join(app.getPath('userData'), 'window-state.json');
   const quickLookTemporaryRoot = join(app.getPath('temp'), 'tau-quick-look');
   removeStaleQuickLookSessions(quickLookTemporaryRoot);
   const quickLookControllers = new Map<number, QuickLookController>();
@@ -942,15 +944,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     new URL(path, isDevelopment ? environment.ELECTRON_RENDERER_URL! : `${appOrigin}/`).href;
 
   const createMainWindow = async (): Promise<BrowserWindow> => {
-    /* Open filling the work area (display minus menu bar and dock) of the
-     * display the user launched from, as native apps do. A fixed size leaves
-     * most of a large display unused. */
-    const { x, y, width, height } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    /* Reopen where the user left the window; the first launch fills the work
+     * area (display minus menu bar and dock) of the display the user launched
+     * from. */
+    const saved = readWindowState(
+      windowStatePath,
+      screen.getAllDisplays().map((display) => display.workArea),
+    );
     const window = new BrowserWindow({
-      x,
-      y,
-      width,
-      height,
+      ...(saved?.bounds ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea),
       show: false,
       icon: applicationIcon,
       title: 'Tau',
@@ -980,6 +982,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     });
     quickLookControllers.set(window.id, quickLook);
     window.once('close', () => {
+      try {
+        writeWindowState(windowStatePath, {
+          bounds: window.getNormalBounds(),
+          maximized: window.isMaximized(),
+          fullScreen: window.isFullScreen(),
+        });
+      } catch (error) {
+        log.log('warn', 'window-state.write-failed', { message: String(error) });
+      }
       quickLook.dispose();
       quickLookControllers.delete(window.id);
     });
@@ -1017,7 +1028,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
     window.webContents.on('will-redirect', guardNavigation('will-redirect'));
 
     await window.loadURL(rendererUrl(openFiles.hasPending() ? '/import?desktop-open=1' : '/'));
+    if (saved?.maximized) {
+      window.maximize();
+    }
     window.show();
+    if (saved?.fullScreen) {
+      window.setFullScreen(true);
+    }
     return window;
   };
 

@@ -17,7 +17,7 @@ import { z } from 'zod';
 
 import type { Environment } from '#config/environment.config.js';
 import { DatabaseService } from '#database/database.service.js';
-import { agentRun, hostDevice, project } from '#database/schema.js';
+import { agentRun, hostDevice, project, user } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
 import {
@@ -377,8 +377,9 @@ export class HostsService implements OnModuleDestroy {
      * until its first push — and anything else is a `404` the host can only
      * restart on. Owner only: a cloud host is a device of the owner (EQ5). */
     const [registered] = await this.databaseService.database
-      .select({ id: project.id })
+      .select({ id: project.id, ownerName: user.name })
       .from(project)
+      .innerJoin(user, eq(user.id, project.ownerId))
       .where(and(eq(project.id, options.projectId), eq(project.ownerId, options.userId)))
       .limit(1);
     if (registered === undefined) {
@@ -424,6 +425,7 @@ export class HostsService implements OnModuleDestroy {
         credential,
         gitCredential,
         ownerId: options.userId,
+        ownerName: registered.ownerName,
         projectId: options.projectId,
         apiUrl: this.configService.get('TAU_API_URL', { infer: true }),
       });

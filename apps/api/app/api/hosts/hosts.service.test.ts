@@ -741,6 +741,7 @@ describe('HostsService cloud provisioning', () => {
     credential: string;
     gitCredential: string;
     ownerId: string;
+    ownerName?: string;
     projectId: string;
     apiUrl: string;
   };
@@ -749,7 +750,7 @@ describe('HostsService cloud provisioning', () => {
     const devices: DeviceRow[] = [];
     const runs: Array<Record<string, unknown>> = [];
     /* The caller's registered project, as the lookup by id and owner answers it; empty when it has none. */
-    const projects: Array<{ id: string }> = [{ id: 'registered' }];
+    const projects: Array<{ id: string; ownerName: string }> = [{ id: 'registered', ownerName: 'Ada Owner' }];
     const started: StartedSpec[] = [];
     const stopped: string[] = [];
     let startFailure: Error | undefined;
@@ -761,9 +762,9 @@ describe('HostsService cloud provisioning', () => {
     const database = {
       database: {
         select: () => ({
-          from: (table: unknown) => ({
+          from: (table: unknown) => {
             // oxlint-disable-next-line typescript/promise-function-async -- drizzle's builder is a thenable with methods on it, not a promise.
-            where: () => {
+            const where = () => {
               const rows: Array<Record<string, unknown>> =
                 table === agentRun ? runs : table === project ? projects : live();
               /* A thenable, as drizzle's builder is: a query with no `limit` awaits the rows. */
@@ -771,8 +772,10 @@ describe('HostsService cloud provisioning', () => {
                 limit: async () => rows.slice(0, 1),
                 orderBy: () => ({ limit: async () => rows }),
               });
-            },
-          }),
+            };
+            /* The project lookup joins its owner's name; the rows already carry it. */
+            return { where, innerJoin: () => ({ where }) };
+          },
         }),
         insert: (table: unknown) => ({
           // oxlint-disable-next-line typescript/promise-function-async -- drizzle's builder is a thenable with methods on it, not a promise.
@@ -878,6 +881,8 @@ describe('HostsService cloud provisioning', () => {
     expect(harness.started[0]).toMatchObject({
       deviceId: first.deviceId,
       ownerId: 'owner-1',
+      /* Rule 15: the host records the owner, so it is told who that is (FX7 D2). */
+      ownerName: 'Ada Owner',
       projectId: 'project-a',
       apiUrl: 'https://api.tau.test',
     });

@@ -1053,7 +1053,7 @@ fn continuous_wall_outside_domain_refuses_both_polarities() {
 }
 
 #[test]
-fn continuous_wall_budget_charges_report_and_query_on_cold_and_warm_claims() {
+fn continuous_wall_budget_charges_the_brep_and_query_units_on_cold_and_warm_claims() {
     let (mut engine, _, _, _, queries) = engine_with_wall(Ok(box_domain([2.0, 3.0, 4.0])));
     let (subject_hash, _) = ingest_step(&mut engine);
     for (budget, expected_status, expected_queries) in [

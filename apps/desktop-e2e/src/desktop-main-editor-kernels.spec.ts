@@ -175,6 +175,38 @@ const expectNativeOpenRscadEngine = async (logPath: string): Promise<void> => {
     .toBe(true);
 };
 
+/**
+ * T2.8: the fast render ran on PicoVoxel's multi-threaded build with a warm pthread pool. The
+ * kernel logs the selected variant at initialize and `variant=… pthreads=… lane=…` per session at
+ * debug level, so the debug filter is switched on to read the session line.
+ *
+ * @param page - The desktop renderer.
+ * @param entryPath - The model's entry file, which names its console group.
+ */
+const expectPicovoxelMultiSession = async (page: Page, entryPath: string): Promise<void> => {
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open console');
+  await page.getByText('Open console', { exact: true }).click();
+  const group = page.getByRole('button', { name: entryPath, exact: true });
+  await expectVisible(group, 60_000);
+  if ((await group.getAttribute('aria-expanded')) !== 'true') {
+    await group.click();
+  }
+  const log = page.getByRole('log', { name: `Console logs for ${entryPath}` });
+  await expectVisible(log, 60_000);
+  await page.getByRole('button', { name: 'Filter by log level' }).click();
+  const debug = page.getByRole('menuitemcheckbox', { name: /debug/iu });
+  if ((await debug.getAttribute('aria-checked')) !== 'true') {
+    await debug.click();
+  }
+  await page.keyboard.press('Escape');
+  await expectVisible(log.getByText('PicoVoxel fast-lane WASM variant: multi', { exact: false }), 60_000);
+  const session = log.getByText(/PicoVoxel session variant=multi pthreads=\d+ lane=fast/u).first();
+  await expectVisible(session, 60_000);
+  const pthreads = Number(/pthreads=(\d+)/u.exec((await session.textContent()) ?? '')?.[1]);
+  expect(pthreads).toBeGreaterThan(1);
+};
+
 test.for(cases)(
   '[completed-artifact] renders and exports $kernel in the main editor',
   async (kernelCase: KernelCase) => {
@@ -210,6 +242,9 @@ test.for(cases)(
       }
       if (kernelCase.kernel === 'OpenRSCAD') {
         await expectNativeOpenRscadEngine(session.logPath);
+      }
+      if (kernelCase.kernel === 'PicoVoxel') {
+        await expectPicovoxelMultiSession(page, `main.${kernelCase.extension}`);
       }
     } catch (error) {
       await session.capture(`main-editor-${kernelCase.kernel.toLowerCase()}-failure`);

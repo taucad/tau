@@ -6,7 +6,6 @@
     "target": "ESNext",
     "outDir": "./out-tsc/lib",
     "paths": {
-      "#*": ["./app/*"],
       "libcascade": ["../libs/api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts"]
     },
     "erasableSyntaxOnly": false // Incompatible with NestJS dependency injection.

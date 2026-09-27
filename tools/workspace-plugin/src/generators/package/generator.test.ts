@@ -70,6 +70,11 @@ describe('package generator', () => {
     // Exactly two keys: every package-specific alias is drift the pkgcheck
     // `tau-internal-imports-shape` rule rejects.
     expect(packageJson.imports).toEqual({ '#*.js': './src/*.ts', '#*': './src/*' });
+    // `compilerOptions.paths` applies to every file in the program, so a `#*` alias would
+    // rewrite the `#` imports of workspace packages compiled from source here.
+    for (const config of ['tsconfig.lib.json', 'tsconfig.spec.json']) {
+      expect(readText(tree, `packages/example/${config}`)).not.toContain('"paths"');
+    }
     expect(packageJson.exports?.['./package.json']).toBe('./package.json');
     expect(packageJson.publishConfig?.exports?.['./package.json']).toBe('./package.json');
     // The source subpath-import map must never reach the registry — see R14/R15.

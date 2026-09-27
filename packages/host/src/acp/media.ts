@@ -123,15 +123,17 @@ export const createAcpMediaStore = (
   };
 
   /* Sequential on purpose: a tool-output row names its rendered content before
-   * its raw output, so the image is stored before the string repeating it is met. */
-  const walk = async (value: JsonValue): Promise<JsonValue> => {
+   * its raw output, so the image is stored before the string repeating it is met.
+   * `unknown`, not `JsonValue`: a log event's optional fields admit `undefined`,
+   * and the walk keeps every value it does not replace exactly as it found it. */
+  const walk = async (value: unknown): Promise<unknown> => {
     if (typeof value === 'string') {
       return stored.get(value)?.path ?? value;
     }
     if (Array.isArray(value)) {
-      const items: JsonValue[] = [];
-      // `Array.isArray` widens a readonly array to `any[]`; the elements are still JSON.
-      for (const item of value as readonly JsonValue[]) {
+      const items: unknown[] = [];
+      // `Array.isArray` narrows to `any[]`; read the elements as `unknown`.
+      for (const item of value as readonly unknown[]) {
         // oxlint-disable-next-line no-await-in-loop -- order is the dedupe (see above).
         items.push(await walk(item));
       }
@@ -145,7 +147,7 @@ export const createAcpMediaStore = (
     if (reference !== undefined) {
       return reference;
     }
-    const entries: Array<[string, JsonValue]> = [];
+    const entries: Array<[string, unknown]> = [];
     for (const [key, item] of Object.entries(value)) {
       // oxlint-disable-next-line no-await-in-loop -- order is the dedupe (see above).
       entries.push([key, await walk(item)]);
@@ -156,9 +158,9 @@ export const createAcpMediaStore = (
   return async (events) => {
     const moved: ExternalAgentLogEvent[] = [];
     for (const event of events) {
-      // The events are JSON by contract; the walk only swaps media for references and keeps every other field.
+      // The walk only swaps media blocks for the `file-ref` blocks the log accepts in their place.
       // oxlint-disable-next-line no-await-in-loop -- rows are recorded in order, and so is the dedupe.
-      moved.push((await walk(event)) as unknown as ExternalAgentLogEvent);
+      moved.push((await walk(event)) as ExternalAgentLogEvent);
     }
     return moved;
   };

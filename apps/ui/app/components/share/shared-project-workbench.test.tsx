@@ -1,6 +1,10 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SharedProjectHydrator } from '#components/share/shared-project-workbench.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { SharedProjectHydrator, SharedProjectWorkbench } from '#components/share/shared-project-workbench.js';
+import type { ParsedPublication } from '#components/share/parsed-publication.js';
 
 const fileManager = vi.hoisted(() => {
   let visiblePaths: string[] = [];
@@ -64,6 +68,11 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/use-project.js', () => ({
   ProjectProvider: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element => children,
   useProject: vi.fn(),
+  useParameterSetActor: () => undefined,
+}));
+
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({
+  useIsMobile: () => true,
 }));
 
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
@@ -87,11 +96,15 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-workbench-dockview.js', () => ({
-  WorkbenchDockview: () => null,
+  WorkbenchDockview: () => <p>Workbench panes</p>,
 }));
 
-vi.mock('#components/share/publication-topbar.js', () => ({
-  PublicationTopbar: () => null,
+vi.mock('#components/share/fork-action.js', () => ({
+  ForkAction: () => <button type='button'>Remix</button>,
+}));
+
+vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({
+  ProjectExportAction: () => <button type='button'>Export</button>,
 }));
 
 const sharedFiles = {
@@ -100,6 +113,18 @@ const sharedFiles = {
   'tau.json': { content: new Uint8Array([3]) },
   'package.json': { content: new Uint8Array([4]) },
   '.tau/parameters/main.ts.json': { content: new Uint8Array([5]) },
+};
+
+const publication: ParsedPublication = {
+  id: 'pub_workbench',
+  title: 'Workbench fixture',
+  visibility: 'public',
+  viewerRole: 'public',
+  entryPath: 'main.ts',
+  ownerSnapshot: null,
+  forkCount: 0,
+  viewCount: 0,
+  createdAt: '2025-01-01T00:00:00.000Z',
 };
 
 const TreeProbe = (): React.JSX.Element => (
@@ -148,5 +173,30 @@ describe('SharedProjectHydrator', () => {
 
     rendered.unmount();
     expect(fileManager.unmount).toHaveBeenCalledWith('/previews/shared-test');
+  });
+});
+
+describe('SharedProjectWorkbench', () => {
+  beforeEach(() => {
+    fileManager.reset();
+  });
+
+  it('should open the workbench drawer from a trigger in the top bar on phones', async () => {
+    render(
+      <TooltipProvider>
+        <MemoryRouter>
+          <SharedProjectWorkbench projectId='shared-test' publication={publication} hydratedFiles={sharedFiles} />
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+    await act(async () => {
+      fileManager.releaseRootListing();
+    });
+
+    // The viewer's bottom edge belongs to its controls, so the trigger sits in the top bar.
+    await userEvent.click(within(await screen.findByRole('banner')).getByRole('button', { name: 'Workbench' }));
+
+    const drawer = await screen.findByRole('dialog', { name: 'Project workbench' });
+    expect(within(drawer).getByText('Workbench panes')).toBeInTheDocument();
   });
 });

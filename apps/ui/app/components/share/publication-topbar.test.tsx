@@ -11,7 +11,11 @@ vi.mock('#components/share/fork-action.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({
-  ProjectExportAction: () => <button type='button'>Export</button>,
+  ProjectExportAction: ({ labelClassName }: { readonly labelClassName?: string }) => (
+    <button type='button'>
+      <span className={labelClassName}>Export</span>
+    </button>
+  ),
 }));
 
 const publication: ParsedPublication = {
@@ -61,6 +65,27 @@ describe('PublicationTopbar', () => {
       'Export',
       'Remix',
     ]);
+  });
+
+  it('should show its own action labels only from md, where the shared page leaves its phone layout', () => {
+    render(
+      <TooltipProvider>
+        <MemoryRouter>
+          <PublicationTopbar
+            publication={publication}
+            files={new Map()}
+            parameters={{}}
+            archive={new Uint8Array()}
+            shareUrl='https://tau.example/s/direct'
+          />
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+
+    // Below md the phone layout adds the Workbench trigger, and the labelled actions no longer fit beside it.
+    for (const label of ['Copy link', 'Download source', 'Export']) {
+      expect(screen.getByText(label)).toHaveClass('hidden', 'md:inline');
+    }
   });
 
   it('copies the original opened share URL exactly', async () => {

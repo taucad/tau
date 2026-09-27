@@ -333,7 +333,7 @@ const openSecondaryViewer = async (): Promise<void> => {
     await target.click(source, { position: { x: 8, y: 14 } });
   }
   await target.hover(selectors.getByCss(`[data-testid="file-tree-item"][data-file-tree-path="src/${fileName}"]`));
-  await target.click(selectors.getByRole('button', { name: `Actions for ${fileName}` }));
+  await target.click(selectors.getByRole('button', { name: `More actions for ${fileName}`, exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectClass(selectors.getByCss(`.dv-tab[aria-label="src/${fileName}"]`), /\bdv-active-tab\b/u, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);

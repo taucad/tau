@@ -2,6 +2,8 @@
 //! candidate pair of leaf occurrences: no tessellation and no CSG connector.
 //! Its partition count comes from structure (C3), never from a report mesh.
 
+use std::path::PathBuf;
+
 use geospec_engine_native_core::backend::{csg::*, BackendError, TriangleMesh};
 use geospec_engine_native_core::{Engine, EngineConfig};
 use geospec_engine_native_occt::{BrepSubject, Document, OcctConnector};
@@ -47,6 +49,19 @@ impl CsgConnector for NoCsg {
 }
 
 const BUDGET: u64 = 8_000_000;
+
+fn workspace(relative: &str) -> Vec<u8> {
+    let root = std::env::var_os("GEOSPEC_ADAPTER_WORKSPACE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(5)
+                .expect("OCCT crate must remain below the workspace root")
+                .to_path_buf()
+        });
+    std::fs::read(root.join(relative)).expect("workspace fixture must be readable")
+}
 
 fn engine() -> Engine {
     Engine::with_backends(
@@ -213,6 +228,31 @@ fn an_invalid_component_refuses_only_as_a_candidate() {
     assert_eq!(claim["status"], "passed", "{claim}");
     assert_eq!(claim["evidence"]["evidence"]["componentCount"], 2);
     assert_eq!(claim["evidence"]["evidence"]["checkedPairs"], 0);
+}
+
+/// Ruling 32: a geometry-free leaf (review R6's pin-through-boss whose wrist
+/// pin representation holds no solid) is no component, so its absent box is
+/// never measured and the claim answers from the three faced leaves.
+#[test]
+fn a_geometry_free_leaf_is_no_component_and_has_no_box() {
+    let source = String::from_utf8(workspace(
+        "packages/geospec-engine/fixtures/containment/pin-through-boss-positive/model.step",
+    ))
+    .unwrap();
+    let faceless = source.replace(
+        "#1355 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#1356),#1454);",
+        "#1355 = SHAPE_REPRESENTATION('',(#11),#1454);",
+    );
+    assert_ne!(faceless, source);
+    let mut engine = engine();
+    let subject = ingest(&mut engine, faceless.as_bytes());
+    let claim = overlap(&mut engine, &subject, BUDGET);
+    assert_eq!(claim["status"], "passed", "{claim}");
+    let evidence = &claim["evidence"]["evidence"];
+    assert_eq!(evidence["profile"], "INTERFERENCE-EXACT-01");
+    assert_eq!(evidence["componentCount"], 3, "{evidence}");
+    assert_eq!(evidence["checkedPairs"], 0);
+    assert_eq!(evidence["overlaps"], json!([]));
 }
 
 #[test]

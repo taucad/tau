@@ -1276,6 +1276,19 @@ pub trait BrepSubject {
         self.source_occurrences()
     }
 
+    /// One occurrence's `source_occurrences` bounds, measured alone, so a
+    /// caller measures only the occurrences it reads (ruling 32: a zero-face
+    /// leaf may have no finite box).
+    fn occurrence_bounds(&self, occurrence: u32) -> Result<Bounds, BackendError> {
+        self.source_occurrences()?
+            .get(occurrence as usize)
+            .map(|row| row.bounds)
+            .ok_or_else(|| BackendError {
+                kind: super::BackendErrorKind::InvalidInput,
+                message: "Occurrence index is out of range.".into(),
+            })
+    }
+
     /// All uniquely forward-transferred public faces for an original source face.
     /// Empty/missing and ambiguous bindings remain typed inventory states.
     fn pmi_source_faces(

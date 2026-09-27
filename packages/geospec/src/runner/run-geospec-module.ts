@@ -1,10 +1,16 @@
 import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
+import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { createCollector } from '#runner/collector.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
 import { getGeoSpecEngineProtocol, getRegisteredGeoSpecHostBinding } from '#engine/registry.js';
 import { analyzeMesh } from '#mesh/load-mesh.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
-import type { GeoSpecRunResult, GeoSpecTestCase, RunGeoSpecModuleOptions } from '#runner/types.js';
+import type {
+  GeoSpecModuleBundleCache,
+  GeoSpecRunResult,
+  GeoSpecTestCase,
+  RunGeoSpecModuleOptions,
+} from '#runner/types.js';
 
 const geospecRunBindingsGlobalKey = '__GEOSPEC_RUN_BINDINGS__';
 
@@ -32,17 +38,26 @@ const builtinIdentity = (options: RunGeoSpecModuleOptions): string =>
       .map(([name, module_]) => [name, module_.version, module_.globalName, module_.code]),
   );
 
+type BundlerRead = Parameters<GeoSpecModuleBundleCache['set']>[1]['bundlerReads'][number];
+
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 
-const cacheEntryIsCurrent = async (
-  filesystem: RunGeoSpecModuleOptions['filesystem'],
-  dependencyContents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
-): Promise<boolean> => {
+const sameAnswer = (left: BundlerRead['answer'], right: BundlerRead['answer']): boolean =>
+  left instanceof Uint8Array && right instanceof Uint8Array ? bytesEqual(left, right) : left === right;
+
+const ask = async (filesystem: VmFileSystem, { question, path }: BundlerRead): Promise<BundlerRead['answer']> => {
+  if (question === 'exists') {
+    return filesystem.exists(path);
+  }
+  return question === 'utf8' ? filesystem.readFile(path, 'utf8') : filesystem.readFile(path);
+};
+
+const cacheEntryIsCurrent = async (filesystem: VmFileSystem, reads: readonly BundlerRead[]): Promise<boolean> => {
   const comparisons = await Promise.all(
-    [...dependencyContents].map(async ([path, previous]) => {
+    reads.map(async (read) => {
       try {
-        return bytesEqual(await filesystem.readFile(path), previous);
+        return sameAnswer(await ask(filesystem, read), read.answer);
       } catch {
         return false;
       }
@@ -51,19 +66,53 @@ const cacheEntryIsCurrent = async (
   return comparisons.every(Boolean);
 };
 
-const snapshotDependencies = async (
-  options: RunGeoSpecModuleOptions,
-  dependencies: readonly string[],
-): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> => {
-  const entries = await Promise.all(
-    [...new Set([options.entryPath, ...dependencies])].map(
-      async (path): Promise<readonly [string, Uint8Array<ArrayBuffer>]> => [
-        path,
-        await options.filesystem.readFile(path),
-      ],
-    ),
-  );
-  return new Map(entries);
+/**
+ * Wrap the VM filesystem so a new bundle is cached with the answers it was
+ * built from, not a later re-read that a mid-bundle save could already have
+ * changed.
+ *
+ * @param filesystem - The run's VM filesystem.
+ * @returns The recording filesystem for the bundler, and its reads: undefined
+ *   when the bundle must not be cached, because a read failed or the same read
+ *   returned two different answers.
+ */
+const recordBundlerReads = (
+  filesystem: VmFileSystem,
+): { filesystem: VmFileSystem; reads: () => BundlerRead[] | undefined } => {
+  const reads = new Map<string, BundlerRead>();
+  let consistent = true;
+  const observe = async <Answer extends BundlerRead['answer']>(
+    question: BundlerRead['question'],
+    path: string,
+    pending: Promise<Answer>,
+  ): Promise<Answer> => {
+    try {
+      const answer = await pending;
+      const previous = reads.get(`${question}:${path}`);
+      if (previous === undefined) {
+        reads.set(`${question}:${path}`, { question, path, answer });
+      } else {
+        consistent &&= sameAnswer(previous.answer, answer);
+      }
+      return answer;
+    } catch (error) {
+      consistent = false;
+      throw error;
+    }
+  };
+  // ponytail: exactly the VmFileSystem contract; record any read method the bundler gains (an optional stat) here too.
+  return {
+    filesystem: {
+      exists: async (path) => observe('exists', path, filesystem.exists(path)),
+      readFile: (async (path: string, encoding?: 'utf8') =>
+        encoding === 'utf8'
+          ? observe('utf8', path, filesystem.readFile(path, 'utf8'))
+          : observe('bytes', path, filesystem.readFile(path))) as VmFileSystem['readFile'],
+      writeFile: async (path, content) => filesystem.writeFile(path, content),
+      ensureDir: async (path) => filesystem.ensureDir(path),
+    },
+    reads: () => (consistent ? [...reads.values()] : undefined),
+  };
 };
 
 const resolveCachedBundle = async (options: RunGeoSpecModuleOptions) => {
@@ -71,7 +120,7 @@ const resolveCachedBundle = async (options: RunGeoSpecModuleOptions) => {
   if (
     entry === undefined ||
     entry.builtinIdentity !== builtinIdentity(options) ||
-    !(await cacheEntryIsCurrent(options.filesystem, entry.dependencyContents))
+    !(await cacheEntryIsCurrent(options.filesystem, entry.bundlerReads))
   ) {
     return undefined;
   }
@@ -235,8 +284,9 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     return { success: false, issues: [compiledTestNamePattern.issue] };
   }
 
+  const recorder = recordBundlerReads(options.filesystem);
   const vm = await createEsbuildModuleVm({
-    filesystem: options.filesystem,
+    filesystem: recorder.filesystem,
   });
   const collector = createCollector({
     ...(options.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: options.matcherWallBackstop }),
@@ -244,7 +294,7 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     ...(options.nativeAssertions === undefined ? {} : { nativeAssertions: options.nativeAssertions }),
   });
   const cached = await resolveCachedBundle(options);
-  const runToken = cached?.runToken ?? createRunToken();
+  const runToken = createRunToken();
   const bindings = ensureRunBindings();
   // D-S3: the model loader is INJECTED. The engine's runner hosts own its
   // construction (caching, affinity, resource-scope tracking); this module
@@ -327,20 +377,21 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     if (!bundle.success) {
       return { success: false, issues: bundle.issues, bundle };
     }
-    if (options.bundleCache !== undefined && cached === undefined) {
-      try {
-        options.bundleCache.set(options.entryPath, {
-          builtinIdentity: builtinIdentity(options),
-          runToken,
-          bundle,
-          dependencyContents: await snapshotDependencies(options, bundle.dependencies),
-        });
-      } catch {
-        // Cache bookkeeping must never change execution semantics.
-      }
+    const bundlerReads = recorder.reads();
+    if (options.bundleCache !== undefined && cached === undefined && bundlerReads !== undefined) {
+      options.bundleCache.set(options.entryPath, {
+        builtinIdentity: builtinIdentity(options),
+        runToken,
+        bundle,
+        bundlerReads,
+      });
     }
 
-    const executed = await vm.execute(bundle.code);
+    // A cached bundle embeds the token of the run that built it. Executing it under this run's own token
+    // leaves work that outlives an earlier run with no binding, instead of this run's.
+    const executed = await vm.execute(
+      cached === undefined ? bundle.code : bundle.code.replaceAll(cached.runToken, runToken),
+    );
     if (!executed.success) {
       return { success: false, issues: executed.issues, bundle };
     }

@@ -11,6 +11,9 @@ import type { GeoSpecRunnerEvent } from '#runner/worker/index.js';
 import { createSerialGeoSpecRunner } from '#runner/worker/serial-runner.js';
 
 class MemoryFileSystem implements VmFileSystem {
+  /** Runs after a read takes its content and before the reader sees it: a save landing right after the read. */
+  public afterRead: ((path: string) => void) | undefined;
+
   private readonly files = new Map<string, string>();
 
   public setText(path: string, content: string): void {
@@ -28,6 +31,7 @@ class MemoryFileSystem implements VmFileSystem {
     if (content === undefined) {
       throw new Error(`ENOENT: ${path}`);
     }
+    this.afterRead?.(path);
     return encoding === 'utf8' ? content : new TextEncoder().encode(content);
   }
 
@@ -175,6 +179,73 @@ describe('runGeoSpecModule', () => {
     }
     expect(changed.bundle).not.toBe(collected.bundle);
     expect(changed.tests.map(({ name }) => name)).toStrictEqual(['changed']);
+  });
+
+  it('should rebundle a file saved after the bundler read it', async () => {
+    const filesystem = filesystemWith([['spec.geospec.ts', `import { it } from 'geospec'; it('v1', () => {});`]]);
+    filesystem.afterRead = (path) => {
+      filesystem.afterRead = undefined;
+      filesystem.setText(path, `import { it } from 'geospec'; it('v2', () => {});`);
+    };
+    const bundleCache = new Map();
+
+    const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+    const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+
+    expect(first.success && first.tests.map(({ name }) => name)).toStrictEqual(['v1']);
+    expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['v2']);
+  });
+
+  it('should rebundle when a new file now wins an import resolution', async () => {
+    const filesystem = filesystemWith([
+      ['spec.geospec.ts', `import { it } from 'geospec'; import { variant } from './helper.js'; it(variant, () => {});`],
+      ['helper.ts', `export const variant = 'helper.ts';`],
+    ]);
+    const bundleCache = new Map();
+
+    const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+    filesystem.setText('helper.js', `export const variant = 'helper.js';`);
+    const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+
+    expect(first.success && first.tests.map(({ name }) => name)).toStrictEqual(['helper.ts']);
+    expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['helper.js']);
+  });
+
+  it('should reject work that outlived its run when a later run reuses the bundle', async () => {
+    const filesystem = filesystemWith([
+      [
+        'spec.geospec.ts',
+        `
+        import { it } from 'geospec';
+        const ghost = globalThis.__GEOSPEC_TEST_GHOST__;
+        if (ghost === undefined) {
+          globalThis.__GEOSPEC_TEST_GHOST__ = () => it('ghost-from-run-1', () => {});
+        } else {
+          try {
+            ghost();
+          } catch (error) {
+            globalThis.__GEOSPEC_TEST_GHOST_ERROR__ = String(error);
+          }
+        }
+        it('body', () => {});
+      `,
+      ],
+    ]);
+    const bundleCache = new Map();
+    const globals = globalThis as Record<string, unknown>;
+    try {
+      const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+      const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+
+      expect(second.success && second.bundle).toBe(first.success && first.bundle);
+      expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['body']);
+      expect(globals['__GEOSPEC_TEST_GHOST_ERROR__']).toBe(
+        'Error: GeoSpec runner binding is not active. Run the module through runGeoSpecModule().',
+      );
+    } finally {
+      Reflect.deleteProperty(globals, '__GEOSPEC_TEST_GHOST__');
+      Reflect.deleteProperty(globals, '__GEOSPEC_TEST_GHOST_ERROR__');
+    }
   });
 
   it('should expose the injected model and step loaders to authored modules', async () => {

@@ -21,8 +21,41 @@ import {
   performanceLabScaleCases,
   performanceLabScaleQueries,
 } from '#bench/performance-lab';
+import { selectLabProducts, toRunCase } from '#bench/performance-lab-cli';
+import { runPerformanceLabCell } from '#bench/performance-lab-runner';
 
 const root = resolve(import.meta.dirname, '../../..');
+
+/**
+ * Run one scale cell on the installed native engine, as the lab times it.
+ * @param fixtureId - Scale fixture to admit.
+ * @param cases - Catalog cases evaluated against that one admission.
+ * @returns The engine's whole-shape tessellation counters after the cell.
+ */
+const scaleCellTessellation = async (
+  fixtureId: string,
+  cases: ReadonlyArray<Parameters<typeof toRunCase>[0]>,
+): Promise<{ tessellations: unknown; meshRecords: unknown }> => {
+  const fixture = performanceLabFixtures.find(({ id }) => id === fixtureId)!;
+  const result = await runPerformanceLabCell(
+    {
+      engine: 'native-desktop',
+      fixture: {
+        id: fixture.id,
+        format: fixture.format,
+        sourceUnit: fixture.sourceUnit,
+        bytes: new Uint8Array(await readFile(new URL(fixture.url))),
+        sha256: fixture.sha256,
+      },
+      cases: cases.map((entry) => toRunCase(entry)),
+      repeats: 1,
+      cache: 'cold',
+    },
+    { native: async () => selectLabProducts({})(resolve(import.meta.dirname, '../src/node.ts')) },
+  );
+  const { physical } = result.engineObservations as { physical: Record<string, unknown> };
+  return { tessellations: physical['tessellations'], meshRecords: physical['meshRecords'] };
+};
 
 void describe('performance lab catalog', () => {
   void it('explains only source-bound target outcomes and legacy records without changing claims', async () => {
@@ -226,6 +259,22 @@ void describe('performance lab catalog', () => {
       const authored = Reflect.apply(method, methods, entry.arguments) as GeoSpecAuthoringInvocation;
       assert.deepStrictEqual(entry.claim.payload, { kind: authored.kind, expected: authored.expected });
     }
+  });
+
+  void it('times STEP-scale interference and wall without tessellating and tessellates in analyzeMesh', async () => {
+    const settling = new Set(['toHaveNoComponentInterference', 'toHaveMinimumWallThickness']);
+    const cells = Map.groupBy(
+      performanceLabScaleCases.filter(({ matcher }) => settling.has(matcher)),
+      ({ fixtureId }) => fixtureId,
+    );
+    assert.equal(cells.size, 5);
+    for (const [fixtureId, cases] of cells) {
+      // oxlint-disable-next-line no-await-in-loop -- One native engine per cell, as the lab runs them.
+      assert.deepStrictEqual(await scaleCellTessellation(fixtureId, cases), { tessellations: '0', meshRecords: '0' });
+    }
+    const query = performanceLabScaleQueries.find(({ fixtureId }) => fixtureId === 'many-occurrences-4096-step')!;
+    const { meshRecords } = await scaleCellTessellation(query.fixtureId, [query]);
+    assert.equal(meshRecords, '1');
   });
 
   void it('pins accepted ancillary queries including PMI inventory', async () => {

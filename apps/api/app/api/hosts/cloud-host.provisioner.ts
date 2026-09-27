@@ -25,6 +25,11 @@ export type CloudHostSpec = {
   /** The repository-scoped push credential (D21): `projectId`'s git routes and nothing else. */
   readonly gitCredential: string;
   readonly ownerId: string;
+  /**
+   * The owner's display name. With `ownerId` it is who the host's revisions are
+   * by (rule 15): the host acts for the owner, not for its container user.
+   */
+  readonly ownerName?: string | undefined;
   /** The project the entrypoint clones and the host serves. */
   readonly projectId: string;
   /** Relay *and* model-gateway origin — a cloud host reaches Tau at one address. */
@@ -58,6 +63,13 @@ export type CloudHostProvisioner = {
    */
   stop(deviceId: string): Promise<void>;
 };
+
+/**
+ * One `--env-file` value. The file is line-oriented with no quoting, so a
+ * control character in a user-chosen name would end its line and let the rest
+ * set another variable.
+ */
+const environmentValue = (value: string): string => value.replaceAll(/\p{Cc}+/gu, ' ').trim();
 
 /** Container name for one device: recoverable across API restarts without a second store. */
 const containerName = (deviceId: string): string => `tau-host-${deviceId}`;
@@ -147,6 +159,8 @@ export const createDockerCloudHostProvisioner = (options: DockerCloudHostProvisi
             `TAU_HOST_GIT_CREDENTIAL=${spec.gitCredential}`,
             `TAU_HOST_PROJECT_ID=${spec.projectId}`,
             `TAU_API_URL=${options.apiUrl ?? spec.apiUrl}`,
+            `TAU_HOST_OWNER_ID=${environmentValue(spec.ownerId)}`,
+            ...(spec.ownerName === undefined ? [] : [`TAU_HOST_OWNER_NAME=${environmentValue(spec.ownerName)}`]),
             '',
           ].join('\n'),
           { encoding: 'utf8', mode: 0o600 },

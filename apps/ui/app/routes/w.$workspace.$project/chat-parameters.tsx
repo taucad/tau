@@ -693,7 +693,7 @@ function GeometryUnitParameters({
 
   if (parameterManifest !== undefined && parameterActor !== undefined && authorityFailure !== undefined) {
     return (
-      <div className={paneviewAttachedBodyClassName}>
+      <div className={cn(paneviewAttachedBodyClassName, 'max-h-full overflow-y-auto')}>
         <ParameterAuthorityFailure
           entryPath={entryPath}
           manifest={parameterManifest}

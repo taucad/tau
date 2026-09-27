@@ -334,6 +334,8 @@ type EditorStateEvent =
   | { type: 'setActiveFile'; path: string }
   | { type: 'revealFileInTree'; path: string; expandTarget?: boolean }
   | { type: 'revealModelComponentInExplorer'; entryPath: string; unitId: string; componentId: string }
+  /** Open the Kinematics pane at the joint that moves a part. */
+  | { type: 'revealModelComponentInKinematics'; entryPath: string; unitId: string; componentId: string }
   | { type: 'renameFile'; oldPath: string; newPath: string }
   | { type: 'closeAll' }
   // Chat operations
@@ -381,7 +383,8 @@ type EditorStateEmitted =
   | { type: 'fileOpening'; path: string }
   | { type: 'fileOpenFailed'; path: string; error: Error }
   | { type: 'fileRevealRequested'; path: string; expandTarget?: boolean }
-  | { type: 'modelComponentRevealRequested'; entryPath: string; unitId: string; componentId: string };
+  | { type: 'modelComponentRevealRequested'; entryPath: string; unitId: string; componentId: string }
+  | { type: 'kinematicsRevealRequested'; entryPath: string; unitId: string; componentId: string };
 
 // Actors to be provided by the consumer
 const loadEditorStateActor = fromSafeAsync<
@@ -857,6 +860,15 @@ export const editorMachine = setup({
             revealModelComponentInExplorer: ({ event }, enq) => {
               enq.emit({
                 type: 'modelComponentRevealRequested',
+                entryPath: event.entryPath,
+                unitId: event.unitId,
+                componentId: event.componentId,
+              });
+              return {};
+            },
+            revealModelComponentInKinematics: ({ event }, enq) => {
+              enq.emit({
+                type: 'kinematicsRevealRequested',
                 entryPath: event.entryPath,
                 unitId: event.unitId,
                 componentId: event.componentId,

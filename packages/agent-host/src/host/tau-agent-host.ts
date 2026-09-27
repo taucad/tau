@@ -877,14 +877,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
 
   /**
    * Hand the chat's answers to the tools that asked (D5, GM.r1 H2): after a `resolve-interrupt` or a `cancel` is
-   * applied, each approval request of the run that now has an answer goes to the registry's `answerApproval`, so what
-   * the tool guards follows the person's answer whether or not the run continues. The registry is idempotent, so an
-   * answer handed over twice (a replayed command) settles once.
+   * applied, each approval request that command's own rows answered goes to the registry's `answerApproval`, so what
+   * the tool guards follows the person's answer whether or not the run continues. A Stop hands over only the requests
+   * it cancelled, never an earlier approval. The registry is idempotent, so an answer handed over twice settles once.
+   * A hand-over lost to a crash or a throwing registry is reconciled when the run continues: an applied `resume`
+   * hands over every answered request of its run (without `commandId`).
    *
    * @param chatId - The chat the command named.
    * @param runId - The run it named.
+   * @param commandId - The command whose answers to hand over, or none for every answer of the run.
    */
-  const answerApprovals = async (chatId: string, runId: string): Promise<void> => {
+  const answerApprovals = async (chatId: string, runId: string, commandId?: string): Promise<void> => {
     const { answerApproval } = options.toolRegistry;
     if (answerApproval === undefined) {
       return;
@@ -898,7 +901,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (row.phase === 'requested' && isJsonObject(context) && typeof context['approvalTool'] === 'string') {
         const { approvalKey: _key, approvalTool: toolName, approvalCall: _call, ...payload } = context;
         asked.set(row.interruptId, { toolName, payload });
-      } else if (row.phase === 'resolved' && asked.has(row.interruptId)) {
+      } else if (
+        row.phase === 'resolved' &&
+        asked.has(row.interruptId) &&
+        (commandId === undefined || row.commandId === commandId)
+      ) {
         const { outcome, optionId, response } = row.payload;
         if (outcome === 'approved' || outcome === 'denied' || outcome === 'cancelled') {
           // oxlint-disable-next-line no-await-in-loop -- one tool's answer at a time, in the order the chat gave them.
@@ -999,7 +1006,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     list: () => tools.list(),
     invoke: async (invocation) => {
       const { approve, spent } = approvalFor(key, invocation);
-      const result = await tools.invoke({ ...invocation, approve });
+      let result: Awaited<ReturnType<ToolRegistry['invoke']>>;
+      try {
+        result = await tools.invoke({ ...invocation, approve });
+      } catch (error) {
+        /* The call recorded no spend, so its claim is released and a retry recalls the approval rather than asking. */
+        const claimed = spent();
+        if (claimed !== undefined) {
+          recalledApprovals.delete(`${key.runId}/${claimed}`);
+        }
+        throw error;
+      }
       const interruptId = spent();
       return interruptId === undefined ? result : { ...result, approval: { interruptId } };
     },
@@ -1779,13 +1796,15 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       runChats.set(command.payload.runId, command.payload.chatId);
     }
     const answer = registry.execute(command);
-    if (command.type === 'resolve-interrupt' || command.type === 'cancel') {
+    if (command.type === 'resolve-interrupt' || command.type === 'cancel' || command.type === 'resume') {
       const { chatId, runId } = command.payload;
+      /* A resume reconciles every answer of its run; an answer or a Stop hands over only what its own rows resolved. */
+      const answeredBy = command.type === 'resume' ? undefined : command.commandId;
       const answerTools = async (): Promise<void> => {
         try {
           const applied = await answer;
           if (applied.status === 'applied') {
-            await answerApprovals(chatId, runId);
+            await answerApprovals(chatId, runId, answeredBy);
           }
         } catch (error) {
           console.error('[agent-host] a tool could not act on the answer to its approval', chatId, runId, error);

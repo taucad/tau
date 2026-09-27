@@ -15,7 +15,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::codec::compare_utf16;
+use crate::{
+    budget::{Budget, BudgetExceeded},
+    codec::compare_utf16,
+};
 
 const SPATIAL_EPSILON: f64 = 1e-5;
 const CLUSTER_SAMPLE_LIMIT: usize = 4;
@@ -1133,64 +1136,151 @@ fn cluster_gaps(clusters: &[ClusterReport]) -> Vec<ClusterGap> {
 /// The bounded profile's failure gaps (PERF-OUTPUT-01): each cluster's
 /// nearest other cluster by (gap, index), as the `cluster_gaps` entries of
 /// those pairs in its order. That relation is a forest, so at most C - 1.
-/// A gap is at least the sweep-axis separation of primitive bounds, which
-/// stops each scan; `longest` bounds how far back an overlapping box starts.
-// ponytail: one long cluster makes the backward scans quadratic; an interval
-// tree over the sweep axis if such inputs fail often at large C.
-pub(crate) fn nearest_cluster_gaps(clusters: &[ClusterReport]) -> Vec<ClusterGap> {
+/// A box tree over primitive bounds finds each nearest cluster: a box's gap
+/// never exceeds the gap of a cluster inside it, so a box is skipped when
+/// its gap passes the best, or equals a nonzero best (equal bits, so no
+/// signed zero) and holds no smaller index. Each gap evaluated is charged
+/// its primitive pairs before it runs.
+pub(crate) fn nearest_cluster_gaps(
+    clusters: &[ClusterReport],
+    budget: &Budget,
+) -> Result<Vec<ClusterGap>, BudgetExceeded> {
     let bounds = primitive_bounds(clusters);
-    let axis = sweep_axis(bounds.iter().copied());
-    let mut order: Vec<usize> = (0..clusters.len()).collect();
-    order.sort_by(|&left, &right| {
-        partial_cmp(bounds[left].min[axis], bounds[right].min[axis]).then_with(|| left.cmp(&right))
-    });
-    let longest = bounds
-        .iter()
-        .map(|aabb| aabb.max[axis] - aabb.min[axis])
-        .fold(0.0, js_max);
-    let mut nearest: Vec<Option<(f64, usize)>> = vec![None; clusters.len()];
-    let consider = |current: usize, candidate: usize, nearest: &mut [Option<(f64, usize)>]| {
-        let (left, right) = (current.min(candidate), current.max(candidate));
-        let gap = pair_gap(&clusters[left], &clusters[right], bounds[right]).gap_mm;
-        if nearest[current].is_none_or(|(best, index)| {
-            gap.total_cmp(&best).then(candidate.cmp(&index)) == Ordering::Less
-        }) {
-            nearest[current] = Some((gap, candidate));
-        }
+    let tree = BoxTree::new(&bounds);
+    let skip = |gap: f64, least: usize, best: &Option<(usize, ClusterGap)>| {
+        best.as_ref().is_some_and(|(index, nearest)| {
+            gap > nearest.gap_mm
+                || (gap >= nearest.gap_mm && nearest.gap_mm != 0.0 && least > *index)
+        })
     };
-    for (position, &current) in order.iter().enumerate() {
-        for &candidate in &order[position + 1..] {
-            if nearest[current].is_some_and(|(gap, _)| {
-                bounds[candidate].min[axis] - bounds[current].max[axis] > gap
-            }) {
-                break;
+    let mut pairs = Vec::new();
+    let mut stack = Vec::new();
+    for current in 0..clusters.len() {
+        let mut best: Option<(usize, ClusterGap)> = None;
+        stack.push(0);
+        while let Some(node) = stack.pop() {
+            let node = &tree.nodes[node];
+            if skip(
+                dominant_gap(bounds[current], node.bounds).1,
+                node.least,
+                &best,
+            ) {
+                continue;
             }
-            consider(current, candidate, &mut nearest);
+            let Some(children) = node.children else {
+                for &candidate in &tree.items[node.items.clone()] {
+                    if candidate == current
+                        || skip(
+                            dominant_gap(bounds[current], bounds[candidate]).1,
+                            candidate,
+                            &best,
+                        )
+                    {
+                        continue;
+                    }
+                    let (left, right) = (current.min(candidate), current.max(candidate));
+                    budget.charge(
+                        (clusters[left].primitives.len() as u64)
+                            .saturating_mul(clusters[right].primitives.len() as u64),
+                    )?;
+                    let gap = pair_gap(&clusters[left], &clusters[right], bounds[right]);
+                    if best.as_ref().is_none_or(|(index, nearest)| {
+                        gap.gap_mm
+                            .total_cmp(&nearest.gap_mm)
+                            .then(candidate.cmp(index))
+                            == Ordering::Less
+                    }) {
+                        best = Some((candidate, gap));
+                    }
+                }
+                continue;
+            };
+            // Nearer box first, so the best tightens before the other is tested.
+            let key = |child: usize| {
+                (
+                    dominant_gap(bounds[current], tree.nodes[child].bounds).1,
+                    tree.nodes[child].least,
+                )
+            };
+            let (near, far) = (key(children[0]), key(children[1]));
+            let first = near.0.total_cmp(&far.0).then(near.1.cmp(&far.1)) != Ordering::Greater;
+            let [a, b] = children;
+            stack.extend(if first { [b, a] } else { [a, b] });
         }
-        for &candidate in order[..position].iter().rev() {
-            if nearest[current].is_some_and(|(gap, _)| {
-                bounds[current].min[axis] - (bounds[candidate].min[axis] + longest) > gap
-            }) {
-                break;
-            }
-            consider(current, candidate, &mut nearest);
+        if let Some((candidate, gap)) = best {
+            pairs.push((current.min(candidate), current.max(candidate), gap));
         }
     }
-    let mut pairs: Vec<(usize, usize)> = nearest
-        .iter()
-        .enumerate()
-        .filter_map(|(current, best)| {
-            best.map(|(_, candidate)| (current.min(candidate), current.max(candidate)))
-        })
-        .collect();
-    pairs.sort_unstable();
-    pairs.dedup();
-    let mut gaps: Vec<ClusterGap> = pairs
-        .into_iter()
-        .map(|(left, right)| pair_gap(&clusters[left], &clusters[right], bounds[right]))
-        .collect();
+    pairs.sort_unstable_by_key(|&(left, right, _)| (left, right));
+    pairs.dedup_by_key(|&mut (left, right, _)| (left, right));
+    let mut gaps: Vec<ClusterGap> = pairs.into_iter().map(|(_, _, gap)| gap).collect();
     sort_gaps(&mut gaps);
-    gaps
+    Ok(gaps)
+}
+
+/// A bounding-volume tree over boxes: median splits of box centres on the
+/// node box's widest axis, leaves in index order, so traversal and the
+/// units charged in it are a function of the boxes alone.
+struct BoxTree {
+    nodes: Vec<BoxNode>,
+    items: Vec<usize>,
+}
+
+struct BoxNode {
+    bounds: Aabb,
+    /// The smallest index below this node, for the (gap, index) tie-break.
+    least: usize,
+    items: std::ops::Range<usize>,
+    children: Option<[usize; 2]>,
+}
+
+impl BoxTree {
+    const LEAF: usize = 8;
+
+    fn new(bounds: &[Aabb]) -> Self {
+        let mut tree = Self {
+            nodes: Vec::new(),
+            items: (0..bounds.len()).collect(),
+        };
+        if !bounds.is_empty() {
+            tree.build(bounds, 0..bounds.len());
+        }
+        tree
+    }
+
+    fn build(&mut self, bounds: &[Aabb], range: std::ops::Range<usize>) -> usize {
+        let items = &mut self.items[range.clone()];
+        let mut aabb = empty_aabb();
+        for &item in items.iter() {
+            expand(&mut aabb, bounds[item].min);
+            expand(&mut aabb, bounds[item].max);
+        }
+        let least = items.iter().copied().min().unwrap_or(usize::MAX);
+        let node = self.nodes.len();
+        self.nodes.push(BoxNode {
+            bounds: aabb,
+            least,
+            items: range.clone(),
+            children: None,
+        });
+        if items.len() <= Self::LEAF {
+            items.sort_unstable();
+            return node;
+        }
+        let axis = (0..3)
+            .max_by(|&a, &b| (aabb.max[a] - aabb.min[a]).total_cmp(&(aabb.max[b] - aabb.min[b])))
+            .unwrap_or(0);
+        let half = items.len() / 2;
+        items.select_nth_unstable_by(half, |&a, &b| {
+            center(bounds[a])[axis]
+                .total_cmp(&center(bounds[b])[axis])
+                .then(a.cmp(&b))
+        });
+        let left = self.build(bounds, range.start..range.start + half);
+        let right = self.build(bounds, range.start + half..range.end);
+        self.nodes[node].children = Some([left, right]);
+        node
+    }
 }
 
 fn component_clusters(
@@ -1800,5 +1890,138 @@ mod tests {
             hypot3(1e200, 1e200, 1e-200).to_bits(),
             0x697d_8f98_1133_5b57
         );
+    }
+
+    /// a1's one-axis sweep (2d9b0fed8), the reference the tree replaces, with
+    /// the primitive pairs of the gaps it evaluates.
+    fn sweep_nearest(clusters: &[ClusterReport]) -> (Vec<ClusterGap>, u64) {
+        let bounds = primitive_bounds(clusters);
+        let axis = sweep_axis(bounds.iter().copied());
+        let mut order: Vec<usize> = (0..clusters.len()).collect();
+        order.sort_by(|&l, &r| {
+            partial_cmp(bounds[l].min[axis], bounds[r].min[axis]).then_with(|| l.cmp(&r))
+        });
+        let longest = bounds
+            .iter()
+            .map(|aabb| aabb.max[axis] - aabb.min[axis])
+            .fold(0.0, js_max);
+        let mut nearest: Vec<Option<(f64, usize)>> = vec![None; clusters.len()];
+        let mut work = 0;
+        let mut consider =
+            |current: usize, candidate: usize, nearest: &mut [Option<(f64, usize)>]| {
+                let (left, right) = (current.min(candidate), current.max(candidate));
+                work += (clusters[left].primitives.len() * clusters[right].primitives.len()) as u64;
+                let gap = pair_gap(&clusters[left], &clusters[right], bounds[right]).gap_mm;
+                if nearest[current].is_none_or(|(best, index)| {
+                    gap.total_cmp(&best).then(candidate.cmp(&index)) == Ordering::Less
+                }) {
+                    nearest[current] = Some((gap, candidate));
+                }
+            };
+        for (position, &current) in order.iter().enumerate() {
+            for &candidate in &order[position + 1..] {
+                if nearest[current].is_some_and(|(gap, _)| {
+                    bounds[candidate].min[axis] - bounds[current].max[axis] > gap
+                }) {
+                    break;
+                }
+                consider(current, candidate, &mut nearest);
+            }
+            for &candidate in order[..position].iter().rev() {
+                if nearest[current].is_some_and(|(gap, _)| {
+                    bounds[current].min[axis] - (bounds[candidate].min[axis] + longest) > gap
+                }) {
+                    break;
+                }
+                consider(current, candidate, &mut nearest);
+            }
+        }
+        let mut pairs: Vec<(usize, usize)> = nearest
+            .iter()
+            .enumerate()
+            .filter_map(|(current, best)| {
+                best.map(|(_, other)| (current.min(other), current.max(other)))
+            })
+            .collect();
+        pairs.sort_unstable();
+        pairs.dedup();
+        let mut gaps: Vec<ClusterGap> = pairs
+            .into_iter()
+            .map(|(left, right)| pair_gap(&clusters[left], &clusters[right], bounds[right]))
+            .collect();
+        sort_gaps(&mut gaps);
+        (gaps, work)
+    }
+
+    #[test]
+    fn the_box_tree_finds_the_sweeps_nearest_gaps_on_a_grid_and_charges_them() {
+        // 1 mm cubes on a 2 mm pitch: all 26 neighbours tie at 1 mm, so the
+        // index decides; scrambled indices, a two-primitive cluster, a
+        // touching pair (gap 0) and an overlapping pair (negative gap).
+        let cube = |min: [f64; 3], size: f64| Aabb {
+            min,
+            max: min.map(|value| value + size),
+        };
+        let mut boxes: Vec<Vec<Aabb>> = Vec::new();
+        for x in 0..6 {
+            for y in 0..6 {
+                for z in 0..6 {
+                    boxes.push(vec![cube(
+                        [2.0 * f64::from(x), 2.0 * f64::from(y), 2.0 * f64::from(z)],
+                        1.0,
+                    )]);
+                }
+            }
+        }
+        boxes[7].push(cube([30.0, 0.0, 0.0], 1.0));
+        boxes.push(vec![cube([31.0, 0.0, 0.0], 1.0)]);
+        boxes.push(vec![cube([40.0, 0.5, 0.5], 2.0)]);
+        boxes.push(vec![cube([41.0, 1.0, 1.0], 2.0)]);
+        let count = boxes.len();
+        // 37 is prime to 219, so index * 37 permutes the grid order.
+        assert_eq!(count, 219);
+        let clusters: Vec<ClusterReport> = (0..count)
+            .map(|index| {
+                let source = &boxes[(index * 37) % count];
+                ClusterReport {
+                    label: format!("c{index}"),
+                    primitives: source
+                        .iter()
+                        .enumerate()
+                        .map(|(part, aabb)| PrimitiveRecord {
+                            name: format!("c{index}p{part}"),
+                            color: None,
+                            vertices: 8,
+                            aabb: *aabb,
+                        })
+                        .collect(),
+                    aabb: source[0],
+                    centroid: [0.0; 3],
+                    total_vertices: 8,
+                }
+            })
+            .collect();
+        let (expected, sweep_work) = sweep_nearest(&clusters);
+        let budget = Budget::new(u64::MAX);
+        let actual = nearest_cluster_gaps(&clusters, &budget).unwrap();
+        assert_eq!(actual, expected);
+        for (actual, expected) in actual.iter().zip(&expected) {
+            assert_eq!(actual.gap_mm.to_bits(), expected.gap_mm.to_bits());
+        }
+        assert!(actual.iter().any(|gap| gap.gap_mm == 0.0));
+        assert!(actual.iter().any(|gap| gap.gap_mm < 0.0));
+        // Units are the primitive pairs of the gaps evaluated: at least one
+        // per cluster, and a small fraction of the sweep's slab scans.
+        let units = budget.used();
+        assert!(
+            units >= count as u64 && units * 8 < sweep_work,
+            "{units} {sweep_work}"
+        );
+        assert_eq!(
+            nearest_cluster_gaps(&clusters, &Budget::new(units)).unwrap(),
+            expected
+        );
+        let exceeded = nearest_cluster_gaps(&clusters, &Budget::new(units - 1)).unwrap_err();
+        assert_eq!(exceeded.limit, units - 1);
     }
 }

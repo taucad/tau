@@ -319,7 +319,8 @@ it('accepts the project Runtime mesh', async () => {
     try {
       const subject = await load({ source: Uint8Array.from(fixtureBytes), format: 'glb', sourceUnit: 'mm' });
       apiSubjectHash = subject.subjectHash;
-      const client = assertionApi.createGeoSpecAssertionClient({ engine });
+      // The chat's runner selects bounded success evidence, so the API reports compare in that profile.
+      const client = assertionApi.createGeoSpecAssertionClient({ engine, evidenceProfile: 'bounded' });
       apiReports.push(
         canonicalChatReport(await client.expectGeo(subject).toHaveVolume({ value: 6000, tolerance: 0.000001 })),
       );
@@ -386,7 +387,7 @@ it('accepts the project Runtime mesh', async () => {
           apiReleased,
           apiClosed,
           limitations: [
-            'Runtime row has independent verdict coverage; finalized export bytes are not exposed. Fixed fixture rows require exact same-profile API report equality.',
+            'Runtime row has independent verdict coverage; finalized export bytes are not exposed. Fixed fixture rows require exact report equality with a bounded-profile API client, the profile the chat runner selects.',
           ],
         },
         null,

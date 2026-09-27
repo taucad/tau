@@ -373,6 +373,7 @@ fn retained_subject() -> Subject {
         source_length_unit: "millimetre".into(),
         source_unit_to_millimeters: 1.0,
         occurrence_count: 0,
+        surfaceless_faces: 0,
     });
     subject.semantic_identity.set(identity).unwrap();
     subject

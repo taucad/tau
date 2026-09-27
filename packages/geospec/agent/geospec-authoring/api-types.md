@@ -1547,9 +1547,19 @@ GeoSpecDiscoveryResult: {
 // Worker-local cache for successful GeoSpec bundles
 GeoSpecModuleBundleCache: Map<string, {
     builtinIdentity: string;
+    /** The run token embedded in `bundle.code`; a reuse executes a copy under its own run's token. */
     runToken: string;
     bundle: BundleResult;
-    dependencyContents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+    /**
+     * Each filesystem read the bundler made while building `bundle`, with the
+     * answer it got. Existence probes are reads too: they decide which file an
+     * import resolves to.
+     */
+    bundlerReads: ReadonlyArray<{
+        question: 'exists' | 'utf8' | 'bytes';
+        path: string;
+        answer: boolean | string | Uint8Array<ArrayBuffer>;
+    }>;
 }>
 
 // Failed GeoSpec run result

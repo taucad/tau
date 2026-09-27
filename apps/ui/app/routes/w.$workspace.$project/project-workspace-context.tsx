@@ -4,6 +4,8 @@ import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import type { PanelState } from '#types/editor.types.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useLocation } from 'react-router';
+import { useSelector } from '@xstate/react';
 
 export const projectWorkspaceKeyCombinations = {
   files: { key: 'f', ctrlKey: true },
@@ -92,7 +94,9 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
 
 export function ProjectWorkspaceProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef, mainEntryPath } = useProject();
+  const location = useLocation();
   const isMobile = useIsMobile();
+  const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
   const queuedPanelRef = useRef<WorkbenchPanelId | undefined>(undefined);
 
@@ -108,6 +112,18 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     },
     [editorRef, isMobile],
   );
+
+  const shouldOpenChat = location.state?.openChat === true || location.state?.focusChatComposer === true;
+  const navigationKey = location.key;
+  /* Each sidebar click is its own navigation, even onto the selected chat, so the
+   * pane opens once per navigation and a pane the user closes afterwards stays closed. */
+  const openedForNavigationRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (isEditorReady && shouldOpenChat && openedForNavigationRef.current !== navigationKey) {
+      openedForNavigationRef.current = navigationKey;
+      setChatOpen(true);
+    }
+  }, [isEditorReady, navigationKey, setChatOpen, shouldOpenChat]);
 
   const setWorkbenchOpen = useCallback(
     (open: boolean) => {

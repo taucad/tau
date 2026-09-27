@@ -12,14 +12,32 @@ const mockWarmMonaco = vi.hoisted(() => vi.fn());
 vi.mock('#lib/monaco-warmup.js', () => ({ warmMonaco: mockWarmMonaco }));
 const mockUseChatSession = vi.fn();
 const mockNavigate = vi.fn();
+const mockLinkState = vi.fn();
 let search = '?chat=chat_12';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => mockUseChats() as ReturnType<typeof useChats> }));
 vi.mock('#hooks/use-chat-session.js', () => ({ useChatSession: mockUseChatSession }));
 vi.mock('react-router', () => ({
-  Link: ({ children, to, ...properties }: { readonly children: ReactNode; readonly to: string }) => (
-    <a href={to} {...properties} rel='noreferrer'>
+  Link: ({
+    children,
+    to,
+    state,
+    ...properties
+  }: {
+    readonly children: ReactNode;
+    readonly to: string;
+    readonly state?: unknown;
+  }) => (
+    <a
+      href={to}
+      {...properties}
+      rel='noreferrer'
+      onClick={(event) => {
+        event.preventDefault();
+        mockLinkState(state);
+      }}
+    >
       {children}
     </a>
   ),
@@ -174,6 +192,14 @@ describe('ProjectChatList', () => {
 
     expect(screen.getByRole('link', { name: 'Chat 12' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Chat 11' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('should request the chat pane when clicking the selected chat again', () => {
+    render(<ProjectChatList project={project} isProjectActive />);
+
+    fireEvent.click(screen.getByRole('link', { name: 'Chat 12' }));
+
+    expect(mockLinkState).toHaveBeenCalledExactlyOnceWith({ openChat: true });
   });
 
   /* The loader spins in the status column, over the row's own mark, so a

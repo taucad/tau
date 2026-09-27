@@ -136,6 +136,9 @@ let finalizedTurnSnapshot: readonly TurnFinalizedEvent[] = [];
 const finalizedTurnTopic = new Topic<void>({ name: 'host-finalized-turns' });
 const hostTurnSettlementTopic = new Topic<HostTurnSettlement>({ name: 'host-turn-settlements' });
 const latestSettlementByChat = new Map<string, HostTurnSettlement>();
+/* The attempt a durable settlement row stated, so a stream continuing a run tells a late row of an earlier attempt
+ * from its own (GM.r2 L-b). */
+const settlementAttempts = new WeakMap<HostTurnSettlement, number>();
 
 /** Every host-attested turn settlement this tab has seen. @see finalizedTurns */
 export const getHostFinalizedTurns = (): readonly TurnFinalizedEvent[] => finalizedTurnSnapshot;
@@ -255,6 +258,9 @@ const recordDurableTurnSettlement = (event: AgentLiveEvent | AgentLogEvent): voi
   }
   const settlement = projectTurnSettlement(event);
   if (settlement !== undefined) {
+    if (event.attempt !== undefined) {
+      settlementAttempts.set(settlement, event.attempt);
+    }
     recordHostTurnSettlement(settlement);
   }
 };
@@ -840,6 +846,14 @@ const createHostStream = <Message extends UIMessage>(input: {
      * this same run id. */
     let terminalEvent = Promise.withResolvers<void>();
     let turnSettlement = Promise.withResolvers<void>();
+    /* The run's last attempt this stream saw open or end, and the one a re-armed gate waits past: attempt 1's late
+     * `turn.*` row must not release the gate re-armed for attempt 2 (GM.r2 L-b). */
+    let seenAttempt = 0;
+    let settledThrough = 0;
+    const armSettlement = (): void => {
+      settledThrough = seenAttempt;
+      turnSettlement = Promise.withResolvers<void>();
+    };
     /* The follow that delivers the settlement row stopped for a reason of its own (the host or its channel died):
      * the row cannot reach this stream, and the host that reconciles the attempt appends it for the next attach. */
     const followEnded = Promise.withResolvers<void>();
@@ -936,6 +950,9 @@ const createHostStream = <Message extends UIMessage>(input: {
         durableUserMessage = projectedUser;
       }
       state = lifecycleState(event) ?? state;
+      if (event.type === 'run.lifecycle' && event.runId === runId && event.attempt !== undefined) {
+        seenAttempt = Math.max(seenAttempt, event.attempt);
+      }
       /* The terminal row carries the refusal, and throwing it away left the
        * record saying `failed` with nothing to judge: resumability read
        * `isResumableRunFailure(undefined)` for every run whose failure arrived
@@ -1149,8 +1166,16 @@ const createHostStream = <Message extends UIMessage>(input: {
       continueRun = async (): Promise<void> => {
         /* Re-armed once every row already delivered is projected, the paused attempt's settlement among them. */
         await projection;
-        turnSettlement = Promise.withResolvers<void>();
-        const snapshot = await client!.resume(input.chatId, runId!);
+        armSettlement();
+        let snapshot: HostRunSnapshot;
+        try {
+          snapshot = await client!.resume(input.chatId, runId!);
+        } catch (error) {
+          /* Refused (another request pending, the run gone, another run live): no attempt opened, so none will
+           * settle. Restored, the gate lets the stream end with the run instead of holding its client (GM.r2 M1). */
+          turnSettlement.resolve();
+          throw error;
+        }
         await projection;
         reconcileSnapshot(snapshot, true);
       };
@@ -1163,7 +1188,11 @@ const createHostStream = <Message extends UIMessage>(input: {
        * replay/admission so a lifecycle-completed stream cannot close in the
        * gap before the matching settlement reaches the chat machine. */
       unsubscribeSettlement = subscribeHostTurnSettlements((event) => {
-        if (event.chatId === input.chatId && event.runId === runId) {
+        if (
+          event.chatId === input.chatId &&
+          event.runId === runId &&
+          (settlementAttempts.get(event) ?? Number.POSITIVE_INFINITY) > settledThrough
+        ) {
           turnSettlement.resolve();
         }
       });
@@ -1283,7 +1312,7 @@ const createHostStream = <Message extends UIMessage>(input: {
          * before it answers, so a re-arm conditioned on a non-terminal snapshot
          * lost that race and closed the stream over the reply. */
         terminalEvent = Promise.withResolvers<void>();
-        turnSettlement = Promise.withResolvers<void>();
+        armSettlement();
         // Everything the log already held is projected; what follows is this
         // attempt's, failure included.
         replayingContinuedFailure = false;

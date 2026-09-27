@@ -229,7 +229,7 @@ const numericFactor = (value: number | 'unavailable' | undefined): number => (ty
  * the base colour (a pie of colours when the surfaces differ), a highlight that tightens as
  * roughness drops, and a darker rim as metalness rises.
  */
-function MaterialSwatch({ materials }: { readonly materials: SurfaceMaterials }): React.JSX.Element {
+export function MaterialSwatch({ materials }: { readonly materials: SurfaceMaterials }): React.JSX.Element {
   const colors = [
     ...new Set(
       materials.map(({ color }) =>
@@ -251,7 +251,7 @@ function MaterialSwatch({ materials }: { readonly materials: SurfaceMaterials })
     <span
       aria-hidden
       data-slot='material-swatch'
-      className='size-3.5 shrink-0 rounded-full ring-1 ring-border'
+      className='size-4 shrink-0 rounded-full ring-1 ring-border'
       style={{ background: `${highlight}, ${rim}, ${fill}` }}
     />
   );

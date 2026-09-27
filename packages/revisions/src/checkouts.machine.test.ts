@@ -106,7 +106,9 @@ const start = (): Harness => {
 const toReady = async (harness: Harness, options?: Readonly<{ checkouts?: readonly unknown[] }>): Promise<void> => {
   harness.actor.send({ type: 'open' });
   await flush();
-  harness.promises.settle('listCheckouts', { output: { checkouts: options?.checkouts ?? [live, linked] } });
+  harness.promises.settle('listCheckouts', {
+    output: { checkouts: options?.checkouts ?? [live, linked], conflicts: [] },
+  });
   await flush();
 };
 
@@ -124,7 +126,7 @@ describe('checkoutsMachine', () => {
     expect(actor.getSnapshot().matches('loading')).toBe(true);
     expect(promises.inputsFor('retireLease')).toEqual([]);
 
-    promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked], conflicts: [] } });
     await flush();
 
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
@@ -132,6 +134,7 @@ describe('checkoutsMachine', () => {
     expect(parent.events.find((event) => event.type === 'checkoutsChanged')).toEqual({
       type: 'checkoutsChanged',
       checkouts: [live, linked],
+      conflicts: [],
     });
 
     actor.stop();
@@ -170,6 +173,36 @@ describe('checkoutsMachine', () => {
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
     expect(actor.getSnapshot().context.checkouts).toEqual([live, linked, added]);
     expect(parent.events.filter((event) => event.type === 'checkoutsChanged')).toHaveLength(2);
+
+    actor.stop();
+  });
+
+  /* An `open` cancels a running add; the add may still have landed, and its
+   * rerun then finds that very checkout (W4 a3d). */
+  it.each([
+    ['counts the rerun as done when the checkout it asked for is already there', 'rev-1', undefined],
+    ['still refuses when another checkout holds that branch', 'rev-other', 'CHECKOUT_CONFLICT'],
+  ])('%s', async (_label, head, refusal) => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    await toReady(harness);
+    actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' });
+    actor.send({ type: 'open' });
+    const landed: CheckoutRecord = {
+      ...linked,
+      id: 'checkout-c',
+      branch: 'agent/c',
+      leaseRunIds: [],
+      headRevisionId: head,
+    };
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked, landed], conflicts: [] } });
+    await flush();
+
+    expect(promises.inputsFor('addCheckout')).toHaveLength(1);
+    expect(actor.getSnapshot().context.pendingOperations).toEqual([]);
+    expect(parent.events.find((event) => event.type === 'checkoutFailed')).toEqual(
+      refusal === undefined ? undefined : expect.objectContaining({ operation: 'add', code: refusal }),
+    );
 
     actor.stop();
   });
@@ -306,7 +339,7 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
-  it('stays ready when retiring a lease rejects', async () => {
+  it('stays ready when retiring a lease rejects, and still drops that lease (L2-F11)', async () => {
     const harness = start();
     const { actor, promises, emitted } = harness;
 
@@ -317,6 +350,10 @@ describe('checkoutsMachine', () => {
 
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
     expect(types(emitted)).toContain('checkoutFailed');
+    /* Not pinned as leased for the rest of the session: Discard and the switch
+     * guard read this set. */
+    expect(selectLeaseSet(actor.getSnapshot())[linked.id]).toEqual([]);
+    expect(emitted.find((event) => event.type === 'leaseRetired')).toEqual({ type: 'leaseRetired', runId: 'run-7' });
 
     actor.stop();
   });
@@ -407,7 +444,7 @@ describe('checkoutsMachine', () => {
     actor.send({ type: 'open' });
     actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
     await flush();
-    harness.promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    harness.promises.settle('listCheckouts', { output: { checkouts: [live, linked], conflicts: [] } });
     await flush();
 
     /* R1's whole point is that a lease is never silently dropped; nothing
@@ -443,7 +480,7 @@ describe('checkoutsMachine', () => {
     actor.send({ type: 'open' });
     await flush();
     actor.send({ type: 'turnEnded', key: keyOf('run-7'), checkoutId: 'checkout-b' });
-    promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked], conflicts: [] } });
     await flush();
     promises.settle('retireLease', { output: undefined });
     await flush();
@@ -464,7 +501,7 @@ describe('checkoutsMachine', () => {
     actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
     actor.send({ type: 'turnEnded', key: keyOf('run-9'), checkoutId: 'checkout-live' });
     await flush();
-    promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked], conflicts: [] } });
     await flush();
 
     /* The registry never recorded that lease and the turn retired its own file,
@@ -573,7 +610,7 @@ describe('checkoutsMachine', () => {
     actor.send({ type: 'open' });
     await flush();
     actor.send({ type: 'open' });
-    promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked], conflicts: [] } });
     await flush();
 
     expect(promises.inputsFor('listCheckouts')).toHaveLength(2);
@@ -604,7 +641,7 @@ describe('checkoutsMachine', () => {
     actor.send({ type: 'open' });
 
     expect(actor.getSnapshot().matches('loading')).toBe(true);
-    promises.settle('listCheckouts', { output: { checkouts: [live] } });
+    promises.settle('listCheckouts', { output: { checkouts: [live], conflicts: [] } });
     await flush();
 
     expect(actor.getSnapshot().context.checkouts).toEqual([live]);

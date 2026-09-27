@@ -24,6 +24,30 @@ describe('createRafCoalescer', () => {
     expect(received).toHaveBeenCalledWith(2);
   });
 
+  it('should deliver a pending value at once on flush and request a fresh frame for the next one', () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => frames.push(callback));
+    const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
+    const received = vi.fn();
+    const coalescer = createRafCoalescer<number>(received);
+
+    coalescer.flush();
+    expect(received).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+
+    coalescer.schedule(1);
+    coalescer.schedule(2);
+    coalescer.flush();
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(1);
+    expect(received).toHaveBeenCalledExactlyOnceWith(2);
+
+    coalescer.schedule(3);
+    expect(frames).toHaveLength(2);
+    frames[1]?.(0);
+    expect(received).toHaveBeenLastCalledWith(3);
+    expect(received).toHaveBeenCalledTimes(2);
+  });
+
   it('should cancel a pending frame', () => {
     const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
     vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(() => 42);

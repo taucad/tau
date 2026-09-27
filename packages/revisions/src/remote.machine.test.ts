@@ -38,12 +38,20 @@
  *
  * | 29 | `authorizing|validating|initialSync → abandoning → failed` | **C10**: a failed attempt removes the remote it wrote, so the next open is not `connected` |
  * | 30 | `reconnectRequired --authorized--> validating → failed` | **C10**: and an attempt that wrote nothing removes nothing |
+ * | 31 | `connected --quotaRefused--> --connect--> choosing` | **L2-F10**: a replaced remote does not keep the old destination's refused files |
+ * | 32 | `failed --quotaRefused-->` | **L2-F10**: a refusal forwarded outside `connected` is not dropped |
+ * | 33 | `initialSync → failed` + parent `childToast` | **L2-F8**: a toast reaches the root, not only a subscriber of this child |
+ * | 34 | `reading → connected` invokes `readStorage` | **D18**: a reopened project shows its usage without connecting again |
+ * | 35 | `connected`, `readStorage` fails | **D18**: a usage read that fails leaves the connection and its figure alone |
+ * | 36 | `connected --quotaRefused-->` after `readStorage` | **D18**: a refusal's figures keep the retained-packs figure it does not carry |
+ * | 37 | `connected --pushed--> connected.reading` | **RV-W8 F9**: a push re-reads the stored figure |
+ * | 38 | `connected.reading --quotaRefused(figures)--> connected.settled` | **RV-W8 F9**: a read that finishes after a refusal's figures cannot overwrite them |
  *
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
 
 import { createActor, createAsyncLogic, setup } from 'xstate';
-import type { Actor, AnyMachineSnapshot, AsyncActorLogic } from 'xstate';
+import type { Actor, AnyActorRef, AnyMachineSnapshot, AsyncActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { guardActors } from '@taucad/xstate-testing/inspect';
@@ -54,9 +62,10 @@ import * as machineModule from '#remote.machine.js';
 import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
 import { reauthorizationRequired } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
+import { createFakeParent } from '@taucad/xstate-testing/fakes';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 import type { SyncFailureReason } from '#sync.types.js';
-import type { RemoteMachineEvent } from '#remote.types.js';
+import type { RemoteMachineEvent, RemoteStorage } from '#remote.types.js';
 import type {
   RemoteActors,
   RemoteInitialSyncActorOutput,
@@ -179,6 +188,7 @@ type Overrides = Partial<RemoteActors>;
 
 const start = (
   overrides: Overrides = {},
+  parentRef?: AnyActorRef,
 ): Readonly<{ actor: Actor<typeof remoteMachine>; emitted: RemoteMachineEmitted[] }> => {
   const actors: RemoteActors = {
     readRemote: reads(undefined),
@@ -191,11 +201,12 @@ const start = (
       }),
     }),
     initialSync: createAsyncLogic({ run: async (): Promise<RemoteInitialSyncActorOutput> => ({}) }),
+    readStorage: createAsyncLogic({ run: async (): Promise<RemoteStorage | undefined> => undefined }),
     ...overrides,
   };
   const guard = guardActors({ ignore: knownDefects });
   const actor = createActor(remoteMachine.provide({ actors }), {
-    input: { projectId: 'p1' },
+    input: { projectId: 'p1', ...(parentRef === undefined ? {} : { parentRef }) },
     clock: new StepClock(),
     inspect: guard.inspect,
   });
@@ -244,6 +255,8 @@ describe('remoteMachine', () => {
     expect(actor.getSnapshot().matches('connected')).toBe(true);
     expect(received).toStrictEqual([
       { type: 'remoteConnected', kind: 'tau', url: tauRemote.url, name: tauRemote.name },
+      /* L2-F8: the connect confirmation reaches the root too. */
+      { type: 'childToast', subject: 'remote', tone: 'info', message: 'This project is backed up.' },
     ]);
 
     actor.send({ type: 'disconnect' });
@@ -912,5 +925,159 @@ describe('remoteMachine', () => {
 
     expect(unansweredEvents(remoteMachine, { ...options, ignore: knownDefects['remote'] })).toEqual([]);
     expect(unreachedStates(remoteMachine, options)).toEqual([]);
+  });
+
+  it('31 (L2-F10): replacing a remote forgets the refused files of the one it replaced', async () => {
+    const githubRemote: RemoteRecord = {
+      name: 'origin',
+      url: 'https://github.com/o/r.git',
+      kind: 'git',
+      provider: 'github',
+    };
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      writeRemote: createAsyncLogic({ run: async () => ({ remote: githubRemote }) }),
+      validate: pending(),
+    });
+    await settle();
+    actor.send({ type: 'quotaRefused', paths: ['models/bracket.step'], storage: { remainingBytes: 0 } });
+    expect(selectRemoteFacet(actor.getSnapshot()).overQuota).toStrictEqual(['models/bracket.step']);
+
+    actor.send({ type: 'connect', kind: 'git', url: githubRemote.url, provider: 'github' });
+    await settle();
+
+    const facet = selectRemoteFacet(actor.getSnapshot());
+    expect(facet.url).toBe(githubRemote.url);
+    expect(facet.overQuota).toStrictEqual([]);
+    expect(facet.quota).toBeUndefined();
+    actor.stop();
+  });
+
+  it('32 (L2-F10): a quota refusal that arrives outside `connected` still names its files', async () => {
+    const { actor } = start({ readRemote: failing('config unreadable') });
+    await settle();
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+
+    actor.send({ type: 'quotaRefused', paths: ['huge.bin'] });
+
+    expect(selectRemoteFacet(actor.getSnapshot()).overQuota).toStrictEqual(['huge.bin']);
+    actor.stop();
+  });
+
+  it('33 (L2-F8): a failed first sync toasts through the root, not only to a subscriber of this child', async () => {
+    const parent = createFakeParent();
+    const { actor } = start({ initialSync: failing('the push was refused') }, parent.ref);
+    await settle();
+
+    actor.send({ type: 'connect', kind: 'tau' });
+    await settle();
+
+    expect(parent.events.filter((event) => event.type === 'childToast')).toStrictEqual([
+      { type: 'childToast', subject: 'remote', tone: 'error', message: 'the push was refused' },
+    ]);
+    actor.stop();
+    parent.stop();
+  });
+
+  it('34 (D18): reads what a reopened Tau Cloud project stores, which never passes through validate', async () => {
+    const asked: Array<Readonly<{ remote: string; kind: string }>> = [];
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async ({ input }): Promise<RemoteStorage | undefined> => {
+          asked.push(input);
+          return { used: 340 * 1024 ** 2, quota: 1024 ** 3 };
+        },
+      }),
+    });
+
+    await settle();
+
+    expect(asked).toStrictEqual([{ remote: 'tau', kind: 'tau' }]);
+    expect(selectRemoteFacet(actor.getSnapshot()).storage).toStrictEqual({ used: 340 * 1024 ** 2, quota: 1024 ** 3 });
+    actor.stop();
+  });
+
+  it('35 (D18): keeps the connection and the figure it had when the usage read fails', async () => {
+    const { actor } = start({ readStorage: failing('usage unavailable') });
+    await settle();
+
+    actor.send({ type: 'connect', kind: 'tau' });
+    await settle();
+
+    expect(actor.getSnapshot().matches('connected')).toBe(true);
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+      error: undefined,
+      storage: { used: 2_100_000_000, quota: 10_000_000_000 },
+    });
+    actor.stop();
+  });
+
+  it('36 (D18): keeps the retained-packs figure when a refusal replaces what is used', async () => {
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async (): Promise<RemoteStorage | undefined> => ({ used: 1, quota: 1024 ** 3, retained: 5 * 1024 ** 2 }),
+      }),
+    });
+    await settle();
+
+    actor.send({ type: 'quotaRefused', paths: ['huge.bin'], used: 1024 ** 3 + 1, quota: 1024 ** 3 });
+
+    expect(selectRemoteFacet(actor.getSnapshot()).storage).toStrictEqual({
+      used: 1024 ** 3 + 1,
+      quota: 1024 ** 3,
+      retained: 5 * 1024 ** 2,
+    });
+    actor.stop();
+  });
+
+  it('37 (F9): reads the stored figure again after a push', async () => {
+    let count = 0;
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async (): Promise<RemoteStorage | undefined> => {
+          count += 1;
+          return { used: count, quota: 1024 };
+        },
+      }),
+    });
+    await settle();
+    expect(selectRemoteFacet(actor.getSnapshot()).storage).toStrictEqual({ used: 1, quota: 1024 });
+
+    actor.send({ type: 'pushed' });
+    await settle();
+
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+      phase: 'connected',
+      storage: { used: 2, quota: 1024 },
+    });
+    actor.stop();
+  });
+
+  it('38 (F9): ignores a storage read that finishes after a refusal set the figures', async () => {
+    let answer: ((storage: RemoteStorage) => void) | undefined;
+    const { actor } = start({
+      readRemote: reads(tauRemote),
+      readStorage: createAsyncLogic({
+        run: async (): Promise<RemoteStorage | undefined> =>
+          new Promise<RemoteStorage>((resolve) => {
+            answer = resolve;
+          }),
+      }),
+    });
+    await settle();
+
+    actor.send({ type: 'quotaRefused', paths: ['huge.bin'], used: 1024 ** 3 + 1, quota: 1024 ** 3 });
+    answer?.({ used: 5, quota: 1024 ** 3 });
+    await settle();
+
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({
+      phase: 'connected',
+      overQuota: ['huge.bin'],
+      storage: { used: 1024 ** 3 + 1, quota: 1024 ** 3 },
+    });
+    actor.stop();
   });
 });

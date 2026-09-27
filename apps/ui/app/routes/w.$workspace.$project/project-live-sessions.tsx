@@ -6,7 +6,7 @@
  * the chunk a page that only lists projects evaluates. `project-route.tsx` loads it lazily the moment
  * a project is live, and the project route imports its own entry point from here directly.
  */
-import { useEffect } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -40,17 +40,26 @@ import {
   reportRegionReady,
 } from '#services/sessions-store.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
+import type { RevisionStatusProjection } from '@taucad/revisions';
+import { useTauCloudIntent, useTauCloudIntentConnection } from '#hooks/use-cloud-projects.js';
+import type { TauCloudIntent } from '#hooks/use-cloud-projects.js';
 import {
   useRevisionClientLifecycle,
   useRevisionClientStatus,
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
+import type { RevisionClient, RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
+import {
+  isRecordingEditorConflict,
+  refuseCloseWhileRecording,
+  subscribeEditorConflictRecords,
+} from '#lib/monaco-model-service.js';
 
 export type ProjectSessionFlushRegistration = {
   projectId: string;
@@ -68,16 +77,22 @@ const editorFlushTimeoutMilliseconds = 10_000;
  * on disk before the cut rather than beside it.
  */
 export async function flushProjectSessionPersistence({
+  projectId,
   parameterService,
   projectRef,
   editorRef,
   closeFlushMilliseconds,
 }: Readonly<{
+  /** The project closing: refused, before anything is torn down, while an editor's conflict is being recorded. */
+  projectId?: string;
   parameterService: ParameterSetService;
   projectRef: ActorRefFrom<typeof projectMachine>;
   editorRef: ActorRefFrom<typeof editorMachine>;
   closeFlushMilliseconds: number;
 }>): Promise<void> {
+  if (projectId !== undefined) {
+    refuseCloseWhileRecording(projectId);
+  }
   await parameterService.close();
   projectRef.send({ type: 'flushNow' });
   editorRef.send({ type: 'flushNow' });
@@ -122,7 +137,9 @@ function ProjectSessionBinding({
   const { fileManagerRef } = useFileManager();
   const { parameterService, projectRef, editorRef } = useProject();
   const client = useRevisionClientLifecycle();
-  const { connectRemote } = useRevisionCommands();
+  const revisionCommands = useRevisionCommands();
+  const { connectRemote } = revisionCommands;
+  const cloudIntent = useTauCloudIntent(projectId);
   const chatSessions = useChatSessionStore();
   const session = useProjectSession(projectId);
   const viewsReady = useSelector(fileManagerRef, (state) => state.matches('ready'));
@@ -130,6 +147,11 @@ function ProjectSessionBinding({
   /* R4: why this project has no kernel, from the machine that owns its units. */
   const kernelRefusal = useSelector(projectRef, selectProjectKernelRefusal);
   const status = useRevisionClientStatus(client);
+  /* RV-W5b2 R2-1: an editor's conflict still being recorded keeps the project open, like a dirty tree. */
+  const recording = useSyncExternalStore(
+    subscribeEditorConflictRecords,
+    useCallback(() => isRecordingEditorConflict(projectId), [projectId]),
+  );
   /* W7 tier 3: the `cloudOpen` marker is read and cleared by the host, through
    * the router, so React sees the change. This half only acts on it. */
   useEffect(() => {
@@ -177,19 +199,21 @@ function ProjectSessionBinding({
     session.send({
       type: 'revisionState',
       dirty: status.projectDirty,
+      recording,
       pushed: sync.state === 'noRemote' || sync.state === 'backedUp',
       sync: syncState,
       /* R11: the branch the checkout is on gives `revision.line` its producer,
        * so the `⎇ <branch>` chip has data instead of a permanent `onMain`. */
       pendingCount: sync.pendingCount,
-      ...(status.branch === undefined ? {} : { branch: status.branch }),
+      ...(status.line.kind === 'unknown' ? {} : { branch: status.line.name }),
     });
-  }, [session, status]);
+  }, [recording, session, status]);
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {
       flushProducers: async () =>
         flushProjectSessionPersistence({
+          projectId,
           parameterService,
           projectRef,
           editorRef,
@@ -257,6 +281,12 @@ function ProjectSessionBinding({
     };
   }, [isFocused, session]);
 
+  /* RV-W5b F12: only the focused project holds its revision long poll; one
+   * that gains focus pulls once its stream is open. */
+  useEffect(() => {
+    client?.focus?.(isFocused);
+  }, [client, isFocused]);
+
   /* R3: the session owns "hidden and idle", the project machine owns the cad
    * units, and no actor ref joins them — the session's `project` child is the
    * registry's region relay, not this machine. This binding is where both are in
@@ -291,7 +321,52 @@ function ProjectSessionBinding({
     [projectId],
   );
 
-  return <UnsavedParameterDraftsDialog projectId={projectId} />;
+  return (
+    <>
+      <UnsavedParameterDraftsDialog projectId={projectId} />
+      {cloudIntent === undefined || cloudIntent === 'connected' || client === undefined ? null : (
+        <TauCloudIntentConnector
+          projectId={projectId}
+          intent={cloudIntent}
+          status={status}
+          client={client}
+          commands={revisionCommands}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Acts on what this device owes the project's Tau Cloud backup (W11: D19's
+ * backup by default, D20's materialized projects). Mounted only while something
+ * is owed, so a project without an intent never asks for the session or the plan.
+ *
+ * @param props - The project, its intent, its projection, its client (read live
+ * by the toast's *Turn off backup*) and the session's remote verbs.
+ * @returns Nothing; it only acts.
+ */
+function TauCloudIntentConnector({
+  projectId,
+  intent,
+  status,
+  client,
+  commands,
+}: {
+  readonly projectId: string;
+  readonly intent: TauCloudIntent;
+  readonly status: RevisionStatusProjection | undefined;
+  readonly client: RevisionClient;
+  readonly commands: RevisionCommands;
+}): undefined {
+  useTauCloudIntentConnection({
+    projectId,
+    intent,
+    status,
+    readRemote: () => client.status()?.remote,
+    commands,
+  });
+  return undefined;
 }
 
 function ProjectSession({

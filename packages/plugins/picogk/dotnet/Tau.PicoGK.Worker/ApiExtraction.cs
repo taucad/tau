@@ -168,8 +168,8 @@ internal static class ApiExtraction
             .ToArray();
         var payload = new ApiSurfacePayload(
             "PicoGK",
-            typeof(global::PicoGK.Library).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-            $"Roslyn {typeof(CSharpCompilation).Assembly.GetName().Version?.ToString(3) ?? "unknown"}",
+            typeof(global::PicoGK.Library).Assembly.GetName().Version!.ToString(),
+            $"Roslyn {typeof(CSharpCompilation).Assembly.GetName().Version!.ToString(3)}",
             diagnosticErrors,
             entries);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
@@ -276,7 +276,7 @@ internal static class ApiExtraction
     {
         var documentation = Documentation(type);
         var path = ContainerPath(type);
-        var memberPath = path is null ? type.Name : $"{path}.{type.Name}";
+        var memberPath = $"{path}.{type.Name}";
         return new ApiEntryPayload(
             type.Name,
             TypeKindName(type),
@@ -302,15 +302,11 @@ internal static class ApiExtraction
         _ => "type",
     };
 
-    private static string? ContainerPath(INamedTypeSymbol type)
-    {
-        if (type.ContainingType is not null)
-        {
-            var outer = ContainerPath(type.ContainingType);
-            return outer is null ? type.ContainingType.Name : $"{outer}.{type.ContainingType.Name}";
-        }
-        return type.ContainingNamespace.IsGlobalNamespace ? null : type.ContainingNamespace.ToDisplayString();
-    }
+    // Every emitted type sits in a namespace: InScope admits no global-namespace type,
+    // and a nested type is reached only through its in-scope container.
+    private static string ContainerPath(INamedTypeSymbol type) => type.ContainingType is { } outer
+        ? $"{ContainerPath(outer)}.{outer.Name}"
+        : type.ContainingNamespace.ToDisplayString();
 
     private static IReadOnlyList<ApiEntryPayload>? Members(INamedTypeSymbol type, string path, string sourceRoot)
     {
@@ -491,17 +487,15 @@ internal static class ApiExtraction
             LanguageSpecific(field, null));
     }
 
-    private static ApiLanguageSpecificPayload LanguageSpecific(ISymbol symbol, IReadOnlyDictionary<string, string>? refKinds)
-    {
-        var documentationId = symbol.GetDocumentationCommentId();
-        return new ApiLanguageSpecificPayload("csharp", refKinds, string.IsNullOrEmpty(documentationId) ? null : documentationId);
-    }
+    private static ApiLanguageSpecificPayload LanguageSpecific(ISymbol symbol, IReadOnlyDictionary<string, string>? refKinds) =>
+        new("csharp", refKinds, symbol.GetDocumentationCommentId());
 
     private static object? Deprecated(ISymbol symbol)
     {
         foreach (var attribute in symbol.GetAttributes())
         {
-            if (attribute.AttributeClass?.Name is not "ObsoleteAttribute")
+            // C# binds every attribute to a class, an error type when it is unresolved.
+            if (attribute.AttributeClass!.Name is not "ObsoleteAttribute")
             {
                 continue;
             }

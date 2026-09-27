@@ -10,6 +10,7 @@ import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   BrowserPlacementChatTransport,
+  deriveChatTranscript,
   retireBrowserAgentHostRun,
   getBrowserAgentHostRun,
   getHostFinalizedTurns,
@@ -2976,6 +2977,237 @@ describe('BrowserPlacementChatTransport', () => {
     }
     expect(lossy).not.toEqual(rebuilt);
     expect(await reattach(lossy)).toEqual(rebuilt);
+    unregister();
+  });
+
+  it('should keep another device’s turns that follow this host’s runs when it reattaches (V15)', async () => {
+    /*
+     * Two devices wrote one chat. This host's own log holds the first two runs;
+     * the other device's two runs arrived as its projected segment
+     * (`events/<device>.jsonl`), so the transcript the files imply is this
+     * host's runs, then the other device's. A reload's reattach replays only
+     * this host's log, and cut every turn after its first message (e2e V15:
+     * the browser never rendered the desktop's reply).
+     */
+    installBrowserGlobals();
+    const chatId = 'chat-two-device-reattach-trailing';
+    const events = hexagonalNutFourRunEvents();
+    const runIds = [...new Set(events.map((event) => event.runId))];
+    const ownRunIds = new Set(runIds.slice(0, 2));
+    const own = events.filter((event) => ownRunIds.has(event.runId));
+    const streamingRunId = own.at(-1)!.runId;
+    const batchFrom = (cursor: number) =>
+      page({
+        cursor,
+        nextCursor: Math.min(cursor + agentWireLimits.batchRows, own.length),
+        endCursor: own.length,
+        events: own.slice(cursor, cursor + agentWireLimits.batchRows),
+        snapshot: snapshot(chatId, streamingRunId),
+      });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A daemon-placed turn reads its workspace from the daemon.');
+      },
+      createClient: async () =>
+        clientFor(chatId, streamingRunId, {
+          attach: vi.fn(async () => batchFrom(0)),
+          read: vi.fn(async (input: { readonly cursor: number }) => batchFrom(input.cursor)),
+        }),
+    });
+
+    // What the chat store derives on open from both devices' segments.
+    const merged = await deriveChatTranscript(events);
+    expect(merged).toHaveLength(8);
+
+    const chat = new Chat<MyUIMessage>({
+      id: chatId,
+      transport: new BrowserPlacementChatTransport(),
+      messages: structuredClone([...merged]),
+    });
+    const unregisterReset = applyRunResets(chat, chatId);
+    await chat.resumeStream();
+    unregisterReset();
+
+    expect(chat.messages.map((message) => message.id)).toEqual(merged.map((message) => message.id));
+    expect(chat.messages).toEqual(merged);
+    unregister();
+  });
+
+  it("keeps another device's later turn when a reopen reattaches to this device's settled run", async () => {
+    /*
+     * Two devices, one chat (desktop-e2e two-client V15). The transcript comes
+     * from the chat's files, which merge every device's log; this host's log
+     * holds only its own runs. Here the last turn is another device's, after
+     * this host's. The reattach replaced everything from this host's first run
+     * onward, so the other device's turn vanished on every reopen — and simply
+     * keeping it would have let the resume write this run's reply into it.
+     */
+    installBrowserGlobals();
+    const chatId = 'chat-two-device-reattach';
+    const events = hexagonalNutFourRunEvents();
+    const runIds = [...new Set(events.map((event) => event.runId))];
+    const foreignRunId = runIds.at(-1)!;
+    const ownRunId = runIds.at(-2)!;
+    const own = events.filter((event) => event.runId !== foreignRunId);
+    const merged = await deriveChatTranscript(events);
+    expect(merged.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A reattach reads the log, not the workspace.');
+      },
+      createClient: async () =>
+        clientFor(chatId, ownRunId, {
+          attach: vi.fn(async () =>
+            page({
+              cursor: 0,
+              nextCursor: own.length,
+              endCursor: own.length,
+              events: own,
+              snapshot: snapshot(chatId, ownRunId),
+            }),
+          ),
+        }),
+    });
+    const chat = new Chat<MyUIMessage>({
+      id: chatId,
+      transport: new BrowserPlacementChatTransport(),
+      messages: structuredClone([...merged]),
+    });
+    const unregisterReset = applyRunResets(chat, chatId);
+
+    await chat.resumeStream();
+
+    expect(chat.messages).toEqual(merged);
+    unregisterReset();
+    unregister();
+  });
+
+  it("never writes this device's running reply into another device's later turn when a reopen reattaches", async () => {
+    /*
+     * The attach finds this device's run still going, and the chat's files
+     * already hold another device's turns after it. The AI SDK continues the
+     * transcript's trailing assistant message, which is the other device's, so
+     * streaming this run would write its reply into that message. The run is
+     * rebuilt in place from the log instead, and nothing streams.
+     */
+    installBrowserGlobals();
+    const chatId = 'chat-two-device-reattach-running';
+    const events = hexagonalNutFourRunEvents();
+    const runIds = [...new Set(events.map((event) => event.runId))];
+    const ownRunIds = new Set(runIds.slice(0, 2));
+    const own = events.filter((event) => ownRunIds.has(event.runId));
+    const runningRunId = runIds[1]!;
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A reattach reads the log, not the workspace.');
+      },
+      createClient: async () =>
+        clientFor(chatId, runningRunId, {
+          attach: vi.fn(async () =>
+            page({
+              cursor: 0,
+              nextCursor: own.length,
+              endCursor: own.length,
+              events: own,
+              snapshot: snapshot(chatId, runningRunId, 'running'),
+            }),
+          ),
+        }),
+    });
+    const merged = await deriveChatTranscript(events);
+    const chat = new Chat<MyUIMessage>({
+      id: chatId,
+      transport: new BrowserPlacementChatTransport(),
+      messages: structuredClone([...merged]),
+    });
+    const unregisterReset = applyRunResets(chat, chatId);
+
+    await chat.resumeStream();
+
+    expect(chat.messages.map((message) => message.id)).toEqual(merged.map((message) => message.id));
+    expect(chat.messages.at(-1)).toEqual(merged.at(-1));
+    expect(chat.messages).toEqual(merged);
+    unregisterReset();
+    unregister();
+  });
+
+  it('replays only the outcome of a settled failed run whose transcript owner rebuilt it', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-reopen-failed-owned';
+    const runId = 'run-reopen-failed-owned';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-reopen-failed',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      {
+        ...base,
+        sequence: 2,
+        type: 'message.appended',
+        message: { id: 'user-reopen-failed', role: 'user', content: 'Build it.' },
+      },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'running' },
+      {
+        ...base,
+        sequence: 4,
+        type: 'run.lifecycle',
+        state: 'failed',
+        detail: { message: 'The provider refused this turn.', code: 'PROVIDER_REFUSED', status: 400 },
+      },
+    ] satisfies AgentLogEvent[];
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A reattach reads the log, not the workspace.');
+      },
+      createClient: async () =>
+        clientFor(chatId, runId, {
+          attach: vi.fn(async () =>
+            page({
+              cursor: 0,
+              nextCursor: events.length,
+              endCursor: events.length,
+              events,
+              snapshot: { chatId, runId, turnId: 'user-reopen-failed', state: 'failed', messages: [] } as const,
+            }),
+          ),
+        }),
+    });
+    const rebuilt: MyUIMessage[] = [];
+    const unregisterReset = registerAgentHostRunReset(chatId, (rebuild) => {
+      rebuilt.push(...rebuild([]));
+    });
+
+    const stream = await new BrowserPlacementChatTransport().reconnectToStream({ chatId, metadata: undefined });
+    const chunks: UIMessageChunk[] = [];
+    const reader = stream!.getReader();
+    const collect = async (): Promise<void> => {
+      const next = await reader.read();
+      if (!next.done) {
+        chunks.push(next.value);
+        await collect();
+      }
+    };
+    await collect();
+
+    expect(chunks.map((chunk) => chunk.type)).toEqual(['error']);
+    // The run's message is rebuilt by its owner, as its `start` chunk used to build it.
+    expect(rebuilt.map((message) => [message.id, message.role])).toEqual([
+      ['user-reopen-failed', 'user'],
+      [runId, 'assistant'],
+    ]);
+    unregisterReset();
     unregister();
   });
 

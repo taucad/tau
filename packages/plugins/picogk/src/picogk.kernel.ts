@@ -11,7 +11,7 @@ import type { KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 
 import { picogkArtifactToGlb } from '#picogk-mesh.js';
-import { picogkAnalysisSchema, picogkBuildSchema } from '#picogk.protocol.js';
+import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
 import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
 
@@ -56,7 +56,7 @@ export const picogkKernel = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
-  version: '2.3.0+dotnet10.roslyn5.9.host2.protocol4.topology1',
+  version: '2.4.0+dotnet10.roslyn5.9.host2.protocol5.topology1',
   optionsSchema: picogkOptionsSchema,
   // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
   cancellation: 'cooperative',
@@ -81,8 +81,29 @@ export const picogkKernel = defineKernel({
   async getDependencies({ entryPath }, runtime, context) {
     try {
       const paths = await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+      /* The worker's Roslyn parse picks the C# this entry compiles with: its program and every
+       * helper. Another program in the project is an independent model, so its edits never
+       * re-render this one. Other files stay dependencies: a model may read any project asset. */
+      let compiled: ReadonlySet<string> | undefined;
+      try {
+        const { sources } = await context.session.request({
+          method: 'resolve',
+          params: { entryPath },
+          schema: picogkResolveSchema,
+          signal: runtime.signal,
+        });
+        compiled = new Set(sources);
+      } catch (error) {
+        /* An entry the worker cannot select, such as a helper two programs could claim, depends on
+         * every file, because any edit can settle it. `analyze` then reports why, located. */
+        if (!(error instanceof PicogkWorkerError)) {
+          throw error;
+        }
+      }
       return {
-        resolved: paths.filter((path) => !tauSystemArtifacts.has(path)),
+        resolved: paths.filter(
+          (path) => !tauSystemArtifacts.has(path) && (!path.endsWith('.cs') || (compiled?.has(path) ?? true)),
+        ),
         unresolved: [],
       };
     } catch (error) {

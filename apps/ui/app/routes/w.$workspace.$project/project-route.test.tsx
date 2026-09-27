@@ -10,6 +10,7 @@ import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
+import { holdEditorConflictRecord } from '#lib/monaco-model-service.js';
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const projectB = 'proj_bbbbbbbbbbbbbbbbbbbbb';
@@ -145,10 +146,10 @@ vi.mock('#hooks/use-project.js', () => ({
   },
   useProject: () => ({ projectRef, editorRef, parameterService, viewGraphics }),
 }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({
-  useFlushOnClose: () => undefined,
-}));
-vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
+vi.mock('#hooks/use-flush-on-close.js', () => {
+  const flushProducers = async (): Promise<void> => undefined;
+  return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };
+});
 /* The registry's agent-host region is a real browser probe. Unmocked it rejects
  * in jsdom, so `closing.releasingAgentHost` threw, every session settled in
  * `failed` instead of `closed`, and the registry never dropped its ref — one
@@ -429,6 +430,28 @@ describe('project route session identity', () => {
     ).rejects.toThrow('checked parameter flush failed');
     expect(project.send).not.toHaveBeenCalled();
     expect(editor.send).not.toHaveBeenCalled();
+  });
+
+  it('should refuse the close flush while an editor conflict is being recorded, before anything is torn down (RV-W5b2 R2-1)', async () => {
+    const parameters = mock<ParameterSetService>();
+    const project = mock<ActorRefFrom<typeof projectMachine>>();
+    const editor = mock<ActorRefFrom<typeof editorMachine>>();
+    const release = holdEditorConflictRecord('proj-recording');
+    try {
+      await expect(
+        sessionsModule.flushProjectSessionPersistence({
+          projectId: 'proj-recording',
+          parameterService: parameters,
+          projectRef: project,
+          editorRef: editor,
+          closeFlushMilliseconds: 100,
+        }),
+      ).rejects.toThrow('An edit that overlapped another change is still being recorded. Try again in a moment.');
+      expect(parameters.close).not.toHaveBeenCalled();
+      expect(project.send).not.toHaveBeenCalled();
+    } finally {
+      release();
+    }
   });
 
   it('should refuse the producers flush when project storage reports idle with an error', async () => {

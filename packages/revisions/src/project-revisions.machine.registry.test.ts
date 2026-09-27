@@ -137,7 +137,7 @@ type Harness = ReturnType<typeof start>;
 /** Bring the invoked `checkouts` child to `ready` through its own records. */
 const readyRegistry = async (harness: Harness, checkouts: readonly CheckoutRecord[]): Promise<void> => {
   await flush();
-  harness.promises.settle('listCheckouts', { output: { checkouts } });
+  harness.promises.settle('listCheckouts', { output: { checkouts, conflicts: [] } });
   await flush();
 };
 
@@ -169,7 +169,7 @@ describe('projectRevisionsMachine and its checkout registry', () => {
     await flush();
 
     expect(head()).toBe('rev-2');
-    expect(viewOfLive(harness)).toMatchObject({ headRevisionId: 'rev-2', branch: 'main' });
+    expect(viewOfLive(harness)).toMatchObject({ headRevisionId: 'rev-2', line: { kind: 'branch', name: 'main' } });
     expect(harness.actor.getSnapshot().context.checkouts[0]).toMatchObject({ leaseRunIds: ['run-9'] });
 
     harness.actor.stop();
@@ -212,7 +212,7 @@ describe('projectRevisionsMachine and its checkout registry', () => {
     expect(harness.promises.inputsFor('casHead')).toEqual([
       { checkoutId: 'checkout-live', branch: 'feature', expectedHead: 'rev-1', head: 'rev-2' },
     ]);
-    expect(viewOfLive(harness).branch).toBe('feature');
+    expect(viewOfLive(harness).line).toEqual({ kind: 'branch', name: 'feature' });
 
     harness.actor.stop();
   });

@@ -48,6 +48,7 @@ import type { AcpFailure, AcpTurnResult } from '#acp/acp-session.machine.js';
 import { provideAcpSession } from '#acp/acp-session.js';
 import { acpSessionsMachine } from '#acp/acp-sessions.machine.js';
 import type { AcpAcquire } from '#acp/acp-sessions.machine.js';
+import { createAcpMediaStore } from '#acp/media.js';
 import type { AcpLimitReset } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
@@ -358,7 +359,9 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
   if (blocks.length === 0) {
     return undefined;
   }
-  return [...cadContextBlocks(turn.config, first), ...blocks];
+  /* The user's own blocks lead: a vendor names its mirrored thread after the
+   * prompt's first text (Codex titled every Tau thread "tau://agent-guidance…"). */
+  return [...blocks, ...cadContextBlocks(turn.config, first)];
 };
 
 /**
@@ -755,7 +758,10 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       const onAbort = (): void => {
         sessions().send({ type: 'cancel', requestId });
       };
-      turns.set(requestId, turn);
+      /* Every durable row of the turn names agent media by attachment rather
+       * than carrying it inline (see `createAcpMediaStore`). */
+      const moveMedia = createAcpMediaStore(options.workspaceRoot, turn.chatId);
+      turns.set(requestId, { ...turn, append: async (events) => turn.append(await moveMedia(events)) });
       turn.signal.addEventListener('abort', onAbort, { once: true });
       try {
         sessions().send({ type: 'acquire', acquire });

@@ -62,7 +62,7 @@ export type ProjectHostOptions = Pick<
   'projectId' | 'checkoutsDirectory' | 'gitExecutable' | 'apiBaseUrl' | 'tauCredential'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
-  Pick<HostToolRegistryOptions, 'systemSkillBundles' | 'geospecRunner'> &
+  Pick<HostToolRegistryOptions, 'systemSkillBundles' | 'geospecRunner' | 'machines'> &
   Readonly<{
     /** Absolute project root: the live checkout, and where `.tau/chats/` lives. */
     workspaceRoot: string;
@@ -345,6 +345,9 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     parameterActor: async (root: string, entry: string) => parameters.get(parameterKey(root, entry)),
     ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
     ...(options.geospecRunner === undefined ? {} : { geospecRunner: options.geospecRunner }),
+    /* The machine tools, over a facet this host already serves; a print request names the project by its id. */
+    ...(options.machines === undefined ? {} : { machines: options.machines }),
+    ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
   };
   const toolRegistry = createHostToolRegistry({ ...registryOptions, workspaceRoot, checkouts });
   const toolRegistryFor = (root: string, filesystem?: HostToolFileSystem): ToolRegistry =>

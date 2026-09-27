@@ -225,6 +225,8 @@ export const refusals = {
 
   // ── revisions (type-tested in packages/host; W5, W8) ────────────────────────────────────────
   BRANCH_NEEDS_REVISION: { owner: 'revisions', retry: 'never' },
+  /** A branch name under a namespace Tau keeps for itself (`conflicts/`, D14). */
+  BRANCH_NAME_RESERVED: { owner: 'revisions', retry: 'never' },
   CHECKOUT_CONFLICT: { owner: 'revisions', retry: 'never' },
   ENGINE_FAILED: { owner: 'revisions', retry: 'never' },
   ENGINE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },
@@ -232,6 +234,8 @@ export const refusals = {
   INVALID_TRANSPORT: { owner: 'revisions', retry: 'never' },
   LFS_REMOTE_UNSUPPORTED: { owner: 'revisions', retry: 'never' },
   MISSING_LARGE_OBJECT: { owner: 'revisions', retry: 'never' },
+  /** The remote's copy is damaged: terminal after one attempt (D22). */
+  REMOTE_DAMAGED: { owner: 'revisions', retry: 'never' },
   REMOTE_FORBIDDEN: { owner: 'revisions', retry: 'never' },
   REMOTE_NOT_ENTITLED: { owner: 'revisions', retry: 'never' },
   REMOTE_NOT_FOUND: { owner: 'revisions', retry: 'never' },

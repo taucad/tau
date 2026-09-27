@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { ClippingGroup } from 'three/webgpu';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -33,9 +33,19 @@ const resetClippingGroup = (group: ClippingGroup): void => {
 };
 
 const applyClippingGroupPlane = (group: ClippingGroup, plane: THREE.Plane | undefined): void => {
-  group.clippingPlanes = plane ? [plane] : [];
+  // Runs every frame. three re-projects the list's planes each frame and tracks only its length, so the
+  // list is replaced only when the committed plane changes.
+  if (group.clippingPlanes[0] !== plane) {
+    group.clippingPlanes = plane ? [plane] : [];
+  }
   group.enabled = Boolean(plane);
 };
+
+/**
+ * Target collection only clears clipping (`enableSection: false` never reads the plane), so it takes this
+ * fixed plane rather than the live one: a plane step must not re-run it and re-traverse the model.
+ */
+const collectionPlane = new THREE.Plane();
 
 /**
  * Backend-aware clipping boundary for section view: `THREE.ClippingGroup` on WebGPU
@@ -74,12 +84,12 @@ export function SectionClippingGroup({
       enableSection: false,
       enableLines,
       enableMesh,
-      plane,
+      plane: collectionPlane,
     });
 
     webGlMeshesRef.current = meshes;
     webGlLinesRef.current = lines;
-  }, [backend, children, enableLines, enableMesh, innerRef, plane]);
+  }, [backend, children, enableLines, enableMesh, innerRef]);
 
   const applyCommittedSnapshot = React.useCallback((): void => {
     const committed = enabled ? snapshotRef.current.committed : undefined;
@@ -89,12 +99,8 @@ export function SectionClippingGroup({
       return;
     }
     setLocalClippingEnabled(gl, Boolean(committedPlane));
-    enforceMaterialClipping([...webGlMeshesRef.current], committedPlane ?? plane, Boolean(committed && enableMesh));
-    enforceMaterialClipping(
-      [...webGlLinesRef.current],
-      committedPlane ?? plane,
-      Boolean(committedPlane && enableLines),
-    );
+    enforceMaterialClipping(webGlMeshesRef.current, committedPlane ?? plane, Boolean(committed && enableMesh));
+    enforceMaterialClipping(webGlLinesRef.current, committedPlane ?? plane, Boolean(committedPlane && enableLines));
   }, [backend, clippingGroup, enableLines, enableMesh, enabled, gl, plane, snapshotRef]);
 
   React.useLayoutEffect(() => {

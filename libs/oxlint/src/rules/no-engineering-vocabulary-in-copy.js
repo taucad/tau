@@ -5,14 +5,43 @@
 /**
  * Revisions policy Rule 1 bans checkout, lease, backend, worktree, ref and HEAD as product
  * vocabulary. `HEAD` is matched uppercase only, so "the head of the list" stays legal prose.
+ *
+ * The always-on sync charter retired a second list (W14): the detached checkout's words
+ * (`detached`, `Return to latest`, `Viewing Rev N`, `viewing an older revision`), the four
+ * phrasings `Needs your decision` replaced (`Needs resolution`, `Changes need review`), raw
+ * `conflicts/…` and `sync/<remote>` line names, raw actor ids (`user_…`, `anon:`, a bare
+ * `agent`) and the op log's `ops`.
  */
-const BANNED_PATTERN = /\b(?:checkouts?|lease[sd]?|backends?|worktrees?|refs?)\b/iu;
-const BANNED_HEAD_PATTERN = /\bHEAD\b/u;
+const BANNED_PATTERNS = [
+  /\b(?:checkouts?|lease[sd]?|backends?|worktrees?|refs?)\b/iu,
+  /\bHEAD\b/u,
+  /\bdetached\b/iu,
+  /\breturn to latest\b/iu,
+  /\bviewing (?:rev \d+|an older revision)/iu,
+  /\bneeds resolution\b/iu,
+  /\bchanges need review\b/iu,
+  /\b(?:conflicts|sync)\/[\w.-]+/u,
+  /\buser_\w+/u,
+  /\banon:/u,
+  /\bops\b/iu,
+];
 
 /** Property names inside a toast options object that a person reads. */
 const COPY_PROPERTIES = new Set(['title', 'description']);
 
-const bannedWord = (text) => BANNED_PATTERN.exec(text)?.[0] ?? BANNED_HEAD_PATTERN.exec(text)?.[0];
+const bannedWord = (text) => {
+  /* A raw actor id `agent` is the whole string; "Tau agent" and "agent turn" are product words. */
+  if (text.trim() === 'agent') {
+    return 'agent';
+  }
+  for (const pattern of BANNED_PATTERNS) {
+    const match = pattern.exec(text);
+    if (match !== null) {
+      return match[0];
+    }
+  }
+  return undefined;
+};
 
 /** `toast.error(…)` and the bare `toast(…)` the repo also uses. */
 const isToastCall = (node) =>
@@ -37,7 +66,7 @@ export const noEngineeringVocabularyInCopyRule = {
     },
     messages: {
       violation:
-        '"{{word}}" is engineering vocabulary. Revisions policy Rule 1 bans checkout, lease, backend, worktree, ref and HEAD in product copy — say Revision, Branch, Current, Restore, Switch, Merge, Discard or Sync instead.',
+        '"{{word}}" is engineering vocabulary. Revisions policy Rule 1 bans checkout, lease, backend, worktree, ref and HEAD in product copy, and the always-on sync charter retired detached, Return to latest, Viewing Rev N, Needs resolution, Changes need review, raw line names, actor ids and ops — say Revision, Branch, Current, Restore, Switch, Merge, Discard, Sync or Needs your decision instead.',
     },
     schema: [],
   },

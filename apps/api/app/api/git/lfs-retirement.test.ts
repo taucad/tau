@@ -520,6 +520,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
       projectId: locator.projectId,
       ownerId: locator.ownerId,
       role: 'owner',
+      callerId: locator.ownerId,
       remainingBytes: 1024 * 1024,
       storageLimitBytes: 1024 * 1024,
     };

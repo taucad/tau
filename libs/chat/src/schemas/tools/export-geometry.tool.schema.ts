@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { fileExtensions } from '@taucad/types/constants';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
 
 const firstGeometryExportExtension = fileExtensions[0];
 if (firstGeometryExportExtension === undefined) {
@@ -39,6 +40,12 @@ export const exportGeometryOutputSchema = z.object({
     )
     .min(1)
     .describe('Complete ordered export artifact set; the first file is the primary artifact.'),
+  warnings: z
+    .array(kernelIssueSchema)
+    .optional()
+    .describe(
+      'What the export could not honour although it wrote every file, such as a multi-colour model sliced in one colour; tell the person.',
+    ),
 });
 
 /** @public */

@@ -88,7 +88,8 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
      * branch count ever makes this slow. */
     describe: async () => {
       await status.promise;
-      const { branch, headRevisionId, branches } = latest!;
+      const { line, headRevisionId, branches } = latest!;
+      const branch = line.kind === 'branch' ? line.name : undefined;
       const [revisionNumber, ...numbers] = await Promise.all([
         branch === undefined || headRevisionId === undefined ? undefined : numberOf(branch),
         ...branches.map(async (facet) => (facet.head === undefined ? undefined : numberOf(facet.name))),

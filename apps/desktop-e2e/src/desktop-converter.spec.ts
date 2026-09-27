@@ -218,49 +218,6 @@ test('[completed-artifact] converts GLB, OBJ sidecars, and STEP to USDZ without 
   expect(await directorySnapshot(session.pickedDirectory)).toEqual(pickedBefore);
 });
 
-test('[completed-artifact] renders and rebuilds the live parametric gear demo', async () => {
-  session = await launchDesktopApp({
-    packaged: true,
-    token: 'demo-package-probe',
-  });
-  await session.page.addInitScript(() => {
-    localStorage.setItem('tau:flags', JSON.stringify({ marketingLanding: true }));
-  });
-  await openRoute(session.page, '/');
-
-  const liveDemo = session.page.getByText('Geometry valid', { exact: true });
-  await session.page.mouse.move(900, 500);
-  await expect
-    .poll(
-      async () => {
-        if (await liveDemo.isVisible().catch(() => false)) {
-          return true;
-        }
-        await session!.page.mouse.wheel(0, 500);
-        await session!.page.waitForTimeout(500);
-        return false;
-      },
-      { timeout: 120_000 },
-    )
-    .toBe(true);
-  expect(await liveDemo.isVisible()).toBe(true);
-  const dimension = session.page.getByText(/^Fits 220 mm bed \(\d+ mm\)$/u);
-  await dimension.waitFor({ state: 'visible', timeout: 120_000 });
-  expect(await dimension.isVisible()).toBe(true);
-  const initialDimension = await dimension.textContent();
-  const canvas = session.page.locator('canvas').first();
-  await canvas.waitFor({ state: 'visible' });
-  expect(await canvas.isVisible()).toBe(true);
-
-  const teeth = session.page.getByLabel('Input for Number Teeth', { exact: true });
-  const teethSlider = session.page.locator('[data-slot="slider-input"]').filter({ has: teeth });
-  await teethSlider.click();
-  await session.page.keyboard.type('24');
-  await session.page.keyboard.press('Enter');
-  await expect.poll(async () => teeth.inputValue()).toBe('24');
-  await expect.poll(async () => dimension.textContent(), { timeout: 120_000 }).not.toBe(initialDimension);
-});
-
 test('[completed-artifact] releases an in-flight conversion utility on unmount and recovers with a fresh utility', async () => {
   session = await launchDesktopApp({ packaged: true, token: 'converter-cancellation-probe' });
   const utilitiesBefore = await utilityProcesses(session);

@@ -106,6 +106,36 @@ const defaultMaxEntries = 500;
 const defaultMaxTotalBytes = 128 * 1024 * 1024;
 const defaultMaxSingleFileBytes = 1024 * 1024;
 const defaultOpenSizeBytes = 50 * 1024 * 1024;
+/* The mutation pipeline refuses a checked write whose bytes and expected bytes pass 8 MiB (RV-W5b2 N3). */
+const checkedEditorSaveBytes = 8 * 1024 * 1024;
+
+/**
+ * An editor save the filesystem refused because the file is no longer the
+ * bytes the editor's text was made from (RV-W5b F4): a revision applied under
+ * the editor (D12), or any other writer. Nothing was written; the editor's
+ * owner rebases its edit onto the file as it now is.
+ *
+ * @public
+ */
+export class EditorSaveConflictError extends Error {
+  public readonly path: string;
+  /** The bytes the refused text was made from; `null` when it was made from no file. */
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+  public readonly base: Uint8Array<ArrayBuffer> | null;
+
+  /**
+   * Creates the refusal for one path.
+   * @param path - Workspace-relative path.
+   * @param base - The bytes the refused save was checked against.
+   */
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+  public constructor(path: string, base: Uint8Array<ArrayBuffer> | null) {
+    super(`'${path}' changed while it was being saved.`);
+    this.name = 'EditorSaveConflictError';
+    this.path = path;
+    this.base = base;
+  }
+}
 
 /**
  * Shared sentinel for unresolved paths. `peekOutcome` MUST return a
@@ -124,6 +154,9 @@ export type OrphanChangeEvent = { path: string; orphaned: boolean };
 
 type EditorSaveState = {
   pending: Uint8Array<ArrayBuffer> | undefined;
+  /** What the chain's first write is checked against (RV-W5b2 N3); each later write, against the one before. */
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+  base: Uint8Array<ArrayBuffer> | null;
   completion: Promise<void>;
 };
 
@@ -412,23 +445,29 @@ export class FileContentService {
     const wireCopy = new Uint8Array(data);
     const absolutePath = this.paths.toAbsolutePath(key);
     await this.proxy.writeFile(absolutePath, wireCopy);
-    this.refreshGuard.begin(key);
-    this.cache.set(key, localCopy);
-    this.setOrphaned(key, false);
-    this.publishOutcome(key, { kind: 'text', content: localCopy });
-    this.notifyGlobalSubscribers({ type: 'written', path: key, data: localCopy, source });
+    this.recordWrite(key, localCopy, source);
   }
 
   /**
    * Persist Monaco working-copy changes with one active write and one
    * replaceable latest value per workspace path.
    *
+   * Each write is checked against the bytes the editor's text was made from —
+   * `base` when the chain starts, then each write it landed — so a file that
+   * changed underneath (an applied revision, D12) refuses the save rather than
+   * being overwritten (RV-W5b F4). A refusal drops the queued value too: it was
+   * made from the same stale bytes, and the editor rebases its whole text.
+   *
    * @param path - Workspace-relative model path.
    * @param data - Latest model bytes.
-   * @returns Promise settled after the latest accepted value is durable.
+   * @param base - The bytes the model was made from (RV-W5b2 N3). A caller that
+   *   does not know says nothing, and the save is checked against the file's
+   *   last text outcome — or against its absence when there is none.
+   * @returns Promise settled after the latest accepted value is durable;
+   *   rejected with {@link EditorSaveConflictError} when the file had moved on.
    */
   // oxlint-disable-next-line @typescript-eslint/promise-function-async -- Concurrent callers must receive the shared queue promise by identity.
-  public saveEditor(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
+  public saveEditor(path: string, data: Uint8Array<ArrayBuffer>, base?: Uint8Array<ArrayBuffer>): Promise<void> {
     const key = this.paths.toWorkspaceRelativeKey('saveEditor', path);
     const copy = new Uint8Array(data);
     const barrier = this._editorMutationBarrierFor(key);
@@ -443,7 +482,12 @@ export class FileContentService {
       return existing.completion;
     }
 
-    const state: EditorSaveState = { pending: copy, completion: Promise.resolve() };
+    const outcome = this.outcomes.get(key);
+    const state: EditorSaveState = {
+      pending: copy,
+      base: base === undefined ? (outcome?.kind === 'text' ? outcome.content : null) : new Uint8Array(base),
+      completion: Promise.resolve(),
+    };
     this.editorSaves.set(key, state);
     state.completion = this._drainEditorSave(key, state);
     return state.completion;
@@ -986,16 +1030,21 @@ export class FileContentService {
 
   private async _drainEditorSave(path: string, state: EditorSaveState): Promise<void> {
     let finalError: unknown;
+    let { base } = state;
     try {
       while (state.pending !== undefined) {
         const data = state.pending;
         state.pending = undefined;
         try {
           // oxlint-disable-next-line no-await-in-loop -- Saves for one path are intentionally serialized.
-          await this.write(path, data, 'editor');
+          await this._writeEditor(path, data, base);
+          base = data;
           finalError = undefined;
         } catch (error) {
           finalError = error;
+          if (error instanceof EditorSaveConflictError) {
+            state.pending = undefined;
+          }
         }
       }
       if (finalError !== undefined) {
@@ -1007,6 +1056,94 @@ export class FileContentService {
         this.editorSaves.delete(path);
       }
     }
+  }
+
+  /**
+   * One editor write, checked against the bytes its text was made from.
+   *
+   * @param key - Workspace-relative path.
+   * @param data - The editor's text.
+   * @param base - The bytes that text was made from; `null` for no file.
+   * @throws {EditorSaveConflictError} When the file is no longer `base`.
+   */
+  private async _writeEditor(
+    key: string,
+    data: Uint8Array<ArrayBuffer>,
+    // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+    base: Uint8Array<ArrayBuffer> | null,
+  ): Promise<void> {
+    const absolutePath = this.paths.toAbsolutePath(key);
+    if ((base?.byteLength ?? 0) + data.byteLength > checkedEditorSaveBytes) {
+      /* ponytail: past the pipeline's checked-write ceiling (a file of about 4 MiB) the check is a
+       * read, then a write: a writer landing inside that one round trip is not caught. A
+       * digest precondition on `writeFileChecked` closes it. */
+      const actual = await this._readOrAbsent(absolutePath);
+      if (!sameBytesOrAbsent(actual, base)) {
+        throw this._refuseEditorSave(key, base, actual);
+      }
+      await this.write(key, data, 'editor');
+      return;
+    }
+    const result = await this.proxy.writeFileChecked({
+      path: absolutePath,
+      data: new Uint8Array(data),
+      preconditions: [{ path: absolutePath, expected: base === null ? null : new Uint8Array(base) }],
+    });
+    if (result.status === 'conflict') {
+      throw this._refuseEditorSave(
+        key,
+        base,
+        result.conflicts.find((conflict) => conflict.path === absolutePath)?.actual ?? null,
+      );
+    }
+    this.recordWrite(key, new Uint8Array(data), 'editor');
+  }
+
+  /**
+   * The refusal of one editor save, publishing the bytes the check read.
+   *
+   * The editor rebases onto them. An absent file is left to the watcher —
+   * mid-apply it is only moved aside.
+   *
+   * @param key - Workspace-relative path.
+   * @param base - The bytes the save was checked against.
+   * @param actual - What the check found.
+   * @returns The error to throw.
+   */
+  private _refuseEditorSave(
+    key: string,
+    // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+    base: Uint8Array<ArrayBuffer> | null,
+    // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+    actual: Uint8Array<ArrayBuffer> | null,
+  ): EditorSaveConflictError {
+    if (actual !== null) {
+      this.refreshGuard.begin(key);
+      this.cache.set(key, new Uint8Array(actual));
+      this.publishOutcome(key, { kind: 'text', content: new Uint8Array(actual) });
+    }
+    return new EditorSaveConflictError(key, base);
+  }
+
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+  private async _readOrAbsent(absolutePath: string): Promise<Uint8Array<ArrayBuffer> | null> {
+    try {
+      return new Uint8Array(await this.proxy.readFile(absolutePath));
+    } catch (error) {
+      if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** The bookkeeping every landed write shares: cache, outcome and the `written` fact. */
+  private recordWrite(key: string, localCopy: Uint8Array<ArrayBuffer>, source: FileWriteSource): void {
+    this.refreshGuard.begin(key);
+    this.cache.set(key, localCopy);
+    this.setOrphaned(key, false);
+    this.publishOutcome(key, { kind: 'text', content: localCopy });
+    this.notifyGlobalSubscribers({ type: 'written', path: key, data: localCopy, source });
   }
 
   private _beginEditorMutation(source: string, target?: string): EditorMutationBarrier {
@@ -1150,10 +1287,20 @@ export class FileContentService {
   private onWorkerFileRenamed(event: WorkerRelativeRenameEvent): void {
     const { oldPath, newPath } = event;
     if (oldPath !== undefined) {
+      /* An applied revision renames an open file aside and a staged copy onto
+       * it, and the pair arrives in one batch: re-read, so the open file never
+       * flashes orphaned (RV-W5b2 R2-2). The read publishes `orphaned` on ENOENT. */
+      const open = this.shouldRefreshWorkerPath(oldPath);
       this.cache.delete(oldPath);
-      this.refreshGuard.begin(oldPath);
-      this.setOrphaned(oldPath, true);
-      this.publishOutcome(oldPath, { kind: 'orphaned' });
+      if (open) {
+        // async-iife: bootstrap
+        // oxlint-disable-next-line promise/prefer-await-to-then -- fire-and-forget refresh
+        void this.refreshOutcomeInPlace(oldPath).catch(() => undefined);
+      } else {
+        this.refreshGuard.begin(oldPath);
+        this.setOrphaned(oldPath, true);
+        this.publishOutcome(oldPath, { kind: 'orphaned' });
+      }
     }
     if (newPath !== undefined) {
       this.refreshGuard.begin(newPath);
@@ -1465,3 +1612,10 @@ function outcomesEqual(a: FileContentResult, b: FileContentResult): boolean {
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
+const sameBytesOrAbsent = (
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+  left: Uint8Array<ArrayBuffer> | null,
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the checked-write absence sentinel.
+  right: Uint8Array<ArrayBuffer> | null,
+): boolean => (left === null || right === null ? left === right : bytesEqual(left, right));

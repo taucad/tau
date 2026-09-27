@@ -12,6 +12,8 @@ import {
   History,
   Info,
   Plus,
+  Printer,
+  Rotate3d,
   Share2,
   SlidersHorizontal,
   Terminal,
@@ -49,6 +51,7 @@ import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { isPrinterFileName } from '#components/printer/printer-file.js';
 import { WorkbenchTabContextMenu } from '#components/panes/editor-tab-context-menu.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 import { DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
@@ -69,12 +72,14 @@ import { useFeature } from '#flags/use-feature.js';
 import { fileViewerRouter } from '#routes/w.$workspace.$project/file-viewers/built-in-viewers.js';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
 import { ParametersPanelBody } from '#routes/w.$workspace.$project/chat-parameters.js';
+import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
 import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
+import { PrintPanelBody } from '#routes/w.$workspace.$project/chat-print.js';
 import { ConverterPanelBody } from '#routes/w.$workspace.$project/chat-converter.js';
 import { DetailsPanelBody } from '#routes/w.$workspace.$project/chat-details.js';
 import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel.js';
@@ -91,7 +96,6 @@ import type {
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import { useRevisions } from '#hooks/use-revisions.js';
 import type { OpenFile } from '#types/editor.types.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -250,6 +254,10 @@ function ParametersWorkbenchPanel(): React.JSX.Element {
   return <ParametersPanelBody />;
 }
 
+function KinematicsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
+  return <KinematicsPanelBody panelApi={api} />;
+}
+
 function ModelWorkbenchPanel(): React.JSX.Element {
   return <ModelPanelBody />;
 }
@@ -264,6 +272,10 @@ function AgentsWorkbenchPanel(): React.JSX.Element {
 
 function JobsWorkbenchPanel(): React.JSX.Element {
   return <JobsPanelBody />;
+}
+
+function PrintWorkbenchPanel(): React.JSX.Element {
+  return <PrintPanelBody />;
 }
 
 function ExportWorkbenchPanel(): React.JSX.Element {
@@ -321,6 +333,19 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
         icon: Box,
         shortcut: projectWorkspaceKeyCombinations.model,
         panel: { id: 'workbench:model', component: 'model', title: 'Model' },
+      },
+      {
+        id: 'print',
+        label: 'Print',
+        icon: Printer,
+        panel: { id: 'workbench:print', component: 'print', title: 'Print' },
+      },
+      {
+        id: 'kinematics',
+        label: 'Kinematics',
+        icon: Rotate3d,
+        shortcut: projectWorkspaceKeyCombinations.kinematics,
+        panel: { id: 'workbench:kinematics', component: 'kinematics', title: 'Kinematics' },
       },
     ],
   },
@@ -409,7 +434,14 @@ export const workbenchSurfaces: readonly WorkbenchSurface[] = workbenchSurfaceGr
 const getWorkbenchSurface = (id: WorkbenchPanelId): WorkbenchSurface =>
   workbenchSurfaces.find((surface) => surface.id === id)!;
 
-const sharedWorkbenchSurfaceIds = new Set<WorkbenchPanelId>(['parameters', 'model', 'files', 'export', 'details']);
+const sharedWorkbenchSurfaceIds = new Set<WorkbenchPanelId>([
+  'parameters',
+  'model',
+  'kinematics',
+  'files',
+  'export',
+  'details',
+]);
 
 export const isWorkbenchSurfaceAllowed = (id: WorkbenchPanelId, profile: WorkbenchProfile): boolean =>
   profile === 'editor' || sharedWorkbenchSurfaceIds.has(id);
@@ -717,9 +749,13 @@ const components = {
   newTab: WorkbenchPlaceholderPanel,
   parameters: ParametersWorkbenchPanel,
   model: ModelWorkbenchPanel,
+  kinematics: KinematicsWorkbenchPanel,
   revisions: RevisionsWorkbenchPanel,
   agents: AgentsWorkbenchPanel,
   jobs: JobsWorkbenchPanel,
+  print: PrintWorkbenchPanel,
+  // Layouts persisted before the Print pane still name the retired Machines component.
+  machines: PrintWorkbenchPanel,
   export: ExportWorkbenchPanel,
   share: ShareWorkbenchPanel,
   details: DetailsWorkbenchPanel,
@@ -730,9 +766,11 @@ const components = {
 export const workbenchPanels = {
   parameters: getWorkbenchSurface('parameters').panel!,
   model: getWorkbenchSurface('model').panel!,
+  kinematics: getWorkbenchSurface('kinematics').panel!,
   revisions: getWorkbenchSurface('revisions').panel!,
   agents: getWorkbenchSurface('agents').panel!,
   jobs: getWorkbenchSurface('jobs').panel!,
+  print: getWorkbenchSurface('print').panel!,
   export: getWorkbenchSurface('export').panel!,
   share: getWorkbenchSurface('share').panel!,
   details: getWorkbenchSurface('details').panel!,
@@ -740,10 +778,25 @@ export const workbenchPanels = {
   console: getWorkbenchSurface('console').panel!,
 } as const satisfies Record<WorkbenchUtilityPanelId, { id: string; component: string; title: string }>;
 
-const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
+/**
+ * Tab glyph for workbench panes: the surface icon for utilities, the printer for printer files (as the
+ * viewer tab shows), and nothing for other files so the extension icon stays.
+ *
+ * @param properties - The tab's panel id and parameters.
+ * @returns The icon, or `undefined` for the default.
+ */
+export const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
   const mode = getPlaceholderParameters(properties)?.mode;
   const surface = workbenchSurfaces.find((candidate) => candidate.panel?.id === properties.api.id);
-  const Icon = mode === 'open-file' ? FolderOpen : mode === 'launcher' ? Plus : surface?.icon;
+  const filePath = getFileParameters(properties)?.filePath;
+  const Icon =
+    mode === 'open-file'
+      ? FolderOpen
+      : mode === 'launcher'
+        ? Plus
+        : filePath !== undefined && isPrinterFileName(filePath)
+          ? Printer
+          : surface?.icon;
   return Icon ? <Icon aria-hidden className='size-3 shrink-0' /> : undefined;
 };
 
@@ -754,6 +807,7 @@ export const WorkbenchDockviewTab = withTabContextMenu(WorkbenchTabContextMenu, 
 const tabComponents = { editor: WorkbenchDockviewTab };
 
 const legacyWorkbenchFilesPanelId = 'workbench:files';
+const legacyWorkbenchMachinesPanelId = 'workbench:machines';
 
 export function openWorkbenchUtility(
   api: DockviewApi,
@@ -807,6 +861,14 @@ export function restoreWorkbenchLayout({
     const legacyFilesPanel = api.panels.find((panel) => panel.id === legacyWorkbenchFilesPanelId);
     if (legacyFilesPanel) {
       api.removePanel(legacyFilesPanel);
+    }
+    const legacyMachinesPanel = api.panels.find((panel) => panel.id === legacyWorkbenchMachinesPanelId);
+    if (legacyMachinesPanel) {
+      api.addPanel({
+        ...workbenchPanels.print,
+        position: { direction: 'within', referenceGroup: legacyMachinesPanel.group },
+      });
+      api.removePanel(legacyMachinesPanel);
     }
     if (!isTauDebugEnabled) {
       for (const panelId of [workbenchPanels.kernel.id, workbenchPanels.console.id]) {
@@ -1540,8 +1602,6 @@ export const WorkbenchDockview = memo(function ({
   const { connectWorkbench, setWorkbenchOpen } = useProjectWorkspace();
   const isMobile = useIsMobile();
   const isTauDebugEnabled = useFeature('tauDebug');
-  const { canReturnToLatest, headRevisionId, isDirty, revisions } = useRevisions();
-  const headRevisionNumber = revisions.find((revision) => revision.revisionId === headRevisionId)?.n;
   const monaco = useConfiguredMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
@@ -1805,14 +1865,9 @@ export const WorkbenchDockview = memo(function ({
 
     const updateTitle = (): void => {
       const revisionsPanel = api.panels.find((panel) => panel.id === workbenchPanels.revisions.id);
-      if (!revisionsPanel) {
-        return;
-      }
-      const marker =
-        headRevisionNumber === undefined
-          ? 'No revisions yet'
-          : `Rev ${String(headRevisionNumber)}${isDirty ? ' · Modified' : ''}`;
-      revisionsPanel.api.setTitle(canReturnToLatest ? `Revisions · ${marker}` : 'Revisions');
+      /* A layout saved while the retired *viewing an older revision* marker
+       * showed (RS5, RA4) still carries it; the tab is always *Revisions*. */
+      revisionsPanel?.api.setTitle('Revisions');
     };
 
     updateTitle();
@@ -1820,7 +1875,7 @@ export const WorkbenchDockview = memo(function ({
     return () => {
       disposable.dispose();
     };
-  }, [api, canReturnToLatest, headRevisionNumber, isDirty]);
+  }, [api]);
 
   useEffect(() => {
     if (!api) {

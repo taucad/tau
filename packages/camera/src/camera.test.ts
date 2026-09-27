@@ -186,6 +186,22 @@ describe('@taucad/camera', () => {
     expect(orthographic.clipping.far / orthographic.clipping.near).toBeLessThan(100);
   });
 
+  it('keeps the orthographic endpoint in front when the target lies past the bounds', () => {
+    const view = createView();
+    const direction = normalize(view.direction);
+    // Target 10 000 units toward the camera from the bounds: every corner lies behind it.
+    const target = view.target.map((coordinate, index) => coordinate + direction[index]! * 10_000) as [
+      number,
+      number,
+      number,
+    ];
+    const frame = resolveCameraFrame({ view: { ...view, target, verticalSpan: 1, requestedVerticalFieldOfView: 0 } });
+
+    expect(frame.distance).toBeGreaterThan(0);
+    expect(frame.clipping.near).toBeGreaterThan(0);
+    expect(frame.clipping.far).toBeGreaterThan(frame.clipping.near);
+  });
+
   it('frames off-origin bounds without changing orientation or viewport', () => {
     const view = createView();
     const framed = frameCameraBounds({

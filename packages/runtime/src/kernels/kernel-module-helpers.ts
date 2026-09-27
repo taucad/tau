@@ -13,7 +13,7 @@ import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
 import { assertRootedPath } from '@taucad/utils/path';
-import { projectDraft7SchemaToParameterDeclaration } from '@taucad/parameters';
+import { projectJsonSchemaToParameterDeclaration } from '@taucad/parameters';
 import type { ParameterDeclaration } from '@taucad/parameters';
 import type { JSONSchema7 } from '@taucad/json-schema';
 
@@ -188,9 +188,9 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
 }
 
 /**
- * Create an admitted native declaration from a kernel producer's Draft-7 schema.
+ * Create an admitted native declaration from a kernel producer's JSON Schema.
  * @param defaults - Producer defaults in native coordinates.
- * @param schema - Producer Draft-7/OGC schema.
+ * @param schema - Producer JSON Schema, Draft-07 or 2020-12 as its `$schema` declares, with optional OGC keywords.
  * @param identity - Caller-owned stable schema identity and name.
  * @returns An admitted immutable native parameter declaration.
  * @public
@@ -200,7 +200,7 @@ export const createKernelParameterDeclaration = (
   schema: JSONSchema7 | Readonly<Record<string, unknown>>,
   identity: Readonly<{ id: string; name: string }>,
 ): ParameterDeclaration =>
-  projectDraft7SchemaToParameterDeclaration({
+  projectJsonSchemaToParameterDeclaration({
     defaults,
     schema,
     schemaId: identity.id,

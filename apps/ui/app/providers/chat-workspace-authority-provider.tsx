@@ -142,7 +142,9 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
   );
   /* A daemon-hosted turn updates Git outside this worker. Adopt its attested
    * head into the retained projection so the next native or ACP turn starts
-   * from the same checkout without requiring a page reload. */
+   * from the same checkout without requiring a page reload. The worker adopts
+   * only a head its own store already names; a cloud host's arrives through
+   * the sync fetch instead. */
   useEffect(() => {
     const adopted = new Set<string>();
     const adopt = (event: HostTurnSettlement): void => {

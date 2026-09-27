@@ -26,7 +26,11 @@ import { nestedActionVariants } from '@taucad/ui/components/nested-action.varian
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { HighlightText } from '#components/highlight-text.js';
-import { ParametersWidget } from '#components/geometry/parameters/parameters-widget.js';
+import {
+  FieldLabelContext,
+  ParametersWidget,
+  useFieldLabel,
+} from '#components/geometry/parameters/parameters-widget.js';
 import {
   isSchemaMatchingSearch,
   getFieldDefaultValue,
@@ -321,7 +325,9 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
             />
           ) : null}
         </div>
-        <div className='flex min-w-0 flex-1 items-center justify-end gap-2'>{children}</div>
+        <div className='flex min-w-0 flex-1 items-center justify-end gap-2'>
+          <FieldLabelContext.Provider value={prettyLabel}>{children}</FieldLabelContext.Provider>
+        </div>
       </div>
       {descriptionText ? (
         <div className='text-xs text-muted-foreground/70'>
@@ -593,6 +599,7 @@ function ScopedArrayFieldItem({
 function SelectWidget(props: WidgetProps): React.ReactNode {
   const { id, options, onChange, onBlur, onFocus, placeholder, name, disabled, readonly, autofocus } = props;
   const layoutContext = useRjsfLayoutContext();
+  const fieldLabel = useFieldLabel(name);
   // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- RJSF leaves widget values untyped.
   const { value } = props;
   const isDisabled = disabled === true || readonly === true;
@@ -619,9 +626,7 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
 
   const prettyLabel = layoutContext.embeddedDiscriminator
     ? formatDisplayLabel(layoutContext.embeddedDiscriminator)
-    : name
-      ? formatDisplayLabel(name)
-      : '';
+    : fieldLabel;
 
   return (
     <Select value={selectedValue} disabled={isDisabled} onValueChange={handleChange}>
@@ -684,7 +689,7 @@ function CustomCheckboxWidget(props: WidgetProps): React.ReactNode {
   // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
   const { id, value, onChange, onBlur, onFocus, name, disabled, readonly, autofocus } = props;
   const isDisabled = disabled === true || readonly === true;
-  const prettyLabel = name ? formatDisplayLabel(name) : '';
+  const prettyLabel = useFieldLabel(name);
   return (
     <ParametersBoolean
       id={id}
@@ -713,7 +718,7 @@ function SimpleInputWidget(
 ): React.ReactNode {
   // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
   const { id, value, onChange, onBlur, onFocus, inputType, name, disabled, readonly, autofocus } = props;
-  const prettyLabel = name ? formatDisplayLabel(name) : '';
+  const prettyLabel = useFieldLabel(name);
   return (
     <Input
       id={id}

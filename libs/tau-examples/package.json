@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@jscad/modeling": "catalog:",
+    "@taucad/kinematics": "workspace:*",
     "geospec": "workspace:*",
     "libcascade": "catalog:",
     "manifold-3d": "catalog:",

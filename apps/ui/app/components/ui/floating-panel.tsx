@@ -453,7 +453,7 @@ function FloatingPanelContentHeaderActions({
         /* The trailing control of a `fade-row` header: `fade-action` paints the scrim that
          * finishes a `fade-label` name's dissolve, over the row's own background. */
         'fade-action relative bg-(--fade-scrim-into)',
-        'md:opacity-0 md:transition-opacity md:duration-150 md:ease-in-out',
+        'md:opacity-0',
         // Keyboard focus reveals the slot too, or a tabbed-to action is an invisible focus ring.
         'group-hover/floating-panel:opacity-100 md:focus-within:opacity-100',
         className,

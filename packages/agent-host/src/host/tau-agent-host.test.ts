@@ -8,6 +8,7 @@ import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json
 import type { ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
+import type { ScriptedParityResponse } from '#host/scripted-model.fixture.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
@@ -974,6 +975,149 @@ the cancelled tools left the system unchanged.
       'requested',
       'resolved',
     ]);
+    await host.close();
+  });
+
+  /*
+   * D5 on the substrate (the fixture's one tool stands in for `request_print`): a tool's approval is the run's native durable interrupt. Asking ends the attempt paused
+   * (D10, TS-R10); the answer resolves it, and the run's next attempt asks again and reads the answer. Geospec's
+   * version held the attempt's driver open on an interrupt port instead, which M1 admits only for external runs.
+   */
+  const printResponses: readonly ScriptedParityResponse[] = [
+    {
+      id: 'print-assistant-1',
+      toolCalls: [{ id: 'call-print-1', name: 'read_file', input: { targetFile: 'main.ts' } }],
+      usage: { inputTokens: 100, outputTokens: 4 },
+    },
+    {
+      id: 'print-assistant-2',
+      toolCalls: [{ id: 'call-print-2', name: 'read_file', input: { targetFile: 'main.ts' } }],
+      usage: { inputTokens: 120, outputTokens: 4 },
+    },
+    { id: 'print-assistant-3', text: 'The print is approved.', usage: { inputTokens: 140, outputTokens: 5 } },
+  ];
+  const printTool = (outcomes: string[]) =>
+    tools(async (invocation) => {
+      const resolution = await invocation.approve!({
+        key: 'print:main.ts',
+        prompt: 'Print main.gcode.3mf on Workshop X1C?',
+        payload: { kind: 'print-request', requestId: 'request-1' },
+      });
+      outcomes.push(resolution.outcome);
+      return { content: { approval: resolution.outcome }, isError: false };
+    });
+
+  it('pauses a Tau run on a tool approval and continues it on the answer as its next attempt', async () => {
+    const file = createMemoryLogFile();
+    const outcomes: string[] = [];
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(printResponses),
+        toolRegistry: printTool(outcomes),
+        idPrefix: 'approval',
+      }),
+    );
+
+    await host.admit({
+      chatId: 'chat-approval',
+      runId: 'run-approval',
+      trigger: 'submit',
+      message: { id: 'turn-approval', role: 'user', content: 'Print it.' },
+    });
+    await expect(host.snapshot('chat-approval')).resolves.toMatchObject({ state: 'paused' });
+    const [pending] = await host.pendingInterrupts('run-approval');
+    expect(pending).toMatchObject({
+      runId: 'run-approval',
+      kind: 'approval',
+      prompt: 'Print main.gcode.3mf on Workshop X1C?',
+      payload: { kind: 'print-request', requestId: 'request-1', approvalKey: 'print:main.ts' },
+    });
+    expect(outcomes).toEqual([]);
+
+    await host.resolveInterrupt({ runId: 'run-approval', interruptId: pending!.interruptId, outcome: 'approved' });
+    await host.resume('chat-approval');
+
+    const eventLog = await file.open();
+    const events = await eventLog.read();
+    expect(outcomes).toEqual(['approved']);
+    expect(events.filter((event) => event.type === 'run.lifecycle').map((event) => event.state)).toEqual([
+      'admitted',
+      'running',
+      'paused',
+      'running',
+      'completed',
+    ]);
+    const recorded = events.filter((event) => event.type === 'interrupt.recorded');
+    expect(recorded.map((event) => event.phase)).toEqual(['requested', 'resolved']);
+    expect(recorded[1]?.payload).toEqual({ outcome: 'approved' });
+    await host.close();
+  });
+
+  it('ends a run paused on a tool approval when the person declines, and asks nothing of the tool', async () => {
+    const file = createMemoryLogFile();
+    const outcomes: string[] = [];
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(printResponses),
+        toolRegistry: printTool(outcomes),
+        idPrefix: 'decline',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-decline',
+      runId: 'run-decline',
+      trigger: 'submit',
+      message: { id: 'turn-decline', role: 'user', content: 'Print it.' },
+    });
+    const [pending] = await host.pendingInterrupts('run-decline');
+
+    await host.resolveInterrupt({ runId: 'run-decline', interruptId: pending!.interruptId, outcome: 'denied' });
+
+    const eventLog = await file.open();
+    const events = await eventLog.read();
+    expect(outcomes).toEqual([]);
+    expect(events.filter((event) => event.type === 'interrupt.recorded').map((event) => event.reason)).toEqual([
+      'Print main.gcode.3mf on Workshop X1C?',
+      'denied',
+    ]);
+    /* `[resolved, cancelled]` ends the settled pause (`paused-reopenable`). */
+    expect(events.findLast((event) => event.type === 'run.lifecycle')?.state).toBe('cancelled');
+    await expect(host.snapshot('chat-decline')).resolves.toMatchObject({ state: 'cancelled' });
+    await host.close();
+  });
+
+  it('answers a tool approval cancelled when its paused run is cancelled', async () => {
+    const file = createMemoryLogFile();
+    const outcomes: string[] = [];
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(printResponses),
+        toolRegistry: printTool(outcomes),
+        idPrefix: 'stop',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-stop',
+      runId: 'run-stop',
+      trigger: 'submit',
+      message: { id: 'turn-stop', role: 'user', content: 'Print it.' },
+    });
+    await expect(host.pendingInterrupts('run-stop')).resolves.toHaveLength(1);
+
+    await host.cancel({ runId: 'run-stop' });
+
+    const eventLog = await file.open();
+    const events = await eventLog.read();
+    expect(outcomes).toEqual([]);
+    await expect(host.pendingInterrupts('run-stop')).resolves.toEqual([]);
+    expect(events.filter((event) => event.type === 'interrupt.recorded').map((event) => event.reason)).toEqual([
+      'Print main.gcode.3mf on Workshop X1C?',
+      'cancelled',
+    ]);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')?.state).toBe('cancelled');
     await host.close();
   });
 

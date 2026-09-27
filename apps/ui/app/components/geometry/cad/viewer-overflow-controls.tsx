@@ -170,20 +170,20 @@ export function MeasureOverflowControl(): React.ReactNode {
   );
 }
 
-// ── Reset Camera Overflow Control ─────────────────────────────────────────────
+// ── Fit View Overflow Control ─────────────────────────────────────────────────
 
-/** Reset camera rendered as a DropdownMenuItem */
-export function ResetCameraOverflowControl(): React.JSX.Element {
+/** Fit view rendered as a DropdownMenuItem */
+export function FitViewOverflowControl(): React.JSX.Element {
   const graphicsRef = useGraphics();
 
-  const handleReset = useCallback(() => {
-    graphicsRef.send({ type: 'resetCamera' });
+  const handleFit = useCallback(() => {
+    graphicsRef.send({ type: 'fitView' });
   }, [graphicsRef]);
 
   return (
-    <DropdownMenuItem onSelect={handleReset}>
+    <DropdownMenuItem onSelect={handleFit}>
       <Focus />
-      Reset Camera
+      Fit view
     </DropdownMenuItem>
   );
 }

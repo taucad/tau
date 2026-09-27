@@ -17,29 +17,40 @@
 
 import { Topic } from '@taucad/events';
 import {
+  awaitCheckoutCuts,
   awaitSyncSettled,
   createProjectRevisionsActor,
+  releaseUnplacedTurns,
   describeTurnRelease,
   describeTurnSettlement,
-  syncQuiesceMilliseconds,
 } from '@taucad/revisions/revision-effects';
-import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
+import type {
+  EditorConflictInput,
+  EditorConflictOutcome,
+  TurnConflictedEvent,
+  TurnFailedEvent,
+  TurnFinalizedEvent,
+} from '@taucad/revisions/revision-effects';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import {
   sameRevisionStatus,
   versionedChangePaths as classifiedChangePaths,
 } from '@taucad/revisions/revision-projection';
+import { isAmbientCut } from '@taucad/revisions/checkout-machine';
 import type {
   BranchOperation,
+  CheckoutRecord,
   GitRemoteCredential,
   IsomorphicGitCheckoutOptions,
   KeepalivePushOutcome,
   PublishDraft,
   RevisionDiffEntry,
+  RevisionDivergence,
   RevisionLogRequest,
   RevisionPort,
   RevisionRow,
   RevisionStatusProjection,
+  RevisionStreamHandlers,
   RevisionTag,
   RevisionUserActor,
 } from '@taucad/revisions';
@@ -47,12 +58,15 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
   publishFailureMessage,
   publishOverHttp,
+  readRemoteStorageOverHttp,
   readRevisionDiff,
   readRevisionLog,
   registerProjectFailureMessage,
   registerProjectOverHttp,
   tauRemoteUrl,
+  watchRevisionStream,
 } from '@taucad/revisions';
+import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { revisionId } from '@taucad/revisions/algorithms';
 import type { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
 import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
@@ -80,6 +94,9 @@ import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 export const versionedChangePaths = (event: ChangeEvent, projectRoot: string): readonly string[] =>
   classifiedChangePaths(event, projectRoot, tauPathPolicy);
 
+/** The sentence a lost compare-and-swap reads as, in the log (the page's words come from its code). */
+const casLostMessage = 'Something else changed this project first. Try again.';
+
 /**
  * A command the page sends to one project's revision root.
  *
@@ -91,8 +108,10 @@ export const versionedChangePaths = (event: ChangeEvent, projectRoot: string): r
  */
 export type WorkerRevisionCommand =
   | Readonly<{ command: 'restore'; revisionId: string }>
-  | Readonly<{ command: 'returnToLatest' }>
+  /** *Undo restore*: restore the first parent of `revisionId`, or of the last restore (D2). */
   | Readonly<{ command: 'undo' }>
+  /** *Undo*: reverse this device's newest operation on the selected line (D15). */
+  | Readonly<{ command: 'undoOperation' }>
   | Readonly<{ command: 'confirm' }>
   | Readonly<{ command: 'cancel' }>
   | Readonly<{ command: 'switch'; branch: string }>
@@ -153,6 +172,8 @@ export type WorkerRevisionCommand =
   | Readonly<{
       command: 'publishProject';
       tag?: string;
+      /** An older revision to publish (a History row's *Publish*); the branch head when absent. */
+      revisionId?: string;
       /* The API origin Publish reaches, on the command rather than in a
        * credential frame: a frame carrying no credential *clears* the one a
        * third-party remote was connected with, and publishing must not sign
@@ -177,6 +198,13 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'finishResolution'; revisionId: string }>
   | Readonly<{ command: 'abandonResolution'; revisionId: string }>
   | Readonly<{ command: 'askChatToResolve'; revisionId: string }>
+  /*
+   * An editor's overlapping edit, recorded as a conflicted revision on the live
+   * line's conflict line (D14, RV-W5b2 R2-1): the *Needs your decision* card is
+   * then the one surface, and it survives a reload and travels. A question: the
+   * editor waits for the record before it lets go of its text.
+   */
+  | (Readonly<{ command: 'recordEditorConflict' }> & EditorConflictInput)
 
   /* The three graph reads. The page never holds a port (A38), and `Rev N`,
    * "Current" and *Compare* are all derived from the graph at read time (I3),
@@ -204,10 +232,11 @@ export type WorkerRevisionCommand =
    * Which device this document is (W13, W17).
    *
    * Sent by the page rather than read here, because the id lives in
-   * `localStorage` and a worker cannot see it. It names a chat *log segment*, so
-   * a worker that has not been told writes no chat refs at all rather than
-   * guessing an id two profiles could share (`apps/ui/app/lib/device-id.ts` is
-   * the one source).
+   * `localStorage` and a worker cannot see it. It names no pushed record — chat
+   * segments name a random record device per actor form (`.git/ops-devices.json`)
+   * — but a worker that has not been told writes no chat refs at all, and the id
+   * counts as this host's own for a segment written before record devices
+   * existed (`apps/ui/app/lib/device-id.ts` is the one source).
    */
   | Readonly<{ command: 'setDeviceId'; deviceId: string }>
   /*
@@ -221,7 +250,8 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'flushKeepalive' }>
   | Readonly<{ command: 'tag'; name: string; revisionId: string; note?: string }>
   | Readonly<{ command: 'deleteTag'; name: string }>
-  | Readonly<{ command: 'log'; branch?: string; limit?: number }>
+  | Readonly<{ command: 'log'; branch?: string; limit?: number; from?: string }>
+  | Readonly<{ command: 'divergence'; head: string; base: string }>
   | Readonly<{ command: 'diff'; revisionId: string; from?: string }>
   | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>;
 
@@ -254,7 +284,10 @@ export type RevisionFileComparison = Readonly<{ original: string; modified: stri
  * @public
  */
 export type RevisionToast =
-  | Readonly<{ type: 'restored'; revisionNumber: number; unrecoverable: readonly string[] }>
+  /** `revisionNumber` is `undefined` for a target that is not on the line (D5, A9). */
+  | Readonly<{ type: 'restored'; revisionNumber: number | undefined }>
+  /** *Undo* landed; the number is the revision it undid (D15). */
+  | Readonly<{ type: 'undone'; revisionNumber: number | undefined }>
   | Readonly<{ type: 'nothingToSave' }>
   | Readonly<{
       type: 'branch';
@@ -300,6 +333,12 @@ export type RevisionToast =
    * W18 DEF-7). A cut a *turn* asked for is not on this channel: its chat
    * already says so, through the admission it refuses.
    */
+  /**
+   * A remote or resolution child's own sentence (L2-F8): *Connected*, a
+   * refused connection, a merge that could not be finished. The machines
+   * already phrase these for a person, so the page shows `message` as it is.
+   */
+  | Readonly<{ type: 'notice'; subject: 'remote' | 'resolution'; tone: 'info' | 'error'; message: string }>
   | Readonly<{
       type: 'error';
       subject: 'restore' | 'branch' | 'save';
@@ -310,6 +349,8 @@ export type RevisionToast =
       message: string;
       /* P4: the code is the refusal; the page turns it into product words. */
       code?: string;
+      /** The revision an undo could not undo, for the page's sentence (D15). */
+      revisionNumber?: number;
     }>;
 
 /**
@@ -380,6 +421,8 @@ export type WorkerProjectRevisions = Readonly<{
    * the guarantee and the next open retries (D28).
    */
   saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
+  /** Record an editor's overlapping edit as a conflicted revision, and wait for it (D14). */
+  recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
   /** Name one revision, or re-point an existing name (S31). */
@@ -388,6 +431,8 @@ export type WorkerProjectRevisions = Readonly<{
   deleteTag: (name: string) => Promise<void>;
   /** One branch's history, newest first, with its first-parent `Rev N` (I3). */
   log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]>;
+  /** How far two heads have gone apart, counted by the port rather than by listing both histories. */
+  divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
   diff: (revision: string, from?: string) => Promise<readonly RevisionDiffEntry[]>;
   /** One file's text before and after a revision, for *Compare* (S38). */
@@ -449,6 +494,20 @@ export type WorkerProjectRevisionsOptions = Readonly<{
   recordHistoryPush?: <Result>(run: () => Promise<Result>) => Promise<Result>;
   /** One rooted provider per checkout route; `checkout.root` is that route. */
   filesystem: (root: string) => RootedFileSystem | Promise<RootedFileSystem>;
+  /**
+   * Observe the versioned content changes under one checkout route.
+   *
+   * Called once per checkout the registry reports, live and linked, and the
+   * returned stop is called when that checkout goes (L2-F4). Absent, only
+   * `changed` feeds the tree.
+   */
+  observe?: (root: string, onChanged: (paths: readonly string[]) => void) => () => void;
+  /**
+   * Whether `observe` reports every write to a checkout before the write
+   * resolves, and a change it lost track of as the root `''` (E1). The change
+   * bus does; a stand-in that raises only what it is told to does not.
+   */
+  completeChanges?: boolean;
   /** Timers and time for this project's revision tree (MC-R4); tests pass a `StepClock`. */
   clock?: ActorOptions<AnyActorLogic>['clock'];
   /** The tree's inspector; development passes the console inspector, tests the harness. */
@@ -463,7 +522,105 @@ export type WorkerProjectRevisionsOptions = Readonly<{
    * publishing is refused rather than guessed.
    */
   apiBaseUrl?: () => string | undefined;
+  /** Whether this project may hold its `revision` long poll now (RV-W5b F12); every project may without it. */
+  attention?: RemoteAttention;
 }>;
+
+/**
+ * Which of this document's live projects holds its `revision` long poll (RV-W5b F12).
+ *
+ * Every live project watching at once is up to eight 25 s polls on one origin,
+ * past HTTP/1.1's six sockets, and every other API request then waits behind
+ * them. So only the focused project streams; the others still push and pull as
+ * they always did, they just are not woken by another device. A project that
+ * gains focus opens its stream and, once the stream's tail is read, pulls once
+ * — tail first, so a push between the two reads is in one of them (a1b). One
+ * that loses focus closes its stream. A refused stream stays off (F5) until the
+ * remote is watched afresh.
+ *
+ * @public
+ */
+export type RemoteAttention = Readonly<{
+  /** The page's word on whether this project is the focused one. */
+  setFocused: (focused: boolean) => void;
+  /**
+   * Hold one `watch` of the scheduler's until this project is focused.
+   *
+   * @param open - Starts the real stream with the handlers it is given.
+   * @param handlers - The scheduler's handlers.
+   * @returns Ends the watch.
+   */
+  gate: (open: (handlers: RevisionStreamHandlers) => () => void, handlers: RevisionStreamHandlers) => () => void;
+}>;
+
+/**
+ * Start unfocused: the page says which project is focused as it binds it.
+ *
+ * @returns One project's attention.
+ * @public
+ */
+export const createRemoteAttention = (): RemoteAttention => {
+  type Watch = {
+    readonly open: (handlers: RevisionStreamHandlers) => () => void;
+    readonly handlers: RevisionStreamHandlers;
+    stop: (() => void) | undefined;
+    refused: boolean;
+  };
+  let focused = false;
+  let held: Watch | undefined;
+  const begin = (watch: Watch, pullOnTail: boolean): void => {
+    watch.stop = watch.open({
+      moved: watch.handlers.moved,
+      refused: (error) => {
+        watch.refused = true;
+        watch.stop = undefined;
+        watch.handlers.refused(error);
+      },
+      watching: () => {
+        watch.handlers.watching?.();
+        if (pullOnTail) {
+          /* A wake-up with nothing named: the scheduler pulls, as for any move. */
+          watch.handlers.moved({ generation: 0, refs: [] });
+        }
+      },
+    });
+  };
+  return {
+    setFocused: (next) => {
+      if (next === focused) {
+        return;
+      }
+      focused = next;
+      const watch = held;
+      if (watch === undefined || watch.refused) {
+        return;
+      }
+      if (next) {
+        begin(watch, true);
+        return;
+      }
+      watch.stop?.();
+      watch.stop = undefined;
+    },
+    gate: (open, handlers) => {
+      const watch: Watch = { open, handlers, stop: undefined, refused: false };
+      held = watch;
+      if (focused) {
+        begin(watch, false);
+      } else {
+        /* No stream, so no tail for the open pull to wait on. */
+        handlers.watching?.();
+      }
+      return () => {
+        watch.stop?.();
+        watch.stop = undefined;
+        if (held === watch) {
+          held = undefined;
+        }
+      };
+    },
+  };
+};
 
 /**
  * Start one project's revision tree in this worker.
@@ -488,12 +645,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const events = new Topic<WorkerRevisionEvent>({ name: 'WorkerProjectRevisionEvents' });
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
 
-  const { actor, settled, turns } = createProjectRevisionsActor({
+  const { actor, settled, turns, recordEditorConflict } = createProjectRevisionsActor({
     port: options.port,
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     actorId: projectId,
+    /* Only a feed that sees every write lets a cut skip the files it did not name (E1). */
+    completeChanges: options.completeChanges === true && options.observe !== undefined,
     deviceId: () => device,
     ...(options.recordHistoryPush === undefined ? {} : { recordHistoryPush: options.recordHistoryPush }),
     /*
@@ -502,6 +661,25 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
      * `WorkerGlobalScope` and fires `online`/`offline` — so nothing is injected
      * from the page for this one.
      */
+    /* D12: the same `.tau/parameters/**` codec the desktop host injects, at every merge. */
+    parameters: { read: requireParameterRecord, serialize: serializeParameterRecord },
+    /*
+     * D13: another device's push wakes this open project over the API's long
+     * poll, with this document's session — the same cookie the git routes take.
+     * The origin is read per request, so a page that names it later is heard.
+     */
+    remoteMoves: (input, handlers) => {
+      const open = (streamHandlers: RevisionStreamHandlers): (() => void) =>
+        watchRevisionStream(
+          {
+            projectId: input.projectId,
+            apiBaseUrl: () => options.apiBaseUrl?.(),
+            auth: () => ({ kind: 'cookie' }),
+          },
+          streamHandlers,
+        );
+      return options.attention === undefined ? open(handlers) : options.attention.gate(open, handlers);
+    },
     connectivity: (report) => {
       const online = (): void => {
         report(true);
@@ -529,6 +707,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     remoteUrl: (id) => {
       const apiBaseUrl = options.apiBaseUrl?.();
       return apiBaseUrl === undefined ? undefined : tauRemoteUrl(apiBaseUrl, id);
+    },
+    /* D18: the owner's usage for the Sync region, with the page's own session. */
+    remoteStorage: async () => {
+      const apiBaseUrl = options.apiBaseUrl?.();
+      return apiBaseUrl === undefined
+        ? undefined
+        : readRemoteStorageOverHttp(apiBaseUrl, { kind: 'cookie' }, projectId);
     },
     /* P51: connecting registers the project before anything asks the remote
      * for an advertisement it would otherwise answer `404`. */
@@ -611,6 +796,57 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     events.emit(failure);
     console.error('[revisions] turn', failure.code, failure.reason);
   });
+  const changed = (checkoutId: string, paths: readonly string[]): void => {
+    /* One increment per content-change event, whatever its path count: the
+     * checkout takes `Math.max` of it across a mint, so a counter that
+     * repeated would hide a write that landed during one (F9, F4). */
+    const generation = (generations.get(checkoutId) ?? 0) + 1;
+    generations.set(checkoutId, generation);
+    actor.send({ type: 'changed', checkoutId, paths, generation });
+  };
+  /*
+   * L2-F4: one observation per checkout, each raising against its own id.
+   *
+   * A write under a linked checkout's route used to be credited to whichever
+   * checkout the workbench showed, and one under the live route while the
+   * workbench showed a linked checkout was credited to that one. Reconciled
+   * from the registry on every snapshot, so a checkout made or removed later
+   * is observed or let go with it.
+   */
+  const observations = new Map<string, () => void>();
+  const observeCheckouts = (checkouts: readonly CheckoutRecord[]): void => {
+    const { observe } = options;
+    if (observe === undefined) {
+      return;
+    }
+    const known = new Set(checkouts.map((checkout) => checkout.id));
+    for (const [id, stop] of observations) {
+      if (!known.has(id)) {
+        stop();
+        observations.delete(id);
+      }
+    }
+    for (const checkout of checkouts) {
+      if (!observations.has(checkout.id)) {
+        observations.set(
+          checkout.id,
+          observe(checkout.root, (paths) => {
+            changed(checkout.id, paths);
+          }),
+        );
+      }
+    }
+  };
+  const observing = actor.subscribe((snapshot) => {
+    observeCheckouts(snapshot.context.checkouts);
+  });
+  const stopObserving = (): void => {
+    observing.unsubscribe();
+    for (const stop of observations.values()) {
+      stop();
+    }
+    observations.clear();
+  };
   actor.start();
   published = selectRevisionStatus(actor.getSnapshot());
   /* After `start`, because the invoked children exist only once the root runs.
@@ -618,10 +854,19 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * them, so they cross the port rather than being re-derived on the page. */
   const restoreChild = actor.getSnapshot().children.restore;
   restoreChild?.on('toast.restored', (toast) => {
-    toasts.emit({ type: 'restored', revisionNumber: toast.revisionNumber, unrecoverable: toast.unrecoverable });
+    toasts.emit({ type: 'restored', revisionNumber: toast.revisionNumber });
+  });
+  restoreChild?.on('toast.undone', (toast) => {
+    toasts.emit({ type: 'undone', revisionNumber: toast.revisionNumber });
   });
   restoreChild?.on('toast.error', (toast) => {
-    toasts.emit({ type: 'error', subject: 'restore', message: toast.message });
+    toasts.emit({
+      type: 'error',
+      subject: 'restore',
+      message: toast.message,
+      ...(toast.code === undefined ? {} : { code: toast.code }),
+      ...(toast.revisionNumber === undefined ? {} : { revisionNumber: toast.revisionNumber }),
+    });
   });
   /* The branch verbs settle out of sight of the region that started them — a
    * *Discard* the registry refused has no row left to say so on (A25's "no
@@ -635,15 +880,29 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    *
    * The Revisions pane counted it — `attention` — and named nothing, so a cut
    * that died on, say, a missing `Buffer` read as "one change could not be
-   * saved" forever. A cut carrying a `turnId` is already reported to the chat
+   * saved" forever. A cut carrying a `turn` is already reported to the chat
    * that asked for it, through the admission the turn refuses; this channel is
    * for the ambient ones nobody is watching a spinner for.
    */
   actor.on('cutFailed', (failure) => {
-    if (failure.turn !== undefined) {
+    if (!isAmbientCut(failure)) {
       return;
     }
     toasts.emit({ type: 'error', subject: 'save', message: failure.reason });
+  });
+  /*
+   * D3: a lost CAS on a save a person asked for is an answer they see, not a count.
+   *
+   * Only `save`: an operation's own cut is answered by the child that asked,
+   * and an `idle`, `hidden` or `close` cut nobody pressed anything for heals
+   * itself — the checkout re-reads, rests dirty, and the next window records
+   * the same bytes (I5, N6) — so saying so would be noise under two clients.
+   */
+  actor.on('casLost', (lost) => {
+    if (lost.turn !== undefined || lost.trigger !== 'save') {
+      return;
+    }
+    toasts.emit({ type: 'error', subject: 'save', message: casLostMessage, code: 'CAS_LOST' });
   });
   actor.on('nothingToSave', (event) => {
     if (event.trigger === 'save') {
@@ -652,6 +911,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
   actor.on('switchRefused', (refusal) => {
     toasts.emit({ type: 'refused', branch: refusal.branch, reason: refusal.reason });
+  });
+  actor.on('childToast', ({ type: _type, ...toast }) => {
+    toasts.emit({ ...toast, type: 'notice' });
   });
   /* A conflicted merge is the one outcome that looks like nothing happening:
    * the branch merged into is byte-identical afterwards, on purpose (A22). */
@@ -716,24 +978,25 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
 
   /**
-   * Cut the live checkout and wait for the tree's own answer (C16).
+   * Cut the selected checkout for an explicit *Save* and wait for the tree's own answer (C16).
    *
-   * One implementation for the close path and for an explicit save: the four
-   * settled outcomes are the machine's own emissions — minted, refused by the
-   * I5 gate or the fresh fence, lost to a compare-and-swap, or failed — each naming this request (B8: an answer). Only
-   * the `hidden` cut keeps a bound, `syncQuiesceMilliseconds`, as an external edge: the page may be frozen after
-   * `pagehide` and the durable queue is then the guarantee.
+   * The four settled outcomes are the machine's own emissions — minted,
+   * refused by the I5 gate or the fresh fence, failed, or lost to another
+   * writer's compare-and-swap (D3) — each naming this request (B8: an answer),
+   * so no bound waits on it. `hidden` and `close` record every checkout
+   * instead, through `awaitCheckoutCuts`, which keeps the close path's bound.
    *
-   * @param trigger - What asked for the cut (S30).
    * @returns When the cut has settled.
    */
-  const awaitCut = async (trigger: 'save' | 'hidden' | 'close'): Promise<void> => {
+  const awaitSave = async (): Promise<void> => {
+    const trigger = 'save';
     const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
     if (checkoutId === undefined) {
       throw new Error('The project checkout was not ready before close.');
     }
     const cut = Promise.withResolvers<void>();
-    /* The answer names this request, so an idle mint or another tab's save never settles it (RM-R1). */
+    /* The answer names this request, so an idle mint or another tab's save never settles it (RM-R1); a save
+     * absorbed by a later `hidden` or `close` is still answered under its own id (RM-R2, RV-W2b #4). */
     const requestId = `${trigger}:${randomUuid()}`;
     const matches = (event: Readonly<{ requestId?: string }>): boolean => event.requestId === requestId;
     const subscriptions = [
@@ -742,13 +1005,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           cut.resolve();
         }
       }),
-      actor.on('nothingToSave', (event) => {
+      /* Terminal: the checkout re-reads and rests dirty, so nothing else will
+       * answer this request (D3). The toast above already said so. */
+      actor.on('casLost', (event) => {
         if (matches(event)) {
-          cut.resolve();
+          cut.reject(new Error(casLostMessage));
         }
       }),
-      /* A lost compare-and-swap settles too: the checkout re-reads, and the next open mints the same bytes. */
-      actor.on('casLost', (event) => {
+      actor.on('nothingToSave', (event) => {
         if (matches(event)) {
           cut.resolve();
         }
@@ -759,17 +1023,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
       }),
     ];
-    const bound =
-      trigger === 'hidden'
-        ? globalThis.setTimeout(() => {
-            cut.reject(new Error('The hidden revision was not recorded before the page froze.'));
-          }, syncQuiesceMilliseconds)
-        : undefined;
     try {
       actor.send({ type: 'cut', requestId, trigger, checkoutId, leaseIds: [] });
       await cut.promise;
     } finally {
-      globalThis.clearTimeout(bound);
       for (const subscription of subscriptions) {
         subscription.unsubscribe();
       }
@@ -820,9 +1077,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
            * `Chat.checkoutId` and leave the chat with nothing to run on (P2,
            * review finding 5). */
           created.reject(
-            Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', name).description), {
-              code: 'BRANCH_UNPLACED',
-            }),
+            Object.assign(
+              new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: name }).description),
+              {
+                code: 'BRANCH_UNPLACED',
+              },
+            ),
           );
           return;
         }
@@ -852,10 +1112,16 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
 
   const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<void> => {
     try {
-      await awaitCut(trigger);
+      /* `hidden` is the browser's close preparation (rule 9), so it records
+       * what a close would: every checkout, live and linked (the close ruling). */
+      await (trigger === 'save' ? awaitSave() : awaitCheckoutCuts(actor, trigger));
+    } catch {
+      /* Reported already; whatever did not record is still on disk for the next cut. */
+    }
+    try {
       await awaitSyncSettled(actor);
     } catch {
-      /* Reported already; the queue carries whatever did not reach the remote. */
+      /* The queue carries whatever did not reach the remote (D28). */
     }
   };
 
@@ -863,13 +1129,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     send: (command) => {
       switch (command.command) {
         case 'adoptHostFinalized': {
-          actor.send({
-            type: 'checkoutChanged',
-            checkoutId: command.checkoutId,
-            revisionId: command.revisionId,
-            treeId: command.treeId,
-            branch: command.branch,
-          });
+          /*
+           * A hint, never a head to adopt (RM-R5): the checkout re-reads its
+           * own ref. So a revision this store does not hold yet (a cloud host
+           * minted in its own clone; the sync fetch brings it, D12) and a
+           * replayed older settlement both leave the head where the store has
+           * it, and a daemon on this Git that moved the ref is read as moved.
+           */
+          actor.send({ type: 'checkoutChanged', checkoutId: command.checkoutId });
           return;
         }
         /* The root invokes `restore` as a child and forwards none of its five
@@ -960,6 +1227,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
               type: 'publish',
               requestId: randomUuid(),
               ...(command.tag === undefined ? {} : { tag: command.tag }),
+              ...(command.revisionId === undefined ? {} : { revisionId: command.revisionId }),
             },
           });
           return;
@@ -1014,8 +1282,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           actor.send({ type: 'switch', requestId: randomUuid(), branch: command.branch });
           return;
         }
-        case 'returnToLatest':
         case 'undo':
+        case 'undoOperation': {
+          actor.getSnapshot().children.restore?.send({ type: command.command });
+          break;
+        }
         case 'confirm':
         case 'cancel': {
           actor.getSnapshot().children.restore?.send({ type: command.command });
@@ -1061,8 +1332,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'tag':
         case 'deleteTag':
         case 'log':
+        case 'divergence':
         case 'diff':
-        case 'compare': {
+        case 'compare':
+        case 'recordEditorConflict': {
           break;
         }
         default: {
@@ -1071,14 +1344,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
       }
     },
-    changed: (checkoutId, paths) => {
-      /* One increment per content-change event, whatever its path count: the
-       * checkout takes `Math.max` of it across a mint, so a counter that
-       * repeated would hide a write that landed during one (F9, F4). */
-      const generation = (generations.get(checkoutId) ?? 0) + 1;
-      generations.set(checkoutId, generation);
-      actor.send({ type: 'changed', checkoutId, paths, generation });
-    },
+    changed,
     tag: async (input) =>
       options.port.tag({
         name: input.name,
@@ -1088,6 +1354,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }),
     deleteTag: async (name) => options.port.deleteTag(name),
     log: async (request) => readRevisionLog(options.port, request),
+    divergence: async (head, base) => options.port.divergence({ head: revisionId(head), base: revisionId(base) }),
     diff: async (revision, from) => {
       /* Against the revision's own first parent by default, which the store
        * knows: a caller that remembered a base would diff the wrong tree when a
@@ -1150,6 +1417,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       };
     },
     saveRevision,
+    recordEditorConflict,
     createBranch,
     placementSession: async () => {
       await session?.fence();
@@ -1171,8 +1439,32 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
        * is pushed, or recorded as unsent" true; after the bound the durable
        * queue is the guarantee and the next open retries it (D28).
        */
-      await awaitCut('close');
-      await awaitSyncSettled(actor);
+      /* Every checkout no turn holds, live and linked (the close ruling, D6).
+       * A refused cut still lets the scheduler push what the others minted,
+       * and then keeps the tree: the next close re-attempts the cut. */
+      /* A turn still waiting to be placed would hold every checkout from the
+       * cuts; a closing document is not going to run it. Abandoned, it
+       * releases whatever it is granted, and the placement port refuses its
+       * admission (RV-W2b #5, TS-R1). No watcher settle first: the change bus
+       * reports every write before the write resolves (E1). */
+      releaseUnplacedTurns(actor);
+      let refused: Error | undefined;
+      try {
+        await awaitCheckoutCuts(actor, 'close');
+      } catch (error) {
+        refused = error instanceof Error ? error : new Error(String(error));
+      }
+      try {
+        await awaitSyncSettled(actor);
+      } catch {
+        /* RV-W2b #2: only a refused cut keeps the tree. A failed or unsettled
+         * sync is already in the durable queue, and the Sync region keeps its
+         * refusal (D28). */
+      }
+      if (refused !== undefined) {
+        throw refused;
+      }
+      stopObserving();
       listeners.dispose();
       events.dispose();
       toasts.dispose();
@@ -1204,7 +1496,10 @@ export type WorkerRevisionRequest =
    * only the page has `authClient` and `window.ENV`; the worker keeps it in
    * memory for as long as the project is open and never writes it anywhere.
    */
-  | (GitRemoteCredential & Readonly<{ command: 'remoteCredential'; id?: number }>);
+  | (GitRemoteCredential & Readonly<{ command: 'remoteCredential'; id?: number }>)
+  /* Whether this project is the page's focused one (RV-W5b F12): a port frame,
+   * because focus is the page's fact about its projects, not the tree's. */
+  | Readonly<{ command: 'focus'; focused: boolean; id?: number }>;
 
 /**
  * What one correlated command answered.
@@ -1217,6 +1512,7 @@ export type WorkerRevisionRequest =
  */
 export type WorkerRevisionResult =
   | Readonly<{ kind: 'log'; rows: readonly RevisionRow[] }>
+  | Readonly<{ kind: 'divergence'; divergence: RevisionDivergence }>
   | Readonly<{ kind: 'diff'; entries: readonly RevisionDiffEntry[] }>
   | Readonly<{ kind: 'comparison'; comparison: RevisionFileComparison }>
   /** `tag` answers with the named version; `deleteTag` answers with nothing. */
@@ -1238,6 +1534,8 @@ export type WorkerRevisionResult =
    * permission for `pagehide` to run.
    */
   | Readonly<{ kind: 'saved' }>
+  /** What recording an editor's overlapping edit did (D14). */
+  | Readonly<{ kind: 'editorConflict'; outcome: EditorConflictOutcome }>
   /**
    * The branch a `createBranch` asked for exists, on the checkout named here.
    *
@@ -1296,12 +1594,15 @@ export type WorkerRevisionRegistryOptions = Readonly<{
   /** One rooted provider per checkout route. */
   filesystem: (root: string) => RootedFileSystem | Promise<RootedFileSystem>;
   /**
-   * Observe this project's versioned content changes.
+   * Observe the versioned content changes under one checkout route.
    *
-   * The worker holds the change bus; the registry only coalesces what it is
-   * handed into one `changed` per event (F9 — debounce is the machine's, W6).
+   * The worker holds the change bus; each project's tree observes one route per
+   * checkout, live and linked, and raises one `changed` per event against that
+   * checkout (F9 — debounce is the machine's, W6; L2-F4).
    */
-  observe: (projectId: string, onChanged: (paths: readonly string[]) => void) => () => void;
+  observe: (root: string, onChanged: (paths: readonly string[]) => void) => () => void;
+  /** Whether `observe` is the change bus itself, so a cut re-reads only what it reports (E1). */
+  completeChanges?: boolean;
   /**
    * This project's filesystem is served by a host that owns its revisions.
    *
@@ -1364,8 +1665,9 @@ type ProjectEntry = {
   readonly setCredential: (credential: GitRemoteCredential) => void;
   /** Record the API origin alone, which Publish carries and a credential also names. */
   readonly setApiBaseUrl: (apiBaseUrl: string) => void;
+  /** Whether this project is the page's focused one, which alone holds the long poll (F12). */
+  readonly setFocused: (focused: boolean) => void;
   readonly revisions: Promise<WorkerProjectRevisions>;
-  readonly stopObserving: () => void;
   readonly unsubscribe: () => void;
 };
 
@@ -1386,10 +1688,19 @@ const answerOf = (
 ): Promise<WorkerRevisionResult> | undefined => {
   switch (request.command) {
     case 'log': {
-      const { branch, limit } = request;
+      const { branch, limit, from } = request;
       return tree
-        .log({ ...(branch === undefined ? {} : { branch }), ...(limit === undefined ? {} : { limit }) })
+        .log({
+          ...(branch === undefined ? {} : { branch }),
+          ...(limit === undefined ? {} : { limit }),
+          ...(from === undefined ? {} : { from }),
+        })
         .then((rows) => ({ kind: 'log', rows }) as const);
+    }
+    case 'divergence': {
+      return tree
+        .divergence(request.head, request.base)
+        .then((divergence) => ({ kind: 'divergence', divergence }) as const);
     }
     case 'diff': {
       return tree.diff(request.revisionId, request.from).then((entries) => ({ kind: 'diff', entries }) as const);
@@ -1414,6 +1725,12 @@ const answerOf = (
      * takes the same path and its answer is simply dropped. */
     case 'saveRevision': {
       return tree.saveRevision(request.trigger).then(() => ({ kind: 'saved' }) as const);
+    }
+    case 'recordEditorConflict': {
+      const { path, base, mine } = request;
+      return tree
+        .recordEditorConflict({ path, base, mine })
+        .then((outcome) => ({ kind: 'editorConflict', outcome }) as const);
     }
     /* A question now too: the page that made the branch places a chat on it, so
      * it needs the checkout rather than a projection diff to guess from. */
@@ -1442,6 +1759,8 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
   const projects = new Map<string, ProjectEntry>();
   /* Placement sessions brokered before the page's own port for their project (RV9-F1). */
   const waitingPlacements = new Map<string, MessagePort[]>();
+  /** Each project's release while its last holder's close is in flight. */
+  const closing = new Map<string, Promise<void>>();
 
   const openProject = (projectId: string): ProjectEntry => {
     const existing = projects.get(projectId);
@@ -1456,11 +1775,15 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     /* Held apart from the credential: the origin outlives any one remote, and
      * Publish names it without minting anything (review R4). */
     let apiBaseUrl: string | undefined;
+    const attention = createRemoteAttention();
     const revisions = (async (): Promise<WorkerProjectRevisions> =>
       createWorkerProjectRevisions({
         projectId,
+        attention,
         port: await options.createPort(projectId, () => credential),
         filesystem: options.filesystem,
+        observe: options.observe,
+        ...(options.completeChanges === undefined ? {} : { completeChanges: options.completeChanges }),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
         ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
         /* The same fact the credential frame carries, read per use: a page that
@@ -1479,7 +1802,6 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
               },
             }),
       }))();
-    let stopObserving = (): void => undefined;
     let unsubscribe = (): void => undefined;
     // async-iife: bootstrap -- the root is served through `revisions`; this only
     // attaches the two streams once it exists.
@@ -1506,12 +1828,6 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           stop();
         }
       };
-      stopObserving = options.observe(projectId, (paths) => {
-        const { checkoutId } = tree.status();
-        if (checkoutId !== undefined) {
-          tree.changed(checkoutId, paths);
-        }
-      });
     })();
     const entry: ProjectEntry = {
       ports,
@@ -1524,16 +1840,61 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       setApiBaseUrl: (url) => {
         apiBaseUrl = url;
       },
+      setFocused: attention.setFocused,
       revisions,
-      stopObserving: () => {
-        stopObserving();
-      },
       unsubscribe: () => {
         unsubscribe();
       },
     };
     projects.set(projectId, entry);
     return entry;
+  };
+
+  const closeProject = async (projectId: string): Promise<void> => {
+    const entry = projects.get(projectId);
+    if (entry === undefined) {
+      return;
+    }
+    const release = (async (): Promise<void> => {
+      const tree = await entry.revisions;
+      /* A refused close keeps the entry and its live tree for the next close. */
+      await tree.release();
+      projects.delete(projectId);
+      entry.unsubscribe();
+      /* A reader lives no longer than the root it reads. */
+      for (const reader of entry.readers) {
+        reader.close();
+      }
+      entry.readers.clear();
+      options.released?.(projectId);
+    })();
+    closing.set(projectId, release);
+    try {
+      await release;
+    } finally {
+      closing.delete(projectId);
+    }
+  };
+
+  /*
+   * A port that arrives while the project's release is in flight would join a
+   * root that stops under it and be left talking to a stopped tree: a page that
+   * reopens a project it just closed, or another tab, would never sync or
+   * stream, and a placement session would place turns on nothing. It connects
+   * once that close settles, to a fresh root or to the one a refused close
+   * kept; its frames wait in the port, which is not started until then.
+   */
+  const afterClose = (projectId: string, retry: () => void): boolean => {
+    const pending = closing.get(projectId);
+    if (pending === undefined) {
+      return false;
+    }
+    // async-iife: bootstrap -- the closing port hears the close's outcome; this only waits it out.
+    void (async (): Promise<void> => {
+      await pending.catch(() => undefined);
+      retry();
+    })();
+    return true;
   };
 
   /* One placement session on its port; the root closes with its last page port or session, whichever is last. */
@@ -1553,28 +1914,15 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       void (async (): Promise<void> => {
         await session.fence();
         if (entry.ports.size === 0 && entry.placements.size === 0 && projects.get(projectId) === entry) {
-          await closeProject(projectId);
+          try {
+            await closeProject(projectId);
+          } catch (error) {
+            /* A refused close keeps the tree; the next holder's close re-attempts the cut (RV-W2b #2). */
+            console.warn('[revisions] a project could not be closed after its placement session ended', error);
+          }
         }
       })();
     });
-  };
-
-  const closeProject = async (projectId: string): Promise<void> => {
-    const entry = projects.get(projectId);
-    if (entry === undefined) {
-      return;
-    }
-    const tree = await entry.revisions;
-    await tree.release();
-    projects.delete(projectId);
-    entry.stopObserving();
-    entry.unsubscribe();
-    /* A reader lives no longer than the root it reads. */
-    for (const reader of entry.readers) {
-      reader.close();
-    }
-    entry.readers.clear();
-    options.released?.(projectId);
   };
 
   type Served = Readonly<{ entry: ProjectEntry; projectId: string; port: MessagePort; reader: boolean }>;
@@ -1636,6 +1984,13 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           entry.setCredential(held);
           return;
         }
+        if (data.command === 'focus') {
+          /* Focus is the page's fact about its projects (F12); a reader has none to give. */
+          if (!reader) {
+            entry.setFocused(data.focused);
+          }
+          return;
+        }
         const answer = answerOf(tree, data);
         if (answer === undefined) {
           tree.send(data);
@@ -1670,13 +2025,20 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     })();
   };
 
-  return {
+  const registry: WorkerRevisionRegistry = {
     connect: (port, projectId) => {
       /* P31: nothing here owns a host-served project's revisions, so nothing
        * here opens a store for it. The port is closed rather than answered,
        * because an empty projection would be a second, wrong answer. */
       if (options.hostServesRevisions?.(projectId) === true) {
         port.close();
+        return;
+      }
+      if (
+        afterClose(projectId, () => {
+          registry.connect(port, projectId);
+        })
+      ) {
         return;
       }
       const entry = openProject(projectId);
@@ -1689,6 +2051,13 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       serve({ entry, projectId, port, reader: false });
     },
     connectReader: (port, projectId) => {
+      if (
+        afterClose(projectId, () => {
+          registry.connectReader(port, projectId);
+        })
+      ) {
+        return;
+      }
       const entry = projects.get(projectId);
       if (options.hostServesRevisions?.(projectId) === true || entry === undefined) {
         /* Never opens a root: only the page's own port does, behind its routing and credential frames (RV9-F1). */
@@ -1701,6 +2070,13 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     connectPlacement: (port, projectId) => {
       if (options.hostServesRevisions?.(projectId) === true || options.servePlacement === undefined) {
         port.close();
+        return;
+      }
+      if (
+        afterClose(projectId, () => {
+          registry.connectPlacement(port, projectId);
+        })
+      ) {
         return;
       }
       const entry = projects.get(projectId);
@@ -1718,4 +2094,5 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       await Promise.all([...projects.keys()].map(async (projectId) => closeProject(projectId)));
     },
   };
+  return registry;
 };

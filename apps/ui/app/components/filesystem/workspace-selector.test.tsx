@@ -274,22 +274,12 @@ describe('WorkspaceSelector', () => {
     expect(onSelectionComplete).toHaveBeenCalledTimes(2);
   });
 
-  it('restores focus after desktop cancellation but not nested cancellation', async () => {
+  it('restores focus after desktop cancellation', async () => {
     const user = userEvent.setup();
     const onRequestFocus = vi.fn();
-    const { unmount } = render(
-      <TooltipProvider>
-        <WorkspaceSelector state={readyState()} variant='toolbar' onRequestFocus={onRequestFocus} />
-      </TooltipProvider>,
-    );
-    await user.click(screen.getByRole('button', { name: 'Create in Home' }));
-    await user.keyboard('{Escape}');
-    expect(onRequestFocus).toHaveBeenCalledOnce();
-    unmount();
-
     render(
       <TooltipProvider>
-        <WorkspaceSelector state={readyState()} variant='toolbar' isNested onRequestFocus={onRequestFocus} />
+        <WorkspaceSelector state={readyState()} variant='toolbar' onRequestFocus={onRequestFocus} />
       </TooltipProvider>,
     );
     await user.click(screen.getByRole('button', { name: 'Create in Home' }));

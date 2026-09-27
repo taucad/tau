@@ -27,6 +27,7 @@ import type { FileMode, FileStatEntry, RootedFileSystem } from '@taucad/filesyst
 
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
+import { revisionTreeId } from '#git-tree-id.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -267,8 +268,7 @@ const materializer = (checkout: RootedFileSystem) => {
     onApplyingTree: undefined,
     policy: tauRevisionPolicy.policy,
     withCheckoutFence: async (_checkoutId, operation) => operation(),
-    recordedTree: async (tree) => tree,
-    formatOf: async () => 'sha1',
+    checkoutTreeId: async (_checkoutId, tree) => revisionTreeId(tree, 'sha1'),
     temporarySibling: (path, role) => {
       temporary += 1;
       const separator = path.lastIndexOf('/');

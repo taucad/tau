@@ -31,6 +31,7 @@ const dynamic = (
     readonly state?: string;
     readonly title?: string;
     readonly toolName?: string;
+    readonly input?: Record<string, unknown>;
   } = {},
 ): Part =>
   ({
@@ -38,7 +39,7 @@ const dynamic = (
     toolCallId: 'dynamic-1',
     toolName: options.toolName ?? options.nativeName ?? 'vendor_tool',
     state: options.state ?? 'output-available',
-    input: {},
+    input: options.input ?? {},
     output: {},
     ...(options.preliminary === undefined ? {} : { preliminary: options.preliminary }),
     toolMetadata: {
@@ -126,6 +127,21 @@ describe('assistant message activity', () => {
     expect(describeActivity([dynamic({ nativeName: 'get_kernel_result', preliminary: true })])).toBe(
       'Rendering models',
     );
+  });
+
+  it('counts a shell command that only explored under what it explored, not as a command', () => {
+    const skills = '/Tau/acp-skills/6948/.agents/skills';
+    const skillReads = dynamic({
+      kind: 'execute',
+      input: {
+        command: `sed -n '1,240p' ${skills}/cad-openscad/SKILL.md && sed -n '1,280p' ${skills}/geospec-authoring/SKILL.md`,
+      },
+    });
+    expect(describeActivity([skillReads])).toBe('Loaded tools');
+    expect(describeActivity([dynamic({ kind: 'execute', input: { command: 'rg -n foo src | head' } })])).toBe(
+      'Searched files',
+    );
+    expect(describeActivity([dynamic({ kind: 'execute', input: { command: 'git status' } })])).toBe('Ran commands');
   });
 
   it('keeps approvals, mixed failures, and denials truthful', () => {

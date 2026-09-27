@@ -15,6 +15,16 @@ const environmentSchemaBase = z.object({
   TAU_CLOUD_ENABLED: strictEnvironmentBoolean(false).describe(
     'Start Tau Cloud billing and funded-admission services. Defaults false for self-hosted deployments.',
   ),
+  /*
+   * Charter D23: sync opens to the free tier only after the deployment gate
+   * (DG1–DG4) closes. Off, a free account projects `canSyncFiles: false`
+   * whatever the code's free tier says. `BillingService` ignores it under
+   * `NODE_ENV=production` until the go-live commit deletes that clause; the
+   * value then arrives through the Terraform secrets map, never a `fly.*.toml`.
+   */
+  TAU_FREE_TIER_SYNC_ENABLED: strictEnvironmentBoolean(false).describe(
+    'Open Tau Cloud backup and publishing to the free tier (charter D23). Ignored under NODE_ENV=production until the go-live checklist opens it.',
+  ),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   // Bounded runtime pool (B8 R3). Every value fails closed: a non-numeric or out-of-range
@@ -195,17 +205,6 @@ const environmentSchemaBase = z.object({
     .describe('Terraform-provisioned Stripe product id for one-time credit packs'),
 
   REDIS_URL: z.string().describe('Redis connection URL (e.g., redis://localhost:6379 or rediss://... for TLS)'),
-
-  // Durable job orchestration. Empty token keeps job dispatch unavailable without affecting chat/CAD startup.
-  HATCHET_CLIENT_TOKEN: z.string().default(''),
-  HATCHET_CLIENT_NAMESPACE: z.string().trim().min(1).default('tau-local'),
-  TAU_JOBS_ENABLED: z
-    .enum(['true', 'false'])
-    .transform((value) => value === 'true')
-    .optional()
-    .describe(
-      'B7 R10 gate for the paid job supplier path. Unset means enabled in development and refused everywhere else; set it true only once an operator-funded allowance covers admitted runs x attempts',
-    ),
 
   // Object storage (MinIO via infra/docker-compose in dev; Cloudflare R2 in staging/production — overrides defaults via Fly secrets + env)
   TAU_S3_ENDPOINT: z

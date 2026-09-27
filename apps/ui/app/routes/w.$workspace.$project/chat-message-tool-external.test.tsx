@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { readUIMessageStream } from 'ai';
 import type { DynamicToolUIPart, UIMessageChunk } from 'ai';
-import type { AgentLogEvent } from '@taucad/agent-host';
+import type { AgentLogEvent, JsonObject, JsonValue } from '@taucad/agent-host';
 import { tauToolKinds } from '@taucad/agent-host';
 import { toolNames } from '@taucad/chat/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -15,6 +15,7 @@ import {
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import { projectAgentHostEvent } from '#services/agent-host-event-projection.js';
+import { ChatAttachmentDirectoriesContext } from '#components/chat/attachment-preview.js';
 import { classifyActivityPart } from '#utils/assistant-message-activity.js';
 import chatMessageSource from '#routes/w.$workspace.$project/chat-message.tsx?raw';
 
@@ -25,6 +26,20 @@ vi.mock('#components/files/file-link.js', () => ({
 vi.mock('#components/code/diff-viewer.js', () => ({
   DiffViewer: ({ modifiedContent }: { readonly modifiedContent: string }) => <pre>{modifiedContent}</pre>,
   getFirstChangedLine: () => 1,
+}));
+const imageHash = 'c'.repeat(64);
+const attachmentDirectory = '/projects/p1/.tau/chats/c1/attachments';
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useOptionalFileManager: () => ({
+    recordFiles: {
+      readFile: async (path: string) => {
+        if (path === `${attachmentDirectory}/${imageHash}.png`) {
+          return new Uint8Array([137, 80, 78, 71]);
+        }
+        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+      },
+    },
+  }),
 }));
 vi.mock('#components/code/code-viewer.js', () => ({
   CodeViewer: ({ text }: { readonly text: string }) => <pre>{text}</pre>,
@@ -107,14 +122,201 @@ const listFilesRows = [
   },
 ] as const;
 
+const directories = { transcript: attachmentDirectory, composer: attachmentDirectory };
 const renderExternal = (part: DynamicToolUIPart) =>
   render(
-    <TooltipProvider>
-      <ChatMessageToolExternal part={part} />
-    </TooltipProvider>,
+    <ChatAttachmentDirectoriesContext.Provider value={directories}>
+      <TooltipProvider>
+        <ChatMessageToolExternal part={part} />
+      </TooltipProvider>
+    </ChatAttachmentDirectoriesContext.Provider>,
   );
 
+beforeAll(() => {
+  // Jsdom has no object URLs; the attachment hook only needs a string per blob.
+  URL.createObjectURL = vi.fn(() => 'blob:agent-image');
+  URL.revokeObjectURL = vi.fn();
+});
+
 afterEach(cleanup);
+
+/**
+ * The image generation codex-acp 1.7.0 reports, as the host records it: the call row, its
+ * envelope replaced with the completed facts, then the result row.
+ */
+const imageGenerationEvents = (image: JsonObject, result: JsonValue): AgentLogEvent[] => {
+  const call = { toolCallId: 'exec-1', kind: 'other', title: 'Image generation' };
+  const content = [
+    { type: 'content', content: { type: 'text', text: 'Revised prompt: a clean relief render' } },
+    { type: 'content', content: image },
+  ];
+  const input = {
+    id: 'g1',
+    role: 'tool-input',
+    toolCallId: 'call-g',
+    toolName: 'Image generation',
+    call: { ...call, status: 'in_progress' },
+    content: { id: 'exec-1' },
+    metadata: externalMetadata,
+  } as const;
+  return [
+    { ...base, sequence: 1, type: 'message.appended', message: input },
+    {
+      ...base,
+      sequence: 2,
+      type: 'message.envelope-replaced',
+      messageId: 'g1',
+      replacement: { ...input, call: { ...call, status: 'completed', content } },
+    },
+    {
+      ...base,
+      sequence: 3,
+      type: 'message.appended',
+      message: {
+        id: 'g2',
+        role: 'tool-output',
+        toolCallId: 'call-g',
+        toolName: 'Image generation',
+        call: { ...call, status: 'completed', content },
+        content: { status: 'completed', revisedPrompt: 'a clean relief render', result, savedPath: '/x/exec-1.png' },
+        isError: false,
+        metadata: externalMetadata,
+      },
+    },
+  ];
+};
+
+describe('external tool media', () => {
+  it("shows Codex's render open under its card, and keeps the revised prompt in the card", async () => {
+    const user = userEvent.setup();
+    const reference = { type: 'file-ref', path: `attachments/${imageHash}.png`, mimeType: 'image/png', byteLength: 4 };
+    renderExternal(await partFromEvents(imageGenerationEvents(reference, `attachments/${imageHash}.png`)));
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole('img', { name: 'Image generation' })).toHaveAttribute('src', 'blob:agent-image');
+    });
+    expect(screen.getByRole('button', { name: 'Open Image generation' })).toHaveClass('rounded-xl');
+    expect(screen.queryByText(/Revised prompt/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Ran Image generation/ }));
+    expect(screen.getByText(/Revised prompt: a clean relief render/)).toBeVisible();
+  });
+
+  it('renders a render recorded inline before media moved to attachments, without printing its bytes', async () => {
+    const data = 'iVBORw0KGgoAAAANSUhEUg';
+    renderExternal(
+      await partFromEvents(
+        imageGenerationEvents({ type: 'image', data, mimeType: 'image/png', uri: '/x/exec-1.png' }, data),
+      ),
+    );
+
+    expect(screen.getByRole('img', { name: 'Image generation' })).toHaveAttribute(
+      'src',
+      `data:image/png;base64,${data}`,
+    );
+    expect(document.body.textContent).not.toContain(data);
+  });
+
+  it("shows a foreign MCP server's image once, from its result, beside the call's own copy", async () => {
+    const image = { type: 'image', data: 'c2NyZWVu', mimeType: 'image/png' };
+    const part = await partFromLog([
+      {
+        id: 'b1',
+        role: 'tool-input',
+        toolCallId: 'call-b',
+        toolName: 'mcp.browser.screenshot',
+        call: {
+          toolCallId: 'mcp-1',
+          kind: 'execute',
+          title: 'Browser screenshot',
+          status: 'pending',
+          content: [{ type: 'content', content: image }],
+        },
+        content: { server: 'browser', tool: 'screenshot', arguments: {} },
+        metadata: externalMetadata,
+      },
+      {
+        id: 'b2',
+        role: 'tool-output',
+        toolCallId: 'call-b',
+        toolName: 'mcp.browser.screenshot',
+        call: { toolCallId: 'mcp-1', kind: 'execute', title: 'Browser screenshot', status: 'completed' },
+        content: {
+          result: { content: [image, { type: 'image', data: 'c2Vjb25k', mimeType: 'image/png' }] },
+          error: null,
+        },
+        isError: false,
+        metadata: externalMetadata,
+      },
+    ]);
+    renderExternal(part);
+
+    expect(screen.getAllByRole('img').map((image_) => image_.getAttribute('src'))).toEqual([
+      'data:image/png;base64,c2NyZWVu',
+      'data:image/png;base64,c2Vjb25k',
+    ]);
+  });
+
+  it("reads an embedded resource's text and a link the call's locations do not already name", async () => {
+    const user = userEvent.setup();
+    const part = await partFromLog([
+      {
+        id: 'r1',
+        role: 'tool-input',
+        toolCallId: 'call-r',
+        toolName: 'fetch',
+        call: {
+          toolCallId: 'fetch-1',
+          kind: 'fetch',
+          title: 'Fetch notes',
+          status: 'completed',
+          locations: [{ path: 'notes.md' }],
+          content: [
+            {
+              type: 'content',
+              content: { type: 'resource', resource: { uri: 'file:///notes.md', text: 'Wall thickness is 2 mm' } },
+            },
+            {
+              type: 'content',
+              content: { type: 'resource_link', uri: 'https://example.test/spec', name: 'spec', title: 'Bracket spec' },
+            },
+            { type: 'content', content: { type: 'resource_link', uri: 'notes.md', name: 'notes.md' } },
+          ],
+        },
+        content: { url: 'https://example.test/spec' },
+        metadata: externalMetadata,
+      },
+    ]);
+    renderExternal(part);
+    await user.click(screen.getByRole('button', { name: /Fetch notes/ }));
+
+    expect(screen.getByText('Wall thickness is 2 mm')).toBeVisible();
+    expect(screen.getByText('Bracket spec')).toBeVisible();
+    expect(screen.getAllByText('notes.md')).toHaveLength(1);
+  });
+
+  it('plays audio a call produced', async () => {
+    const part = await partFromLog([
+      {
+        id: 'a1',
+        role: 'tool-input',
+        toolCallId: 'call-a',
+        toolName: 'speak',
+        call: {
+          toolCallId: 'speak-1',
+          kind: 'other',
+          title: 'Speak',
+          status: 'completed',
+          content: [{ type: 'content', content: { type: 'audio', data: 'UklGRg==', mimeType: 'audio/wav' } }],
+        },
+        content: {},
+        metadata: externalMetadata,
+      },
+    ]);
+    const { container } = renderExternal(part);
+
+    expect(container.querySelector('audio')).toHaveAttribute('src', 'data:audio/wav;base64,UklGRg==');
+  });
+});
 
 describe('the external tool-call renderer', () => {
   it('resolves every ACP tool kind, and an absent one, to a card', () => {
@@ -305,6 +507,40 @@ describe('the external tool-call renderer', () => {
     await user.click(screen.getByRole('button', { name: /openscad main.scad/ }));
     expect(screen.getByText(/ERROR: Parser error/)).toBeVisible();
     expect(screen.queryByText(/terminal-1/)).not.toBeInTheDocument();
+  });
+
+  it('names the skills a compound read command loaded, and keeps the command in the body', async () => {
+    const user = userEvent.setup();
+    const skills = String.raw`/Users/me/Library/Application\ Support/Tau/acp-skills/6948/.agents/skills`;
+    const command = `sed -n '1,240p' ${skills}/cad-openscad/SKILL.md && sed -n '1,280p' ${skills}/geospec-authoring/SKILL.md`;
+    const part = await partFromLog([
+      {
+        id: 'm-skill',
+        role: 'tool-input',
+        toolCallId: 'call-skill',
+        toolName: command,
+        call: { toolCallId: 'exec-1', kind: 'execute', title: command, status: 'pending' },
+        content: { command, cwd: '/work' },
+        metadata: externalMetadata,
+      },
+      {
+        id: 'm-skill-out',
+        role: 'tool-output',
+        toolCallId: 'call-skill',
+        toolName: command,
+        call: { toolCallId: 'exec-1', kind: 'execute', status: 'completed' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex's own `rawOutput` field names.
+        content: { formatted_output: '--- name: cad-openscad', exit_code: 0 },
+        isError: false,
+        metadata: externalMetadata,
+      },
+    ]);
+
+    renderExternal(part);
+    const header = screen.getByRole('button', { name: /skills cad-openscad, geospec-authoring/ });
+    expect(header).toHaveTextContent(/^Read skills cad-openscad, geospec-authoring$/u);
+    await user.click(header);
+    expect(screen.getByText(/\$ sed -n '1,240p'.*--- name: cad-openscad/u)).toBeVisible();
   });
 
   it('strips control and bidirectional-override characters from an agent-authored title', async () => {

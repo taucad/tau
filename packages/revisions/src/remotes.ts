@@ -14,10 +14,11 @@
  * kind's UI; the data model already holds it.
  */
 
-import { isCeilingRefusal } from '#refusal-markers.js';
+import { isIncompleteRepositoryRefusal, isStorageRefusal } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
+import type { RemoteStorage } from '#remote.types.js';
 
 /** Which of the two remote kinds a project's remote is. @public */
 export type RemoteKind = 'tau' | 'git';
@@ -55,8 +56,9 @@ export const remoteKindOf = (name: string): RemoteKind => (name === tauRemoteNam
  * same URL is what a stock `git clone` is given.
  *
  * @param apiBaseUrl - Origin the Tau API is reachable at, with or without a trailing slash.
- * @param projectId - Identifies the project whose repository this is.
+ * @param projectId - Identifies the project whose repository this is: word characters and `-` only.
  * @returns The smart-HTTP URL a client clones and pushes.
+ * @throws RevisionPortError `INVALID_TRANSPORT` for an id that could leave the `/v1/git/` path (`../x`).
  * @public
  *
  * @example <caption>Where Tau Cloud keeps one project</caption>
@@ -66,8 +68,12 @@ export const remoteKindOf = (name: string): RemoteKind => (name === tauRemoteNam
  * tauRemoteUrl('https://api.tau.new/', 'p1'); // 'https://api.tau.new/v1/git/p1.git'
  * ```
  */
-export const tauRemoteUrl = (apiBaseUrl: string, projectId: string): string =>
-  `${apiBaseUrl.replace(/\/+$/u, '')}/v1/git/${projectId}.git`;
+export const tauRemoteUrl = (apiBaseUrl: string, projectId: string): string => {
+  if (!/^[\w-]+$/u.test(projectId)) {
+    throw new RevisionPortError('INVALID_TRANSPORT', `"${projectId}" is not a Tau project id.`);
+  }
+  return `${apiBaseUrl.replace(/\/+$/u, '')}/v1/git/${projectId}.git`;
+};
 
 /**
  * One remote record from a name and a URL.
@@ -91,7 +97,8 @@ export const remoteOf = (
  * module both legs' transports read (W3a R4; architecture "Ref allow-list").
  *
  * `refs/tau/{chats,evidence,artifacts}` are deliberately absent: they are the
- * record set the design pushes (D14, A15, A30, review 3 F13).
+ * record set the design pushes (D14, A15, A30, review 3 F13). So are conflict
+ * lines, `refs/heads/conflicts/*`: a conflicted revision travels (charter D14).
  */
 const hostLocalRefPrefixes: readonly string[] = Object.freeze([
   'refs/tau/owners',
@@ -104,9 +111,6 @@ const hostLocalRefPrefixes: readonly string[] = Object.freeze([
   /* Fetch's own half of the store: a remote-tracking ref is what this host
    * last saw *of* a remote, so offering one back is meaningless. */
   'refs/remotes',
-  /* Where an unresolved sync conflict lands (A22). It is evidence for the
-   * person at this host, never a branch anybody else should see. */
-  'refs/heads/sync',
 ]);
 
 /**
@@ -122,23 +126,15 @@ export const isHostLocalRef = (ref: string): boolean =>
 /**
  * The refs a *refspec* may never name, on either side.
  *
- * Narrower than {@link isHostLocalRef} by exactly two entries, and both for the
- * same reason: a refspec is written in *patterns*, so a prefix that shares a
- * namespace with legitimate refs cannot be blocked at the prefix.
- *
- * - `refs/remotes/*` never leaves this host, but it is precisely where a fetch
- *   writes, so a refspec naming it is correct rather than an attack.
- * - `refs/heads/sync` is a branch. Blocking it here would refuse
- *   `+refs/heads/*:refs/remotes/tau/*` — the ordinary fetch refspec — because
- *   that pattern can expand to it. It is still never *offered* to a remote,
- *   which is {@link isHostLocalRef}'s job and is enforced per ref in both legs'
- *   `push`, where the name is known exactly.
+ * Narrower than {@link isHostLocalRef} by `refs/remotes/*`: it never leaves this
+ * host, but it is precisely where a fetch writes, so a refspec naming it is
+ * correct rather than an attack.
  *
  * What remains is `refs/tau/*`'s host-local half: namespaces no refspec has any
  * business naming, in either direction.
  */
 const managedRefPrefixes: readonly string[] = Object.freeze(
-  hostLocalRefPrefixes.filter((prefix) => prefix !== 'refs/remotes' && prefix !== 'refs/heads/sync'),
+  hostLocalRefPrefixes.filter((prefix) => prefix !== 'refs/remotes'),
 );
 
 /**
@@ -353,13 +349,37 @@ export type RemoteTransportContext = Readonly<{
   remote?: string;
   /** Git's own stderr, on the leg that has one. */
   stderr?: string;
+  /** A 429's `Retry-After` header, on the leg that can read it. */
+  retryAfter?: string;
 }>;
+
+/**
+ * A rate limit's wait when the remote named none the leg could read: the Tau
+ * git budget's window is 60 s, so half of it on average (W13d).
+ */
+const defaultRateLimitWaitMilliseconds = 30_000;
+
+/**
+ * `Retry-After` in milliseconds: delta-seconds or an HTTP date.
+ *
+ * @param header - The header's value.
+ * @returns The wait, or `undefined` when the value says nothing usable.
+ */
+const retryAfterMilliseconds = (header: string | undefined): number | undefined => {
+  if (header === undefined || header.trim() === '') {
+    return undefined;
+  }
+  const seconds = Number(header);
+  const wait = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now();
+  return Number.isFinite(wait) ? Math.max(0, wait) : undefined;
+};
 
 /** What a remote answered, however this leg learned it. */
 type RemoteRefusal = Readonly<{ status?: number; code?: string; message?: string }>;
 
 /** The `code` values this classifier will hand back untouched when it finds one. */
 const remoteErrorCodes: ReadonlySet<string> = new Set<RevisionPortErrorCode>([
+  'REMOTE_DAMAGED',
   'REMOTE_FORBIDDEN',
   'REMOTE_MOVED',
   'REMOTE_NOT_ENTITLED',
@@ -380,7 +400,11 @@ const refusalBody = (body: string | undefined): RemoteRefusal => {
   try {
     parsed = JSON.parse(body);
   } catch {
-    return {};
+    /* GitHub's git endpoint refuses in plain text ("Write access to repository
+     * not granted."), and that sentence is the remote's answer (N4). An HTML
+     * error page is not a sentence. */
+    const said = body.trim().split('\n')[0]?.trim() ?? '';
+    return said === '' || said.startsWith('<') || said.length > 300 ? {} : { message: said };
   }
   if (typeof parsed !== 'object' || parsed === null) {
     return {};
@@ -496,6 +520,9 @@ const refusalSentence = (code: RevisionPortErrorCode): string => {
     case 'REMOTE_REJECTED': {
       return 'The remote refused this update; this project will catch up and try again.';
     }
+    case 'REMOTE_DAMAGED': {
+      return 'This project’s cloud copy is damaged and needs repair before it can be backed up.';
+    }
     default: {
       return 'This remote is busy; this project will try again.';
     }
@@ -566,14 +593,18 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
      * rewind or a deletion on every ref family that way (contract §4). Its own
      * words, never one of Tau's (N4). */
     if (answered.message !== undefined) {
-      /* D20's ceiling refusal is one of those sentences, and it is a *quota*
-         answer rather than a rule the caller broke: the affordance must not
-         offer "Sync now" again. `isCeilingRefusal` (`refusal-markers.ts`) is
+      /* D20's ceiling and D17's plan quota are two of those sentences, and each
+         is a *quota* answer rather than a rule the caller broke: the affordance must not
+         offer "Sync now" again. `isStorageRefusal` (`refusal-markers.ts`) is
          the one place that question is answered, for this leg and for the
          scheduler's. The remote's own words, list of files and all, are still
          what is shown. */
       return new RevisionPortError(
-        isCeilingRefusal(answered.message) ? 'REMOTE_QUOTA_EXCEEDED' : 'REMOTE_REJECTED',
+        isStorageRefusal(answered.message)
+          ? 'REMOTE_QUOTA_EXCEEDED'
+          : isIncompleteRepositoryRefusal(answered.message)
+            ? 'REMOTE_DAMAGED'
+            : 'REMOTE_REJECTED',
         answered.message,
         { cause: error },
       );
@@ -625,8 +656,20 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
                      so in its own words and a blind re-push reproduces it, so
                      this is a rejection carrying that sentence, not a retry. */
                   'REMOTE_REJECTED'
-                : 'REMOTE_UNAVAILABLE';
-  return new RevisionPortError(code, answered.message ?? refusalSentence(code), { cause: error });
+                : status === 500 &&
+                    (answered.code === 'GIT_REPOSITORY_INCOMPLETE' || isIncompleteRepositoryRefusal(answered.message))
+                  ? /* The manifest names a pack the store does not hold (D22):
+                       no retry repairs it, so it must not ride the 5xx
+                       backoff forever. Every other 5xx and 429 stays
+                       retryable, 503 race-lost included. */
+                    'REMOTE_DAMAGED'
+                  : 'REMOTE_UNAVAILABLE';
+  return new RevisionPortError(code, answered.message ?? refusalSentence(code), {
+    cause: error,
+    ...(status === 429
+      ? { retryAfterMilliseconds: retryAfterMilliseconds(context.retryAfter) ?? defaultRateLimitWaitMilliseconds }
+      : {}),
+  });
 };
 
 /**
@@ -765,6 +808,48 @@ export const registerProjectOverHttp = async (
 };
 
 /**
+ * What the owner's Tau Cloud account stores against its plan (D18), for a Sync
+ * region to render as `x of 1 GB` before any push is refused.
+ *
+ * Answers only for the project's owner: a collaborator is refused (`403`) and
+ * draws no meter, as does a signed-out host or a plan that cannot sync. The
+ * figures are the ones a later quota refusal quotes — account-wide, because
+ * the allowance is.
+ *
+ * @param apiBaseUrl - The API origin, with or without a trailing slash.
+ * @param auth - How this host proves who is asking.
+ * @param projectId - The project whose owner's account is asked about.
+ * @returns Bytes used and the allowance, or `undefined` when there is no figure to show.
+ * @public
+ */
+export const readRemoteStorageOverHttp = async (
+  apiBaseUrl: string,
+  auth: TauCloudAuth,
+  projectId: string,
+): Promise<RemoteStorage | undefined> => {
+  const response = await globalThis.fetch(
+    `${apiBaseUrl.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(projectId)}/usage`,
+    tauCloudRequestInit(auth),
+  );
+  if (!response.ok) {
+    return undefined;
+  }
+  const body = (await response.json()) as Readonly<Record<string, unknown>>;
+  const { storageBytes, lfsBytes, storageLimitBytes, retainedBytes } = body;
+  if (typeof storageBytes !== 'number' || typeof lfsBytes !== 'number' || typeof storageLimitBytes !== 'number') {
+    return undefined;
+  }
+  if (storageLimitBytes <= 0) {
+    return undefined;
+  }
+  const used = storageBytes + lfsBytes;
+  /* An API that predates the column sends no `retainedBytes`: no second figure. */
+  return typeof retainedBytes === 'number' && retainedBytes > 0
+    ? { used, quota: storageLimitBytes, retained: retainedBytes }
+    : { used, quota: storageLimitBytes };
+};
+
+/**
  * What to tell a person whose project could not be registered on Tau Cloud (C6).
  *
  * One owner, because the two legs had written two ladders and both were wrong
@@ -813,20 +898,24 @@ export const registerProjectFailureMessage = (status: number, code?: string, mes
 };
 
 /**
- * Whether a remote of this name can carry a project's large objects (P20).
+ * Whether this remote can carry a project's large objects (P20).
  *
- * Only Tau Cloud can. A third-party remote's LFS endpoints are not reachable:
- * the proxy carries git's three smart-HTTP endpoints and nothing else (P17), and
- * the disk leg would reach the remote's own LFS server with a credential Tau
- * never asked for — so the two legs would disagree about what a push means,
- * which is the one thing A15 exists to prevent.
+ * Tau Cloud can, and so can a GitHub remote, whose LFS batch requests the API
+ * relays under the same repository-bound credential. Any other Git remote
+ * cannot: the proxy carries its smart-HTTP endpoints and nothing else (P17), and
+ * the disk leg would reach its LFS server with a credential Tau never asked for,
+ * so the two legs would disagree about what a push means (A15).
  *
- * @param remote - The remote's name in git's config.
+ * One input type (C34, L2-F12): the answer depends on the recorded provider,
+ * which a bare name cannot carry, so a GitHub remote used to be refused or
+ * allowed depending on whether its config row happened to be found.
+ *
+ * @param remote - The remote as git's config records it.
  * @returns `true` when large objects may be offered to it.
  * @public
  */
-export const remoteCarriesLargeObjects = (remote: string | Remote): boolean =>
-  typeof remote === 'string' ? remoteKindOf(remote) === 'tau' : remote.kind === 'tau' || remote.provider === 'github';
+export const remoteCarriesLargeObjects = (remote: Remote): boolean =>
+  remote.kind === 'tau' || remote.provider === 'github';
 
 /**
  * What to tell a person whose project cannot be backed up to this remote (P20).

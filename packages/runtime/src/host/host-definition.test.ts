@@ -5,6 +5,7 @@ import { definePlugin } from '@taucad/runtime/plugin';
 import { defineJobProvider } from '@taucad/runtime/job';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine } from '@taucad/runtime/machine';
+import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
 
 const execute = vi.fn(async () => ({ value: 1 }));
 const configuration = () =>
@@ -55,6 +56,7 @@ describe('host runtime composition', () => {
               technology: 'additive.fff',
             },
           ],
+          manifest: machineManifestFixture,
           bindingConfiguration: configuration(),
           submissionConfiguration: configuration(),
           discover,

@@ -72,6 +72,21 @@ describe('materializeAttachments', () => {
     expect(outcome.messages[2]).toBe(input[2]);
   });
 
+  it("materializes an external agent's image on its assistant and tool-output rows, and never a tool-input", async () => {
+    const reference = { type: 'file-ref', path: imagePath, mimeType: 'image/png' } as const;
+    const outcome = await materializeAttachments(
+      [
+        { id: 'assistant-image', role: 'assistant', content: [reference] },
+        { id: 'call', role: 'tool-input', toolCallId: 't', toolName: 'Read', content: [reference] },
+        { id: 'result', role: 'tool-output', toolCallId: 't', toolName: 'Read', content: [reference], isError: false },
+      ],
+      reader({ [imagePath]: imageBytes }),
+    );
+
+    const image = { type: 'image', mimeType: 'image/png', data: base64(imageBytes) };
+    expect(outcome.messages.map((message) => message.content)).toEqual([[image], [reference], [image]]);
+  });
+
   it('omits a reference whose bytes are absent and reports its path instead of throwing', async () => {
     const outcome = await materializeAttachments(history(), reader({ [pdfPath]: pdfBytes }));
 

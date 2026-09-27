@@ -28,6 +28,7 @@ export const rpcName = {
   editFile: 'edit_file',
   resolveSkill: 'resolve_skill',
   readRevisions: 'read_revisions',
+  writeTodos: 'write_todos',
 } as const satisfies Record<string, string>;
 
 /**
@@ -59,6 +60,7 @@ export const mutatingRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.appendFile,
   rpcName.editFile,
   rpcName.applyParameterOperation,
+  rpcName.writeTodos,
 ]);
 
 /**

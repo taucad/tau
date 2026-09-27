@@ -125,6 +125,54 @@ const createSeedProject = (mainFixture: string | undefined): Omit<ProjectManifes
   },
 });
 
+/**
+ * The worker that holds one OPFS file's exclusive access handle until the page goes.
+ *
+ * A held `FileSystemSyncAccessHandle` refuses every other writer with
+ * `NoModificationAllowedError` while reads still succeed, which is what a second
+ * tab or a full disk does to the revision store. It is a real refusal from the
+ * platform, reached by the real machines; nothing on the page is painted.
+ */
+const holderSource = `onmessage = async ({ data }) => {
+  try {
+    const parts = data.split('/');
+    const name = parts.pop();
+    let directory = await navigator.storage.getDirectory();
+    for (const part of parts) directory = await directory.getDirectoryHandle(part);
+    self.held = await (await directory.getFileHandle(name)).createSyncAccessHandle();
+    postMessage({ held: true });
+  } catch (error) {
+    postMessage({ held: false, error: String(error) });
+  }
+};`;
+
+/** Holders stay referenced for the page's life, so a collected worker never lets its handle go. */
+const holders: Worker[] = [];
+
+/**
+ * Hold one file of the open project (S19 in `revision-ux-visual-matrix.spec.ts`).
+ *
+ * A home-location project lives at the OPFS root under its URL slug.
+ *
+ * @param path - The project-relative path, e.g. `.git/refs/heads/main`.
+ * @returns Once the handle is held.
+ */
+const holdProjectFile = async (path: string): Promise<void> => {
+  const projectSlug = location.pathname.split('/').pop() ?? '';
+  const holder = new Worker(URL.createObjectURL(new Blob([holderSource], { type: 'text/javascript' })));
+  holders.push(holder);
+  await new Promise<void>((resolve, reject) => {
+    holder.addEventListener('message', ({ data }: MessageEvent<{ held: boolean; error?: string }>) => {
+      if (data.held) {
+        resolve();
+      } else {
+        reject(new Error(`Could not hold ${projectSlug}/${path}: ${data.error ?? 'unknown'}`));
+      }
+    });
+    holder.postMessage(`${projectSlug}/${path}`);
+  });
+};
+
 export const loader = async (): Promise<Response> => {
   const environment = await getEnvironment();
 
@@ -183,6 +231,9 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
       }
       return { kind: 'workspace', workspaceId: connected.workspace.workspaceId };
     };
+
+    /* S19's fault, reachable after the seed navigates into the project. */
+    Object.assign(globalThis, { __tauE2eHoldProjectFile: holdProjectFile });
 
     const seed = async (): Promise<void> => {
       try {

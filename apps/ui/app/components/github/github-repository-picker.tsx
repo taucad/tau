@@ -20,14 +20,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import {
+  configureGithubAccess,
   GithubRequestError,
   githubConnections,
   githubErrorMessage,
-  githubSetupReturn,
 } from '#lib/github-connections.js';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
@@ -96,7 +95,6 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
   onConnectRequestHandled,
 }: GithubRepositoryPickerProps): React.JSX.Element {
   const { data: session, isPending: sessionPending } = useSession(authClient);
-  const { canConnectGitHub, isResolved: planResolved, requestUpgrade } = useCommercialFeatures();
   const connectionAvailable = useGithubConnectionAvailable();
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [connections, setConnections] = useState<readonly GithubConnection[]>([]);
@@ -140,7 +138,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
   }, []);
 
   useEffect(() => {
-    if (sessionPending || session === null || session === undefined || !canConnectGitHub) {
+    if (sessionPending || session === null || session === undefined) {
       return;
     }
     // async-iife: bootstrap -- the component cleanup aborts any desktop OAuth poll.
@@ -148,7 +146,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     return () => {
       oauthAbort.current?.abort();
     };
-  }, [canConnectGitHub, loadConnections, session, sessionPending]);
+  }, [loadConnections, session, sessionPending]);
 
   useEffect(() => {
     if (connectionId === '') {
@@ -380,12 +378,8 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
     setBusy(true);
     setError(undefined);
     try {
-      const configuration = await githubConnections.configuration();
-      if (!isDesktopTarget) {
-        /* D16d: GitHub returns to the App's Setup URL (/github/complete) with no Tau state. */
-        githubSetupReturn.remember(returnTo);
-      }
-      globalThis.location.assign(configuration.installUrl);
+      const { installUrl } = await githubConnections.configuration();
+      configureGithubAccess(installUrl, returnTo);
       if (isDesktopTarget) {
         setBusy(false);
       }
@@ -537,23 +531,6 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         <p className='text-sm text-muted-foreground'>Sign in to connect GitHub and select a repository.</p>
         <Button asChild className='self-start'>
           <Link to={`/auth/sign-in?redirectTo=${encodeURIComponent(returnTo)}`}>Sign in to connect GitHub</Link>
-        </Button>
-      </div>
-    );
-  }
-
-  if (!planResolved) {
-    return <p role='status'>Checking your plan…</p>;
-  }
-
-  if (!canConnectGitHub) {
-    return (
-      <div className='flex flex-col gap-3'>
-        <p className='text-sm text-muted-foreground'>
-          Linking a GitHub repository with its history and sync is available on Pro.
-        </p>
-        <Button variant='outline' size='sm' className='self-start' onClick={requestUpgrade}>
-          <CommercialUpgradeLabel />
         </Button>
       </div>
     );

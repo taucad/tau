@@ -1,0 +1,78 @@
+{
+  "name": "desktop-quick-look",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:ui", "type:app"],
+  "namedInputs": {
+    "production": ["{projectRoot}/quick-look-formats.json"]
+  },
+  "targets": {
+    "generate-metadata": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/macos/scripts/generate-quick-look-metadata.mts --write"
+      }
+    },
+    "check-metadata": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "inputs": [
+        "{projectRoot}/quick-look-formats.json",
+        "{projectRoot}/fixtures/**/*",
+        "{projectRoot}/generated/*",
+        "{projectRoot}/scripts/generate-quick-look-metadata.mts",
+        "^production"
+      ],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/macos/scripts/generate-quick-look-metadata.mts --check"
+      }
+    },
+    "typecheck": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "inputs": [
+        "{projectRoot}/runtime/**/*",
+        "{projectRoot}/scripts/**/*",
+        "{projectRoot}/quick-look-formats.json",
+        "{workspaceRoot}/tsconfig.base.json",
+        "^production"
+      ],
+      "options": {
+        "cwd": ".",
+        "command": "tsgo -p apps/desktop/macos/runtime/tsconfig.json || status=1; tsgo -p apps/desktop/macos/scripts/tsconfig.json || status=1; exit ${status:-0}"
+      }
+    },
+    "build-runtime": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "dependsOn": ["^copy-assets"],
+      "inputs": ["{projectRoot}/runtime/**/*", "{projectRoot}/quick-look-formats.json", "^production"],
+      "outputs": ["{projectRoot}/generated/runtime"],
+      "options": {
+        "cwd": ".",
+        "command": "vite build --config apps/desktop/macos/runtime/vite.config.ts"
+      }
+    },
+    "build-extensions": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "dependsOn": ["build-runtime", "check-metadata"],
+      "inputs": [
+        "{projectRoot}/**/*.swift",
+        "{projectRoot}/TauQuickLook.xcodeproj/**/*",
+        "{projectRoot}/Config/*",
+        "{projectRoot}/generated/*",
+        "{projectRoot}/scripts/build-quick-look-extensions.mts",
+        { "runtime": "xcodebuild -version" },
+        { "dependentTasksOutputFiles": "**/*" }
+      ],
+      "outputs": ["{projectRoot}/dist/extensions"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/macos/scripts/build-quick-look-extensions.mts"
+      }
+    }
+  }
+}

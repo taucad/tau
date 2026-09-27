@@ -575,6 +575,18 @@ const composeProjectHost = async (
       ...runtimeRpc,
       parameters,
       geospec: geoSpecClient,
+      machines: runtimeClient.machines,
+      print: {
+        /* The `tau.json` id every print request from this project's agent names (blueprint D5). An attempt reads
+         * its artifact from the checkout its placement granted. */
+        projectId: provide.authority.projectId,
+        readArtifact: async ({ path, signal }) => {
+          signal.throwIfAborted();
+          const bytes = await record.readFile(assertRootedPath(path));
+          signal.throwIfAborted();
+          return bytes;
+        },
+      },
       revisions,
       testingEnabled: provide.testingEnabled ?? false,
     });

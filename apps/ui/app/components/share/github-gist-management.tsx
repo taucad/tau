@@ -86,7 +86,7 @@ export function GithubGistManagement({
       if (authorizationReturn.outcome === 'cancelled') {
         toast.info('GitHub Gist access was not granted.');
       } else if (authorizationReturn.outcome === 'failed') {
-        toast.error('GitHub authorization could not be completed.');
+        toast.error(authorizationReturn.failure ?? 'GitHub authorization could not be completed.');
       } else {
         toast.success('GitHub Gist access updated.');
       }

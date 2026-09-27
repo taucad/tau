@@ -15,10 +15,29 @@
  */
 
 /**
- * The three verbs whose refusals reach the tree's one error channel, and the
- * turn, which announces its own (`turn.failed`).
+ * The three verbs whose refusals reach the tree's one error channel, the turn,
+ * which announces its own (`turn.failed`), the backup, whose terminal refusal
+ * the Sync line says, and removing a version name or another device's
+ * decision, which the Hosted Remote's audited verb answers (D24, D14).
  */
-export type RevisionFailureSubject = 'restore' | 'branch' | 'save' | 'turn';
+export type RevisionFailureSubject =
+  | 'restore'
+  | 'branch'
+  | 'save'
+  | 'turn'
+  | 'backup'
+  | 'removeName'
+  | 'removeConflictLine';
+
+/** What Tau Cloud's own budgets answer (D22, I11): one sentence each, each saying when to try again. */
+const hostedRemoteCopy: ReadonlyArray<readonly [string, string]> = [
+  ['GIT_RATE_LIMITED', 'Tau Cloud is getting too many requests for this project. Wait a minute, then try again.'],
+  ['GIT_LEASE_OWNER_BUSY', 'Tau Cloud is still busy with this account’s other projects. Try again in a moment.'],
+  [
+    'GIT_HYDRATE_BUDGET_EXHAUSTED',
+    'This account has reached today’s limit for opening projects on Tau Cloud. Try again tomorrow.',
+  ],
+];
 
 /** Whatever the engine itself could not do, said the same way for every verb. */
 const engineCopy: ReadonlyArray<readonly [string, string]> = [
@@ -35,12 +54,53 @@ const engineCopy: ReadonlyArray<readonly [string, string]> = [
  * module owns every word of a failure rather than two (A18, I12).
  */
 export const revisionFailureCopy: Readonly<
-  Record<RevisionFailureSubject, Readonly<{ title: string; fallback: string; codes: ReadonlyMap<string, string> }>>
+  Record<
+    RevisionFailureSubject,
+    Readonly<{
+      title: string;
+      fallback: string;
+      codes: ReadonlyMap<string, string>;
+      /** A title for a code whose outcome is not the subject's failure, e.g. files that are back but unrecorded. */
+      titles?: ReadonlyMap<string, string>;
+    }>
+  >
 > = {
   restore: {
     title: 'Restore failed',
     fallback: 'Tau could not restore that revision. Reload the page and try again.',
-    codes: new Map([...engineCopy, ['UNKNOWN_REVISION', 'That revision is not in this project any more.']]),
+    codes: new Map([
+      ...engineCopy,
+      /* A1: a turn holds the files, so the restore wrote nothing — Switch's words. */
+      ['LEASE_UNAVAILABLE', 'An agent is working in this project’s files.'],
+      /* One of the restore's two revisions lost its race with another writer (A7). */
+      ['CAS_LOST', 'Something else changed this project first. Try again.'],
+      /* A3: the files moved between the revision before the restore and its write. */
+      ['CHECKOUT_CONFLICT', 'These files changed while the restore was being prepared. Try again.'],
+      ['UNKNOWN_REVISION', 'That revision is not in this project any more.'],
+      /* W0 N1: the files are the target's, but the restore's own revision lost its race; a retry would find nothing to save. */
+      [
+        'RESTORE_UNRECORDED',
+        'The earlier files are back, but something else changed this project at the same time, so this restore is not in History as its own revision. Your files are kept.',
+      ],
+      /* W0 M1: Undo pressed after the selection left the line the restore was made on. */
+      ['UNDO_UNAVAILABLE', 'That restore was made on another branch. Open it there to undo it.'],
+      /* D15: nothing of this device's is left on the branch; nothing was written. */
+      ['NOTHING_TO_UNDO', 'Nothing you did on this branch is left to undo.'],
+      /* D15: the inverse overlaps a later revision's changes, which Undo never reverts. */
+      [
+        'UNDO_CONFLICT',
+        'A later revision changed the same lines, so that change can’t be undone. Restore an earlier revision instead.',
+      ],
+      /* D15, RV-W7 #7: Undo never reaches past a merge made here; nothing was written. */
+      ['UNDO_PAST_MERGE', 'Your last change on this branch was a merge. Restore an earlier revision instead.'],
+    ]),
+    titles: new Map([
+      ['RESTORE_UNRECORDED', 'Files restored'],
+      ['UNDO_UNAVAILABLE', 'Nothing to undo here'],
+      ['NOTHING_TO_UNDO', 'Nothing to undo here'],
+      ['UNDO_CONFLICT', 'That change can’t be undone'],
+      ['UNDO_PAST_MERGE', 'A merge can’t be undone'],
+    ]),
   },
   branch: {
     title: 'That branch change did not go through',
@@ -49,6 +109,8 @@ export const revisionFailureCopy: Readonly<
       ...engineCopy,
       /* A fresh project: nothing recorded, and nothing unrecorded to record. */
       ['BRANCH_NEEDS_REVISION', 'There is nothing to branch from yet. Add a file, then try again.'],
+      /* D14: the name decisions travel under; the page shows the reason, not the generic refusal. */
+      ['BRANCH_NAME_RESERVED', '“conflicts” is kept for decisions that travel between devices. Choose another name.'],
       /* Made, with nowhere for a chat to work in it. */
       ['BRANCH_UNPLACED', 'Tau made that branch but could not open its files. Reload the page and try again.'],
       ['CAS_LOST', 'Something else changed this project at the same time. Try again.'],
@@ -66,7 +128,39 @@ export const revisionFailureCopy: Readonly<
     fallback: 'Tau could not record this change. Reload the page and try again.',
     codes: new Map([
       ...engineCopy,
+      /* D3: another writer moved the line first; the files stay as they are, unsaved. */
+      ['CAS_LOST', 'Something else changed this project first. Your changes are still here; save again.'],
       ['UNKNOWN_REVISION', 'The revision this change builds on is not in this project any more.'],
+    ]),
+  },
+  backup: {
+    title: 'Not backed up',
+    fallback: 'Tau could not back this project up. It will try again.',
+    codes: new Map([
+      ...hostedRemoteCopy,
+      /* Terminal (W2a): no retry and no verb clears it; only a repair of the cloud copy does. */
+      [
+        'REMOTE_DAMAGED',
+        'Tau has to repair this project’s copy on Tau Cloud before it can back it up again. Nothing on this device is lost.',
+      ],
+    ]),
+  },
+  removeName: {
+    title: 'That name was not removed',
+    fallback: 'Tau Cloud could not remove that name. Try again.',
+    codes: new Map([
+      ...hostedRemoteCopy,
+      ['GIT_REF_REMOVAL_OWNER_ONLY', 'Only the project’s owner can remove a version name.'],
+      ['GIT_REF_NOT_REMOVABLE', 'Only a version name can be removed.'],
+    ]),
+  },
+  removeConflictLine: {
+    title: 'That decision was not removed',
+    fallback: 'Tau Cloud could not remove that decision. Try again.',
+    codes: new Map([
+      ...hostedRemoteCopy,
+      ['GIT_REF_REMOVAL_OWNER_ONLY', 'Only the project’s owner can remove another device’s decision.'],
+      ['GIT_REF_NOT_REMOVABLE', 'Tau Cloud cannot remove that decision.'],
     ]),
   },
   turn: {
@@ -91,21 +185,24 @@ export const revisionFailureCopy: Readonly<
  *
  * @param subject Which verb refused.
  * @param code The refusal's `RevisionPortErrorCode`, when it carried one.
- * @param branch The branch the verb named, for the sentences that can say it.
+ * @param about The branch the verb named, and the revision an undo could not undo, for the sentences that can say them.
  * @returns The toast's title and description.
  */
 export const describeRevisionFailure = (
   subject: RevisionFailureSubject,
   code: string | undefined,
-  branch?: string,
+  about: Readonly<{ branch?: string; revisionNumber?: number }> = {},
 ): Readonly<{ title: string; description: string }> => {
+  const { branch, revisionNumber } = about;
   const copy = revisionFailureCopy[subject];
   const description = (code === undefined ? undefined : copy.codes.get(code)) ?? copy.fallback;
+  const named =
+    code === 'UNDO_CONFLICT' && revisionNumber !== undefined
+      ? `A later revision changed the same lines, so Rev ${String(revisionNumber)} can’t be undone. Restore an earlier revision instead.`
+      : description;
   return {
-    title: copy.title,
+    title: (code === undefined ? undefined : copy.titles?.get(code)) ?? copy.title,
     description:
-      branch === undefined || code !== 'CHECKOUT_CONFLICT'
-        ? description
-        : `${branch} already exists. Pick another name.`,
+      branch === undefined || code !== 'CHECKOUT_CONFLICT' ? named : `${branch} already exists. Pick another name.`,
   };
 };

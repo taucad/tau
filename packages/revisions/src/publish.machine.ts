@@ -68,7 +68,10 @@ export type PublishMachineContext = Readonly<{
   branch: string;
   /** Names this project already has, for the dialog's picker. */
   tags: readonly RevisionTag[];
-  /** The revision being published — the branch head when the dialog opened. */
+  /**
+   * The revision being published: the one the dialog was opened on (a History
+   * row's *Publish*), or the branch head when it was opened without one.
+   */
   revisionId: string | undefined;
   /** What the remote last advertised for the branch, which is the push lease. */
   expected: string | undefined;
@@ -90,7 +93,13 @@ export type PublishMachineContext = Readonly<{
 
 /** Events accepted by publishMachine. @public */
 export type PublishMachineEvent =
-  | Readonly<{ type: 'publish'; requestId: string; tag?: string }>
+  | Readonly<{
+      type: 'publish';
+      requestId: string;
+      tag?: string;
+      /** An older revision to name and publish; the branch head when absent. */
+      revisionId?: string;
+    }>
   | Readonly<{ type: 'confirm'; draft: PublishDraft }>
   | Readonly<{ type: 'cancel' }>
   | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>
@@ -161,6 +170,7 @@ type PublishEnqueue = EnqueueObject<PublishMachineEvent, PublishMachineEmitted>;
 const startPublish = (event: Extract<PublishMachineEvent, { type: 'publish' }>): Partial<PublishMachineContext> => ({
   tag: event.tag,
   requestId: event.requestId,
+  revisionId: event.revisionId,
   draft: undefined,
   pushId: undefined,
   publicationId: undefined,
@@ -272,7 +282,7 @@ const publishMachineDefinition = setup({
               }
               const read = {
                 tags: event.output.tags,
-                revisionId: event.output.revisionId,
+                revisionId: context.revisionId ?? event.output.revisionId,
                 expected: event.output.expected,
                 remoteTags: event.output.remoteTags,
               };

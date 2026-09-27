@@ -8,6 +8,7 @@ import {
   checkoutIgnoredEvents,
   checkoutMachine,
   checkoutQueuedCutLimit,
+  satisfiesCut,
   selectCheckoutDirty,
 } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput, CheckoutMachineEvent } from '#checkout.machine.js';
@@ -27,7 +28,10 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  * Path table — `checkout.machine` (catalogue: 30).
  *
  *  1  rehydrates from `input` and rests `clean`
- *  2  `changed` → `dirty` and bumps the write generation
+ *  2  `changed` → `dirty` and bumps the write generation; from `clean` it compares
+ *     first, so a write that restores the head's bytes (a pull's own apply) reads
+ *     clean again without the idle window, and a write during that comparison
+ *     restarts it (FX1 M)
  *  3  one `changed` carrying 50 paths is one transition (F9)
  *  4  `cut` mints: fence → cut → writeRevision → casHead → `clean` + `revisionMinted`
  *  5  the tree-hash gate (I5): equal `treeId` → `nothingToSave`, `writeRevision` never called
@@ -43,8 +47,9 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  * 14  the fence is released when the mint leaves `minting`
  * 15  a `cut` arriving during a mint is served afterwards, so both requesters
  *     are answered when the mint succeeds
- * 16  `headMoved` in `clean` re-reads branch, head and tree, and rests `clean`
- *     when nothing was written since (RM-R5)
+ * 16  `headMoved` re-reads branch, head and tree; `clean` rests `clean` when
+ *     nothing was written since, and unrecorded bytes are compared with the new
+ *     head before they read clean (RM-R5, I6)
  * 17  every outcome is both sent to the parent and emitted, with its trigger,
  *     request id and turn
  * 18  start and stop leak no child, the snapshot is serializable and holds no function
@@ -67,6 +72,11 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  *     answers `nothingToSave` naming the lease, and stays `dirty` (RM-R16)
  * 28  the status fact carries the branch and head tree (RM-R5)
  * 29  `selectCheckoutDirty` reads the declared `dirty` tag (MC-R28)
+ * 30  an operation's cut (`restore`, `switch`) never collapses into an ambient one,
+ *     and a restore cut carries `restoredFrom` to `writeRevision` (D1)
+ * 31  a lost CAS on a trigger-only cut is exactly one terminal answer (D3, T5)
+ * 32  a checkout spawned over a stale tree rests `clean`, then reads `dirty` when
+ *     the spawn-time comparison answers; an equal tree stays `clean` (D4)
  * --  `getSimplePaths` generates no state value the table above leaves unexercised
  */
 
@@ -87,7 +97,9 @@ type Harness = Readonly<{
   clock: StepClock;
 }>;
 
-const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWindow?: number }>): Harness => {
+const start = (
+  options?: Readonly<{ headTreeId?: string; branch?: string; idleWindow?: number; unborn?: boolean }>,
+): Harness => {
   const guard = guardActors({ ignore: { checkout: checkoutIgnoredEvents } });
   const promises = createFakePromiseActors();
   const callbacks = createFakeCallbackActors();
@@ -101,6 +113,7 @@ const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWi
         casHead: promises.actor('casHead'),
         readHead: promises.actor('readHead'),
         fence: callbacks.actor<CheckoutFenceActorInput>('fence'),
+        captureTree: promises.actor('captureTree'),
       },
     }),
     {
@@ -109,8 +122,8 @@ const start = (options?: Readonly<{ headTreeId?: string; branch?: string; idleWi
       input: {
         checkoutId: 'checkout-1',
         branch: options?.branch ?? 'main',
-        headRevisionId: 'rev-1',
-        headTreeId: options?.headTreeId ?? headTreeId,
+        headRevisionId: options?.unborn === true ? undefined : 'rev-1',
+        headTreeId: options?.unborn === true ? undefined : (options?.headTreeId ?? headTreeId),
         ...(options?.idleWindow === undefined ? {} : { idleWindow: options.idleWindow }),
         parentRef: parent.ref,
       },
@@ -202,7 +215,7 @@ describe('checkoutMachine', () => {
     expect(actor.getSnapshot().matches('clean')).toBe(true);
     expect(actor.getSnapshot().context.headRevisionId).toBe('rev-2');
     expect(actor.getSnapshot().context.headTreeId).toBe(nextTreeId);
-    expect(promises.inputsFor('cut')).toEqual([{ checkoutId: 'checkout-1', trigger: 'turn' }]);
+    expect(promises.inputsFor('cut')).toEqual([{ checkoutId: 'checkout-1', trigger: 'turn', generation: 1 }]);
     expect(promises.inputsFor('writeRevision')).toEqual([
       {
         checkoutId: 'checkout-1',
@@ -235,6 +248,32 @@ describe('checkoutMachine', () => {
     expect(types(emitted)).toContain('nothingToSave');
     expect(types(parent.events)).toContain('nothingToSave');
     expect(actor.getSnapshot().matches('clean')).toBe(true);
+
+    actor.stop();
+  });
+
+  /*
+   * W13c: an unborn line's cut before the open pull lands — offline at open, or
+   * a close while the pull runs — minted Tau's scaffold as a root revision, and
+   * the pull then merged the remote in as unrelated history. The host answers
+   * that its files hold no work, and the machine mints nothing.
+   */
+  it('mints nothing on an unborn line whose cut holds no work of its own', async () => {
+    const harness = start({ unborn: true });
+    const { actor, promises, emitted } = harness;
+
+    actor.send({ type: 'changed', paths: ['tau.json'], generation: 1 });
+    actor.send({ type: 'cut', requestId: 'c-1', trigger: 'close', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-1', nothingToSave: true } });
+    await flush();
+
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
+    expect(emitted.filter((event) => event.type === 'nothingToSave')).toEqual([
+      { type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'close', requestId: 'c-1' },
+    ]);
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    expect(actor.getSnapshot().context.headRevisionId).toBeUndefined();
 
     actor.stop();
   });
@@ -485,17 +524,99 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
-  it('re-reads into dirty when the tree was written since it was clean', async () => {
-    const { actor, promises } = start();
-
+  it('reads clean after a head move only once the files are shown to be that head (I6)', async () => {
+    const { actor, promises, parent } = start();
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
+
     actor.send({ type: 'headMoved' });
     promises.settle('readHead', { output: { revisionId: 'rev-7', treeId: 'tree-7', branch: 'main' } });
     await flush();
 
-    expect(actor.getSnapshot().matches('dirty')).toBe(true);
+    /* Unrecorded bytes are not declared clean because a head moved (I6). */
+    expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
     expect(actor.getSnapshot().context.headRevisionId).toBe('rev-7');
+    expect(parent.events.findLast((event) => event.type === 'checkoutStatusChanged')).toMatchObject({
+      status: 'dirty',
+      headRevisionId: 'rev-7',
+    });
+    promises.settle('captureTree', { output: { treeId: 'tree-7' } });
+    await flush();
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
 
+    actor.stop();
+  });
+
+  it('stays dirty after a head move when the files are not that head (I6)', async () => {
+    const { actor, promises } = start();
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
+
+    actor.send({ type: 'headMoved' });
+    promises.settle('readHead', { output: { revisionId: 'rev-7', treeId: 'tree-7', branch: 'main' } });
+    await flush();
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
+    actor.stop();
+  });
+
+  it('keeps minting through a head move and answers no lost CAS for it (RV-W2b #3, RM-R6)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    actor.send({ type: 'headMoved' });
+    await flush();
+
+    expect(parent.events.filter((event) => event.type === 'casLost')).toEqual([]);
+    expect(actor.getSnapshot().matches({ minting: 'cutting' })).toBe(true);
+    actor.stop();
+  });
+
+  it('collapses queued ambient requests into the stronger trigger, never a weaker one (RV-W2b #4)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+
+    actor.send({ type: 'cut', requestId: 'c-2', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'c-3', trigger: 'hidden', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'c-4', trigger: 'close', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'c-5', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
+    await flush();
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    await flush();
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-2' } });
+    await flush();
+
+    const answered = parent.events.filter((event) => event.type === 'nothingToSave');
+    /* One mint for the three merged wishes, and each requester answered under its own trigger and id (RM-R2). */
+    expect(answered.map((event) => (event as AnyEventObject & { trigger: string }).trigger)).toEqual([
+      'save',
+      'hidden',
+      'close',
+      'save',
+    ]);
+    expect(promises.inputsFor('cut')).toHaveLength(2);
+    /* A waiter matching by trigger alone still settles on the stronger answer. */
+    expect(satisfiesCut('close', 'hidden')).toBe(true);
+    expect(satisfiesCut('close', 'save')).toBe(true);
+    expect(satisfiesCut('hidden', 'close')).toBe(false);
+    expect(satisfiesCut('close', 'restore')).toBe(false);
+    expect(satisfiesCut('switch', 'switch')).toBe(true);
     actor.stop();
   });
 
@@ -631,8 +752,13 @@ describe('checkoutMachine', () => {
   it('mints one idle revision after the quiet window, restarted by every write', async () => {
     const harness = start({ idleWindow: 1000 });
     const { actor, clock, promises, emitted, parent } = harness;
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
 
+    /* The first write from clean is compared (FX1 M); a real edit leaves it quiet. */
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
     expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
 
     /* A burst restarts the window; a checkout that is still being typed into
@@ -757,7 +883,8 @@ describe('checkoutMachine', () => {
     const { actor, promises, parent } = harness;
 
     actor.send({ type: 'cut', requestId: 't-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
-    actor.send({ type: 'cut', requestId: 'branch-1/cut', trigger: 'switch', leaseIds: [] });
+    /* Two ambient wishes coalesce; an operation's cut would keep its own place (D1). */
+    actor.send({ type: 'cut', requestId: 'hidden-1', trigger: 'hidden', leaseIds: [] });
     actor.send({ type: 'cut', requestId: 'save-1', trigger: 'save', leaseIds: [] });
     await mintToCas(harness);
     promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
@@ -774,10 +901,11 @@ describe('checkoutMachine', () => {
       answersOf(parent.events).map((event): unknown[] => [event['requestId'], event['trigger'], event['revisionId']]),
     ).toEqual([
       ['t-1', 'turn', 'rev-2'],
-      ['branch-1/cut', 'switch', 'rev-3'],
+      ['hidden-1', 'hidden', 'rev-3'],
       ['save-1', 'save', 'rev-3'],
     ]);
-    expect(promises.inputsFor('writeRevision').at(-1)).toMatchObject({ trigger: 'save' });
+    /* The merged mint records the stronger trigger (RV-W2b #4). */
+    expect(promises.inputsFor('writeRevision').at(-1)).toMatchObject({ trigger: 'hidden' });
 
     actor.stop();
   });
@@ -862,7 +990,7 @@ describe('checkoutMachine', () => {
   it('writes nothing, names the lease and stays dirty when a save finds a lease', async () => {
     const harness = start();
     const { actor, promises, parent } = harness;
-    const heldBy = { chatId: 'chat-2', turnId: 'turn-9', runId: 'run-9', attempt: 1 };
+    const heldBy = { chatId: 'chat-2', turn: turnOf('turn-9'), runId: 'run-9', attempt: 1 };
 
     actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
     actor.send({ type: 'cut', requestId: 'save-1', trigger: 'save', leaseIds: [] });
@@ -914,6 +1042,263 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
+  it('keeps an operation’s cut apart from the ambient ones queued beside it (D1)', () => {
+    const harness = start();
+    const { actor } = harness;
+
+    actor.send({ type: 'cut', requestId: 'c-6', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', requestId: 'r-2', trigger: 'restore', leaseIds: [], restoredFrom: 'rev-0' });
+    actor.send({ type: 'cut', requestId: 'r-3', trigger: 'save', leaseIds: [] });
+
+    expect(actor.getSnapshot().context.queued).toEqual([
+      {
+        trigger: 'restore',
+        requesters: [{ requestId: 'r-2', trigger: 'restore' }],
+        leaseIds: [],
+        restoredFrom: 'rev-0',
+      },
+      { trigger: 'save', requesters: [{ requestId: 'r-3', trigger: 'save' }], leaseIds: [] },
+    ]);
+
+    actor.stop();
+  });
+
+  it('writes a restore revision with the revision it restored (D1)', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'cut', requestId: 'c-9', trigger: 'restore', leaseIds: [], restoredFrom: 'rev-0' });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-1' } });
+    await flush();
+
+    expect(promises.inputsFor('writeRevision')).toEqual([
+      {
+        checkoutId: 'checkout-1',
+        cutId: 'cut-1',
+        treeId: nextTreeId,
+        parents: ['rev-1'],
+        trigger: 'restore',
+        leaseIds: [],
+        restoredFrom: 'rev-0',
+      },
+    ]);
+
+    actor.stop();
+  });
+
+  it('answers a lost CAS on a trigger-only cut exactly once, and rests dirty (T5)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    actor.send({ type: 'cut', requestId: 'r-t5', trigger: 'save', leaseIds: [] });
+    await mintToCas(harness);
+    promises.settle('casHead', { output: { status: 'conflicted', head: 'rev-9' } });
+    await flush();
+    promises.settle('readHead', { output: { revisionId: 'rev-9', treeId: 'tree-9', branch: 'main' } });
+    await flush();
+
+    expect(answersOf(parent.events)).toEqual([
+      { type: 'casLost', checkoutId: 'checkout-1', trigger: 'save', requestId: 'r-t5' },
+    ]);
+    expect(actor.getSnapshot().matches('dirty')).toBe(true);
+
+    actor.stop();
+  });
+
+  /* L2-F5's intent under RM-R6: the move is deferred, the mint's own compare-and-swap
+   * answers the turn once, and the queued turn mints on the re-read head. */
+  it('answers a turn exactly once with a lost CAS when the head moves mid-mint, then drains its queue (L2-F5, RM-R6)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks, parent } = harness;
+
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'r-2', trigger: 'turn', turn: turnOf('turn-2'), leaseIds: [] });
+    actor.send({ type: 'headMoved' });
+    await mintToCas(harness);
+    promises.settle('casHead', { output: { status: 'conflicted', head: 'rev-7' } });
+    await flush();
+    promises.settle('readHead', { output: { revisionId: 'rev-7', treeId: 'tree-7', branch: 'main' } });
+    await flush();
+
+    expect(answersOf(parent.events)).toEqual([
+      { type: 'casLost', checkoutId: 'checkout-1', trigger: 'turn', requestId: 'r-1', turn: turnOf('turn-1') },
+    ]);
+    /* The queued turn mints on the new head. */
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    await flush();
+    promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-2' } });
+    await flush();
+    expect(promises.inputsFor('writeRevision').at(-1)).toMatchObject({ parents: ['rev-7'], turn: turnOf('turn-2') });
+
+    actor.stop();
+  });
+
+  it('rests clean at spawn and reads dirty once a stale tree is found (D4)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    /* The first render is never held: the checkout is `clean` before anything is read. */
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    expect(parent.events.filter((event) => event.type === 'checkoutStatusChanged')).toEqual([
+      {
+        type: 'checkoutStatusChanged',
+        checkoutId: 'checkout-1',
+        status: 'clean',
+        branch: 'main',
+        headRevisionId: 'rev-1',
+        headTreeId,
+      },
+    ]);
+    expect(promises.inputsFor('captureTree')).toEqual([{ checkoutId: 'checkout-1', generation: 0 }]);
+
+    promises.settle('captureTree', { output: { treeId: 'tree-stale' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches('dirty')).toBe(true);
+    expect(parent.events.at(-1)).toMatchObject({ type: 'checkoutStatusChanged', status: 'dirty' });
+
+    actor.stop();
+  });
+
+  it('compares again against the new head when the head moves mid-capture (D4, M5, P2)', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    /* A registry re-announce lands before the first capture answers. */
+    actor.send({ type: 'headMoved' });
+    promises.settle('readHead', { output: { revisionId: 'rev-2', treeId: 'tree-2', branch: 'main' } });
+    await flush();
+
+    expect(promises.inputsFor('captureTree')).toHaveLength(2);
+    /* The first, cancelled capture's answer changes nothing; the second's is read. */
+    promises.settle('captureTree', { output: { treeId: 'tree-2' } });
+    await flush();
+    expect(actor.getSnapshot().matches({ clean: 'comparing' })).toBe(true);
+    promises.settle('captureTree', { output: { treeId: 'tree-stale' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches('dirty')).toBe(true);
+
+    actor.stop();
+  });
+
+  it('echoes the request id it was asked with on the answer, so a verb matches its own cut (N2)', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+
+    actor.send({ type: 'cut', requestId: 'restore-1', trigger: 'restore', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
+    await flush();
+
+    expect(parent.events.filter((event) => event.type === 'nothingToSave')).toEqual([
+      { type: 'nothingToSave', checkoutId: 'checkout-1', trigger: 'restore', requestId: 'restore-1' },
+    ]);
+
+    actor.stop();
+  });
+
+  it('stays clean when the spawn-time comparison finds the head’s tree, and compares only once it has answered (D4)', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+    actor.send({ type: 'headMoved' });
+    promises.settle('readHead', { output: { revisionId: 'rev-2', treeId: 'tree-2', branch: 'main' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches('clean')).toBe(true);
+    expect(promises.inputsFor('captureTree')).toHaveLength(1);
+
+    actor.stop();
+  });
+
+  describe('a write to a clean checkout (FX1 M)', () => {
+    /* Spawn, and answer D4's comparison with the head, so the checkout rests clean. */
+    const startRested = async (): Promise<Harness> => {
+      const harness = start({ idleWindow: 1000 });
+      harness.promises.settle('captureTree', { output: { treeId: headTreeId } });
+      await flush();
+      return harness;
+    };
+
+    it('should read clean at once when a pull’s own writes land after its head and equal it', async () => {
+      const { actor, promises, parent } = await startRested();
+
+      /* The host applies the pull, announces the head, and its watcher reports the apply (E1). */
+      actor.send({ type: 'headMoved' });
+      promises.settle('readHead', { output: { revisionId: 'rev-2', treeId: 'tree-2', branch: 'main' } });
+      await flush();
+      actor.send({ type: 'changed', paths: ['main.scad', 'tau.json'], generation: 1 });
+
+      expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
+      promises.settle('captureTree', { output: { treeId: 'tree-2' } });
+      await flush();
+
+      /* No idle window elapsed and nothing was cut: the comparison alone cleared it. */
+      expect(actor.getSnapshot().matches('clean')).toBe(true);
+      expect(promises.inputsFor('cut')).toEqual([]);
+      expect(parent.events.findLast((event) => event.type === 'checkoutStatusChanged')).toMatchObject({
+        status: 'clean',
+        headRevisionId: 'rev-2',
+      });
+      actor.stop();
+    });
+
+    it('should stay dirty and start the idle window when the write is a real edit', async () => {
+      const { actor, promises, clock } = await startRested();
+
+      actor.send({ type: 'changed', paths: ['main.scad'], generation: 1 });
+      promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+      await flush();
+
+      expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
+      clock.advance(1000);
+      expect(actor.getSnapshot().context['pending']).toEqual({ trigger: 'idle', requesters: [], leaseIds: [] });
+      actor.stop();
+    });
+
+    it('should hand the cut after an answered comparison no path the comparison read (E1)', async () => {
+      const harness = await startRested();
+      const { actor, promises } = harness;
+
+      actor.send({ type: 'changed', paths: ['main.scad'], generation: 1 });
+      promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+      await flush();
+      actor.send({ type: 'changed', paths: ['tau.json'], generation: 2 });
+      actor.send({ type: 'cut', requestId: 'c-11', trigger: 'save', leaseIds: [] });
+      harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+      expect(promises.inputsFor('cut')).toEqual([
+        { checkoutId: 'checkout-1', trigger: 'save', changedPaths: ['tau.json'], generation: 2 },
+      ]);
+      actor.stop();
+    });
+
+    it('should compare again when another write lands while it compares', async () => {
+      const { actor, promises } = await startRested();
+
+      actor.send({ type: 'changed', paths: ['main.scad'], generation: 1 });
+      actor.send({ type: 'changed', paths: ['tau.json'], generation: 2 });
+
+      expect(promises.inputsFor('captureTree')).toHaveLength(3);
+      /* The first capture predates the second write, so its equal answer clears nothing. */
+      promises.settle('captureTree', { output: { treeId: headTreeId } });
+      await flush();
+      expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
+      promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+      await flush();
+
+      expect(actor.getSnapshot().matches({ dirty: 'quiet' })).toBe(true);
+      actor.stop();
+    });
+  });
+
   it('exercises every state value xstate/graph can generate', () => {
     const paths = getSimplePaths(checkoutMachine, {
       events: [
@@ -930,8 +1315,10 @@ describe('checkoutMachine', () => {
       limit: 200,
     });
     const exercised = new Set([
-      '"clean"',
+      '{"clean":"rested"}',
+      '{"clean":"comparing"}',
       '{"dirty":"quiet"}',
+      '{"dirty":"comparing"}',
       '"failed"',
       '"stale"',
       '"rereading"',
@@ -952,6 +1339,7 @@ describe('checkoutMachine', () => {
     const writeInvoke = invokeId('minting.writing');
     const casInvoke = invokeId('minting.publishing');
     const readHeadInvoke = invokeId('rereading');
+    const captureInvokes = [invokeId('clean.comparing'), invokeId('dirty.comparing')];
     const publicEvents: readonly CheckoutMachineEvent[] = [
       { type: 'changed', paths: ['a.ts'], generation: 1 },
       { type: 'cut', requestId: 'r-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] },
@@ -987,6 +1375,11 @@ describe('checkoutMachine', () => {
           output: { revisionId: 'rev-9', treeId: 'tree-9', branch: 'main' },
         },
         { type: `xstate.error.actor.${readHeadInvoke}`, error: new Error('ESTALE') },
+        ...captureInvokes.flatMap((id) => [
+          { type: `xstate.done.actor.${id}`, output: { treeId: headTreeId } },
+          { type: `xstate.done.actor.${id}`, output: { treeId: 'tree-mine' } },
+          { type: `xstate.error.actor.${id}`, error: new Error('EACCES') },
+        ]),
       ],
       limit: 20_000,
       serializeState: (snapshot: AnyMachineSnapshot) => JSON.stringify(snapshot.value),
@@ -994,7 +1387,108 @@ describe('checkoutMachine', () => {
 
     expect(unansweredEvents(checkoutMachine, { ...options, ignore: checkoutIgnoredEvents })).toEqual([]);
     /* Routing states — `stale` and the finals `MintExit` routes through — are left in the macrostep that enters them. */
-    const transient = new Set(['checkout.dirty.elapsed', 'checkout.minting.done', 'checkout.stale']);
+    const transient = new Set([
+      'checkout.dirty.elapsed',
+      'checkout.minting.done',
+      'checkout.stale',
+      'checkout.clean.differs',
+      'checkout.dirty.matched',
+    ]);
     expect(unreachedStates(checkoutMachine, options).filter((id) => !transient.has(id))).toEqual([]);
+  });
+});
+
+describe('checkoutMachine changed paths (E1)', () => {
+  type PathsInput = Readonly<{ changedPaths?: readonly string[] | undefined }>;
+  const pathsOf = (harness: Harness, name: 'cut' | 'captureTree'): ReadonlyArray<readonly string[] | undefined> =>
+    (harness.promises.inputsFor(name) as readonly PathsInput[]).map((input) => input.changedPaths);
+
+  /* Spawn, answer D4's comparison with the head, and run one cut the tree gate settles. */
+  const startSettled = async (): Promise<Harness> => {
+    const harness = start();
+    harness.promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+    harness.actor.send({ type: 'cut', requestId: 'c-12', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    harness.promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-0' } });
+    await flush();
+    return harness;
+  };
+
+  it('should hand a cut every path written since the previous cut took them, and unknown before the first', async () => {
+    const harness = await startSettled();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'changed', paths: ['b.ts'], generation: 1 });
+    actor.send({ type: 'changed', paths: ['c.ts', 'b.ts'], generation: 2 });
+    actor.send({ type: 'cut', requestId: 'c-13', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    /* A write that lands while the cut runs is the next cut's (F4). */
+    actor.send({ type: 'changed', paths: ['d.ts'], generation: 3 });
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
+    await flush();
+    actor.send({ type: 'cut', requestId: 'c-14', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+    expect(pathsOf(harness, 'cut')).toEqual([undefined, ['b.ts', 'c.ts'], ['d.ts']]);
+    actor.stop();
+  });
+
+  it('should give a failed cut’s paths back to the next cut', async () => {
+    const harness = await startSettled();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'changed', paths: ['x.ts'], generation: 1 });
+    actor.send({ type: 'cut', requestId: 'c-15', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { error: new Error('disk full') });
+    await flush();
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+    actor.send({ type: 'changed', paths: ['y.ts'], generation: 2 });
+    actor.send({ type: 'cut', requestId: 'c-16', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+    expect(pathsOf(harness, 'cut').at(-1)).toEqual(['x.ts', 'y.ts']);
+    actor.stop();
+  });
+
+  it('should forget the paths when the head moves, so the comparison reads everything and the next cut only what followed it (I6)', async () => {
+    const harness = await startSettled();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    promises.settle('captureTree', { output: { treeId: 'tree-mine' } });
+    await flush();
+    actor.send({ type: 'headMoved' });
+    promises.settle('readHead', { output: { revisionId: 'rev-7', treeId: 'tree-7', branch: 'main' } });
+    await flush();
+    expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
+    promises.settle('captureTree', { output: { treeId: 'tree-other' } });
+    await flush();
+    actor.send({ type: 'changed', paths: ['b.ts'], generation: 2 });
+    actor.send({ type: 'cut', requestId: 'c-17', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+    /* Spawn, the clean edge's comparison of the one path written (FX1 M), then the moved head's whole one. */
+    expect(pathsOf(harness, 'captureTree')).toEqual([undefined, ['a.ts'], undefined]);
+    expect(pathsOf(harness, 'cut').at(-1)).toEqual(['b.ts']);
+    actor.stop();
+  });
+
+  it('should read everything once more paths were written than a list is worth', async () => {
+    const harness = await startSettled();
+    const { actor } = harness;
+
+    actor.send({
+      type: 'changed',
+      paths: Array.from({ length: 1025 }, (_, index) => `f${String(index)}.ts`),
+      generation: 1,
+    });
+    actor.send({ type: 'cut', requestId: 'c-18', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+
+    expect(pathsOf(harness, 'cut').at(-1)).toBeUndefined();
+    expect(actor.getSnapshot().context.changedPaths).toEqual([]);
+    actor.stop();
   });
 });

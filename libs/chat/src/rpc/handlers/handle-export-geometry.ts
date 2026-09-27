@@ -18,7 +18,14 @@ export async function handleExportGeometry(
     };
   }
 
-  const result = await graphics.exportGeometry({ targetFile: input.targetFile, format: input.format }, context);
+  const result = await graphics.exportGeometry(
+    {
+      targetFile: input.targetFile,
+      format: input.format,
+      ...(input.exportOptions === undefined ? {} : { exportOptions: input.exportOptions }),
+    },
+    context,
+  );
   context?.signal?.throwIfAborted();
 
   if (!result.success) {
@@ -44,9 +51,12 @@ export async function handleExportGeometry(
     };
   }
 
+  /* A transcoder can succeed with less than was asked, such as one colour for a multi-colour model; the agent must hear it. */
+  const warnings = result.issues?.filter((issue) => issue.severity === 'warning') ?? [];
   return {
     success: true,
     format: input.format,
     files,
+    ...(warnings.length === 0 ? {} : { warnings }),
   };
 }

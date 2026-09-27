@@ -9,7 +9,8 @@
  * `attachments/<sha256>.<ext>`, content addressed, so the same bytes are the
  * same entry on every device (D12).
  * The ref's tree is that directory with one rename: this device's own
- * `events.jsonl` is written out as `events/<deviceId>.jsonl`, so the paths of
+ * `events.jsonl` is written out as `events/<deviceId>.jsonl` — `deviceId` being
+ * the record device of the writing actor form, never the host's own id — so the paths of
  * two devices' logs are disjoint and a merge never has to read a line (A39,
  * S39). The union is therefore a tree union, and the CAS loser replays by
  * putting its own segment back onto the remote tree — there is no merge driver
@@ -33,6 +34,7 @@ import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { equalBytes } from '#object-hash.js';
 
 import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
+import { remoteTrackingRef } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort, RevisionPushRef } from '#revision-port.js';
 
@@ -61,6 +63,17 @@ export const chatLogFileName = 'events.jsonl';
 
 /** One device's log as the ref's tree spells it. @public */
 export const chatSegmentPath = (deviceId: string): string => `events/${deviceId}.jsonl`;
+
+/**
+ * Whether a tree path is one of this host's own segments, under any actor form.
+ *
+ * @param context - The segment name this write uses, and every one this host has used.
+ * @param path - A path inside the chat ref's tree.
+ * @returns `true` for a segment this host wrote.
+ */
+const isOwnSegment = (context: ChatRefContext, path: string): boolean =>
+  path === chatSegmentPath(context.deviceId) ||
+  [...(context.ownDevices ?? [])].some((device) => path === chatSegmentPath(device));
 
 /**
  * One attachment blob as the closed tree spells it: `attachments/<64 hex>.<ext>`
@@ -104,7 +117,10 @@ export const chatIdOfRef = (ref: string): string | undefined => {
 export type ChatRefWriteStatus =
   /** The ref moved to a new commit. */
   | 'updated'
-  /** The chat directory's bytes already match the ref. Nothing was written. */
+  /**
+   * Nothing new was recorded: the chat directory's bytes are already in the
+   * ref, or in the head it was built on, which the ref now names.
+   */
   | 'upToDate'
   /** *Sync chats* is off for this project. No ref exists and none was created. */
   | 'disabled'
@@ -138,13 +154,21 @@ export type ChatRefContext = Readonly<{
   /** The checkout whose `.tau/chats/**` is the canonical form. */
   filesystem: FileSystemProvider;
   /**
-   * This host's stable identity among the devices writing one chat.
+   * The name of this device's segment for the actor form writing it: a record
+   * device id (`OpsLog.deviceFor`), never the host's own device id (EQ10(a)).
    *
    * It names a *log segment*, so it must be stable across reloads of one
-   * profile and different between two profiles; it is never an identity a
-   * remote can be authenticated by and never leaves the tree.
+   * profile and different between two profiles; it is opaque to every reader,
+   * which only breaks a tie with it, and never an identity a remote can be
+   * authenticated by.
    */
   deviceId: string;
+  /**
+   * Every segment name this host has written under, for any actor form. A
+   * segment named by one of them is this host's own and never projected back
+   * onto disk, after a sign-in changed which one {@link deviceId} is.
+   */
+  ownDevices?: ReadonlySet<string>;
 }>;
 
 /** Input for {@link writeChatRef}. @public */
@@ -165,6 +189,12 @@ export type WriteChatRefInput = ChatRefContext &
     actorId: string;
     /** Milliseconds since the Unix epoch. Defaults to the host clock. */
     now?: number;
+    /**
+     * The remote this project syncs with, whose fetched chat head a write
+     * builds on when the local chain does not already hold it. Absent, a
+     * write builds on the local chain alone.
+     */
+    remote?: string;
   }>;
 
 /** Input for {@link replayChatSegment}. @public */
@@ -187,6 +217,11 @@ export type ProjectChatsInput = ChatRefContext &
     /** The refs a fetch just wrote, local or remote-tracking. */
     refs: ReadonlyArray<Readonly<{ name: string; head: RevisionId }>>;
     signal?: AbortSignal;
+    /**
+     * Told of each chat whose bytes on disk changed, as it changes — also for
+     * one whose record then conflicts, whose segments were still written (CH1).
+     */
+    onWritten?: (chatId: string) => void;
   }>;
 
 const textDecoder = new TextDecoder();
@@ -242,14 +277,15 @@ const localChatEntries = async (input: ChatRefContext & Readonly<{ chatId: strin
     readdirOrEmpty(input.filesystem, `${directory}/events`),
     readdirOrEmpty(input.filesystem, `${directory}/attachments`),
   ]);
-  const foreign = segmentNames.filter((name) => name.endsWith('.jsonl') && name !== `${input.deviceId}.jsonl`);
+  const foreign = segmentNames.filter((name) => name.endsWith('.jsonl') && !isOwnSegment(input, `events/${name}`));
   /* Filtered by the same rule the incoming tree is validated against, so a
    * stray file in the directory is left where it is instead of being recorded
    * into a tree every reader would then refuse. */
   const attachments = attachmentNames.filter((name) => chatAttachmentPattern.test(`attachments/${name}`));
   const read = await Promise.all([
+    /* This device's checkout binding and failure never travel (RV-W7 #3). */
     readFileOrUndefined(input.filesystem, `${directory}/${chatRecordFileName}`).then(
-      (bytes) => [chatRecordFileName, bytes] as const,
+      (bytes) => [chatRecordFileName, bytes === undefined ? undefined : withoutLocalFields(bytes)] as const,
     ),
     readFileOrUndefined(input.filesystem, `${directory}/${chatLogFileName}`).then(
       (bytes) => [chatSegmentPath(input.deviceId), bytes] as const,
@@ -265,8 +301,12 @@ const localChatEntries = async (input: ChatRefContext & Readonly<{ chatId: strin
       ),
     ),
   ]);
+  /* A zero-byte log carries no record: a chat whose only logs are empty is a
+   * chat nobody wrote, not one to publish (the desktop registration probe once
+   * created exactly that on every project open). */
   return read
     .filter((entry): entry is readonly [string, Uint8Array<ArrayBuffer>] => entry[1] !== undefined)
+    .filter(([path, content]) => !(path.startsWith('events/') && content.byteLength === 0))
     .map(([path, content]) => [path, content] as const);
 };
 
@@ -316,14 +356,161 @@ const appendUnion = (
   );
 };
 
+type ChatRecordFields = Readonly<Record<string, unknown>>;
+
+const recordConflict = (): RevisionPortError =>
+  new RevisionPortError(
+    'CHECKOUT_CONFLICT',
+    'This chat’s details changed on two devices. Keep the local details or the incoming details, then retry.',
+  );
+
+const parseRecordFields = (bytes: Uint8Array<ArrayBuffer>): ChatRecordFields | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(textDecoder.decode(bytes));
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? Object.fromEntries(Object.entries(parsed))
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const byKey = ([left]: readonly [string, unknown], [right]: readonly [string, unknown]): number =>
+  left < right ? -1 : left > right ? 1 : 0;
+
+/* Nested objects with their keys sorted, so equal values compare and serialize alike on every device. */
+const canonicalJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, nested: unknown) =>
+    typeof nested === 'object' && nested !== null && !Array.isArray(nested)
+      ? Object.fromEntries(Object.entries(nested).toSorted(byKey))
+      : nested,
+  );
+
+const sameValue = (left: unknown, right: unknown): boolean => canonicalJson(left) === canonicalJson(right);
+
+/* The app's `serializeChatRecord` format — two-space JSON and a newline — restated
+ * because `packages/**` imports no app code. */
+const serializeRecord = (record: ChatRecordFields): Uint8Array<ArrayBuffer> =>
+  new TextEncoder().encode(`${JSON.stringify(record, undefined, 2)}\n`);
+
+/* Fields every device moves on every turn: the later instant is the answer. */
+const latestFields = new Set(['updatedAt', 'recencyAt']);
+/* Fields that only ever settle: the earlier instant is the answer, and a tombstone wins. */
+const earliestFields = new Set(['createdAt', 'deletedAt']);
+/* This device's own checkout binding and failure: they never travel (RV-W7 #3). */
+const localFields = ['checkoutId', 'error'] as const;
+
 /**
- * Three-way `chat.json`, against every ancestor both sides are known to share (D40).
+ * A record as it travels: without the fields that are this device's alone.
+ *
+ * @param bytes - A `chat.json`.
+ * @returns The same bytes when it holds neither field or is not a record; else
+ *   the record without them, in its own key order.
+ */
+const withoutLocalFields = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
+  const record = parseRecordFields(bytes);
+  if (record === undefined || localFields.every((key) => !(key in record))) {
+    return bytes;
+  }
+  return serializeRecord(
+    Object.fromEntries(Object.entries(record).filter(([key]) => !localFields.some((field) => field === key))),
+  );
+};
+
+/**
+ * The record to write here: the reconciled one, with this device's own fields
+ * as this device holds them.
+ *
+ * @param merged - The reconciled record, without local fields.
+ * @param local - This device's `chat.json` as it is on disk.
+ * @param shared - `local` without its local fields.
+ * @returns `local` itself when nothing shared changed, so a re-run writes nothing.
+ */
+const withLocalFieldsOf = (
+  merged: Uint8Array<ArrayBuffer>,
+  local: Uint8Array<ArrayBuffer>,
+  shared: Uint8Array<ArrayBuffer>,
+): Uint8Array<ArrayBuffer> => {
+  if (equalBytes(merged, shared)) {
+    return local;
+  }
+  const record = parseRecordFields(merged);
+  const own = parseRecordFields(local);
+  if (record === undefined || own === undefined || localFields.every((key) => !(key in own) && !(key in record))) {
+    return merged;
+  }
+  const kept = Object.entries(record).filter(([key]) => !localFields.some((field) => field === key));
+  return serializeRecord(
+    Object.fromEntries([...kept, ...localFields.flatMap((key) => (key in own ? [[key, own[key]] as const] : []))]),
+  );
+};
+
+/**
+ * One field of `chat.json`, three ways (CH1): the side that changed, a join for
+ * the timestamps, and a conflict only where both sides changed anything else.
+ * Symmetric: swapping the two sides gives the same value.
+ *
+ * @param field - The field's name, this device's value and the fetched value
+ *   (`undefined` when absent), and each known ancestor's value.
+ * @returns The merged value, `undefined` to leave the field out.
+ * @throws RevisionPortError `CHECKOUT_CONFLICT` when both sides changed a field with no join.
+ */
+const mergeRecordField = ({
+  key,
+  local,
+  incoming,
+  bases,
+}: Readonly<{ key: string; local: unknown; incoming: unknown; bases: readonly unknown[] }>): unknown => {
+  if (sameValue(local, incoming)) {
+    return local;
+  }
+  const localChanged = !bases.some((base) => sameValue(base, local));
+  const incomingChanged = !bases.some((base) => sameValue(base, incoming));
+  if (localChanged !== incomingChanged) {
+    return localChanged ? local : incoming;
+  }
+  const join = latestFields.has(key) ? Math.max : earliestFields.has(key) ? Math.min : undefined;
+  if (join !== undefined) {
+    if (typeof local === 'number' && typeof incoming === 'number') {
+      return join(local, incoming);
+    }
+    /* One side has no instant yet: the present one wins (a tombstone is never cleared). */
+    if (typeof local === 'number' && incoming === undefined) {
+      return local;
+    }
+    if (typeof incoming === 'number' && local === undefined) {
+      return incoming;
+    }
+  }
+  /* Each side equals a different ancestor: neither changed anything the other
+   * has not seen, so either value is the record's; the larger reads the same
+   * from both sides. */
+  if (!localChanged) {
+    return canonicalJson(local) > canonicalJson(incoming) ? local : incoming;
+  }
+  throw recordConflict();
+};
+
+/**
+ * Three-way `chat.json` without local fields, against every ancestor both sides
+ * are known to share (D40), field by field (CH1).
  *
  * Two are known: the incoming commit's parent, and this device's own chat ref —
  * what it last recorded. The second is the only one a device's own push has when
- * it comes back, since a chat's first commit has no parent.
+ * it comes back, since a chat's first commit has no parent. When both sides
+ * changed the record, it is merged per field by {@link mergeRecordField} and
+ * written in one order every device agrees on — the first ancestor's keys, then
+ * the rest sorted, nested keys sorted — so either device merging writes the
+ * same bytes.
+ *
+ * @param local - This device's record.
+ * @param bases - Each known ancestor's record.
+ * @param incoming - The fetched record.
+ * @returns The record, or `undefined` for none.
+ * @throws RevisionPortError `CHECKOUT_CONFLICT` when both sides changed a field
+ *   with no join, or either side is not a record.
  */
-const reconcileMetadata = (
+const reconcileShared = (
   local: Uint8Array<ArrayBuffer> | undefined,
   bases: ReadonlyArray<Uint8Array<ArrayBuffer> | undefined>,
   incoming: Uint8Array<ArrayBuffer> | undefined,
@@ -336,10 +523,58 @@ const reconcileMetadata = (
   if (incoming === undefined || equalBytes(local, incoming) || isBase(incoming)) {
     return local;
   }
-  throw new RevisionPortError(
-    'CHECKOUT_CONFLICT',
-    'This chat’s details changed on two devices. Keep the local details or the incoming details, then retry.',
+  const localFieldsOf = parseRecordFields(local);
+  const incomingFieldsOf = parseRecordFields(incoming);
+  if (localFieldsOf === undefined || incomingFieldsOf === undefined) {
+    throw recordConflict();
+  }
+  const baseRecords = bases.flatMap((base) => {
+    const parsed = base === undefined ? undefined : parseRecordFields(base);
+    return parsed === undefined ? [] : [parsed];
+  });
+  const keys = new Set([...Object.keys(localFieldsOf), ...Object.keys(incomingFieldsOf)]);
+  const first = Object.keys(baseRecords[0] ?? {}).filter((key) => keys.has(key));
+  const rest = [...keys].filter((key) => !first.includes(key)).toSorted();
+  const merged: Array<readonly [string, unknown]> = [];
+  for (const key of [...first, ...rest]) {
+    const value = mergeRecordField({
+      key,
+      local: localFieldsOf[key],
+      incoming: incomingFieldsOf[key],
+      bases: baseRecords.map((base) => base[key]),
+    });
+    if (value !== undefined) {
+      merged.push([key, JSON.parse(canonicalJson(value)) as unknown]);
+    }
+  }
+  return serializeRecord(Object.fromEntries(merged));
+};
+
+/**
+ * `chat.json` as this device should hold it after a fetch: the shared fields
+ * reconciled by {@link reconcileShared}, and `checkoutId`/`error` kept as this
+ * device has them in every branch — they never travel (RV-W7 #3).
+ *
+ * @param local - This device's `chat.json`.
+ * @param bases - Each known ancestor's `chat.json`.
+ * @param incoming - The fetched `chat.json`.
+ * @returns The record to write, or `undefined` for none.
+ * @throws RevisionPortError `CHECKOUT_CONFLICT` as {@link reconcileShared} does.
+ */
+const reconcileMetadata = (
+  local: Uint8Array<ArrayBuffer> | undefined,
+  bases: ReadonlyArray<Uint8Array<ArrayBuffer> | undefined>,
+  incoming: Uint8Array<ArrayBuffer> | undefined,
+): Uint8Array<ArrayBuffer> | undefined => {
+  const shared = local === undefined ? undefined : withoutLocalFields(local);
+  const merged = reconcileShared(
+    shared,
+    bases.map((base) => (base === undefined ? undefined : withoutLocalFields(base))),
+    incoming === undefined ? undefined : withoutLocalFields(incoming),
   );
+  return local === undefined || shared === undefined || merged === undefined
+    ? merged
+    : withLocalFieldsOf(merged, local, shared);
 };
 
 const sameTree = (left: ImmutableRevisionTree, right: ImmutableRevisionTree | undefined): boolean => {
@@ -424,10 +659,14 @@ const chatProvenance = (input: WriteChatRefInput, now: number): RevisionProvenan
 /**
  * Record this device's chat directory onto `refs/tau/chats/<chatId>`.
  *
- * The local ref's current value is the commit's parent *and* the lease the ref
- * update is made under, because for an ordinary write those are the same head.
- * They part company after a fetch: see {@link replayChatSegment}, which is what
- * a `conflicted` result and a rejected push both route to.
+ * The commit's parent is the local ref's current value, unless the fetched
+ * head (`refs/remotes/<remote>/tau/chats/<chatId>`) holds something the local
+ * chain does not: then it is that head. A fetch writes only the tracking ref,
+ * so a chat this device only received has no local chain at all, and building
+ * on nothing minted a root the remote refuses as not a fast-forward (W13c).
+ * The lease the ref update is made under is always the local ref's own value;
+ * see {@link replayChatSegment}, which is what a `conflicted` result and a
+ * rejected push both route to.
  *
  * @param input - The chat, the device, and the project's *Sync chats* answer.
  * @returns What the ref holds now, and why.
@@ -455,7 +694,27 @@ export const writeChatRef = async (input: WriteChatRefInput): Promise<ChatRefWri
       expectedLocalHead: undefined,
     });
   }
-  return replayChatSegment({ ...input, onto: await input.port.readRef(chatRefName(input.chatId)) });
+  const ref = chatRefName(input.chatId);
+  const [local, fetched] = await Promise.all([
+    input.port.readRef(ref),
+    input.remote === undefined ? undefined : input.port.readRef(remoteTrackingRef(input.remote, ref)),
+  ]);
+  /* Every segment only grows on the remote, so a tracking head the local chain
+   * lacks is the newer base; this device's own bytes come back off disk. A
+   * chain that already holds it stays its own: a native push moves no tracking
+   * ref, so the fetched head can be behind what this device pushed. */
+  const holdsFetched = async (): Promise<boolean> => {
+    if (fetched === undefined || fetched === local) {
+      return true;
+    }
+    if (local === undefined) {
+      return false;
+    }
+    const { behind } = await input.port.divergence({ head: local, base: fetched });
+    return behind === 0;
+  };
+  const onto = (await holdsFetched()) ? local : fetched;
+  return replayChatSegment({ ...input, onto });
 };
 
 /**
@@ -518,13 +777,37 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
      * an empty chat, it is a chat this host has no records for. */
     return unchanged;
   }
-  if (sameTree(tree, base)) {
-    /* This device has nothing the base does not already hold. The local ref is
-     * left where it is: its tree is a subset of the base's, and the next write
-     * parents on it with every projected segment read back off disk, so nothing
-     * is lost by not re-pointing it here. */
+  const nothingNew = sameTree(tree, base);
+  if (nothingNew && input.onto === localHead) {
     return unchanged;
   }
+  /* Nothing of this device's that the base lacks: the local ref follows the
+   * base (W13c). Left behind, it was offered again on every sync, and the
+   * remote refused that stale chain as not a fast-forward each time. */
+  const head = nothingNew ? input.onto : await recordUnion(input, tree);
+  if (head === undefined) {
+    return unchanged;
+  }
+  /* The parent is the head being caught up to; the lease is what *this host's*
+   * ref holds. They differ on every real second device, and using `onto` for
+   * both is why a fetched replay could never publish (a1 review R2). */
+  const published = await input.port.updateRef({ name: ref, expectedHead: localHead, head });
+  const status = nothingNew ? 'upToDate' : 'updated';
+  return Object.freeze(
+    published.status === 'updated'
+      ? { chatId: input.chatId, ref, status, head, expectedLocalHead: localHead }
+      : { chatId: input.chatId, ref, status: 'conflicted', head: published.actualHead, expectedLocalHead: localHead },
+  );
+};
+
+/**
+ * Write one union tree as the next commit of a chat chain, parented on `onto`.
+ *
+ * @param input - The chat and the head the union is built on.
+ * @param tree - The union to record.
+ * @returns The new commit.
+ */
+const recordUnion = async (input: ReplayChatSegmentInput, tree: ImmutableRevisionTree): Promise<RevisionId> => {
   const now = input.now ?? Date.now();
   const receipt = await input.port.writeRevision({
     parents: input.onto === undefined ? [] : [input.onto],
@@ -537,16 +820,50 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
     provenance: chatProvenance(input, now),
     summary: { generated: `Chat ${input.chatId}` },
   });
-  const head = revisionId(receipt.commitId);
-  /* The parent is the head being caught up to; the lease is what *this host's*
-   * ref holds. They differ on every real second device, and using `onto` for
-   * both is why a fetched replay could never publish (a1 review R2). */
-  const published = await input.port.updateRef({ name: ref, expectedHead: localHead, head });
-  return Object.freeze(
-    published.status === 'updated'
-      ? { chatId: input.chatId, ref, status: 'updated', head, expectedLocalHead: localHead }
-      : { chatId: input.chatId, ref, status: 'conflicted', head: published.actualHead, expectedLocalHead: localHead },
-  );
+  return revisionId(receipt.commitId);
+};
+
+/*
+ * How many chat refs one fetch projects at once (L4-F10, R34). Each reads up to
+ * three trees, and a second device's first open can bring every chat the
+ * project has, so an unbounded fan-out held every tree in memory at once — the
+ * shape `readTree`'s own fan-out bug had before C49.
+ *
+ * ponytail: the base tree is still read whole for its `chat.json`; reading that
+ * one file needs a single-path read on `RevisionPort` (both legs), which is the
+ * upgrade path if second-device opens measure slow (L4 E9).
+ */
+const chatProjectionConcurrency = 16;
+
+/**
+ * `Promise.allSettled` over `items`, with at most `limit` running at once.
+ *
+ * @param items - The work, in order.
+ * @param limit - The most that may run together.
+ * @param run - One item's work.
+ * @returns One settled result per item, in the items' order.
+ */
+const settleBounded = async <Item, Result>(
+  items: readonly Item[],
+  limit: number,
+  run: (item: Item) => Promise<Result>,
+): Promise<ReadonlyArray<PromiseSettledResult<Result>>> => {
+  const results: Array<PromiseSettledResult<Result>> = [];
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each lane is one sequential slot of the bounded pool.
+        results[index] = { status: 'fulfilled', value: await run(items[index]!) };
+      } catch (error) {
+        results[index] = { status: 'rejected', reason: error };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+  return results;
 };
 
 /**
@@ -567,49 +884,63 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
  * @public
  */
 export const projectChats = async (input: ProjectChatsInput): Promise<readonly string[]> => {
-  const projected = await Promise.allSettled(
-    input.refs.map(async (ref) => {
-      const chatId = chatIdOfRef(ref.name);
-      if (chatId === undefined) {
-        return undefined;
-      }
-      const tree = await input.port.readTree(ref.head);
-      if (tree === undefined) {
-        return undefined;
-      }
-      assertChatTree(tree);
-      input.signal?.throwIfAborted();
-      const directory = chatRecordsPath(chatId);
-      const localRecord = await readFileOrUndefined(input.filesystem, `${directory}/${chatRecordFileName}`);
-      const revision = await input.port.readRevision(ref.head);
-      const base = revision?.parents[0] === undefined ? undefined : await input.port.readTree(revision.parents[0]);
-      const recorded = await input.port.readRef(chatRefName(chatId));
-      const own = recorded === undefined ? undefined : await input.port.readTree(recorded);
-      const incomingRecord = tree.get(chatRecordFileName);
-      const metadata = reconcileMetadata(
+  const projected = await settleBounded(input.refs, chatProjectionConcurrency, async (ref) => {
+    const chatId = chatIdOfRef(ref.name);
+    if (chatId === undefined) {
+      return undefined;
+    }
+    const tree = await input.port.readTree(ref.head);
+    if (tree === undefined) {
+      return undefined;
+    }
+    assertChatTree(tree);
+    input.signal?.throwIfAborted();
+    const directory = chatRecordsPath(chatId);
+    const localRecord = await readFileOrUndefined(input.filesystem, `${directory}/${chatRecordFileName}`);
+    const revision = await input.port.readRevision(ref.head);
+    const base = revision?.parents[0] === undefined ? undefined : await input.port.readTree(revision.parents[0]);
+    const recorded = await input.port.readRef(chatRefName(chatId));
+    const own = recorded === undefined ? undefined : await input.port.readTree(recorded);
+    const incomingRecord = tree.get(chatRecordFileName);
+    /* A record conflict never withholds the other device's log (CH1): the
+     * segments and attachments are written either way, the record only when it
+     * reconciled, and the conflict is reported after them. */
+    let metadata: Uint8Array<ArrayBuffer> | undefined;
+    let conflict: RevisionPortError | undefined;
+    try {
+      metadata = reconcileMetadata(
         localRecord,
         [base?.get(chatRecordFileName), own?.get(chatRecordFileName)],
         incomingRecord,
       );
-      const changed = await writeEntries({
-        filesystem: input.filesystem,
-        directory,
-        entries: [
-          ...tree
-            .entries()
-            .filter(
-              (entry) =>
-                entry.path !== chatSegmentPath(input.deviceId) &&
-                entry.path !== chatLogFileName &&
-                entry.path !== chatRecordFileName,
-            ),
-          ...(metadata === undefined ? [] : [{ path: chatRecordFileName, content: metadata }]),
-        ],
-        signal: input.signal,
-      });
-      return changed ? chatId : undefined;
-    }),
-  );
+    } catch (error) {
+      if (!(error instanceof RevisionPortError)) {
+        throw error;
+      }
+      conflict = error;
+    }
+    const changed = await writeEntries({
+      filesystem: input.filesystem,
+      directory,
+      entries: [
+        ...tree
+          .entries()
+          .filter(
+            (entry) =>
+              !isOwnSegment(input, entry.path) && entry.path !== chatLogFileName && entry.path !== chatRecordFileName,
+          ),
+        ...(metadata === undefined ? [] : [{ path: chatRecordFileName, content: metadata }]),
+      ],
+      signal: input.signal,
+    });
+    if (changed) {
+      input.onWritten?.(chatId);
+    }
+    if (conflict !== undefined) {
+      throw conflict;
+    }
+    return changed ? chatId : undefined;
+  });
   const rejected = projected.find((result) => result.status === 'rejected');
   if (rejected !== undefined) {
     throw rejected.reason instanceof Error ? rejected.reason : new Error(String(rejected.reason));

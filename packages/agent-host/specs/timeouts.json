@@ -85,9 +85,9 @@
     },
     {
       "id": "B8",
-      "bound": "Cut wait (awaitCut), the `hidden` cut only: the page may be frozen after `pagehide`; `save` and `close` are answered by request id",
-      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
-      "token": "syncQuiesceMilliseconds",
+      "bound": "Cut wait at close (awaitCheckoutCuts), the `hidden` cut only (closeCutMilliseconds): the page may be frozen after `pagehide`; `save` and `close` are answered by request id",
+      "site": "packages/revisions/src/revision-effects.ts",
+      "token": "trigger === 'hidden' ? closeCutMilliseconds",
       "class": "External edge",
       "owner": "W8"
     },
@@ -387,14 +387,6 @@
       "owner": "W8"
     },
     {
-      "id": "E14b",
-      "bound": "Watch echo window for paths the host is applying",
-      "site": "packages/host/src/revisions.ts",
-      "token": "applyingPaths.get(path)",
-      "class": "Debounce",
-      "owner": "W8"
-    },
-    {
       "id": "E16",
       "bound": "ACP adapter start: spawn, skill publication and initialize",
       "site": "packages/host/src/acp/acp-session.machine.ts",
@@ -589,14 +581,6 @@
       "owner": "W8"
     },
     {
-      "id": "B18",
-      "bound": "Hatchet worker-affinity and job-runtime requests, 10 s each (found by the AbortSignal.timeout match)",
-      "site": "packages/host/src/solver-job-worker.ts",
-      "token": "AbortSignal.timeout(10_000)",
-      "class": "External edge",
-      "owner": "runtime"
-    },
-    {
       "id": "D13",
       "bound": "Chat name generation request, 10 s (found by the AbortSignal.timeout match)",
       "site": "apps/ui/app/chat-clients/_internal/name-generator-client.ts",
@@ -635,6 +619,128 @@
       "token": "parameterCloseBound",
       "class": "External edge",
       "owner": "W6"
+    },
+    {
+      "id": "A14",
+      "bound": "Restore's own cut, before and after the tree is applied (30 s, restoreCutMilliseconds; geospec D15). The cut is answered by its request id, so this waits on a peer that always answers",
+      "site": "packages/revisions/src/restore.machine.ts",
+      "token": "restoreCutMilliseconds",
+      "class": "Peer",
+      "owner": "GM",
+      "fixedBy": "GM follow-up, open at the merge: an answer-only restore cut (RM-R11, B8)"
+    },
+    {
+      "id": "A15",
+      "bound": "Sync burst ceiling: a pending push goes at most this long after the first mint of a burst (syncMaxWait, D28)",
+      "site": "packages/revisions/src/sync.machine.ts",
+      "token": "syncMaxWait",
+      "class": "Debounce",
+      "owner": "GM"
+    },
+    {
+      "id": "A16",
+      "bound": "An open pull's wait for the revision stream's tail (2 s, W5b a1b); a stream that never answers holds the pull at most this long",
+      "site": "packages/revisions/src/revision-effects.ts",
+      "token": "streamTailWaitMilliseconds",
+      "class": "External edge",
+      "owner": "GM"
+    },
+    {
+      "id": "A17",
+      "bound": "Revision stream retry delay between failed long polls (D13)",
+      "site": "packages/revisions/src/revision-stream.ts",
+      "token": "setTimeout(resolve, milliseconds)",
+      "class": "Backoff",
+      "owner": "GM"
+    },
+    {
+      "id": "A18",
+      "bound": "Revision stream long-poll request deadline (long poll + 10 s, D13; found by the AbortSignal.timeout match)",
+      "site": "packages/revisions/src/revision-stream.ts",
+      "token": "AbortSignal.timeout(requestTimeout)",
+      "class": "External edge",
+      "owner": "GM"
+    },
+    {
+      "id": "N2",
+      "bound": "Not a timer: a variable named after",
+      "site": "packages/revisions/src/revision-stream.ts",
+      "token": "let failures = 0;",
+      "class": "None",
+      "owner": "GM"
+    },
+    {
+      "id": "E14c",
+      "bound": "Watch settle cookie (500 ms, E1): an unanswered cookie reads every path instead of the feed",
+      "site": "packages/host/src/revisions.ts",
+      "token": "watchSettleMilliseconds",
+      "class": "External edge",
+      "owner": "GM"
+    },
+    {
+      "id": "M1",
+      "bound": "Machine certificate probe",
+      "site": "packages/host/src/machine-host.ts",
+      "token": "MACHINE_CERTIFICATE_PROBE_TIMEOUT",
+      "class": "External edge",
+      "owner": "machines"
+    },
+    {
+      "id": "M2",
+      "bound": "Machine connect",
+      "site": "packages/host/src/machine-host.ts",
+      "token": "MACHINE_CONNECT_TIMEOUT",
+      "class": "External edge",
+      "owner": "machines"
+    },
+    {
+      "id": "M3",
+      "bound": "Machine stream idle",
+      "site": "packages/host/src/machine-host.ts",
+      "token": "MACHINE_STREAM_IDLE_TIMEOUT",
+      "class": "External edge",
+      "owner": "machines"
+    },
+    {
+      "id": "M4",
+      "bound": "Machine discovery listen window (found by the AbortSignal.timeout match)",
+      "site": "packages/host/src/machine-host.ts",
+      "token": "AbortSignal.timeout(input.durationMs)",
+      "class": "External edge",
+      "owner": "machines"
+    },
+    {
+      "id": "M5",
+      "bound": "Machine camera still deadline",
+      "site": "packages/host/src/rtsps-still.ts",
+      "token": "MACHINE_STILL_TIMEOUT",
+      "class": "External edge",
+      "owner": "machines"
+    },
+    {
+      "id": "M6",
+      "bound": "Keychain security CLI call",
+      "site": "packages/host/src/secret-vault.ts",
+      "token": "securityTimeout",
+      "class": "External edge",
+      "owner": "machines"
+    },
+    {
+      "id": "M7",
+      "bound": "Desktop machine-binding ceremony answer from the services utility",
+      "site": "apps/desktop/src/main/services-broker.ts",
+      "token": "The desktop machine binding timed out.",
+      "class": "Peer",
+      "owner": "machines",
+      "fixedBy": "outside this charter: the machines owner (desktop binding ceremony)"
+    },
+    {
+      "id": "M8",
+      "bound": "Refused machines channel held open 1 s so calls made together read the same refusal",
+      "site": "apps/desktop/src/tau/services-host.impl.ts",
+      "token": "server.dispose(reason.message)",
+      "class": "Debounce",
+      "owner": "machines"
     }
   ]
 }

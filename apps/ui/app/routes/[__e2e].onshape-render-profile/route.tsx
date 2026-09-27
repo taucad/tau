@@ -88,7 +88,10 @@ async function compressCapture(bytes: Uint8Array<ArrayBuffer>): Promise<string> 
   return uint8ArrayToBase64(compressed);
 }
 
-/** Read shader output before canvas PNG conversion unpremultiplies sRGB channels. */
+/**
+ * Read the premultiplied sRGB drawing buffer before canvas PNG conversion unpremultiplies and
+ * requantizes it. These are the bytes the compositor shows: `rgb + background × (1 − a)`.
+ */
 async function captureFramebuffer(renderer: WebGLRenderer): Promise<Record<string, unknown>> {
   const context = renderer.getContext();
   const { drawingBufferWidth: width, drawingBufferHeight: height } = context;
@@ -98,7 +101,13 @@ async function captureFramebuffer(renderer: WebGLRenderer): Promise<Record<strin
   for (let row = 0; row < height; row++) {
     topDown.set(pixels.subarray(row * width * 4, (row + 1) * width * 4), (height - row - 1) * width * 4);
   }
-  return { width, height, format: 'rgba8-srgb-framebuffer', compression: 'gzip', data: await compressCapture(topDown) };
+  return {
+    width,
+    height,
+    format: 'rgba8-srgb-premultiplied-framebuffer',
+    compression: 'gzip',
+    data: await compressCapture(topDown),
+  };
 }
 
 /** Export the actual filtered lighting texture without changing its pixels or the live scene. */

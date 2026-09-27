@@ -1,9 +1,11 @@
-import CameraControlsImpl from 'camera-controls';
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { selectCameraProjection } from '@taucad/camera/machine';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
-import { TauCameraControls } from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
+import {
+  resolveCameraControlProps,
+  TauCameraControls,
+} from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
 import { ViewportGizmoCube } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube.js';
 import { SectionViewControls } from '#components/geometry/graphics/three/react/section-view-controls.js';
 import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
@@ -52,7 +54,6 @@ export const Controls = React.memo(function ({
   zoomSpeed,
   gizmoContainer,
 }: ControlsProperties) {
-  const dollySpeed = zoomSpeed * 0.5;
   const graphicsActor = useGraphics();
   const cameraRig = useCameraRig();
   const renderFrame = useRenderFrame();
@@ -79,9 +80,9 @@ export const Controls = React.memo(function ({
     const point = toThreeRenderPoint({ renderFrame, pointMeters: pivot });
     return [point.x, point.y, point.z];
   }, [pivot, renderFrame]);
-  const mouseButtons = useMemo(
-    () => resolveCameraControlMouseButtons({ enablePan, enableZoom, secondaryMouseButtonMode, projectionKind }),
-    [enablePan, enableZoom, projectionKind, secondaryMouseButtonMode],
+  const controlProps = useMemo(
+    () => resolveCameraControlProps({ enablePan, enableZoom, secondaryMouseButtonMode, projectionKind, zoomSpeed }),
+    [enablePan, enableZoom, projectionKind, secondaryMouseButtonMode, zoomSpeed],
   );
 
   // Handlers to send events to xstate
@@ -143,15 +144,7 @@ export const Controls = React.memo(function ({
 
   return (
     <>
-      <TauCameraControls
-        makeDefault
-        initialTarget={initialTarget}
-        dollySpeed={dollySpeed}
-        truckSpeed={enablePan ? 2 : 0}
-        smoothTime={0}
-        draggingSmoothTime={0}
-        mouseButtons={mouseButtons}
-      />
+      <TauCameraControls makeDefault initialTarget={initialTarget} {...controlProps} />
       <MeasureTool />
       <SectionViewControls
         isActive={isActive}
@@ -174,29 +167,3 @@ export const Controls = React.memo(function ({
     </>
   );
 });
-
-export function resolveCameraControlMouseButtons({
-  enablePan,
-  enableZoom,
-  secondaryMouseButtonMode,
-  projectionKind = 'perspective',
-}: {
-  readonly enablePan: boolean;
-  readonly enableZoom: boolean;
-  readonly secondaryMouseButtonMode: SecondaryMouseButtonMode;
-  readonly projectionKind?: 'orthographic' | 'perspective';
-}): React.ComponentProps<typeof TauCameraControls>['mouseButtons'] {
-  return {
-    left: CameraControlsImpl.ACTION.ROTATE,
-    middle: enablePan ? CameraControlsImpl.ACTION.TRUCK : CameraControlsImpl.ACTION.NONE,
-    right:
-      enablePan && secondaryMouseButtonMode === 'camera-pan'
-        ? CameraControlsImpl.ACTION.TRUCK
-        : CameraControlsImpl.ACTION.NONE,
-    wheel: enableZoom
-      ? projectionKind === 'orthographic'
-        ? CameraControlsImpl.ACTION.ZOOM
-        : CameraControlsImpl.ACTION.DOLLY
-      : CameraControlsImpl.ACTION.NONE,
-  };
-}

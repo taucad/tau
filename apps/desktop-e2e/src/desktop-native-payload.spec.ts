@@ -1,9 +1,10 @@
 /* oxlint-disable no-await-in-loop -- Each negative case temporarily withholds one payload and must restore it before the next. */
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
-import { constants } from 'node:fs';
-import { cp, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
+import { promisify } from 'node:util';
 
 import { _electron as electron } from 'playwright';
 import { expect, test } from 'vitest';
@@ -66,7 +67,9 @@ test('[completed-artifact] loads native esbuild and nanoraster inside an Electro
   const app = join(runRoot, 'Tau.app');
   const utilityEntry = join(runRoot, 'native-payload-probe.mjs');
   const fixture = await readFile(join(workspaceRoot, 'packages/plugins/gltf/src/fixtures/cube.glb'));
-  await cp(sourceApp, app, { mode: constants.COPYFILE_FICLONE, recursive: true, verbatimSymlinks: true });
+  /* APFS clones through BSD `cp -c`, as `copyTree` in apps/desktop/scripts/runtime-closure.mts does:
+   * `fs.cp` with COPYFILE_FICLONE byte-copies the whole 1.3 GB bundle on macOS. */
+  await promisify(execFile)('/bin/cp', ['-c', '-R', `${sourceApp}/`, app]);
 
   const asarRoot = join(app, 'Contents/Resources/app.asar/node_modules');
   const esbuildEntry = join(asarRoot, 'esbuild/lib/main.js');
@@ -156,7 +159,16 @@ try {
   const application = await electron.launch({
     executablePath: join(app, 'Contents/MacOS/Tau'),
     args: [`--user-data-dir=${join(runRoot, 'user-data')}`],
-    env: { LANG: 'C.UTF-8', PATH: '/usr/bin:/bin:/usr/sbin:/sbin', TAU_E2E_KEEP_PATH: '1', TMPDIR: runRoot },
+    env: {
+      LANG: 'C.UTF-8',
+      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+      TAU_E2E_KEEP_PATH: '1',
+      TMPDIR: runRoot,
+      /* Automated runs keep secrets and the machine store in the throwaway
+       * profile, never the login keychain or the person's own config. */
+      TAU_SECRET_VAULT: 'file',
+      TAU_CONFIG_DIR: join(runRoot, 'config'),
+    },
   });
   try {
     const positive = await runUtilityProbe(application, { cwd: runRoot, entry: utilityEntry, esbuildExecutable });

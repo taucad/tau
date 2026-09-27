@@ -8,12 +8,12 @@
  * following the pattern from use-project.tsx.
  */
 
-import { setup, types } from 'xstate';
+import { createAsyncLogic, setup, types } from 'xstate';
 import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import { getRetryDelay } from '#utils/backoff.utils.js';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas } from '#lib/xstate.lib.js';
 import type { ChatRequest } from '#machines/chat-session.machine.js';
 
 // Input types
@@ -121,9 +121,12 @@ export type ChatPersistenceMachineContext = {
   retryMaxAttempts: number;
   /** The in-flight request is being ended to make room for a queued turn. */
   preempting: boolean;
+  /** An effect or child failure no transition modelled; the machine keeps answering (MC-R12). */
+  fault?: string;
 };
 
-export type ChatRetrievedEvent = { type: 'chatRetrieved'; chat: Chat | undefined };
+/** What loading a chat answers: its row, or `undefined` when it has none yet. */
+export type ChatLoadOutput = Readonly<{ chat: Chat | undefined }>;
 
 // Events
 type ChatPersistenceMachineEvents =
@@ -177,8 +180,7 @@ type ChatPersistenceMachineEvents =
    * persisted error layer in the same frame as `chat.error` clears (see
    * `ChatSessionStore` `~registerStatusCallback`).
    */
-  | { type: 'streamResumed' }
-  | ChatRetrievedEvent;
+  | { type: 'streamResumed' };
 
 /**
  * Events emitted by the machine for the React shell (`<ChatInstance>`) to
@@ -263,34 +265,49 @@ function buildRestoreCancelledDraftEmit(messages: MyUIMessage[]): {
   };
 }
 
-const loadChatActor = fromSafeAsync<ChatRetrievedEvent, { chatId: string }>(async () => {
-  throw new Error('loadChatActor not provided');
+const loadChatActor = createAsyncLogic<ChatLoadOutput, { chatId: string }>({
+  run: async () => {
+    throw new Error('chatPersistenceMachine: the loadChatActor actor was not provided.');
+  },
 });
 
-const persistMessagesActor = fromSafeAsync<void, { chatId: string; messages: MyUIMessage[] }>(async () => {
-  throw new Error('persistMessagesActor not provided');
+const persistMessagesActor = createAsyncLogic<void, { chatId: string; messages: MyUIMessage[] }>({
+  run: async () => {
+    throw new Error('chatPersistenceMachine: the persistMessagesActor actor was not provided.');
+  },
 });
 
-const persistErrorActor = fromSafeAsync<void, { chatId: string; error: ChatError }>(async () => {
-  throw new Error('persistErrorActor not provided');
+const persistErrorActor = createAsyncLogic<void, { chatId: string; error: ChatError }>({
+  run: async () => {
+    throw new Error('chatPersistenceMachine: the persistErrorActor actor was not provided.');
+  },
 });
 
-const clearErrorActor = fromSafeAsync<void, { chatId: string }>(async () => {
-  throw new Error('clearErrorActor not provided');
+const clearErrorActor = createAsyncLogic<void, { chatId: string }>({
+  run: async () => {
+    throw new Error('chatPersistenceMachine: the clearErrorActor actor was not provided.');
+  },
 });
 
-const persistActiveExecutionActor = fromSafeAsync<
+const persistActiveExecutionActor = createAsyncLogic<
   void,
   { chatId: string; activeExecution: CadAgentExecution | undefined }
->(async () => {
-  throw new Error('persistActiveExecutionActor not provided');
+>({
+  run: async () => {
+    throw new Error('chatPersistenceMachine: the persistActiveExecutionActor actor was not provided.');
+  },
 });
 
-const persistActiveKernelActor = fromSafeAsync<void, { chatId: string; activeKernel: KernelId | undefined }>(
-  async () => {
-    throw new Error('persistActiveKernelActor not provided');
+const persistActiveKernelActor = createAsyncLogic<void, { chatId: string; activeKernel: KernelId | undefined }>({
+  run: async () => {
+    throw new Error('chatPersistenceMachine: the persistActiveKernelActor actor was not provided.');
   },
-);
+});
+
+/* The persistence error log, a named effect (MC-R8). */
+const logPersistenceError = (error: unknown): void => {
+  console.error('Chat persistence error:', error);
+};
 
 /** The chat an event names, or the active chat when it names none. */
 const chatIdOf = (context: ChatPersistenceMachineContext, event: ChatPersistenceMachineEvents): string | undefined =>
@@ -346,6 +363,11 @@ export const chatPersistenceMachine = setup({
   },
 }).createMachine({
   id: 'chatPersistence',
+  version: '1',
+  /* A fault no transition modelled is recorded and the machine keeps answering (MC-R12). */
+  onError: ({ event }) => ({
+    context: { fault: event.error instanceof Error ? event.error.message : 'chat persistence fault' },
+  }),
   context: ({ input }) => ({
     activeChatId: input.activeChatId,
     resourceId: input.resourceId,
@@ -382,20 +404,21 @@ export const chatPersistenceMachine = setup({
           invoke: {
             src: 'loadChatActor',
             input: ({ context }) => ({ chatId: context.activeChatId! }),
-            onDone: { target: 'idle', context: { isLoadingChat: false } },
+            onDone: {
+              target: 'idle',
+              context: ({ event }) => ({
+                isLoadingChat: false,
+                persistedError: event.output.chat?.error,
+                activeExecution: event.output.chat?.activeExecution,
+                activeKernel: event.output.chat?.activeKernel,
+              }),
+            },
             onError: {
               target: 'idle',
               context: ({ event }) => ({ isLoadingChat: false, loadError: event.error as Error }),
             },
           },
           on: {
-            chatRetrieved: {
-              context: ({ event }) => ({
-                persistedError: event.chat?.error,
-                activeExecution: event.chat?.activeExecution,
-                activeKernel: event.chat?.activeKernel,
-              }),
-            },
             setActiveChatId: {
               target: 'loading',
               reenter: true,
@@ -422,13 +445,15 @@ export const chatPersistenceMachine = setup({
         },
         pending: {
           after: {
-            persistDebounce: ({ context }) => (hasPendingMessages(context) ? { target: 'persisting' } : undefined),
+            /* A queue with nothing in it has nothing to write: back to idle, never an unanswered timer (MC-R16). */
+            persistDebounce: ({ context }) =>
+              hasPendingMessages(context) ? { target: 'persisting' } : { target: 'idle' },
           },
           on: {
             // Reset timer if new messages come in
             queuePersist: { target: 'pending', reenter: true, ...queuePending },
             // Immediately bypass debounce and persist
-            flushNow: ({ context }) => (hasPendingMessages(context) ? { target: 'persisting' } : undefined),
+            flushNow: ({ context }) => (hasPendingMessages(context) ? { target: 'persisting' } : { target: 'idle' }),
           },
         },
         persisting: {
@@ -547,8 +572,6 @@ export const chatPersistenceMachine = setup({
             // User explicitly bailed during backoff -- drop the chain.
             // The `after` timer is auto-cancelled on state exit.
             stopRequest: { target: 'idle', context: { retryAttempt: 0 } },
-            // Late `streaming` status callbacks during the backoff window — ignore.
-            streamResumed: {},
           },
         },
         stopping: {
@@ -708,13 +731,41 @@ export const chatPersistenceMachine = setup({
   on: {
     turnRequested: { context: { persistedError: undefined, retryAttempt: 0 } },
     handleError: ({ event }, enq) => {
-      enq(() => {
-        console.error('Chat persistence error:', event.error);
-      });
+      enq(logPersistenceError, event.error);
       return {};
     },
   },
 });
+
+/**
+ * The (state, event) pairs `chatPersistenceMachine` leaves unanswered on purpose (MC-R17).
+ *
+ * @public
+ */
+export const chatPersistenceIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  /* A chat with no valid id, or one still loading, has nothing to persist yet (`hasValidChatId`, `canPersist`). */
+  ['messagePersistence.idle', 'queuePersist'],
+  ['errorPersistence.idle', 'setPersistedError'],
+  ['errorPersistence.idle', 'clearPersistedError'],
+  ['activeExecutionPersistence.idle', 'setActiveExecution'],
+  ['activeExecutionPersistence.persisting', 'setActiveExecution'],
+  ['activeKernelPersistence.idle', 'setActiveKernel'],
+  ['activeKernelPersistence.persisting', 'setActiveKernel'],
+  /* Nothing is waiting out the debounce: there is nothing to flush. */
+  ['messagePersistence.idle', 'flushNow'],
+  ['messagePersistence.persisting', 'flushNow'],
+  /* No request is in flight to pre-empt, finish or resume, or it is already stopping. */
+  ['requestLifecycle.idle', 'preemptRequest'],
+  ['requestLifecycle.stopping', 'preemptRequest'],
+  ['requestLifecycle.retrying', 'preemptRequest'],
+  ['requestLifecycle.idle', 'requestFinished'],
+  ['requestLifecycle.retrying', 'requestFinished'],
+  ['requestLifecycle.idle', 'streamResumed'],
+  /* A late `streaming` status callback during the backoff window. */
+  ['requestLifecycle.retrying', 'streamResumed'],
+  ['requestLifecycle.stopping', 'streamResumed'],
+  ['requestLifecycle.stopping', 'stopRequest'],
+];
 
 export type ChatPersistenceMachineState = ReturnType<typeof chatPersistenceMachine.getInitialSnapshot>;
 export type ChatPersistenceMachineActor = typeof chatPersistenceMachine;

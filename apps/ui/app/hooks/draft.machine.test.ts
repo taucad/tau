@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { createActor, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
+import type { EventFromLogic } from 'xstate';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
 import { createAttachmentStore } from '#db/attachment-store.js';
-import { draftMachine } from '#hooks/draft.machine.js';
+import { draftIgnoredEvents, draftMachine } from '#hooks/draft.machine.js';
 import type { DraftAttachmentModel, DraftEmittedEvents } from '#hooks/draft.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { attachmentCapBytes } from '#utils/attachment.utils.js';
 import type { Attachment, StoredAttachment } from '#utils/attachment.utils.js';
 
@@ -81,6 +83,7 @@ type HarnessOptions = {
   store?: (input: StoreInput) => Promise<Attachment>;
   /** Hold every draft persist open until the test resolves it. */
   deferDraftPersist?: boolean;
+  inspect?: ReturnType<typeof guardActors>['inspect'];
 };
 
 /**
@@ -99,32 +102,40 @@ function createHarness(options: HarnessOptions = {}) {
 
   const machine = draftMachine.provide({
     actors: {
-      persistDraftActor: fromSafeAsync(async ({ input }: { input: PersistDraftInput }) => {
-        drafts.push(input);
-        if (options.deferDraftPersist) {
-          await new Promise<void>((resolve) => {
-            draftResolvers.push(resolve);
-          });
-        }
+      persistDraftActor: createAsyncLogic({
+        run: async ({ input }: { input: PersistDraftInput }) => {
+          drafts.push(input);
+          if (options.deferDraftPersist) {
+            await new Promise<void>((resolve) => {
+              draftResolvers.push(resolve);
+            });
+          }
+        },
       }),
-      persistEditDraftActor: fromSafeAsync(async ({ input }: { input: PersistEditInput }) => {
-        edits.push(input);
+      persistEditDraftActor: createAsyncLogic({
+        run: async ({ input }: { input: PersistEditInput }) => {
+          edits.push(input);
+        },
       }),
-      persistSelectionActor: fromSafeAsync(async ({ input }: { input: PersistSelectionInput }) => {
-        selections.push(input);
+      persistSelectionActor: createAsyncLogic({
+        run: async ({ input }: { input: PersistSelectionInput }) => {
+          selections.push(input);
+        },
       }),
       // oxlint-disable-next-line no-empty-function -- mock stub
-      clearMessageEditActor: fromSafeAsync(async () => {}),
-      resizeImageActor: fromSafeAsync<
+      clearMessageEditActor: createAsyncLogic({ run: async () => {} }),
+      resizeImageActor: createAsyncLogic<
         { type: 'imageResized'; resized: string },
         { image: string; preserveOriginal: boolean }
-      >(async ({ input }) => {
-        resized.push(input.image);
-        const resizer = options.resize ?? (async (image) => image);
-        return { type: 'imageResized', resized: await resizer(input.image) };
+      >({
+        run: async ({ input }) => {
+          resized.push(input.image);
+          const resizer = options.resize ?? (async (image) => image);
+          return { type: 'imageResized', resized: await resizer(input.image) };
+        },
       }),
-      storeAttachmentActor: fromSafeAsync<{ type: 'attachmentStored'; attachment: StoredAttachment }, StoreInput>(
-        async ({ input }) => {
+      storeAttachmentActor: createAsyncLogic<{ type: 'attachmentStored'; attachment: StoredAttachment }, StoreInput>({
+        run: async ({ input }) => {
           stored.push(input);
           const put =
             options.store ??
@@ -137,11 +148,14 @@ function createHarness(options: HarnessOptions = {}) {
           // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake store mints the brand as `put` does.
           return { type: 'attachmentStored', attachment: (await put(input)) as StoredAttachment };
         },
-      ),
+      }),
     },
   });
 
-  const actor = createActor(machine, { input: { initialDraft: options.initialDraft } });
+  const actor = createActor(machine, {
+    input: { initialDraft: options.initialDraft },
+    ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+  });
   return { actor, drafts, edits, selections, stored, resized, draftResolvers };
 }
 
@@ -1181,5 +1195,58 @@ describe('draftMachine', () => {
       expect(() => actor.stop()).not.toThrow();
       expect(actor.getSnapshot().status).toBe('stopped');
     });
+  });
+});
+
+describe('draftMachine — the machine contract (PV-S5, MC-R17)', () => {
+  it('answers every sampled event, or declares it ignored, in every reachable state', () => {
+    const message = userMessage([{ type: 'text', text: 'hi' }]);
+    /* `imageResized` and `attachmentStored` are raised by their own invokes, never sent from outside. */
+    const events = [
+      { type: 'initializeFromChat' },
+      { type: 'setDraftText', text: 'a' },
+      { type: 'removeDraftAttachment', index: 0 },
+      { type: 'setDraftToolChoice', toolChoice: 'x' },
+      { type: 'setDraftMode', mode: 'agent' },
+      { type: 'clearDraft' },
+      { type: 'loadDraftFromMessageTransient', draft: message },
+      { type: 'setEditDraftText', text: 'b' },
+      { type: 'removeEditDraftAttachment', index: 0 },
+      { type: 'startEditingMessage', messageId: 'm' },
+      { type: 'exitEditMode' },
+      { type: 'clearEditDraft' },
+      { type: 'clearMessageEdit', messageId: 'm' },
+      { type: 'flushNow' },
+    ] satisfies Array<EventFromLogic<typeof draftMachine>>;
+    expect(
+      unansweredEvents(draftMachine, {
+        input: {},
+        events,
+        limit: 100_000,
+        ignore: draftIgnoredEvents,
+        serializeState: (snapshot) =>
+          JSON.stringify([
+            snapshot.value,
+            snapshot.context.activeEditMessageId,
+            snapshot.context.draftText,
+            snapshot.context.attachmentQueue.length,
+          ]),
+      }),
+    ).toEqual([]);
+  });
+
+  it('leaves no dead letter, unanswered delivery or fault over typing, an image and a send', async () => {
+    const guard = guardActors({ ignore: { draft: draftIgnoredEvents } });
+    const { actor, drafts } = createHarness({ inspect: guard.inspect });
+    actor.start();
+    actor.send({ type: 'setDraftText', text: 'hello' });
+    actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+    await waitFor(actor, (snapshot) => snapshot.context.draftAttachments.length === 1);
+    actor.send({ type: 'flushNow' });
+    actor.send({ type: 'clearDraft' });
+    await vi.waitFor(() => {
+      expect(drafts.length).toBeGreaterThan(0);
+    });
+    actor.stop();
   });
 });

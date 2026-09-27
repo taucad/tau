@@ -1,5 +1,5 @@
 import { createCallbackLogic, setup, types } from 'xstate';
-import type { ActorRefFrom, AnyActorRef, EnqueueObject, EventObject, SystemRegistry } from 'xstate';
+import type { ActorRefFrom, EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
@@ -79,8 +79,8 @@ export type ChatRequest =
       /**
        * Execution the body must be composed from, when the dispatcher knows it
        * and the React tree does not yet. The seeded first turn is dispatched
-       * from inside `loadChatActor`, one statement before the `chatRetrieved`
-       * event that assigns {@link ChatPersistenceMachineContext.activeExecution};
+       * from inside `loadChatActor`, one statement before the load's answer
+       * that assigns {@link ChatPersistenceMachineContext.activeExecution};
        * without this the bodyless dispatch composes from the un-hydrated
        * cookie fallback and runs the chat's `acp` (or host-pinned Tau) turn as
        * a plain browser Tau turn.
@@ -138,19 +138,20 @@ export type ChatTurnSettlementInput = Readonly<{
   outcome: ChatTurnOutcome;
 }>;
 
-/** Input accepted when creating a chatSessionMachine actor. @public */
+/** Input accepted when creating a chatSessionMachine actor; the store creates it as a root (PV-S5, L3 D10). @public */
 export type ChatSessionMachineInput = Readonly<{
   chatId: string;
   projectId: string;
-  /** The project session this chat asks for turn settlement. */
-  parentRef?: AnyActorRef;
 }>;
 
 /** Serializable state owned by chatSessionMachine. @public */
 export type ChatSessionMachineContext = Readonly<{
   chatId: string;
   projectId: string;
-  parentRef: AnyActorRef | undefined;
+  /** Why the chat's host binding failed, while it is unbound (L3 D8). */
+  hostFailure: string | undefined;
+  /** An effect or child failure no transition modelled; the actor keeps answering (MC-R12). */
+  fault: string | undefined;
   /** Approvals the transport says are outstanding, batched per event (F8). */
   pendingApprovalCount: number;
   /** Tool parts in flight, batched per transport event — never per delta. */
@@ -304,8 +305,9 @@ const holdGesture = ({ context, event }: ChatSessionArgs<EventOf<'requestTurn'>>
 };
 
 /* Buffered until `run.lifecycle: completed` for the run this chat presents. */
+/* Another run's outcome is stale here: answered with `{}` (MC-R18). */
 const bufferSettlement = ({ context, event }: ChatSessionArgs<ChatTurnSettlementObservation>) =>
-  event.runId === context.activeRunId ? { context: { pendingSettlement: event } } : undefined;
+  event.runId === context.activeRunId ? { context: { pendingSettlement: event } } : {};
 
 const failureMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
@@ -325,8 +327,9 @@ const recordSettlementFailure = (context: ChatSessionMachineContext, error: unkn
 const observedSettlement =
   (target: 'done' | 'failed', failureReason?: (event: ChatTurnSettlementObservation) => string) =>
   ({ context, event }: ChatSessionArgs<ChatTurnSettlementObservation>, enq: ChatSessionEnqueue) => {
+    /* An owned turn settles through `settleTurn`; another run's outcome is stale (MC-R18). */
     if (context.turn !== undefined || event.runId !== context.activeRunId) {
-      return undefined;
+      return {};
     }
     announce(context, enq);
     const patch = failureReason === undefined ? {} : { failureReason: failureReason(event) };
@@ -350,8 +353,9 @@ const reconcileSettlementTransition = (
   { context, event }: ChatSessionArgs<EventOf<'reconcileSettlement'>>,
   enq: ChatSessionEnqueue,
 ) => {
+  /* The turn this page admitted is already settling itself. */
   if (context.turn !== undefined) {
-    return undefined;
+    return {};
   }
   announce(context, enq);
   return {
@@ -375,8 +379,9 @@ const reconcileSettlementTransition = (
  * settlement an adopted run will ever get.
  */
 const adoptRunTransition = ({ context, event }: ChatSessionArgs<EventOf<'adoptRun'>>, enq: ChatSessionEnqueue) => {
+  /* This chat owns a turn; the discovered run is that turn's or stale. */
   if (context.turn !== undefined) {
-    return undefined;
+    return {};
   }
   announce(context, enq);
   return { target: '#chat-session.run.running.reconnecting', context: { activeRunId: event.runId } };
@@ -473,6 +478,59 @@ const runningRow = (context: ChatSessionMachineContext): 'approval' | 'tool' | '
   return context.toolsInFlight > 0 ? 'tool' : 'generating';
 };
 
+const runStates = {
+  idle: 'run.idle',
+  observing: 'run.queued.observing',
+  dispatched: 'run.queued.dispatched',
+  queued: 'run.queued',
+  running: 'run.running',
+  finishing: 'run.finishing',
+  done: 'run.done',
+  failed: 'run.failed',
+  stopped: 'run.stopped',
+} as const;
+const pairs = (states: readonly string[], events: readonly string[]): Array<readonly [string, string]> =>
+  states.flatMap((state) => events.map((type) => [state, type] as const));
+
+/**
+ * The (state, event) pairs this machine ignores (MC-R17).
+ *
+ * - `turnAdmitted` outside `queued.admitting`: the answer of an admission a later gesture aborted.
+ * - `requestLifecycle` outside `running`: the store reports every change; only a running turn reads it.
+ * - A host-attested outcome where no run is presented: the store replays an idle chat's settlement as its lifecycle.
+ * - `adoptRun` and `reconcileSettlement` in the states that hold a turn or a live run (see their transitions).
+ * - `viewed` while read, and `unreadRestored` while unread: idempotent.
+ *
+ * @public
+ */
+export const chatSessionIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ...pairs(
+    [
+      runStates.idle,
+      runStates.observing,
+      runStates.dispatched,
+      runStates.running,
+      runStates.finishing,
+      runStates.done,
+      runStates.failed,
+      runStates.stopped,
+    ],
+    ['turnAdmitted'],
+  ),
+  ...pairs(
+    [runStates.idle, runStates.queued, runStates.finishing, runStates.done, runStates.failed, runStates.stopped],
+    ['requestLifecycle'],
+  ),
+  ...pairs(
+    [runStates.idle, runStates.done, runStates.failed, runStates.stopped],
+    ['turnFinalizedObserved', 'turnFailedObserved', 'turnConflictedObserved'],
+  ),
+  ...pairs([runStates.queued, runStates.running, runStates.finishing], ['adoptRun']),
+  ...pairs([runStates.queued, runStates.running, runStates.done], ['reconcileSettlement']),
+  ['read.read', 'viewed'],
+  ['read.unread', 'unreadRestored'],
+];
+
 /**
  * One chat's run, read and revision state.
  *
@@ -488,10 +546,14 @@ export const chatSessionMachine = setup({
   actors: chatSessionActors,
 }).createMachine({
   id: 'chat-session',
+  version: '1',
+  /* A fault no transition modelled is recorded and the chat keeps answering, so a render never throws (MC-R12). */
+  onError: ({ event }) => ({ context: { fault: failureMessage(event.error, 'chat-session fault') } }),
   context: ({ input }) => ({
     chatId: input.chatId,
     projectId: input.projectId,
-    parentRef: input.parentRef,
+    hostFailure: undefined,
+    fault: undefined,
     pendingApprovalCount: 0,
     toolsInFlight: 0,
     toolName: undefined,
@@ -657,8 +719,9 @@ export const chatSessionMachine = setup({
                 return { target: 'stopped', context: clearRunDetail };
               }
               /* `invoking` is a request in flight; the `generating` guards route
-               * it straight back to a tool or an approval when one is open. */
-              return event.phase === 'invoking' ? { target: '.generating' } : undefined;
+               * it straight back to a tool or an approval when one is open. An
+               * `idle` request says nothing the run's own lifecycle will not. */
+              return event.phase === 'invoking' ? { target: '.generating' } : {};
             },
             durableRunState: ({ event }) => (event.state === 'reattaching' ? { target: '.reconnecting' } : undefined),
             requestTurn: holdGesture,
@@ -750,8 +813,9 @@ export const chatSessionMachine = setup({
         /* Reload discovery can substantiate a run for a chat that never left
          * `idle` on this page (`retainDurableRun`). */
         durableRunState: ({ context, event }, enq) => {
+          /* Only a reattach moves the run; `active` and `terminal` arrive as its lifecycle. */
           if (event.state !== 'reattaching') {
-            return undefined;
+            return {};
           }
           announce(context, enq);
           return { target: '.running.reconnecting' };
@@ -787,12 +851,29 @@ export const chatSessionMachine = setup({
             id: 'hostBinding',
             src: 'hostBinding',
             input: ({ context }) => ({ chatId: context.chatId, placement: context.placement }),
+            /* A registration that fails leaves the chat, its project and the registry alive (L3 D8). */
+            onError: ({ context, event }, enq) => {
+              announce(context, enq);
+              return {
+                target: 'unbound',
+                context: { hostFailure: failureMessage(event.error, 'the host binding failed') },
+              };
+            },
           },
           on: {
             agentConfigChanged: ({ context, event }) =>
               event.placement === context.placement
                 ? { context: { placement: event.placement } }
                 : { target: 'bound', reenter: true, context: { placement: event.placement } },
+          },
+        },
+        /* The next placement tries again. */
+        unbound: {
+          on: {
+            agentConfigChanged: ({ event }) => ({
+              target: 'bound',
+              context: { placement: event.placement, hostFailure: undefined },
+            }),
           },
         },
       },

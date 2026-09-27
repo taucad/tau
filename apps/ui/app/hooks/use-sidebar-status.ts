@@ -11,9 +11,10 @@
  * Two shapes, on purpose:
  *
  * - `ChatSidebarStatus` is a chat's whole vocabulary and comes from **one**
- *   snapshot, the chat's own machine. The branch and dirty facets ride on it
- *   because `project-session` broadcasts `revisionState` to every chat it owns;
- *   the chat's revision marker reads them, the sidebar does not (v2 D4).
+ *   snapshot, the chat's own machine, a root `ChatSessionStore` owns (PV-S5).
+ *   The branch and dirty facets ride on it because the store forwards the
+ *   project's revision facts to every chat of the project; the chat's revision
+ *   marker reads them, the sidebar does not (v2 D4).
  * - `ProjectSidebarStatus` is the one coalesced object per project (S46) that
  *   the project row and the close dialogs read. It joins the registry's
  *   liveness, its chats' statuses and the worker's `RevisionStatus` projection
@@ -42,6 +43,7 @@ import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import { actorSessionIdOf } from '#lib/xstate.lib.js';
+import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 /**
  * Everything a chat row draws, from that chat's own machine.
@@ -494,22 +496,31 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
 const projectSessionOf = (sessions: SessionsActorRef, projectId: string): ProjectSessionActorRef | undefined =>
   sessions.getSnapshot().context.refs[projectId];
 
+const noChatRoots: ReadonlyMap<string, ChatSessionActorRef> = new Map();
+
+/* A closed project has no chat to report: its row reads the registry's reason alone. */
 const chatReferencesOf = (
   sessions: SessionsActorRef,
+  chats: ChatSessionStore,
   projectId: string,
-): Readonly<Record<string, ChatSessionActorRef>> =>
-  projectSessionOf(sessions, projectId)?.getSnapshot().context.chatRefs ?? {};
+): ReadonlyMap<string, ChatSessionActorRef> =>
+  projectSessionOf(sessions, projectId) === undefined ? noChatRoots : chats.chatRootsOf(projectId);
 
 /**
  * The one coalesced object, built once per project.
  *
  * @param sessions - The registry actor.
+ * @param chats - The chat store, whose roots are the chats' machines (PV-S5).
  * @param projectId - The project the row is about.
  * @returns That project's coalesced status.
  * @public
  */
-export const readProjectStatus = (sessions: SessionsActorRef, projectId: string): ProjectSidebarStatus => {
-  const chatReferences = Object.entries(chatReferencesOf(sessions, projectId));
+export const readProjectStatus = (
+  sessions: SessionsActorRef,
+  chats: ChatSessionStore,
+  projectId: string,
+): ProjectSidebarStatus => {
+  const chatReferences = [...chatReferencesOf(sessions, chats, projectId)];
   return {
     session: selectProjectLiveness(sessions.getSnapshot().context, projectId),
     /* The session's own record of a region that did not come up (R4). */
@@ -550,18 +561,22 @@ const projectRowKey = (row: ProjectSidebarRow): string => Object.values(row).joi
  * Ponytail: one binder, rebound only when the chat set changes.
  *
  * A sidebar row wakes on its own actors — the registry (a project opened or
- * closed), the project session (a chat spawned, the revision facts moved) and
- * the chat machines it draws. Rebinding on every notification would unsubscribe
- * listeners from inside an emit, so the id list is compared first and the churn
- * happens only when a chat actually appears or goes.
+ * closed), the project session (its failures), the chat store (a chat joined
+ * or left) and the chat machines it draws. Rebinding on every notification
+ * would unsubscribe listeners from inside an emit, so the id list is compared
+ * first and the churn happens only when a chat actually appears or goes. The
+ * chat machines are the store's roots, so a chat's machine never swaps under a
+ * row (PV-S5).
  */
 const bindProject = ({
   sessions,
+  chats,
   projectId,
   chatIds,
   listener,
 }: {
   readonly sessions: SessionsActorRef;
+  readonly chats: ChatSessionStore;
   readonly projectId: string;
   readonly chatIds?: () => readonly string[];
   readonly listener: () => void;
@@ -571,21 +586,17 @@ const bindProject = ({
   let sessionScan: { unsubscribe: () => void } | undefined;
   const rebind = (): void => {
     const session = projectSessionOf(sessions, projectId);
-    const ids = chatIds?.() ?? Object.keys(chatReferencesOf(sessions, projectId));
-    /*
-     * R3: the revision client is created by the project's route subtree, later
+    const references = chatReferencesOf(sessions, chats, projectId);
+    const ids = chatIds?.() ?? [...references.keys()];
+    /* R3: the revision client is created by the project's route subtree, later
      * than this bind, so its presence has to be in the key or a project row
-     * never subscribes to the projection it draws its branch and sync from.
-     * R4: `openChat` spawns a *fresh* actor for an id it no longer holds, so
-     * ids alone would leave the row bound to a stopped machine — the session id
-     * is the identity that changes with the swap.
-     */
-    const references = chatReferencesOf(sessions, projectId);
+     * never subscribes to the projection it draws its branch and sync from. */
     const key = [
       session === undefined ? 'closed' : 'live',
       peekRevisionClient(projectId) === undefined ? 'no-client' : 'client',
+      /* R4: a chat released and acquired again gets a fresh root under the same id, so the actor is the identity. */
       ...ids.map((id) => {
-        const reference = references[id];
+        const reference = references.get(id);
         return reference === undefined ? id : actorSessionIdOf(reference);
       }),
     ].join(keySeparator);
@@ -601,7 +612,7 @@ const bindProject = ({
         subscription.unsubscribe();
       });
       for (const id of ids) {
-        const ref = references[id];
+        const ref = references.get(id);
         if (ref !== undefined) {
           const chatSubscription = ref.subscribe(listener);
           bound.push(() => {
@@ -618,14 +629,10 @@ const bindProject = ({
       off();
     }
   };
-  /* A chat spawning moves the session's snapshot, not the registry's, so the
-   * rebind check rides on the session's own notification too — next microtask,
-   * because unsubscribing inside an emit is what the guard above avoids. */
+  /* The session's failures move its own snapshot, not the registry's (R4). */
   const watchSession = (): void => {
     sessionScan?.unsubscribe();
-    sessionScan = projectSessionOf(sessions, projectId)?.subscribe(() => {
-      queueMicrotask(rebind);
-    });
+    sessionScan = projectSessionOf(sessions, projectId)?.subscribe(listener);
   };
   rebind();
   watchSession();
@@ -634,9 +641,15 @@ const bindProject = ({
     watchSession();
     listener();
   });
+  /* Membership is coalesced onto a microtask by the store, so this never rebinds inside an emit. */
+  const unsubscribeMembership = chats.subscribeMembership(() => {
+    rebind();
+    listener();
+  });
   return () => {
     registry.unsubscribe();
     sessionScan?.unsubscribe();
+    unsubscribeMembership();
     for (const off of bound) {
       off();
     }
@@ -656,16 +669,17 @@ const bindProject = ({
  */
 export const useProjectSidebarRow = (projectId: string): ProjectSidebarRow => {
   const sessions = useSessions();
+  const chats = useChatSessionStore();
   const idleWindow = sessions.getSnapshot().context.idleWindowMilliseconds;
   const subscribe = useCallback(
-    (listener: () => void) => bindProject({ sessions, projectId, listener }),
-    [projectId, sessions],
+    (listener: () => void) => bindProject({ sessions, chats, projectId, listener }),
+    [chats, projectId, sessions],
   );
   const cache = useRef<{ key: string; value: ProjectSidebarRow } | undefined>(undefined);
   const getSnapshot = useCallback(() => {
-    const row = selectProjectRow(readProjectStatus(sessions, projectId), idleWindow);
+    const row = selectProjectRow(readProjectStatus(sessions, chats, projectId), idleWindow);
     return keep(cache, `${projectId}${keySeparator}${projectRowKey(row)}`, row);
-  }, [idleWindow, projectId, sessions]);
+  }, [chats, idleWindow, projectId, sessions]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 };
 
@@ -679,17 +693,18 @@ export const useProjectSidebarRow = (projectId: string): ProjectSidebarRow => {
  */
 export const useChatSidebarStatus = (projectId: string, chatId: string): ChatSidebarStatus | undefined => {
   const sessions = useSessions();
+  const chats = useChatSessionStore();
   const chatIds = useCallback(() => [chatId], [chatId]);
   const subscribe = useCallback(
-    (listener: () => void) => bindProject({ sessions, projectId, chatIds, listener }),
-    [chatIds, projectId, sessions],
+    (listener: () => void) => bindProject({ sessions, chats, projectId, chatIds, listener }),
+    [chatIds, chats, projectId, sessions],
   );
   const cache = useRef<{ key: string; value: ChatSidebarStatus | undefined } | undefined>(undefined);
   const getSnapshot = useCallback((): ChatSidebarStatus | undefined => {
-    const ref = chatReferencesOf(sessions, projectId)[chatId];
+    const ref = chatReferencesOf(sessions, chats, projectId).get(chatId);
     const status = ref === undefined ? undefined : selectChatStatus(ref.getSnapshot());
     return keep(cache, `${projectId}${keySeparator}${chatId}${keySeparator}${chatKey(status)}`, status);
-  }, [chatId, projectId, sessions]);
+  }, [chatId, chats, projectId, sessions]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 };
 
@@ -753,7 +768,7 @@ export const useSidebarCommands = (): SidebarCommands => {
        * of vanishing. */
       closeChat: (projectId, chatId) => {
         chatSessions.stopRun(chatId);
-        chatReferencesOf(sessions, projectId)[chatId]?.send({ type: 'close' });
+        chatReferencesOf(sessions, chatSessions, projectId).get(chatId)?.send({ type: 'close' });
       },
       closeProject: (projectId) => {
         const session = projectSessionOf(sessions, projectId);

@@ -30,14 +30,12 @@
  * the record merges those patches over what it read (R5).
  */
 
-import { assertEvent, setup, types } from 'xstate';
+import { assertEvent, createAsyncLogic, setup, types } from 'xstate';
 import type { EnqueueObject, SystemRegistry } from 'xstate';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas } from '#lib/xstate.lib.js';
 import type { MyUIMessage, ModelInputModality, ModelSupport } from '@taucad/chat';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
-import { generatePrefixedId } from '@taucad/utils/id';
-import { idPrefix } from '@taucad/types/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
 import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
 import type { AttachmentKind, StoredAttachment, StoredAttachmentRef } from '#utils/attachment.utils.js';
@@ -60,8 +58,6 @@ export type DraftTarget = 'main' | 'edit';
 // FIFO ingest queue entry. The machine processes one entry at a time via the
 // `attachmentProcessing` region, preserving submission order.
 type AttachmentQueueEntry = {
-  /** Stable id for trace/debug; not consumed by the UI. */
-  readonly id: string;
   readonly target: DraftTarget;
   /** The edit an `edit` entry belongs to; its attachment is dropped if that edit is no longer open. */
   readonly editMessageId?: string;
@@ -103,6 +99,8 @@ export type DraftMachineContext = {
   /** FIFO queue of attachments awaiting `resizing` and `storing`. */
   attachmentQueue: readonly AttachmentQueueEntry[];
   touched: DraftTouched;
+  /** An effect or child failure no transition modelled; the draft keeps answering (MC-R12). */
+  fault?: string;
 };
 
 /**
@@ -165,8 +163,9 @@ export function buildDraftMessage(text: string, attachments: readonly DraftAttac
   return {
     id: 'draft',
     role: 'user',
+    /* A draft is not a message yet: the send stamps its time (`buildUserMessage`), so this stays pure (MC-R6). */
     metadata: {
-      createdAt: Date.now(),
+      createdAt: 0,
       status: 'pending',
     },
     parts,
@@ -192,7 +191,7 @@ export function createEmptyDraftMessage(): MyUIMessage {
     role: 'user',
     parts: [],
     metadata: {
-      createdAt: Date.now(),
+      createdAt: 0,
       status: 'pending',
     },
   };
@@ -231,7 +230,6 @@ const queueEntryFor = (
     return { error: notDataUrlError() };
   }
   const base = {
-    id: generatePrefixedId(idPrefix.log),
     target: options.target,
     mediaType,
     preserveOriginal: options.preserveOriginal,
@@ -343,21 +341,29 @@ type DraftMachineEvents =
   | { type: 'attachmentStored'; attachment: StoredAttachment };
 
 // Placeholder actors - actual implementations provided via machine.provide()
-const persistDraftActor = fromSafeAsync<void, { draft: MyUIMessage }>(async () => {
-  throw new Error('persistDraftActor not provided');
+const persistDraftActor = createAsyncLogic<void, { draft: MyUIMessage }>({
+  run: async () => {
+    throw new Error('draftMachine: the persistDraftActor actor was not provided.');
+  },
 });
 
-const persistEditDraftActor = fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async () => {
-  throw new Error('persistEditDraftActor not provided');
+const persistEditDraftActor = createAsyncLogic<void, { messageId: string; draft: MyUIMessage }>({
+  run: async () => {
+    throw new Error('draftMachine: the persistEditDraftActor actor was not provided.');
+  },
 });
 
 /** Patches the touched selector fields; an omitted field is left alone in the record. */
-const persistSelectionActor = fromSafeAsync<void, { toolChoice?: string | string[]; mode?: ChatMode }>(async () => {
-  throw new Error('persistSelectionActor not provided');
+const persistSelectionActor = createAsyncLogic<void, { toolChoice?: string | string[]; mode?: ChatMode }>({
+  run: async () => {
+    throw new Error('draftMachine: the persistSelectionActor actor was not provided.');
+  },
 });
 
-const clearMessageEditActor = fromSafeAsync<void, { messageId: string }>(async () => {
-  throw new Error('clearMessageEditActor not provided');
+const clearMessageEditActor = createAsyncLogic<void, { messageId: string }>({
+  run: async () => {
+    throw new Error('draftMachine: the clearMessageEditActor actor was not provided.');
+  },
 });
 
 /**
@@ -366,22 +372,26 @@ const clearMessageEditActor = fromSafeAsync<void, { messageId: string }>(async (
  * `.provide({ actors: { resizeImageActor } })` by every ownership site.
  * Tests override with a deterministic fake.
  */
-const resizeImageActor = fromSafeAsync<
+const resizeImageActor = createAsyncLogic<
   { type: 'imageResized'; resized: string },
   { image: string; preserveOriginal: boolean }
->(async () => {
-  throw new Error('resizeImageActor not provided');
+>({
+  run: async () => {
+    throw new Error('draftMachine: the resizeImageActor actor was not provided.');
+  },
 });
 
 /**
  * Placeholder store actor. `draftPersistenceFor` provides one that `put`s the
  * bytes into the record's attachment store; the store enforces kind and cap.
  */
-const storeAttachmentActor = fromSafeAsync<
+const storeAttachmentActor = createAsyncLogic<
   { type: 'attachmentStored'; attachment: StoredAttachment },
   { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string }
->(async () => {
-  throw new Error('storeAttachmentActor not provided');
+>({
+  run: async () => {
+    throw new Error('draftMachine: the storeAttachmentActor actor was not provided.');
+  },
 });
 
 const asError = (error: unknown, fallback: string): Error =>
@@ -473,6 +483,11 @@ export const draftMachine = setup({
   },
 }).createMachine({
   id: 'draft',
+  version: '1',
+  /* A fault no transition modelled is recorded and the draft keeps answering (MC-R12). */
+  onError: ({ event }) => ({
+    context: { fault: event.error instanceof Error ? event.error.message : 'draft fault' },
+  }),
   context: ({ input }) => {
     const loaded = loadMessage(input.initialDraft);
     return {
@@ -518,7 +533,7 @@ export const draftMachine = setup({
         },
         setDraftText: ({ context, event }) =>
           event.text === context.draftText
-            ? undefined
+            ? /* Idempotent re-delivery: the same text changes nothing. */ {}
             : { context: { draftText: event.text, touched: touch(context.touched, { draft: true }) } },
         addDraftAttachment: enqueueAttachment,
         removeDraftAttachment: {
@@ -791,6 +806,11 @@ export const draftMachine = setup({
               image: context.attachmentQueue[0]!.dataUrl!,
               preserveOriginal: context.attachmentQueue[0]!.preserveOriginal,
             }),
+            /* The result is the `imageResized` event its handler below reads. */
+            onDone: ({ event }, enq) => {
+              enq.raise(event.output);
+              return {};
+            },
             onError: dropHeadWith('Image resize failed', 'imageResizeFailed'),
           },
           on: {
@@ -827,6 +847,11 @@ export const draftMachine = setup({
                 mediaType: head.mediaType,
                 ...(head.filename === undefined ? {} : { filename: head.filename }),
               };
+            },
+            /* Raised, because the saving regions react to a stored attachment too. */
+            onDone: ({ event }, enq) => {
+              enq.raise(event.output);
+              return {};
             },
             onError: dropHeadWith('Attachment could not be stored', 'attachmentStoreFailed'),
           },
@@ -889,3 +914,14 @@ export const draftMachine = setup({
     },
   },
 });
+
+/**
+ * The (state, event) pairs `draftMachine` leaves unanswered on purpose (MC-R17). `imageResized` and
+ * `attachmentStored` are raised by their own invokes, so they are never delivered from outside.
+ *
+ * @public
+ */
+export const draftIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  /* With nothing waiting out a debounce, a flush has nothing to write. */
+  ['*', 'flushNow'],
+];

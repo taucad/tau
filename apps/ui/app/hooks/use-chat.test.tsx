@@ -9,14 +9,8 @@ import type { ChatError } from '@taucad/types';
 import { resolveKernel } from '@taucad/types/constants';
 import { createActor } from 'xstate';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
-import {
-  chatTurnAdmission,
-  chatTurnSettlement,
-  publishChatTurnAdmission,
-  resetChatTurnServices,
-} from '#chat-clients/_internal/chat-host-binding.js';
+import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 // ---------------------------------------------------------------------------
@@ -380,16 +374,7 @@ const testAdmission = async (gesture: ChatTurnGesture): Promise<ChatTurn> => ({
  * admission published through the same seam production uses.
  */
 function startTurnOwner(store: ChatSessionStore, chatId: string, admit = testAdmission): () => void {
-  const session = createActor(
-    projectSessionMachine.provide({
-      actors: {
-        chatSession: chatSessionMachine.provide({
-          actors: { admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
-        }),
-      },
-    }),
-    { input: { projectId: testProjectId } },
-  );
+  const session = createActor(projectSessionMachine, { input: { projectId: testProjectId } });
   session.start();
   const unpublish = publishChatTurnAdmission(chatId, admit);
   store.setFocusedProject(testProjectId);

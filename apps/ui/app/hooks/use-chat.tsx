@@ -589,8 +589,8 @@ export function useChatActions(chatId?: string): ChatActions {
          * appends it to the transcript, so `requestTurn` owns when it is
          * cleared — and when the draft-stage bytes behind it are released. It
          * is the only caller that knows whether the gesture was taken, queued,
-         * parked, displaced or refused. Clearing here first meant each of those
-         * last three deleted what the person wrote; releasing here afterwards
+         * displaced or refused. Clearing here first meant the last two deleted
+         * what the person wrote; releasing here afterwards
          * deleted the files of the very message it had just handed back. */
         await store.requestTurn(resolvedChatId, {
           kind: 'send',

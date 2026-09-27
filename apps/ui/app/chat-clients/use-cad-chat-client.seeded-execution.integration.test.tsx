@@ -29,12 +29,7 @@ import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { createActor } from 'xstate';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import { chatSessionMachine } from '#machines/chat-session.machine.js';
-import {
-  chatTurnAdmission,
-  chatTurnSettlement,
-  resetChatTurnServices,
-} from '#chat-clients/_internal/chat-host-binding.js';
+import { resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 
 /** The Tau model the cookie holds — what the un-hydrated fallback rebuilds from. */
 const cookieModelId = 'openai-gpt-5.6-luna';
@@ -222,16 +217,7 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<R
   /* The seeded turn is a turn like any other: its owner is the chat's session
    * actor under its project's, and the admission it invokes is the one
    * `ChatTurnHost` publishes below (C3). */
-  const projectSession = createActor(
-    projectSessionMachine.provide({
-      actors: {
-        chatSession: chatSessionMachine.provide({
-          actors: { admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
-        }),
-      },
-    }),
-    { input: { projectId: row.resourceId } },
-  );
+  const projectSession = createActor(projectSessionMachine, { input: { projectId: row.resourceId } });
   projectSession.start();
   harness.projectSession = projectSession;
   store.setFocusedProject(row.resourceId);

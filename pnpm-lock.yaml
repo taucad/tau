@@ -2718,6 +2718,9 @@ importers:
       '@taucad/vite':
         specifier: workspace:*
         version: link:../../libs/vite
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../libs/xstate-testing
       '@types/express':
         specifier: ^5.0.0
         version: 5.0.6

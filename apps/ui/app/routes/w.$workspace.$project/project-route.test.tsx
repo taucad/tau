@@ -5,12 +5,15 @@ import { mock } from 'vitest-mock-extended';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
-import { sessionsActor } from '#services/sessions-store.js';
+import { createSessionsActor } from '#services/sessions-store.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { holdEditorConflictRecord } from '#lib/monaco-model-service.js';
+
+/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
+const sessionsActor = createSessionsActor().start();
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const projectB = 'proj_bbbbbbbbbbbbbbbbbbbbb';
@@ -298,7 +301,7 @@ const renderRouteProvider = ({
    * tree would never show one — include it exactly where the shell does.
    */
   const Provider = ({ children }: React.PropsWithChildren): React.JSX.Element => (
-    <SessionsProvider>
+    <SessionsProvider actor={sessionsActor}>
       <routeModule.ProjectRouteProviders
         projectId={currentProjectId}
         requestedChatId={requestedChatId}

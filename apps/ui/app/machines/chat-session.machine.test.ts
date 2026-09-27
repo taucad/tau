@@ -1,13 +1,15 @@
 import { util as zodUtility } from 'zod';
 import { createActor, createCallbackLogic } from 'xstate';
-import type { AnyActorRef, CallbackActorLogic, EventObject } from 'xstate';
+import type { CallbackActorLogic, EventObject } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import { describe, expect, it, vi } from 'vitest';
 
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MyUIMessage } from '@taucad/chat';
 import * as machineModule from './chat-session.machine.js';
-import { chatSessionMachine } from './chat-session.machine.js';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents } from '@taucad/xstate-testing/paths';
+import { chatSessionIgnoredEvents, chatSessionMachine } from './chat-session.machine.js';
 import type {
   ChatRequest,
   ChatSessionMachineEvent,
@@ -19,22 +21,8 @@ import type {
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
-/** A started parent that records what a child sends it. */
-const recordingParent = (): { ref: AnyActorRef; received: EventObject[] } => {
-  const received: EventObject[] = [];
-  const ref = createActor(
-    createCallbackLogic<EventObject>(({ receive }) => {
-      receive((event) => received.push(event));
-    }),
-  );
-  ref.start();
-  return { ref, received };
-};
-
-const start = (parentRef?: AnyActorRef) => {
-  const actor = createActor(chatSessionMachine, {
-    input: { chatId: 'chat-1', projectId: 'proj_1', ...(parentRef === undefined ? {} : { parentRef }) },
-  });
+const start = () => {
+  const actor = createActor(chatSessionMachine, { input: { chatId: 'chat-1', projectId: 'proj_1' } });
   actor.start();
   return actor;
 };
@@ -336,18 +324,16 @@ describe('chatSessionMachine', () => {
     actor.stop();
   });
 
-  it('reads Stopped when the chat is closed, and asks its project session for nothing (P63)', () => {
-    const parent = recordingParent();
-    const actor = start(parent.ref);
+  it('reads Stopped when the chat is closed, and stays alive (P63)', () => {
+    const actor = start();
     actor.send({ type: 'runLifecycle', phase: 'running' });
     actor.send({ type: 'toolParts', inFlight: 1, approvals: 1 });
 
     actor.send({ type: 'close' });
 
     /* A person's Close is not a teardown: the store cancels the run and the
-     * row keeps reading `Stopped`, so the actor stays alive and `chatClosed`
-     * has exactly one sender — the store's own teardown. */
-    expect(parent.received).not.toContainEqual({ type: 'chatClosed', chatId: 'chat-1' });
+     * row keeps reading `Stopped`, so the actor stays alive until the store's
+     * own teardown stops its root (PV-S5). */
     expect(actor.getSnapshot().status).toBe('active');
     expect(runState(actor)).toBe('stopped');
     expect(actor.getSnapshot().context.pendingApprovalCount).toBe(0);
@@ -455,6 +441,27 @@ describe('chatSessionMachine host region', () => {
 
     expect(binding.bound).toEqual(['', 'tau', 'desktop']);
     expect(binding.released).toEqual(['', 'tau']);
+  });
+
+  it('should survive a host binding that throws, recording why (PV-S5, L3 D8)', () => {
+    const actor = createActor(
+      chatSessionMachine.provide({
+        actors: {
+          hostBinding: createCallbackLogic<EventObject, { chatId: string; placement: string }>(() => {
+            throw new Error('the worker refused the registration');
+          }),
+        },
+      }),
+      { input: { chatId: 'chat-1', projectId: 'proj_1' } },
+    );
+    actor.start();
+
+    expect(actor.getSnapshot().status).toBe('active');
+    expect(actor.getSnapshot().context.hostFailure).toBe('the worker refused the registration');
+    /* Still answers its public events. */
+    actor.send({ type: 'runLifecycle', phase: 'running', runId: 'run-1' });
+    expect(actor.getSnapshot().matches({ run: 'running' })).toBe(true);
+    actor.stop();
   });
 
   it('should release the binding when the chat session stops', () => {
@@ -964,6 +971,78 @@ describe('chatSessionMachine run ownership', () => {
     expect(dispatched[0]).toMatchObject({ chatId: 'chat-1', request });
     expect(actor.getSnapshot().context.turn).toEqual({ runId: 'run-9', leaseTurnId: 'user-9', request });
 
+    actor.stop();
+  });
+});
+
+describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
+  const events = [
+    ...(['admitted', 'running', 'paused', 'completed', 'cancelled'] as const).map(
+      (phase) => ({ type: 'runLifecycle', phase, runId: 'r' }) as const,
+    ),
+    { type: 'runLifecycle', phase: 'failed', runId: 'r', reason: 'x' },
+    { type: 'requestTurn', gesture: { kind: 'continue' } },
+    {
+      type: 'turnAdmitted',
+      turn: { runId: 'r', leaseTurnId: 't', request: { kind: 'continue' } },
+    },
+    { type: 'adoptRun', runId: 'r' },
+    { type: 'reconcileSettlement', runId: 'r', outcome: 'completed' },
+    { type: 'agentConfigChanged', placement: 'tau' },
+    { type: 'interruptRecorded', state: 'requested' },
+    { type: 'interruptRecorded', state: 'resolved' },
+    { type: 'toolParts', inFlight: 1, approvals: 0 },
+    { type: 'toolParts', inFlight: 0, approvals: 1 },
+    { type: 'toolParts', inFlight: 0, approvals: 0 },
+    ...(['invoking', 'retrying', 'stopping', 'idle'] as const).map(
+      (phase) => ({ type: 'requestLifecycle', phase }) as const,
+    ),
+    { type: 'durableRunState', state: 'reattaching' },
+    { type: 'durableRunState', state: 'active' },
+    { type: 'viewed' },
+    { type: 'unreadRestored' },
+    { type: 'close' },
+    { type: 'turnFinalized', branch: 'main' },
+    { type: 'turnFinalizedObserved', runId: 'r' },
+    { type: 'turnFailedObserved', runId: 'r', reason: 'x' },
+    { type: 'turnConflictedObserved', runId: 'r' },
+    { type: 'dirtyChanged', dirty: true },
+    { type: 'syncState', state: 'pending' },
+  ] satisfies ChatSessionMachineEvent[];
+
+  it('answers every sampled event, or declares it ignored, in every reachable state', () => {
+    expect(
+      unansweredEvents(chatSessionMachine, {
+        input: { chatId: 'chat-1', projectId: 'proj_1' },
+        events,
+        limit: 100_000,
+        ignore: chatSessionIgnoredEvents,
+        serializeState: (snapshot) =>
+          JSON.stringify([
+            snapshot.value,
+            snapshot.context.turn !== undefined,
+            snapshot.context.pendingGesture !== undefined,
+            snapshot.context.pendingApprovalCount > 0,
+            snapshot.context.toolsInFlight > 0,
+          ]),
+      }),
+    ).toEqual([]);
+  });
+
+  it('leaves no dead letter, unanswered delivery or fault over a turn and its settlement', () => {
+    const guard = guardActors({ ignore: { 'chat-session': chatSessionIgnoredEvents } });
+    const actor = createActor(chatSessionMachine, {
+      input: { chatId: 'chat-1', projectId: 'proj_1' },
+      inspect: guard.inspect,
+    }).start();
+    actor.send({ type: 'agentConfigChanged', placement: 'tau' });
+    actor.send({ type: 'runLifecycle', phase: 'admitted', runId: 'run-1' });
+    actor.send({ type: 'runLifecycle', phase: 'running', runId: 'run-1' });
+    actor.send({ type: 'toolParts', inFlight: 1, approvals: 0 });
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
+    actor.send({ type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'turn-1' });
+    actor.send({ type: 'viewed' });
+    expect(actor.getSnapshot().matches({ run: 'done' })).toBe(true);
     actor.stop();
   });
 });

@@ -1738,44 +1738,10 @@
       }
     },
     {
-      // Ratchet, W9 (page substrate).
-      "files": ["apps/ui/app/machines/{chat-session,composer-record}.machine.ts"],
+      // Ratchet, W9: `admitTurn` and `settleTurn` are deleted in PV-S13.
+      "files": ["apps/ui/app/machines/chat-session.machine.ts"],
       "rules": {
-        "tau-lint/xstate-owner-machine": ["error", { "pending": ["fromSafeAsync", "rootOnError", "version"] }]
-      }
-    },
-    {
-      // Ratchet, W9.
-      "files": ["apps/ui/app/machines/project-session.machine.ts"],
-      "rules": {
-        "tau-lint/xstate-owner-machine": [
-          "error",
-          { "pending": ["fromSafeAsync", "rootOnError", "spawnByKey", "version"] }
-        ]
-      }
-    },
-    {
-      // Ratchet, W9.
-      "files": ["apps/ui/app/machines/sessions.machine.ts"],
-      "rules": {
-        "tau-lint/xstate-owner-machine": ["error", { "pending": ["rootOnError", "spawnByKey", "version"] }]
-      }
-    },
-    {
-      // Ratchet, W9.
-      "files": ["apps/ui/app/hooks/chat-persistence.machine.ts"],
-      "rules": {
-        "tau-lint/xstate-owner-machine": [
-          "error",
-          { "pending": ["fromSafeAsync", "inlineEffect", "rootOnError", "version"] }
-        ]
-      }
-    },
-    {
-      // Ratchet, W9.
-      "files": ["apps/ui/app/hooks/draft.machine.ts"],
-      "rules": {
-        "tau-lint/xstate-owner-machine": ["error", { "pending": ["fromSafeAsync", "impure", "rootOnError", "version"] }]
+        "tau-lint/xstate-owner-machine": ["error", { "pending": ["fromSafeAsync"] }]
       }
     }
   ],

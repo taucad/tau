@@ -77,6 +77,20 @@ describe('collectDeclarationGraph', () => {
     ]);
   });
 
+  it('should read each file of an import cycle once and terminate', () => {
+    const directory = createFiles({
+      'index.d.ts': 'export * from "./voxels.js";',
+      'voxels.d.ts': 'import type { Mesh } from "./mesh.js";\nexport type Voxels = { toMesh(): Mesh };',
+      'mesh.d.ts': 'import type { Voxels } from "./voxels.js";\nexport type Mesh = { voxelize(): Voxels };',
+    });
+
+    expect(collectDeclarationGraph(directory, ['index.d.ts'])).toEqual({
+      'index.d.ts': 'export * from "./voxels.js";',
+      'mesh.d.ts': 'import type { Voxels } from "./voxels.js";\nexport type Mesh = { voxelize(): Voxels };',
+      'voxels.d.ts': 'import type { Mesh } from "./mesh.js";\nexport type Voxels = { toMesh(): Mesh };',
+    });
+  });
+
   it('should refuse an import that climbs out of the declaration directory', () => {
     const directory = createFiles({ 'index.d.ts': 'import { X } from "../outside.js";' });
 

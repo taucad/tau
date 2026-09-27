@@ -1,6 +1,6 @@
 # geospec API index
 
-geospec 0.1.0-beta.1 · 366 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.1 · 367 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -361,6 +361,7 @@ GeoSpecPmiQueryValue (type) — Complete inventory value
 GeoSpecCanonicalClaimReport (type) — Full native assertion result with the exact core-owned bytes retained
 GeoSpecNativeClaimEvaluation (type) — Exact core bytes of one claim evaluated in one engine…
 GeoSpecNativeEngine (type) — Byte-only engine surface consumed by the runner-independent assertion client
+GeoSpecNativeEvidenceProfile (type) — Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
 GeoSpecNativeSubject (type) — Content-addressed subject accepted by a protocol-3 assertion plan
 GeoSpecFixedNativeMatcherDescriptor (type) — A fixed-contract matcher available only through native clients
 GeoSpecNativeMatcherName (type) — Every matcher name exposed by a native `expectGeo(...)` client

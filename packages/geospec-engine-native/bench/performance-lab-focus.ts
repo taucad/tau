@@ -534,9 +534,9 @@ const measureFocusCase = async (spec: { product: FocusProduct; caseId: string; r
       // An add-on from before evaluateClaim (R10) still runs the cell through the calls its client made.
       const binding = await import('#native-binding');
       const module = 'evaluateClaim' in binding.Engine.prototype ? loaded : withTwoCallClaims(loaded);
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
       return {
         ...module,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
         Engine: construct(module.Engine, product.permits === undefined ? undefined : [undefined, product.permits]),
       };
     },

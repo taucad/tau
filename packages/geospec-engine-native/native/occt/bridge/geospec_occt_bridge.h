@@ -13,6 +13,7 @@ extern "C" {
 
 typedef struct geospec_occt_document geospec_occt_document;
 typedef struct geospec_occt_operand_memo geospec_occt_operand_memo;
+typedef struct geospec_occt_component_bodies geospec_occt_component_bodies;
 
 enum geospec_occt_status {
   GEOSPEC_OCCT_OK = 0,
@@ -22,8 +23,14 @@ enum geospec_occt_status {
   GEOSPEC_OCCT_NO_SHAPE = 4,
   GEOSPEC_OCCT_NATIVE_ERROR = 5,
   GEOSPEC_OCCT_BUFFER_TOO_SMALL = 6,
-  GEOSPEC_OCCT_UNSUPPORTED = 7
+  GEOSPEC_OCCT_UNSUPPORTED = 7,
+  GEOSPEC_OCCT_STOPPED = 8
 };
+
+// Ruling 28: a step asks for the work units of its next piece of work before
+// running it. A nonzero return refuses them: the step then returns
+// GEOSPEC_OCCT_STOPPED without doing that work.
+typedef int (*geospec_occt_charge)(void* context, uint64_t units);
 
 enum geospec_occt_surface_type {
   GEOSPEC_OCCT_SURFACE_PLANE = 0,
@@ -164,7 +171,6 @@ typedef struct geospec_occt_bounds {
 } geospec_occt_bounds;
 
 typedef struct geospec_occt_shape_facts {
-  int valid;
   geospec_occt_bounds bounds;
   double volume;
   double surface_area;
@@ -237,7 +243,6 @@ typedef struct geospec_occt_located_face_facts {
   geospec_occt_face_facts face;
   geospec_occt_bounds bounds;
   int reversed;
-  size_t edge_count;
 } geospec_occt_located_face_facts;
 
 typedef struct geospec_occt_edge_facts {
@@ -264,7 +269,46 @@ typedef struct geospec_occt_validity_facts {
   uint32_t invalid_solid_count;
   uint32_t open_edge_count;
   int closed_wires;
+  uint32_t nonmanifold_edge_count;
 } geospec_occt_validity_facts;
+
+// V1 shell closure: per unique shell definition, face uses per edge, skipping
+// degenerated and INTERNAL/EXTERNAL uses; odd is open, three or more is
+// non-manifold. Faces outside any shell form one group. A group with no
+// counted use fails with no open or non-manifold edge.
+typedef struct geospec_occt_closure_facts {
+  uint32_t shell_count;
+  uint32_t free_face_count;
+  uint32_t open_edge_count;
+  uint32_t nonmanifold_edge_count;
+  size_t failing_group_count;
+} geospec_occt_closure_facts;
+
+typedef struct geospec_occt_closure_edge_sample {
+  uint32_t face_uses;
+  double start[3];
+  double end[3];
+  double center[3];
+} geospec_occt_closure_edge_sample;
+
+typedef struct geospec_occt_closure_group {
+  int free_faces;
+  uint32_t open_edge_count;
+  uint32_t nonmanifold_edge_count;
+  uint32_t sample_count;
+  geospec_occt_closure_edge_sample samples[4];
+  size_t occurrence_count;
+} geospec_occt_closure_group;
+
+// M2: one exact connected-component body. `occurrence` is UINT32_MAX for a
+// whole-shape body; `bounds` folds the body's face boxes.
+typedef struct geospec_occt_component_body {
+  uint32_t occurrence;
+  int solid;
+  uint32_t vertex_count;
+  uint32_t face_count;
+  geospec_occt_bounds bounds;
+} geospec_occt_component_body;
 
 typedef struct geospec_occt_regular_solid_containment_result {
   int contained;
@@ -275,6 +319,17 @@ typedef struct geospec_occt_regular_solid_containment_result {
   int has_residual_center_of_mass;
   double residual_center_of_mass[3];
 } geospec_occt_regular_solid_containment_result;
+
+// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences.
+// `unqualified` names the operand (1 left, 2 right) that is not one regular
+// solid, with its reason; otherwise the residual is exact.
+typedef struct geospec_occt_occurrence_overlap_result {
+  int32_t unqualified;
+  uint32_t residual_solid_count;
+  int32_t has_residual_bounds;
+  double residual_volume;
+  geospec_occt_bounds residual_bounds;
+} geospec_occt_occurrence_overlap_result;
 
 typedef struct geospec_occt_cylinder_axial_extent_result {
   double origin[3];
@@ -547,11 +602,12 @@ size_t geospec_occt_triangulated_face_count(
 
 // Admission keeps source identity and addresses only. Occurrence bounds, edge
 // addresses and whole-face numerics are computed on first demand by their
-// getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR.
+// getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR. The surfaceless
+// face count (tessellated-only products, ruling 32) is taken at admission.
 int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* out_source_unit_to_millimeters, size_t* out_occurrence_count,
-    geospec_occt_string* source_unit,
+    size_t* out_surfaceless_face_count, geospec_occt_string* source_unit,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_step_subject_metadata(
     const geospec_occt_document* document, size_t* out_source_byte_length,
@@ -559,30 +615,37 @@ int geospec_occt_step_subject_metadata(
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 enum geospec_occt_report_facet {
-  // The soup of the isolated copy+mesh generation.
+  // The soup of an isolated copy+mesh generation built for this call only.
   GEOSPEC_OCCT_REPORT_MESH = 1,
-  // Whole-shape facts on that generation; `valid` is not measured.
-  GEOSPEC_OCCT_REPORT_FACTS = 2,
+  // Whole-shape facts on the admitted source shape (no copy, no mesh), one
+  // part per bit, each computed once per document on first demand; the
+  // transfer carries exactly the requested parts (the others NaN, counts 0).
+  // VOLUME is the volume and centre of mass.
+  GEOSPEC_OCCT_REPORT_VOLUME = 2,
   // Whole and occurrence face tables from the source public faces: the
   // address part (index, query index, orientation, surface and analytic
-  // parameters); no generation. Edge counts are zero.
+  // parameters); no generation.
   GEOSPEC_OCCT_REPORT_FACES = 4,
   // With FACES: face areas, centres of mass and non-triangulated Add boxes.
-  GEOSPEC_OCCT_REPORT_FACE_MEASURES = 8
+  GEOSPEC_OCCT_REPORT_FACE_MEASURES = 8,
+  // Surface area.
+  GEOSPEC_OCCT_REPORT_AREA = 16,
+  // Exact AddOptimal bounds (no triangulation, no shape tolerance).
+  GEOSPEC_OCCT_REPORT_BOUNDS = 32,
+  // The seven topology counts.
+  GEOSPEC_OCCT_REPORT_COUNTS = 64
 };
 
-// Prepare the requested facets into the transfer slot. A successful copy+mesh
-// is retained until both the mesh and facts facets have been prepared from it
-// or the document is freed, so either order meshes once.
+// Prepare the requested facets into the transfer slot.
 int geospec_occt_report_prepare(
     const geospec_occt_document* document, uint32_t facets,
     geospec_occt_report_sizes* out_sizes,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 // Private control: caller proves a dedicated OCCT closure and exclusively owns
-// the caller-inclusive grant for this call. A copy+mesh built by the call runs
-// the mesher in the selected mode, and the pool reservation ends with it;
-// everything else is serial. Zero is the plain call. A faces-only call takes
-// no grant and reports serial mode.
+// the caller-inclusive grant for this call. The grant serves the mesher of a
+// MESH call and the per-face box pass of a BOUNDS call, and the pool
+// reservation ends with them; everything else is serial. Zero is the plain
+// call. A call without MESH or BOUNDS takes no grant and reports serial mode.
 int geospec_occt_report_prepare_dedicated(
     const geospec_occt_document* document, uint32_t facets, int grant_width,
     int* out_used_parallel, geospec_occt_report_sizes* out_sizes,
@@ -707,6 +770,64 @@ int geospec_occt_validity_dedicated(
     int* out_used_parallel, geospec_occt_validity_facts* out_validity,
     geospec_occt_string* reason,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// The shell-closure facet alone: no validity analyzer, no tessellation.
+int geospec_occt_validity_closure(const geospec_occt_document* document,
+                                  geospec_occt_closure_facts* out_closure,
+                                  geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Failing group `index` (shells in explorer order, then the free faces): its
+// samples placed at the group's first located instance, and the ordinals of
+// the leaf occurrences containing it (capacity: the occurrence count). The
+// first call attributes every failing group in one pass over the leaves.
+int geospec_occt_validity_closure_group(
+    const geospec_occt_document* document, size_t index,
+    geospec_occt_closure_group* out_group, uint32_t* out_occurrences,
+    size_t occurrence_capacity, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// M2 narrow phase. The bodies of the listed occurrences (the whole shape when
+// the count is zero) are their top-level solids, then free shells, then free
+// faces, each with its faces' boxes from the per-located-face memo, grown by
+// each face's largest face, edge or vertex tolerance (the body bounds fold
+// them ungrown); bodies without a finite face box are omitted. The boxes are charged before any is
+// measured. The caller releases the set before the document. `facts` writes
+// every body, then every face box in body order.
+int geospec_occt_component_bodies_new(
+    const geospec_occt_document* document, const uint32_t* occurrences,
+    size_t occurrence_count, geospec_occt_charge charge, void* context,
+    geospec_occt_component_bodies** out_bodies, size_t* out_body_count,
+    size_t* out_face_count, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+void geospec_occt_component_bodies_release(
+    geospec_occt_component_bodies* bodies) GEOSPEC_OCCT_NOEXCEPT;
+int geospec_occt_component_bodies_facts(
+    const geospec_occt_component_bodies* bodies,
+    geospec_occt_component_body* out_bodies, size_t body_capacity,
+    geospec_occt_bounds* out_face_bounds, size_t face_capacity,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Whether any listed face of `left` lies within `tolerance` of any listed face
+// of `right`. The vertices, edges and faces of the listed faces pair up as the
+// exact shape distance decomposes them; the pairs whose boxes lie within
+// reach of the tolerance run that distance's per-pair extrema, serially,
+// nearest box first, each charged before it runs, until one lies within the
+// tolerance. A verdict only, never a point.
+int geospec_occt_component_faces_within(
+    const geospec_occt_component_bodies* bodies, size_t left,
+    const uint32_t* left_faces, size_t left_count, size_t right,
+    const uint32_t* right_faces, size_t right_count, double tolerance,
+    geospec_occt_charge charge, void* context, int* out_within,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Where `inner` lies in the solid `outer`: one vertex per vertex-connected
+// face set of `inner`, classified as the whole-body distance's solid treatment
+// classifies every vertex (0.001 mm), charged before the classifier is built.
+// *out_state is 0 when every point is OUT, 1 when one is IN, and 2 when none
+// is IN and one is ON or unclassified.
+int geospec_occt_component_body_inside(
+    const geospec_occt_component_bodies* bodies, size_t outer, size_t inner,
+    geospec_occt_charge charge, void* context, int* out_state,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Whole-body exact distance (a solid's interior counts as distance zero),
+// parallel within a grant of two or more; a verdict only, never a point.
+int geospec_occt_component_bodies_within_dedicated(
+    const geospec_occt_component_bodies* bodies, size_t left, size_t right,
+    double tolerance, int grant_width, int* out_used_parallel, int* out_within,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment(
     const geospec_occt_document* document, geospec_occt_entity subject,
     geospec_occt_entity target,
@@ -720,11 +841,31 @@ geospec_occt_operand_memo* geospec_occt_operand_memo_new(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_operand_memo_release(
     geospec_occt_operand_memo* memo) GEOSPEC_OCCT_NOEXCEPT;
+// Diagnostic count of occurrence operand qualifications run on this document
+// (memo misses and memo-less queries).
+size_t geospec_occt_occurrence_qualifications(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_regular_solid_containment_dedicated(
     const geospec_occt_document* document, geospec_occt_entity subject,
     geospec_occt_entity target, geospec_occt_operand_memo* memo,
     int grant_width, int* out_used_parallel,
     geospec_occt_regular_solid_containment_result* out_result,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// S10: one occurrence's exact-box price, M2's face-box units of its faces.
+int geospec_occt_occurrence_box_units(
+    const geospec_occt_document* document, uint32_t occurrence,
+    uint64_t* out_units, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// S10: each step of the pair is charged before it runs (ruling 28): the
+// face-box pre-count, each operand's first qualification in the memo, then
+// the Common, priced from the face pairs whose exact memo boxes, each
+// enlarged by `tolerance`, intersect. The Common is non-destructive, on the
+// memo's regular-solid operands.
+int geospec_occt_occurrence_overlap_dedicated(
+    const geospec_occt_document* document, uint32_t left, uint32_t right,
+    double tolerance, geospec_occt_operand_memo* memo, int grant_width,
+    geospec_occt_charge charge, void* context, int* out_used_parallel,
+    geospec_occt_occurrence_overlap_result* out_result,
+    geospec_occt_string* reason,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_cylinder_axial_extent(
     const geospec_occt_document* document, geospec_occt_entity face,
@@ -763,6 +904,10 @@ int geospec_occt_circular_bore(
     geospec_occt_circular_bore_candidate* out_candidate,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_circular_bores_discard(
+    const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
+// Diagnostic count of bore interiors the separation certificate cleared
+// without a Common in this document's inventories.
+size_t geospec_occt_certified_clear_bores(
     const geospec_occt_document* document) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_edge_treatment_counts_get(
     const geospec_occt_document* document,

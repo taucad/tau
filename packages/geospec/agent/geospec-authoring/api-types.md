@@ -1,6 +1,6 @@
 # geospec — Types
 
-274 top-level symbols. Signatures are verbatim typescript.
+275 top-level symbols. Signatures are verbatim typescript.
 
 // Stateful GeoSpec API created by {@link createGeoSpec}
 GeoSpec: {
@@ -1547,9 +1547,19 @@ GeoSpecDiscoveryResult: {
 // Worker-local cache for successful GeoSpec bundles
 GeoSpecModuleBundleCache: Map<string, {
     builtinIdentity: string;
+    /** The run token embedded in `bundle.code`; a reuse executes a copy under its own run's token. */
     runToken: string;
     bundle: BundleResult;
-    dependencyContents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+    /**
+     * Each filesystem read the bundler made while building `bundle`, with the
+     * answer it got. Existence probes are reads too: they decide which file an
+     * import resolves to.
+     */
+    bundlerReads: ReadonlyArray<{
+        question: 'exists' | 'utf8' | 'bytes';
+        path: string;
+        answer: boolean | string | Uint8Array<ArrayBuffer>;
+    }>;
 }>
 
 // Failed GeoSpec run result
@@ -2535,6 +2545,8 @@ GeoSpecAssertionClient: {
 GeoSpecAssertionClientOptions: {
     readonly claimId?: (matcher: GeoSpecNativeMatcherName, sequence: number) => string;
     readonly engine: GeoSpecNativeEngine;
+    /** Success-evidence profile of every claim and query; omitted means `complete`. */
+    readonly evidenceProfile?: GeoSpecNativeEvidenceProfile;
     readonly subjectSlot?: string;
     readonly workUnitLimit?: number;
 }
@@ -2702,6 +2714,9 @@ GeoSpecNativeEngine: {
     evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
     processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
 }
+
+// Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
+GeoSpecNativeEvidenceProfile: 'bounded' | 'complete'
 
 // Content-addressed subject accepted by a protocol-3 assertion plan
 GeoSpecNativeSubject: {

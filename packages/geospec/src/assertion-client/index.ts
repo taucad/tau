@@ -34,6 +34,7 @@ export type {
   GeoSpecCanonicalClaimReport,
   GeoSpecNativeClaimEvaluation,
   GeoSpecNativeEngine,
+  GeoSpecNativeEvidenceProfile,
   GeoSpecNativeSubject,
 } from '#engine/client.js';
 export { geoSpecNativeMatcherDescriptors } from '#engine/matchers.js';

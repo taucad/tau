@@ -291,6 +291,7 @@ fn validate_payload(
     }
     Some(CompletedOverlap {
         evidence: super::Evidence {
+            exact: false,
             component_count: components.len(),
             components: payload
                 .evidence
@@ -322,7 +323,7 @@ fn expected_trace(components: &[Component], candidates: &[(usize, usize)]) -> Ve
             if admitted.insert(component.id) {
                 trace.push(OverlapRequest::Source {
                     component: component.id,
-                    units: crate::backend::csg_scope::CsgScope::mesh_cost(&component.mesh),
+                    units: crate::backend::csg_scope::CsgScope::mesh_cost(component.mesh()),
                 });
             }
         }
@@ -386,6 +387,7 @@ fn request_to_dto(value: &OverlapRequest) -> RequestDto {
         },
         OverlapRequest::Boolean => RequestDto::Boolean,
         OverlapRequest::Properties => RequestDto::Properties,
+        OverlapRequest::Pair { .. } => unreachable!("publish admits only the Manifold trace"),
     }
 }
 

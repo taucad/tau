@@ -72,9 +72,20 @@ export type GeoSpecCanonicalClaimReport = {
   readonly status: GeoSpecCanonicalClaimStatus;
 };
 
+/**
+ * Success-evidence profile a product selects for its plans (PERF-OUTPUT-01).
+ * `complete`, the default, keeps every evidence field. `bounded` keeps verdicts
+ * and drops evidence that grows with the subject on success: component gaps
+ * (nearest-neighbour gaps on failure), a closed mesh's per-primitive rows,
+ * undeclared duplicate faces, and all but the first matching circular hole.
+ * @public
+ */
+export type GeoSpecNativeEvidenceProfile = 'bounded' | 'complete';
+
 type GeoSpecNativeClaimContext = {
   readonly claimId: string;
   readonly engine: GeoSpecNativeEngine;
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile;
   readonly polarity: GeoSpecClaimPolarity;
   readonly subject: GeoSpecNativeSubject;
   readonly subjectSlot: string;
@@ -287,6 +298,7 @@ const evaluateNativePayload = (options: NativePayloadOptions): GeoSpecCanonicalC
           workUnitBudget: options.workUnitLimit,
         },
       ],
+      ...(options.evidenceProfile === undefined ? {} : { evidenceProfile: options.evidenceProfile }),
     },
   };
   const { canonicalClaim, canonicalPlan, canonicalResult } = options.engine.evaluateClaim(

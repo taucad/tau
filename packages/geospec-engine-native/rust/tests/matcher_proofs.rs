@@ -9,8 +9,8 @@ use geospec_engine_native_core::{
     backend::{
         brep::{
             Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepIdentityProfile,
-            BrepSubject, ContinuousWallDomain, ContinuousWallShape, DocumentFacts, LocatedFace,
-            OccurrenceFacts, PointState, ReportedBrepBundle, ShapeFacts, TessellationProfile,
+            BrepSubject, ContinuousWallDomain, ContinuousWallShape, DocumentRows, LocatedFace,
+            OccurrenceFacts, PointState, ReportedFaces, ShapeFacts, TessellationProfile,
             TopologyCounts, ValidityFacts,
         },
         csg::{
@@ -100,33 +100,26 @@ fn occurrence() -> OccurrenceFacts {
         product_name: "wall".into(),
         instance_name: Some("wall".into()),
         ordinal_path: vec![1],
+        face_count: 1,
     }
 }
 
-fn facts() -> Rc<DocumentFacts> {
-    Rc::new(DocumentFacts {
-        source_length_unit: "millimetre".into(),
-        source_unit_to_millimeters: 1.0,
-        occurrences: vec![occurrence()],
-        shape: ShapeFacts {
-            bounds: bounds([0.0; 3], [1.0; 3]),
-            volume: 1.0,
-            surface_area: 6.0,
-            center_of_mass: [0.5; 3],
-            topology: TopologyCounts {
-                compounds: 1,
-                solids: 1,
-                shells: 1,
-                faces: 6,
-                wires: 6,
-                edges: 12,
-                vertices: 8,
-            },
+fn shape() -> ShapeFacts {
+    ShapeFacts {
+        bounds: bounds([0.0; 3], [1.0; 3]),
+        volume: 1.0,
+        surface_area: 6.0,
+        center_of_mass: [0.5; 3],
+        topology: TopologyCounts {
+            compounds: 1,
+            solids: 1,
+            shells: 1,
+            faces: 6,
+            wires: 6,
+            edges: 12,
+            vertices: 8,
         },
-        subshapes: Vec::new(),
-        datum_placements: Vec::new(),
-        semantic_datums: Vec::new(),
-    })
+    }
 }
 
 fn box_domain(edge_lengths: [f64; 3]) -> ContinuousWallDomain {
@@ -292,16 +285,31 @@ impl BrepSubject for ProofBrep {
             source_length_unit: "millimetre".into(),
             source_unit_to_millimeters: 1.0,
             occurrence_count: 1,
+            surfaceless_faces: 0,
         })
     }
 
-    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
-        Ok(ReportedBrepBundle {
-            facts: facts(),
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
+        Ok(cube(bounds([0.0; 3], [1.0; 3])))
+    }
+
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        Ok(shape())
+    }
+
+    fn reported_faces(&self, _: bool) -> Result<ReportedFaces, BackendError> {
+        Ok(ReportedFaces {
             whole_faces: Rc::from(Vec::<LocatedFace>::new()),
             occurrence_faces: vec![Rc::from(Vec::<LocatedFace>::new())],
-            mesh: Rc::new(cube(bounds([0.0; 3], [1.0; 3]))),
         })
+    }
+
+    fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        Ok(Rc::from([occurrence()]))
+    }
+
+    fn document_rows(&self) -> Result<DocumentRows, BackendError> {
+        Ok(DocumentRows::default())
     }
 
     fn continuous_wall_domain(&self, _: BrepEntity) -> Result<ContinuousWallDomain, BackendError> {
@@ -1053,7 +1061,7 @@ fn continuous_wall_outside_domain_refuses_both_polarities() {
 }
 
 #[test]
-fn continuous_wall_budget_charges_report_and_query_on_cold_and_warm_claims() {
+fn continuous_wall_budget_charges_the_brep_and_query_units_on_cold_and_warm_claims() {
     let (mut engine, _, _, _, queries) = engine_with_wall(Ok(box_domain([2.0, 3.0, 4.0])));
     let (subject_hash, _) = ingest_step(&mut engine);
     for (budget, expected_status, expected_queries) in [

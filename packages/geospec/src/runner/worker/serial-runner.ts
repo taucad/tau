@@ -71,7 +71,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
   const listeners = new Set<(event: GeoSpecRunnerEvent) => void>();
   let activeDrain: Promise<void> | undefined;
   let closePromise: Promise<void> | undefined;
-  // Runs are exclusive (activeDrain), so one cache serves every run; entries revalidate their dependency bytes.
+  // One cache serves every run; an entry is reused only while the bundler's reads still return the same answers.
   const bundleCache: GeoSpecModuleBundleCache = new Map();
 
   const emit = (event: GeoSpecRunnerEvent): void => {

@@ -251,7 +251,8 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       };
       runner = createNativeGeoSpecRunner({
         filesystem: createBridgeVmFileSystem(fileSystem),
-        nativeAssertions: { engine },
+        // PERF-OUTPUT-01: the product selects the bounded success evidence (ruling 13).
+        nativeAssertions: { engine, evidenceProfile: 'bounded' },
         model: {
           runtime: trackedRuntime,
           readSource: async (source) => {

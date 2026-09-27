@@ -163,6 +163,22 @@ impl Capability {
         )
     }
 
+    /// Ruling 32: whether the claim measures the admitted shape's faces or
+    /// edges, which a tessellated-only product (faces with no surface) does
+    /// not provide. Units, product structure, subject diagnostics, PMI, the
+    /// mesh query and the plate certificate read no face geometry.
+    pub const fn is_exact(self) -> bool {
+        !matches!(
+            self,
+            Self::ToHaveNoDiagnostics
+                | Self::ToHaveStepUnits
+                | Self::ToHaveProductStructure
+                | Self::AnalyzeMesh
+                | Self::QueryPmi
+                | Self::ToSatisfyRationalPlate
+        )
+    }
+
     pub const fn kind(self) -> Option<&'static str> {
         match self {
             Self::ToHaveBoundingBox => Some("boundingBox"),

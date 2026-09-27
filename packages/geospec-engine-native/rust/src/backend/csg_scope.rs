@@ -167,7 +167,23 @@ impl<'a> CsgScope<'a> {
     ) -> Result<SolidId, BackendError> {
         self.charge_cached_source(identity, component, Self::mesh_cost(mesh))?;
         let key = (identity.to_owned(), component);
-        let Some(cache) = self.retained.as_deref_mut() else {
+        if let Some(result) = self
+            .retained
+            .as_deref()
+            .and_then(|cache| cache.entries.get(&key))
+        {
+            if let Some(observations) = &self.observations {
+                observations.add(WorkCounter::CsgSourceHits, 1);
+            }
+            return Ok(*result);
+        }
+        // C8 (§16): a full engine-wide cache admits a transient operand instead
+        // of refusing, so the verdict never depends on what other claims retained.
+        let Some(cache) = self
+            .retained
+            .as_deref_mut()
+            .filter(|cache| (cache.entries.len() as u64) < u64::from(cache.max_entries))
+        else {
             if let Some(observations) = &self.observations {
                 observations.add(WorkCounter::CsgAdmissions, 1);
             }
@@ -175,18 +191,6 @@ impl<'a> CsgScope<'a> {
             self.transient.push(id);
             return Ok(id);
         };
-        if let Some(result) = cache.entries.get(&key) {
-            if let Some(observations) = &self.observations {
-                observations.add(WorkCounter::CsgSourceHits, 1);
-            }
-            return Ok(*result);
-        }
-        if cache.entries.len() as u64 >= u64::from(cache.max_entries) {
-            return Err(BackendError {
-                kind: BackendErrorKind::Unsupported,
-                message: "Source CSG operands exceed the configured retained solid limit.".into(),
-            });
-        }
         if let Some(observations) = &self.observations {
             observations.add(WorkCounter::CsgAdmissions, 1);
         }

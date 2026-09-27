@@ -151,6 +151,9 @@ pub struct BrepAdmissionFacts {
     pub source_length_unit: String,
     pub source_unit_to_millimeters: f64,
     pub occurrence_count: usize,
+    /// Located faces admitted without a surface: tessellated-only products
+    /// under the `OnNoBRep` read profile, whose exact claims refuse (ruling 32).
+    pub surfaceless_faces: usize,
 }
 
 /// Bounded public-subject metadata captured by the same successful STEP read.
@@ -161,29 +164,6 @@ pub struct StepSubjectMetadata {
     pub source_byte_length: usize,
     pub free_shape_count: usize,
     pub native_read_stream: bool,
-}
-
-/// One coherent fixed-profile report of a connector without separate facets;
-/// the `BrepSubject` facet defaults slice it. Entity ordinals still address
-/// immutable nominal query shapes.
-#[derive(Clone, Debug)]
-pub struct ReportedBrepBundle {
-    pub facts: Rc<DocumentFacts>,
-    pub whole_faces: Rc<[LocatedFace]>,
-    pub occurrence_faces: Vec<Rc<[LocatedFace]>>,
-    pub mesh: Rc<TriangleMesh>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DocumentFacts {
-    pub source_length_unit: String,
-    pub source_unit_to_millimeters: f64,
-    pub occurrences: Vec<OccurrenceFacts>,
-    pub shape: ShapeFacts,
-    pub subshapes: Vec<SubshapeFacts>,
-    pub datum_placements: Vec<DatumPlacementFacts>,
-    pub semantic_datums: Vec<SemanticDatumFacts>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -198,6 +178,10 @@ pub struct OccurrenceFacts {
     pub product_name: String,
     pub instance_name: Option<String>,
     pub ordinal_path: Vec<u32>,
+    /// Public faces of this occurrence. A parent (another occurrence names it
+    /// as `parent`) is structure and owns none (ruling 6); a zero-face leaf
+    /// owns none either (ruling 32).
+    pub face_count: u32,
 }
 
 /// Report face tables in public order: whole faces and one table per
@@ -225,6 +209,30 @@ pub struct ShapeFacts {
     pub surface_area: f64,
     pub center_of_mass: [f64; 3],
     pub topology: TopologyCounts,
+}
+
+/// The parts of [`ShapeFacts`] a claim reads, each measured on demand (F1):
+/// a scalar claim pays for its own integral only. Unrequested parts are
+/// unmeasured (NaN, counts zero) and must not be read.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ShapeParts(u8);
+
+impl ShapeParts {
+    /// Volume and centre of mass: one volume integral.
+    pub const VOLUME: Self = Self(1);
+    pub const AREA: Self = Self(2);
+    /// Exact `AddOptimal` bounds (ruling 4 (A)).
+    pub const BOUNDS: Self = Self(4);
+    pub const COUNTS: Self = Self(8);
+    pub const ALL: Self = Self(15);
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -432,8 +440,102 @@ pub struct ValidityFacts {
     pub solid_count: Option<u32>,
     pub invalid_solid_count: Option<u32>,
     pub open_edge_count: Option<u32>,
+    pub nonmanifold_edge_count: Option<u32>,
     pub closed_wires: Option<bool>,
     pub reason: Option<String>,
+}
+
+/// Exact shell closure (V1): per unique shell definition, face uses per edge,
+/// skipping degenerated and INTERNAL/EXTERNAL uses. An odd count is open,
+/// three or more is non-manifold; faces outside any shell form one group.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClosureFacts {
+    pub shells: u32,
+    pub free_faces: u32,
+    pub open_edges: u32,
+    pub nonmanifold_edges: u32,
+    /// Groups that are not closed (an open or non-manifold edge, or no counted
+    /// edge use): shells, then the free faces.
+    pub failing: Vec<ClosureGroup>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClosureGroup {
+    pub free_faces: bool,
+    pub open_edges: u32,
+    pub nonmanifold_edges: u32,
+    /// Ordinals of the leaf occurrences that contain the group.
+    pub occurrences: Vec<u32>,
+    /// Up to four failing edges, placed at the group's first located instance.
+    pub samples: Vec<ClosureEdgeSample>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClosureEdgeSample {
+    pub face_uses: u32,
+    pub start: [f64; 3],
+    pub end: [f64; 3],
+    pub center: [f64; 3],
+}
+
+/// One body of exact connected components (M2): a top-level solid, free
+/// shell or free face of a requested occurrence, or of the whole shape.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComponentBody {
+    /// The requested occurrence; `None` for a whole-shape body.
+    pub occurrence: Option<u32>,
+    /// A solid, so a body inside its material is at distance zero.
+    pub solid: bool,
+    pub vertices: u32,
+    /// The fold of the faces' memo boxes before they grow, bit-equal to the
+    /// shape's exact bounds.
+    pub bounds: Bounds,
+    /// Each face's box from the per-located-face memo, grown by the largest
+    /// tolerance of the face, its edges and its vertices so it encloses what
+    /// the exact distances measure, in explorer order.
+    pub faces: Vec<Bounds>,
+}
+
+/// Asked for the work units of the next native step before it runs (ruling
+/// 28); `false` stops the step, which then answers `None`.
+pub type Charge<'a> = dyn FnMut(u64) -> bool + 'a;
+
+/// Exact narrow-phase verdicts over one set of component bodies; nothing
+/// here publishes a point.
+pub trait ComponentBodies {
+    fn bodies(&self) -> &[ComponentBody];
+    /// Whether any listed face of `left` lies within `tolerance` of any
+    /// listed face of `right`: their vertex, edge and face pairs whose boxes
+    /// lie within reach, nearest first, each charged before its serial exact
+    /// distance, stopping at the first within `tolerance`.
+    fn faces_within(
+        &self,
+        left: usize,
+        left_faces: &[u32],
+        right: usize,
+        right_faces: &[u32],
+        tolerance: f64,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<bool>, BackendError>;
+    /// Where `inner` lies in the solid `outer`, for bodies whose boundaries
+    /// lie farther apart than the tolerance: one vertex per vertex-connected
+    /// face set of `inner`, classified as the whole-body distance classifies
+    /// every vertex; `In` when one is inside, `Out` when all are outside, and
+    /// `On` otherwise.
+    fn body_inside(
+        &self,
+        outer: usize,
+        inner: usize,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<PointState>, BackendError>;
+    /// Whether two whole bodies lie within `tolerance`, a solid's interior
+    /// included; parallel under a grant, which leaves the distance exact.
+    fn bodies_within(
+        &self,
+        left: usize,
+        right: usize,
+        tolerance: f64,
+    ) -> Result<bool, BackendError>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -453,6 +555,20 @@ pub struct RegularSolidContainment {
     pub residual_volume: f64,
     pub residual_bounds: Option<Bounds>,
     pub residual_center_of_mass: Option<[f64; 3]>,
+}
+
+/// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OccurrenceOverlap {
+    /// The left or right operand is not one regular solid.
+    Unqualified { left: bool, reason: String },
+    /// The exact Common's residual: empty (no solids, zero volume, no bounds)
+    /// when the operands only touch.
+    Residual {
+        solids: u32,
+        volume: f64,
+        bounds: Option<Bounds>,
+    },
 }
 
 /// Qualified full cylindrical-band trim; distances are along the unit axis.
@@ -910,6 +1026,15 @@ pub struct FiniteContactLine {
     pub edge_tolerance: f64,
     pub vertex_tolerances: [f64; 2],
 }
+
+/// The report facets' default: a connector reports none of them.
+fn no_report() -> BackendError {
+    BackendError {
+        kind: super::BackendErrorKind::Unsupported,
+        message: "The BRep connector has no qualified fixed-profile report bundle.".into(),
+    }
+}
+
 pub trait BrepSubject {
     /// Complete bounded plane region or source-attached circular rim evidence.
     fn finite_contact_face(&self, _face: BrepEntity) -> Result<FiniteContactFace, BackendError> {
@@ -929,42 +1054,30 @@ pub trait BrepSubject {
         Ok(None)
     }
 
-    /// The combined report. A connector with separate facets overrides the
-    /// facets below instead; their defaults slice this bundle.
-    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
-        Err(BackendError {
-            kind: super::BackendErrorKind::Unsupported,
-            message: "The BRep connector has no qualified fixed-profile report bundle.".into(),
-        })
-    }
-
     /// The report mesh facet, owned so the caller can move it into its record.
     fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
-        Ok(self.reported_facts_and_mesh()?.mesh.as_ref().clone())
+        Err(no_report())
     }
 
     /// The report's whole-shape facts.
     fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
-        Ok(self.reported_facts_and_mesh()?.facts.shape.clone())
+        Err(no_report())
+    }
+
+    /// Whole-shape facts measuring only `parts` (F1); the others may be
+    /// unmeasured. The default measures them all.
+    fn reported_shape_parts(&self, _parts: ShapeParts) -> Result<ShapeFacts, BackendError> {
+        self.reported_shape()
     }
 
     /// The report face tables; `measured == false` may leave them address-only.
     fn reported_faces(&self, _measured: bool) -> Result<ReportedFaces, BackendError> {
-        let bundle = self.reported_facts_and_mesh()?;
-        Ok(ReportedFaces {
-            whole_faces: bundle.whole_faces,
-            occurrence_faces: bundle.occurrence_faces,
-        })
+        Err(no_report())
     }
 
     /// Subshape names and datums without a report.
     fn document_rows(&self) -> Result<DocumentRows, BackendError> {
-        let facts = self.reported_facts_and_mesh()?.facts;
-        Ok(DocumentRows {
-            subshapes: facts.subshapes.clone(),
-            datum_placements: facts.datum_placements.clone(),
-            semantic_datums: facts.semantic_datums.clone(),
-        })
+        Err(no_report())
     }
 
     /// The `AddOptimal` box of one public whole face, measured only for the
@@ -1085,6 +1198,26 @@ pub trait BrepSubject {
         self.regular_solid_containment(subject, target)
     }
 
+    /// S10 (ruling 23): the non-destructive exact Common of two leaf
+    /// occurrences' regular-solid operands, each qualified once per memo (C7).
+    /// Each step is charged before it runs (ruling 28): the face-box
+    /// pre-count, each operand's first qualification in the memo, and the
+    /// Common, priced from the face pairs whose exact boxes, enlarged by
+    /// `tolerance`, intersect; `None` when `charge` stops one.
+    fn occurrence_overlap_memoized(
+        &self,
+        _left: u32,
+        _right: u32,
+        _tolerance: f64,
+        _memo: &mut OperandMemo,
+        _charge: &mut Charge<'_>,
+    ) -> Result<Option<OccurrenceOverlap>, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no exact occurrence overlap query.".into(),
+        })
+    }
+
     /// One requested subject-target difference. Implementations must validate
     /// regular closed 3D operands and successful valid result topology; faces,
     /// open shells and indeterminate results cannot be reported contained.
@@ -1140,18 +1273,32 @@ pub trait BrepSubject {
     /// transferring whole-document face/PMI inventories. `name` may be left
     /// empty.
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
-        Ok(self
-            .reported_facts_and_mesh()?
-            .facts
-            .occurrences
-            .clone()
-            .into())
+        Err(no_report())
     }
 
     /// `source_occurrences` without measuring occurrence bounds: every field
     /// except `bounds`, which a connector may leave unmeasured (NaN).
     fn source_occurrence_structure(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
         self.source_occurrences()
+    }
+
+    /// The work units of measuring one occurrence's exact box: M2's face-box
+    /// price of its faces (ruling 28).
+    fn occurrence_box_units(&self, _occurrence: u32) -> Result<u64, BackendError> {
+        Ok(1)
+    }
+
+    /// One occurrence's `source_occurrences` bounds, measured alone, so a
+    /// caller measures only the occurrences it reads (ruling 32: a zero-face
+    /// leaf may have no finite box).
+    fn occurrence_bounds(&self, occurrence: u32) -> Result<Bounds, BackendError> {
+        self.source_occurrences()?
+            .get(occurrence as usize)
+            .map(|row| row.bounds)
+            .ok_or_else(|| BackendError {
+                kind: super::BackendErrorKind::InvalidInput,
+                message: "Occurrence index is out of range.".into(),
+            })
     }
 
     /// All uniquely forward-transferred public faces for an original source face.
@@ -1169,6 +1316,29 @@ pub trait BrepSubject {
     /// `bounds` may be unmeasured (NaN); `face_optimal_bounds` measures one.
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
+    /// Exact shell closure alone: no validity analyzer and no tessellation.
+    /// Naming the failing groups' leaf occurrences is charged before it runs,
+    /// warm or cold, a unit per failing group and per occurrence (rulings 23
+    /// and 28); `None` when `charge` stops it.
+    fn closure(&self, _charge: &mut Charge<'_>) -> Result<Option<Rc<ClosureFacts>>, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no exact shell-closure facet.".into(),
+        })
+    }
+    /// Component bodies of the listed occurrences, or of the whole shape
+    /// when the list is empty (M2), with their face boxes charged before
+    /// they are measured; `None` when `charge` stops them.
+    fn component_bodies(
+        &self,
+        _occurrences: &[u32],
+        _charge: &mut Charge<'_>,
+    ) -> Result<Option<Box<dyn ComponentBodies + '_>>, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no exact component-body query.".into(),
+        })
+    }
     /// Classify against the located trimmed face. Off-surface points are Out.
     fn classify_face_points(
         &self,

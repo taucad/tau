@@ -2727,51 +2727,54 @@ mod tests {
                 .unwrap()
                 .clone())
         }
-        fn reported_facts_and_mesh(
+        fn source_occurrences(
             &self,
-        ) -> Result<crate::backend::brep::ReportedBrepBundle, BackendError> {
-            use crate::backend::{brep::*, TriangleMesh};
+        ) -> Result<std::rc::Rc<[crate::backend::brep::OccurrenceFacts]>, BackendError> {
+            use crate::backend::brep::*;
+            Ok(std::rc::Rc::from([OccurrenceFacts {
+                name: "housing".into(),
+                placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                bounds: Bounds {
+                    min: [-40.0; 3],
+                    max: [40.0; 3],
+                },
+                path: "housing".into(),
+                parent: None,
+                product: 0,
+                product_name: "core-product".into(),
+                instance_name: None,
+                ordinal_path: vec![1],
+                face_count: 1,
+            }]))
+        }
+        fn reported_shape(&self) -> Result<crate::backend::brep::ShapeFacts, BackendError> {
+            use crate::backend::brep::*;
+            Ok(ShapeFacts {
+                bounds: Bounds {
+                    min: [-40.0; 3],
+                    max: [40.0; 3],
+                },
+                volume: 1.0,
+                surface_area: 1.0,
+                center_of_mass: [0.0; 3],
+                topology: TopologyCounts {
+                    compounds: 0,
+                    solids: 1,
+                    shells: 1,
+                    faces: 3,
+                    wires: 3,
+                    edges: 3,
+                    vertices: 2,
+                },
+            })
+        }
+        fn reported_faces(
+            &self,
+            _: bool,
+        ) -> Result<crate::backend::brep::ReportedFaces, BackendError> {
+            use crate::backend::brep::*;
             use std::rc::Rc;
-            Ok(ReportedBrepBundle {
-                facts: Rc::new(DocumentFacts {
-                    source_length_unit: "millimetre".into(),
-                    source_unit_to_millimeters: 1.0,
-                    occurrences: vec![OccurrenceFacts {
-                        name: "housing".into(),
-                        placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                        bounds: Bounds {
-                            min: [-40.0; 3],
-                            max: [40.0; 3],
-                        },
-                        path: "housing".into(),
-                        parent: None,
-                        product: 0,
-                        product_name: "core-product".into(),
-                        instance_name: None,
-                        ordinal_path: vec![1],
-                    }],
-                    subshapes: vec![],
-                    datum_placements: vec![],
-                    semantic_datums: vec![],
-                    shape: ShapeFacts {
-                        bounds: Bounds {
-                            min: [-40.0; 3],
-                            max: [40.0; 3],
-                        },
-                        volume: 1.0,
-                        surface_area: 1.0,
-                        center_of_mass: [0.0; 3],
-                        topology: TopologyCounts {
-                            compounds: 0,
-                            solids: 1,
-                            shells: 1,
-                            faces: 3,
-                            wires: 3,
-                            edges: 3,
-                            vertices: 2,
-                        },
-                    },
-                }),
+            Ok(ReportedFaces {
                 whole_faces: Rc::from([]),
                 occurrence_faces: vec![self
                     .bands
@@ -2799,10 +2802,15 @@ mod tests {
                     })
                     .collect::<Vec<_>>()
                     .into()],
-                mesh: Rc::new(TriangleMesh {
-                    positions: vec![],
-                    triangles: vec![],
-                }),
+            })
+        }
+        fn document_rows(&self) -> Result<crate::backend::brep::DocumentRows, BackendError> {
+            Ok(crate::backend::brep::DocumentRows::default())
+        }
+        fn reported_mesh(&self) -> Result<crate::backend::TriangleMesh, BackendError> {
+            Ok(crate::backend::TriangleMesh {
+                positions: vec![],
+                triangles: vec![],
             })
         }
 

@@ -50,13 +50,20 @@ fn occurrence(index: u32, path: &str) -> OccurrenceFacts {
         product_name: "bracket".into(),
         instance_name: Some(path.into()),
         ordinal_path: vec![index + 1],
+        face_count: 1,
     }
 }
 
-fn retained_facts() -> DocumentFacts {
-    DocumentFacts {
-        source_length_unit: "millimetre".into(),
-        source_unit_to_millimeters: 1.0,
+/// The retained fixture's occurrences and whole-shape facts, which its report
+/// facets serve (a millimetre source without rows).
+#[derive(Clone)]
+struct RetainedFacts {
+    occurrences: Vec<OccurrenceFacts>,
+    shape: ShapeFacts,
+}
+
+fn retained_facts() -> RetainedFacts {
+    RetainedFacts {
         occurrences: vec![occurrence(0, "left"), occurrence(1, "right")],
         shape: ShapeFacts {
             bounds: bounds([-10.0, -10.0, 0.0], [10.0, 10.0, 10.0]),
@@ -73,9 +80,6 @@ fn retained_facts() -> DocumentFacts {
                 vertices: 16,
             },
         },
-        subshapes: Vec::new(),
-        datum_placements: Vec::new(),
-        semantic_datums: Vec::new(),
     }
 }
 
@@ -145,7 +149,7 @@ fn retained_faces() -> Vec<LocatedFace> {
 }
 
 struct RetainedBrep {
-    facts: Rc<DocumentFacts>,
+    facts: Rc<RetainedFacts>,
     faces: Rc<[LocatedFace]>,
     validity: Rc<ValidityFacts>,
     bore_queries: Rc<Cell<usize>>,
@@ -154,6 +158,18 @@ struct RetainedBrep {
 }
 
 impl RetainedBrep {
+    /// One report facet demand: counted, and refused under `fail_report`.
+    fn report(&self) -> Result<(), BackendError> {
+        self.report_calls.set(self.report_calls.get() + 1);
+        if self.fail_report {
+            return Err(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "deliberate report failure".into(),
+            });
+        }
+        Ok(())
+    }
+
     fn complete() -> Self {
         Self {
             facts: Rc::new(retained_facts()),
@@ -176,6 +192,7 @@ impl RetainedBrep {
                 solid_count: Some(1),
                 invalid_solid_count: Some(0),
                 open_edge_count: Some(0),
+                nonmanifold_edge_count: None,
                 closed_wires: Some(true),
                 reason: None,
             }),
@@ -280,31 +297,34 @@ impl BrepSubject for RetainedBrep {
         Ok(CircularBoreInventory { candidates })
     }
 
-    fn reported_facts_and_mesh(
-        &self,
-    ) -> Result<crate::backend::brep::ReportedBrepBundle, BackendError> {
-        self.report_calls.set(self.report_calls.get() + 1);
-        if self.fail_report {
-            return Err(BackendError {
-                kind: BackendErrorKind::Unsupported,
-                message: "deliberate report failure".into(),
-            });
-        }
-        // This test double supplies the explicit coherent report seam. Its empty
-        // mesh is unused by these fact-only predicate/early-selection controls.
-        let facts = Rc::clone(&self.facts);
-        let occurrence_faces = (0..facts.occurrences.len())
-            .map(|_| Rc::from(Vec::<LocatedFace>::new()))
-            .collect();
-        Ok(crate::backend::brep::ReportedBrepBundle {
-            facts,
+    fn reported_faces(&self, _: bool) -> Result<crate::backend::brep::ReportedFaces, BackendError> {
+        self.report()?;
+        Ok(crate::backend::brep::ReportedFaces {
             whole_faces: Rc::clone(&self.faces),
-            occurrence_faces,
-            mesh: Rc::new(TriangleMesh {
-                positions: Vec::new(),
-                triangles: Vec::new(),
-            }),
+            occurrence_faces: (0..self.facts.occurrences.len())
+                .map(|_| Rc::from(Vec::<LocatedFace>::new()))
+                .collect(),
         })
+    }
+
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        self.report()?;
+        Ok(self.facts.shape.clone())
+    }
+
+    // Its empty mesh is unused by these fact-only predicate/early-selection
+    // controls.
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
+        self.report()?;
+        Ok(TriangleMesh {
+            positions: Vec::new(),
+            triangles: Vec::new(),
+        })
+    }
+
+    fn document_rows(&self) -> Result<crate::backend::brep::DocumentRows, BackendError> {
+        self.report()?;
+        Ok(crate::backend::brep::DocumentRows::default())
     }
 
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
@@ -353,6 +373,7 @@ fn retained_subject() -> Subject {
         source_length_unit: "millimetre".into(),
         source_unit_to_millimeters: 1.0,
         occurrence_count: 0,
+        surfaceless_faces: 0,
     });
     subject.semantic_identity.set(identity).unwrap();
     subject
@@ -695,7 +716,7 @@ fn retained_neutral_facts_drive_all_eleven_positive_predicates() {
     let brep = RetainedBrep::complete();
     let facts = Rc::clone(&brep.facts);
 
-    assert!(evaluate_units("mm", &facts).unwrap().positive);
+    assert!(unit_outcome("mm", "millimetre", 1.0).positive);
     assert!(
         evaluate_products(
             &ProductStructure {
@@ -1073,7 +1094,7 @@ fn evaluation_context_drives_all_eleven_matcher_families_with_one_brep_unit() {
 #[test]
 fn mismatch_diagnostics_retain_source_details_and_inventory() {
     let facts = retained_facts();
-    let units = evaluate_units("in", &facts).unwrap();
+    let units = unit_outcome("in", "millimetre", 1.0);
     assert_eq!(
         units.diagnostics[0].details,
         Some(Json::object([
@@ -1266,7 +1287,7 @@ fn analyze_brep_reports_the_source_unavailable_diagnostic() {
 fn retained_neutral_facts_drive_all_eleven_negative_predicates() {
     let brep = RetainedBrep::complete();
     let facts = Rc::clone(&brep.facts);
-    assert!(!evaluate_units("in", &facts).unwrap().positive);
+    assert!(!unit_outcome("in", "millimetre", 1.0).positive);
     assert!(
         !evaluate_products(
             &ProductStructure {
@@ -1888,7 +1909,7 @@ fn analyze_brep_meets_the_edge_treatment_face_limit_before_report_facts_and_bore
         })
         .collect::<Vec<_>>()
         .into();
-    connector.facts = Rc::new(DocumentFacts {
+    connector.facts = Rc::new(RetainedFacts {
         occurrences: Vec::new(),
         ..retained_facts()
     });
@@ -1919,4 +1940,83 @@ fn analyze_brep_meets_the_edge_treatment_face_limit_before_report_facts_and_bore
     assert_eq!(budget.used(), 1);
     assert_eq!(queries.get(), 0);
     assert!(subjects[0].mesh_record().is_none());
+}
+
+#[test]
+fn bounded_circular_hole_stops_at_the_first_matching_bore() {
+    let mut subject = retained_subject();
+    subject.brep = Some(Box::new(RetainedBrep::complete()));
+    let subjects = [Rc::new(subject)];
+    let hole = |diameter: f64, profile| {
+        let prepared = prepared(
+            Capability::ToHaveCircularHole,
+            Json::object([
+                ("diameter", Json::Number(diameter)),
+                ("through", Json::Bool(true)),
+            ]),
+        );
+        let normalized = prepared.normalized_payload();
+        let budget = Budget::new(1_000);
+        let mut context = EvaluationContext::new(
+            &subjects,
+            Capability::ToHaveCircularHole,
+            "claim",
+            &normalized,
+            &budget,
+            None,
+        )
+        .with_evidence_profile(profile);
+        match evaluate(&prepared, &mut context) {
+            Evaluation::Geometric {
+                positive_satisfied,
+                diagnostics,
+                evidence,
+                ..
+            } => (positive_satisfied, diagnostics, evidence),
+            _ => panic!("a retained BRep evaluates the hole claim"),
+        }
+    };
+    // Four qualified 2 mm through bores follow a 1 mm exterior cylinder.
+    let (satisfied, _, complete) = hole(2.0, crate::protocol::EvidenceProfile::Complete);
+    assert!(satisfied);
+    let complete = object_field(&complete, "witnesses").unwrap();
+    assert_eq!(
+        array_values(object_field(complete, "circularHoles").unwrap()).len(),
+        4
+    );
+    assert_eq!(
+        array_values(object_field(complete, "matches").unwrap()).len(),
+        4
+    );
+    let (satisfied, _, bounded) = hole(2.0, crate::protocol::EvidenceProfile::Bounded);
+    assert!(satisfied);
+    assert_eq!(
+        object_field(object_field(&bounded, "measured").unwrap(), "matchCount"),
+        Some(&Json::Number(1.0))
+    );
+    let bounded = object_field(&bounded, "witnesses").unwrap();
+    assert!(object_field(bounded, "circularHoles").is_none());
+    assert_eq!(
+        array_values(object_field(bounded, "matches").unwrap()),
+        &array_values(object_field(complete, "matches").unwrap())[..1]
+    );
+    let topology = object_field(bounded, "circularBoreTopology").unwrap();
+    assert!(object_field(topology, "complete").is_none());
+    let candidates = array_values(object_field(topology, "candidates").unwrap());
+    let first_qualified = array_values(
+        object_field(
+            object_field(complete, "circularBoreTopology").unwrap(),
+            "candidates",
+        )
+        .unwrap(),
+    )
+    .iter()
+    .find(|candidate| object_field(candidate, "status") == Some(&Json::string("qualified")))
+    .unwrap();
+    assert_eq!(candidates, std::slice::from_ref(first_qualified));
+    // Without a match the bounded profile keeps the complete evidence.
+    assert_eq!(
+        hole(3.0, crate::protocol::EvidenceProfile::Bounded),
+        hole(3.0, crate::protocol::EvidenceProfile::Complete)
+    );
 }

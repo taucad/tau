@@ -23,33 +23,19 @@ fn should_transfer_ordered_source_occurrences_without_report_preparation() {
 
     // F10: source rows leave the unread XDE name empty.
     assert!(source.iter().all(|row| row.name.is_empty()));
-    let report = document.reported_facts_and_mesh().unwrap();
-    assert_eq!(report.facts.occurrences.len(), source.len());
     let expected_bounds = [
         ([-5.0, -5.0, -5.0], [5.0, 5.0, 5.0]),
         ([25.0, -5.0, -5.0], [35.0, 5.0, 5.0]),
     ];
-    for (index, (source_row, report_row)) in source
-        .iter()
-        .zip(report.facts.occurrences.iter())
-        .enumerate()
-    {
-        assert_eq!(source_row.path, report_row.path);
-        assert_eq!(source_row.ordinal_path, report_row.ordinal_path);
-        assert_eq!(source_row.parent, report_row.parent);
-        assert_eq!(source_row.product, report_row.product);
-        assert_eq!(
-            source_row.placement.map(f64::to_bits),
-            report_row.placement.map(f64::to_bits)
-        );
-        assert_eq!(source_row.bounds.min, expected_bounds[index].0);
-        assert_eq!(source_row.bounds.max, expected_bounds[index].1);
-        assert_eq!(report_row.bounds.min, expected_bounds[index].0);
-        assert_eq!(report_row.bounds.max, expected_bounds[index].1);
+    for (row, (min, max)) in source.iter().zip(expected_bounds) {
+        assert_eq!(row.bounds.min, min);
+        assert_eq!(row.bounds.max, max);
     }
-    // The occurrence boxes happen to match bit-for-bit here; the whole-shape
-    // report box has its separate tolerance expansion.
-    assert_ne!(source[0].bounds.min, report.facts.shape.bounds.min);
+    // V2: the whole-shape report box is the same exact AddOptimal fold, so it
+    // is the union of the root occurrence boxes.
+    let shape = document.reported_shape().unwrap();
+    assert_eq!(shape.bounds.min, source[0].bounds.min);
+    assert_eq!(shape.bounds.max, source[1].bounds.max);
 }
 
 #[test]

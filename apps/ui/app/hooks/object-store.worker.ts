@@ -7,7 +7,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import type { AppUiPreferences } from '#types/storage.types.js';
 import type { EditorState, EditorStateInput, OpenFile } from '#types/editor.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type {
   PendingCreateProjectOperation,
   PendingDuplicateProjectOperation,

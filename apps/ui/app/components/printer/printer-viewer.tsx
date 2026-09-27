@@ -45,7 +45,12 @@ import {
   formatDuration,
   playbackSpeeds,
 } from '#components/printer/printer-playback.js';
-import type { PlaybackSpeed } from '#components/printer/printer-playback.js';
+import type {
+  LiveRunPosition,
+  PlaybackSnapshot,
+  PlaybackSpeed,
+  PlaybackStore,
+} from '#components/printer/printer-playback.js';
 import { loadPrinterProgram } from '#components/printer/printer-program.js';
 import { defaultPrinterPlate, printerPlateById, x1cPlates } from '#components/printer/printer-plates.js';
 import type { PrinterPlateId, PrinterPlateModel } from '#components/printer/printer-plates.js';
@@ -243,13 +248,6 @@ const usePrinterGeometry = (live: PrinterLiveState | undefined) => {
   return { manifest, geometry };
 };
 
-/**
- * The G-code filter's state: every segment's group, and the groups hidden,
- * travel and wipes to begin with.
- *
- * @param program - The loaded toolpath.
- * @returns The grouping, the hidden set (a new set per change) and its toggle.
- */
 /** The first known filament colour, in priority order, and each filter group's colour as the scene draws it. */
 const useToolpathColors = (filaments: ReadonlyArray<string | undefined>, theme: 'light' | 'dark') => {
   const filamentColor = filaments.find((color) => color !== undefined) ?? printerAccent;
@@ -261,6 +259,13 @@ const useToolpathColors = (filaments: ReadonlyArray<string | undefined>, theme: 
   return { filamentColor, groupColors };
 };
 
+/**
+ * The G-code filter's state: every segment's group, and the groups hidden,
+ * travel and wipes to begin with.
+ *
+ * @param program - The loaded toolpath.
+ * @returns The grouping, the hidden set (a new set per change) and its toggle.
+ */
 const useToolpathFilter = (program: ToolpathProgram) => {
   const grouping = useMemo(() => groupToolpath(program), [program]);
   const [hiddenGroups, setHiddenGroups] = useState(defaultHiddenToolpathGroups);
@@ -276,6 +281,41 @@ const useToolpathFilter = (program: ToolpathProgram) => {
     });
   }, []);
   return { grouping, hiddenGroups, handleGroupShown };
+};
+
+/**
+ * Keep the cursor on the followed machine while Live is on, leave Live once the machine stops printing
+ * this file, and pause while the document is hidden.
+ */
+const useLivePlayback = (
+  store: PlaybackStore,
+  {
+    isLive,
+    position,
+    isLiveAvailable,
+  }: Readonly<{ isLive: boolean; position: LiveRunPosition | undefined; isLiveAvailable: boolean }>,
+): void => {
+  useEffect(() => {
+    if (isLive && position) {
+      store.followLive(position);
+    }
+  }, [position, isLive, store]);
+  useEffect(() => {
+    if (isLive && !isLiveAvailable) {
+      store.setLive(false);
+    }
+  }, [isLiveAvailable, isLive, store]);
+  useEffect(() => {
+    const pauseWhenHidden = (): void => {
+      if (document.hidden) {
+        store.pause();
+      }
+    };
+    document.addEventListener('visibilitychange', pauseWhenHidden);
+    return () => {
+      document.removeEventListener('visibilitychange', pauseWhenHidden);
+    };
+  }, [store]);
 };
 
 function PrinterSimulation({
@@ -309,30 +349,11 @@ function PrinterSimulation({
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const { grouping, hiddenGroups, handleGroupShown } = useToolpathFilter(program);
   const { filamentColor, groupColors } = useToolpathColors([slicedFilamentColor, live?.filamentColor], theme);
-  const position = live?.position;
-  const isLiveAvailable = live?.printsThisFile === true;
-
-  useEffect(() => {
-    if (snapshot.isLive && position) {
-      store.followLive(position);
-    }
-  }, [position, snapshot.isLive, store]);
-  useEffect(() => {
-    if (snapshot.isLive && !isLiveAvailable) {
-      store.setLive(false);
-    }
-  }, [isLiveAvailable, snapshot.isLive, store]);
-  useEffect(() => {
-    const pauseWhenHidden = (): void => {
-      if (document.hidden) {
-        store.pause();
-      }
-    };
-    document.addEventListener('visibilitychange', pauseWhenHidden);
-    return () => {
-      document.removeEventListener('visibilitychange', pauseWhenHidden);
-    };
-  }, [store]);
+  useLivePlayback(store, {
+    isLive: snapshot.isLive,
+    position: live?.position,
+    isLiveAvailable: live?.printsThisFile === true,
+  });
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLElement>): void => {
@@ -366,22 +387,6 @@ function PrinterSimulation({
     store.pause();
     setSceneError('The graphics context was lost. Reopen the file to restart the simulation.');
   }, [store]);
-  const handleSpeed = useCallback(
-    (value: string): void => {
-      const speed = playbackSpeeds.find((candidate) => String(candidate) === value);
-      if (speed !== undefined) {
-        store.setSpeed(speed);
-      }
-    },
-    [store],
-  );
-
-  const layerCount = program.layerTable.length;
-  const layerNumber = Math.max(0, snapshot.layer + 1);
-  const nozzleTarget = live?.nozzleTarget ?? eventValueAt(program.events, 'nozzle-temperature', snapshot.time);
-  const bedTarget = live?.bedTarget ?? eventValueAt(program.events, 'bed-temperature', snapshot.time);
-  const filamentUsed = extrudedLengthAt(prefix, program, snapshot.time);
-  const duration = Math.ceil(program.duration);
 
   return (
     <section
@@ -423,40 +428,7 @@ function PrinterSimulation({
         <p id={hintId} className='sr-only'>
           Space plays or pauses. Left and right arrows step one segment.
         </p>
-        <section
-          aria-label='Print HUD'
-          className='pointer-events-none absolute top-2 left-2 rounded-md bg-background/80 px-2 py-1.5 text-xs tabular-nums'
-        >
-          <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5'>
-            <dt className='text-muted-foreground'>Layer</dt>
-            <dd>
-              {layerNumber} / {layerCount}
-            </dd>
-            <dt className='text-muted-foreground'>Elapsed</dt>
-            <dd>{formatDuration(snapshot.time)}</dd>
-            <dt className='text-muted-foreground'>Remaining</dt>
-            <dd>{formatDuration(program.duration - snapshot.time)}</dd>
-            <dt className='text-muted-foreground'>Nozzle</dt>
-            <dd>{formatTemperature(nozzleTarget)}</dd>
-            <dt className='text-muted-foreground'>Bed</dt>
-            <dd>{formatTemperature(bedTarget)}</dd>
-            <dt className='text-muted-foreground'>Filament</dt>
-            <dd>
-              {formatFilament(filamentUsed)} / {formatFilament(program.filamentLength)}
-            </dd>
-            {isLiveAvailable ? (
-              <>
-                <dt className='text-muted-foreground'>Machine</dt>
-                <dd>
-                  {live.machineName} · {live.runState}
-                </dd>
-              </>
-            ) : null}
-          </dl>
-          {program.coverage.complete ? null : (
-            <p className='mt-1 text-muted-foreground'>Preview shows known motion only</p>
-          )}
-        </section>
+        <PrintHud program={program} snapshot={snapshot} prefix={prefix} live={live} />
         <ToolpathFilter
           counts={grouping.counts}
           colors={groupColors}
@@ -464,108 +436,189 @@ function PrinterSimulation({
           onGroupShown={handleGroupShown}
         />
       </div>
-      <div
-        role='group'
-        aria-label='Playback controls'
-        className='flex shrink-0 flex-wrap items-center gap-2 border-t border-border/70 px-2 py-1.5'
-      >
-        <Button type='button' size='sm' variant='outline' disabled={snapshot.isLive} onClick={store.toggle}>
-          {snapshot.isPlaying ? <Pause aria-hidden /> : <Play aria-hidden />}
-          {snapshot.isPlaying ? 'Pause' : 'Play'}
-        </Button>
-        <Button
-          type='button'
-          size='icon-sm'
-          variant='ghost'
-          aria-label='Previous segment'
-          disabled={snapshot.isLive}
-          onClick={() => {
-            store.step(-1);
-          }}
-        >
-          <SkipBack aria-hidden />
-        </Button>
-        <Button
-          type='button'
-          size='icon-sm'
-          variant='ghost'
-          aria-label='Next segment'
-          disabled={snapshot.isLive}
-          onClick={() => {
-            store.step(1);
-          }}
-        >
-          <SkipForward aria-hidden />
-        </Button>
-        <ToggleGroup
-          type='single'
-          size='sm'
-          variant='outline'
-          aria-label='Speed'
-          value={String(snapshot.speed)}
-          disabled={snapshot.isLive}
-          onValueChange={handleSpeed}
-        >
-          {playbackSpeeds.map((speed) => (
-            <ToggleGroupItem key={speed} value={String(speed)}>
-              {speedLabel(speed)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <label className='flex min-w-40 flex-1 items-center gap-2 text-xs'>
-          <span className='sr-only'>Time</span>
-          <input
-            type='range'
-            className='h-6 w-full cursor-action accent-primary disabled:cursor-not-allowed'
-            min={0}
-            max={duration}
-            step={1}
-            value={snapshot.time}
-            aria-valuetext={`${formatDuration(snapshot.time)} of ${formatDuration(program.duration)}`}
-            disabled={snapshot.isLive}
-            onChange={(event) => {
-              store.seek(Number(event.target.value));
-            }}
-          />
-        </label>
-        <label className='flex min-w-28 items-center gap-2 text-xs'>
-          <span className='text-muted-foreground'>Layer</span>
-          <input
-            type='range'
-            className='h-6 w-full cursor-action accent-primary disabled:cursor-not-allowed'
-            min={1}
-            max={Math.max(1, layerCount)}
-            step={1}
-            value={Math.max(1, layerNumber)}
-            aria-valuetext={`Layer ${layerNumber} of ${layerCount}`}
-            disabled={snapshot.isLive || layerCount === 0}
-            onChange={(event) => {
-              store.seekLayer(Number(event.target.value) - 1);
-            }}
-          />
-        </label>
-        <label className='flex h-6 items-center gap-2 text-xs'>
-          <Switch
-            size='sm'
-            aria-label='Live'
-            checked={snapshot.isLive}
-            disabled={!isLiveAvailable}
-            onCheckedChange={store.setLive}
-          />
-          <Radio aria-hidden className='size-3.5' />
-          Live
-          {isLiveAvailable ? null : (
-            <span className='text-muted-foreground'>
-              · {live?.isActive ? 'The printer is running another file' : 'No active run to follow'}
-            </span>
-          )}
-        </label>
-        <Button type='button' size='sm' variant='ghost' disabled={snapshot.isLive} onClick={store.reset}>
-          <RotateCcw aria-hidden />
-          Reset
-        </Button>
-      </div>
+      <PlaybackControls program={program} store={store} snapshot={snapshot} live={live} />
     </section>
+  );
+}
+
+/** Where the run stands, top left over the scene: layer, time, temperatures, filament and the followed machine. */
+function PrintHud({
+  program,
+  snapshot,
+  prefix,
+  live,
+}: Readonly<{
+  program: ToolpathProgram;
+  snapshot: PlaybackSnapshot;
+  /** Filament fed before each segment, from `createExtrusionPrefix`. */
+  prefix: Float64Array;
+  live: PrinterLiveState | undefined;
+}>): React.JSX.Element {
+  const nozzleTarget = live?.nozzleTarget ?? eventValueAt(program.events, 'nozzle-temperature', snapshot.time);
+  const bedTarget = live?.bedTarget ?? eventValueAt(program.events, 'bed-temperature', snapshot.time);
+  const isLiveAvailable = live?.printsThisFile === true;
+  return (
+    <section
+      aria-label='Print HUD'
+      className='pointer-events-none absolute top-2 left-2 rounded-md bg-background/80 px-2 py-1.5 text-xs tabular-nums'
+    >
+      <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5'>
+        <dt className='text-muted-foreground'>Layer</dt>
+        <dd>
+          {Math.max(0, snapshot.layer + 1)} / {program.layerTable.length}
+        </dd>
+        <dt className='text-muted-foreground'>Elapsed</dt>
+        <dd>{formatDuration(snapshot.time)}</dd>
+        <dt className='text-muted-foreground'>Remaining</dt>
+        <dd>{formatDuration(program.duration - snapshot.time)}</dd>
+        <dt className='text-muted-foreground'>Nozzle</dt>
+        <dd>{formatTemperature(nozzleTarget)}</dd>
+        <dt className='text-muted-foreground'>Bed</dt>
+        <dd>{formatTemperature(bedTarget)}</dd>
+        <dt className='text-muted-foreground'>Filament</dt>
+        <dd>
+          {formatFilament(extrudedLengthAt(prefix, program, snapshot.time))} / {formatFilament(program.filamentLength)}
+        </dd>
+        {isLiveAvailable ? (
+          <>
+            <dt className='text-muted-foreground'>Machine</dt>
+            <dd>
+              {live.machineName} · {live.runState}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+      {program.coverage.complete ? null : <p className='mt-1 text-muted-foreground'>Preview shows known motion only</p>}
+    </section>
+  );
+}
+
+/** Play, step, speed, the time and layer sliders, Live and Reset, under the scene. */
+function PlaybackControls({
+  program,
+  store,
+  snapshot,
+  live,
+}: Readonly<{
+  program: ToolpathProgram;
+  store: PlaybackStore;
+  snapshot: PlaybackSnapshot;
+  live: PrinterLiveState | undefined;
+}>): React.JSX.Element {
+  const handleSpeed = useCallback(
+    (value: string): void => {
+      const speed = playbackSpeeds.find((candidate) => String(candidate) === value);
+      if (speed !== undefined) {
+        store.setSpeed(speed);
+      }
+    },
+    [store],
+  );
+  const layerCount = program.layerTable.length;
+  const layerNumber = Math.max(0, snapshot.layer + 1);
+  const isLiveAvailable = live?.printsThisFile === true;
+  return (
+    <div
+      role='group'
+      aria-label='Playback controls'
+      className='flex shrink-0 flex-wrap items-center gap-2 border-t border-border/70 px-2 py-1.5'
+    >
+      <Button type='button' size='sm' variant='outline' disabled={snapshot.isLive} onClick={store.toggle}>
+        {snapshot.isPlaying ? <Pause aria-hidden /> : <Play aria-hidden />}
+        {snapshot.isPlaying ? 'Pause' : 'Play'}
+      </Button>
+      <Button
+        type='button'
+        size='icon-sm'
+        variant='ghost'
+        aria-label='Previous segment'
+        disabled={snapshot.isLive}
+        onClick={() => {
+          store.step(-1);
+        }}
+      >
+        <SkipBack aria-hidden />
+      </Button>
+      <Button
+        type='button'
+        size='icon-sm'
+        variant='ghost'
+        aria-label='Next segment'
+        disabled={snapshot.isLive}
+        onClick={() => {
+          store.step(1);
+        }}
+      >
+        <SkipForward aria-hidden />
+      </Button>
+      <ToggleGroup
+        type='single'
+        size='sm'
+        variant='outline'
+        aria-label='Speed'
+        value={String(snapshot.speed)}
+        disabled={snapshot.isLive}
+        onValueChange={handleSpeed}
+      >
+        {playbackSpeeds.map((speed) => (
+          <ToggleGroupItem key={speed} value={String(speed)}>
+            {speedLabel(speed)}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+      <label className='flex min-w-40 flex-1 items-center gap-2 text-xs'>
+        <span className='sr-only'>Time</span>
+        <input
+          type='range'
+          className='h-6 w-full cursor-action accent-primary disabled:cursor-not-allowed'
+          min={0}
+          max={Math.ceil(program.duration)}
+          step={1}
+          value={snapshot.time}
+          aria-valuetext={`${formatDuration(snapshot.time)} of ${formatDuration(program.duration)}`}
+          disabled={snapshot.isLive}
+          onChange={(event) => {
+            store.seek(Number(event.target.value));
+          }}
+        />
+      </label>
+      <label className='flex min-w-28 items-center gap-2 text-xs'>
+        <span className='text-muted-foreground'>Layer</span>
+        <input
+          type='range'
+          className='h-6 w-full cursor-action accent-primary disabled:cursor-not-allowed'
+          min={1}
+          max={Math.max(1, layerCount)}
+          step={1}
+          value={Math.max(1, layerNumber)}
+          aria-valuetext={`Layer ${layerNumber} of ${layerCount}`}
+          disabled={snapshot.isLive || layerCount === 0}
+          onChange={(event) => {
+            store.seekLayer(Number(event.target.value) - 1);
+          }}
+        />
+      </label>
+      <label className='flex h-6 items-center gap-2 text-xs'>
+        <Switch
+          size='sm'
+          aria-label='Live'
+          checked={snapshot.isLive}
+          disabled={!isLiveAvailable}
+          onCheckedChange={store.setLive}
+        />
+        <Radio aria-hidden className='size-3.5' />
+        Live
+        {isLiveAvailable ? null : (
+          <span className='text-muted-foreground'>
+            · {live?.isActive ? 'The printer is running another file' : 'No active run to follow'}
+          </span>
+        )}
+      </label>
+      <Button type='button' size='sm' variant='ghost' disabled={snapshot.isLive} onClick={store.reset}>
+        <RotateCcw aria-hidden />
+        Reset
+      </Button>
+    </div>
   );
 }
 

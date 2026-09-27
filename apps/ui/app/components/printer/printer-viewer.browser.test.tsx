@@ -13,9 +13,9 @@ import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-v
  * framed wide and in a narrow pane, light and dark, the pane from the manual
  * dry run, a zoom the person made surviving a resize until they frame the
  * print again, the viewer following a live run, the part alone with the
- * preparation hidden, the whole printer, and each X1C plate. The print's
- * extent is measured from the rendered pixels; PNGs land under
- * `out/research/.../K/`.
+ * preparation hidden, the whole printer, each X1C plate, and the preparation
+ * on the gold plate and a dark one. The print's extent is measured from the
+ * rendered pixels; PNGs land under `out/research/.../V/`.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -28,7 +28,7 @@ vi.mock('#components/printer/use-printer-live.js', () => ({ usePrinterLive: () =
 
 const { PrinterViewer } = await import('#components/printer/printer-viewer.js');
 
-const evidenceDirectory = '../../../../../out/research/design-to-print-workbench-blueprint/2026-09-24-implementation/K';
+const evidenceDirectory = '../../../../../out/research/machines-production-readiness-blueprint/2026-09-27-execution/V';
 const name = 'bracket.gcode.3mf';
 // A 50 mm square tube, 24 mm tall: about the size of the dry run's pyramid.
 const container = writeBambuContainer({
@@ -273,11 +273,12 @@ describe('Printer viewer framing', () => {
   it('centres the finished part as the CAD viewer does and holds still while it prints', async () => {
     mocks.live = idleLive;
     const { frame, scene } = await mount('dark', [1280, 720]);
-    // The preview opens on the finished print: the whole part, centred in the pane.
+    // The preview opens on the finished print: the whole part, centred in the pane on both axes.
     const finished = await measurePrint(scene);
     await capture(frame, 'plate-focus-finished-dark.png');
     expectFramed(finished, 0.1);
-    expect(Math.abs((finished.top + finished.bottom) / 2 - 0.5), 'centred down the pane').toBeLessThan(0.1);
+    expect(Math.abs((finished.left + finished.right) / 2 - 0.5), 'centred across the pane').toBeLessThan(0.01);
+    expect(Math.abs((finished.top + finished.bottom) / 2 - 0.5), 'centred down the pane').toBeLessThan(0.01);
 
     // Earlier in the run, and with the preparation hidden, the part stands in the same place: the camera never moved.
     await pauseAt(frame, 0.3, /^3\d \/ 120$/u);
@@ -326,6 +327,19 @@ describe('Printer viewer framing', () => {
       await chooseFromMore(frame, 'menuitemradio', plate);
       await capture(frame, `plate-${plate.toLowerCase().replaceAll(' ', '-')}-dark.png`);
       expectFramed(await measurePrint(scene), 0.1);
+    });
+  }
+
+  // The purge line runs along the plate's front edge, so the whole printer is the view that shows it.
+  for (const plate of ['Textured PEI Plate', 'High Temp Plate']) {
+    it(`shows the preparation on the ${plate}`, async () => {
+      mocks.live = idleLive;
+      const { frame, scene } = await mount('dark', [1280, 720]);
+      await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+      await chooseFromMore(frame, 'menuitemradio', plate);
+      await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
+      await capture(frame, `preparation-${plate.toLowerCase().replaceAll(' ', '-')}-dark.png`);
+      expectFramed(await measurePrint(scene), 0.05);
     });
   }
 

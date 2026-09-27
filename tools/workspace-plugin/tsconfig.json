@@ -5,10 +5,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "target": "ESNext",
-    "types": ["node"],
-    "paths": {
-      "#*": ["./src/*"]
-    }
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"]
 }

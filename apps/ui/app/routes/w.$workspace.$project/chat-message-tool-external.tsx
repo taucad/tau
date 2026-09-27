@@ -36,6 +36,8 @@ import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { CollapsibleFileOperation } from '#components/chat/chat-tool-file-operation.js';
 import { CodeBlockContent, Pre } from '#components/code/code-block.js';
 import { FileLink } from '#components/files/file-link.js';
+import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
+import type { ChatMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 
 /** ACP's whole `ToolKind` taxonomy, in the order the protocol declares it. @see https://agentclientprotocol.com */
 export const externalToolKinds = [
@@ -179,19 +181,70 @@ const diffBlocks = (
     ];
   });
 
+/** The ACP content blocks a call rendered, unwrapped from their `{type:'content'}` envelopes. */
+const contentBlocks = (facts: AcpFacts): ReadonlyArray<Record<string, unknown>> =>
+  facts.content.flatMap((block) =>
+    isRecord(block) && block['type'] === 'content' && isRecord(block['content']) ? [block['content']] : [],
+  );
+
+/**
+ * One media block as the transcript renders it: a `file-ref` the host moved
+ * into the chat's attachments, or an inline ACP/MCP `image`/`audio` block.
+ */
+const mediaOfBlock = (block: Record<string, unknown>): ChatMedia | undefined => {
+  const mimeType = stringAt(block, 'mimeType');
+  if (mimeType === undefined) {
+    return undefined;
+  }
+  const path = stringAt(block, 'path');
+  if (block['type'] === 'file-ref' && path !== undefined) {
+    const filename = stringAt(block, 'filename');
+    return { url: path, mediaType: mimeType, ...(filename === undefined ? {} : { filename }) };
+  }
+  const data = stringAt(block, 'data');
+  return (block['type'] === 'image' || block['type'] === 'audio') && data !== undefined
+    ? { url: `data:${mimeType};base64,${data}`, mediaType: mimeType }
+    : undefined;
+};
+
+/**
+ * Media the call produced: its rendered content, then an MCP result's own
+ * content — a foreign MCP server's image rides only there (codex-acp puts the
+ * whole `CallToolResult` under `rawOutput.result`). Each file shows once.
+ */
+const externalToolMedia = (facts: AcpFacts, output: unknown): readonly ChatMedia[] => {
+  const result = isRecord(output) && isRecord(output['result']) ? output['result'] : undefined;
+  const resultBlocks = Array.isArray(result?.['content']) ? result['content'].filter(isRecord) : [];
+  const seen = new Set<string>();
+  return [...contentBlocks(facts), ...resultBlocks].flatMap((block) => {
+    const media = mediaOfBlock(block);
+    if (media === undefined || seen.has(media.url)) {
+      return [];
+    }
+    seen.add(media.url);
+    return [media];
+  });
+};
+
 /**
  * Text the agent rendered, from its content blocks and its raw output.
  *
  * A `{type:'terminal'}` block is deliberately ignored: Tau advertises no
  * terminal capability, so no terminal was ever created and its id resolves to
  * nothing. Both adapters send the same bytes as text or `formatted_output`.
+ * An embedded text `resource` reads as its text, and a `resource_link` the
+ * call's locations do not already name reads as its name.
  */
 const bodyText = (facts: AcpFacts, output: unknown): string => {
-  const blocks = facts.content.flatMap((block) => {
-    if (!isRecord(block) || block['type'] !== 'content' || !isRecord(block['content'])) {
-      return [];
-    }
-    const text = stringAt(block['content'], 'text');
+  const blocks = contentBlocks(facts).flatMap((block) => {
+    const resource = block['type'] === 'resource' && isRecord(block['resource']) ? block['resource'] : undefined;
+    const link = block['type'] === 'resource_link' ? stringAt(block, 'uri') : undefined;
+    const text =
+      stringAt(block, 'text') ??
+      (resource === undefined ? undefined : stringAt(resource, 'text')) ??
+      (link === undefined || facts.locations.includes(link)
+        ? undefined
+        : (stringAt(block, 'title') ?? stringAt(block, 'name')));
     return text === undefined ? [] : [text];
   });
   if (typeof output === 'string') {
@@ -268,6 +321,16 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
   const text = bodyText(facts, output);
   const exitCode = exitCodeOf(output);
   const hasBody = text !== '' || facts.locations.length > 0;
+  /* The call's product, not its log: shown open under the card, as Codex shows a render. */
+  const media = externalToolMedia(facts, output);
+  const mediaList =
+    media.length === 0 ? null : (
+      <div className='mt-1 flex flex-col gap-2'>
+        {media.map((item) => (
+          <ChatMessageMedia key={item.url} media={item} alt={detail === '' ? label : detail} />
+        ))}
+      </div>
+    );
 
   const header = (
     <ChatToolCardHeader>
@@ -282,9 +345,12 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
 
   if (!hasBody) {
     return (
-      <ChatToolCard variant='minimal' status={status} isCollapsible={false}>
-        {header}
-      </ChatToolCard>
+      <>
+        <ChatToolCard variant='minimal' status={status} isCollapsible={false}>
+          {header}
+        </ChatToolCard>
+        {mediaList}
+      </>
     );
   }
 
@@ -316,6 +382,7 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
           )}
         </ChatToolCardContent>
       </ChatToolCard>
+      {mediaList}
     </div>
   );
 }

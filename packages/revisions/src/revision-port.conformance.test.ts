@@ -17,6 +17,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { RevisionId } from '#algorithms/index.js';
@@ -1975,4 +1976,187 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await rm(root, { force: true, recursive: true });
     }
   }, 180_000);
+});
+
+/*
+ * R14: the live checkout's index names the tree of the branch `HEAD` names.
+ *
+ * Tau never reads the index; stock Git does. Without it `git status` in a
+ * project listed every file as a staged deletion and `git commit -a` committed
+ * the whole project deleted — and in a repository Tau adopted, the person's
+ * stale index reverted Tau's revisions. Both legs over a real directory, read
+ * back with the `git` binary, so one reader judges both writers.
+ */
+describe.runIf(gitToolchainOnPath)('the live index follows HEAD (R14)', () => {
+  // Environment names, not identifiers: assigned rather than spelled as keys.
+  const gitEnvironment: NodeJS.ProcessEnv = { ...process.env };
+  gitEnvironment['GIT_CONFIG_GLOBAL'] = '/dev/null';
+  gitEnvironment['GIT_CONFIG_NOSYSTEM'] = '1';
+  delete gitEnvironment['GIT_DIR'];
+  const git = (cwd: string, args: readonly string[]): string =>
+    execFileSync('git', args, { cwd, env: gitEnvironment }).toString('utf8').trim();
+  /** `mode oid path` per blob, the same spelling for the index and a tree. */
+  const indexEntries = (cwd: string): string =>
+    git(cwd, ['ls-files', '--stage'])
+      .split('\n')
+      .map((line) => line.replace(/ 0\t/u, ' '))
+      .join('\n');
+  const treeEntries = (cwd: string, revision: string): string =>
+    git(cwd, ['ls-tree', '-r', revision])
+      .split('\n')
+      .map((line) => line.replace(/ blob /u, ' ').replace('\t', ' '))
+      .join('\n');
+
+  const legs = [
+    {
+      name: 'native-git',
+      create: (repositoryPath: string): RevisionPort => createNativeGitRevisionPort({ repositoryPath }),
+    },
+    {
+      name: 'isomorphic-git',
+      create: (repositoryPath: string): RevisionPort =>
+        createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(repositoryPath) }),
+    },
+  ] as const;
+
+  const roots: string[] = [];
+  afterAll(async () => {
+    await Promise.all(roots.map(async (root) => rm(root, { force: true, recursive: true })));
+  });
+  const project = async (): Promise<string> => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-live-index-'));
+    roots.push(root);
+    return root;
+  };
+  /** Record `files` onto `branch` the way a mint does: write, then publish. */
+  const mint = async (port: RevisionPort, branch: string, files: Record<string, string>): Promise<RevisionId> => {
+    const parent = await port.readRef(branch);
+    const receipt = await port.writeRevision({
+      parents: parent === undefined ? [] : [parent],
+      tree: tree(files),
+      provenance: provenance('user'),
+      summary: summary(`Mint onto ${branch}`),
+    });
+    const head = revisionId(receipt.commitId);
+    const updated = await port.updateRef({ name: branch, expectedHead: parent, head });
+    expect(updated.status).toBe('updated');
+    return head;
+  };
+
+  describe.each(legs)('$name', ({ create }) => {
+    it('leaves a clean status after a mint of the working copy', async () => {
+      const root = await project();
+      const port = create(root);
+      await port.init({ author });
+      const files = {
+        '.gitignore': await readFile(join(root, generatedIgnorePath), 'utf8'),
+        '.gitattributes': await readFile(join(root, '.gitattributes'), 'utf8'),
+        'main.scad': 'cube(10);\n',
+        'parts/bolt.scad': 'cylinder(3);\n',
+      };
+      await mkdir(join(root, 'parts'), { recursive: true });
+      await writeFile(join(root, 'main.scad'), files['main.scad']);
+      await writeFile(join(root, 'parts/bolt.scad'), files['parts/bolt.scad']);
+
+      await mint(port, 'main', files);
+
+      expect(indexEntries(root)).toBe(treeEntries(root, 'HEAD'));
+      expect(git(root, ['status', '--porcelain'])).toBe('');
+    }, 60_000);
+
+    it('follows HEAD to another branch and ignores a branch HEAD does not name', async () => {
+      const root = await project();
+      const port = create(root);
+      await port.init({ author });
+      await mint(port, 'main', { 'a.txt': 'a\n' });
+      await mint(port, 'side', { 'b.txt': 'b\n' });
+
+      expect(indexEntries(root)).toBe(treeEntries(root, 'main'));
+
+      await port.setHead('side');
+
+      expect(indexEntries(root)).toBe(treeEntries(root, 'side'));
+    }, 60_000);
+
+    it('empties the index when the branch HEAD names is deleted', async () => {
+      const root = await project();
+      const port = create(root);
+      await port.init({ author });
+      const head = await mint(port, 'main', { 'a.txt': 'a\n' });
+
+      expect(git(root, ['ls-files'])).toBe('a.txt');
+
+      await port.updateRef({ name: 'main', expectedHead: head });
+
+      expect(git(root, ['ls-files'])).toBe('');
+    }, 60_000);
+
+    it('heals a store with no index at open and keeps an existing one', async () => {
+      const root = await project();
+      const first = create(root);
+      await first.init({ author });
+      await mint(first, 'main', { 'a.txt': 'a\n' });
+      await rm(join(root, '.git', 'index'));
+
+      await create(root).init({ author });
+
+      expect(indexEntries(root)).toBe(treeEntries(root, 'HEAD'));
+
+      // A staged path the person added survives the next open untouched.
+      await writeFile(join(root, 'staged.txt'), 'mine\n');
+      git(root, ['add', 'staged.txt']);
+      await create(root).init({ author });
+
+      expect(git(root, ['diff', '--cached', '--name-only'])).toBe('staged.txt');
+    }, 60_000);
+
+    it("moves an adopted repository's stale index to Tau's revision", async () => {
+      const root = await project();
+      git(root, ['init', '--quiet', '--initial-branch=main']);
+      await writeFile(join(root, 'main.scad'), 'size = 10;\n');
+      git(root, ['add', 'main.scad']);
+      git(root, ['-c', 'user.name=Ada', '-c', 'user.email=ada@example.com', 'commit', '--quiet', '-m', 'Mine']);
+      const port = create(root);
+      await port.init({ author });
+
+      await mint(port, 'main', { 'main.scad': 'size = 20;\n', 'part.scad': 'cube(1);\n' });
+
+      // Before R14 the index still held the person's commit: `git commit -a`
+      // then deleted `part.scad`, and a plain `git commit` undid the revision.
+      expect(indexEntries(root)).toBe(treeEntries(root, 'HEAD'));
+    }, 60_000);
+
+    it("records the mint and leaves the index to the person's own Git while it holds the lock", async () => {
+      const root = await project();
+      const port = create(root);
+      await port.init({ author });
+      const before = await readFile(join(root, '.git', 'index'));
+      await writeFile(join(root, '.git', 'index.lock'), '');
+      try {
+        const head = await mint(port, 'main', { 'a.txt': 'a\n' });
+
+        expect(await port.readRef('main')).toBe(head);
+        expect(await readFile(join(root, '.git', 'index'))).toStrictEqual(before);
+      } finally {
+        await rm(join(root, '.git', 'index.lock'), { force: true });
+      }
+    }, 60_000);
+  });
+
+  it('refreshes the index of the linked worktree that holds a moved branch (native)', async () => {
+    const harness = await nativeHarness(projectId, 'tau-revisions-linked-index-');
+    try {
+      const { port } = harness;
+      await port.init({ author });
+      const base = await mint(port, 'main', { 'a.txt': 'a\n' });
+      const linked = await port.addCheckout!({ branch: 'side', from: base });
+
+      await mint(port, 'side', { 'a.txt': 'a\n', 'b.txt': 'b\n' });
+
+      expect(indexEntries(linked.root)).toBe(treeEntries(linked.root, 'side'));
+      expect(indexEntries(harness.liveRoot)).toBe(treeEntries(harness.liveRoot, 'main'));
+    } finally {
+      await harness.dispose();
+    }
+  }, 60_000);
 });

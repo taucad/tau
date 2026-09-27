@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
@@ -908,6 +908,52 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /**
+   * Point each worktree's index at the tree its branch names (R14).
+   *
+   * Tau never reads the index: it applies trees through the filesystem provider
+   * and decides dirtiness by capture. Stock Git does read it, and an index left
+   * behind by a moved branch makes `git status` show every Tau revision
+   * reversed and `git commit -a` record it undone. So after a branch moves,
+   * every worktree that has it checked out gets `read-tree` of the new head:
+   * the state `git reset` leaves, with stat data zero for Git to fill in on
+   * its own next refresh. Anything the person staged is already in the working
+   * copy the next capture records.
+   *
+   * One queue so the last refresh reads the last head, and every failure is
+   * swallowed: the ref has already moved, and a held `index.lock` means the
+   * person's own Git is mid-operation.
+   *
+   * @param moved - The fully-qualified branch that moved, or `undefined` for
+   *   the live worktree alone (an open that found no index).
+   * @returns Once every matching worktree's index was refreshed or skipped.
+   */
+  const syncIndexes = async (moved: string | undefined): Promise<void> =>
+    refQueue.queueFor(`${repositoryPath}:index`, async () => {
+      const listing = await run(['worktree', 'list', '--porcelain']);
+      if (listing.exitCode !== 0) {
+        return;
+      }
+      const zero = await zeroObjectId();
+      const blocks = textDecoder.decode(listing.stdout).split('\n\n');
+      for (const [index, block] of blocks.entries()) {
+        const lines = block.split('\n');
+        const root = lines.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
+        const head = lines.find((line) => line.startsWith('HEAD '))?.slice('HEAD '.length);
+        const branch = lines.find((line) => line.startsWith('branch '))?.slice('branch '.length);
+        const wanted = moved === undefined ? index === 0 : branch === moved;
+        if (root === undefined || !wanted) {
+          continue;
+        }
+        const readTree = head === undefined || head === zero ? ['read-tree', '--empty'] : ['read-tree', head];
+        // oxlint-disable-next-line no-await-in-loop -- at most one worktree holds a branch.
+        await (index === 0
+          ? run(readTree)
+          : // A linked worktree finds its own admin directory from its `.git` file.
+            run(['-C', root, ...readTree], { env: clearedGitEnvironment() }));
+      }
+    });
+
+  /**
    * Refuse a remote or ref that Git could read as an option, and any ref this
    * host keeps to itself.
    *
@@ -1092,6 +1138,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * and reads revisions through this port, and `resolveGitLfs` is what tells
        * an operator the transport half is missing. */
       await run(['lfs', 'install', '--local']);
+      /* Every project an older build recorded has no index at all, so this open
+       * heals it. An existing index is left alone: in a repository Tau adopted
+       * it may hold the person's own staged work. */
+      const indexed = await access(join(repositoryPath, gitDirectoryName, 'index')).then(
+        () => true,
+        () => false,
+      );
+      if (!indexed) {
+        await syncIndexes(undefined);
+      }
     },
 
     readRevision: async (id: RevisionId): Promise<RevisionRecord | undefined> => {
@@ -1222,14 +1278,15 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * Git's own `update-ref` transaction is the linearization point: the
      * expected-old value is passed to it, so the compare and the write are one
      * operation under the repository's ref lock (I7). The queue below only keeps
-     * this process's own concurrent writers off the same name.
+     * this process's own concurrent writers off the same name. A branch that
+     * moved takes the index of whichever worktree holds it along (R14).
      *
      * @param input - The ref, the value it must currently hold, and the new one.
      * @returns The publication, or the conflict that refused it.
      */
-    updateRef: async (input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult> =>
-      refQueue.queueFor(`${repositoryPath}:${input.name}`, async () => {
-        const ref = refOf(input.name);
+    updateRef: async (input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult> => {
+      const ref = refOf(input.name);
+      const result = await refQueue.queueFor(`${repositoryPath}:${input.name}`, async () => {
         const expected = input.expectedHead ?? (await zeroObjectId());
         const conflicted = async (): Promise<UpdateRevisionRefResult> => {
           const actual = await resolve(ref);
@@ -1269,7 +1326,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           previousHead: input.expectedHead,
           head: input.head,
         });
-      }),
+      });
+      if (result.status === 'updated' && ref.startsWith(`${branchRefPrefix}/`)) {
+        await syncIndexes(ref);
+      }
+      return result;
+    },
 
     /* Symbolic, like Git's own HEAD: the file names a *branch*, so a turn
      * recorded onto that branch moves the head with it and nothing is written
@@ -1287,6 +1349,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
     setHead: async (branch: string): Promise<void> => {
       await refQueue.queueFor(`${repositoryPath}:HEAD`, async () => output(['symbolic-ref', 'HEAD', refOf(branch)]));
+      await syncIndexes(refOf(branch));
     },
 
     listRefs: async (prefix?: string): Promise<readonly RevisionRef[]> => {
@@ -1742,9 +1805,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (existing === undefined) {
         throw new RevisionPortError('CHECKOUT_CONFLICT', `No checkout is registered as ${id}.`);
       }
-      /* `--force` because git's own dirty check is meaningless here: Tau applies
-       * trees through the filesystem provider, never `git checkout`, so the
-       * index is always stale and an unforced remove would always refuse. The
+      /* `--force` because git's own dirty check is not the judge here: Tau
+       * applies trees through the filesystem provider, never `git checkout`, and
+       * keeps the index only for stock Git's sake (R14), so an unforced remove
+       * can refuse over stat data or an untracked file Tau already judged. The
        * real gate is one layer up — `removeCheckout` in `revision-effects.ts`
        * compares the checkout's head tree against a live capture and refuses
        * work that is not in a revision yet (a1 review R7). */

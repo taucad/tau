@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { MyUIMessage, SkillMetadata } from '@taucad/chat';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 
@@ -527,6 +527,50 @@ describe('ChatMessage source part rendering', () => {
 
     expect(screen.getByRole('article')).toHaveTextContent('Design brief');
     expect(screen.getByRole('article')).toHaveTextContent('brief.pdf');
+  });
+});
+
+describe('ChatMessage agent media', () => {
+  it("renders an agent's image in place, between its words, and not in the user attachment strip", () => {
+    const message: MyUIMessage = {
+      id: 'msg-render',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'Here is the render.' },
+        { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,iVBORw0K' },
+        { type: 'text', text: 'Saved beside the project.' },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-render' />);
+
+    const article = screen.getByRole('article');
+    const image = within(article).getByRole('img', { name: 'Agent image' });
+    const [before, after] = within(article).getAllByTestId('chat-message-text');
+    // eslint-disable-next-line no-bitwise -- compareDocumentPosition returns a bitmask.
+    expect(before!.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // eslint-disable-next-line no-bitwise -- compareDocumentPosition returns a bitmask.
+    expect(image.compareDocumentPosition(after!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId('chat-message-file-attachments')).not.toBeInTheDocument();
+  });
+
+  it("keeps a user's attachments in the strip above their message", () => {
+    setMessages([
+      {
+        id: 'msg-user-file',
+        role: 'user',
+        parts: [
+          { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,iVBORw0K' },
+          { type: 'text', text: 'Render this' },
+        ],
+      },
+    ]);
+
+    render(<ChatMessage messageId='msg-user-file' />);
+
+    expect(screen.getByTestId('chat-message-file-attachments')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Agent image' })).not.toBeInTheDocument();
   });
 });
 

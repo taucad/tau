@@ -33,15 +33,21 @@ import type { Chat } from '@ai-sdk/react';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
 import { z } from 'zod';
-import { createActor, waitFor } from 'xstate';
-import type { Actor } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
+import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { isAnyToolPart } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
-import type { ChatRequest, ChatSessionActorRef, ChatTurnGesture } from '#machines/chat-session.machine.js';
+import { waitUnlessGone } from '#lib/xstate.lib.js';
+import { chatSessionMachine } from '#machines/chat-session.machine.js';
+import type {
+  ChatRequest,
+  ChatSessionActorRef,
+  ChatSyncState,
+  ChatTurnGesture,
+} from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { buildDraftMessage, draftMachine } from '#hooks/draft.machine.js';
@@ -61,7 +67,6 @@ import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
 import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
-import { inspect } from '#machines/inspector.js';
 import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import { buildUserMessage, finalizeInterruptedToolParts, stampMessageCreatedAt } from '#utils/chat.utils.js';
@@ -80,7 +85,12 @@ import {
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
-import { clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
+import {
+  chatHostBinding,
+  chatTurnAdmission,
+  chatTurnSettlement,
+  clearChatTurnServices,
+} from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
 
@@ -150,8 +160,9 @@ export type ChatSession = {
    * the architecture's agent-state table is one of its states. The sidebar
    * (W20) and the Agents pane read this, never the flags behind it.
    */
-  /* Not readonly: the owner changes when a project session opens or closes. */
-  stateActorRef: ChatSessionActorRef | undefined;
+  /* A root the store creates at acquire and stops at dispose (PV-S5, L3 D10): never swapped, so a view that
+   * subscribed once stays subscribed to the chat's machine. */
+  readonly stateActorRef: ChatSessionActorRef;
 };
 
 // ---------------------------------------------------------------------------
@@ -275,6 +286,8 @@ function hasPendingApproval(messages: readonly MyUIMessage[]): boolean {
 // ---------------------------------------------------------------------------
 
 type InternalSession = ChatSession & {
+  /** The chat's machine as the root this store started; `stateActorRef` is the same actor. */
+  readonly chatRoot: Actor<typeof chatSessionMachine>;
   /** React/view consumers currently observing this session. */
   viewRefcount: number;
   /** Non-view ownership held while one logical run is active. */
@@ -299,18 +312,7 @@ type InternalSession = ChatSession & {
   readonly projectId: string;
   /** Where this chat's next turn runs, as its turn host last said. */
   placement: string | undefined;
-  /**
-   * A gesture whose owner had not bound yet, waiting for
-   * {@link ChatSessionStore.setProjectSession}.
-   *
-   * One slot for every gesture, not just the consumed homepage seed: the seed
-   * is one-shot and dropping it loses the prompt for good (V3a), and a person's
-   * `send` is worse — its text has already left the composer. A chat has no
-   * owner between `setProjectSession(id, undefined)` and the next registration,
-   * and after the idle policy stops its project session (I5).
-   */
-  pendingGesture: ChatTurnGesture | undefined;
-  /** The chat machine's turn emits, re-subscribed whenever its actor changes. */
+  /** The chat machine's turn emits, subscribed once when its root is created. */
   turnSubscriptions: Array<{ unsubscribe: () => void }>;
   /** What was last handed to `stateActorRef`, so nothing is sent twice. */
   lastState: {
@@ -368,6 +370,15 @@ const composedText = (message: MyUIMessage): string => message.parts.find((part)
 /** The two phases that OPEN a run; every other phase settles one. */
 const opensRun = (phase: ChatRunPhase): boolean => phase === 'admitted' || phase === 'running';
 
+/* The `revision` region's three facts, as the project's route last reported them. */
+const sendRevisionFacts = (ref: ChatSessionActorRef, facts: ChatRevisionFacts): void => {
+  ref.send({ type: 'dirtyChanged', dirty: facts.dirty });
+  ref.send({ type: 'syncState', state: facts.sync });
+  if (facts.branch !== undefined) {
+    ref.send({ type: 'turnFinalized', branch: facts.branch });
+  }
+};
+
 const runPhaseOf = (status: ChatStatus): Exclude<ChatRunPhase, 'cancelled'> | undefined => {
   switch (status) {
     case 'submitted': {
@@ -385,8 +396,24 @@ const runPhaseOf = (status: ChatStatus): Exclude<ChatRunPhase, 'cancelled'> | un
   }
 };
 
+/**
+ * How a store creates its chat roots (MC-R4): the chat-session logic, and the clock, inspector and rejected-event
+ * hook every root it creates takes. Production passes none; tests pass the harness.
+ *
+ * @public
+ */
+export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &
+  Readonly<{ chatSession?: typeof chatSessionMachine }>;
+
+/** The revision facts one project's chats show (the project's route reports them). @public */
+export type ChatRevisionFacts = Readonly<{ dirty: boolean; sync: ChatSyncState; branch?: string }>;
+
 export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
+  readonly #chatSessionLogic: typeof chatSessionMachine;
+  readonly #rootOptions: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
+  /** The last revision facts each project reported, replayed to a chat root created after them. */
+  readonly #revisionFacts = new Map<string, ChatRevisionFacts>();
   /**
    * Every live project's session, keyed by project (R2).
    *
@@ -450,7 +477,16 @@ export class ChatSessionStore {
     },
   };
 
-  public constructor() {
+  public constructor(options: ChatSessionStoreOptions = {}) {
+    const { chatSession, ...rootOptions } = options;
+    /* The chat session's three owned resources, bound to the route's published services: one host registration,
+     * one admission and one settlement per chat (policy §16). */
+    this.#chatSessionLogic =
+      chatSession ??
+      chatSessionMachine.provide({
+        actors: { hostBinding: chatHostBinding, admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
+      });
+    this.#rootOptions = rootOptions;
     // E2E reads the same owner that drives the sidebar. Keeping this bridge
     // debug-only makes a liveness failure report the store's SDK/cache facts
     // and the project actors' run sets instead of guessing from labels.
@@ -467,16 +503,16 @@ export class ChatSessionStore {
       ),
       chats: Object.fromEntries(
         [...this.#sessions].map(([chatId, session]) => {
-          const state = session.stateActorRef?.getSnapshot();
+          const state = session.stateActorRef.getSnapshot();
           return [
             chatId,
             {
               projectId: session.projectId,
               status: session.status,
               phase: session.lastState.phase,
-              machineState: state?.value,
-              activeRunId: state?.context.activeRunId,
-              pendingSettlement: state?.context.pendingSettlement,
+              machineState: state.value,
+              activeRunId: state.context.activeRunId,
+              pendingSettlement: state.context.pendingSettlement,
             },
           ];
         }),
@@ -740,7 +776,7 @@ export class ChatSessionStore {
       return;
     }
     session.placement = placement;
-    session.stateActorRef?.send({ type: 'agentConfigChanged', placement });
+    session.stateActorRef.send({ type: 'agentConfigChanged', placement });
   }
 
   /**
@@ -748,10 +784,9 @@ export class ChatSessionStore {
    *
    * Every verb goes through here, and through nothing else: the actor owns the
    * lease, the run id and the settlement, so it is the only thing that can
-   * refuse a second turn while one is live (V1, V2). A chat with no session
-   * actor yet parks the gesture on its session; `#bindSessionOwner` flushes it
-   * when the owner arrives, because a dropped gesture is a message the person
-   * wrote and can no longer see (I5).
+   * refuse a second turn while one is live (V1, V2). The actor is a root the
+   * store created at acquire, so a gesture is taken whatever route effects have
+   * run (PV-S5).
    *
    * @param chatId - The chat the person acted on.
    * @param gesture - What they did.
@@ -778,7 +813,7 @@ export class ChatSessionStore {
    * @public
    */
   public holdsTurn(chatId: string): boolean {
-    const snapshot = this.#sessions.get(chatId)?.stateActorRef?.getSnapshot();
+    const snapshot = this.#sessions.get(chatId)?.stateActorRef.getSnapshot();
     return (
       snapshot !== undefined &&
       (snapshot.context.turn !== undefined || snapshot.matches({ run: { queued: 'admitting' } }))
@@ -821,10 +856,10 @@ export class ChatSessionStore {
   /**
    * Register one live project's session, or forget it when it closes.
    *
-   * Every live project's binding calls this — not only the focused one — so a
-   * chat machine exists for every chat of every live project (R2, R12's
-   * precondition). The store never creates a `chat-session` actor itself:
-   * they are children of their project session (I23).
+   * Every live project's binding calls this, not only the focused one, so a
+   * run reports to the project that ran it (R2). The chats' machines are roots
+   * this store owns (PV-S5, L3 D10); a session that registers late is told which
+   * of its chats already have a run in flight, so `busy` still counts them.
    *
    * @param projectId - The project this session is for.
    * @param ref - The live session, or `undefined` when it closes.
@@ -838,27 +873,50 @@ export class ChatSessionStore {
       this.#settlementUnsubscribe ??= subscribeHostTurnSettlements((event) => {
         this.#observeHostTurnSettlement(event);
       });
-    }
-    for (const session of this.#sessions.values()) {
-      if (session.projectId !== projectId) {
-        continue;
+      for (const session of this.#sessions.values()) {
+        const { phase } = session.lastState;
+        if (session.projectId === projectId && phase !== undefined && opensRun(phase)) {
+          ref.send({ type: 'runStarted', chatId: session.chatId });
+        }
       }
-      if (ref === undefined) {
-        session.stateActorRef = undefined;
-        this.#bindTurnEmits(session);
-        continue;
-      }
-      this.#bindSessionOwner(session);
-      session.lastState = { inFlight: 0, approvals: 0 };
-      this.#replayPersistedFailure(session);
-      this.#replayPersistedSettlement(session);
-      this.#syncChatState(session);
-      this.#restoreUnread(session);
     }
     if (this.#projectSessions.size === 0) {
       this.#settlementUnsubscribe?.();
       this.#settlementUnsubscribe = undefined;
     }
+  }
+
+  /**
+   * Tell one project's chats what its revision status says (the `revision` region of each chat's machine).
+   *
+   * ponytail: forwarded by the store until PV-S14 replaces it with selects on the revision client.
+   *
+   * @param projectId - The project whose status moved.
+   * @param facts - Its dirty, sync and branch facts.
+   * @public
+   */
+  public setRevisionFacts(projectId: string, facts: ChatRevisionFacts): void {
+    this.#revisionFacts.set(projectId, facts);
+    for (const session of this.#sessions.values()) {
+      if (session.projectId === projectId) {
+        sendRevisionFacts(session.stateActorRef, facts);
+      }
+    }
+  }
+
+  /**
+   * The chat machines of one project's live chats, for its sidebar row and Agents pane.
+   *
+   * @param projectId - The project.
+   * @returns Each live chat's machine by chat id.
+   * @public
+   */
+  public chatRootsOf(projectId: string): ReadonlyMap<string, ChatSessionActorRef> {
+    return new Map(
+      [...this.#sessions.values()]
+        .filter((session) => session.projectId === projectId)
+        .map((session) => [session.chatId, session.stateActorRef]),
+    );
   }
 
   /**
@@ -902,7 +960,7 @@ export class ChatSessionStore {
   /** Tell a chat the person is looking at it, so `unread` clears (S45) — in its machine and its record (D9). @public */
   public markViewed(chatId: string): void {
     const session = this.#sessions.get(chatId);
-    session?.stateActorRef?.send({ type: 'viewed' });
+    session?.stateActorRef.send({ type: 'viewed' });
     if (session !== undefined) {
       this.#setUnread(session.projectId, chatId, false);
     }
@@ -984,7 +1042,7 @@ export class ChatSessionStore {
     await Promise.all(
       sessions.map(async (session) => {
         session.draftActorRef.send({ type: 'flushNow' });
-        await waitFor(
+        await waitUnlessGone(
           session.draftActorRef,
           (state) => state.matches({ inputSaving: 'idle' }) && state.matches({ editSaving: 'idle' }),
         );
@@ -1069,11 +1127,6 @@ export class ChatSessionStore {
   /**
    * The body of {@link ChatSessionStore.requestTurn}, by session.
    *
-   * Separate because `#bindSessionOwner` flushes a parked gesture through it
-   * while the session is still being created, before it is in `#sessions` —
-   * and a flush that skipped this path left the composer holding a message the
-   * chat had already taken (I5).
-   *
    * @param session - The chat that acted.
    * @param gesture - What the person did.
    */
@@ -1082,26 +1135,12 @@ export class ChatSessionStore {
      * clears it — the dispatch is an admission away. */
     session.persistenceActorRef.send({ type: 'turnRequested' });
     const owner = session.stateActorRef;
-    if (owner === undefined) {
-      /* A second gesture made while this chat is still unbound displaces the
-       * first one out of the same single slot. */
-      const parked = session.pendingGesture;
-      session.pendingGesture = gesture;
-      await this.#settleComposer(session, gesture, parked);
-      return;
-    }
     /* Read before the send: the slot this gesture is about to overwrite. */
     const displaced = owner.getSnapshot().context.pendingGesture;
     owner.send({ type: 'requestTurn', gesture });
     if (owner.getSnapshot().context.pendingGesture !== gesture) {
-      /* The ref is stale: a stopped actor takes no event and never emits
-       * again, and its last snapshot can still read `admitting`, so the wait
-       * below would never end — the composer's editable lock is what awaits it
-       * (T3-D11, from the other side). The gesture is nobody's until this chat
-       * is given a new owner, which is what the unbound path above is for. */
-      const parked = session.pendingGesture;
-      session.pendingGesture = gesture;
-      await this.#settleComposer(session, gesture, parked);
+      /* The chat was disposed under the gesture: its stopped root takes nothing, so the composer keeps the message. */
+      await this.#settleComposer(session, gesture, displaced);
       return;
     }
     /* S01: the composer stays busy until the turn is admitted or refused, so a
@@ -1160,7 +1199,7 @@ export class ChatSessionStore {
   ): Promise<void> {
     /* Only what this gesture took out of the composer is the composer's to
      * clear or write over. A gesture can be answered a long time after it was
-     * made — a chat with no owner parks it until one binds — and by then the
+     * made — its admission waits for the route to publish one — and by then the
      * person may have typed the next message into the same box. Neither the
      * clear nor a returning message may land on that. */
     const { draftText } = session.draftActorRef.getSnapshot().context;
@@ -1174,18 +1213,11 @@ export class ChatSessionStore {
       await this.#restoreDraftMessage(session, returning);
       return;
     }
-    const held = session.stateActorRef?.getSnapshot().context;
-    if (
-      gesture.kind === 'send' &&
-      (held === undefined || (held.turn === undefined && held.pendingGesture === undefined))
-    ) {
-      /* Nothing took it. Either the chat has no owner yet and the gesture is
-       * parked on the session — `pendingGesture` is a field that dies with the
-       * document, so the composer is the only durable copy (I5) — or the
-       * admission refused it and the chat is holding nothing, where the banner
-       * says why and the message comes back rather than vanishing with the
-       * turn that never started. `#bindSessionOwner` flushes a parked gesture
-       * back through `#requestTurn`, so the clear below is still what ends it. */
+    const held = session.stateActorRef.getSnapshot().context;
+    if (gesture.kind === 'send' && held.turn === undefined && held.pendingGesture === undefined) {
+      /* Nothing took it: the admission refused it and the chat is holding
+       * nothing, where the banner says why and the message comes back rather
+       * than vanishing with the turn that never started (I5). */
       await this.#restoreDraftMessage(session, gesture.message);
       return;
     }
@@ -1255,10 +1287,6 @@ export class ChatSessionStore {
       subscription.unsubscribe();
     }
     const { stateActorRef } = session;
-    if (stateActorRef === undefined || typeof stateActorRef.on !== 'function') {
-      session.turnSubscriptions = [];
-      return;
-    }
     /* The admission is a reference on the session (`#isAdmittingTurn`), and the
      * moment it ends is the only moment that reference is released — a chat
      * whose last view unmounted mid-admission is never asked about again. */
@@ -1270,52 +1298,28 @@ export class ChatSessionStore {
       stateActorRef.on('stopTurnRequest', () => {
         session.persistenceActorRef.send({ type: 'preemptRequest' });
       }),
-      ...(typeof stateActorRef.subscribe === 'function'
-        ? [
-            stateActorRef.subscribe(() => {
-              const admits = this.#isAdmittingTurn(session);
-              if (admitting && !admits) {
-                this.#disposeIfUnreferenced(session);
-              }
-              admitting = admits;
-            }),
-          ]
-        : []),
+      stateActorRef.subscribe(() => {
+        const admits = this.#isAdmittingTurn(session);
+        if (admitting && !admits) {
+          this.#disposeIfUnreferenced(session);
+        }
+        admitting = admits;
+      }),
     ];
   }
 
   /**
-   * Give one chat its session actor, and the actor its turn wiring.
+   * Wire a new chat root and start it: its turn emits, where its turns run, the project's revision facts, and a
+   * run of this chat that outlived its previous view.
    *
-   * Called wherever the pair can change: on acquisition, and when a project
-   * session registers or unregisters.
-   *
-   * @param session - The chat to bind.
+   * @param session - The chat whose root was just created.
    */
-  #bindSessionOwner(session: InternalSession): void {
-    const owner = this.#projectSessions.get(session.projectId);
-    owner?.send({ type: 'openChat', chatId: session.chatId });
-    session.stateActorRef = owner?.getSnapshot().context.chatRefs[session.chatId];
+  #startChatRoot(session: InternalSession): void {
     this.#bindTurnEmits(session);
-    /* A chat machine that has just been spawned has never been told where its
-     * turns run, so its host binding would invoke on an empty placement. */
-    if (session.placement !== undefined) {
-      session.stateActorRef?.send({ type: 'agentConfigChanged', placement: session.placement });
-    }
-    /* Every gesture made while this chat had no owner (I5). The homepage seed
-     * is consumed by the loader on the route's first render, before the effect
-     * that registers the project session; a person's own verb lands here
-     * whenever the project session is between registrations or the idle policy
-     * has stopped it. Dropping either loses what the person wrote — the seed's
-     * one-shot request, or a `send` whose text the composer no longer holds. */
-    const heldGesture = session.pendingGesture;
-    if (heldGesture !== undefined && session.stateActorRef !== undefined) {
-      session.pendingGesture = undefined;
-      /* Through the request path, not straight at the actor: the composer is
-       * still holding this message (I5), and `#requestTurn` is the one writer
-       * that knows when it has been taken. Floating, as the gesture's own
-       * request is: the flush outlives this bind. */
-      void this.#requestTurn(session, heldGesture);
+    session.chatRoot.start();
+    const facts = this.#revisionFacts.get(session.projectId);
+    if (facts !== undefined) {
+      sendRevisionFacts(session.stateActorRef, facts);
     }
     /* A run outlives the view that started it (V5). Navigating away and back
      * gives this chat a new actor while its run is still in flight, and an
@@ -1323,8 +1327,10 @@ export class ChatSessionStore {
      * the host refuses, ending the turn on a banner the page caused itself. */
     const live = getBrowserAgentHostRun(session.chatId);
     if (live !== undefined && !terminalBrowserRunStates.has(live.state)) {
-      session.stateActorRef?.send({ type: 'adoptRun', runId: live.runId });
+      session.stateActorRef.send({ type: 'adoptRun', runId: live.runId });
     }
+    /* A chat whose log this page already read shows how its last turn ended from the start. */
+    this.#replayPersistedSettlement(session);
   }
 
   #unreadRecord(projectId: string): UnreadRecord {
@@ -1358,7 +1364,7 @@ export class ChatSessionStore {
   /** Tell a bound chat machine what the unread record says (D9); `read` is its default, so only unread is sent. */
   #restoreUnread(session: InternalSession): void {
     if (this.#unreadRecords.get(session.projectId)?.chats.has(session.chatId)) {
-      session.stateActorRef?.send({ type: 'unreadRestored' });
+      session.stateActorRef.send({ type: 'unreadRestored' });
     }
   }
 
@@ -1439,180 +1445,183 @@ export class ChatSessionStore {
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
         actors: {
-          loadChatActor: fromSafeAsync(async ({ input, signal }) => {
-            const loadedChat = await readChatRow(input.chatId);
-            signal.throwIfAborted();
-            if (this.#sessions.get(input.chatId) !== session) {
-              return { type: 'chatRetrieved', chat: undefined };
-            }
+          loadChatActor: createAsyncLogic({
+            run: async ({ input, signal }) => {
+              const loadedChat = await readChatRow(input.chatId);
+              signal.throwIfAborted();
+              if (this.#sessions.get(input.chatId) !== session) {
+                return { chat: undefined };
+              }
 
-            if (!loadedChat) {
+              if (!loadedChat) {
+                if (session.durableRunId && session.durableRunState !== 'terminal') {
+                  queueMicrotask(() => {
+                    void session.chat.resumeStream();
+                  });
+                }
+                if (session.chat.messages.length === 0) {
+                  session.chat.messages = [];
+                }
+                session.draftActorRef.send({ type: 'initializeFromChat' });
+
+                return { chat: undefined };
+              }
+
+              /* Splice, never replace and never skip. The live `Chat` may already
+               * hold messages this load never saw — a brand-new chat that is
+               * already in-flight, a host reattach that rebuilt from the log, a
+               * reconciled durable user row — and overwriting them is the classic
+               * "load wipes in-flight messages" race. But *skipping* the load when
+               * they are there loses the other side: a session recreated by the
+               * shell's remount starts with an empty `Chat` and reads its history
+               * asynchronously, so a submit landing inside that read dropped every
+               * earlier turn for good — nothing reads the row twice, and a
+               * browser-placed chat has no reattach to rebuild it from the log.
+               * Ids are shared with the log's own derivation (P26), so keeping the
+               * row's messages this transcript does not already name can only add
+               * history, never a second copy of it. */
+              const inFlight = session.chat.messages;
+              const inFlightIds = new Set(inFlight.map((message) => message.id));
+              session.chat.messages = [
+                ...loadedChat.messages.filter((message) => !inFlightIds.has(message.id)),
+                ...inFlight,
+              ];
+
+              const lastMessage = session.chat.messages.at(-1);
+              const { startupRequest } = loadedChat;
+              if (startupRequest) {
+                const isEligibleStartupRequest =
+                  lastMessage?.role === 'user' &&
+                  lastMessage.id === startupRequest.messageId &&
+                  lastMessage.metadata?.status === 'pending';
+                /* Eligibility is decided *before* the consume: the seed message
+                 * lives only in the chat store's in-memory hold until a host logs
+                 * the turn, so a loader that reloaded in between reads
+                 * `messages: []` — and consuming there burned the request and
+                 * dropped the prompt with no draft restore (F4c). */
+                if (isEligibleStartupRequest) {
+                  /* The consume is one-shot, so from here the session owns the
+                   * request. Home → project navigation remounts the shell under
+                   * the sidebar row that is this chat's only view; without a hold
+                   * across the await the session was disposed mid-dispatch and
+                   * its replacement found the request already gone (F3). The hold
+                   * is freed by `#scheduleRunReleaseIfTerminal` once the request
+                   * settles — including the compose failure below (F4a). */
+                  session.runHeld = true;
+                  /* Nothing else can give this hold back: the request was never
+                   * started, so the lifecycle release never runs. A rejected
+                   * consume — it is a filesystem patch — left the session held
+                   * forever, undisposable and undrained (R1-F2). `retainDurableRun`
+                   * may have taken its own hold during the await; it is the only
+                   * other writer and it always sets `durableRunId` with it, so
+                   * that field tells this path's hold from theirs (R1-F5). */
+                  const releaseSeedHold = (): void => {
+                    if (session.durableRunId === undefined) {
+                      session.runHeld = false;
+                    }
+                    this.#disposeIfUnreferenced(session);
+                  };
+                  const consumedChat = await depsRef()
+                    .consumeChatStartupRequest(input.chatId, startupRequest.id)
+                    .catch((error: unknown) => {
+                      releaseSeedHold();
+                      throw error;
+                    });
+                  if (consumedChat) {
+                    session.draftActorRef.send({ type: 'initializeFromChat' });
+                    session.chat.messages = consumedChat.messages;
+
+                    /* This dispatch *is* the host stream for the chat's first turn.
+                     * Marked before it is sent, because the host registration that
+                     * would otherwise reattach lands in the same tick and would open
+                     * a second stream — a second relay session on rung 2, which a
+                     * capacity-1 daemon refuses. */
+                    session.seededDispatch = true;
+                    /* Through the turn's owner, like every other gesture: the
+                     * seeded turn takes a lease and must settle it. The consumed
+                     * row's execution rides with the gesture, because the
+                     * load's answer that assigns it to the machine is
+                     * only returned on the next line and the route's own agent
+                     * config is a render older still — without it the chat's
+                     * `acp` agent (or its pinned Tau host/model) is rebuilt from
+                     * the cookie and the first turn silently runs somewhere
+                     * else. The admission waits for the route to publish, so
+                     * being ahead of it is not a race any more. */
+                    const seedGesture: ChatTurnGesture = {
+                      kind: 'regenerate',
+                      execution: consumedChat.activeExecution,
+                    };
+                    /* The chat's root exists from acquire, so the seed is taken, never parked (V3a, PV-S5). */
+                    session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
+
+                    return { chat: { ...consumedChat, error: undefined } };
+                  }
+                  releaseSeedHold();
+                }
+              }
+
+              /* Healing a pending tail into the composer is for a turn *this load*
+               * found abandoned in the row. A message the live `Chat` was already
+               * carrying belongs to a request in flight right now, and yanking it
+               * back into the draft cancels the turn the person just sent. */
+              const pendingTailRestore =
+                inFlight.length > 0 ? undefined : buildPendingTailDraftRestore(session.chat.messages);
+              session.draftActorRef.send({ type: 'initializeFromChat' });
+              if (pendingTailRestore) {
+                session.chat.messages = pendingTailRestore.truncatedMessages;
+                await restoreDraft(pendingTailRestore.userMessage);
+                const restoredChat = await depsRef().commitCancelledDraftRestore(input.chatId, {
+                  messages: pendingTailRestore.truncatedMessages,
+                  clearStartupRequestId: startupRequest?.id,
+                });
+                const healedChat = restoredChat ?? {
+                  ...loadedChat,
+                  messages: pendingTailRestore.truncatedMessages,
+                  startupRequest: undefined,
+                };
+
+                return { chat: healedChat };
+              }
+
+              this.#replayPersistedSettlement(session);
+              // Reattach to any admitted queued/running/waiting run after a
+              // reload. The host transport replays the whole durable log from
+              // cursor 0 — nothing persists a cursor — and drops this
+              // transcript's copy of the run it is about to rebuild through the
+              // reset registered above, so the replay cannot double any part it
+              // already applied.
               if (session.durableRunId && session.durableRunState !== 'terminal') {
                 queueMicrotask(() => {
                   void session.chat.resumeStream();
                 });
               }
-              if (session.chat.messages.length === 0) {
-                session.chat.messages = [];
-              }
-              session.draftActorRef.send({ type: 'initializeFromChat' });
-
-              return { type: 'chatRetrieved', chat: undefined };
-            }
-
-            /* Splice, never replace and never skip. The live `Chat` may already
-             * hold messages this load never saw — a brand-new chat that is
-             * already in-flight, a host reattach that rebuilt from the log, a
-             * reconciled durable user row — and overwriting them is the classic
-             * "load wipes in-flight messages" race. But *skipping* the load when
-             * they are there loses the other side: a session recreated by the
-             * shell's remount starts with an empty `Chat` and reads its history
-             * asynchronously, so a submit landing inside that read dropped every
-             * earlier turn for good — nothing reads the row twice, and a
-             * browser-placed chat has no reattach to rebuild it from the log.
-             * Ids are shared with the log's own derivation (P26), so keeping the
-             * row's messages this transcript does not already name can only add
-             * history, never a second copy of it. */
-            const inFlight = session.chat.messages;
-            const inFlightIds = new Set(inFlight.map((message) => message.id));
-            session.chat.messages = [
-              ...loadedChat.messages.filter((message) => !inFlightIds.has(message.id)),
-              ...inFlight,
-            ];
-
-            const lastMessage = session.chat.messages.at(-1);
-            const { startupRequest } = loadedChat;
-            if (startupRequest) {
-              const isEligibleStartupRequest =
-                lastMessage?.role === 'user' &&
-                lastMessage.id === startupRequest.messageId &&
-                lastMessage.metadata?.status === 'pending';
-              /* Eligibility is decided *before* the consume: the seed message
-               * lives only in the chat store's in-memory hold until a host logs
-               * the turn, so a loader that reloaded in between reads
-               * `messages: []` — and consuming there burned the request and
-               * dropped the prompt with no draft restore (F4c). */
-              if (isEligibleStartupRequest) {
-                /* The consume is one-shot, so from here the session owns the
-                 * request. Home → project navigation remounts the shell under
-                 * the sidebar row that is this chat's only view; without a hold
-                 * across the await the session was disposed mid-dispatch and
-                 * its replacement found the request already gone (F3). The hold
-                 * is freed by `#scheduleRunReleaseIfTerminal` once the request
-                 * settles — including the compose failure below (F4a). */
-                session.runHeld = true;
-                /* Nothing else can give this hold back: the request was never
-                 * started, so the lifecycle release never runs. A rejected
-                 * consume — it is a filesystem patch — left the session held
-                 * forever, undisposable and undrained (R1-F2). `retainDurableRun`
-                 * may have taken its own hold during the await; it is the only
-                 * other writer and it always sets `durableRunId` with it, so
-                 * that field tells this path's hold from theirs (R1-F5). */
-                const releaseSeedHold = (): void => {
-                  if (session.durableRunId === undefined) {
-                    session.runHeld = false;
-                  }
-                  this.#disposeIfUnreferenced(session);
-                };
-                const consumedChat = await depsRef()
-                  .consumeChatStartupRequest(input.chatId, startupRequest.id)
-                  .catch((error: unknown) => {
-                    releaseSeedHold();
-                    throw error;
-                  });
-                if (consumedChat) {
-                  session.draftActorRef.send({ type: 'initializeFromChat' });
-                  session.chat.messages = consumedChat.messages;
-
-                  /* This dispatch *is* the host stream for the chat's first turn.
-                   * Marked before it is sent, because the host registration that
-                   * would otherwise reattach lands in the same tick and would open
-                   * a second stream — a second relay session on rung 2, which a
-                   * capacity-1 daemon refuses. */
-                  session.seededDispatch = true;
-                  /* Through the turn's owner, like every other gesture: the
-                   * seeded turn takes a lease and must settle it. The consumed
-                   * row's execution rides with the gesture, because the
-                   * `chatRetrieved` event that assigns it to the machine is
-                   * only returned on the next line and the route's own agent
-                   * config is a render older still — without it the chat's
-                   * `acp` agent (or its pinned Tau host/model) is rebuilt from
-                   * the cookie and the first turn silently runs somewhere
-                   * else. The admission waits for the route to publish, so
-                   * being ahead of it is not a race any more. */
-                  const seedGesture: ChatTurnGesture = {
-                    kind: 'regenerate',
-                    execution: consumedChat.activeExecution,
-                  };
-                  /* The owner is bound by the route's effect, which has not
-                   * necessarily run yet on a chat acquired during the first
-                   * render. An optional chain here dropped the seeded turn
-                   * silently: request consumed, no lease, no banner, nothing on
-                   * reload (V3a). `#bindSessionOwner` flushes it instead, so the
-                   * seed is never lost — only late. */
-                  if (session.stateActorRef === undefined) {
-                    session.pendingGesture = seedGesture;
-                  } else {
-                    session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
-                  }
-
-                  return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
-                }
-                releaseSeedHold();
-              }
-            }
-
-            /* Healing a pending tail into the composer is for a turn *this load*
-             * found abandoned in the row. A message the live `Chat` was already
-             * carrying belongs to a request in flight right now, and yanking it
-             * back into the draft cancels the turn the person just sent. */
-            const pendingTailRestore =
-              inFlight.length > 0 ? undefined : buildPendingTailDraftRestore(session.chat.messages);
-            session.draftActorRef.send({ type: 'initializeFromChat' });
-            if (pendingTailRestore) {
-              session.chat.messages = pendingTailRestore.truncatedMessages;
-              await restoreDraft(pendingTailRestore.userMessage);
-              const restoredChat = await depsRef().commitCancelledDraftRestore(input.chatId, {
-                messages: pendingTailRestore.truncatedMessages,
-                clearStartupRequestId: startupRequest?.id,
-              });
-              const healedChat = restoredChat ?? {
-                ...loadedChat,
-                messages: pendingTailRestore.truncatedMessages,
-                startupRequest: undefined,
-              };
-
-              return { type: 'chatRetrieved', chat: healedChat };
-            }
-
-            this.#replayPersistedSettlement(session);
-            // Reattach to any admitted queued/running/waiting run after a
-            // reload. The host transport replays the whole durable log from
-            // cursor 0 — nothing persists a cursor — and drops this
-            // transcript's copy of the run it is about to rebuild through the
-            // reset registered above, so the replay cannot double any part it
-            // already applied.
-            if (session.durableRunId && session.durableRunState !== 'terminal') {
-              queueMicrotask(() => {
-                void session.chat.resumeStream();
-              });
-            }
-            return { type: 'chatRetrieved', chat: loadedChat };
+              return { chat: loadedChat };
+            },
           }),
-          persistMessagesActor: fromSafeAsync(async ({ input }) => {
-            await depsRef().patchChat(input.chatId, 'messages', stampMessageCreatedAt(input.messages));
+          persistMessagesActor: createAsyncLogic({
+            run: async ({ input }) => {
+              await depsRef().patchChat(input.chatId, 'messages', stampMessageCreatedAt(input.messages));
+            },
           }),
-          persistErrorActor: fromSafeAsync(async ({ input }) => {
-            await depsRef().patchChat(input.chatId, 'error', input.error);
+          persistErrorActor: createAsyncLogic({
+            run: async ({ input }) => {
+              await depsRef().patchChat(input.chatId, 'error', input.error);
+            },
           }),
-          clearErrorActor: fromSafeAsync(async ({ input }) => {
-            await depsRef().patchChat(input.chatId, 'error', undefined);
+          clearErrorActor: createAsyncLogic({
+            run: async ({ input }) => {
+              await depsRef().patchChat(input.chatId, 'error', undefined);
+            },
           }),
-          persistActiveExecutionActor: fromSafeAsync(async ({ input }) => {
-            await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
+          persistActiveExecutionActor: createAsyncLogic({
+            run: async ({ input }) => {
+              await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
+            },
           }),
-          persistActiveKernelActor: fromSafeAsync(async ({ input }) => {
-            await depsRef().patchChat(input.chatId, 'activeKernel', input.activeKernel);
+          persistActiveKernelActor: createAsyncLogic({
+            run: async ({ input }) => {
+              await depsRef().patchChat(input.chatId, 'activeKernel', input.activeKernel);
+            },
           }),
         } satisfies Partial<MachineActors<typeof chatPersistenceMachine>>,
       }),
@@ -1621,7 +1630,7 @@ export class ChatSessionStore {
           activeChatId: chatId,
           resourceId: undefined,
         },
-        inspect,
+        ...this.#rootOptions,
       },
     );
 
@@ -1632,7 +1641,7 @@ export class ChatSessionStore {
           resizeImageActor,
         } satisfies Partial<MachineActors<typeof draftMachine>>,
       }),
-      { input: {}, inspect },
+      { ...this.#rootOptions, input: {} },
     );
     /**
      * Put a cancelled turn's message back in the composer, durably.
@@ -1977,13 +1986,14 @@ export class ChatSessionStore {
     // oxlint-disable-next-line eslint/prefer-const -- assigned after `session.dispose` captures it so immediate actor emissions cannot observe a partial session.
     let lifecycleSubscription: { unsubscribe: () => void } | undefined;
     let requestLifecycleWasActive = false;
+    let loading: 'before' | 'loading' | 'loaded' = 'before';
+    const chatRoot = createActor(this.#chatSessionLogic, { ...this.#rootOptions, input: { chatId, projectId } });
     session = {
       chatId,
       chat,
       projectId,
-      /* Bound below, once the record exists: `#bindSessionOwner` is the single
-       * place a chat is opened on its project session (I23). */
-      stateActorRef: undefined,
+      chatRoot,
+      stateActorRef: chatRoot,
       lastState: { inFlight: 0, approvals: 0 },
       persistenceActorRef,
       draftActorRef,
@@ -2000,7 +2010,6 @@ export class ChatSessionStore {
       activeRunBody: undefined,
       status: chat.status,
       placement: undefined,
-      pendingGesture: undefined,
       turnSubscriptions: [],
       dispose: () => {
         for (const subscription of session.turnSubscriptions) {
@@ -2023,6 +2032,13 @@ export class ChatSessionStore {
     };
 
     lifecycleSubscription = persistenceActorRef.subscribe((snapshot) => {
+      /* A failure the record still holds from an earlier session is said once, when the load lands (P59). */
+      if (loading === 'before' && snapshot.context.isLoadingChat) {
+        loading = 'loading';
+      } else if (loading === 'loading' && !snapshot.context.isLoadingChat) {
+        loading = 'loaded';
+        this.#replayPersistedFailure(session);
+      }
       this.#syncChatState(session);
       this.#flushPendingReattach(session);
       const idle = snapshot.matches({ requestLifecycle: 'idle' });
@@ -2037,11 +2053,9 @@ export class ChatSessionStore {
       this.#scheduleRunReleaseIfTerminal(session);
     });
 
-    /* The chat's state machine is a child of the *project session*, never of
-     * this store: every project-scoped resource dies with its session (I23).
-     * Absent a live session — the home route has chats too — the store keeps
-     * its flags and nothing subscribes to a state row. */
-    this.#bindSessionOwner(session);
+    /* The chat's machine is a root this store owns (PV-S5, L3 D10): a chat's fault never reaches its project, and
+     * the machine exists before any route effect registers the project session. */
+    this.#startChatRoot(session);
 
     // Kick off chat hydration only after the session record exists. The load
     // actor may dispatch a startup run, whose non-view hold must be able to
@@ -2091,13 +2105,13 @@ export class ChatSessionStore {
       lastState.inFlight = tools.inFlight;
       lastState.approvals = tools.approvals;
       lastState.toolName = tools.toolName;
-      stateActorRef?.send({ type: 'toolParts', ...tools });
+      stateActorRef.send({ type: 'toolParts', ...tools });
     }
     this.#syncRunPhase(session);
     if (session.durableRunState !== lastState.durable) {
       lastState.durable = session.durableRunState;
       if (session.durableRunState !== undefined) {
-        stateActorRef?.send({ type: 'durableRunState', state: session.durableRunState });
+        stateActorRef.send({ type: 'durableRunState', state: session.durableRunState });
       }
     }
     const snapshot = session.persistenceActorRef.getSnapshot();
@@ -2107,7 +2121,7 @@ export class ChatSessionStore {
     if (lifecycle !== lastState.lifecycle) {
       lastState.lifecycle = lifecycle;
       if (lifecycle !== undefined) {
-        stateActorRef?.send({ type: 'requestLifecycle', phase: lifecycle });
+        stateActorRef.send({ type: 'requestLifecycle', phase: lifecycle });
       }
     }
   }
@@ -2143,7 +2157,7 @@ export class ChatSessionStore {
     const host = getBrowserAgentHostRun(session.chatId);
     const hostOutcome =
       host?.runId === outcome.runId && (host.state === 'failed' || host.state === 'cancelled') ? host.state : undefined;
-    session.stateActorRef?.send({
+    session.stateActorRef.send({
       type: 'reconcileSettlement',
       runId: outcome.runId,
       outcome: hostOutcome ?? (outcome.isAbort ? 'cancelled' : outcome.isError ? 'failed' : 'completed'),
@@ -2153,19 +2167,17 @@ export class ChatSessionStore {
   /** Route one host-attested outcome to the chat that owns it. */
   #observeHostTurnSettlement(event: HostTurnSettlement): void {
     const session = this.#sessions.get(event.chatId);
-    const stateActorRef = session?.stateActorRef;
-    if (
-      session !== undefined &&
-      stateActorRef !== undefined &&
-      typeof stateActorRef.getSnapshot === 'function' &&
-      stateActorRef.getSnapshot().matches({ run: 'idle' })
-    ) {
+    if (session === undefined) {
+      return;
+    }
+    const { stateActorRef } = session;
+    if (stateActorRef.getSnapshot().matches({ run: 'idle' })) {
       this.#replayPersistedSettlement(session);
       return;
     }
     switch (event.type) {
       case 'turn.finalized': {
-        stateActorRef?.send({
+        stateActorRef.send({
           type: 'turnFinalizedObserved',
           runId: event.runId,
           turnId: event.turnId,
@@ -2174,7 +2186,7 @@ export class ChatSessionStore {
         break;
       }
       case 'turn.failed': {
-        stateActorRef?.send({
+        stateActorRef.send({
           type: 'turnFailedObserved',
           runId: event.runId,
           turnId: event.turnId,
@@ -2183,7 +2195,7 @@ export class ChatSessionStore {
         break;
       }
       case 'turn.conflicted': {
-        stateActorRef?.send({ type: 'turnConflictedObserved', runId: event.runId, turnId: event.turnId });
+        stateActorRef.send({ type: 'turnConflictedObserved', runId: event.runId, turnId: event.turnId });
         break;
       }
     }
@@ -2193,7 +2205,7 @@ export class ChatSessionStore {
   #replayPersistedSettlement(session: InternalSession): void {
     const event = getHostTurnSettlement(session.chatId);
     const { stateActorRef } = session;
-    if (event === undefined || stateActorRef === undefined || !stateActorRef.getSnapshot().matches({ run: 'idle' })) {
+    if (event === undefined || !stateActorRef.getSnapshot().matches({ run: 'idle' })) {
       return;
     }
     stateActorRef.send({ type: 'runLifecycle', phase: 'admitted', runId: event.runId });
@@ -2233,7 +2245,7 @@ export class ChatSessionStore {
    * The SDK status of a rehydrated chat is `ready`, so `#syncRunPhase` never
    * reports the failure the record still holds and the chat's machine — the one
    * status source — would say `idle` about a run that failed. This says it once,
-   * at bind, and never over a live run. No `runSettled` goes with it: a
+   * when the chat's load lands, and never over a live run. No `runSettled` goes with it: a
    * historical failure is not a run this session admitted.
    *
    * @param session - The chat that just got its machine.
@@ -2247,7 +2259,7 @@ export class ChatSessionStore {
       return;
     }
     session.lastState.phase = 'failed';
-    session.stateActorRef?.send({ type: 'runLifecycle', phase: 'failed', reason: failure.message });
+    session.stateActorRef.send({ type: 'runLifecycle', phase: 'failed', reason: failure.message });
   }
 
   /**
@@ -2300,7 +2312,7 @@ export class ChatSessionStore {
       type: opensRun(next) ? 'runStarted' : 'runSettled',
       chatId: session.chatId,
     });
-    session.stateActorRef?.send({
+    session.stateActorRef.send({
       type: 'runLifecycle',
       phase: next,
       ...(runId === undefined ? {} : { runId }),
@@ -2349,11 +2361,7 @@ export class ChatSessionStore {
    * @returns Whether its actor is in `run.queued.admitting`.
    */
   #isAdmittingTurn(session: InternalSession): boolean {
-    const owner = session.stateActorRef;
-    if (owner === undefined || typeof owner.getSnapshot !== 'function') {
-      return false;
-    }
-    return owner.getSnapshot().matches({ run: { queued: 'admitting' } });
+    return session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } });
   }
 
   #disposeIfUnreferenced(session: InternalSession): void {
@@ -2375,8 +2383,12 @@ export class ChatSessionStore {
     const drained = Promise.withResolvers<void>();
     this.#composerDrains.set(session.chatId, drained.promise);
     void this.#drainComposer(session, drained);
-    /* The session owns the chat machine; asking it to let go is what stops it. */
-    this.#sessionOwner(session)?.send({ type: 'chatClosed', chatId: session.chatId });
+    /* The store owns the chat's root. A run it was still counting stops counting with it. */
+    const { phase } = session.lastState;
+    if (phase !== undefined && opensRun(phase)) {
+      this.#sessionOwner(session)?.send({ type: 'runSettled', chatId: session.chatId });
+    }
+    session.chatRoot.stop();
     this.#sessions.delete(session.chatId);
     clearChatTurnServices(session.chatId);
     clearLedger(session.chatId);

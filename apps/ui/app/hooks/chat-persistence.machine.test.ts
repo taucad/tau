@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createActor, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
+import type { EventFromLogic } from 'xstate';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
-import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
-import type { ChatRetrievedEvent, RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
+import { chatPersistenceIgnoredEvents, chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
+import type { ChatLoadOutput, RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
 import type { ChatRequest } from '#machines/chat-session.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 type MockMessage = { id: string; role: string; parts: Array<{ type: string; text?: string }> };
 
@@ -28,30 +30,40 @@ function createTestActor(options?: {
   persistErrorResult?: () => Promise<void>;
   clearErrorResult?: () => Promise<void>;
   activeChatId?: string;
+  inspect?: ReturnType<typeof guardActors>['inspect'];
 }) {
   const machine = chatPersistenceMachine.provide({
     actors: {
-      loadChatActor: fromSafeAsync(async () => {
-        const chat = typeof options?.loadResult === 'function' ? await options.loadResult() : options?.loadResult;
-        return { type: 'chatRetrieved', chat };
+      loadChatActor: createAsyncLogic({
+        run: async () => {
+          const chat = typeof options?.loadResult === 'function' ? await options.loadResult() : options?.loadResult;
+          return { chat };
+        },
       }),
-      persistMessagesActor: fromSafeAsync(async () => {
-        // oxlint-disable-next-line no-empty-function -- mock stub
-        await (options?.persistResult ?? (async () => {}))();
+      persistMessagesActor: createAsyncLogic({
+        run: async () => {
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          await (options?.persistResult ?? (async () => {}))();
+        },
       }),
-      persistErrorActor: fromSafeAsync(async () => {
-        // oxlint-disable-next-line no-empty-function -- mock stub
-        await (options?.persistErrorResult ?? (async () => {}))();
+      persistErrorActor: createAsyncLogic({
+        run: async () => {
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          await (options?.persistErrorResult ?? (async () => {}))();
+        },
       }),
-      clearErrorActor: fromSafeAsync(async () => {
-        // oxlint-disable-next-line no-empty-function -- mock stub
-        await (options?.clearErrorResult ?? (async () => {}))();
+      clearErrorActor: createAsyncLogic({
+        run: async () => {
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          await (options?.clearErrorResult ?? (async () => {}))();
+        },
       }),
     },
   });
 
   return createActor(machine, {
     input: { activeChatId: options?.activeChatId },
+    ...(options?.inspect === undefined ? {} : { inspect: options.inspect }),
   });
 }
 
@@ -339,21 +351,23 @@ describe('chatPersistenceMachine', () => {
         // Re-provide persistMessagesActor so we can capture inputs.
         actor.stop();
         const { chatPersistenceMachine: machineRef } = await import('#hooks/chat-persistence.machine.js');
-        const { fromSafeAsync: fromSafeAsyncRef } = await import('#lib/xstate.lib.js');
         const { createActor: createActorRef } = await import('xstate');
         const recordingMachine = machineRef.provide({
           actors: {
-            loadChatActor: fromSafeAsyncRef<ChatRetrievedEvent, { chatId: string }>(async () => ({
-              type: 'chatRetrieved',
-              chat: undefined,
-            })),
-            persistMessagesActor: fromSafeAsyncRef<void, { chatId: string; messages: MyUIMessage[] }>(
-              async ({ input }) => {
+            loadChatActor: createAsyncLogic<ChatLoadOutput, { chatId: string }>({
+              run: async () => ({
+                chat: undefined,
+              }),
+            }),
+            persistMessagesActor: createAsyncLogic<void, { chatId: string; messages: MyUIMessage[] }>({
+              run: async ({ input }) => {
                 persistCalls.push({ chatId: input.chatId });
               },
-            ),
-            persistErrorActor: fromSafeAsyncRef<void, { chatId: string; error: ChatError }>(async () => undefined),
-            clearErrorActor: fromSafeAsyncRef<void, { chatId: string }>(async () => undefined),
+            }),
+            persistErrorActor: createAsyncLogic<void, { chatId: string; error: ChatError }>({
+              run: async () => undefined,
+            }),
+            clearErrorActor: createAsyncLogic<void, { chatId: string }>({ run: async () => undefined }),
           },
         });
         const recordingActor = createActorRef(recordingMachine, {
@@ -534,27 +548,30 @@ describe('chatPersistenceMachine', () => {
       const persistCalls: Array<{ chatId: string; model: string | undefined }> = [];
       const machine = chatPersistenceMachine.provide({
         actors: {
-          loadChatActor: fromSafeAsync<ChatRetrievedEvent, { chatId: string }>(async () => ({
-            type: 'chatRetrieved',
-            chat: undefined,
-          })),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          persistMessagesActor: fromSafeAsync(async () => {}),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          persistErrorActor: fromSafeAsync(async () => {}),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          clearErrorActor: fromSafeAsync(async () => {}),
-          persistActiveExecutionActor: fromSafeAsync<
-            void,
-            { chatId: string; activeExecution: CadAgentExecution | undefined }
-          >(async ({ input }) => {
-            persistCalls.push({
-              chatId: input.chatId,
-              model: input.activeExecution?.kind === 'tau' ? input.activeExecution.model : undefined,
-            });
+          loadChatActor: createAsyncLogic<ChatLoadOutput, { chatId: string }>({
+            run: async () => ({
+              chat: undefined,
+            }),
           }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          persistActiveKernelActor: fromSafeAsync(async () => {}),
+          persistMessagesActor: createAsyncLogic({ run: async () => {} }),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          persistErrorActor: createAsyncLogic({ run: async () => {} }),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          clearErrorActor: createAsyncLogic({ run: async () => {} }),
+          persistActiveExecutionActor: createAsyncLogic<
+            void,
+            { chatId: string; activeExecution: CadAgentExecution | undefined }
+          >({
+            run: async ({ input }) => {
+              persistCalls.push({
+                chatId: input.chatId,
+                model: input.activeExecution?.kind === 'tau' ? input.activeExecution.model : undefined,
+              });
+            },
+          }),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          persistActiveKernelActor: createAsyncLogic({ run: async () => {} }),
         },
       });
       const actor = createActor(machine, { input: { activeChatId: 'chat_abc' } });
@@ -572,23 +589,24 @@ describe('chatPersistenceMachine', () => {
       const persistCalls: Array<{ chatId: string; kernel: string | undefined }> = [];
       const machine = chatPersistenceMachine.provide({
         actors: {
-          loadChatActor: fromSafeAsync<ChatRetrievedEvent, { chatId: string }>(async () => ({
-            type: 'chatRetrieved',
-            chat: undefined,
-          })),
+          loadChatActor: createAsyncLogic<ChatLoadOutput, { chatId: string }>({
+            run: async () => ({
+              chat: undefined,
+            }),
+          }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          persistMessagesActor: fromSafeAsync(async () => {}),
+          persistMessagesActor: createAsyncLogic({ run: async () => {} }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          persistErrorActor: fromSafeAsync(async () => {}),
+          persistErrorActor: createAsyncLogic({ run: async () => {} }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          clearErrorActor: fromSafeAsync(async () => {}),
+          clearErrorActor: createAsyncLogic({ run: async () => {} }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          persistActiveExecutionActor: fromSafeAsync(async () => {}),
-          persistActiveKernelActor: fromSafeAsync<void, { chatId: string; activeKernel: KernelId | undefined }>(
-            async ({ input }) => {
+          persistActiveExecutionActor: createAsyncLogic({ run: async () => {} }),
+          persistActiveKernelActor: createAsyncLogic<void, { chatId: string; activeKernel: KernelId | undefined }>({
+            run: async ({ input }) => {
               persistCalls.push({ chatId: input.chatId, kernel: input.activeKernel });
             },
-          ),
+          }),
         },
       });
       const actor = createActor(machine, { input: { activeChatId: 'chat_abc' } });
@@ -606,24 +624,27 @@ describe('chatPersistenceMachine', () => {
       const persistCalls: string[] = [];
       const machine = chatPersistenceMachine.provide({
         actors: {
-          loadChatActor: fromSafeAsync<ChatRetrievedEvent, { chatId: string }>(async () => ({
-            type: 'chatRetrieved',
-            chat: undefined,
-          })),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          persistMessagesActor: fromSafeAsync(async () => {}),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          persistErrorActor: fromSafeAsync(async () => {}),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          clearErrorActor: fromSafeAsync(async () => {}),
-          persistActiveExecutionActor: fromSafeAsync<
-            void,
-            { chatId: string; activeExecution: CadAgentExecution | undefined }
-          >(async ({ input }) => {
-            persistCalls.push(input.chatId);
+          loadChatActor: createAsyncLogic<ChatLoadOutput, { chatId: string }>({
+            run: async () => ({
+              chat: undefined,
+            }),
           }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          persistActiveKernelActor: fromSafeAsync(async () => {}),
+          persistMessagesActor: createAsyncLogic({ run: async () => {} }),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          persistErrorActor: createAsyncLogic({ run: async () => {} }),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          clearErrorActor: createAsyncLogic({ run: async () => {} }),
+          persistActiveExecutionActor: createAsyncLogic<
+            void,
+            { chatId: string; activeExecution: CadAgentExecution | undefined }
+          >({
+            run: async ({ input }) => {
+              persistCalls.push(input.chatId);
+            },
+          }),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          persistActiveKernelActor: createAsyncLogic({ run: async () => {} }),
         },
       });
       const actor = createActor(machine, { input: {} });
@@ -642,24 +663,27 @@ describe('chatPersistenceMachine', () => {
       const persistCalls: string[] = [];
       const machine = chatPersistenceMachine.provide({
         actors: {
-          loadChatActor: fromSafeAsync<ChatRetrievedEvent, { chatId: string }>(async () => ({
-            type: 'chatRetrieved',
-            chat: undefined,
-          })),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          persistMessagesActor: fromSafeAsync(async () => {}),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          persistErrorActor: fromSafeAsync(async () => {}),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          clearErrorActor: fromSafeAsync(async () => {}),
-          persistActiveExecutionActor: fromSafeAsync<
-            void,
-            { chatId: string; activeExecution: CadAgentExecution | undefined }
-          >(async ({ input }) => {
-            persistCalls.push(input.activeExecution?.kind === 'tau' ? input.activeExecution.model : '<undef>');
+          loadChatActor: createAsyncLogic<ChatLoadOutput, { chatId: string }>({
+            run: async () => ({
+              chat: undefined,
+            }),
           }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          persistActiveKernelActor: fromSafeAsync(async () => {}),
+          persistMessagesActor: createAsyncLogic({ run: async () => {} }),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          persistErrorActor: createAsyncLogic({ run: async () => {} }),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          clearErrorActor: createAsyncLogic({ run: async () => {} }),
+          persistActiveExecutionActor: createAsyncLogic<
+            void,
+            { chatId: string; activeExecution: CadAgentExecution | undefined }
+          >({
+            run: async ({ input }) => {
+              persistCalls.push(input.activeExecution?.kind === 'tau' ? input.activeExecution.model : '<undef>');
+            },
+          }),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          persistActiveKernelActor: createAsyncLogic({ run: async () => {} }),
         },
       });
       const actor = createActor(machine, { input: { activeChatId: 'chat_abc' } });
@@ -1350,16 +1374,18 @@ describe('chatPersistenceMachine', () => {
       // Pass a 1-attempt budget so a single disconnect exhausts immediately.
       const machine = chatPersistenceMachine.provide({
         actors: {
-          loadChatActor: fromSafeAsync(async () => {
-            const event: ChatRetrievedEvent = { type: 'chatRetrieved', chat: undefined };
-            return event;
+          loadChatActor: createAsyncLogic({
+            run: async () => {
+              const event: ChatLoadOutput = { chat: undefined };
+              return event;
+            },
           }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          persistMessagesActor: fromSafeAsync(async () => {}),
+          persistMessagesActor: createAsyncLogic({ run: async () => {} }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          persistErrorActor: fromSafeAsync(async () => {}),
+          persistErrorActor: createAsyncLogic({ run: async () => {} }),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          clearErrorActor: fromSafeAsync(async () => {}),
+          clearErrorActor: createAsyncLogic({ run: async () => {} }),
         },
       });
       const actor = createActor(machine, {
@@ -1505,5 +1531,60 @@ describe('chatPersistenceMachine', () => {
         vi.useRealTimers();
       }
     });
+  });
+});
+
+describe('chatPersistenceMachine — the machine contract (PV-S5, MC-R17)', () => {
+  it('answers every sampled event, or declares it ignored, in every reachable state', () => {
+    const message = { id: 'm', role: 'user', parts: [{ type: 'text', text: 'hi' }] } satisfies MyUIMessage;
+    const events = [
+      { type: 'setActiveChatId', chatId: 'chat_a' },
+      { type: 'queuePersist', messages: [message] },
+      { type: 'handleError', error: new Error('x') },
+      { type: 'setPersistedError', error: sampleChatError },
+      { type: 'clearPersistedError' },
+      { type: 'flushNow' },
+      { type: 'startRequest', request: { kind: 'continue' } },
+      { type: 'turnRequested' },
+      { type: 'preemptRequest' },
+      { type: 'stopRequest' },
+      { type: 'requestFinished', messages: [message], isAbort: false, isError: false, isDisconnect: false },
+      { type: 'requestFinished', messages: [message], isAbort: false, isError: true, isDisconnect: true },
+      { type: 'setActiveExecution', execution: undefined },
+      { type: 'setActiveKernel', kernel: undefined },
+      { type: 'streamResumed' },
+    ] satisfies Array<EventFromLogic<typeof chatPersistenceMachine>>;
+    expect(
+      unansweredEvents(chatPersistenceMachine, {
+        input: {},
+        events,
+        limit: 200_000,
+        ignore: chatPersistenceIgnoredEvents,
+        serializeState: (snapshot) =>
+          JSON.stringify([
+            snapshot.value,
+            snapshot.context.isLoadingChat,
+            snapshot.context.pendingRequest !== undefined,
+            snapshot.context.retryAttempt,
+            snapshot.context.preempting,
+            snapshot.context.pendingMessages !== undefined,
+          ]),
+      }),
+    ).toEqual([]);
+  });
+
+  it('leaves no dead letter, unanswered delivery or fault over a load, a persist and a request', async () => {
+    const guard = guardActors({ ignore: { chatPersistence: chatPersistenceIgnoredEvents } });
+    const actor = createTestActor({ loadResult: createMockChat(), inspect: guard.inspect });
+    actor.start();
+    actor.send({ type: 'setActiveChatId', chatId: 'chat_test' });
+    await waitFor(actor, (snapshot) => !snapshot.context.isLoadingChat);
+    actor.send({ type: 'queuePersist', messages: [] });
+    actor.send({ type: 'flushNow' });
+    actor.send({ type: 'turnRequested' });
+    actor.send({ type: 'startRequest', request: { kind: 'continue' } });
+    actor.send({ type: 'requestFinished', messages: [], isAbort: false, isError: false, isDisconnect: false });
+    await waitFor(actor, (snapshot) => snapshot.matches({ messagePersistence: 'idle' }));
+    actor.stop();
   });
 });

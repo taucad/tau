@@ -33,14 +33,14 @@
 import { useActorRef, useSelector } from '@xstate/react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Chat } from '@ai-sdk/react';
-import { waitFor } from 'xstate';
+import { createAsyncLogic } from 'xstate';
+import { waitUnlessGone } from '#lib/xstate.lib.js';
 import type { ActorRefFrom } from 'xstate';
 import { isAnyToolPart } from '@taucad/chat';
 import type { CadAgentExecution, ContextUsageData, MyUIMessage } from '@taucad/chat';
 import type { KernelEntry, KernelId } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { draftMachine } from '#hooks/draft.machine.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
@@ -200,12 +200,14 @@ const ActiveChatSessionContext = createContext<ActiveChatSessionContextValue | u
 // Composer-only draft actor wiring
 // ---------------------------------------------------------------------------
 
-const noopPersistDraftActor = fromSafeAsync<void, { draft: MyUIMessage }>(async () => undefined);
-const noopPersistEditDraftActor = fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async () => undefined);
-const noopPersistSelectionActor = fromSafeAsync<void, { toolChoice?: string | string[]; mode?: ChatMode }>(
-  async () => undefined,
-);
-const noopClearMessageEditActor = fromSafeAsync<void, { messageId: string }>(async () => undefined);
+const noopPersistDraftActor = createAsyncLogic<void, { draft: MyUIMessage }>({ run: async () => undefined });
+const noopPersistEditDraftActor = createAsyncLogic<void, { messageId: string; draft: MyUIMessage }>({
+  run: async () => undefined,
+});
+const noopPersistSelectionActor = createAsyncLogic<void, { toolChoice?: string | string[]; mode?: ChatMode }>({
+  run: async () => undefined,
+});
+const noopClearMessageEditActor = createAsyncLogic<void, { messageId: string }>({ run: async () => undefined });
 
 /** A pre-project composer that keeps no record; each owns its draft-stage attachment directory. */
 export type ComposerSurface = Parameters<typeof composerRecordPaths.surfaceAttachments>[0];
@@ -330,7 +332,7 @@ export function HomeNewProjectComposerProvider({
   useFlushOnClose(
     async () => {
       draftActorRef.send({ type: 'flushNow' });
-      await waitFor(draftActorRef, (state) => state.matches({ inputSaving: 'idle' }));
+      await waitUnlessGone(draftActorRef, (state) => state.matches({ inputSaving: 'idle' }));
       await flushRecord(recordRef);
     },
     { stage: 'producer' },
@@ -613,7 +615,7 @@ function useConsumeDraft(
 ): () => Promise<void> {
   return useCallback(async () => {
     draftActorRef.send({ type: 'clearDraft' });
-    await waitFor(draftActorRef, (snapshot) => snapshot.matches({ inputSaving: 'idle' }));
+    await waitUnlessGone(draftActorRef, (snapshot) => snapshot.matches({ inputSaving: 'idle' }));
     if (!owner) {
       return;
     }
@@ -621,7 +623,7 @@ function useConsumeDraft(
     // the navigation that follows cannot strand it. A failed write keeps
     // retrying and is reported by the record's toasts.
     if (owner.recordRef) {
-      await waitFor(owner.recordRef, (snapshot) => !snapshot.matches({ writes: 'persisting' }));
+      await waitUnlessGone(owner.recordRef, (snapshot) => !snapshot.matches({ writes: 'persisting' }));
     }
     // Project creation has already copied the draft's bytes into the new chat;
     // keep only what the draft references now.

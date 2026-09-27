@@ -12,6 +12,7 @@ import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions.machine.js';
+import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { peekRevisionClient } from '#hooks/use-revision-status.js';
@@ -182,7 +183,6 @@ const sessionRefFor = (projectId: string): ProjectSessionActorRef =>
   ({
     getSnapshot: () => ({
       context: {
-        chatRefs: fakeRegistry.chatReferences[projectId] ?? {},
         failures: fakeRegistry.failures[projectId] ?? {},
       },
     }),
@@ -197,6 +197,12 @@ const sessionRefFor = (projectId: string): ProjectSessionActorRef =>
       };
     },
   }) as unknown as ProjectSessionActorRef;
+
+/** The chat store's roots, as the sidebar reads them (PV-S5). */
+const fakeChats = {
+  chatRootsOf: (projectId: string) => new Map(Object.entries(fakeRegistry.chatReferences[projectId] ?? {})),
+  subscribeMembership: () => () => undefined,
+} as unknown as ChatSessionStore;
 
 const resetRegistry = (): void => {
   fakeRegistry.refs = {};
@@ -299,7 +305,8 @@ beforeEach(() => {
     acquire: acquireSession,
     release: releaseSession,
     get: () => undefined,
-    subscribeMembership: () => () => undefined,
+    subscribeMembership: fakeChats.subscribeMembership,
+    chatRootsOf: fakeChats.chatRootsOf,
   } as unknown as ReturnType<typeof useChatSessionStore>);
   vi.mocked(useSessions).mockImplementation(() => fakeRegistry.actor);
   vi.mocked(peekRevisionClient).mockImplementation(
@@ -523,7 +530,10 @@ describe('use-sidebar-status — pin (a): every agent-state row renders from a d
           driveChat(sidebarProject.id, `conflicted-${String(index)}`, [{ type: 'syncState', state: 'conflicted' }]);
         }
         revisions(sidebarProject.id, revision);
-        const row = selectProjectRow(readProjectStatus(fakeRegistry.actor, sidebarProject.id), idleWindowMilliseconds);
+        const row = selectProjectRow(
+          readProjectStatus(fakeRegistry.actor, fakeChats, sidebarProject.id),
+          idleWindowMilliseconds,
+        );
         expect(row.detail).toBe(label);
         if (attention !== undefined) {
           expect(row.attention).toBe(attention);
@@ -577,7 +587,7 @@ describe('use-sidebar-status — pin (a): every agent-state row renders from a d
 
 describe('use-sidebar-status — pin (d): the project row rolls up its chats (A36, v2 D3, D11)', () => {
   const rowOf = (projectId: string): ProjectSidebarRow =>
-    selectProjectRow(readProjectStatus(fakeRegistry.actor, projectId), idleWindowMilliseconds);
+    selectProjectRow(readProjectStatus(fakeRegistry.actor, fakeChats, projectId), idleWindowMilliseconds);
   const collapsed = (projectId: string) => selectProjectFacts(rowOf(projectId), false);
   const expanded = (projectId: string) => selectProjectFacts(rowOf(projectId), true);
 
@@ -924,7 +934,7 @@ describe('use-sidebar-status — pin (R3/R4): the bind key carries what the row 
     expect(screen.getByText('Live')).toBeTruthy();
   });
 
-  it('re-subscribes when a chat id is bound to a freshly spawned machine', () => {
+  it('re-subscribes when a chat id is bound to a freshly created root', () => {
     liveProject('bracket');
     driveChat('bracket', 'sweep', []);
     function Row(): React.JSX.Element {
@@ -934,8 +944,8 @@ describe('use-sidebar-status — pin (R3/R4): the bind key carries what the row 
     render(<Row />);
     expect(screen.getByText('idle')).toBeTruthy();
 
-    /* `openChat` spawns a new actor for an id it no longer holds; the ids are
-     * identical across the swap, so only actor identity can catch it. */
+    /* A chat released and acquired again gets a fresh root under the same id;
+     * the ids are identical across the swap, so only actor identity can catch it. */
     const replacement = driveChat('bracket', 'sweep', []);
     act(() => {
       notifyRegistry();
@@ -951,14 +961,14 @@ describe('use-sidebar-status — pin (R13): closing is visible, never silent', (
   it('says what it is waiting for while a project closes', () => {
     liveProject('bracket', { state: 'closing', pending: 1 });
     revisions('bracket', { sync: { state: 'pending', pendingCount: 1 } });
-    expect(selectProjectRow(readProjectStatus(fakeRegistry.actor, 'bracket'), idleWindowMilliseconds).detail).toBe(
-      'Backing up 1 revision, then closing…',
-    );
+    expect(
+      selectProjectRow(readProjectStatus(fakeRegistry.actor, fakeChats, 'bracket'), idleWindowMilliseconds).detail,
+    ).toBe('Backing up 1 revision, then closing…');
 
     revisions('bracket');
-    expect(selectProjectRow(readProjectStatus(fakeRegistry.actor, 'bracket'), idleWindowMilliseconds).detail).toBe(
-      'Closing…',
-    );
+    expect(
+      selectProjectRow(readProjectStatus(fakeRegistry.actor, fakeChats, 'bracket'), idleWindowMilliseconds).detail,
+    ).toBe('Closing…');
   });
 });
 

@@ -17,13 +17,15 @@
  * See `apps/ui/app/hooks/draft.machine.ts` for the consumer state machine.
  */
 
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { createAsyncLogic } from 'xstate';
 import { resizeImageForChat } from '#utils/resize-image.js';
 
-export const resizeImageActor = fromSafeAsync<
+export const resizeImageActor = createAsyncLogic<
   { type: 'imageResized'; resized: string },
   { image: string; preserveOriginal: boolean }
->(async ({ input }) => {
-  const resized = input.preserveOriginal ? input.image : await resizeImageForChat(input.image);
-  return { type: 'imageResized', resized };
+>({
+  run: async ({ input }) => {
+    const resized = input.preserveOriginal ? input.image : await resizeImageForChat(input.image);
+    return { type: 'imageResized', resized };
+  },
 });

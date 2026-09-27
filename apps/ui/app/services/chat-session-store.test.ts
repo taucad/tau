@@ -1,7 +1,6 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
-import type { Actor } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
@@ -13,16 +12,16 @@ import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
-import type { ChatRequest, ChatSessionActorRef, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
+import type { ChatRequest, ChatTurnGesture, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { spyOnSend } from '#lib/xstate-test.utils.js';
+import { fromSafeAsync } from '#lib/xstate.lib.js';
 import {
   chatTurnAdmission,
   publishChatTurnAdmission,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -291,20 +290,25 @@ async function settle(): Promise<void> {
   }
 }
 
+/* The host settles every turn (W8 TS-S6); these rows assert which run the chat's session actor ends, and how. */
+const recordedSettlements = new Map<string, ChatTurnSettlementInput[]>();
+const recordingSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input }) => {
+  recordedSettlements.get(input.chatId)?.push(input);
+});
+
+/** Every store here runs its chats on this logic, so a row can record the turns a chat ends (PV-S5: the store owns each chat's root). */
+const chatSession = chatSessionMachine.provide({
+  actors: { admitTurn: chatTurnAdmission, settleTurn: recordingSettlement },
+});
+
 function createStore(): StoreType {
-  const store = new ChatSessionStore();
+  const store = new ChatSessionStore({ chatSession });
   store.setDependencies(createStubDeps());
   return store;
 }
 
 /** Project sessions a row started, stopped after it. */
 const turnOwners: Array<{ stop: () => void }> = [];
-
-/* The host settles every turn (W8 TS-S6); these rows assert which run the chat's session actor ends, and how. */
-const recordedSettlements = new Map<string, ChatTurnSettlementInput[]>();
-const recordingSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input }) => {
-  recordedSettlements.get(input.chatId)?.push(input);
-});
 
 /**
  * Register the project session that owns a chat's turns (C3).
@@ -317,16 +321,7 @@ const recordingSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async (
  * @param projectId - The project whose session owns the chat.
  */
 function startTurnOwner(store: StoreType, projectId: string): void {
-  const session = createActor(
-    projectSessionMachine.provide({
-      actors: {
-        chatSession: chatSessionMachine.provide({
-          actors: { admitTurn: chatTurnAdmission, settleTurn: recordingSettlement },
-        }),
-      },
-    }),
-    { input: { projectId } },
-  );
+  const session = createActor(projectSessionMachine, { input: { projectId } });
   session.start();
   turnOwners.push(session);
   store.setFocusedProject(projectId);
@@ -436,7 +431,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         send: (event: { type: string; chatId?: string }) => {
           heard.push(event);
         },
-        getSnapshot: () => ({ context: { chatRefs: {} } }),
+        getSnapshot: () => ({ context: { runs: [] } }),
       } as unknown as Parameters<StoreType['setProjectSession']>[1],
     };
   };
@@ -481,15 +476,15 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.acquire('chat-a');
     store.release('chat-a');
 
-    expect(projectA.heard).toContainEqual({ type: 'openChat', chatId: 'chat-a' });
-    expect(projectB.heard).not.toContainEqual({ type: 'openChat', chatId: 'chat-a' });
+    expect([...store.chatRootsOf('proj_a').keys()]).toEqual(['chat-a']);
+    expect(store.chatRootsOf('proj_b').size).toBe(0);
     store.release('chat-a');
     store.setProjectSession('proj_a', undefined);
     store.setProjectSession('proj_b', undefined);
   });
 
   it('binds a chat acquired during a focus switch to its caller’s project before its row loads', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -498,25 +493,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     deps.getChat.mockImplementation(async () => loadedChat);
     store.setDependencies(deps);
 
-    const boundSession = (projectId: string) => {
-      const heard: Array<{ type: string; chatId?: string }> = [];
-      const chatRef = { send: vi.fn() } as unknown as ChatSessionActorRef;
-      const chatReferences = new Map<string, ChatSessionActorRef>();
-      const ref = {
-        send: (event: { type: string; chatId?: string }) => {
-          heard.push(event);
-          if (event.type === 'openChat' && event.chatId !== undefined) {
-            chatReferences.set(event.chatId, chatRef);
-          } else if (event.type === 'chatClosed' && event.chatId !== undefined) {
-            chatReferences.delete(event.chatId);
-          }
-        },
-        getSnapshot: () => ({ context: { chatRefs: Object.fromEntries(chatReferences) } }),
-      } as unknown as ProjectSessionActorRef;
-      return { projectId, heard, chatRef, ref };
-    };
-    const projectA = boundSession('proj_a');
-    const projectB = boundSession('proj_b');
+    const projectA = fakeSession('proj_a');
+    const projectB = fakeSession('proj_b');
     store.setProjectSession('proj_a', projectA.ref);
     store.setProjectSession('proj_b', projectB.ref);
     store.setFocusedProject('proj_b');
@@ -524,7 +502,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     /* React renders A's new chat before ProjectSessionBinding's focus effect
      * runs, so focus still says B. The caller names A (PV-S4). */
     const session = store.acquire('chat_a', 'proj_a');
-    expect(session.stateActorRef).toBe(projectA.chatRef);
+    expect(store.chatRootsOf('proj_a').get('chat_a')).toBe(session.stateActorRef);
     expect(session.persistenceActorRef.getSnapshot().value).toMatchObject({ chatLoading: 'loading' });
     await vi.waitFor(() => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a');
@@ -547,7 +525,6 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     fake.emitStatusChange();
 
     expect(projectB.heard).toEqual([]);
-    expect(projectA.heard).toContainEqual({ type: 'openChat', chatId: 'chat_a' });
     expect(projectA.heard).toContainEqual({ type: 'runStarted', chatId: 'chat_a' });
     expect(projectB.heard).not.toContainEqual({ type: 'runStarted', chatId: 'chat_a' });
     store.release('chat_a');
@@ -555,8 +532,56 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setProjectSession('proj_b', undefined);
   });
 
+  it('takes a gesture made before any route effect registered its project, rather than parking it (PV-S5)', () => {
+    const store = createStore();
+    const session = store.acquire('chat_unbound', 'proj_unbound');
+    const gesture: ChatTurnGesture = { kind: 'regenerate' };
+
+    void store.requestTurn('chat_unbound', gesture);
+
+    expect(session.stateActorRef.getSnapshot().context.pendingGesture).toBe(gesture);
+    store.release('chat_unbound');
+  });
+
+  it('keeps the agents pane’s chat machine across a project session re-registration (PV-S5)', () => {
+    const store = createStore();
+    store.setProjectSession('proj_pane', fakeSession('proj_pane').ref);
+    const session = store.acquire('chat_pane', 'proj_pane');
+    const machine = session.stateActorRef;
+    expect(machine).toBeDefined();
+
+    /* The project's route remounts: its binding unregisters and registers a new session. */
+    store.setProjectSession('proj_pane', undefined);
+    store.setProjectSession('proj_pane', fakeSession('proj_pane').ref);
+
+    /* The pane subscribed to `machine` when the chat joined; it must still be the chat's machine. */
+    expect(session.stateActorRef).toBe(machine);
+    expect(machine.getSnapshot().status).toBe('active');
+    store.release('chat_pane');
+    store.setProjectSession('proj_pane', undefined);
+  });
+
+  it('forwards its project’s revision facts to a chat, whether it joined before or after them (PV-S5)', () => {
+    const store = createStore();
+    const revisionOf = (chatId: string) =>
+      (store.get(chatId)!.stateActorRef.getSnapshot().value as { revision: Record<string, string> }).revision;
+
+    store.acquire('chat_facts_early', 'proj_facts');
+    store.setRevisionFacts('proj_facts', { dirty: true, sync: 'pending', branch: 'main' });
+    store.acquire('chat_facts_late', 'proj_facts');
+    store.acquire('chat_facts_other', 'proj_other');
+
+    for (const chatId of ['chat_facts_early', 'chat_facts_late']) {
+      expect(revisionOf(chatId)).toMatchObject({ tree: 'dirty', sync: 'pending' });
+    }
+    expect(revisionOf('chat_facts_other')).not.toMatchObject({ tree: 'dirty' });
+    for (const chatId of ['chat_facts_early', 'chat_facts_late', 'chat_facts_other']) {
+      store.release(chatId);
+    }
+  });
+
   it('should ignore a delayed hydration after the session is released', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -571,7 +596,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_b');
 
     try {
-      store.acquire('chat_delayed_release', 'proj_b');
+      const root = store.acquire('chat_delayed_release', 'proj_b').stateActorRef;
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledWith('chat_delayed_release');
       });
@@ -589,11 +614,10 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       await Promise.resolve();
 
       expect(store.get('chat_delayed_release')).toBeUndefined();
+      expect(root.getSnapshot().status).toBe('stopped');
+      expect(store.chatRootsOf('proj_b').size).toBe(0);
       expect(projectA.heard).toEqual([]);
-      expect(projectB.heard).toEqual([
-        { type: 'openChat', chatId: 'chat_delayed_release' },
-        { type: 'chatClosed', chatId: 'chat_delayed_release' },
-      ]);
+      expect(projectB.heard).toEqual([]);
     } finally {
       store.setProjectSession('proj_a', undefined);
       store.setProjectSession('proj_b', undefined);
@@ -601,7 +625,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   });
 
   it('should not let a released hydration close a reacquired replacement', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     let resolveFirstLoad!: (chat: ChatEntity) => void;
     const firstLoad = new Promise<ChatEntity>((resolve) => {
@@ -644,12 +668,10 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       await Promise.resolve();
 
       expect(store.get('chat_reacquired')).toBe(replacement);
+      expect(released.stateActorRef.getSnapshot().status).toBe('stopped');
+      expect(replacement.stateActorRef.getSnapshot().status).toBe('active');
+      expect(store.chatRootsOf('proj_b').get('chat_reacquired')).toBe(replacement.stateActorRef);
       expect(projectA.heard).toEqual([]);
-      expect(projectB.heard).toEqual([
-        { type: 'openChat', chatId: 'chat_reacquired' },
-        { type: 'chatClosed', chatId: 'chat_reacquired' },
-        { type: 'openChat', chatId: 'chat_reacquired' },
-      ]);
     } finally {
       store.release('chat_reacquired');
       resolveReplacementLoad({
@@ -666,7 +688,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   });
 
   it('should bind admission before an early settlement arrives during hydration', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -675,31 +697,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     deps.getChat.mockImplementation(async () => loadedChat);
     store.setDependencies(deps);
 
-    const realSession = (projectId: string) => {
-      const heard: Array<{ type: string; chatId?: string }> = [];
-      const chatReferences = new Map<string, Actor<typeof chatSessionMachine>>();
-      const ref = mock<ProjectSessionActorRef>();
-      const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>();
-      Object.defineProperty(snapshot, 'context', {
-        get: () => ({ chatRefs: Object.fromEntries(chatReferences) }),
-      });
-      vi.mocked(ref.send).mockImplementation((event) => {
-        heard.push(event);
-        if (event.type === 'openChat' && !chatReferences.has(event.chatId)) {
-          chatReferences.set(
-            event.chatId,
-            createActor(chatSessionMachine, { input: { chatId: event.chatId, projectId } }).start(),
-          );
-        } else if (event.type === 'chatClosed') {
-          chatReferences.get(event.chatId)?.stop();
-          chatReferences.delete(event.chatId);
-        }
-      });
-      vi.mocked(ref.getSnapshot).mockReturnValue(snapshot);
-      return { heard, chatReferences, ref };
-    };
-    const projectA = realSession('proj_a');
-    const projectB = realSession('proj_b');
+    const projectA = fakeSession('proj_a');
+    const projectB = fakeSession('proj_b');
     store.setProjectSession('proj_a', projectA.ref);
     store.setProjectSession('proj_b', projectB.ref);
     store.setFocusedProject('proj_b');
@@ -744,8 +743,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       fake.status = 'ready';
       fake.emitStatusChange();
 
-      const chatA = projectA.chatReferences.get('chat_early_settlement');
-      expect(chatA?.getSnapshot().matches({ run: 'done' })).toBe(true);
+      const chatA = session.stateActorRef;
+      expect(chatA.getSnapshot().matches({ run: 'done' })).toBe(true);
       expect(projectA.heard.filter((event) => event.type === 'runStarted')).toEqual([
         { type: 'runStarted', chatId: 'chat_early_settlement' },
       ]);
@@ -758,21 +757,15 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       store.release('chat_early_settlement');
       store.setProjectSession('proj_a', undefined);
       store.setProjectSession('proj_b', undefined);
-      for (const actor of [...projectA.chatReferences.values(), ...projectB.chatReferences.values()]) {
-        actor.stop();
-      }
     }
   });
 });
 
 describe('ChatSessionStore — host-attested settlement (P71)', () => {
-  const sessionProjectRef = (chatId: string, actor: ChatSessionActorRef) => {
+  /* The chat's machine is the store's root (PV-S5); the project session only counts runs. */
+  const sessionProjectRef = () => {
     const ref = mock<ProjectSessionActorRef>();
-    const chatReferences: Record<string, ChatSessionActorRef> = {};
-    const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>({
-      context: { chatRefs: chatReferences },
-    });
-    chatReferences[chatId] = actor;
+    const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>({ context: { runs: [] } });
     vi.mocked(ref.getSnapshot).mockReturnValue(snapshot);
     return ref;
   };
@@ -781,14 +774,11 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     const store = createStore();
     const chatId = 'chat-ordered-settlement';
     const runId = testRunBody.admission.idempotencyKey;
-    const actor = createActor(chatSessionMachine, {
-      input: { chatId, projectId: 'project-settlement' },
-    }).start();
 
     try {
       store.setFocusedProject('project-settlement');
-      store.setProjectSession('project-settlement', sessionProjectRef(chatId, actor));
-      store.acquire(chatId, 'project-settlement');
+      store.setProjectSession('project-settlement', sessionProjectRef());
+      const actor = store.acquire(chatId, 'project-settlement').stateActorRef;
       store.startRun(chatId, testRunBody);
       const fake = harness.created.find((entry) => entry.id === chatId);
       expect(fake).toBeDefined();
@@ -817,7 +807,6 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     } finally {
       store.release(chatId);
       store.setProjectSession('project-settlement', undefined);
-      actor.stop();
     }
   });
 
@@ -825,14 +814,11 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     const store = createStore();
     const chatId = 'chat-correlated-settlement';
     const currentRunId = 'req_current_chat_session_store';
-    const actor = createActor(chatSessionMachine, {
-      input: { chatId, projectId: 'project-settlement' },
-    }).start();
 
     try {
       store.setFocusedProject('project-settlement');
-      store.setProjectSession('project-settlement', sessionProjectRef(chatId, actor));
-      store.acquire(chatId, 'project-settlement');
+      store.setProjectSession('project-settlement', sessionProjectRef());
+      const actor = store.acquire(chatId, 'project-settlement').stateActorRef;
       store.startRun(chatId, {
         ...testRunBody,
         admission: { version: 1, idempotencyKey: currentRunId },
@@ -876,27 +862,16 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     } finally {
       store.release(chatId);
       store.setProjectSession('project-settlement', undefined);
-      actor.stop();
     }
   });
 
   it("keeps a completed run finishing until that chat's own settlement is observed", () => {
     const store = createStore();
-    const chatA = createActor(chatSessionMachine, {
-      input: { chatId: 'chat-a', projectId: 'project-settlement' },
-    }).start();
-    const chatB = createActor(chatSessionMachine, {
-      input: { chatId: 'chat-b', projectId: 'project-settlement' },
-    }).start();
-    const projectRef = {
-      send: () => undefined,
-      getSnapshot: () => ({ context: { chatRefs: { 'chat-a': chatA, 'chat-b': chatB } } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
     try {
       store.setFocusedProject('project-settlement');
-      store.setProjectSession('project-settlement', projectRef);
-      store.acquire('chat-a', 'project-settlement');
+      store.setProjectSession('project-settlement', sessionProjectRef());
+      const chatA = store.acquire('chat-a', 'project-settlement').stateActorRef;
       store.acquire('chat-b', 'project-settlement');
       chatA.send({ type: 'runLifecycle', phase: 'running', runId: 'run-a' });
       chatA.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-a' });
@@ -931,8 +906,6 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
       store.release('chat-a');
       store.release('chat-b');
       store.setProjectSession('project-settlement', undefined);
-      chatA.stop();
-      chatB.stop();
     }
   });
 
@@ -940,22 +913,15 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     const store = createStore();
     const failed: Array<Record<string, unknown>> = [];
     const conflicted: Array<Record<string, unknown>> = [];
-    const projectRef = {
-      send: () => undefined,
-      getSnapshot: () => ({
-        context: {
-          chatRefs: {
-            'chat-failed': { send: (event: Record<string, unknown>) => failed.push(event) },
-            'chat-conflicted': { send: (event: Record<string, unknown>) => conflicted.push(event) },
-          },
-        },
-      }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
     store.setFocusedProject('project-settlement');
-    store.setProjectSession('project-settlement', projectRef);
-    store.acquire('chat-failed', 'project-settlement');
-    store.acquire('chat-conflicted', 'project-settlement');
+    store.setProjectSession('project-settlement', sessionProjectRef());
+    spyOnSend(store.acquire('chat-failed', 'project-settlement').stateActorRef, (event) => {
+      failed.push(event);
+    });
+    spyOnSend(store.acquire('chat-conflicted', 'project-settlement').stateActorRef, (event) => {
+      conflicted.push(event);
+    });
     try {
       recordHostTurnSettlement({
         type: 'turn.failed',
@@ -1005,13 +971,6 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
   it('rehydrates a terminal chat card from its durable settlement', () => {
     const store = createStore();
     const chatId = 'chat-persisted-settlement';
-    const chat = createActor(chatSessionMachine, {
-      input: { chatId, projectId: 'project-persisted-settlement' },
-    }).start();
-    const projectRef = {
-      send: () => undefined,
-      getSnapshot: () => ({ context: { chatRefs: { [chatId]: chat } } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
     recordHostFinalizedTurn({
       type: 'turn.finalized',
       turnId: 'turn-persisted-settlement',
@@ -1026,32 +985,26 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     });
 
     store.setFocusedProject('project-persisted-settlement');
-    store.acquire(chatId, 'project-persisted-settlement');
-    store.setProjectSession('project-persisted-settlement', projectRef);
+    const chat = store.acquire(chatId, 'project-persisted-settlement').stateActorRef;
+    store.setProjectSession('project-persisted-settlement', sessionProjectRef());
 
     expect(chat.getSnapshot().matches({ run: 'done' })).toBe(true);
     expect(chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
 
     store.release(chatId);
     store.setProjectSession('project-persisted-settlement', undefined);
-    chat.stop();
   });
 
   it('replays a settlement discovered while the durable chat is loading', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     const chatId = 'chat-loading-settlement';
     const projectId = 'project-loading-settlement';
-    const chat = createActor(chatSessionMachine, { input: { chatId, projectId } }).start();
     const loading = Promise.withResolvers<Awaited<ReturnType<ChatSessionDeps['getChat']>>>();
-    const projectRef = {
-      send: () => undefined,
-      getSnapshot: () => ({ context: { chatRefs: { [chatId]: chat } } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
     deps.getChat.mockImplementation(async () => loading.promise);
     store.setDependencies(deps);
-    store.setProjectSession(projectId, projectRef);
-    store.acquire(chatId, projectId);
+    store.setProjectSession(projectId, sessionProjectRef());
+    const chat = store.acquire(chatId, projectId).stateActorRef;
     recordHostFinalizedTurn({
       type: 'turn.finalized',
       turnId: 'turn-loading-settlement',
@@ -1080,7 +1033,6 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
 
     store.release(chatId);
     store.setProjectSession(projectId, undefined);
-    chat.stop();
   });
 });
 
@@ -1088,7 +1040,7 @@ describe('ChatSessionStore — persisted failure replay (P59)', () => {
   /* A reload finds the failed turn in IndexedDB, not on a live run: nothing
    * ever sent the chat's machine a lifecycle for it, so the row read `Idle`
    * for work that ended badly. Binding is the moment to say so. */
-  it('replays a persisted failure into the chat machine as it binds, and settles no run', () => {
+  it('replays a persisted failure into the chat machine as its row loads, and settles no run', async () => {
     const store = createStore();
     const heard: Array<Record<string, unknown>> = [];
     const projectHeard: Array<{ type: string }> = [];
@@ -1096,63 +1048,56 @@ describe('ChatSessionStore — persisted failure replay (P59)', () => {
       send: (event: { type: string }) => {
         projectHeard.push(event);
       },
-      getSnapshot: () => ({
-        context: {
-          chatRefs: {
-            'chat-reloaded': {
-              send: (event: Record<string, unknown>) => {
-                heard.push(event);
-              },
-            },
-          },
-        },
-      }),
+      getSnapshot: () => ({ context: { runs: [] } }),
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
     store.setFocusedProject('proj_reload');
-    store.acquire('chat-reloaded', 'proj_reload');
-    const fake = harness.created.find((entry) => entry.id === 'chat-reloaded')!;
+    store.setProjectSession('proj_reload', projectRef);
+    const session = store.acquire('chat_reloaded', 'proj_reload');
+    spyOnSend(session.stateActorRef, (event) => {
+      heard.push(event);
+    });
+    const fake = harness.created.find((entry) => entry.id === 'chat_reloaded')!;
     fake.status = 'error';
     fake.error = new Error('the model refused');
 
-    store.setProjectSession('proj_reload', projectRef);
+    /* The chat's row lands: that is when its persisted failure is known (PV-S5). */
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
 
     expect(heard).toContainEqual({ type: 'runLifecycle', phase: 'failed', reason: 'the model refused' });
     /* A historical failure is not a run this session admitted (P59). */
     expect(projectHeard.filter((event) => event.type === 'runSettled')).toEqual([]);
-    store.release('chat-reloaded');
+    store.release('chat_reloaded');
     store.setProjectSession('proj_reload', undefined);
   });
 
-  it('leaves a live run alone, replaying nothing over it', () => {
+  it('leaves a live run alone, replaying nothing over it', async () => {
     const store = createStore();
     const heard: Array<Record<string, unknown>> = [];
     const projectRef = {
       send: () => undefined,
-      getSnapshot: () => ({
-        context: {
-          chatRefs: {
-            'chat-streaming': {
-              send: (event: Record<string, unknown>) => {
-                heard.push(event);
-              },
-            },
-          },
-        },
-      }),
+      getSnapshot: () => ({ context: { runs: [] } }),
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
     store.setFocusedProject('proj_live');
-    store.acquire('chat-streaming', 'proj_live');
-    const fake = harness.created.find((entry) => entry.id === 'chat-streaming')!;
+    store.setProjectSession('proj_live', projectRef);
+    const session = store.acquire('chat_streaming', 'proj_live');
+    spyOnSend(session.stateActorRef, (event) => {
+      heard.push(event);
+    });
+    const fake = harness.created.find((entry) => entry.id === 'chat_streaming')!;
     fake.status = 'streaming';
     fake.emitStatusChange();
     fake.error = new Error('an error from the turn before');
 
-    store.setProjectSession('proj_live', projectRef);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
 
     expect(heard.filter((event) => event['phase'] === 'failed')).toEqual([]);
-    store.release('chat-streaming');
+    store.release('chat_streaming');
     store.setProjectSession('proj_live', undefined);
   });
 });
@@ -1173,7 +1118,7 @@ describe('ChatSessionStore', () => {
   });
 
   it('routes accepted user activity through the current dependency set', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     store.setDependencies(deps);
 
@@ -1186,10 +1131,7 @@ describe('ChatSessionStore', () => {
     const store = createStore();
     const session = store.acquire('chat_tool_name', 'project_1');
     const fake = harness.created.find((entry) => entry.id === 'chat_tool_name')!;
-    const actor = createActor(chatSessionMachine, {
-      input: { chatId: 'chat_tool_name', projectId: 'project_1' },
-    }).start();
-    session.stateActorRef = actor;
+    const actor = session.stateActorRef;
     const activeToolMessage = (toolName: string): MyUIMessage => ({
       id: 'assistant_1',
       role: 'assistant',
@@ -1203,8 +1145,7 @@ describe('ChatSessionStore', () => {
     fake.messages = [activeToolMessage('edit_file')];
     fake.emitMessagesChange();
     expect(actor.getSnapshot().context.toolName).toBe('edit_file');
-
-    actor.stop();
+    store.release('chat_tool_name');
   });
 
   /* Rewritten for W7: the store's unread decision is written to the project's
@@ -1214,7 +1155,7 @@ describe('ChatSessionStore', () => {
     const projectId = 'proj_unread';
     const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
     const storeInProject = (): { store: StoreType; deps: StubDeps } => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (chatId) => chatRow(chatId, projectId));
       store.setDependencies(deps);
@@ -1400,7 +1341,7 @@ describe('ChatSessionStore', () => {
         expect(
           store
             .get('chat_dispose_admitting')
-            ?.stateActorRef?.getSnapshot()
+            ?.stateActorRef.getSnapshot()
             .matches({ run: { queued: 'admitting' } }),
         ).toBe(true);
       });
@@ -1411,74 +1352,35 @@ describe('ChatSessionStore', () => {
     });
 
     /*
-     * T3-D11. `requestTurn` resolves when the actor leaves `queued.admitting`,
-     * through a `next`-only observer. An actor stopped while admitting never
-     * emits again, so the promise never settled — and it is what the composer's
-     * editable lock awaits, so the editor stayed read-only until reload.
+     * T3-D11 said an actor stopped mid-admission never emits again, so the composer's editable lock never settled.
+     * The project session no longer owns the chat (PV-S5): stopping it leaves the chat's root admitting, and the
+     * admission's answer is what releases the composer. The store never stops a root that is admitting.
      */
-    it('should release the composer when the turn owner is stopped mid-admission', async () => {
+    it('keeps a turn admitting when its project session stops, since the store owns the chat (PV-S5)', async () => {
       const store = createStore();
       store.acquire('chat_stopped_admitting', 'resource_stopped_admitting');
       startTurnOwner(store, 'resource_stopped_admitting');
       const owner = turnOwners.at(-1)!;
-      publishChatTurnAdmission(
-        'chat_stopped_admitting',
-        async () =>
-          new Promise<never>(() => {
-            /* Never answers: the admission is in flight for the whole row. */
-          }),
-      );
+      const admission = Promise.withResolvers<ChatRequest>();
+      publishAdmission('chat_stopped_admitting', async () => admission.promise);
+      const root = store.get('chat_stopped_admitting')!.stateActorRef;
 
       const requested = store.requestTurn('chat_stopped_admitting', { kind: 'regenerate' });
       await vi.waitFor(() => {
-        expect(
-          store
-            .get('chat_stopped_admitting')
-            ?.stateActorRef?.getSnapshot()
-            .matches({ run: { queued: 'admitting' } }),
-        ).toBe(true);
+        expect(root.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
       });
 
-      // The idle policy stops the project session, and its chat children with it.
+      // The idle policy stops the project session; the chat's root is the store's.
       owner.stop();
+      expect(root.getSnapshot().status).toBe('active');
 
+      admission.resolve({
+        kind: 'regenerate',
+        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
+      });
       await expect(requested).resolves.toBeUndefined();
-    });
-
-    /*
-     * W10-8c, the same wait from the other side. The gesture arrives *after*
-     * the owner was stopped: the store still holds the stale ref, whose last
-     * snapshot still matches `admitting`, and subscribing to a stopped actor
-     * registers no observer at all (XState drops it, and only emits `complete`
-     * for a snapshot whose status is `done` — a machine stopped mid-run is
-     * still `active`). Nothing ever calls back, so the promise the composer's
-     * editable lock awaits never settles.
-     */
-    it('should release the composer for a gesture made after its turn owner was stopped', async () => {
-      const store = createStore();
-      store.acquire('chat_stopped_before', 'resource_stopped_before');
-      startTurnOwner(store, 'resource_stopped_before');
-      const owner = turnOwners.at(-1)!;
-      publishChatTurnAdmission(
-        'chat_stopped_before',
-        async () =>
-          new Promise<never>(() => {
-            /* Never answers: the admission is in flight for the whole row. */
-          }),
-      );
-
-      void store.requestTurn('chat_stopped_before', { kind: 'regenerate' });
-      await vi.waitFor(() => {
-        expect(
-          store
-            .get('chat_stopped_before')
-            ?.stateActorRef?.getSnapshot()
-            .matches({ run: { queued: 'admitting' } }),
-        ).toBe(true);
-      });
-      owner.stop();
-
-      await expect(store.requestTurn('chat_stopped_before', { kind: 'regenerate' })).resolves.toBeUndefined();
+      expect(root.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(false);
+      store.release('chat_stopped_admitting');
     });
 
     it('retains and resumes an API-discovered run without a focused view', async () => {
@@ -1531,7 +1433,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('resumes a durable run discovered after the mounted chat finished loading', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue({
         id: 'chat_recovery',
@@ -1692,7 +1594,7 @@ describe('ChatSessionStore', () => {
       try {
         const session = store.acquire('chat_adopt', 'project_adopt');
 
-        const snapshot = session.stateActorRef!.getSnapshot();
+        const snapshot = session.stateActorRef.getSnapshot();
         expect(snapshot.matches({ run: 'running' })).toBe(true);
         expect(snapshot.context.activeRunId).toBe('run_live');
       } finally {
@@ -1741,7 +1643,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('does not resume a loaded chat without a durable run', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue({
         id: 'chat_idle',
@@ -1763,7 +1665,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('reattaches a host-placed chat to its host log, once per host', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue({
         id: 'chat_daemon',
@@ -1799,7 +1701,7 @@ describe('ChatSessionStore', () => {
      * request waits here rather than on a React dependency array.
      */
     it('holds a reattach requested while the chat is loading and applies it once, after the load', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       const chatId = 'chat_loading_reattach';
       const loading = Promise.withResolvers<ChatEntity>();
@@ -1830,7 +1732,7 @@ describe('ChatSessionStore', () => {
      * the first, so the seeded turn never ran (live proof 2026-09-03 06:20:33).
      */
     it('leaves a seeded first turn to its own dispatch instead of reattaching over it', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       const seededMessage: MyUIMessage = {
         id: 'msg_seeded_pending',
@@ -1869,7 +1771,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('never reattaches a host-placed chat over a run of its own', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue({
         id: 'chat_daemon_busy',
@@ -1903,26 +1805,24 @@ describe('ChatSessionStore', () => {
      * the sidebar said "Live, busy / Finishing…" forever.
      */
     it('should leave the chat idle when a host reattach finds no run', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       const chatId = 'chat_reattach_no_run';
       deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Empty chat' }));
       store.setDependencies(deps);
-      const actor = createActor(chatSessionMachine, {
-        input: { chatId, projectId: 'project_reattach' },
-      }).start();
       const heard: string[] = [];
       const projectRef = {
         send: (event: { type: string }) => {
           heard.push(event.type);
         },
-        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
+        getSnapshot: () => ({ context: { runs: [] } }),
       } as unknown as ProjectSessionActorRef;
 
       try {
         store.setFocusedProject('project_reattach');
         store.setProjectSession('project_reattach', projectRef);
         const session = store.acquire(chatId, 'project_reattach');
+        const actor = session.stateActorRef;
         await vi.waitFor(() => {
           expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
         });
@@ -1942,7 +1842,6 @@ describe('ChatSessionStore', () => {
       } finally {
         store.release(chatId);
         store.setProjectSession('project_reattach', undefined);
-        actor.stop();
       }
     });
 
@@ -1954,26 +1853,24 @@ describe('ChatSessionStore', () => {
      * the run settle.
      */
     it('should surface a host reattach that fails before a run binds', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       const chatId = 'chat_reattach_failed';
       deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Unreachable host chat' }));
       store.setDependencies(deps);
-      const actor = createActor(chatSessionMachine, {
-        input: { chatId, projectId: 'project_reattach' },
-      }).start();
       const heard: string[] = [];
       const projectRef = {
         send: (event: { type: string }) => {
           heard.push(event.type);
         },
-        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
+        getSnapshot: () => ({ context: { runs: [] } }),
       } as unknown as ProjectSessionActorRef;
 
       try {
         store.setFocusedProject('project_reattach');
         store.setProjectSession('project_reattach', projectRef);
         const session = store.acquire(chatId, 'project_reattach');
+        const actor = session.stateActorRef;
         await vi.waitFor(() => {
           expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
         });
@@ -1994,7 +1891,6 @@ describe('ChatSessionStore', () => {
       } finally {
         store.release(chatId);
         store.setProjectSession('project_reattach', undefined);
-        actor.stop();
       }
     });
 
@@ -2008,26 +1904,24 @@ describe('ChatSessionStore', () => {
      * (R3-F2).
      */
     it("should settle a reattached chat's run whose identity cleared before the final status", async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       const chatId = 'chat_reattach_settles';
       deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Reattached chat' }));
       store.setDependencies(deps);
-      const actor = createActor(chatSessionMachine, {
-        input: { chatId, projectId: 'project_reattach' },
-      }).start();
       const heard: string[] = [];
       const projectRef = {
         send: (event: { type: string }) => {
           heard.push(event.type);
         },
-        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
+        getSnapshot: () => ({ context: { runs: [] } }),
       } as unknown as ProjectSessionActorRef;
 
       try {
         store.setFocusedProject('project_reattach');
         store.setProjectSession('project_reattach', projectRef);
         const session = store.acquire(chatId, 'project_reattach');
+        const actor = session.stateActorRef;
         await vi.waitFor(() => {
           expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
         });
@@ -2049,7 +1943,6 @@ describe('ChatSessionStore', () => {
       } finally {
         store.release(chatId);
         store.setProjectSession('project_reattach', undefined);
-        actor.stop();
       }
     });
 
@@ -2655,7 +2548,7 @@ describe('ChatSessionStore', () => {
     it('queues debounced IndexedDB persistence when milestone parts appear on the trailing assistant row', async () => {
       vi.useFakeTimers();
       const chatIdForMilestonePersistence = 'chat_milestone_integration';
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -2716,7 +2609,7 @@ describe('ChatSessionStore', () => {
           },
         };
 
-        const store = new ChatSessionStore();
+        const store = new ChatSessionStore({ chatSession });
         const deps = createStubDeps();
         store.setDependencies(deps);
 
@@ -2804,7 +2697,7 @@ describe('ChatSessionStore', () => {
       try {
         const chatId = 'chat_restore_empty_cancel';
         const projectId = 'proj_restore';
-        const store = new ChatSessionStore();
+        const store = new ChatSessionStore({ chatSession });
         const deps = createStubDeps();
         deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
         deps.client.files.set(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`, pngBytes);
@@ -2895,7 +2788,7 @@ describe('ChatSessionStore', () => {
       vi.useFakeTimers();
       try {
         const chatId = 'chat_restore_after_stream';
-        const store = new ChatSessionStore();
+        const store = new ChatSessionStore({ chatSession });
         const deps = createStubDeps();
         store.setDependencies(deps);
 
@@ -2980,7 +2873,7 @@ describe('ChatSessionStore', () => {
         createdAt: 0,
         updatedAt: 0,
       };
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async () => storedChat);
       deps.consumeChatStartupRequest.mockImplementation(async () => {
@@ -3048,7 +2941,7 @@ describe('ChatSessionStore', () => {
 
   describe('hydration on acquire', () => {
     it('calls deps.getChat on first acquire so hydration kicks off', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -3072,7 +2965,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('waits for the chat admission before dispatching a consumed startup request', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -3180,7 +3073,7 @@ describe('ChatSessionStore', () => {
      * for the gesture.
      */
     it('dispatches a seeded first turn consumed before its project session bound', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -3244,8 +3137,9 @@ describe('ChatSessionStore', () => {
       store.acquire('chat_unbound_gesture', 'resource_unbound_gesture');
       const fake = harness.created.find((entry) => entry.id === 'chat_unbound_gesture')!;
 
-      // No project session: the chat has no owner to ask.
-      await store.requestTurn('chat_unbound_gesture', { kind: 'regenerate' });
+      // No project session yet: the chat's root admits the gesture, and the admission waits for the route (PV-S5).
+      const requested = store.requestTurn('chat_unbound_gesture', { kind: 'regenerate' });
+      await settle();
       expect(fake.regenerate).not.toHaveBeenCalled();
 
       startTurnOwner(store, 'resource_unbound_gesture');
@@ -3257,6 +3151,7 @@ describe('ChatSessionStore', () => {
       await vi.waitFor(() => {
         expect(fake.regenerate).toHaveBeenCalledTimes(1);
       });
+      await requested;
 
       store.release('chat_unbound_gesture');
     });
@@ -3275,7 +3170,8 @@ describe('ChatSessionStore', () => {
       const message = buildUserMessage({ text: 'parked message' });
       session.draftActorRef.send({ type: 'setDraftText', text: 'parked message' });
 
-      await store.requestTurn('chat_parked_draft', { kind: 'send', message });
+      const requested = store.requestTurn('chat_parked_draft', { kind: 'send', message });
+      await settle();
 
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('parked message');
 
@@ -3289,6 +3185,7 @@ describe('ChatSessionStore', () => {
       await vi.waitFor(() => {
         expect(fake.sendMessage).toHaveBeenCalledTimes(1);
       });
+      await requested;
       await vi.waitFor(() => {
         expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
       });
@@ -3309,7 +3206,8 @@ describe('ChatSessionStore', () => {
       const message = buildUserMessage({ text: 'parked message' });
       session.draftActorRef.send({ type: 'setDraftText', text: 'parked message' });
 
-      await store.requestTurn('chat_parked_retyped', { kind: 'send', message });
+      const requested = store.requestTurn('chat_parked_retyped', { kind: 'send', message });
+      await settle();
       session.draftActorRef.send({ type: 'setDraftText', text: 'and now something else' });
 
       startTurnOwner(store, 'resource_parked_retyped');
@@ -3322,6 +3220,7 @@ describe('ChatSessionStore', () => {
       await vi.waitFor(() => {
         expect(fake.sendMessage).toHaveBeenCalledTimes(1);
       });
+      await requested;
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('and now something else');
 
       store.release('chat_parked_retyped');
@@ -3426,7 +3325,8 @@ describe('ChatSessionStore', () => {
       });
 
       try {
-        await store.requestTurn('chat_parked_live_run', { kind: 'regenerate' });
+        const requested = store.requestTurn('chat_parked_live_run', { kind: 'regenerate' });
+        await settle();
         expect(fake.regenerate).not.toHaveBeenCalled();
 
         startTurnOwner(store, 'resource_parked_live_run');
@@ -3438,6 +3338,7 @@ describe('ChatSessionStore', () => {
         await vi.waitFor(() => {
           expect(fake.regenerate).toHaveBeenCalledTimes(1);
         });
+        await requested;
       } finally {
         live.mockRestore();
         store.release('chat_parked_live_run');
@@ -3445,7 +3346,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('restores a plain pending user tail to draft on hydration without regenerating', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -3490,7 +3391,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('trims an empty assistant placeholder when healing an orphan pending tail', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -3580,7 +3481,7 @@ describe('ChatSessionStore', () => {
         row = { ...row, messages: input.messages, startupRequest: undefined };
         return row;
       });
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       store.setDependencies(deps);
       return { deps, seedMessage, startupRequest, store };
     };
@@ -3676,7 +3577,7 @@ describe('ChatSessionStore', () => {
       });
 
       await vi.waitFor(() => {
-        const snapshot = session.stateActorRef!.getSnapshot();
+        const snapshot = session.stateActorRef.getSnapshot();
         expect(snapshot.matches({ run: 'failed' })).toBe(true);
         expect(snapshot.context.failureReason).toContain('durable workspace admission failed');
       });
@@ -4240,7 +4141,7 @@ describe('ChatSessionStore', () => {
       vi.useFakeTimers();
       try {
         const chatId = 'chat_tt3_retry';
-        const store = new ChatSessionStore();
+        const store = new ChatSessionStore({ chatSession });
         const deps = createStubDeps();
         store.setDependencies(deps);
 
@@ -4382,7 +4283,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   });
 
   const openStore = (client: MemoryClient, row: ChatEntity = chatRow(chatId, projectId)) => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps(client);
     deps.getChat.mockImplementation(async (id) => (id === row.id ? row : undefined));
     store.setDependencies(deps);
@@ -4701,6 +4602,22 @@ describe('ChatSessionStore — composer records (W7)', () => {
     store.release(chatId);
   });
 
+  /* LT09: `waitFor` rejects when its actor stops first. A gone draft has nothing left to flush, and the close must
+   * still flush every other record rather than fail on it. */
+  it('flushes the other records when one draft actor is gone before its save lands (PV-S5, LT09)', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.composerRecordRef.getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
+    });
+    session.draftActorRef.send({ type: 'setDraftText', text: 'typed before the draft went away' });
+    session.draftActorRef.stop();
+
+    await expect(store.flushComposerRecords()).resolves.toBeUndefined();
+    store.release(chatId);
+  });
+
   it('should write a record that is waiting out a retry when flushed (R9)', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
@@ -4790,19 +4707,18 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
   const chatId = 'chat_w8';
   const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
 
-  /** A store over one device's disk, with a live project session holding a real chat machine. */
+  /** A store over one device's disk, with a live project session; the store owns the chat's machine (PV-S5). */
   const openStore = (client: MemoryClient) => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps(client);
     deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
     store.setDependencies(deps);
-    const chat = createActor(chatSessionMachine, { input: { chatId, projectId } }).start();
     const projectRef = {
       send: () => undefined,
-      getSnapshot: () => ({ context: { chatRefs: { [chatId]: chat }, runs: new Set() } }),
+      getSnapshot: () => ({ context: { runs: [] } }),
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
     store.setProjectSession(projectId, projectRef);
-    return { store, chat };
+    return { store };
   };
 
   beforeEach(() => {
@@ -4826,21 +4742,18 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     first.store.release(chatId);
 
     const second = openStore(client);
-    expect(second.chat.getSnapshot().matches({ read: 'read' })).toBe(true);
-    second.store.acquire(chatId, projectId);
+    const chat = second.store.acquire(chatId, projectId).stateActorRef;
 
     await vi.waitFor(() => {
-      expect(second.chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
+      expect(chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
     });
     expect(second.store.isUnread(chatId)).toBe(true);
     second.store.release(chatId);
-    first.chat.stop();
-    second.chat.stop();
   });
 
   it('stops the live record actor when its chat is deleted, so a later patch cannot write the record back', async () => {
     const client = createMemoryClient();
-    const { store, chat } = openStore(client);
+    const { store } = openStore(client);
     const session = store.acquire(chatId, projectId);
     const draft = (text: string): MyUIMessage => ({
       id: 'draft',
@@ -4865,13 +4778,12 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     expect(client.json(composerPath(projectId, chatId))).toBeUndefined();
     expect(session.composerRecordRef.getSnapshot().status).toBe('done');
     store.release(chatId);
-    chat.stop();
   });
 
   it('does not recreate unread.json for a late unread decision after its project is deleted', async () => {
     vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
     const client = createMemoryClient();
-    const { store, chat } = openStore(client);
+    const { store } = openStore(client);
     store.acquire(chatId, projectId);
     store.markViewed(chatId);
     await settle();
@@ -4883,6 +4795,5 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     expect(client.json(unreadPath)).toBeUndefined();
     expect(client.namesUnder(`/.tau/composers/chats/${projectId}`)).toEqual([]);
     store.release(chatId);
-    chat.stop();
   });
 });

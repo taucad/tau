@@ -201,13 +201,16 @@ function ProjectSessionBinding({
       dirty: status.projectDirty,
       recording,
       pushed: sync.state === 'noRemote' || sync.state === 'backedUp',
-      sync: syncState,
-      /* R11: the branch the checkout is on gives `revision.line` its producer,
-       * so the `⎇ <branch>` chip has data instead of a permanent `onMain`. */
       pendingCount: sync.pendingCount,
+    });
+    /* The chats' `revision` region. R11: the branch the checkout is on gives `revision.line` its producer, so the
+     * `⎇ <branch>` chip has data instead of a permanent `onMain`. */
+    chatSessions.setRevisionFacts(projectId, {
+      dirty: status.projectDirty,
+      sync: syncState,
       ...(status.line.kind === 'unknown' ? {} : { branch: status.line.name }),
     });
-  }, [recording, session, status]);
+  }, [chatSessions, projectId, recording, session, status]);
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {

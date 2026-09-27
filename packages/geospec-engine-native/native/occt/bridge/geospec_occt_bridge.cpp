@@ -639,10 +639,13 @@ SourceValidity shape_is_valid(const TopoDS_Shape& shape) {
 // V1 (rulings 2 and 3): shell closure from exact topology. Per unique shell
 // definition, face uses per edge, skipping degenerated and INTERNAL/EXTERNAL
 // uses: an odd count is open, three or more is non-manifold, and sharing
-// across shells counts as closed. Faces outside any shell form one group.
+// across shells counts as closed. Faces outside any shell form one group. A
+// group with no counted use (faces with no edge, as surfaceless faces have)
+// proves nothing closed, so it fails too.
 struct ClosureGroup {
   TopoDS_Shape key;          // the shell definition; null for the free faces
   TopLoc_Location instance;  // the first located instance, placing samples
+  uint32_t edges = 0;        // edges with a counted use
   uint32_t open = 0, nonmanifold = 0, sample_count = 0;
   TopoDS_Edge samples[4];    // in the group's frame, in first-use order
   uint32_t sample_uses[4] = {};
@@ -675,6 +678,7 @@ void count_face_uses(const TopoDS_Shape& group, ClosureGroup& result) {
       }
     }
   }
+  result.edges = static_cast<uint32_t>(uses.Extent());
   for (int index = 1; index <= uses.Extent(); ++index) {
     const uint32_t count = uses.FindFromIndex(index);
     const bool open = count % 2 == 1, nonmanifold = count >= 3;
@@ -687,14 +691,16 @@ void count_face_uses(const TopoDS_Shape& group, ClosureGroup& result) {
   }
 }
 
+bool closed(const ClosureGroup& group) {
+  return group.edges != 0 && group.open == 0 && group.nonmanifold == 0;
+}
+
 ClosureFacet closure_facet(const TopoDS_Shape& shape) {
   ClosureFacet facet;
   const auto add = [&facet](ClosureGroup&& group) {
     facet.open_edges += group.open;
     facet.nonmanifold_edges += group.nonmanifold;
-    if (group.open != 0 || group.nonmanifold != 0) {
-      facet.failing.push_back(std::move(group));
-    }
+    if (!closed(group)) facet.failing.push_back(std::move(group));
   };
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> definitions;
   for (TopExp_Explorer shell(shape, TopAbs_SHELL); shell.More(); shell.Next()) {
@@ -706,7 +712,7 @@ ClosureFacet closure_facet(const TopoDS_Shape& shape) {
     group.key = key;
     group.instance = shell.Current().Location();
     count_face_uses(key, group);
-    if (group.open != 0 || group.nonmanifold != 0) facet.shells_closed = false;
+    if (!closed(group)) facet.shells_closed = false;
     add(std::move(group));
   }
   facet.shells = static_cast<uint32_t>(definitions.Extent());
@@ -1739,6 +1745,9 @@ struct geospec_occt_document {
   std::string schema;
   size_t source_byte_length = 0;
   size_t free_shape_count = 0;
+  // Ruling 32: located faces admitted without a surface, i.e. tessellated-only
+  // products that the OnNoBRep read profile keeps; exact claims refuse them.
+  size_t surfaceless_face_count = 0;
   std::string source_length_unit;
   double source_unit_to_millimeters = 1.0;
   std::vector<ProductFacts> products;
@@ -6238,6 +6247,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     for (int index = 1; index <= faces.Extent(); ++index) {
       FaceFacts face;
       face.shape = TopoDS::Face(faces(index));
+      TopLoc_Location location;
+      if (BRep_Tool::Surface(face.shape, location).IsNull()) {
+        ++result->surfaceless_face_count;
+      }
       result->faces.push_back(std::move(face));
     }
     result->public_faces.reserve(static_cast<size_t>(faces.Extent()));
@@ -6343,15 +6356,16 @@ int geospec_occt_selected_continuous_domain(
 int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* unit_to_millimeters, size_t* occurrence_count,
-    geospec_occt_string* source_unit,
+    size_t* surfaceless_face_count, geospec_occt_string* source_unit,
     geospec_occt_string* error) noexcept {
   if (document == nullptr || unit_to_millimeters == nullptr ||
-      occurrence_count == nullptr) {
+      occurrence_count == nullptr || surfaceless_face_count == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Document/admission output is null.", error);
   }
   *unit_to_millimeters = document->source_unit_to_millimeters;
   *occurrence_count = document->occurrences.size();
+  *surfaceless_face_count = document->surfaceless_face_count;
   return write_string(document->source_length_unit, source_unit);
 }
 

@@ -1617,11 +1617,13 @@ fn edge_treatment_vec<T>(count: usize, owned: &mut u64) -> Result<Vec<T>, Backen
 unsafe fn admission_facts(raw: *const ffi::Document) -> Result<BrepAdmissionFacts, BackendError> {
     let mut source_unit_to_millimeters = 0.0;
     let mut occurrence_count = 0;
+    let mut surfaceless_faces = 0;
     let source_length_unit = copied_string(|unit, error| {
         ffi::geospec_occt_admission_facts(
             raw,
             &mut source_unit_to_millimeters,
             &mut occurrence_count,
+            &mut surfaceless_faces,
             unit,
             error,
         )
@@ -1630,6 +1632,7 @@ unsafe fn admission_facts(raw: *const ffi::Document) -> Result<BrepAdmissionFact
         source_length_unit,
         source_unit_to_millimeters,
         occurrence_count,
+        surfaceless_faces,
     })
 }
 
@@ -4345,6 +4348,7 @@ mod ffi {
             document: *const Document,
             unit_scale: *mut f64,
             occurrence_count: *mut usize,
+            surfaceless_face_count: *mut usize,
             unit: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;

@@ -1175,8 +1175,33 @@ struct ExactClosure {
     watertight: bool,
     open_edges: u32,
     nonmanifold_edges: u32,
+    /// No shell and no free face: nothing is enclosed.
+    faceless: bool,
+    /// Failing groups with no open or non-manifold edge: their faces have no
+    /// counted edge use, so nothing proves them closed.
+    edgeless: usize,
     measured: Json,
     failing_shells: Vec<Json>,
+}
+
+impl ExactClosure {
+    fn mismatch_message(&self) -> String {
+        if self.faceless {
+            return "The exact BRep topology has no face, so it encloses no closed manifold surface."
+                .into();
+        }
+        let edgeless = if self.edgeless == 0 {
+            String::new()
+        } else {
+            format!(" ({} with no counted edge use)", self.edgeless)
+        };
+        format!(
+            "The exact BRep topology has {} open-boundary and {} non-manifold edges in {} failing shells{edgeless}, so it is not a closed manifold surface.",
+            self.open_edges,
+            self.nonmanifold_edges,
+            self.failing_shells.len()
+        )
+    }
 }
 
 fn exact_closure(context: &mut EvaluationContext<'_>) -> Result<ExactClosure, Evaluation> {
@@ -1244,11 +1269,20 @@ fn exact_closure(context: &mut EvaluationContext<'_>) -> Result<ExactClosure, Ev
             ])
         })
         .collect();
-    let watertight = closure.open_edges == 0 && closure.nonmanifold_edges == 0;
+    // A subject with no face encloses nothing; a group that bounds no counted
+    // edge fails without an open or non-manifold edge (the facet's rule).
+    let faceless = closure.shells == 0 && closure.free_faces == 0;
+    let watertight = !faceless && closure.failing.is_empty();
     Ok(ExactClosure {
         watertight,
         open_edges: closure.open_edges,
         nonmanifold_edges: closure.nonmanifold_edges,
+        faceless,
+        edgeless: closure
+            .failing
+            .iter()
+            .filter(|group| group.open_edges == 0 && group.nonmanifold_edges == 0)
+            .count(),
         measured: Json::object([
             ("watertight", Json::Bool(watertight)),
             (
@@ -1284,13 +1318,12 @@ fn evaluate_exact_watertight(context: &mut EvaluationContext<'_>) -> Evaluation 
         mismatch(
             &mut diagnostics,
             "GEOSPEC_WATERTIGHT_MISMATCH",
-            format!(
-                "The exact BRep topology has {} open-boundary and {} non-manifold edges in {} failing shells, so it is not a closed manifold surface.",
-                closure.open_edges,
-                closure.nonmanifold_edges,
-                closure.failing_shells.len()
-            ),
-            "Close the open shells and remove the over-shared edges at the reported samples in the named occurrences, then re-export.",
+            closure.mismatch_message(),
+            if closure.faceless {
+                "Export the model's solid or surface geometry; a subject without a face has no closed surface."
+            } else {
+                "Close the open shells and remove the over-shared edges at the reported samples in the named occurrences, then re-export."
+            },
             Json::Object(details),
             None,
         );

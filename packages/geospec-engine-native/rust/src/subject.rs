@@ -779,6 +779,38 @@ impl Subject {
         }))
     }
 
+    /// Ruling 32: the refusal of an exact claim on a STEP subject whose
+    /// admission counted faces with no surface (tessellated-only products
+    /// under the `OnNoBRep` read profile). One named refusal for every exact
+    /// claim, decided from the admission count, never per facet.
+    /// ponytail: subject-wide; scope it to the claim's occurrences if a
+    /// mixed BRep and tessellated document becomes a live case.
+    pub(crate) fn tessellated_only_refusal(&self, capability: Capability) -> Option<Evaluation> {
+        let faces = self.step_admission_facts.as_ref()?.surfaceless_faces;
+        if faces == 0 || !capability.is_exact() {
+            return None;
+        }
+        let mut diagnostic = Diagnostic::error(
+            "GEOSPEC_EVIDENCE_UNSUPPORTED",
+            format!(
+                "GeoSpec matcher '{}' needs exact BRep geometry, but the loaded subject does not provide it: {faces} of its faces have no surface (tessellated-only product geometry).",
+                capability.name()
+            ),
+        );
+        diagnostic.suggestion = Some(
+            "Export the model with exact BRep faces, or load its tessellation as a mesh subject such as GLB for mesh-grade claims."
+                .into(),
+        );
+        diagnostic.details = Some(Json::object([
+            ("matcher", Json::string(capability.name())),
+            ("missing", Json::string("exact BRep geometry")),
+            ("surfacelessFaces", Json::Number(faces as f64)),
+        ]));
+        Some(Evaluation::Refused {
+            diagnostics: vec![diagnostic],
+        })
+    }
+
     pub(crate) fn step_subject_metadata(
         &self,
     ) -> Result<Option<&StepSubjectMetadata>, BackendError> {

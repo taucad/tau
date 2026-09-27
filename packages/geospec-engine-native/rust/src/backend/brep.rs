@@ -151,6 +151,9 @@ pub struct BrepAdmissionFacts {
     pub source_length_unit: String,
     pub source_unit_to_millimeters: f64,
     pub occurrence_count: usize,
+    /// Located faces admitted without a surface: tessellated-only products
+    /// under the `OnNoBRep` read profile, whose exact claims refuse (ruling 32).
+    pub surfaceless_faces: usize,
 }
 
 /// Bounded public-subject metadata captured by the same successful STEP read.

@@ -291,6 +291,27 @@ fn facts_claims_answer_over_the_report_mesh_limits_that_refuse_mesh_claims() {
 }
 
 #[test]
+fn a_facts_cell_answers_the_part_sets_it_covers_and_each_cell_is_accounted() {
+    // F1: one cell per demanded part set; a demand reads any retained cell
+    // that covers it, and retention counts every cell (ruling 14).
+    let (brep, calls) = brep(false, false);
+    let subject = subject(brep);
+    let cell = size_of::<ShapeFacts>() as u64;
+    for (parts, backend_calls, cells) in [
+        (ShapeParts::VOLUME, 1, 1),
+        (ShapeParts::VOLUME, 1, 1),
+        (ShapeParts::BOUNDS, 2, 2),
+        (ShapeParts::ALL, 3, 3),
+        (ShapeParts::COUNTS, 3, 3),
+        (ShapeParts::AREA, 3, 3),
+    ] {
+        assert_eq!(subject.report_shape(parts).unwrap(), Some(&shape()));
+        assert_eq!(calls.facts.get(), backend_calls);
+        assert_eq!(subject.retained_report_bytes(), cells * cell);
+    }
+}
+
+#[test]
 fn facts_demands_build_no_mesh_record_and_each_facet_builds_once() {
     {
         let (brep, calls) = brep(false, false);

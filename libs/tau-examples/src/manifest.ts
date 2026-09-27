@@ -15,6 +15,7 @@ export type ExampleManifest = {
   openscad: 'kitchen-sink';
   picogk: 'boolean-shell' | 'multifile-asset' | 'parameterized-sphere';
   replicad: 'bambu-plate' | 'birdhouse' | 'bottle' | 'bundler-feature-matrix' | 'card-holder' | 'chair' | 'copper-lampshade' | 'cycloidal-gear' | 'decorated-box' | 'drinking-glass' | 'flower-attachment-section-outline-fixture' | 'gridfinity-box' | 'helical-gear' | 'hex-screwdriver' | 'hollow-box' | 'ibeam' | 'jscad-logo' | 'lego' | 'libassimp-format-prism' | 'logo' | 'logo-keychain' | 'nanoraster-logo' | 'picovoxel-logo' | 'planetary-gear-system' | 'pot-plant' | 'projection-test' | 'rao-nozzle' | 'replicad-logo' | 'simple-tray' | 'six-axis-arm' | 'staircase' | 'stress-test' | 't-slot-rail' | 'table' | 'tau-wordmark' | 'tray' | 'turbofan' | 'v8-engine' | 'v8-engine-rev2' | 'vase' | 'wavy-vase' | 'wedge-door-stopper' | 'worm-gear-system';
+  tscircuit: 'led-board';
 };
 
 /** Available kernel names. */

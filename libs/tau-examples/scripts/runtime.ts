@@ -8,6 +8,7 @@ import { opencascade } from '@taucad/opencascade';
 import { openrscad } from '@taucad/openrscad';
 import { loadPicogkKernelOptions, picogk } from '@taucad/picogk';
 import { replicad } from '@taucad/replicad';
+import { tscircuit } from '@taucad/tscircuit';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createNodeClient } from '@taucad/runtime/node';
 import { defineRuntime } from '@taucad/runtime/worker';
@@ -29,7 +30,17 @@ const nativePlugins = resourceRoot
 
 /** Runtime composition used to generate and verify checked-in example thumbnails. @public */
 export const exampleRuntime = defineRuntime({
-  plugins: [replicad(), opencascade(), manifold(), jscad(), openrscad(), esbuild(), image(), ...nativePlugins],
+  plugins: [
+    replicad(),
+    opencascade(),
+    manifold(),
+    jscad(),
+    openrscad(),
+    esbuild(),
+    image(),
+    ...nativePlugins,
+    tscircuit(),
+  ],
   middleware: [parameterFileResolver(), parameterCache(), parameterUnits(), gltfEdgeDetection()],
 });
 

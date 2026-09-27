@@ -39,7 +39,7 @@ type BuiltinEntry = {
   readonly textFiles: ReadonlySet<string>;
 };
 
-const candidateMainFiles = ['main.ts', 'main.py', 'main.cs', 'main.scad', 'main.cpp'] as const;
+const candidateMainFiles = ['main.ts', 'main.tsx', 'main.py', 'main.cs', 'main.scad', 'main.cpp'] as const;
 const excludedDirectories = new Set(['.tau', '__pycache__']);
 const excludedFiles = new Set(['example.json', 'thumbnail.webp']);
 

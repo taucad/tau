@@ -765,5 +765,16 @@
       "tau.json",
       "tooth-profile.ts"
     ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "tscircuit",
+    "name": "led-board",
+    "mainFile": "main.tsx",
+    "files": [
+      "main.tsx",
+      "tau.json"
+    ]
   }
 ]

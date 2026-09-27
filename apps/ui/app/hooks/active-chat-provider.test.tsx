@@ -278,11 +278,13 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
   };
 }
 
-function createSessionWrapper(chatId: string) {
+function createSessionWrapper(chatId: string, projectId = 'home') {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
       <ChatSessionStoreProvider>
-        <ActiveChatProvider chatId={chatId}>{children}</ActiveChatProvider>
+        <ActiveChatProvider chatId={chatId} projectId={projectId}>
+          {children}
+        </ActiveChatProvider>
       </ChatSessionStoreProvider>
     );
   };
@@ -1249,7 +1251,7 @@ describe('ActiveChatProvider', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const { result } = renderHook(() => useActiveChatSession(), {
-      wrapper: createSessionWrapper('chat_persist'),
+      wrapper: createSessionWrapper('chat_persist', 'proj_persist'),
     });
 
     act(() => {
@@ -1274,7 +1276,7 @@ describe('ActiveChatProvider', () => {
 
     const { rerender } = render(
       <ChatSessionStoreProvider>
-        <ActiveChatProvider chatId='chat_first'>
+        <ActiveChatProvider chatId='chat_first' projectId='home'>
           <Probe />
         </ActiveChatProvider>
       </ChatSessionStoreProvider>,
@@ -1284,7 +1286,7 @@ describe('ActiveChatProvider', () => {
 
     rerender(
       <ChatSessionStoreProvider>
-        <ActiveChatProvider chatId='chat_second'>
+        <ActiveChatProvider chatId='chat_second' projectId='home'>
           <Probe />
         </ActiveChatProvider>
       </ChatSessionStoreProvider>,
@@ -1304,7 +1306,7 @@ describe('ActiveChatProvider', () => {
     harness.getChat.mockResolvedValue(makeChat({ id: 'chat_with_draft', resourceId: 'proj_load' }));
 
     const { result } = renderHook(() => useActiveChatSession(), {
-      wrapper: createSessionWrapper('chat_with_draft'),
+      wrapper: createSessionWrapper('chat_with_draft', 'proj_load'),
     });
 
     await waitFor(() => {
@@ -1340,7 +1342,7 @@ describe('ActiveChatProvider', () => {
       harness.getChat.mockResolvedValue(makeChat({ id: 'chat_no_toast', resourceId: 'proj_toast' }));
 
       const { result } = renderHook(() => useActiveChatSession(), {
-        wrapper: createSessionWrapper('chat_no_toast'),
+        wrapper: createSessionWrapper('chat_no_toast', 'proj_toast'),
       });
 
       act(() => {

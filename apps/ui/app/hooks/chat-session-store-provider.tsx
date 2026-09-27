@@ -5,7 +5,7 @@
  * lifetime of the app. The store outlives every React subtree and owns the
  * per-chat AI SDK `Chat`, persistence actor, draft actor and composer record
  * actor, plus each project's unread record; React components subscribe via
- * `useChatSession(chatId)` (acquire/release) and
+ * `useChatSession(chatId, projectId)` (acquire/release) and
  * `useChatSessionSnapshot(chatId, selector)` (re-render gate).
  *
  * The provider mirrors the closures from `useProjectManager()` and the file

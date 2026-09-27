@@ -293,11 +293,13 @@ beforeEach(() => {
   registrySend.mockReset();
   sessionSend.mockReset();
   /* `ProjectChatItem` acquires a chat session on mount (`useChatSession`), so
-   * the store mock owes the two verbs that acquisition uses. */
+   * the store mock owes the verbs that acquisition and its read use. */
   vi.mocked(useChatSessionStore).mockReturnValue({
     stopRun,
     acquire: acquireSession,
     release: releaseSession,
+    get: () => undefined,
+    subscribeMembership: () => () => undefined,
   } as unknown as ReturnType<typeof useChatSessionStore>);
   vi.mocked(useSessions).mockImplementation(() => fakeRegistry.actor);
   vi.mocked(peekRevisionClient).mockImplementation(

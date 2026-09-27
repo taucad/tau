@@ -10,7 +10,8 @@
  * draft state leaking across chats, cross-chat persist mis-targeting).
  *
  * Lifetime ownership:
- * - `acquire(chatId)` / `release(chatId)` track React views only.
+ * - `acquire(chatId, projectId)` / `release(chatId)` track React views only; the
+ *   caller names the chat's project (PV-S4).
  * - `startRun(chatId)` owns the session independently while a request is
  *   active, so navigation cannot stop its transport or persistence actor.
  * - A session is disposed only when its final view and active run are both
@@ -70,7 +71,6 @@ import {
   getBoundDurableChatRunId,
 } from '#chat-clients/_internal/shared-chat-transport.js';
 import {
-  awaitSettlement,
   cancelBrowserAgentHostRun,
   getBrowserAgentHostRun,
   getHostTurnSettlement,
@@ -295,8 +295,8 @@ type InternalSession = ChatSession & {
   /** Immutable wire body for the active logical run, including admission. */
   activeRunBody: Readonly<Record<string, unknown>> | undefined;
   status: ChatStatus;
-  /** The project this chat belongs to; its session owns the run accounting. */
-  projectId: string | undefined;
+  /** The project this chat belongs to, from its caller (PV-S4, L3 D9); never from focus. */
+  readonly projectId: string;
   /** Where this chat's next turn runs, as its turn host last said. */
   placement: string | undefined;
   /**
@@ -322,12 +322,10 @@ type InternalSession = ChatSession & {
     lifecycle?: string;
   };
   /**
-   * The chat's record store and project, once its project is known. The record
-   * actor exists from the first frame; its I/O waits for this (D7).
+   * The chat's record store and project. Known at acquire (PV-S4); a reacquired chat's I/O waits only for its released
+   * predecessor's drain (D7).
    */
-  composer: Promise<ComposerBinding | undefined>;
-  /** Settle {@link InternalSession.composer}; only the first call counts. */
-  bindComposer: (projectId: string | undefined) => void;
+  composer: Promise<ComposerBinding>;
   /** Composer work that must reach the record before its actor stops (a cancelled-draft restore). */
   composerWork: Set<Promise<unknown>>;
   /** Cleanups for the per-chat subscriptions wired up at session creation. */
@@ -407,8 +405,6 @@ export class ChatSessionStore {
    */
   readonly #composerDrains = new Map<string, Promise<void>>();
   #settlementUnsubscribe: (() => void) | undefined;
-  /** The project whose chats are being acquired right now. */
-  #focusedProjectId: string | undefined;
   /** The chat the person has in front of them (R3); only it counts as attended. */
   #focusedChatId: string | undefined;
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
@@ -519,10 +515,10 @@ export class ChatSessionStore {
    * Retain one chat and bind its state actor to its owning live project.
    *
    * @param chatId - Chat to hydrate.
-   * @param projectId - Known owner; defaults to the focused project for existing callers.
+   * @param projectId - The chat's project, from its caller: focus never names it (PV-S4, L3 D9).
    * @returns The retained chat session.
    */
-  public acquire(chatId: string, projectId = this.#focusedProjectId): ChatSession {
+  public acquire(chatId: string, projectId: string): ChatSession {
     const existing = this.#sessions.get(chatId);
     if (existing) {
       existing.viewRefcount += 1;
@@ -542,6 +538,7 @@ export class ChatSessionStore {
    */
   public retainDurableRun(input: {
     readonly chatId: string;
+    readonly projectId: string;
     readonly runId: string;
     readonly state?: 'active' | 'terminal';
   }): ChatSession {
@@ -573,7 +570,7 @@ export class ChatSessionStore {
       }
       return existing;
     }
-    const session = this.#createSession(input.chatId, this.#focusedProjectId);
+    const session = this.#createSession(input.chatId, input.projectId);
     session.viewRefcount = 0;
     session.runHeld = true;
     session.durableRunId = input.runId;
@@ -800,10 +797,6 @@ export class ChatSessionStore {
       throw new Error(`ChatSessionStore: cannot start a run for inactive chat ${chatId}`);
     }
 
-    const { projectId } = body;
-    if (typeof projectId === 'string' && this.#projectSessions.has(projectId)) {
-      this.#rebindSessionProject(session, projectId);
-    }
     const admittedBody = this.#withAdmission(body);
     session.runHeld = true;
     session.activeRunBody = admittedBody;
@@ -869,22 +862,15 @@ export class ChatSessionStore {
   }
 
   /**
-   * Say which project's chats are being acquired now.
-   *
-   * A chat is acquired from inside its own project's route, so the focused
-   * project is the chat's project. Sessions created before any project was
-   * focused are adopted here rather than left without a machine.
+   * Say which project the person is on, so its chats are bound to its live session. Focus never names a chat's
+   * project: its caller does (PV-S4, L3 D9).
    *
    * @param projectId - The focused project, or `undefined` on leaving.
    * @public
    */
   public setFocusedProject(projectId: string | undefined): void {
-    this.#focusedProjectId = projectId;
     if (projectId === undefined) {
       return;
-    }
-    for (const session of this.#sessions.values()) {
-      session.projectId ??= projectId;
     }
     this.setProjectSession(projectId, this.#projectSessions.get(projectId));
   }
@@ -918,7 +904,7 @@ export class ChatSessionStore {
     const session = this.#sessions.get(chatId);
     session?.stateActorRef?.send({ type: 'viewed' });
     if (session !== undefined) {
-      void this.#setUnreadWhenBound(session.composer, chatId, false);
+      this.#setUnread(session.projectId, chatId, false);
     }
   }
 
@@ -969,7 +955,7 @@ export class ChatSessionStore {
     if (session === undefined) {
       return;
     }
-    await this.#setUnreadWhenBound(session.composer, chatId, false);
+    this.#setUnread(session.projectId, chatId, false);
     await removeRecord(session.composerRecordRef);
   }
 
@@ -1047,11 +1033,7 @@ export class ChatSessionStore {
     if (session === undefined) {
       throw new Error(`ChatSessionStore: cannot send attachments from inactive chat ${chatId}`);
     }
-    const binding = await session.composer;
-    if (binding === undefined) {
-      throw new Error(`Chat ${chatId} belongs to no project, so its attachments cannot be sent.`);
-    }
-    const { record, chatAttachments } = binding;
+    const { record, chatAttachments } = await session.composer;
     const copies = await Promise.allSettled(
       // `copyTo` skips a blob the chat already holds, so an edit re-referencing a sent attachment moves nothing.
       attachments.map(async (attachment) => record.attachments.copyTo(chatAttachments, attachment)),
@@ -1080,7 +1062,7 @@ export class ChatSessionStore {
       return;
     }
     const binding = await session.composer;
-    await binding?.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
+    await binding.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
   }
 
   /** This project's unread record actor, created and read on first use. */
@@ -1242,10 +1224,10 @@ export class ChatSessionStore {
         const binding = await session.composer;
         await Promise.allSettled(
           attachments.map(async (attachment) => {
-            if (await binding?.record.attachments.has(attachment)) {
+            if (await binding.record.attachments.has(attachment)) {
               return;
             }
-            await binding?.chatAttachments.copyTo(binding.record.attachments, attachment);
+            await binding.chatAttachments.copyTo(binding.record.attachments, attachment);
           }),
         );
       } catch (error) {
@@ -1305,14 +1287,13 @@ export class ChatSessionStore {
   /**
    * Give one chat its session actor, and the actor its turn wiring.
    *
-   * Called wherever the pair can change: on acquisition, when a project session
-   * registers or unregisters, and when a durable row moves a chat to the
-   * project that actually owns it.
+   * Called wherever the pair can change: on acquisition, and when a project
+   * session registers or unregisters.
    *
    * @param session - The chat to bind.
    */
   #bindSessionOwner(session: InternalSession): void {
-    const owner = session.projectId === undefined ? undefined : this.#projectSessions.get(session.projectId);
+    const owner = this.#projectSessions.get(session.projectId);
     owner?.send({ type: 'openChat', chatId: session.chatId });
     session.stateActorRef = owner?.getSnapshot().context.chatRefs[session.chatId];
     this.#bindTurnEmits(session);
@@ -1376,30 +1357,8 @@ export class ChatSessionStore {
 
   /** Tell a bound chat machine what the unread record says (D9); `read` is its default, so only unread is sent. */
   #restoreUnread(session: InternalSession): void {
-    if (session.projectId !== undefined && this.#unreadRecords.get(session.projectId)?.chats.has(session.chatId)) {
+    if (this.#unreadRecords.get(session.projectId)?.chats.has(session.chatId)) {
       session.stateActorRef?.send({ type: 'unreadRestored' });
-    }
-  }
-
-  /** Record an unread decision once the chat's project is known; a chat with no project has no record. */
-  async #setUnreadWhenBound(
-    composer: Promise<ComposerBinding | undefined>,
-    chatId: string,
-    value: boolean,
-  ): Promise<void> {
-    let binding: ComposerBinding | undefined;
-    try {
-      binding = await awaitSettlement(
-        composer,
-        'This chat never found the project its unread mark belongs to.',
-        'COMPOSER_BINDING_TIMEOUT',
-      );
-    } catch {
-      // An unread mark nobody can write is not worth a rejection at its fire-and-forget callers.
-      return;
-    }
-    if (binding !== undefined) {
-      this.#setUnread(binding.projectId, chatId, value);
     }
   }
 
@@ -1442,29 +1401,10 @@ export class ChatSessionStore {
 
   /** The project session that owns this chat's run accounting (R2). */
   #sessionOwner(session: InternalSession): ProjectSessionActorRef | undefined {
-    return session.projectId === undefined ? undefined : this.#projectSessions.get(session.projectId);
+    return this.#projectSessions.get(session.projectId);
   }
 
-  /** Move one hydrated chat from a provisional focused project to its durable owner. */
-  #rebindSessionProject(session: InternalSession, projectId: string): void {
-    if (session.projectId === projectId) {
-      return;
-    }
-    const previousOwner = this.#sessionOwner(session);
-    if (session.lastState.phase === 'admitted' || session.lastState.phase === 'running') {
-      previousOwner?.send({ type: 'runSettled', chatId: session.chatId });
-    }
-    previousOwner?.send({ type: 'chatClosed', chatId: session.chatId });
-    session.projectId = projectId;
-    this.#bindSessionOwner(session);
-    session.lastState = { inFlight: 0, approvals: 0 };
-    this.#replayPersistedFailure(session);
-    this.#replayPersistedSettlement(session);
-    this.#syncChatState(session);
-    this.#restoreUnread(session);
-  }
-
-  #createSession(chatId: string, projectId: string | undefined): InternalSession {
+  #createSession(chatId: string, projectId: string): InternalSession {
     // Defensive aliases so closures bound to the AI SDK's internal scheduler
     // always read through `this.#deps` (the latest provider snapshot).
     const depsRef = (): ChatSessionDeps => this.#deps;
@@ -1476,47 +1416,25 @@ export class ChatSessionStore {
      * holding no run closes that stream without a chunk; its `onFinish` is not a run finishing. */
     let requestWroteOutput = false;
 
-    // `undefined` is a chat with no project: it has nowhere to keep a composer, so its record I/O fails.
-    const composer = Promise.withResolvers<ComposerBinding | undefined>();
-    let composerBound = false;
-    const bindComposer = (owner: string | undefined): void => {
-      if (composerBound) {
-        return;
-      }
-      composerBound = true;
-      if (owner === undefined) {
-        composer.resolve(undefined);
-        return;
-      }
-      const { client } = depsRef();
-      this.#unreadRecord(owner);
-      const binding: ComposerBinding = {
-        projectId: owner,
-        record: createComposerRecordStore(client, composerRecordPaths.chat(owner, chatId)),
-        chatAttachments: createChatAttachmentStore(client, owner, chatId),
-      };
-      composer.resolve(this.#afterComposerDrain(chatId, binding));
-    };
-    const recordStore = deferredRecordStore(composer.promise);
+    /* The project is the caller's (PV-S4), so the composer binds now; only a released predecessor's drain is awaited. */
+    const { client } = depsRef();
+    this.#unreadRecord(projectId);
+    const composer = this.#afterComposerDrain(chatId, {
+      projectId,
+      record: createComposerRecordStore(client, composerRecordPaths.chat(projectId, chatId)),
+      chatAttachments: createChatAttachmentStore(client, projectId, chatId),
+    });
+    const recordStore = deferredRecordStore(composer);
     const composerRecordRef = createComposerRecordActor(recordStore);
 
     const markUnreadIfUnattended = (): void => {
       if (this.#focusedChatId === chatId && isDocumentActive()) {
         return;
       }
-      void this.#setUnreadWhenBound(composer.promise, chatId, true);
+      this.#setUnread(projectId, chatId, true);
     };
 
-    const readChatRow = async (id: string): Promise<ChatEntity | undefined> => {
-      try {
-        return await depsRef().getChat(id);
-      } catch (error) {
-        // An unreadable row still has a composer: bind it where the chat was opened, so its writes,
-        // promotion and deletion do not wait forever on a binding nothing else will settle.
-        bindComposer(session.projectId);
-        throw error;
-      }
-    };
+    const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id);
 
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
@@ -1537,20 +1455,10 @@ export class ChatSessionStore {
               if (session.chat.messages.length === 0) {
                 session.chat.messages = [];
               }
-              // No row to name the owner: the chat is being created in the project it was acquired from.
-              bindComposer(session.projectId);
               session.draftActorRef.send({ type: 'initializeFromChat' });
 
               return { type: 'chatRetrieved', chat: undefined };
             }
-
-            /* A focus switch renders the next chat before its project binding
-             * effect runs, so acquisition can briefly inherit the prior
-             * project's focus. The durable row is the first authoritative
-             * ownership fact; correct the provisional binding before a seeded
-             * or user run can report lifecycle to the wrong project. */
-            this.#rebindSessionProject(session, loadedChat.resourceId);
-            bindComposer(loadedChat.resourceId);
 
             /* Splice, never replace and never skip. The live `Chat` may already
              * hold messages this load never saw — a brand-new chat that is
@@ -1746,14 +1654,7 @@ export class ChatSessionStore {
       }
     };
     const persistRestoredDraft = async (): Promise<void> => {
-      const binding = await awaitSettlement(
-        composer.promise,
-        'This chat never found the project its draft is saved in. Reload the page and try again.',
-        'COMPOSER_BINDING_TIMEOUT',
-      );
-      if (binding === undefined) {
-        return;
-      }
+      const binding = await composer;
       const restored = draftActorRef.getSnapshot().context;
       await Promise.all(
         restored.draftAttachments.map(async (attachment) => {
@@ -2087,8 +1988,7 @@ export class ChatSessionStore {
       persistenceActorRef,
       draftActorRef,
       composerRecordRef,
-      composer: composer.promise,
-      bindComposer,
+      composer,
       composerWork: new Set(),
       viewRefcount: 1,
       runHeld: false,
@@ -2472,8 +2372,6 @@ export class ChatSessionStore {
     // A debounced keystroke is handed to the record before the draft stops, and the record outlives it until written.
     session.draftActorRef.send({ type: 'flushNow' });
     session.draftActorRef.stop();
-    // A chat released before its row loaded still belongs to the project it was opened in; its flush lands there.
-    session.bindComposer(session.projectId);
     const drained = Promise.withResolvers<void>();
     this.#composerDrains.set(session.chatId, drained.promise);
     void this.#drainComposer(session, drained);

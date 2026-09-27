@@ -32,8 +32,8 @@
  *   `<ChatComposerProvider>` cannot call these hooks.
  * - Passing `chatId` resolves to that exact chat from the store. The
  *   caller is responsible for keeping the session live (typically by
- *   wrapping the subtree in `<ActiveChatProvider chatId={chatId}>` or
- *   calling `useChatSession(chatId)` directly). When the explicit chat is
+ *   wrapping the subtree in `<ActiveChatProvider chatId={chatId} projectId={projectId}>` or
+ *   calling `useChatSession(chatId, projectId)` directly). When the explicit chat is
  *   not the active session (cross-chat read), action mutators warn-and-no-op
  *   on missing sessions to keep cross-chat dispatch safe.
  */
@@ -313,8 +313,8 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
  * Read state from a non-active chat (e.g. an agents-panel row showing a
  * background chat's status while a different chat is focused). The caller
  * is responsible for ensuring a session for `chatId` is alive (typically
- * by mounting `<ActiveChatProvider chatId={chatId}>` higher up or calling
- * `useChatSession(chatId)` in the same component).
+ * by mounting `<ActiveChatProvider chatId={chatId} projectId={projectId}>` higher up or calling
+ * `useChatSession(chatId, projectId)` in the same component).
  */
 export function useChatById<T>(chatId: string, selector: (state: CombinedChatState) => T): T {
   return useChatSelector(selector, chatId);

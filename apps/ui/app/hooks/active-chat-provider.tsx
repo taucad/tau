@@ -372,21 +372,41 @@ export function HomeNewProjectComposerProvider({
 }
 
 /**
- * Session-backed provider. Acquires the live `ChatSession` for `chatId`
- * from the app-shell `ChatSessionStore`, then populates the unified
- * composer contract from chat-row + cookie sources. Mounting this provider
- * implies a session must be acquirable; consumers below it can call
+ * Session-backed provider. Acquires the live `ChatSession` for `chatId` in its
+ * own project from the app-shell `ChatSessionStore`, then populates the unified
+ * composer contract from chat-row + cookie sources. It renders nothing until the
+ * acquisition has committed, so consumers below it can call
  * {@link useActiveChatSession} freely.
  */
 export function ActiveChatProvider({
   children,
   chatId,
+  projectId,
 }: {
   readonly children: React.ReactNode;
   readonly chatId: string;
-}): React.JSX.Element {
-  const session = useChatSession(chatId);
+  readonly projectId: string;
+}): React.JSX.Element | undefined {
+  const session = useChatSession(chatId, projectId);
+  if (session === undefined) {
+    return undefined;
+  }
+  return (
+    <ActiveChatSessionProvider chatId={chatId} session={session}>
+      {children}
+    </ActiveChatSessionProvider>
+  );
+}
 
+function ActiveChatSessionProvider({
+  children,
+  chatId,
+  session,
+}: {
+  readonly children: React.ReactNode;
+  readonly chatId: string;
+  readonly session: ChatSession;
+}): React.JSX.Element {
   // Single global toast site for image-resize failures across the chat
   // surface. Mounted at the provider so the 12 image entry points never
   // need their own try/catch around the resize step. See

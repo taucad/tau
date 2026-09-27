@@ -66,11 +66,11 @@ export function useLiveSectionCutSet(): SectionCutSet {
 
 /**
  * Whether Section is on, so the model prepares the topology its caps are sliced from: a caller re-renders only when
- * Section turns on or off, not on a cut edit. Every shown cut cuts meshes, so `enableMesh` equals `isActive`.
+ * Section turns on or off, not on a cut edit.
  */
-export function useSectionViewFlags(): Readonly<{ isActive: boolean; enableMesh: boolean }> {
+export function useSectionViewFlags(): Readonly<{ isActive: boolean }> {
   const isActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
-  return { isActive, enableMesh: isActive };
+  return { isActive };
 }
 
 /** Striped-diagonal spacing and stripe width of the cap material, in render units, from the zoom-aware grid. */

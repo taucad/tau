@@ -363,10 +363,16 @@ type Drawing = Readonly<{
   dispose: () => void;
 }>;
 
-const tagDrawing = (group: THREE.Group): void => {
+const tagDrawing = (group: THREE.Group, handles: readonly SectionHandle[]): void => {
   group.traverse((object) => {
     Object.assign(object.userData, sceneTagData(sceneTag.sectionViewHelper));
   });
+  // The e2e bridge finds a handle by this name.
+  for (const { target, hits } of handles) {
+    for (const hit of hits) {
+      hit.name = `${target.kind}:${target.cutId}`;
+    }
+  }
 };
 
 // Scratch for `place`, which runs once per drag step.
@@ -493,7 +499,7 @@ const planeDrawing = ({ cut, isSelected, model, backend }: DrawingOptions<PlaneC
     arrow?.position.copy(origin);
   };
   place(cut, model);
-  tagDrawing(group);
+  tagDrawing(group, handles);
   return {
     group,
     handles,
@@ -639,7 +645,7 @@ const revolutionDrawing = ({ cut, isSelected, model, backend }: DrawingOptions<R
     endKnob?.anchor.copy(center).addScaledVector(directionAt(next.axis, start + sweep, scratchDirection), radius);
   };
   place(cut, model);
-  tagDrawing(group);
+  tagDrawing(group, handles);
   return {
     group,
     handles,

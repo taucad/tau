@@ -107,7 +107,7 @@ describe('useSectionViewFlags', () => {
     actor.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
     const [cut] = actor.getSnapshot().context.sectionCuts;
 
-    const seen: Array<{ isActive: boolean; enableMesh: boolean }> = [];
+    const seen: Array<{ isActive: boolean }> = [];
     let commits = 0;
     const Probe = (): ReactNode => {
       seen.push(useSectionViewFlags());
@@ -127,7 +127,7 @@ describe('useSectionViewFlags', () => {
     );
     await act(async () => undefined);
     const settled = commits;
-    expect(seen.at(-1)).toEqual({ isActive: true, enableMesh: true });
+    expect(seen.at(-1)).toEqual({ isActive: true });
 
     act(() => {
       for (const offset of [0.01, 0.02, 0.03]) {
@@ -141,7 +141,7 @@ describe('useSectionViewFlags', () => {
       actor!.send({ type: 'setSectionViewActive', payload: false });
     });
     expect(commits).toBe(settled + 1);
-    expect(seen.at(-1)).toEqual({ isActive: false, enableMesh: false });
+    expect(seen.at(-1)).toEqual({ isActive: false });
   });
 });
 

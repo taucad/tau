@@ -90,7 +90,7 @@ describe('parseGcode', () => {
     it('should record the source digest and parser identity', () => {
       expect(program.source).toEqual({
         digest: 'sha256:0967e63c5dab107b89d9d0ce4215de99b65b731c962bbced32b1bb8986e4ac50',
-        parser: { id: 'tau.slicer.toolpath', version: '3' },
+        parser: { id: 'tau.slicer.toolpath', version: '4' },
       });
       expect(program.version).toBe(1);
       expect(program.units).toBe('mm');
@@ -176,15 +176,16 @@ describe('parseGcode', () => {
     });
 
     it('should retain vendor records, count the unknown one and never treat comments as executables', () => {
-      // 61 executable lines: 24 vendor-family records, one unknown (M9999), the rest known.
-      expect(program.coverage).toEqual({ records: 61, known: 36, vendor: 24, unknown: 1, complete: false });
+      // 61 executable lines: 25 vendor records (T255 among them), one unknown (M9999), the rest known.
+      expect(program.coverage).toEqual({ records: 61, known: 35, vendor: 25, unknown: 1, complete: false });
       const vendor = program.events.filter((event) => event.kind === 'vendor').map((event) => event.record);
       expect(vendor).toContain('M970 Q1 A10 B10 C130 K0');
       expect(vendor).toContain('M1002 judge_flag build_plate_detect_flag');
       expect(vendor).toContain('M622.1 S1');
       expect(vendor).toContain('M201.2 K1.0');
       expect(vendor).toContain('M400 U1');
-      expect(vendor).toHaveLength(24);
+      expect(vendor).toContain('T255');
+      expect(vendor).toHaveLength(25);
     });
 
     it('should linearise the helical full-circle G3 and the quarter G3 arc', () => {
@@ -208,7 +209,7 @@ describe('parseGcode', () => {
       expect(ends.some(([x, y]) => Math.abs(x - 130) < 1e-4 && Math.abs(y - 110) < 1e-4)).toBe(true);
     });
 
-    it('should raise pauses, tool changes, chamber and fan events in program order', () => {
+    it('should raise pauses, chamber and fan events in program order', () => {
       const events = program.events.filter((event) => event.kind !== 'vendor' && event.kind !== 'layer-change');
       expect(events.map((event) => `${event.kind}:${event.value ?? ''}`)).toEqual([
         'bed-temperature:55',
@@ -219,7 +220,6 @@ describe('parseGcode', () => {
         'fan:0',
         'fan:70',
         'pause:',
-        'tool-change:255',
         'pause:',
         'nozzle-temperature:0',
         'bed-temperature:0',
@@ -251,17 +251,61 @@ describe('parseGcode', () => {
     });
   });
 
+  describe('Bambu Studio two-colour excerpt', () => {
+    const text = new TextDecoder().decode(readFixture('two-colour-cubes.gcode'));
+    const program = parseGcode(text);
+
+    it('should keep each selected filament through the machine T commands around it', () => {
+      const extruding = new Set(program.tools.filter((_, segment) => program.extrusion[segment]! > 0));
+      expect(extruding).toEqual(new Set([0, 1]));
+      // Bambu Studio announces each filament selection with `M620 S<n>A`; the filament holds until the next.
+      const selections = [...text.matchAll(/^M620 S(\d+)A$/gmu)].map((match) => ({
+        tool: Number(match[1]),
+        start: parseGcode(text.slice(0, match.index)).segmentCount,
+      }));
+      expect(selections.map(({ tool }) => tool)).toEqual([0, 1, 0]);
+      const expected = [selections[0]!.start, 0];
+      for (const [index, { tool, start }] of selections.entries()) {
+        expected[tool]! += (selections[index + 1]?.start ?? program.segmentCount) - start;
+      }
+      const counts = [0, 0];
+      for (const tool of program.tools) {
+        counts[tool]! += 1;
+      }
+      expect(counts).toEqual(expected);
+      expect(program.events.filter(({ kind }) => kind === 'tool-change').map(({ value }) => value)).toEqual([0, 1, 0]);
+      const machine = program.events.filter(({ kind, record }) => kind === 'vendor' && record?.startsWith('T'));
+      expect(new Set(machine.map(({ record }) => record))).toEqual(new Set(['T1000', 'T1100', 'T255']));
+    });
+  });
+
   describe('limits and refusals', () => {
-    it('should refuse sources over the byte limit before decoding', () => {
+    it('should refuse sources over the byte limit before decoding, and say what to do instead', () => {
+      expect(parseGcode(new Uint8Array(64), { maximumBytes: 64 }).segmentCount).toBe(0);
       expect(() => parseGcode(new Uint8Array(65), { maximumBytes: 64 })).toThrow(
         new ToolpathParseError(
           'TOOLPATH_SOURCE_TOO_LARGE',
-          'G-code source is 65 bytes; the parser accepts at most 64.',
+          'This G-code is too large to preview. The printer can still print it as it is; to preview it, slice a ' +
+            'smaller model or with a larger layer height.',
         ),
       );
     });
 
-    it('should refuse sources over the record limit', () => {
+    it('should parse a source past the 1,100,000 lines it once refused', () => {
+      const program = parseGcode(`G90\nM83\nG28\n${';\n'.repeat(1_100_000)}G1 X1 F600\n`);
+      expect(program.segmentCount).toBe(1);
+      expect(program.coverage.records).toBe(4);
+    });
+
+    it('should hold two million segments and refuse the next one', { timeout: 120_000 }, () => {
+      const moves = (count: number): string => `G90\nM83\nG28\nG1 F6000\n${'G1 X1\nG1 X2\n'.repeat(count / 2)}`;
+      expect(parseGcode(moves(2_000_000)).segmentCount).toBe(2_000_000);
+      expect(() => parseGcode(`${moves(2_000_000)}G1 X3\n`)).toThrow(
+        expect.objectContaining({ code: 'TOOLPATH_SEGMENT_LIMIT', record: 2_000_005 }),
+      );
+    });
+
+    it('should refuse sources over a record limit the caller sets', () => {
       expect(() => parseGcode('G90\nM83\nG28\nG1 X1 F100\n', { maximumRecords: 3 })).toThrow(
         expect.objectContaining({ code: 'TOOLPATH_RECORD_LIMIT', record: 4 }),
       );

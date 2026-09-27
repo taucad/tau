@@ -20,6 +20,7 @@ import { openrscadKernel } from '@taucad/openrscad';
 import { picogk } from '@taucad/picogk';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { tscircuit } from '@taucad/tscircuit';
 
 import { build123dKernelOptions } from '#tau/build123d-resources.js';
 import { picogkKernelOptions } from '#tau/picogk-resources.js';
@@ -66,6 +67,7 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
             },
           },
         }),
+        tscircuit(),
       ],
       kernels: [desktopOpenrscadKernel],
       middleware: [parameterFileResolver(), parameterCache(), parameterUnits(), geometryCache(), gltfEdgeDetection()],

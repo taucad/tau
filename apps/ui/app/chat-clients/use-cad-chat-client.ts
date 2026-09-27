@@ -221,10 +221,17 @@ export const useCadChatClient = (): CadChatClient => {
     ): Promise<void> => {
       const { reason, optionId } = decision ?? {};
       const browserRun = getBrowserAgentHostRun(activeChatId);
-      if (browserRun) {
+      /* A daemon-placed chat whose paused run no stream of this page follows is answered all the same, and the page
+       * then follows what the answer continued or ended (GM.r1 H1). */
+      const detachedRunId =
+        browserRun === undefined && daemonPlacementOf(agent.execution) !== undefined
+          ? resumableBrowserAgentHostRunId(activeChatId)
+          : undefined;
+      const answeredRunId = browserRun?.runId ?? detachedRunId;
+      if (answeredRunId !== undefined) {
         await resolveBrowserAgentHostInterrupt({
           chatId: activeChatId,
-          runId: browserRun.runId,
+          runId: answeredRunId,
           interruptId: approvalId,
           approved,
           reason,
@@ -244,12 +251,14 @@ export const useCadChatClient = (): CadChatClient => {
             ),
           })),
         );
+        if (detachedRunId !== undefined) {
+          void chat.resumeStream();
+        }
         return;
       }
       /* The branch below is the browser placement's: it answers the paused run
-         over a new request that continues it. A daemon-placed chat has none —
-         the daemon owns the run and records the turn — so with no live host run
-         to answer, the stale affordance is dropped instead (5-review N5). The
+         over a new request that continues it. A daemon-placed chat with no run
+         left to answer drops the stale affordance instead (5-review N5). The
          host places the continuation as its own attempt (W8 TS-S5). */
       const runId = resumableBrowserAgentHostRunId(activeChatId);
       if (requestInFlight || runId === undefined || daemonPlacementOf(agent.execution) !== undefined) {

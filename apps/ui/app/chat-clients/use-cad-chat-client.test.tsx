@@ -35,6 +35,8 @@ const browserHostHarness = vi.hoisted(() => ({
   /** Whether this chat has a browser host registered, and whether its run can be resumed. */
   placed: false,
   resumable: false,
+  /** The run the host last named for this chat when no stream of this page publishes one (a daemon-placed chat). */
+  hostRunId: undefined as string | undefined,
   createClient: vi.fn((_options: AgentHostClientOptions): AgentHostClient => {
     const client = Object.create(null) as AgentHostClient;
     client.close = vi.fn(async () => undefined);
@@ -181,7 +183,8 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   },
   getBrowserAgentHostRun: () => browserHostHarness.run,
   isBrowserAgentHostPlaced: () => browserHostHarness.placed,
-  resumableBrowserAgentHostRunId: () => (browserHostHarness.resumable ? browserHostHarness.run?.runId : undefined),
+  resumableBrowserAgentHostRunId: () =>
+    browserHostHarness.resumable ? (browserHostHarness.run?.runId ?? browserHostHarness.hostRunId) : undefined,
   resolveBrowserAgentHostInterrupt: browserHostHarness.resolveInterrupt,
 }));
 vi.mock('#services/agent-host-client.js', () => ({
@@ -429,6 +432,7 @@ beforeEach(() => {
   browserHostHarness.run = undefined;
   browserHostHarness.placed = false;
   browserHostHarness.resumable = false;
+  browserHostHarness.hostRunId = undefined;
   availabilityHarness.gate = undefined;
   revisionRoot.connected = true;
   mountAgentMock(buildAgent());
@@ -946,6 +950,31 @@ describe('useCadChatClient', () => {
         ],
       },
     ]);
+    expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
+  });
+
+  it("answers a daemon-placed chat's paused run that no stream follows, then follows what it continued (GM.r1 H1)", async () => {
+    placementHarness.localHostId = 'desktop';
+    browserHostHarness.hostRunId = 'run-daemon-paused';
+    browserHostHarness.resumable = true;
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    useChatSelectorMock.mockReturnValue('ready');
+    installActions(buildActions());
+
+    const { result } = renderClient();
+    await act(async () => result.current.respondToToolApproval('interrupt-1', true));
+
+    expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledWith({
+      chatId: 'chat_test',
+      runId: 'run-daemon-paused',
+      interruptId: 'interrupt-1',
+      approved: true,
+      reason: undefined,
+      optionId: undefined,
+    });
+    expect(chat.resumeStream).toHaveBeenCalledOnce();
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
   });
 

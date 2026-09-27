@@ -67,6 +67,8 @@ export const subscribeBrowserAgentHostRuns = (listener: () => void): (() => void
 const boundRunIds = new Map<string, string>();
 const activeClients = new Map<string, { readonly client: AgentHostClient; readonly runId: string }>();
 const clientSettlements = new Map<string, Promise<void>>();
+/** How the stream following a chat continues the native run an approval left paused (PV-S10). */
+const continuations = new Map<string, () => Promise<void>>();
 /** Chats whose next reattach may drive the host's own resume. @see requestBrowserAgentHostResume */
 const requestedResumes = new Set<string>();
 
@@ -812,6 +814,7 @@ const createHostStream = <Message extends UIMessage>(input: {
     let unsubscribe: (() => void) | undefined;
     let unsubscribeLive: (() => void) | undefined;
     let unsubscribeSettlement: (() => void) | undefined;
+    let continueRun: (() => Promise<void>) | undefined;
     let { runId } = input;
     let closed = false;
     let cursor = 0;
@@ -1140,6 +1143,18 @@ const createHostStream = <Message extends UIMessage>(input: {
       if (runId !== undefined) {
         activeClients.set(input.chatId, { client, runId });
       }
+      /* The paused attempt's `turn.*` row already resolved the settlement gate, so the continued attempt's row is the
+       * one to wait for. `terminalEvent` stays: `paused` is not terminal, and this stream is awaiting that very
+       * promise, which a replacement would strand. */
+      continueRun = async (): Promise<void> => {
+        /* Re-armed once every row already delivered is projected, the paused attempt's settlement among them. */
+        await projection;
+        turnSettlement = Promise.withResolvers<void>();
+        const snapshot = await client!.resume(input.chatId, runId!);
+        await projection;
+        reconcileSnapshot(snapshot, true);
+      };
+      continuations.set(input.chatId, continueRun);
       unsubscribeLive = client.subscribeLive?.(input.chatId, (_chatId, event) => {
         queueSubscribedEvent(event);
       });
@@ -1329,6 +1344,9 @@ const createHostStream = <Message extends UIMessage>(input: {
       if (activeClients.get(input.chatId)?.client === client) {
         activeClients.delete(input.chatId);
       }
+      if (continueRun !== undefined && continuations.get(input.chatId) === continueRun) {
+        continuations.delete(input.chatId);
+      }
       const closeError = await closeClient(client);
       if (closeError !== undefined) {
         if (closed) {
@@ -1378,7 +1396,16 @@ export const cancelBrowserAgentHostRun = async (chatId: string): Promise<void> =
   }
 };
 
-/** Resolve a projected browser-host approval without opening a new admission. */
+/**
+ * Answer a projected browser-host approval without opening a new admission.
+ *
+ * W9 PV-S10: an approval sends `resolve-interrupt`, then `resume` for a native run the answer leaves paused. Asking
+ * ended the attempt (D10, TS-R10), so nothing else continues it; an external driver continues on its own, and a denial
+ * ends the run. The stream following the chat continues it, so it waits for the continued attempt; a chat no stream
+ * follows (a daemon-placed run answered from its card) is answered over a client of its own (GM.r1 H1).
+ *
+ * @param input - The chat, its run, the interrupt and the person's answer.
+ */
 export const resolveBrowserAgentHostInterrupt = async (input: {
   readonly chatId: string;
   readonly runId: string;
@@ -1389,15 +1416,36 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
   readonly optionId?: string | undefined;
 }): Promise<void> => {
   const active = activeClients.get(input.chatId);
-  if (!active || active.runId !== input.runId) {
-    throw new Error(`Browser agent host run ${input.runId} is not attached.`);
+  const attached = active?.runId === input.runId ? active : undefined;
+  const registration = attached === undefined ? await registrationFor(input.chatId) : undefined;
+  const client = attached?.client ?? (await registration!.createClient());
+  try {
+    const answered = await client.resolveInterrupt(input.chatId, input.runId, {
+      interruptId: input.interruptId,
+      outcome: input.approved ? 'approved' : 'denied',
+      ...(input.optionId ? { optionId: input.optionId } : {}),
+      ...(input.reason ? { payload: { reason: input.reason } } : {}),
+    });
+    if (!input.approved || answered.runId !== input.runId || answered.state !== 'paused') {
+      return;
+    }
+    const continueRun = attached === undefined ? undefined : continuations.get(input.chatId);
+    try {
+      await (continueRun === undefined ? client.resume(input.chatId, input.runId) : continueRun());
+    } catch (error) {
+      /* Another request of the run still waits; its answer continues the run. */
+      if (!(error instanceof AgentHostWorkerError) || error.code !== 'INTERRUPT_PENDING') {
+        throw error;
+      }
+    }
+  } finally {
+    if (attached === undefined) {
+      const closeError = await closeClient(client);
+      if (closeError !== undefined) {
+        console.error('[browserAgentHost] closing the approval client failed', input.chatId, closeError);
+      }
+    }
   }
-  await active.client.resolveInterrupt(input.chatId, input.runId, {
-    interruptId: input.interruptId,
-    outcome: input.approved ? 'approved' : 'denied',
-    ...(input.optionId ? { optionId: input.optionId } : {}),
-    ...(input.reason ? { payload: { reason: input.reason } } : {}),
-  });
 };
 
 /**

@@ -40,7 +40,11 @@ const page = <Fields extends { readonly cursor: number; readonly nextCursor: num
 type Follow = Parameters<AgentHostClient['subscribe']>;
 type LiveListener = Parameters<NonNullable<AgentHostClient['subscribeLive']>>[1];
 
-const snapshot = (chatId: string, runId: string, state: 'running' | 'completed' | 'cancelled' = 'completed') =>
+const snapshot = (
+  chatId: string,
+  runId: string,
+  state: 'running' | 'paused' | 'completed' | 'cancelled' = 'completed',
+) =>
   ({
     chatId,
     runId,
@@ -2795,6 +2799,121 @@ describe('BrowserPlacementChatTransport', () => {
     expect(client.start).toHaveBeenCalledOnce();
     unregister();
   });
+
+  /* W9 PV-S10, GM.r1 H1: an approval answers `resolve-interrupt`, then `resume` for a native run the answer leaves
+   * paused; the attempt it asked in already ended (D10, TS-R10), so nothing else continues it. */
+  it('continues a native run the approval leaves paused, and stays open for the continued attempt', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-native-approval';
+    const runId = 'run-native-approval';
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
+    const row = (sequence: number, body: Record<string, unknown>) =>
+      listener?.(chatId, {
+        version: 1,
+        leaderEpoch: 'leader-native',
+        sequence,
+        recordedAt: '2026-09-01T00:00:01.000Z',
+        runId,
+        ...body,
+      } as unknown as AgentLogEvent);
+    const settled = (sequence: number, attempt: number) =>
+      row(sequence, {
+        type: 'turn.finalized',
+        turnId: `message-${chatId}`,
+        attempt,
+        chatId,
+        projectId: `project-${chatId}`,
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      });
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async () => {
+        row(1, { type: 'run.lifecycle', state: 'running' });
+        row(2, { type: 'run.lifecycle', state: 'paused' });
+        settled(3, 1);
+        return snapshot(chatId, runId, 'paused');
+      }),
+      resolveInterrupt: vi.fn(async () => snapshot(chatId, runId, 'paused')),
+      resume: vi.fn(async () => {
+        row(4, { type: 'run.lifecycle', state: 'running', attempt: 2 });
+        return snapshot(chatId, runId, 'running');
+      }),
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-native-approval',
+        backend: 'opfs',
+        providerBasePath: 'project-native-approval',
+      }),
+      createClient: async () => client,
+    });
+    const stream = await new BrowserPlacementChatTransport().sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: 'message-native-approval',
+      messages: [{ id: 'message-native-approval', role: 'user', parts: [{ type: 'text', text: 'Print it.' }] }],
+      abortSignal: undefined,
+      body: browserBody({ runId, trigger: 'submit' }),
+    });
+    const drained = drain(stream.getReader());
+    await vi.waitFor(() => {
+      expect(client.start).toHaveBeenCalledOnce();
+    });
+
+    await resolveBrowserAgentHostInterrupt({ chatId, runId, interruptId: 'interrupt-print', approved: true });
+
+    expect(client.resume).toHaveBeenCalledExactlyOnceWith(chatId, runId);
+    row(5, { type: 'run.lifecycle', state: 'completed' });
+    await drained;
+    /* The paused attempt's settlement is not the continued attempt's: the stream holds its client for the second. */
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(client.close).not.toHaveBeenCalled();
+    settled(6, 2);
+    await vi.waitFor(() => {
+      expect(client.close).toHaveBeenCalledOnce();
+    });
+    expect(client.start).toHaveBeenCalledOnce();
+    unregister();
+  });
+
+  it.each([
+    [true, 'paused', 1],
+    [false, 'cancelled', 0],
+  ] as const)(
+    'answers a paused run no stream follows over a client of its own (approved: %s)',
+    async (approved, after, resumes) => {
+      installBrowserGlobals();
+      const chatId = `chat-detached-approval-${String(approved)}`;
+      const runId = `run-detached-approval-${String(approved)}`;
+      const client = clientFor(chatId, runId, {
+        resolveInterrupt: vi.fn(async () => snapshot(chatId, runId, after)),
+        resume: vi.fn(async () => snapshot(chatId, runId, 'running')),
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({ projectId: 'project-detached', backend: 'opfs', providerBasePath: 'detached' }),
+        createClient: async () => client,
+      });
+
+      await resolveBrowserAgentHostInterrupt({ chatId, runId, interruptId: 'interrupt-print', approved });
+
+      expect(client.resolveInterrupt).toHaveBeenCalledExactlyOnceWith(chatId, runId, {
+        interruptId: 'interrupt-print',
+        outcome: approved ? 'approved' : 'denied',
+      });
+      expect(client.resume).toHaveBeenCalledTimes(resumes);
+      expect(client.close).toHaveBeenCalledOnce();
+      unregister();
+    },
+  );
 
   it('rebuilds the run it reattaches to instead of appending a second copy of every assistant text', async () => {
     // The operator's rung-2 reload, from the daemon's own log: every assistant

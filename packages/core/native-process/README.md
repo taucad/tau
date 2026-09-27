@@ -51,6 +51,10 @@ metadata and content reads; excluding `thumbnail.webp` leaves `assets/thumbnail.
 The mirror also enforces path, size, depth, and case-collision limits. The OS sandbox is applied
 by `NativeProcessSession` when it spawns the worker against that mirror.
 
+Inside a kernel call, pass `runtime.fileContentCache` and `runtime.operationId` as `sync()`'s second
+and third arguments. The mirror then reuses bytes the runtime already read and walks the workspace
+once per runtime operation, however many of a render's calls ask for it.
+
 ## API
 
 | Export                          | Purpose                                                                                                              |

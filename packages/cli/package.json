@@ -87,6 +87,7 @@
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/skills": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "citty": "catalog:",
     "consola": "catalog:",
     "ink": "catalog:",
